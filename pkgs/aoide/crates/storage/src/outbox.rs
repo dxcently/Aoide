@@ -685,21 +685,19 @@ pub fn back_off(node: &str, now_epoch: i64, outcome: &str) -> Result<LinkState, 
     Ok(state)
 }
 
-/// The `.bsy` guard (ruling 3: `LOCK_EX|LOCK_NB`, never blocking) — a drain
-/// holds this across its whole dial+POST+record cycle for one link.
-/// Dropping it releases the flock immediately, on every path including an
-/// early return — a drain that errors out partway still frees the link for
-/// the next attempt rather than wedging it until process exit.
+/// The `.bsy` guard (ruling 3: an exclusive lock TRIED, never waited for —
+/// `LOCK_EX|LOCK_NB` on Unix, `LockFileEx` with `LOCKFILE_FAIL_IMMEDIATELY`
+/// on Windows) — a drain holds this across its whole dial+POST+record cycle
+/// for one link. Dropping it releases the lock immediately, on every path
+/// including an early return — a drain that errors out partway still frees
+/// the link for the next attempt rather than wedging it until process exit.
 pub struct LinkLockGuard {
     file: std::fs::File,
 }
 
 impl Drop for LinkLockGuard {
     fn drop(&mut self) {
-        use std::os::unix::io::AsRawFd;
-        unsafe {
-            libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
-        }
+        crate::fs::unlock(&self.file);
     }
 }
 
@@ -709,7 +707,6 @@ impl Drop for LinkLockGuard {
 /// ordinary "another drain already holds this link" outcome, never an
 /// error; `Err` only when the lock file itself can't be created or opened.
 pub fn try_take_link_lock(node: &str) -> Result<Option<LinkLockGuard>, String> {
-    use std::os::unix::io::AsRawFd;
     let dir = node_dir(node);
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let path = bsy_path(node);
@@ -719,15 +716,11 @@ pub fn try_take_link_lock(node: &str) -> Result<Option<LinkLockGuard>, String> {
         .truncate(false)
         .open(&path)
         .map_err(|e| format!("{}: {e}", path.display()))?;
-    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-    if rc == 0 {
+    let taken = crate::fs::try_lock_exclusive(&file).map_err(|e| format!("{}: {e}", path.display()))?;
+    if taken {
         return Ok(Some(LinkLockGuard { file }));
     }
-    let err = std::io::Error::last_os_error();
-    if err.kind() == std::io::ErrorKind::WouldBlock {
-        return Ok(None);
-    }
-    Err(format!("{}: {err}", path.display()))
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -976,6 +969,14 @@ mod tests {
 
     /// A `receipt` entry acking `acked_msgid`, addressed back to `to_node`
     /// — the shape `write_ack_if_absent` scans for.
+    ///
+    /// **The msgid is a filename, so it is built like one.** This spool names
+    /// each entry `<msgid>.json` (`entry_path`), and production mints a msgid
+    /// as a hex digest (`mail::compute_msgid`) — safe on every host. The
+    /// fixture used to build one out of `minted_at`, whose `:` is ILLEGAL in a
+    /// Windows filename, so the entry could not be spooled there at all
+    /// (`ERROR_INVALID_NAME`, os error 123). The ISO timestamp still lives in
+    /// the header, where colons are just characters.
     fn ack_for(to_node: &str, acked_msgid: &str, minted_at: &str) -> Envelope {
         Envelope {
             header: Header {
@@ -988,7 +989,7 @@ mod tests {
             },
             text: acked_msgid.to_string(),
             sig: "ef".repeat(32),
-            msgid: format!("ack-{minted_at}"),
+            msgid: format!("ack-{acked_msgid}-{}", minted_at.replace(':', "-")),
         }
     }
 

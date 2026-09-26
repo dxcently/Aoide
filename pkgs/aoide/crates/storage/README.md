@@ -47,6 +47,20 @@ by decision — no embedded database yet
   `$AOIDE_STAGE_DIR` (absolute-path-wins) as one combined override, same as
   before the split; `conducting_stage_dir`'s own no-override fallback is
   `state_dir().join("stage")` instead of `stage_dir`'s `song/stage`.
+
+  **The host split inside `fs`.** The one place a Unix primitive had no
+  Windows spelling is `fs_windows.rs`, beside `fs.rs` the way
+  `aoide-protocol`'s `feed_windows.rs` sits beside `feed.rs`:
+  `flock(LOCK_EX)`/`LOCK_EX|LOCK_NB` become `LockFileEx` on the same lock
+  files (and a lock that belongs to the HANDLE, so a second handle in the
+  same process blocks exactly as a second process's does — the property
+  `with_stage_lock`'s re-entrancy flag exists for), `renameat2(RENAME_NOREPLACE)`
+  becomes `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING`, and the
+  link-preserving copy picks `symlink_dir`/`symlink_file` by asking the
+  source what its target is. The private-file and private-directory policy is
+  NOT answered here: `atomic_write_private`'s temp and `secure_private_dir`
+  call `aoide_protocol::owner_only`, one implementation exposed from the leaf
+  crate rather than a second copy in this one.
   `conducting_stage_dir`'s first no-override resolution in a process also
   drives `fs::migrate_conducting_stage`: a one-shot, idempotent move of the
   six core files off their pre-split `song/stage/` location, never

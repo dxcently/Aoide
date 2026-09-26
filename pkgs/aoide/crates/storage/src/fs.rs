@@ -22,6 +22,106 @@
 
 use std::io::Write;
 
+/// The Windows half of this module: the lock, the no-clobber rename and the
+/// link-preserving copy, whose Unix shapes have no Windows spelling. A
+/// sibling file is not a non-`mod.rs` parent's default resolution, hence the
+/// explicit `#[path]`, the same shape `aoide_protocol::feed`'s
+/// `feed_windows.rs` uses.
+#[cfg(windows)]
+#[path = "fs_windows.rs"]
+mod fs_windows;
+
+// ── the lock, as both hosts' callers see it ──────────────────────────────
+
+/// Take the exclusive lock on an open lock file, blocking until it is free.
+/// Unix `flock(LOCK_EX)`; Windows `LockFileEx`. `false` means it was not
+/// taken — every caller here already reads that as "not held", never as
+/// "assume held".
+#[cfg(unix)]
+pub(crate) fn lock_exclusive(file: &std::fs::File) -> bool {
+    use std::os::unix::io::AsRawFd;
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+    rc == 0
+}
+
+#[cfg(windows)]
+pub(crate) fn lock_exclusive(file: &std::fs::File) -> bool {
+    fs_windows::lock_exclusive(file).is_ok()
+}
+
+/// The non-blocking probe: `Ok(true)` taken, `Ok(false)` another holder has
+/// it (`LOCK_NB`'s `EWOULDBLOCK`, `LockFileEx`'s `LOCKFILE_FAIL_IMMEDIATELY`
+/// lock violation), `Err` a real failure. The distinction is the whole point
+/// for `outbox`'s `.bsy` guard, which skips a busy link and must not mistake
+/// "busy" for "broken".
+#[cfg(unix)]
+pub(crate) fn try_lock_exclusive(file: &std::fs::File) -> std::io::Result<bool> {
+    use std::os::unix::io::AsRawFd;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+        return Ok(true);
+    }
+    let err = std::io::Error::last_os_error();
+    if err.kind() == std::io::ErrorKind::WouldBlock {
+        return Ok(false);
+    }
+    Err(err)
+}
+
+#[cfg(windows)]
+pub(crate) fn try_lock_exclusive(file: &std::fs::File) -> std::io::Result<bool> {
+    fs_windows::try_lock_exclusive(file)
+}
+
+/// Release the lock. Best-effort and total on both hosts — the callers are a
+/// `Drop` guard and the tail of a closure, neither of which has anywhere to
+/// report a failure to.
+#[cfg(unix)]
+pub(crate) fn unlock(file: &std::fs::File) {
+    use std::os::unix::io::AsRawFd;
+    unsafe {
+        libc::flock(file.as_raw_fd(), libc::LOCK_UN);
+    }
+}
+
+#[cfg(windows)]
+pub(crate) fn unlock(file: &std::fs::File) {
+    fs_windows::unlock(file);
+}
+
+// ── the private policy, as a test asks about it ──────────────────────────
+
+/// Assert a FILE carries this crate's private policy on THIS host: mode
+/// `0o600` on Unix, the owner-only DACL read back from the object on Windows.
+/// Test-only and `pub(crate)` so `identity`'s tests ask the same question the
+/// same way, rather than answering it with a second mechanism.
+#[cfg(all(test, unix))]
+pub(crate) fn assert_private_file(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "{} must be 0600, got {mode:o}", path.display());
+}
+
+#[cfg(all(test, windows))]
+pub(crate) fn assert_private_file(path: &std::path::Path) {
+    let refusal = aoide_protocol::owner_only::file_privacy(path).unwrap();
+    assert!(refusal.is_none(), "{} must carry the owner-only DACL: {refusal:?}", path.display());
+}
+
+/// The directory half — `0o700` on Unix, the same owner-only DACL on
+/// Windows, where the mask's directory meanings cover list and add.
+#[cfg(all(test, unix))]
+pub(crate) fn assert_private_dir(dir: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(dir).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o700, "{} must be 0700, got {mode:o}", dir.display());
+}
+
+#[cfg(all(test, windows))]
+pub(crate) fn assert_private_dir(dir: &std::path::Path) {
+    let refusal = aoide_protocol::owner_only::dir_privacy(dir).unwrap();
+    assert!(refusal.is_none(), "{} must carry the owner-only DACL: {refusal:?}", dir.display());
+}
+
 /// The runtime root every stage/state/run tree hangs off: `$AOIDE_ROOT`
 /// (absolute-path-wins, same discipline as every other override here),
 /// default [`default_root`] (`<home>/.aoide`) — core code default, no nix
@@ -216,7 +316,15 @@ pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::
             copy_dir_recursive(&entry.path(), &dst_path)?;
         } else if file_type.is_symlink() {
             let target = std::fs::read_link(entry.path())?;
+            #[cfg(unix)]
             std::os::unix::fs::symlink(target, &dst_path)?;
+            // Windows has no untyped `symlink(2)`: the kind is a flag on the
+            // call, so the source's own target is asked what it is. The
+            // link is still a link — never followed, never rewritten as a
+            // regular file — and a source that no longer resolves lands as
+            // a file link rather than as a copy.
+            #[cfg(windows)]
+            fs_windows::symlink(&entry.path(), target, &dst_path)?;
         } else {
             std::fs::copy(entry.path(), &dst_path)?;
         }
@@ -359,17 +467,13 @@ fn migrate_conducting_stage(new_dir: &std::path::Path) {
         return;
     }
 
-    use std::os::unix::io::AsRawFd;
     let lock = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(false)
         .open(new_dir.join(".migrate.lock"))
         .ok();
-    let held = lock
-        .as_ref()
-        .map(|f| unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } == 0)
-        .unwrap_or(false);
+    let held = lock.as_ref().map(lock_exclusive).unwrap_or(false);
 
     for name in CONDUCTING_STAGE_FILES {
         let src = old_dir.join(name);
@@ -400,9 +504,7 @@ fn migrate_conducting_stage(new_dir: &std::path::Path) {
 
     if held {
         if let Some(f) = &lock {
-            unsafe {
-                libc::flock(f.as_raw_fd(), libc::LOCK_UN);
-            }
+            unlock(f);
         }
     }
 }
@@ -737,18 +839,66 @@ fn write_temp_file(
     contents: &[u8],
     create_mode: Option<u32>,
 ) -> std::io::Result<()> {
-    let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
-    if let Some(mode) = create_mode {
-        use std::os::unix::fs::OpenOptionsExt;
-        // `open(2)`'s O_CREAT mode is still subject to the process umask,
-        // but 0600 carries no group/other bits for a umask to strip in the
-        // first place — the temp is created AT 0600, not narrowed to it
-        // afterward, so there is no instant where it exists on disk under
-        // any wider mode.
-        opts.mode(mode);
-    }
-    let mut f = opts.open(tmp)?;
+    #[cfg(unix)]
+    let mut f = {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        if let Some(mode) = create_mode {
+            use std::os::unix::fs::OpenOptionsExt;
+            // `open(2)`'s O_CREAT mode is still subject to the process umask,
+            // but 0600 carries no group/other bits for a umask to strip in the
+            // first place — the temp is created AT 0600, not narrowed to it
+            // afterward, so there is no instant where it exists on disk under
+            // any wider mode.
+            opts.mode(mode);
+        }
+        opts.open(tmp)?
+    };
+    // Windows has no mode: the private path's policy is the owner-only DACL
+    // `aoide-protocol` attaches AT CREATION, which is the only shape with no
+    // window at a wider policy (create-then-tighten is the race
+    // `owner_only`'s own doc rejects). `0o600` is the one creation mode that
+    // policy represents; anything else is refused BY NAME before a byte is
+    // written, never narrowed to owner-only. `None` is the ordinary path —
+    // `File::create`'s default, i.e. here the DACL the parent already
+    // grants, which is the Windows spelling of "whatever the umask leaves".
+    #[cfg(windows)]
+    let mut f = match create_mode {
+        // The descriptor is a REQUEST, and a filesystem that accepts it
+        // without persisting it is not a private file: the object is read
+        // back through `owner_only::file_privacy` BEFORE the first payload
+        // byte, exactly as `feed_windows` reads its own creation back. The
+        // check is not a formality — `atomic_write_private` is the identity
+        // keypair, and "created at 0600" is worth nothing if nobody asked.
+        // A link at the temp path is refused by the same reader: this module
+        // will not write a key through a reparse point it cannot name.
+        Some(0o600) => {
+            let file = aoide_protocol::owner_only::create_truncating(tmp)?;
+            match aoide_protocol::owner_only::file_privacy(tmp)? {
+                None => file,
+                Some(reason) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        format!(
+                            "refusing the private temp {} this process just created: {reason} \
+                             (this filesystem may not persist ACLs, and nothing here writes a private file it cannot prove is owner-only)",
+                            tmp.display()
+                        ),
+                    ))
+                }
+            }
+        }
+        Some(mode) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                format!(
+                    "refusing create_mode {mode:o}: native Windows honors only 0o600 (a protected owner-only DACL), \
+                     so {mode:#o} is unavailable, not narrowed"
+                ),
+            ))
+        }
+        None => std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(tmp)?,
+    };
     f.write_all(contents)?;
     f.sync_all()
 }
@@ -798,9 +948,26 @@ pub fn atomic_write_private(path: &std::path::Path, contents: &[u8]) -> std::io:
 /// costs nothing and never regresses a directory some earlier run already
 /// locked down.
 pub fn secure_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+    #[cfg(unix)]
+    {
+        std::fs::create_dir_all(dir)?;
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+    }
+    // The Windows half keeps the same two promises in the only order that
+    // has no window: the ANCESTORS are created the ordinary way (their mode
+    // is not this function's business on either host), and the leaf gets its
+    // policy attached AT creation, then read back — `ensure_private_dir`
+    // tightens an existing directory that is not private yet, which is what
+    // this call means on a second mint, and refuses (never silently accepts)
+    // one whose policy the filesystem would not honor.
+    #[cfg(windows)]
+    {
+        if let Some(parent) = dir.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        aoide_protocol::owner_only::ensure_private_dir(dir)
+    }
 }
 
 /// Run `f` while holding an exclusive advisory lock on the stage directory,
@@ -836,7 +1003,6 @@ pub fn secure_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
 /// without serialising them against `stage_dir()`'s own rice writers sharing
 /// this same lock today — no new hazard exists to close, so none was added.
 pub fn with_stage_lock<T>(f: impl FnOnce() -> T) -> T {
-    use std::os::unix::io::AsRawFd;
     // Already held by THIS thread (see the doc above): run the closure
     // directly. The flag is true only between a successful `flock` and its
     // unlock, so a genuinely unlocked (best-effort) outer pass does not silence
@@ -852,10 +1018,7 @@ pub fn with_stage_lock<T>(f: impl FnOnce() -> T) -> T {
         .truncate(false)
         .open(dir.join(".stage.lock"))
         .ok();
-    let held = lock
-        .as_ref()
-        .map(|f| unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } == 0)
-        .unwrap_or(false);
+    let held = lock.as_ref().map(lock_exclusive).unwrap_or(false);
     // RAII so an unwind inside `f` clears the flag with the fd, never after it:
     // declared AFTER `lock`, so it drops BEFORE it. On an unwind that is the
     // whole story — the flag is cleared while the flock is still held, then the
@@ -878,9 +1041,7 @@ pub fn with_stage_lock<T>(f: impl FnOnce() -> T) -> T {
     let out = f();
     if held {
         if let Some(f) = &lock {
-            unsafe {
-                libc::flock(f.as_raw_fd(), libc::LOCK_UN);
-            }
+            unlock(f);
         }
     }
     out
@@ -913,7 +1074,6 @@ pub fn try_stage_lock<T>(f: impl FnOnce() -> T) -> Result<T, String> {
 /// Not re-entrant (each call opens its own fd) — a caller must never nest two
 /// calls against the same path.
 pub(crate) fn lock_path<T>(path: std::path::PathBuf, f: impl FnOnce() -> T) -> Result<T, String> {
-    use std::os::unix::io::AsRawFd;
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
@@ -923,8 +1083,7 @@ pub(crate) fn lock_path<T>(path: std::path::PathBuf, f: impl FnOnce() -> T) -> R
         .truncate(false)
         .open(&path)
         .map_err(|e| format!("cannot open lock file {}: {e}", path.display()))?;
-    let rc = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) };
-    if rc != 0 {
+    if !lock_exclusive(&lock) {
         return Err(format!(
             "cannot lock {}: {}",
             path.display(),
@@ -932,36 +1091,50 @@ pub(crate) fn lock_path<T>(path: std::path::PathBuf, f: impl FnOnce() -> T) -> R
         ));
     }
     let out = f();
-    unsafe {
-        libc::flock(lock.as_raw_fd(), libc::LOCK_UN);
-    }
+    unlock(&lock);
     Ok(out)
 }
 
 /// Is `pid` a live process? The one liveness probe in core: POSIX `kill(pid, 0)`
 /// — `0`/`EPERM` live, `ESRCH` absent, any other errno conservatively live. Live
 /// is not identity: a recycled pid is live.
+///
+/// **Windows**: `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` +
+/// `GetExitCodeProcess` out of `aoide_protocol::win_proc`, with the same
+/// verdicts one-for-one (`ERROR_INVALID_PARAMETER`/`ERROR_NOT_FOUND` absent,
+/// `ERROR_ACCESS_DENIED` live, anything unanswerable live) and the same
+/// refusal of a pid that cannot name one process. The reading is the
+/// contract; the syscall under it is the host's.
 pub fn pid_is_alive(pid: u32) -> bool {
-    let Some(pid) = probeable_pid(pid) else {
-        return false;
-    };
-    // SAFETY: signal 0 is never delivered; the call only asks whether `pid`
-    // exists and whether this process may signal it.
-    let rc = unsafe { libc::kill(pid, 0) };
-    if rc == 0 {
-        return true;
+    #[cfg(unix)]
+    {
+        let Some(pid) = probeable_pid(pid) else {
+            return false;
+        };
+        // SAFETY: signal 0 is never delivered; the call only asks whether `pid`
+        // exists and whether this process may signal it.
+        let rc = unsafe { libc::kill(pid, 0) };
+        if rc == 0 {
+            return true;
+        }
+        return probe_verdict(std::io::Error::last_os_error().raw_os_error());
     }
-    probe_verdict(std::io::Error::last_os_error().raw_os_error())
+    #[cfg(windows)]
+    {
+        aoide_protocol::win_proc::is_alive(pid)
+    }
 }
 
 /// `pid` as a `pid_t`, or `None` for `0`/`pid > pid_t::MAX` — both name a
 /// process GROUP, never one process, so `kill` is never handed either.
+#[cfg(unix)]
 fn probeable_pid(pid: u32) -> Option<libc::pid_t> {
     (pid > 0 && pid <= libc::pid_t::MAX as u32).then_some(pid as libc::pid_t)
 }
 
 /// A failed `kill(pid, 0)`: `ESRCH` alone is absent; every other errno (and no
 /// errno at all) is conservatively live, so an unanswerable probe never reaps.
+#[cfg(unix)]
 fn probe_verdict(errno: Option<i32>) -> bool {
     errno != Some(libc::ESRCH)
 }
@@ -1016,28 +1189,37 @@ fn sweep_stale_temps(path: &std::path::Path) {
 /// `renameat2(RENAME_NOREPLACE)` is the atomic primitive [`seed_if_absent`] needs
 /// so its file-absent seed can never overwrite a roster that raced in.
 fn rename_no_replace(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<bool> {
-    use std::os::unix::ffi::OsStrExt;
-    let cfrom = std::ffi::CString::new(from.as_os_str().as_bytes())
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-    let cto = std::ffi::CString::new(to.as_os_str().as_bytes())
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-    let rc = unsafe {
-        libc::renameat2(
-            libc::AT_FDCWD,
-            cfrom.as_ptr(),
-            libc::AT_FDCWD,
-            cto.as_ptr(),
-            libc::RENAME_NOREPLACE,
-        )
-    };
-    if rc == 0 {
-        return Ok(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let cfrom = std::ffi::CString::new(from.as_os_str().as_bytes())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+        let cto = std::ffi::CString::new(to.as_os_str().as_bytes())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+        let rc = unsafe {
+            libc::renameat2(
+                libc::AT_FDCWD,
+                cfrom.as_ptr(),
+                libc::AT_FDCWD,
+                cto.as_ptr(),
+                libc::RENAME_NOREPLACE,
+            )
+        };
+        if rc == 0 {
+            return Ok(true);
+        }
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::EEXIST) {
+            Ok(false) // target already there — the concurrent registration wins.
+        } else {
+            Err(err)
+        }
     }
-    let err = std::io::Error::last_os_error();
-    if err.raw_os_error() == Some(libc::EEXIST) {
-        Ok(false) // target already there — the concurrent registration wins.
-    } else {
-        Err(err)
+    // Windows' no-clobber move is `MoveFileExW` WITHOUT
+    // MOVEFILE_REPLACE_EXISTING — the same three answers, the same meaning.
+    #[cfg(windows)]
+    {
+        fs_windows::rename_no_replace(from, to)
     }
 }
 
@@ -1137,9 +1319,9 @@ mod tests {
     /// against a side effect).
     struct RootEnvGuard(Option<String>);
     impl RootEnvGuard {
-        fn set(scratch: &std::path::Path) -> Self {
+        fn set(root: &std::path::Path) -> Self {
             let saved = std::env::var("AOIDE_ROOT").ok();
-            std::env::set_var("AOIDE_ROOT", scratch);
+            std::env::set_var("AOIDE_ROOT", root);
             RootEnvGuard(saved)
         }
     }
@@ -1150,6 +1332,19 @@ mod tests {
                 None => std::env::remove_var("AOIDE_ROOT"),
             }
         }
+    }
+
+    /// A scratch path that IS absolute on THIS host, as a `String` for the
+    /// env-override APIs. The Unix literals these tests used to write
+    /// (`/tmp/...`) are not absolute on Windows — `Path::is_absolute` there
+    /// wants a drive or UNC prefix — so the override-resolution code would
+    /// silently ignore the value under test and the assertion would then
+    /// compare against the FALLBACK path instead of the override.
+    /// `temp_dir()` is absolute and writable on every host, so the same
+    /// assertion still proves the same thing: an absolute override wins and
+    /// a relative one is declined.
+    fn scratch(name: &str) -> String {
+        std::env::temp_dir().join(name).to_string_lossy().to_string()
     }
 
     #[test]
@@ -1202,24 +1397,24 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
 
-        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-test-stage");
-        assert_eq!(stage_dir(), std::path::PathBuf::from("/tmp/aoide-test-stage"));
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-test-stage"));
+        assert_eq!(stage_dir(), std::path::PathBuf::from(scratch("aoide-test-stage")));
 
         // Empty and relative values are ignored — we fall back, never resolve a
         // runtime path against an arbitrary cwd. `AOIDE_ROOT` pinned to a
         // scratch dir (see `RootEnvGuard`'s doc) so the assertion below is
         // deterministic across machines rather than depending on this box's
         // actual `$HOME`.
-        let _root = RootEnvGuard::set(std::path::Path::new("/tmp/aoide-test-root"));
+        let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-test-root")));
         std::env::set_var("AOIDE_STAGE_DIR", "");
         assert!(stage_dir().is_absolute());
-        assert_eq!(stage_dir(), std::path::PathBuf::from("/tmp/aoide-test-root/song/stage"));
+        assert_eq!(stage_dir(), std::path::PathBuf::from(scratch("aoide-test-root/song/stage")));
         std::env::set_var("AOIDE_STAGE_DIR", "relative/stage");
-        assert_eq!(stage_dir(), std::path::PathBuf::from("/tmp/aoide-test-root/song/stage"));
+        assert_eq!(stage_dir(), std::path::PathBuf::from(scratch("aoide-test-root/song/stage")));
 
         // Absent → falls back to `$AOIDE_ROOT/song/stage`.
         std::env::remove_var("AOIDE_STAGE_DIR");
-        assert_eq!(stage_dir(), std::path::PathBuf::from("/tmp/aoide-test-root/song/stage"));
+        assert_eq!(stage_dir(), std::path::PathBuf::from(scratch("aoide-test-root/song/stage")));
 
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
@@ -1234,22 +1429,22 @@ mod tests {
 
         // Point the stage at `<tmp>/stage`; the song tree is its parent, so
         // the songbook resolves as a sibling of `stage/`.
-        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-song-test/stage");
-        assert_eq!(song_dir(), std::path::PathBuf::from("/tmp/aoide-song-test"));
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-song-test/stage"));
+        assert_eq!(song_dir(), std::path::PathBuf::from(scratch("aoide-song-test")));
         assert_eq!(
             songbook_notes("moonlight"),
-            std::path::PathBuf::from("/tmp/aoide-song-test/songbook/moonlight/livery.json")
+            std::path::PathBuf::from(scratch("aoide-song-test/songbook/moonlight/livery.json"))
         );
 
         // With `AOIDE_STAGE_DIR` absent, the song tree composes off
         // `$AOIDE_ROOT/song` (`RootEnvGuard` keeps this off `root()`'s real
         // fallback — see its doc).
-        let _root = RootEnvGuard::set(std::path::Path::new("/tmp/aoide-song-test-root"));
+        let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-song-test-root")));
         std::env::remove_var("AOIDE_STAGE_DIR");
-        assert_eq!(song_dir(), std::path::PathBuf::from("/tmp/aoide-song-test-root/song"));
+        assert_eq!(song_dir(), std::path::PathBuf::from(scratch("aoide-song-test-root/song")));
         assert_eq!(
             songbook_notes("x"),
-            std::path::PathBuf::from("/tmp/aoide-song-test-root/song/songbook/x/livery.json")
+            std::path::PathBuf::from(scratch("aoide-song-test-root/song/songbook/x/livery.json"))
         );
 
         match saved {
@@ -1266,29 +1461,29 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
 
-        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-drafts-test/stage");
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-drafts-test/stage"));
         assert_eq!(
             song_drafts_dir("sonata"),
-            std::path::PathBuf::from("/tmp/aoide-drafts-test/songbook/sonata/drafts")
+            std::path::PathBuf::from(scratch("aoide-drafts-test/songbook/sonata/drafts"))
         );
         assert_eq!(
             draft_dir("sonata", "neon-night"),
-            std::path::PathBuf::from("/tmp/aoide-drafts-test/songbook/sonata/drafts/neon-night")
+            std::path::PathBuf::from(scratch("aoide-drafts-test/songbook/sonata/drafts/neon-night"))
         );
 
         // With `AOIDE_STAGE_DIR` absent: `$AOIDE_ROOT/song/stage` →
         // songbook_dir("x") = `$AOIDE_ROOT/song/songbook/x` →
         // song_drafts_dir("x") = `$AOIDE_ROOT/song/songbook/x/drafts`
         // (`RootEnvGuard` keeps this off `root()`'s real fallback).
-        let _root = RootEnvGuard::set(std::path::Path::new("/tmp/aoide-drafts-test-root"));
+        let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-drafts-test-root")));
         std::env::remove_var("AOIDE_STAGE_DIR");
         assert_eq!(
             song_drafts_dir("x"),
-            std::path::PathBuf::from("/tmp/aoide-drafts-test-root/song/songbook/x/drafts")
+            std::path::PathBuf::from(scratch("aoide-drafts-test-root/song/songbook/x/drafts"))
         );
         assert_eq!(
             draft_dir("x", "y"),
-            std::path::PathBuf::from("/tmp/aoide-drafts-test-root/song/songbook/x/drafts/y")
+            std::path::PathBuf::from(scratch("aoide-drafts-test-root/song/songbook/x/drafts/y"))
         );
 
         match saved {
@@ -1306,10 +1501,10 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
 
-        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-run-qml-test/stage");
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-run-qml-test/stage"));
         assert_eq!(
             run_qml_dir(),
-            std::path::PathBuf::from("/tmp/run/qml"),
+            std::path::PathBuf::from(scratch("run/qml")),
             "run/qml is a sibling of song_dir(), not under stage/"
         );
 
@@ -1317,9 +1512,9 @@ mod tests {
         // song_dir() = `$AOIDE_ROOT/song` → run_qml_dir() =
         // `$AOIDE_ROOT/run/qml` (`RootEnvGuard` keeps this off `root()`'s
         // real fallback).
-        let _root = RootEnvGuard::set(std::path::Path::new("/tmp/aoide-run-qml-test-root"));
+        let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-run-qml-test-root")));
         std::env::remove_var("AOIDE_STAGE_DIR");
-        assert_eq!(run_qml_dir(), std::path::PathBuf::from("/tmp/aoide-run-qml-test-root/run/qml"));
+        assert_eq!(run_qml_dir(), std::path::PathBuf::from(scratch("aoide-run-qml-test-root/run/qml")));
 
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
@@ -1334,10 +1529,10 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
 
-        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-run-elements-test/stage");
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-run-elements-test/stage"));
         assert_eq!(
             run_elements_dir(),
-            std::path::PathBuf::from("/tmp/run/elements"),
+            std::path::PathBuf::from(scratch("run/elements")),
             "run/elements is a sibling of song_dir(), not under stage/"
         );
 
@@ -1345,11 +1540,11 @@ mod tests {
         // song_dir() = `$AOIDE_ROOT/song` → run_elements_dir() =
         // `$AOIDE_ROOT/run/elements` (`RootEnvGuard` keeps this off `root()`'s
         // real fallback).
-        let _root = RootEnvGuard::set(std::path::Path::new("/tmp/aoide-run-elements-test-root"));
+        let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-run-elements-test-root")));
         std::env::remove_var("AOIDE_STAGE_DIR");
         assert_eq!(
             run_elements_dir(),
-            std::path::PathBuf::from("/tmp/aoide-run-elements-test-root/run/elements")
+            std::path::PathBuf::from(scratch("aoide-run-elements-test-root/run/elements"))
         );
 
         match saved {
@@ -1368,19 +1563,19 @@ mod tests {
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_flake = std::env::var("AOIDE_FLAKE_ROOT").ok();
 
-        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-flake-root-test/song/stage");
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-flake-root-test/song/stage"));
         std::env::remove_var("AOIDE_FLAKE_ROOT");
         assert!(
-            !flake_root().starts_with("/tmp/aoide-flake-root-test"),
+            !flake_root().starts_with(scratch("aoide-flake-root-test")),
             "an AOIDE_STAGE_DIR relocation must not move flake_root: {:?}",
             flake_root()
         );
         assert!(flake_root().ends_with("Aoide"));
 
-        std::env::set_var("AOIDE_FLAKE_ROOT", "/tmp/aoide-flake-root-test/fixture-flake");
+        std::env::set_var("AOIDE_FLAKE_ROOT", scratch("aoide-flake-root-test/fixture-flake"));
         assert_eq!(
             flake_root(),
-            std::path::PathBuf::from("/tmp/aoide-flake-root-test/fixture-flake"),
+            std::path::PathBuf::from(scratch("aoide-flake-root-test/fixture-flake")),
             "an explicit AOIDE_FLAKE_ROOT wins outright"
         );
 
@@ -1401,39 +1596,46 @@ mod tests {
         // Pure tier logic — no real env/filesystem, mirroring
         // `aoide_protocol::bin::tiers_resolve_in_order`'s table shape for
         // the same two-tier resolver applied to a directory.
+        // The fixtures are HOST-absolute (`scratch`'s doc): a `/opt/...` or
+        // `/usr/bin` literal is not absolute on Windows, so the env tier the
+        // case is about would be ignored and the sibling tier would answer
+        // instead — the assertion would then be measuring the wrong tier.
+        let env_dir = scratch("opt/custom/songbook");
+        let exe_dir = scratch("usr/bin");
+        let sibling = format!("{exe_dir}/../share/lyra/songbook");
         let cases: &[(&str, Option<&str>, Option<&str>, bool, Option<&str>)] = &[
             (
                 "env wins even when a sibling dir exists",
-                Some("/opt/custom/songbook"),
-                Some("/usr/bin"),
+                Some(env_dir.as_str()),
+                Some(exe_dir.as_str()),
                 true,
-                Some("/opt/custom/songbook"),
+                Some(env_dir.as_str()),
             ),
             (
                 "env wins over the no-sibling case too",
-                Some("/opt/custom/songbook"),
+                Some(env_dir.as_str()),
                 None,
                 false,
-                Some("/opt/custom/songbook"),
+                Some(env_dir.as_str()),
             ),
             (
                 "a relative env value is ignored, falls through to the sibling",
                 Some("relative/songbook"),
-                Some("/usr/bin"),
+                Some(exe_dir.as_str()),
                 true,
-                Some("/usr/bin/../share/lyra/songbook"),
+                Some(sibling.as_str()),
             ),
             (
                 "sibling used only when it actually exists",
                 None,
-                Some("/usr/bin"),
+                Some(exe_dir.as_str()),
                 true,
-                Some("/usr/bin/../share/lyra/songbook"),
+                Some(sibling.as_str()),
             ),
             (
                 "sibling absent (not a dir) resolves to nothing",
                 None,
-                Some("/usr/bin"),
+                Some(exe_dir.as_str()),
                 false,
                 None,
             ),
@@ -1455,10 +1657,10 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_SONG_TEMPLATES").ok();
 
-        std::env::set_var("AOIDE_SONG_TEMPLATES", "/tmp/aoide-song-templates-test");
+        std::env::set_var("AOIDE_SONG_TEMPLATES", scratch("aoide-song-templates-test"));
         assert_eq!(
             song_templates_dir(),
-            Some(std::path::PathBuf::from("/tmp/aoide-song-templates-test"))
+            Some(std::path::PathBuf::from(scratch("aoide-song-templates-test")))
         );
 
         // Empty/relative values are ignored, same discipline as every other
@@ -1547,7 +1749,7 @@ mod tests {
 
         let leaked = dir.join(format!("graph.tmp.{}", u32::MAX)); // pid above pid_max — never alive
         std::fs::write(&leaked, "half-written").unwrap();
-        let live_node = dir.join("graph.tmp.1"); // pid 1 (init) is always alive
+        let live_node = dir.join(format!("graph.tmp.{ALWAYS_LIVE_PID}"));
         std::fs::write(&live_node, "in-flight").unwrap();
 
         atomic_write(&target, "{}").unwrap();
@@ -1571,7 +1773,7 @@ mod tests {
 
         let dead = u32::MAX; // above pid_max — never alive
         let orphan = dir.join(format!("aaaa1111.tmp.{dead}"));
-        let in_flight = dir.join("bbbb2222.tmp.1"); // pid 1 (init) is always alive
+        let in_flight = dir.join(format!("bbbb2222.tmp.{ALWAYS_LIVE_PID}"));
         // Deliberately distinct temp shapes owned by other writers
         // (`migrate_state_tree`, `seed_if_absent`) — `.tmp.` is a whole
         // separator, so neither is ours to remove.
@@ -1604,34 +1806,69 @@ mod tests {
 
     // ── the process-liveness probe (POSIX `kill(pid, 0)`) ──
 
+    /// A pid that is always live on THIS host, for the sweep tests below:
+    /// `init` on Unix, and on Windows the System process, which is always
+    /// pid 4. It must be a live pid that is NOT ours — the sweep spares our
+    /// own pid by an explicit check, so using it would prove nothing.
+    #[cfg(unix)]
+    const ALWAYS_LIVE_PID: u32 = 1;
+    #[cfg(windows)]
+    const ALWAYS_LIVE_PID: u32 = 4;
+
     #[test]
     fn pid_is_alive_reads_this_process_and_a_waited_child() {
         assert!(pid_is_alive(std::process::id()));
 
-        // SAFETY: the child branch calls only `_exit`, so the forked copy never
-        // reaches a panic, the harness, or an atexit handler.
-        let child = unsafe { libc::fork() };
-        if child == 0 {
-            unsafe { libc::_exit(0) };
-        }
-        assert!(child > 0, "fork failed: {}", std::io::Error::last_os_error());
-        assert!(pid_is_alive(child as u32), "a forked child is a live pid");
-
-        let mut status: libc::c_int = 0;
-        let waited = loop {
-            // SAFETY: `child` is this process's own child and is waited exactly
-            // once; `&mut status` is a valid local.
-            let r = unsafe { libc::waitpid(child, &mut status, 0) };
-            if r != -1 || std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
-                break r;
+        // Unix: a forked copy, waited for — the shape the probe's `ESRCH`
+        // verdict is written around.
+        #[cfg(unix)]
+        {
+            // SAFETY: the child branch calls only `_exit`, so the forked copy never
+            // reaches a panic, the harness, or an atexit handler.
+            let child = unsafe { libc::fork() };
+            if child == 0 {
+                unsafe { libc::_exit(0) };
             }
-        };
-        assert_eq!(waited, child, "the child is reaped, not merely polled");
-        assert!(
-            libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
-            "the forked child must exit cleanly, never via a panic: status {status}"
-        );
-        assert!(!pid_is_alive(child as u32), "a reaped pid names no process");
+            assert!(child > 0, "fork failed: {}", std::io::Error::last_os_error());
+            assert!(pid_is_alive(child as u32), "a forked child is a live pid");
+
+            let mut status: libc::c_int = 0;
+            let waited = loop {
+                // SAFETY: `child` is this process's own child and is waited exactly
+                // once; `&mut status` is a valid local.
+                let r = unsafe { libc::waitpid(child, &mut status, 0) };
+                if r != -1 || std::io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
+                    break r;
+                }
+            };
+            assert_eq!(waited, child, "the child is reaped, not merely polled");
+            assert!(
+                libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0,
+                "the forked child must exit cleanly, never via a panic: status {status}"
+            );
+            assert!(!pid_is_alive(child as u32), "a reaped pid names no process");
+        }
+
+        // Windows: the same two facts through a child process this one can
+        // wait on. The pid is asked about AFTER the wait, while the `Child`
+        // (and so the process object) is still open — a pid whose exit code
+        // is already known reads absent even as a held handle, which is
+        // exactly the "reaped, not merely polled" reading.
+        #[cfg(windows)]
+        {
+            let mut child = std::process::Command::new("cmd.exe")
+                .args(["/C", "exit", "0"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("spawning a child process");
+            let pid = child.id();
+            assert!(pid_is_alive(pid), "a spawned child is a live pid");
+            let status = child.wait().expect("waiting for the child");
+            assert!(status.success(), "the child must exit cleanly, got {status}");
+            assert!(!pid_is_alive(pid), "a waited-for pid names no process");
+        }
     }
 
     #[test]
@@ -1640,11 +1877,20 @@ mod tests {
         // above `pid_t::MAX` wraps to a negative group/broadcast address —
         // neither names ONE process, so both are refused before the syscall
         // rather than answered by a kernel that would call both live.
+        // Windows has no process groups, but `0` is its Idle pseudo-process
+        // and a pid past the real range is refused by the API: the same two
+        // answers, reached the same way (before the probe's own verdict).
         assert!(!pid_is_alive(0));
         assert!(!pid_is_alive(u32::MAX));
+        #[cfg(unix)]
         assert!(!pid_is_alive(libc::pid_t::MAX as u32 + 1));
     }
 
+    /// `ESRCH`/`EPERM` are errno names: this test asks the Unix arm's own
+    /// verdict table, which has no Windows counterpart (there the verdicts
+    /// come from Win32 error codes inside `win_proc`, covered by its own
+    /// tests on that host).
+    #[cfg(unix)]
     #[test]
     fn probe_verdict_reads_only_esrch_as_absent() {
         assert!(!probe_verdict(Some(libc::ESRCH)), "ESRCH is the one absent verdict");
@@ -1658,6 +1904,13 @@ mod tests {
 
     // ── atomic_write is symlink-transparent (rice draft mode's routing) ──
 
+    /// Unix-only: creating a symbolic link on native Windows needs
+    /// SeCreateSymbolicLinkPrivilege or Developer Mode, which no runner
+    /// guarantees, and the thing under test IS the link (`atomic_write`'s
+    /// own symlink transparency is `symlink_metadata`/`read_link`, which are
+    /// portable — only the fixture cannot be built there). `copy_dir_recursive`'s
+    /// Windows arm has its own test in `fs_windows`.
+    #[cfg(unix)]
     #[test]
     fn atomic_write_writes_through_a_symlink_leaving_the_link_itself_intact() {
         let dir = std::env::temp_dir().join(format!("aoide-atomic-symlink-{}", std::process::id()));
@@ -1685,6 +1938,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Unix-only for the same reason as the test above: the fixture is a link.
+    #[cfg(unix)]
     #[test]
     fn atomic_write_resolves_a_relative_symlink_target() {
         // The exact shape `rice mode draft` creates: stage/livery.json (a
@@ -1739,25 +1994,26 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The private policy, asked of the host that holds it: this asserts the
+    /// SAME promise with each host's own reader ([`assert_private_file`]),
+    /// which is why the test name no longer says `0600` — a mode is how Unix
+    /// spells owner-only, not what the promise is.
     #[test]
-    fn atomic_write_private_locks_the_file_to_0600() {
-        use std::os::unix::fs::PermissionsExt;
+    fn atomic_write_private_locks_the_file_to_the_owner_only_policy() {
         let dir = std::env::temp_dir().join(format!("aoide-atomic-private-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("secret.key");
 
         atomic_write_private(&path, b"private bytes").unwrap();
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "atomic_write_private must lock to 0600, got {mode:o}");
+        assert_private_file(&path);
         assert_eq!(std::fs::read(&path).unwrap(), b"private bytes");
 
         // A second write to the SAME path (the re-mint-never-happens case,
         // but the primitive itself must stay correct either way) is still
-        // locked to 0600 afterward.
+        // locked to the same policy afterward.
         atomic_write_private(&path, b"replaced").unwrap();
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600);
+        assert_private_file(&path);
         assert_eq!(std::fs::read(&path).unwrap(), b"replaced");
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -1777,20 +2033,25 @@ mod tests {
         // final path after the whole write-then-rename round trip returns
         // (which the OLD, buggy code would also have passed, since its
         // chmod ran before returning — the defect was a window DURING the
-        // call, not a wrong end state).
-        use std::os::unix::fs::PermissionsExt;
+        // call, not a wrong end state). Windows' arm of the same window is
+        // the DACL attached to `CreateFileW` itself, read back here by
+        // `assert_private_file` through the object's own handle.
         let dir = std::env::temp_dir().join(format!("aoide-write-temp-file-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let tmp = dir.join("secret.key.tmp");
 
         write_temp_file(&tmp, b"private seed bytes", Some(0o600)).unwrap();
-        let mode = std::fs::metadata(&tmp).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "the TEMP file itself must already be 0600 the instant it's created, got {mode:o}");
+        assert_private_file(&tmp);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Unix-only: a umask is a POSIX process-wide mode mask. Its Windows
+    /// counterpart is the DACL a parent directory grants, which the test
+    /// above already covers through the same readback — and there is no
+    /// process-wide knob there to widen it in the first place.
+    #[cfg(unix)]
     #[test]
     fn atomic_write_private_locks_the_final_path_to_0600_under_a_permissive_umask() {
         // Complements the test above: end-to-end through the public
@@ -1825,23 +2086,142 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Windows: `secure_private_dir` on a directory that already exists and is
+    /// NOT private must TIGHTEN it, not refuse it and not leave it as it is.
+    /// That is the second of the three states `ensure_private_dir` has to
+    /// tell apart (absent, present-and-private, present-and-open), and it is
+    /// the one a host inherits from an earlier install — the Unix arm's
+    /// `chmod 0700` over an existing directory, which is equally idempotent.
+    /// The fixture starts wide on purpose: `create_dir_all` leaves the
+    /// inherited default DACL, which is exactly the shape being repaired.
+    #[cfg(windows)]
+    #[test]
+    fn secure_private_dir_tightens_a_directory_another_run_left_open() {
+        let dir = std::env::temp_dir().join(format!("aoide-secure-dir-tighten-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let before = aoide_protocol::owner_only::dir_privacy(&dir).unwrap();
+        assert!(before.is_some(), "the fixture must start with a policy this crate would not accept: {before:?}");
+
+        secure_private_dir(&dir).unwrap();
+        assert_private_dir(&dir);
+
+        // And it stays idempotent: a second call over an already-private
+        // directory neither fails nor regresses it.
+        secure_private_dir(&dir).unwrap();
+        assert_private_dir(&dir);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Windows, and the rule this crate's private path is built around,
+    /// asserted rather than assumed: **NT re-propagates a container's DACL
+    /// change to children whose ACEs are INHERITED.** A child created the
+    /// ordinary way has only inherited ACEs; the tighten writes a protected,
+    /// `NO_INHERITANCE` policy, so the child's inherited ACEs are stripped
+    /// and it ends up with none — unreadable, exactly as the first version of
+    /// `config`'s unwritable-directory fixture was.
+    ///
+    /// That is why nothing in this crate relies on inheritance for private
+    /// material: every private write attaches its OWN protected policy at
+    /// creation (`create_truncating`), and the second half of this test shows
+    /// such a child is untouched by a later tighten of its directory. The
+    /// Unix arm has no analogue — `chmod 0700` changes no child's mode — so
+    /// the asymmetry is the point of the assertion.
+    #[cfg(windows)]
+    #[test]
+    fn tightening_a_directory_strips_a_child_that_only_inherited_its_access() {
+        let dir = std::env::temp_dir().join(format!("aoide-secure-dir-repropagate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // The child the host wrote: inherited ACEs only.
+        let inherited = dir.join("inherited.json");
+        std::fs::write(&inherited, "payload").unwrap();
+        assert!(std::fs::read(&inherited).is_ok(), "the fixture must start readable");
+
+        secure_private_dir(&dir).unwrap();
+
+        let after = std::fs::read(&inherited);
+        assert!(
+            after.is_err(),
+            "NT should have stripped the child's inherited ACEs with the parent's policy: {after:?}"
+        );
+
+        // The child THIS crate wrote: its own protected policy, unaffected by
+        // any later change to its directory's.
+        let owned = dir.join("owned.json");
+        {
+            let mut f = aoide_protocol::owner_only::create_truncating(&owned).unwrap();
+            f.write_all(b"payload").unwrap();
+        }
+        secure_private_dir(&dir).unwrap();
+        assert_eq!(std::fs::read(&owned).unwrap(), b"payload", "a child with its own policy survives a tighten");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Windows: a directory JUNCTION is refused by name. A junction is the
+    /// one link kind a non-elevated process can create, and it is exactly
+    /// what a user does to redirect a state directory onto another volume —
+    /// so it is the shape that would silently make this function report a
+    /// repair of the link while the directory callers actually use kept the
+    /// default it had.
+    #[cfg(windows)]
+    #[test]
+    fn secure_private_dir_refuses_a_junction_by_name() {
+        use std::process::Stdio;
+        let base = std::env::temp_dir().join(format!("aoide-secure-dir-junction-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let target = base.join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        let link = base.join("link");
+        let made = std::process::Command::new("cmd.exe")
+            .args([
+                "/C",
+                "mklink",
+                "/J",
+                link.to_str().unwrap(),
+                target.to_str().unwrap(),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        assert!(made, "the fixture needs a junction, and `mklink /J` needs no privilege");
+
+        // The reader refuses it as itself, with a reason, and never reports
+        // the LINK's policy as the directory's.
+        let reason = aoide_protocol::owner_only::dir_privacy(&link).unwrap();
+        assert!(reason.is_some(), "a junction is not the object the path resolves to: {reason:?}");
+
+        let err = secure_private_dir(&link).expect_err("a junction must be refused, never repaired");
+        let text = err.to_string();
+        assert!(text.contains("junction") || text.contains("symbolic link"), "{text}");
+
+        let _ = std::fs::remove_dir(&link);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn captures_dir_nests_under_state_dir_and_honors_its_override() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
 
-        std::env::set_var("AOIDE_STATE_DIR", "/tmp/aoide-captures-test/state");
+        std::env::set_var("AOIDE_STATE_DIR", scratch("aoide-captures-test/state"));
         assert_eq!(
             captures_dir(),
-            std::path::PathBuf::from("/tmp/aoide-captures-test/state/captures")
+            std::path::PathBuf::from(scratch("aoide-captures-test/state/captures"))
         );
 
         // With `AOIDE_STATE_DIR` absent: `$AOIDE_ROOT/state` →
         // captures_dir() = `$AOIDE_ROOT/state/captures` (`RootEnvGuard` keeps
         // this deterministic across machines, see its doc).
-        let _root = RootEnvGuard::set(std::path::Path::new("/tmp/aoide-captures-test-root"));
+        let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-captures-test-root")));
         std::env::remove_var("AOIDE_STATE_DIR");
-        assert_eq!(captures_dir(), std::path::PathBuf::from("/tmp/aoide-captures-test-root/state/captures"));
+        assert_eq!(captures_dir(), std::path::PathBuf::from(scratch("aoide-captures-test-root/state/captures")));
 
         match saved {
             Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
@@ -1854,19 +2234,19 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
 
-        std::env::set_var("AOIDE_STATE_DIR", "/tmp/aoide-pointer-test/state");
+        std::env::set_var("AOIDE_STATE_DIR", scratch("aoide-pointer-test/state"));
         assert_eq!(
             pointer_state_file(),
-            std::path::PathBuf::from("/tmp/aoide-pointer-test/state/pointer-pos.json")
+            std::path::PathBuf::from(scratch("aoide-pointer-test/state/pointer-pos.json"))
         );
 
         // `RootEnvGuard` keeps this deterministic across machines — see its
         // doc.
-        let _root = RootEnvGuard::set(std::path::Path::new("/tmp/aoide-pointer-test-root"));
+        let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-pointer-test-root")));
         std::env::remove_var("AOIDE_STATE_DIR");
         assert_eq!(
             pointer_state_file(),
-            std::path::PathBuf::from("/tmp/aoide-pointer-test-root/state/pointer-pos.json")
+            std::path::PathBuf::from(scratch("aoide-pointer-test-root/state/pointer-pos.json"))
         );
 
         match saved {
@@ -2112,8 +2492,8 @@ mod tests {
         let saved_home = std::env::var("HOME").ok();
         let saved_user = std::env::var("AOIDE_USER").ok();
 
-        std::env::set_var("AOIDE_ROOT", "/tmp/aoide-root-test");
-        assert_eq!(root(), std::path::PathBuf::from("/tmp/aoide-root-test"));
+        std::env::set_var("AOIDE_ROOT", scratch("aoide-root-test"));
+        assert_eq!(root(), std::path::PathBuf::from(scratch("aoide-root-test")));
 
         // Empty and relative values are ignored — falls back to the default,
         // same discipline every other override in this module holds.
@@ -2252,7 +2632,7 @@ mod tests {
         let home = std::env::temp_dir().join(format!("aoide-migrate-root-piecewise-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::env::set_var("HOME", &home);
-        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-migrate-root-piecewise-elsewhere");
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-migrate-root-piecewise-elsewhere"));
 
         let old_stage = home.join("Aoide").join("song").join("stage");
         let old_state = home.join("Aoide").join("state");

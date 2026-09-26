@@ -29,11 +29,14 @@ pub fn local_host_name() -> String {
         .unwrap_or_else(|| "aoide".to_string())
 }
 
-/// The OS hostname via `libc::gethostname`, or `None` on any failure
-/// (truncated/non-UTF8/errno) — best-effort, never a panic. Ported from
-/// `aoide_server::a2a::os_hostname` (moved here so conduct/conductor
-/// renderers, which cannot depend on the server crate, can call it too; the
-/// server copy is deleted once this one is wired in).
+/// The OS hostname, or `None` on any failure (truncated/non-UTF8/errno) —
+/// best-effort, never a panic. Unix asks `gethostname(2)`; Windows asks
+/// `GetComputerNameExW` for the DNS hostname, the same name a Unix host
+/// reports for itself (and not the NetBIOS name, which is the truncated,
+/// uppercase form). Ported from `aoide_server::a2a::os_hostname` (moved here
+/// so conduct/conductor renderers, which cannot depend on the server crate,
+/// can call it too; the server copy is deleted once this one is wired in).
+#[cfg(unix)]
 fn os_hostname() -> Option<String> {
     let mut buf = vec![0u8; 256];
     let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
@@ -42,6 +45,27 @@ fn os_hostname() -> Option<String> {
     }
     let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
     let s = String::from_utf8_lossy(&buf[..end]).trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+/// The Windows arm — see the Unix arm's doc above for the shared contract.
+/// The two-call `GetComputerNameExW` shape (the required length first, then
+/// the value, with the length it wrote checked against what it was given) is
+/// what keeps a name too long for the first buffer from coming back
+/// truncated-but-plausible: a truncated name would be a DIFFERENT host.
+#[cfg(windows)]
+fn os_hostname() -> Option<String> {
+    use windows_sys::Win32::System::SystemInformation::{ComputerNameDnsHostname, GetComputerNameExW};
+    let mut buf = vec![0u16; 256];
+    let mut len = buf.len() as u32;
+    if unsafe { GetComputerNameExW(ComputerNameDnsHostname, buf.as_mut_ptr(), &mut len) } == 0 {
+        return None;
+    }
+    let len = len as usize;
+    if len == 0 || len > buf.len() {
+        return None;
+    }
+    let s = String::from_utf16_lossy(&buf[..len]).trim().to_string();
     (!s.is_empty()).then_some(s)
 }
 
@@ -74,10 +98,37 @@ mod tests {
     #[test]
     fn local_host_name_never_panics_and_is_never_empty() {
         // No env/hostname assumptions in a test sandbox — just prove the
-        // full fallback chain (env -> gethostname -> "aoide") always lands
+        // full fallback chain (env -> hostname -> "aoide") always lands
         // on something non-empty without unwinding.
         let name = local_host_name();
         assert!(!name.is_empty());
+    }
+
+    /// Windows: the hostname arm is ASSERTED, not merely executed. The test
+    /// above passes whether `GetComputerNameExW` answers, answers `None`, or
+    /// is never reached — the `"aoide"` fallback satisfies "non-empty" too —
+    /// so this one asks for a fact only the real call can produce: the name
+    /// this host reports for ITSELF. `COMPUTERNAME` is the NetBIOS name and
+    /// the arm returns the DNS hostname, which on a stock host is the same
+    /// string in different case and on a joined host may carry a domain
+    /// suffix — hence the containment either way, case-folded. A regression
+    /// to a constant, to `None`, or to the fallback fails on both halves.
+    #[cfg(windows)]
+    #[test]
+    fn os_hostname_reports_this_host_and_not_a_constant() {
+        let got = os_hostname().expect("a named host has a hostname");
+        assert_ne!(got, "aoide", "the shared fallback is not this host's name");
+        if let Ok(netbios) = std::env::var("COMPUTERNAME") {
+            if !netbios.is_empty() {
+                let got_fold = got.to_ascii_uppercase();
+                let wanted_fold = netbios.to_ascii_uppercase();
+                assert!(
+                    got_fold.contains(&wanted_fold) || wanted_fold.contains(&got_fold),
+                    "the arm returned {got:?}, which is not this host's own name ({netbios:?}) — \
+                     a value no constant could satisfy"
+                );
+            }
+        }
     }
 
     #[test]

@@ -1,18 +1,13 @@
 //! The Windows half of [`super`]'s feed primitive: the two facts Unix takes
 //! from the filesystem, answered against the object's own handle.
 //!
-//! **Creation policy, attached AT creation.** Unix chmods after the open;
-//! the Windows shape that merely looks equivalent — create with the
-//! inherited default DACL, then tighten with `SetSecurityInfo` — is a race,
-//! because another principal can open the brand-new file and keep the handle
-//! in the window between the two steps. So [`super::FeedWriter::append`]
-//! passes `SECURITY_ATTRIBUTES` whose `SECURITY_DESCRIPTOR` already holds an
-//! EXPLICIT, `SE_DACL_PROTECTED`, single-ACE DACL for the current token user
-//! ([`OWNER_ONLY_MASK`], `NO_INHERITANCE`), with the owner pinned to that
-//! same user — nothing inheritable is applied, and there is no second step
-//! to race. The owner is pinned rather than assumed because an elevated
-//! token's DEFAULT owner is the Administrators group, and [`security_facts`]
-//! asks for the current user.
+//! **The owner-only policy itself lives in [`crate::owner_only`]**, shared
+//! with `aoide-storage`'s private-write half (`pkgs/aoide/crates/AGENTS.md`:
+//! no cross-crate copying — one implementation, exposed from the leaf crate
+//! both consumers already depend on). What this module keeps is the FEED's
+//! use of it: create-if-absent ([`create_new`]), then validate an existing
+//! file before touching it ([`open_existing`] + [`reject_reparse_point`] +
+//! [`file_refusal`]), then the EOF append below.
 //!
 //! **`0o600` is the only supported creation mode here.** The group-shared
 //! `0o640` (`aoide-secrets`' broker feed) has no Windows mapping in this
@@ -24,20 +19,15 @@
 //! the object's own owner and DACL are read back from it: the DACL must be
 //! present and `SE_DACL_PROTECTED`, non-empty, every ACE an
 //! `ACCESS_ALLOWED_ACE_TYPE` for that same token user (a deny, audit or
-//! foreign-trustee ACE refuses), with the union of the masks covering
-//! [`REQUIRED_ACCESS`]. Only then may anything seek, truncate or write. A
-//! reparse point is refused outright: this module will not write through a
-//! link whose target it cannot name.
+//! foreign-trustee ACE refuses), with the union of the masks covering the
+//! owner's own read/write bits. Only then may anything seek, truncate or
+//! write. A reparse point is refused outright: this module will not write
+//! through a link whose target it cannot name.
 //!
 //! **Identity** cannot be `(dev, ino)`: [`file_identity`] reads the 128-bit
 //! `FILE_ID_INFO` through the handle (`FileIdInfo`, correct on ReFS too),
 //! with `GetFileInformationByHandle` as a documented fallback on
 //! `ERROR_INVALID_PARAMETER` only. A failure propagates, never "same file".
-//!
-//! Every resource — token, `SetEntriesInAclW`'s ACL, `GetSecurityInfo`'s
-//! descriptor, the token buffer, each file handle — is owned by a guard, so
-//! every error path releases it; the token buffer is a `Vec<u64>` (not a
-//! misaligned `Vec<u8>` cast) so the `TOKEN_USER` read inside it is aligned.
 //!
 //! **The append is the documented EOF write, not a file-pointer dance.** A
 //! Windows handle that also needs `FILE_WRITE_DATA` (for the past-cap
@@ -53,463 +43,25 @@
 //! rather than claimed as Unix `O_APPEND` equivalence.
 
 use super::owner_only_mode;
+use crate::owner_only::{
+    APPEND_ACCESS, CreateError, create_new, file_refusal, last_error, open_existing, reject_reparse_point, wide,
+};
 use std::ffi::c_void;
 use std::fs::File;
 use std::io;
-use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, RawHandle};
 use std::path::Path;
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_FILE_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_INVALID_PARAMETER, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS,
-    GENERIC_WRITE, HANDLE, HLOCAL, INVALID_HANDLE_VALUE, LocalFree,
-};
-use windows_sys::Win32::Security::Authorization::{
-    EXPLICIT_ACCESS_W, GRANT_ACCESS, GetSecurityInfo, SE_FILE_OBJECT, SetEntriesInAclW, TRUSTEE_IS_SID, TRUSTEE_IS_USER,
-    TRUSTEE_W,
-};
-use windows_sys::Win32::Security::{
-    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation, DACL_SECURITY_INFORMATION, EqualSid,
-    GetAce, GetAclInformation, GetLengthSid, GetSecurityDescriptorControl, GetTokenInformation,
-    InitializeSecurityDescriptor, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
-    SECURITY_DESCRIPTOR, SE_DACL_PRESENT, SE_DACL_PROTECTED, SetSecurityDescriptorControl, SetSecurityDescriptorDacl,
-    SetSecurityDescriptorOwner, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    ERROR_FILE_NOT_FOUND, ERROR_INVALID_PARAMETER, ERROR_PATH_NOT_FOUND, HANDLE, INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    BY_HANDLE_FILE_INFORMATION, CREATE_NEW, CreateFileW, FILE_APPEND_DATA, FILE_ATTRIBUTE_NORMAL,
-    FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_BEGIN, FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO,
-    FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_READ_EA, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, FileAttributeTagInfo, FileIdInfo, GetFileInformationByHandle,
-    GetFileInformationByHandleEx, GetFileSizeEx, OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE, SetEndOfFile,
-    SetFilePointerEx, WriteFile,
+    BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_BEGIN, FILE_ID_INFO, FILE_READ_ATTRIBUTES,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileIdInfo, GetFileInformationByHandle,
+    GetFileInformationByHandleEx, GetFileSizeEx, OPEN_EXISTING, SYNCHRONIZE, SetEndOfFile, SetFilePointerEx, WriteFile,
 };
 use windows_sys::Win32::System::IO::{OVERLAPPED, OVERLAPPED_0, OVERLAPPED_0_0};
-use windows_sys::Win32::System::SystemServices::{ACCESS_ALLOWED_ACE_TYPE, SECURITY_DESCRIPTOR_REVISION, SID_REVISION};
-use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-
-/// What the one owner-only ACE grants: every bit `GENERIC_READ` and
-/// `GENERIC_WRITE` resolve to on a file, so the object this module creates
-/// can be reopened for reading (the [`super::Follower`], or any
-/// `read_to_string`) and for the validated append — by this user and nobody
-/// else. The bits are not decoration: the access check for a create runs
-/// against the descriptor being attached, so a `GENERIC_WRITE` create whose
-/// DACL omits `FILE_WRITE_EA`/`FILE_WRITE_ATTRIBUTES` fails, and a DACL
-/// that omits the read bits is a feed its own follower cannot open.
-const OWNER_ONLY_MASK: u32 =
-    FILE_READ_DATA | FILE_WRITE_DATA | FILE_APPEND_DATA | FILE_READ_EA | FILE_WRITE_EA | FILE_READ_ATTRIBUTES
-        | FILE_WRITE_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE;
-
-/// What the append handle asks for, every bit of it inside
-/// [`OWNER_ONLY_MASK`] — so a file that validates always permits this open.
-const APPEND_ACCESS: u32 =
-    FILE_APPEND_DATA | FILE_WRITE_DATA | FILE_READ_DATA | FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE;
-
-/// What an existing file's DACL must cover before this module will append to
-/// it: the whole [`OWNER_ONLY_MASK`], so a file this module created always
-/// validates and a write-only file (one its own follower could not read)
-/// never does.
-const REQUIRED_ACCESS: u32 = OWNER_ONLY_MASK;
-
-// ── guards: every allocation is released on every path ───────────────────
-
-/// An `HLOCAL` allocation owned by `advapi32` (`SetEntriesInAclW`'s ACL,
-/// `GetSecurityInfo`'s security descriptor). `LocalFree` tolerates a null
-/// pointer, so the guard is safe to build before the call succeeds.
-struct LocalAlloc(*mut c_void);
-
-impl Drop for LocalAlloc {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            unsafe { LocalFree(self.0 as HLOCAL) };
-        }
-    }
-}
-
-/// A kernel handle from `CreateFileW`/`OpenProcessToken` that has not been
-/// wrapped in a [`File`] yet — so an early return between the call and the
-/// wrap still closes it.
-struct Handle(HANDLE);
-
-impl Drop for Handle {
-    fn drop(&mut self) {
-        if self.0 != INVALID_HANDLE_VALUE && !self.0.is_null() {
-            unsafe { CloseHandle(self.0) };
-        }
-    }
-}
-
-// ── the current token user, whose SID is the one trustee allowed ─────────
-
-/// The SID of the user this process's token is for — `SID_AND_ATTRIBUTES.Sid`
-/// out of `TokenUser`. The backing buffer is an 8-byte-aligned `Vec<u64>`
-/// (`TOKEN_USER` needs pointer alignment; a `Vec<u8>` cast would be
-/// misaligned), and it is owned here because `sid` points INTO it.
-struct TokenUserSid {
-    _buffer: Vec<u64>,
-    sid: PSID,
-}
-
-impl TokenUserSid {
-    fn current() -> io::Result<Self> {
-        let mut raw: HANDLE = null_mut();
-        if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let token = Handle(raw);
-
-        // The documented two-call shape: the required length first, then the
-        // value. A failure at either step is propagated, never guessed past.
-        let mut needed: u32 = 0;
-        unsafe { GetTokenInformation(token.0, TokenUser, null_mut(), 0, &mut needed) };
-        if needed == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let mut buffer: Vec<u64> = vec![0; needed.div_ceil(8) as usize];
-        if unsafe {
-            GetTokenInformation(token.0, TokenUser, buffer.as_mut_ptr() as *mut c_void, needed, &mut needed)
-        } == 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        let user: TOKEN_USER = unsafe { std::ptr::read_unaligned(buffer.as_ptr() as *const TOKEN_USER) };
-        if user.User.Sid.is_null() {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "the process token names no user SID"));
-        }
-        Ok(Self { _buffer: buffer, sid: user.User.Sid })
-    }
-
-    fn as_ptr(&self) -> PSID {
-        self.sid
-    }
-}
-
-/// A path as a NUL-terminated wide string. An embedded NUL is refused
-/// rather than truncated: `CreateFileW` takes a C string, so a path carrying
-/// one would silently name a DIFFERENT file than the caller asked for.
-fn wide(path: &Path) -> io::Result<Vec<u16>> {
-    let mut out: Vec<u16> = path.as_os_str().encode_wide().collect();
-    if out.contains(&0) {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "the feed path contains an embedded NUL"));
-    }
-    out.push(0);
-    Ok(out)
-}
-
-/// The last-error code of a failed call, as an `io::Error`.
-fn last_error() -> io::Error {
-    io::Error::last_os_error()
-}
-
-// ── creation with the policy already attached ────────────────────────────
-
-/// Build the one creation policy into `sd`: an explicit, protected,
-/// single-ACE owner-only DACL, with the owner pinned to `sid`. The returned
-/// guard owns the ACL the descriptor points at, so it must outlive `sd`'s
-/// use in `CreateFileW`.
-fn owner_only_descriptor(sd: &mut SECURITY_DESCRIPTOR, sid: &TokenUserSid) -> io::Result<LocalAlloc> {
-    let descriptor = sd as *mut SECURITY_DESCRIPTOR as PSECURITY_DESCRIPTOR;
-    if unsafe { InitializeSecurityDescriptor(descriptor, SECURITY_DESCRIPTOR_REVISION) } == 0 {
-        return Err(last_error());
-    }
-    // Pinning the owner is not decoration: an elevated token's DEFAULT owner
-    // is the Administrators group, so a created file can legitimately belong
-    // to someone other than its creator — and [`check_owner_only`] asks for
-    // the current user. Setting it here makes create and verify agree by
-    // construction, and setting the owner to one's OWN token user needs no
-    // privilege.
-    if unsafe { SetSecurityDescriptorOwner(descriptor, sid.as_ptr(), 0) } == 0 {
-        return Err(last_error());
-    }
-
-    let entry = EXPLICIT_ACCESS_W {
-        grfAccessPermissions: OWNER_ONLY_MASK,
-        grfAccessMode: GRANT_ACCESS,
-        grfInheritance: 0, // NO_INHERITANCE
-        Trustee: TRUSTEE_W {
-            TrusteeForm: TRUSTEE_IS_SID,
-            TrusteeType: TRUSTEE_IS_USER,
-            ptstrName: sid.as_ptr() as *mut u16,
-            ..Default::default()
-        },
-    };
-    let mut acl: *mut ACL = null_mut();
-    let status = unsafe { SetEntriesInAclW(1, &entry, null(), &mut acl) };
-    if status != ERROR_SUCCESS {
-        return Err(io::Error::from_raw_os_error(status as i32));
-    }
-    let acl = LocalAlloc(acl as *mut c_void);
-
-    // `bDaclPresent = TRUE` with a non-null ACL is the EXPLICIT DACL;
-    // `bDaclDefaulted = FALSE` says so out loud, so no mechanism later
-    // substitutes the token's default DACL for it.
-    if unsafe { SetSecurityDescriptorDacl(descriptor, 1, acl.0 as *const ACL, 0) } == 0 {
-        return Err(last_error());
-    }
-    // SE_DACL_PROTECTED: nothing inheritable from the parent is ever applied,
-    // which is what makes "attached at creation" as strict as it sounds.
-    if unsafe { SetSecurityDescriptorControl(descriptor, SE_DACL_PROTECTED, SE_DACL_PROTECTED) } == 0 {
-        return Err(last_error());
-    }
-    Ok(acl)
-}
-
-/// Why a `CREATE_NEW` did not hand back a fresh file — the two outcomes the
-/// caller distinguishes, so `ERROR_FILE_EXISTS` can fall through to the
-/// validate-an-existing-file branch instead of being reported as a failure.
-enum CreateError {
-    Exists,
-    Failed(io::Error),
-}
-
-/// Create the feed file with the owner-only DACL already attached, or report
-/// that it already exists. Nothing is tightened after the fact.
-fn create_owner_only(path: &Path) -> Result<File, CreateError> {
-    let sid = TokenUserSid::current().map_err(CreateError::Failed)?;
-    let mut sd = SECURITY_DESCRIPTOR::default();
-    let _acl = owner_only_descriptor(&mut sd, &sid).map_err(CreateError::Failed)?;
-    let attributes = SECURITY_ATTRIBUTES {
-        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-        lpSecurityDescriptor: &mut sd as *mut SECURITY_DESCRIPTOR as *mut c_void,
-        bInheritHandle: 0,
-    };
-
-    let wide_path = wide(path).map_err(CreateError::Failed)?;
-    let handle = unsafe {
-        CreateFileW(
-            wide_path.as_ptr(),
-            GENERIC_WRITE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            &attributes,
-            CREATE_NEW,
-            FILE_ATTRIBUTE_NORMAL,
-            null_mut(),
-        )
-    };
-    // `CreateFileW` reports failure as INVALID_HANDLE_VALUE, never as a
-    // null-or-nonzero BOOL: the code is the comparison, and the error comes
-    // from GetLastError.
-    if handle == INVALID_HANDLE_VALUE {
-        let error = last_error();
-        return Err(match error.raw_os_error() {
-            Some(code) if code == ERROR_FILE_EXISTS as i32 => CreateError::Exists,
-            _ => CreateError::Failed(error),
-        });
-    }
-    Ok(unsafe { File::from_raw_handle(handle as RawHandle) })
-}
-
-// ── validating an existing file before it is used ────────────────────────
-
-/// What the DACL and owner of one file actually are, read from the OBJECT's
-/// own handle — never from the path, and never from a second open.
-struct SecurityFacts {
-    dacl_present: bool,
-    dacl_protected: bool,
-    ace_count: u32,
-    /// Every ACE is an `ACCESS_ALLOWED_ACE_TYPE` for the current token user.
-    all_aces_are_current_user_allows: bool,
-    /// The union of the allow masks found.
-    covered_mask: u32,
-    owner_is_current_user: bool,
-}
-
-impl SecurityFacts {
-    fn is_owner_only(&self) -> bool {
-        self.dacl_present
-            && self.dacl_protected
-            && self.ace_count > 0
-            && self.all_aces_are_current_user_allows
-            && self.owner_is_current_user
-            && self.covered_mask & REQUIRED_ACCESS == REQUIRED_ACCESS
-    }
-}
-
-/// Read the facts above out of `file`'s handle. `GetSecurityInfo` returns a
-/// `WIN32_ERROR` (zero is success), not a BOOL — its failure code is the
-/// return value, never `GetLastError`.
-fn security_facts(file: &File) -> io::Result<SecurityFacts> {
-    let sid = TokenUserSid::current()?;
-    let mut owner: PSID = null_mut();
-    let mut dacl: *mut ACL = null_mut();
-    let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
-    let status = unsafe {
-        GetSecurityInfo(
-            file.as_raw_handle() as HANDLE,
-            SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION | OWNER_SECURITY_INFORMATION,
-            &mut owner,
-            null_mut(),
-            &mut dacl,
-            null_mut(),
-            &mut descriptor,
-        )
-    };
-    if status != ERROR_SUCCESS {
-        return Err(io::Error::from_raw_os_error(status as i32));
-    }
-    // The descriptor (and the DACL inside it) is owned from here on, so the
-    // pointers below stay valid for the whole read and are released on the
-    // way out, error or not.
-    let descriptor = LocalAlloc(descriptor);
-
-    // A null DACL is grant-all access to everyone; an absent one is the
-    // same. Neither is ever accepted, and neither reaches the ACE walk.
-    if dacl.is_null() {
-        return Ok(SecurityFacts {
-            dacl_present: false,
-            dacl_protected: false,
-            ace_count: 0,
-            all_aces_are_current_user_allows: false,
-            covered_mask: 0,
-            owner_is_current_user: false,
-        });
-    }
-
-    let mut control: u16 = 0;
-    let mut revision: u32 = 0;
-    if unsafe { GetSecurityDescriptorControl(descriptor.0 as PSECURITY_DESCRIPTOR, &mut control, &mut revision) } == 0 {
-        return Err(last_error());
-    }
-
-    let mut info = ACL_SIZE_INFORMATION::default();
-    if unsafe {
-        GetAclInformation(
-            dacl as *const ACL,
-            &mut info as *mut ACL_SIZE_INFORMATION as *mut c_void,
-            std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
-            AclSizeInformation,
-        )
-    } == 0
-    {
-        return Err(last_error());
-    }
-
-    let mut all_aces_are_current_user_allows = true;
-    let mut covered_mask: u32 = 0;
-    for index in 0..info.AceCount {
-        let mut ace: *mut c_void = null_mut();
-        if unsafe { GetAce(dacl as *const ACL, index, &mut ace) } == 0 {
-            return Err(last_error());
-        }
-        // The ACE TYPE and FLAGS are checked BEFORE anything in the ACE's
-        // variable tail is touched: only an explicit, non-inherited allow
-        // ACE even has a SID where this reader would look. `AceFlags != 0`
-        // rejects an inherited or container-propagating ACE, which is what
-        // an explicit single-trustee policy never carries.
-        let header: ACE_HEADER = unsafe { std::ptr::read_unaligned(ace as *const ACE_HEADER) };
-        let sid_offset = std::mem::offset_of!(ACCESS_ALLOWED_ACE, SidStart) as u32;
-        if header.AceType as u32 != ACCESS_ALLOWED_ACE_TYPE
-            || header.AceFlags != 0
-            || (header.AceSize as u32) < sid_offset + 8
-        {
-            all_aces_are_current_user_allows = false;
-            continue;
-        }
-        let allowed = ace as *const ACCESS_ALLOWED_ACE;
-        let mask = unsafe { std::ptr::read_unaligned(std::ptr::addr_of!((*allowed).Mask)) };
-        let trustee: PSID = unsafe { std::ptr::addr_of!((*allowed).SidStart) as PSID };
-        // A SID is a counted structure: validate it against its own header
-        // (revision, sub-authority count) before comparing, and inside this
-        // ACE's `AceSize`. Only the first two bytes are read here — the rest
-        // is never copied, and no read happens past the ACE.
-        let sid_header: [u8; 2] = unsafe { std::ptr::read_unaligned(trustee as *const [u8; 2]) };
-        let sub_authorities = sid_header[1] as u32;
-        let sid_bytes = 8 + 4 * sub_authorities;
-        if sid_header[0] as u32 != SID_REVISION
-            || sub_authorities > 15
-            || sid_offset + sid_bytes > header.AceSize as u32
-            || unsafe { GetLengthSid(trustee) } != sid_bytes
-        {
-            all_aces_are_current_user_allows = false;
-            continue;
-        }
-        if unsafe { EqualSid(trustee, sid.as_ptr()) } == 0 {
-            all_aces_are_current_user_allows = false;
-            continue;
-        }
-        covered_mask |= mask;
-    }
-
-    Ok(SecurityFacts {
-        dacl_present: control & SE_DACL_PRESENT != 0,
-        dacl_protected: control & SE_DACL_PROTECTED != 0,
-        ace_count: info.AceCount,
-        all_aces_are_current_user_allows,
-        covered_mask,
-        owner_is_current_user: !owner.is_null() && unsafe { EqualSid(owner, sid.as_ptr()) } != 0,
-    })
-}
-
-/// The named refusal when an existing file is not the owner-only object this
-/// module is willing to append to. `None` means it is, and only then may a
-/// caller seek, truncate, or write.
-fn owner_only_refusal(file: &File) -> io::Result<Option<String>> {
-    let facts = security_facts(file)?;
-    if facts.is_owner_only() {
-        return Ok(None);
-    }
-    let reason = if !facts.dacl_present {
-        "its DACL is absent or null (grant-all), which is never accepted".to_string()
-    } else if !facts.dacl_protected {
-        "its DACL is not SE_DACL_PROTECTED, so inherited ACEs apply".to_string()
-    } else if facts.ace_count == 0 {
-        "its DACL is empty".to_string()
-    } else if !facts.all_aces_are_current_user_allows {
-        "its DACL grants someone other than the current user (a foreign trustee, a deny ACE, or a non-allow ACE)".to_string()
-    } else if !facts.owner_is_current_user {
-        "its owner is not the current user".to_string()
-    } else {
-        format!(
-            "its DACL mask {:#x} does not cover the append/write bits {:#x}",
-            facts.covered_mask, REQUIRED_ACCESS
-        )
-    };
-    Ok(Some(reason))
-}
-
-/// Open an existing feed file for the validated append: no truncation, no
-/// directory creation, and `FILE_FLAG_OPEN_REPARSE_POINT` so a link at the
-/// path is refused as itself instead of being silently followed.
-fn open_existing(path: &Path) -> io::Result<File> {
-    let wide_path = wide(path)?;
-    let handle = unsafe {
-        CreateFileW(
-            wide_path.as_ptr(),
-            APPEND_ACCESS,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            null(),
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
-            null_mut(),
-        )
-    };
-    if handle == INVALID_HANDLE_VALUE {
-        return Err(last_error());
-    }
-    Ok(unsafe { File::from_raw_handle(handle as RawHandle) })
-}
-
-/// Refuse a reparse point: this module validates the object it holds, and a
-/// link's target is a different object than the link the path names.
-fn reject_reparse_point(file: &File) -> io::Result<Option<String>> {
-    let mut info = FILE_ATTRIBUTE_TAG_INFO::default();
-    if unsafe {
-        GetFileInformationByHandleEx(
-            file.as_raw_handle() as HANDLE,
-            FileAttributeTagInfo,
-            &mut info as *mut FILE_ATTRIBUTE_TAG_INFO as *mut c_void,
-            std::mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
-        )
-    } == 0
-    {
-        return Err(last_error());
-    }
-    if info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-        return Ok(Some(format!("the feed path is a reparse point (tag {:#x})", info.ReparseTag)));
-    }
-    Ok(None)
-}
 
 // ── identity ─────────────────────────────────────────────────────────────
 
@@ -658,7 +210,7 @@ pub(super) fn append(path: &Path, cap: u64, create_mode: u32, line: &[u8]) -> Re
         }
     }
 
-    let file = match create_owner_only(path) {
+    let file = match create_new(path) {
         Ok(file) => file,
         Err(CreateError::Exists) => return append_to_existing(path, cap, line),
         Err(CreateError::Failed(e)) => return Err(format!("could not create the feed file: {e}")),
@@ -668,7 +220,7 @@ pub(super) fn append(path: &Path, cap: u64, create_mode: u32, line: &[u8]) -> Re
     // made is read back through the same verification an existing file gets,
     // and a feed whose own policy is not honored is refused BEFORE the first
     // payload byte is written — no repair step, no tightening afterwards.
-    match owner_only_refusal(&file) {
+    match file_refusal(&file) {
         Ok(None) => {}
         Ok(Some(reason)) => {
             return Err(format!(
@@ -684,13 +236,13 @@ pub(super) fn append(path: &Path, cap: u64, create_mode: u32, line: &[u8]) -> Re
 /// The existing-file branch: validate first, and only a validated handle may
 /// be seeked, truncated, or written to. A refusal here has touched nothing.
 fn append_to_existing(path: &Path, cap: u64, line: &[u8]) -> Result<(), String> {
-    let file = open_existing(path).map_err(|e| format!("could not open the feed file: {e}"))?;
+    let file = open_existing(path, APPEND_ACCESS, false).map_err(|e| format!("could not open the feed file: {e}"))?;
     match reject_reparse_point(&file) {
         Ok(None) => {}
         Ok(Some(reason)) => return Err(format!("refusing the feed file: {reason}")),
         Err(e) => return Err(format!("could not read the feed file's attributes: {e}")),
     }
-    match owner_only_refusal(&file) {
+    match file_refusal(&file) {
         Ok(None) => {}
         Ok(Some(reason)) => return Err(format!("refusing the feed file: {reason}")),
         Err(e) => return Err(format!("could not read the feed file's security: {e}")),
@@ -698,7 +250,7 @@ fn append_to_existing(path: &Path, cap: u64, line: &[u8]) -> Result<(), String> 
 
     let mut size: i64 = 0;
     if unsafe { GetFileSizeEx(file.as_raw_handle() as HANDLE, &mut size) } == 0 {
-        return Err(format!("could not size the feed file: {}", last_error()));
+        return Err(format!("could not size the feed file: {}", io::Error::last_os_error()));
     }
     if size as u64 >= cap {
         // Past the cap: empty the file through the same validated handle —
@@ -713,10 +265,17 @@ fn append_to_existing(path: &Path, cap: u64, line: &[u8]) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use windows_sys::Win32::Security::{
-        AllocateAndInitializeSid, FreeSid, SECURITY_WORLD_SID_AUTHORITY,
+    use crate::owner_only::{LocalAlloc, REQUIRED_ACCESS, security_facts, wide};
+    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, GENERIC_WRITE};
+    use windows_sys::Win32::Security::Authorization::{
+        EXPLICIT_ACCESS_W, GRANT_ACCESS, SetEntriesInAclW, TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
     };
-    use windows_sys::Win32::System::SystemServices::SECURITY_WORLD_RID;
+    use windows_sys::Win32::Security::{
+        ACL, AllocateAndInitializeSid, FreeSid, GetLengthSid, InitializeSecurityDescriptor, PSECURITY_DESCRIPTOR, PSID,
+        SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, SECURITY_WORLD_SID_AUTHORITY, SetSecurityDescriptorDacl,
+    };
+    use windows_sys::Win32::Storage::FileSystem::CREATE_NEW;
+    use windows_sys::Win32::System::SystemServices::{SECURITY_DESCRIPTOR_REVISION, SECURITY_WORLD_RID};
 
     fn tmp(tag: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("aoide-feed-win-{tag}-{}", std::process::id()))
@@ -749,7 +308,7 @@ mod tests {
             },
             0,
             "AllocateAndInitializeSid: {}",
-            last_error()
+            io::Error::last_os_error()
         );
         let length = unsafe { GetLengthSid(sid) } as usize;
         assert!(length > 0);
@@ -811,7 +370,7 @@ mod tests {
                 null_mut(),
             )
         };
-        assert_ne!(handle, INVALID_HANDLE_VALUE, "CreateFileW: {}", last_error());
+        assert_ne!(handle, INVALID_HANDLE_VALUE, "CreateFileW: {}", io::Error::last_os_error());
         unsafe { CloseHandle(handle) };
         drop(acl_guard);
     }
@@ -844,7 +403,10 @@ mod tests {
         assert!(facts.all_aces_are_current_user_allows, "the only ACE must be an allow for the current user");
         assert!(facts.owner_is_current_user, "the owner must be the current user");
         assert_eq!(facts.covered_mask & REQUIRED_ACCESS, REQUIRED_ACCESS);
-        assert!(facts.is_owner_only());
+        assert!(
+            facts.covers(REQUIRED_ACCESS),
+            "the mask the refusal reader requires is the one an owner-only file covers"
+        );
         drop(file);
         std::fs::remove_file(&path).ok();
     }

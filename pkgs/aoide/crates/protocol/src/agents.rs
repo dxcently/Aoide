@@ -2903,6 +2903,24 @@ pub fn on_path(profile: &AgentProfile) -> bool {
 mod tests {
     use super::*;
 
+    /// The file name a launch program lands under on this host, for the two
+    /// `on_path` tests below. Unix: the name itself — `on_path` asks
+    /// `is_file` there, so no execute bit is needed to be found. Windows:
+    /// `<name>.exe`, because the SUFFIX is that platform's predicate and
+    /// `on_path`'s own candidates are `<name>` plus every spawnable
+    /// extension (`bin.rs`'s `windows_*` tests make the same split). Either
+    /// way the assertion is one thing: the profile's declared launch program
+    /// is found on the scoped `PATH`.
+    #[cfg(unix)]
+    fn program_name(name: &str) -> String {
+        name.to_string()
+    }
+
+    #[cfg(windows)]
+    fn program_name(name: &str) -> String {
+        format!("{name}.exe")
+    }
+
     // ── the seam itself: dispatch pins ─────────────────────────────────────
 
     #[test]
@@ -2915,12 +2933,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("aoide_agents_on_path_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("pi"), "").unwrap();
+        std::fs::write(dir.join(program_name("pi")), "").unwrap();
         std::env::set_var("PATH", &dir);
 
         assert!(on_path(&PI_PROFILE), "pi's launch program sits on the scoped PATH");
 
-        std::fs::remove_file(dir.join("pi")).unwrap();
+        std::fs::remove_file(dir.join(program_name("pi"))).unwrap();
         assert!(!on_path(&PI_PROFILE), "pi's launch program no longer sits on PATH");
 
         match saved {
@@ -4327,12 +4345,12 @@ mod tests {
             .join(format!("aoide_agents_on_path_eidolon_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("eidolon"), "").unwrap();
+        std::fs::write(dir.join(program_name("eidolon")), "").unwrap();
         std::env::set_var("PATH", &dir);
 
         assert!(on_path(&EIDOLON_PROFILE), "eidolon's launch program sits on the scoped PATH");
 
-        std::fs::remove_file(dir.join("eidolon")).unwrap();
+        std::fs::remove_file(dir.join(program_name("eidolon"))).unwrap();
         assert!(!on_path(&EIDOLON_PROFILE), "eidolon's launch program no longer sits on PATH");
 
         match saved {
@@ -4517,8 +4535,9 @@ mod tests {
 
     /// Pin a file's mtime. The one portable way to make "this mirror is older
     /// than its journal" a fact rather than a race with the filesystem's own
-    /// timestamp granularity.
-    #[cfg(unix)]
+    /// timestamp granularity — `File::set_modified` is `std`'s own
+    /// cross-platform call, so this helper carries no `cfg` even though most
+    /// of its callers do.
     fn set_mtime(path: &Path, at: SystemTime) {
         std::fs::File::options()
             .write(true)
@@ -4528,7 +4547,9 @@ mod tests {
             .unwrap();
     }
 
-    #[cfg(unix)]
+    /// The companion to [`set_mtime`]: an hour before now, the age the
+    /// journal side of a mirror pair is pinned to. Pure arithmetic on
+    /// `SystemTime`, so nothing about it is Unix either.
     fn an_hour_ago() -> SystemTime {
         SystemTime::now() - Duration::from_secs(3600)
     }

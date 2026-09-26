@@ -871,6 +871,29 @@
   node belongs in `aoide-client`, never here, regardless of which crate owns
   the state it reads or writes.
 
+- **A Windows arm keeps the Unix contract or refuses by name — never an
+  `Ok(())`, a `true`, or an empty collection standing in for a guarantee.**
+  The host split lives in one sibling file, `src/fs_windows.rs`, beside
+  `fs.rs` (the shape `aoide_protocol::feed`'s `feed_windows.rs` set): every
+  Unix-only primitive gets its Windows spelling there, and `fs.rs` keeps the
+  one function each caller names with two `cfg` bodies. `unlock`,
+  `lock_exclusive` and `try_lock_exclusive` are `pub(crate)` because
+  `outbox`'s `.bsy` guard takes the same lock rather than a second one.
+- **A private file or directory policy shared with another crate is CALLED,
+  never copied.** `aoide_protocol::owner_only` is the one implementation of
+  the owner-only DACL, so `atomic_write_private`'s temp and
+  `secure_private_dir` reach for it rather than writing a `windows-sys` call
+  sequence of their own — and a test that asks whether a file is private asks
+  through `fs::assert_private_file`/`assert_private_dir`, which read the
+  HOST's own answer (`mode` on Unix, the DACL on Windows). A privacy check
+  is never skipped on a host where it is inconvenient; a test that asserts a
+  Linux fact (`/proc`, a `umask`, a symlink fixture) is `cfg`-gated with the
+  reason in place. The readback obligation is not the test's alone:
+  `write_temp_file`'s Windows arm reads the private temp back through
+  `owner_only::file_privacy` BEFORE its first payload byte, because a
+  `SECURITY_ATTRIBUTES` descriptor is a request and a volume that ignores
+  ACLs would otherwise accept a private key at whatever policy it likes.
+
 ## Docs update required in the same commit
 
 - This `README.md` when a new module or stage-file shape is added.

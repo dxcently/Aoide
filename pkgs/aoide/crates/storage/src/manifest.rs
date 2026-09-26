@@ -360,13 +360,19 @@ mod tests {
 
     /// The taught-error proof: an absolute `dir` in any spec refuses the
     /// WHOLE save, before anything touches disk — never a partial write.
+    ///
+    /// The fixture is absolute ON THIS HOST (`temp_dir`, whose doc explains
+    /// why a `/etc/...` literal will not do): on Windows that literal is not
+    /// absolute at all, so the gate under test would never fire and the test
+    /// would be proving a platform fact rather than the save's own refusal.
     #[test]
     fn save_manifest_rejects_an_absolute_dir_with_a_taught_error_before_writing_anything() {
         let root = temp_dir("absolute-dir");
+        let absolute = temp_dir("absolute-dir-fixture").to_string_lossy().to_string();
 
         let manifest = Manifest {
             version: MANIFEST_VERSION,
-            sessions: vec![spec("yomi", "/etc/not/relative", "claude")],
+            sessions: vec![spec("yomi", &absolute, "claude")],
         };
         let err = save_manifest(&root, &manifest).expect_err("an absolute dir must be refused");
         assert!(err.contains("yomi"), "error must name the offending host: {err}");
@@ -494,6 +500,12 @@ mod tests {
     /// (the `is_file` check follows the symlink), and the returned root is
     /// the AS-WALKED `root/link`, never a `canonicalize`d `root/real` — the
     /// walk never resolves the symlink to keep climbing from its target.
+    /// Unix-only: the fixture is a symbolic link, whose creation on native
+    /// Windows needs SeCreateSymbolicLinkPrivilege or Developer Mode — no
+    /// runner guarantees it. What `walk_up` does with a link (never resolve
+    /// it, return the as-walked path) is `symlink_metadata`-shaped and
+    /// portable; only this way of BUILDING the fixture is not.
+    #[cfg(unix)]
     #[test]
     fn walk_up_finds_a_manifest_through_a_symlinked_directory_without_resolving_it() {
         let root = temp_dir("walk-up-symlink");

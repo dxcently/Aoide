@@ -181,6 +181,7 @@ dependencies = [
  "sha2 0.11.0",
  "toml",
  "toml_edit",
+ "windows-sys",
 ]
 
 [[package]]
