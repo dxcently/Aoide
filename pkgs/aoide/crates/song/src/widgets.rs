@@ -17,10 +17,10 @@
 //! resolves ownership, and it runs in the nix evaluator, nowhere else. So
 //! both files are regenerated WHOLE, for every committed song at once, by
 //! shelling out to `nix eval --json` against the `songbookManifest` flake
-//! output (`flake.nix`) — the exact same generator
-//! `modules/facets/quickshell/default.nix`'s `quickshellConfig` derivation
-//! calls at build time. One generator, two callers: [`eval_songbook`] is
-//! that shell-out, invoked once from the manifest path
+//! output (`flake.nix`) — the exact same generator the quickshell facet's
+//! `quickshellConfig` derivation calls at build time. One generator, two
+//! callers: [`eval_songbook`] is that shell-out, invoked once from the
+//! manifest path
 //! ([`sync_song_widgets`]) and once from the registry path
 //! ([`sync_song_registry`]) — see each function's own doc.
 //!
@@ -36,10 +36,10 @@
 //! CHECKOUT host's committed songbook is stable across calls, so "every
 //! song" and "every committed song nix can see" are the same set).
 //!
-//! Mirrors the nix build's own per-song widget carry
-//! (`modules/facets/quickshell/default.nix`'s `quickshellConfig`
-//! derivation) as closely as possible for the BODY copy: the WHOLE
-//! `widgets/` tree is copied unfiltered (helper components, asset subdirs,
+//! Mirrors the nix build's own per-song widget carry (the quickshell
+//! facet's `quickshellConfig` derivation) as closely as possible for the
+//! BODY copy: the WHOLE `widgets/` tree is copied unfiltered (helper
+//! components, asset subdirs,
 //! `.gitkeep`, everything), while the manifest only ever lists top-level
 //! lowercase-kebab `.qml` files as slots.
 //!
@@ -152,9 +152,9 @@ pub(crate) const SONGBOOK_EVAL_FIXTURE_VAR: &str = "AOIDE_SONGBOOK_EVAL_FIXTURE"
 
 /// On a CHECKOUT host (`flake_root()` names a real flake): one `nix eval
 /// --json` shell-out against the `songbookManifest` flake output
-/// (`flake.nix`), which wraps `lib/songbook.nix` — the SAME function
-/// `modules/facets/quickshell/default.nix`'s `quickshellConfig` derivation
-/// calls at build time. Evaluates against
+/// (`flake.nix`), which wraps `lib/songbook.nix` — the SAME function the
+/// quickshell facet's `quickshellConfig` derivation calls at build time.
+/// Evaluates against
 /// [`aoide_storage::fs::flake_root`] (the git checkout, not the relocatable
 /// stage/runtime trees — see that function's doc), so the result reflects
 /// the COMMITTED songbook (an untracked file needs `git add` before nix's
@@ -697,9 +697,9 @@ fn copy_tree_atomic(
 }
 
 /// `name`'s top-level slot files in `src` — informational only (see
-/// [`WidgetSyncOk::slots`]'s doc), same rule
-/// `modules/facets/quickshell/default.nix`'s manifest generation uses: a
-/// FILE (not a dir), not `.gitkeep`, ending `.qml`, first byte
+/// [`WidgetSyncOk::slots`]'s doc), same rule the quickshell facet's manifest
+/// generation uses: a FILE (not a dir), not `.gitkeep`, ending `.qml`, first
+/// byte
 /// ascii-lowercase or an ascii digit.
 fn scan_slot_names(src: &Path) -> Result<Vec<String>, WidgetSyncErr> {
     let entries = std::fs::read_dir(src).map_err(|e| WidgetSyncErr {

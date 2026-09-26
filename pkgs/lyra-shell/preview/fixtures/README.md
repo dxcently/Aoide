@@ -1,13 +1,13 @@
 # Preview fixtures
 
 Stage-file sets for the widget preview canvas
-(`modules/facets/quickshell/qml/WidgetPreview.qml`). `lyra preview
+(`pkgs/lyra-shell/qml/WidgetPreview.qml`). `lyra preview
 --fixture <name>` copies one set into `$ROOT/state/stage/`, where every
 widget reads it exactly as it reads the live desktop's stage: the canvas
 never talks to `aoided`, so these four files ARE the world the previewed
 widget sees.
 
-Song-blind, like the rest of this facet directory: a fixture describes
+Song-blind, like the rest of this shell source: a fixture describes
 session/project/hook/herald *shapes*, never a song's taste.
 
 ## The four files
@@ -48,8 +48,8 @@ follows the rules.
 ## Adding a set
 
 ```sh
-mkdir modules/facets/quickshell/preview/fixtures/<name>
-cd    modules/facets/quickshell/preview/fixtures/<name>
+mkdir pkgs/lyra-shell/preview/fixtures/<name>
+cd    pkgs/lyra-shell/preview/fixtures/<name>
 for f in sessions projects hooks herald; do
   jq '<your edit>' ~/.aoide/state/stage/$f.json > $f.json
 done

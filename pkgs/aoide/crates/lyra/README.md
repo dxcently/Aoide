@@ -133,7 +133,7 @@ are core `aoide` identity, root `AGENTS.md`).
   `state/stage/{sessions,projects,hooks,herald}.json` seeded from a named
   fixture set or a directory (falling back to empty-but-valid defaults
   while no fixture set has landed yet), and its own `run/qml/` — COPIES,
-  never symlinks into the checkout: one copy per facet `*.qml`, the facet's
+  never symlinks into the checkout: one copy per shell `*.qml`, the shell's
   resolved `icons/` tree (the canvas toolbar's Iconoir glyphs, `lyra icon
   resolve` output already in the checkout), one copied
   tree per non-`_`-prefixed song's `widgets/` dir (`stage_qml_copies`/

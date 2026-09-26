@@ -37,7 +37,11 @@ by decision — no embedded database yet
   `$AOIDE_ROOT` (absolute-path-wins), default `<home>/.aoide`, nix-free
   (L-C2, lyra-carrier lane, task #107) — EXCEPT `fs::flake_root`, which
   stays pinned to the dev git checkout (`$AOIDE_FLAKE_ROOT`, default
-  `<home>/Aoide`) since that is not a runtime tree. `fs` resolves TWO stage
+  `<home>/Aoide`) since that is not a runtime tree. Beside it sits
+  `fs::LYRA_SHELL_SRC` — the ONE checkout-relative source path named from
+  outside this crate (the lyra shell's `qml`/`icons`/`preview` tree, and the
+  same directory `pkgs/lyra-shell` is built from, so what a checkout is read
+  from and what the package ships cannot drift apart). `fs` resolves TWO stage
   roots off that one root, not one (command-defrag lane S1, 2026-08-27,
   CONTRACTS.md §4): `stage_dir` — unchanged, `$AOIDE_ROOT/song/stage/`,
   rice/paint (`livery.json`/`mode.json`, lyra's tree) — and

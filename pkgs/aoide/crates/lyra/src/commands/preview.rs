@@ -35,6 +35,7 @@
 use crate::dispatch::Invocation;
 use crate::output::Outcome;
 use crate::registry::{arg, cmd, flag, Registry};
+use aoide_storage::fs::LYRA_SHELL_SRC;
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -46,7 +47,7 @@ pub fn register(r: &mut Registry) {
         args: [arg!("widget", "string", false, "Initial widget to preview: a bare slot name, `<song>/<slot>`, or an absolute songbook widgets/ path.")],
         flags: [
             flag!("song", "string", "Song whose default livery/widgets seed the preview (default \"sonata\")."),
-            flag!("fixture", "string", "Fixture set name under modules/facets/quickshell/preview/fixtures/, or a directory path (default \"many\")."),
+            flag!("fixture", "string", "Fixture set name under pkgs/lyra-shell/preview/fixtures/, or a directory path (default \"many\")."),
             flag!(
                 "livery",
                 "string",
@@ -682,7 +683,7 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
     // `<song>/widgets/`) is something `preview declare` has any business
     // copying back into the checkout. The prefix check alone is a STRING
     // match and nothing more: a `..`-laden field
-    // (`songs/demo/../../../../modules/facets/quickshell/qml/ShellBridge`)
+    // (`songs/demo/../../../../pkgs/lyra-shell/qml/ShellBridge`)
     // satisfies it while resolving to a facet file entirely outside any
     // songbook -- so a `..` component is refused outright, and (the
     // structural check underneath the string one) the field's resolved
@@ -1357,9 +1358,7 @@ enum FixtureSource {
 
 fn fixtures_registry_dir(checkout: &Path) -> PathBuf {
     checkout
-        .join("modules")
-        .join("facets")
-        .join("quickshell")
+        .join(LYRA_SHELL_SRC)
         .join("preview")
         .join("fixtures")
 }
@@ -1485,9 +1484,9 @@ fn copy_tree_fresh(src_dir: &Path, dst_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// One copy per `*.qml` in `CHECKOUT/modules/facets/quickshell/qml/`,
-/// landing at `ROOT/run/qml/<file>.qml`, plus the facet's resolved icon
-/// assets (`CHECKOUT/modules/facets/quickshell/icons/` -> `ROOT/run/qml/
+/// One copy per `*.qml` in `CHECKOUT/pkgs/lyra-shell/qml/`,
+/// landing at `ROOT/run/qml/<file>.qml`, plus the shell's resolved icon
+/// assets (`CHECKOUT/pkgs/lyra-shell/icons/` -> `ROOT/run/qml/
 /// icons/`, the canvas toolbar's `Qt.resolvedUrl("icons/...")` source) —
 /// refreshed on every build, so a rebuild always reflects the checkout's
 /// CURRENT files. Icons are `lyra icon resolve` output already in the
@@ -1495,12 +1494,12 @@ fn copy_tree_fresh(src_dir: &Path, dst_dir: &Path) -> Result<(), String> {
 fn stage_qml_copies(checkout: &Path, run_qml_dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(run_qml_dir)
         .map_err(|e| format!("creating {}: {e}", run_qml_dir.display()))?;
-    let facet = checkout.join("modules").join("facets").join("quickshell");
-    let icons = facet.join("icons");
+    let shell = checkout.join(LYRA_SHELL_SRC);
+    let icons = shell.join("icons");
     if icons.is_dir() {
         copy_tree_fresh(&icons, &run_qml_dir.join("icons"))?;
     }
-    let src_dir = facet.join("qml");
+    let src_dir = shell.join("qml");
     let Ok(entries) = std::fs::read_dir(&src_dir) else {
         return Ok(());
     };
@@ -1647,7 +1646,7 @@ fn map_widget(widget: &str, song: &str, checkout: &Path) -> String {
 /// absolute already (an out-of-songbook path `map_widget` passed through
 /// verbatim) is canonicalized directly; `songs/<s>/<rest>` maps to
 /// `CHECKOUT/song/songbook/<s>/widgets/<rest>`; any other relative
-/// spelling is a facet file, `CHECKOUT/modules/facets/quickshell/qml/
+/// spelling is a shell file, `CHECKOUT/pkgs/lyra-shell/qml/
 /// <rest>`. A `..` component is refused (`None`), as is a missing file --
 /// best-effort metadata for [`compute_watch_list`], never worth failing
 /// the whole build/merge over.
@@ -1668,9 +1667,7 @@ pub(crate) fn resolve_widget_abs(checkout: &Path, widget_field: &str) -> Option<
             .join(file)
     } else {
         checkout
-            .join("modules")
-            .join("facets")
-            .join("quickshell")
+            .join(LYRA_SHELL_SRC)
             .join("qml")
             .join(widget_field)
     };
@@ -2031,12 +2028,12 @@ mod tests {
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(dir.join("flake.nix"), "{ }\n").unwrap();
 
-        let qml = dir.join("modules/facets/quickshell/qml");
+        let qml = dir.join(LYRA_SHELL_SRC).join("qml");
         std::fs::create_dir_all(&qml).unwrap();
         std::fs::write(qml.join("ShellBridge.qml"), "// bridge\n").unwrap();
         std::fs::write(qml.join("LiveryState.qml"), "// livery\n").unwrap();
         std::fs::write(qml.join("not-qml.txt"), "ignore me\n").unwrap();
-        let icons = dir.join("modules/facets/quickshell/icons/iconoir");
+        let icons = dir.join(LYRA_SHELL_SRC).join("icons").join("iconoir");
         std::fs::create_dir_all(&icons).unwrap();
         std::fs::write(icons.join("drag-hand-gesture.svg"), "<svg/>\n").unwrap();
 
@@ -2665,7 +2662,7 @@ mod tests {
             ("root", root.to_str().unwrap()),
             (
                 "widget",
-                "demo/../../../../modules/facets/quickshell/qml/ShellBridge",
+                "demo/../../../../pkgs/lyra-shell/qml/ShellBridge",
             ),
         ]));
         assert_eq!(outcome.status, aoide_protocol::output::Status::Usage);
@@ -3097,8 +3094,8 @@ mod tests {
         // canonicalizing, through a REAL `run/qml/songs/<song>` directory
         // symlink (what an older, symlinking root left behind), straight out
         // to a facet file entirely outside any songbook. Reproduces the
-        // coordinator's own review shape (`demo/../../../../modules/facets/
-        // quickshell/qml/ShellBridge`; "sonata" stands in for "demo" here).
+        // coordinator's own review shape (`demo/../../../../pkgs/lyra-shell/
+        // qml/ShellBridge`; "sonata" stands in for "demo" here).
         let base = scratch("declare_traversal_via_symlink");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
@@ -3114,7 +3111,7 @@ mod tests {
 
         write_seed_control(
             &root,
-            json!({"widget": "songs/sonata/../../../../modules/facets/quickshell/qml/ShellBridge.qml", "song": "sonata"}),
+            json!({"widget": format!("songs/sonata/../../../../{LYRA_SHELL_SRC}/qml/ShellBridge.qml"), "song": "sonata"}),
         );
 
         let outcome = with_flake_root(&checkout, || {
@@ -3175,7 +3172,7 @@ mod tests {
         // replaced by a copy, never written through.
         std::fs::create_dir_all(run_qml_dir.join("songs")).unwrap();
         std::os::unix::fs::symlink(
-            checkout.join("modules/facets/quickshell/qml/ShellBridge.qml"),
+            checkout.join(LYRA_SHELL_SRC).join("qml").join("ShellBridge.qml"),
             run_qml_dir.join("ShellBridge.qml"),
         )
         .unwrap();
@@ -3191,7 +3188,7 @@ mod tests {
         for (copy, original) in [
             (
                 run_qml_dir.join("ShellBridge.qml"),
-                checkout.join("modules/facets/quickshell/qml/ShellBridge.qml"),
+                checkout.join(LYRA_SHELL_SRC).join("qml").join("ShellBridge.qml"),
             ),
             (
                 run_qml_dir.join("songs/sonata/conductor.qml"),
@@ -3228,7 +3225,7 @@ mod tests {
         let watch = vec![
             "/c/song/songbook/sonata/widgets/conductor.qml".to_string(),
             "/c/song/songbook/etude/widgets/parts/Knob.qml".to_string(),
-            "/c/modules/facets/quickshell/qml/ShellBridge.qml".to_string(),
+            format!("/c/{LYRA_SHELL_SRC}/qml/ShellBridge.qml"),
             "/elsewhere/foreign.qml".to_string(),
         ];
         let map = compute_stage_map(checkout, root, &watch);
@@ -3253,12 +3250,12 @@ mod tests {
         );
         assert_eq!(
             resolve_widget_abs(&checkout, "ShellBridge.qml"),
-            Some(real.join("modules/facets/quickshell/qml/ShellBridge.qml"))
+            Some(real.join(LYRA_SHELL_SRC).join("qml").join("ShellBridge.qml"))
         );
         assert_eq!(
             resolve_widget_abs(
                 &checkout,
-                "songs/sonata/../../../modules/facets/quickshell/qml/ShellBridge.qml"
+                &format!("songs/sonata/../../../{LYRA_SHELL_SRC}/qml/ShellBridge.qml")
             ),
             None
         );

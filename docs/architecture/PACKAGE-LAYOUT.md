@@ -402,6 +402,21 @@ surface: everything that paints, or that only a desktop needs.
   `packages.<system>.aoide-static` and the `pkg-aoide-static` check, never
   as `packages.default` — NixOS hosts keep the dynamic multi-output build
   `aoide.lyra.enable` depends on.
+- **The shell SOURCE is a package, not a crate — `pkgs/lyra-shell`.** The QML
+  tree, the resolved icons and the preview fixture sets a shell is generated
+  from live in the ROOT repo (`pkgs/lyra-shell/{qml,icons,preview}`) and ship
+  verbatim as `${pkgs.lyra-shell}/share/lyra/{qml,icons,preview}`. Plain
+  source: it runs nothing and names no config, so it is not a shell — the
+  directory a shell runs is `aoide.quickshell.config`, and what fills it is a
+  song's business. Core cannot read it (this flake is rooted at `pkgs/aoide`
+  and never walks the root repo), and `lyra` reads the CHECKOUT's copy rather
+  than the store path, naming it once as
+  `aoide_storage::fs::LYRA_SHELL_SRC`. Published by the root flake as
+  `packages.<system>.lyra-shell` and consumed as `pkgs.lyra-shell` through
+  the same `lib/pkgs.nix` overlay as every other root package. **Never
+  `lyra`:** that attribute is an unrelated nixpkgs package, and in THIS
+  document `packages.<system>.lyra` is core's rice output — one name, one
+  meaning, per flake.
 
 ## Flake outputs — the export surface
 
@@ -475,7 +490,8 @@ assumption:
 - `songbookManifest` / `aoideOptions` from the core flake — both need
   `song/` and `modules/`, which this flake never walks.
 - a `lyra` flake, or any Quickshell/rice export — `lyra` is paint, per
-  root `AGENTS.md`.
+  root `AGENTS.md`; the shell's own source package is the ROOT flake's
+  `packages.<system>.lyra-shell`, never anything exported here.
 - removal of `lib/walk.nix` — the walker stays.
 
 ## Open questions (each tagged with when it must be settled)

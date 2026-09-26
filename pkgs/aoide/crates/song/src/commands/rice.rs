@@ -321,8 +321,8 @@ fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
 /// not JSON, not an object, carries no string `"song"`, or carries one that
 /// fails [`crate::compose::valid_song_name`].
 ///
-/// Only the nix facet's activation seed writes that file
-/// (`modules/facets/quickshell/default.nix`); this crate only ever reads it.
+/// Only the nix facet's activation seed writes that file; this crate only
+/// ever reads it.
 /// The name-shape guard mirrors [`super::mode::current_staged_song`]'s own
 /// read-side guard — the result is joined into a songbook path by callers, so
 /// a hand-poisoned field must resolve to nothing rather than to something

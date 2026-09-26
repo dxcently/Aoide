@@ -525,6 +525,21 @@ pub fn flake_root() -> std::path::PathBuf {
     aoide_protocol::aoide_home().join("Aoide")
 }
 
+/// The lyra shell SOURCE, as a path relative to [`flake_root`]: the QML tree,
+/// the resolved icons and the preview fixture sets a checkout carries — the
+/// same directory `pkgs/lyra-shell` builds its `share/lyra/{qml,icons,
+/// preview}` from, so the path a checkout is READ from and the path the
+/// package is BUILT from cannot drift apart.
+///
+/// Named ONCE, here, and joined onto [`flake_root`] by every reader
+/// (`aoide-lyra`'s `commands::preview` stages the tree into an isolated
+/// preview root; `aoide-song`'s `compose` writes the scaffold doc that points
+/// a new song's author at `qml/slots.md`). A second checkout-relative tree
+/// earns its own const beside this one rather than a literal at the call site
+/// — the rename this exists to survive is exactly the one that leaves a
+/// string behind in a crate nobody thought to grep.
+pub const LYRA_SHELL_SRC: &str = "pkgs/lyra-shell";
+
 /// Pure tier logic for [`song_templates_dir`] — the same two-tier shape
 /// `aoide_protocol::bin`'s sibling-binary resolver uses (env override, then
 /// a sibling of `current_exe()`'s directory gated on its OWN existence
@@ -614,8 +629,7 @@ pub fn songbook_notes(name: &str) -> std::path::PathBuf {
 ///
 /// Same content as the active song's committed `livery.json` with the venue's
 /// `aoide.livery.override` applied (a plain file, never a symlink), published
-/// by the quickshell facet's activation seed
-/// (`modules/facets/quickshell/default.nix`) — the file's own `"song"` field
+/// by the quickshell facet's activation seed — the file's own `"song"` field
 /// says WHICH song that was. Absent on a host that never activated the facet
 /// (or before its first activation); readers then fall back to the committed
 /// songbook for that song. Shares [`song_dir`]'s `AOIDE_STAGE_DIR`-relative

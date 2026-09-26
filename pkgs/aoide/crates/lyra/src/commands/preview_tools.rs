@@ -6,8 +6,8 @@
 //! item tree joined against its own QML source (so a node comes back with
 //! not just geometry but `id`/`file:line`), and keep a small scaffolding
 //! notes list an agent can read as a work list. Every capability here is
-//! reachable from a shell — the canvas (P7, `modules/facets/quickshell/
-//! qml/WidgetPreview.qml`'s `IpcHandler { target: "preview" }`) only PAINTS
+//! reachable from a shell — the canvas (P7, `pkgs/lyra-shell/qml/
+//! WidgetPreview.qml`'s `IpcHandler { target: "preview" }`) only PAINTS
 //! the same data, per root `AGENTS.md` house rule 7's "delete every
 //! `.qml` — is this still reachable from a terminal?" test.
 //!

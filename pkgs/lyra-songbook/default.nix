@@ -11,10 +11,10 @@
 # `$out/share/lyra/songbook/` = a verbatim copy of the committed
 # `song/songbook/` tree (every song's `rice.nix`/`livery.json`/`design/`/
 # `widgets/`) PLUS `manifest.json`/`registry.json` baked via `lib/songbook.nix`
-# — the SAME generator `modules/facets/quickshell/default.nix`'s
-# `quickshellConfig` derivation and the `songbookManifest` flake output both
-# use, so this dir's baked files can never drift from what a checkout host's
-# `nix eval` would produce for the same committed songs.
+# — the SAME generator the quickshell facet's `quickshellConfig` derivation
+# and the `songbookManifest` flake output both call, so this dir's baked files
+# can never drift from what a checkout host's `nix eval` would produce for the
+# same committed songs.
 #
 # Consumed at runtime by `aoide_storage::fs::song_templates_dir` /
 # `AOIDE_SONG_TEMPLATES` — `lyra rice compose --from <song>` and

@@ -85,11 +85,11 @@
   map before every reload and by a `--no-launch` rebuild. Nothing in
   `commands::preview_tools` writes under `run/qml/`, and no code path may
   reintroduce a link there: a live incident during this crate's own P6
-  phase wrote through such a link and truncated `modules/facets/
-  quickshell/qml/WidgetPreview.qml` (no git copy — recovered only because
+  phase wrote through such a link and truncated `pkgs/lyra-shell/
+  qml/WidgetPreview.qml` (no git copy — recovered only because
   a reviewer's `Read` transcript held the file byte-for-byte);
   `a_write_through_run_qml_never_reaches_the_checkout` is the regression
-  test. The facet's `icons/` tree is copied the same way (`stage_qml_copies`),
+  test. The shell's `icons/` tree is copied the same way (`stage_qml_copies`),
   so the canvas toolbar's `Qt.resolvedUrl("icons/...")` never leaves the
   root. `resolve_widget_abs` resolves a `widget` field to the CHECKOUT
   file, never through the root, and `preview declare`'s containment check
@@ -337,7 +337,7 @@
   a boundary no shared Rust type can enforce (root `AGENTS.md`'s core/paint
   split), so a drift here is silent until a dialog answers wrong.
 - `commands::preview_tools`'s own module doc, plus the QML canvas's own
-  doc (P7, `modules/facets/quickshell/qml/WidgetPreview.qml`), when the
+  doc (P7, `pkgs/lyra-shell/qml/WidgetPreview.qml`), when the
   `qs ipc call` argv shape, the element path grammar, or the
   `IpcHandler { target: "preview" }` function signatures change — same
   no-shared-type boundary as the dialog contract above, Rust on one side

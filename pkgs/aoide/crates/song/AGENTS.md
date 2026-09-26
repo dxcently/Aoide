@@ -69,11 +69,11 @@
   `handle_rice_stage`.
 - **`song/declared/livery.json` (the declared twin, CONTRACTS.md §4) is
   READ-ONLY for this crate — only the nix facet writes it.** The quickshell
-  facet's activation seed (`modules/facets/quickshell/default.nix`,
-  `home.activation.aoideSeedStage`) publishes it: the declared song's
-  committed notes with the venue's `aoide.livery.override` applied, `"song"`
-  injected, keys sorted. `commands::rice::notes_source` reads it for
-  `handle_rice_stage`, and `commands::rice::declared_song` exposes its
+  facet's activation seed (`home.activation.aoideSeedStage`) publishes it: the
+  declared song's committed notes with the venue's `aoide.livery.override`
+  applied, `"song"` injected, keys sorted.
+  `commands::rice::notes_source` reads it for `handle_rice_stage`, and
+  `commands::rice::declared_song` exposes its
   `"song"` field (`rice mode declarative`'s no-`<name>` resolve uses it,
   ahead of `current_staged_song`). **The declared-song test is `"song"`
   EQUALITY against the name being staged — never a mode, never a mtime,

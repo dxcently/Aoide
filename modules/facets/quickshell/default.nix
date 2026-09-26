@@ -193,7 +193,7 @@ let
   # widget, it just excludes it, same as `.widgets` omitting a key.
   quickshellConfig = pkgs.runCommand "aoide-quickshell-config" { nativeBuildInputs = [ pkgs.jq ]; } ''
     mkdir -p "$out/qml"
-    cp -r ${./qml}/. "$out/qml/"
+    cp -r ${pkgs.lyra-shell}/share/lyra/qml/. "$out/qml/"
 
     # ── Manifest + registry: typed nix, formatted through jq ───────────────
     # `manifestJsonFile`/`registryJsonFile` (above) are the validated

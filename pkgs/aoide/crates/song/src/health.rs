@@ -1,7 +1,7 @@
 //! Live watchdog for the quickshell placeholder-screen lockup.
 //!
-//! `aoide-quickshell.service`'s `Restart=on-failure` (`modules/facets/
-//! quickshell/default.nix`) is useless against one specific failure mode:
+//! `aoide-quickshell.service`'s `Restart=on-failure` (the quickshell
+//! facet) is useless against one specific failure mode:
 //! after a transient output blip on the real monitor, Qt's wayland QPA
 //! backend sometimes falls onto an internal placeholder screen and never
 //! reattaches even once the real output returns — the process stays
@@ -803,8 +803,8 @@ mod tests {
     // ── The declared-expectation predicate ────────────────────────────────
     //
     // The published shape, verbatim from the quickshell facet's own output
-    // (`modules/facets/quickshell/default.nix`'s `surfacesJsonFile`,
-    // CONTRACTS.md §5): one object, NOT keyed by song, whose keys are the
+    // (`surfacesJsonFile`, CONTRACTS.md §5): one object, NOT keyed by song,
+    // whose keys are the
     // already-RESOLVED layer-shell namespaces. That resolution is why nothing
     // here derives `aoide-<slot>` itself.
     fn sonata_expectation() -> Value {

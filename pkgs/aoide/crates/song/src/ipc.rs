@@ -16,7 +16,7 @@
 //! `quickshell ipc call <target> <function>` does NOT auto-discover a
 //! running instance by itself (confirmed live: it looks for a "default"
 //! config directory and fails otherwise) — the instance here was launched
-//! with `-p <run_qml_dir>/shell.qml` (`modules/facets/quickshell/default.nix`),
+//! with `-p <run_qml_dir>/shell.qml` (the quickshell facet's service),
 //! so the same `-p` has to prefix the `ipc call` invocation to target it.
 //!
 //! ── Why success is judged on OUTPUT, not the exit code (khoa, 2026-08-15) ──

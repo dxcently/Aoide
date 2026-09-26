@@ -301,7 +301,7 @@ pub fn validate(container: &Value) -> Validation {
     // Widgets tier — optional top-level key, an object keyed by slot name
     // (CONTRACTS.md §5; `aoide.arrangement.widgets`, options.nix). Absent
     // means "no declared widget types", treated as `{}` — same posture the
-    // build-time walk already uses (`modules/facets/quickshell/default.nix`'s
+    // build-time walk already uses (the quickshell facet's
     // `.widgets // {}`). These fields are plain configuration, not W3C
     // design-token notes (no `{group.key}` refs, no `$value` wrapping), so
     // they are matched directly against `Value`, unlike the colour tiers

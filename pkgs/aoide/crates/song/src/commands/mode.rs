@@ -134,8 +134,8 @@ fn handle_mode_status(_inv: &Invocation) -> Outcome {
 /// Read the song `stage/livery.json` is CURRENTLY carrying, straight off its
 /// own `"song"` field — the same field both `rice stage` (below) and the nix
 /// activation's `home.activation.aoideSeedStage` reseed script
-/// (`modules/facets/quickshell/default.nix`) write on every stage/every
-/// activation. This is how "the current rice" is knowable at all: the Rust
+/// (the quickshell facet's activation) write on every stage, every activation.
+/// This is how "the current rice" is knowable at all: the Rust
 /// side has no nix evaluation access, so the stage file's own breadcrumb is
 /// the only source of truth for "what is this host actually performing right
 /// now" — reused here rather than re-deriving it some other way. Reads
