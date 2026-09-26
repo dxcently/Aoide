@@ -2,7 +2,7 @@
 #
 # Dendrite shape v1 (CONTRACTS.md §2): guarded on aoide.audio.enable, carries
 # its own dependencies, reads no other module (only aoide.user, implicitly
-# via the `audio` group already granted in hosts/common/default.nix).
+# via the `audio` group already granted in the account (users/khoa.nix).
 #
 # Backs the bar's REAL volume control: AoideBar.qml already binds to
 # Quickshell.Services.Pipewire (Pipewire.defaultAudioSink.audio.volume/

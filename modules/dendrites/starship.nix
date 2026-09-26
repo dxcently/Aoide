@@ -3,7 +3,8 @@
 # Dendrite shape v1 (CONTRACTS.md §2):
 #   - Guarded on aoide.starship.enable (default false — shipped but off).
 #   - Carries its own dependencies; reads no other module.
-#   - Enable with one line in hosts/ (see hosts/common/default.nix).
+#   - Enable with one line in hosts/ (the `base` aggregation defaults it on —
+#     see modules/aggregations/base/default.nix).
 #
 # What this dendrite does (ported verbatim from dxflake modules/dendrites/
 # starship.nix): the musical-notation Starship prompt — clef-decorated two-line

@@ -3,7 +3,8 @@
 # Dendrite shape v1 (CONTRACTS.md §2):
 #   - Guarded on aoide.yazi.enable (default false — shipped but off).
 #   - Carries its own dependencies; reads no other module.
-#   - Enable with one line in hosts/ (see hosts/common/default.nix).
+#   - Enable with one line in hosts/ (the `base` aggregation defaults it on —
+#     see modules/aggregations/base/default.nix).
 #
 # What this dendrite does (ported verbatim from dxflake modules/dendrites/
 # yazi.nix): programs.yazi with the dxflake layout/sort settings, a `y` shell
@@ -30,7 +31,7 @@
 #
 # Openers are restricted to binaries this dendrite can see are actually
 # installed on every host that turns yazi on: `nvim` (modules/dendrites/
-# neovim.nix, aoide.neovim.enable, mkDefault true in hosts/common) and
+# neovim.nix, aoide.neovim.enable, mkDefault true in the `base` aggregation) and
 # `xdg-open` (modules/dendrites/cli.nix ships xdg-utils, aoide.cli.enable,
 # also mkDefault true). No media-player dendrite exists in this repo yet, so
 # there is deliberately no mpv/imv/feh opener — xdg-open is the fallback for

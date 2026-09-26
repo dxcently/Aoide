@@ -13,8 +13,14 @@
 # aggregate `body` and a selected lane's own `body` are the same declarations
 # twice, which nixpkgs throws on rather than merging.
 #
-# This aggregate is on its way out (S7): once hosts select through the
-# constructor, nothing imports a whole tree, and this file goes with them.
+# This aggregate is on its way out: it is kept alive by the two readers that
+# still want a whole tree without a host — `lib/options.nix`'s `aoideOptions`
+# derivation (every body's declarations, one bare eval) and `flake.nix`'s
+# `fmt`/`nix-lint` scope, which walk the committed tree rather than import it.
+# No host takes it any more: hosts select through the catalogue and the
+# constructor imports only what they selected (S7). It goes when those two
+# readers stop needing it — not before (S10's export surface is where that
+# lands, if it does).
 let
   # A catalogue entry is either a lane record or a provider registry
   # (`{ providers.<p> = <path>; }`) — a capability with alternatives, each

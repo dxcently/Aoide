@@ -1,15 +1,16 @@
 # hosts/_mac/default.nix — TEMPLATE (forward-looking): macOS / nix-darwin host.
 #
-# Shelved (the `_` prefix): not registered anywhere. NOT EVALUABLE TODAY —
-# lib/mkHost.nix is nixosSystem-only. Landing a mac host needs the class seam
-# first:
+# Shelved (the `_` prefix): not discovered by flake.nix, so nothing builds or
+# evaluates it. NOT EVALUABLE TODAY — the constructor is nixosSystem-only.
+# Landing a mac host needs the class seam first:
 #   1. flake.nix: a nix-darwin input (follows nixpkgs), `aarch64-darwin` in
 #      `systems`, a `darwinConfigurations` output
-#   2. lib/mkHost.nix: a `class` arg — darwinSystem + home-manager's and
-#      stylix's *darwinModules* instead of the nixosModules sets
+#   2. lib/composition.nix / lib/aoideos.nix: a `class` arg — darwinSystem plus
+#      home-manager's and stylix's *darwinModules* instead of the nixosModules
+#      sets (`composition.laneNames` already carries `darwin`)
 #   3. modules/nucleus: a launchd twin for the aoided/shellbridge user services
-#      (systemd.user.services → launchd.user.agents); hosts/common also carries
-#      NixOS-only options (system.stateVersion, users.users.*.isNormalUser)
+#      (systemd.user.services → launchd.user.agents); `nixpkgs.hostPlatform`
+#      and `users.users.*.isNormalUser` are NixOS-only options
 #      that need a class split
 #   4. pkgs/aoide/flake.nix: add aarch64-darwin to its systems
 # See docs/architecture/PACKAGE-LAYOUT.md — "NixOS optional, never required."

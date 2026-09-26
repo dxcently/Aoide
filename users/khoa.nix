@@ -28,8 +28,13 @@
     };
 
   # The home floor: Home Manager's compat pin, and nothing else. Packages and
-  # programs are the machine's business or a selected lane's.
-  homeManager = {
-    home.stateVersion = "25.11";
-  };
+  # programs are the machine's business or a selected lane's. mkDefault because
+  # it IS a floor: a machine that needs a different pin states it in its own
+  # record (`users.khoa.homeManager.config`) and wins, which is what
+  # `users/README.md` promises.
+  homeManager =
+    { lib, ... }:
+    {
+      home.stateVersion = lib.mkDefault "25.11";
+    };
 }

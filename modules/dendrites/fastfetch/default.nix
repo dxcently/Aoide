@@ -12,7 +12,8 @@
 #   - Guarded on aoide.fastfetch.enable (default false — shipped but off).
 #   - Carries its own dependencies (including the bundled logo); reads no other
 #     module.
-#   - Enable with one line in hosts/ (see hosts/common/default.nix).
+#   - Enable with one line in hosts/ (the `base` aggregation defaults it on —
+#     see modules/aggregations/base/default.nix).
 #
 # Design: a clean, system-fitting greeting — a compact lyre, aligned key
 # columns, and two subtly music-marked section rules (hardware / software).

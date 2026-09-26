@@ -2,7 +2,7 @@
 #
 # Dendrite shape v1 (CONTRACTS.md §2):
 #   - Guarded on aoide.devtools.enable (default false — shipped but off;
-#     defaulted ON fleet-wide in hosts/common/default.nix).
+#   - ON fleet-wide in modules/aggregations/base/default.nix.
 #   - Carries its own dependencies; reads no other module.
 #
 # Scope: genuinely DEV-specific tools only. General command-line utilities

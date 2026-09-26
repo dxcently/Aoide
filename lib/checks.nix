@@ -106,9 +106,9 @@ let
   # ban is scoped to ephemeral runtime state (stage/ · auditions/ · catalog/ ·
   # index/) — `stage/` can never become load-bearing for the frozen half. It
   # deliberately does NOT list `song/songbook/` wholesale: committed songs
-  # there are VERSIONED SCORE, legitimately walked at eval by lib/mkHost.nix
-  # (each song's rice.nix self-gates on `aoide.song`). Walking the songbook
-  # therefore never trips this check on its own — EXCEPT the `drafts/`
+  # there are VERSIONED SCORE, legitimately read at eval by the lane that
+  # imports them (each song's rice.nix self-gates on `aoide.song`). Walking the
+  # songbook therefore never trips this check on its own — EXCEPT the `drafts/`
   # subfolder nested inside each song (`song/songbook/<name>/drafts/`,
   # `rice draft save`'s scratch tree): that one runtime dir sits INSIDE an
   # otherwise-legitimate songbook path, so a flat infix can't name it (the

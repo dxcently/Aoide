@@ -27,7 +27,7 @@
 
     # nvf (Neovim-Flake) — the neovim dendrite's config framework (dxflake
     # form, verbatim). Inputs can only live here; the dendrite reaches it via
-    # specialArgs (lib/mkHost.nix threads `inputs` into home-manager too).
+    # specialArgs (lib/aoideos.nix threads `inputs` into home-manager too).
     nvf = {
       url = "github:notashelf/nvf";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -62,19 +62,11 @@
         username = "khoa";
       };
 
-      # The machines this flake builds: every immediate child directory of
-      # `hosts/` that holds a `default.nix`, minus the `_`-prefixed shelved
-      # ones. Discovered, never listed — adding a machine is a new directory,
-      # and this file is not edited to add one. `_desktop`/`_laptop`/`_server`
-      # are the templates to copy; `_mac` needs the darwin seam first.
-      hostNames = builtins.attrNames (
-        lib.filterAttrs (
-          name: type:
-          type == "directory"
-          && !lib.hasPrefix "_" name
-          && builtins.pathExists (./hosts + "/${name}/default.nix")
-        ) (builtins.readDir ./hosts)
-      );
+      # The machines this flake builds. `hostNames` lives in lib/aoideos.nix —
+      # the ONE site that reads `hosts/` — so what this file builds and what
+      # `mkHost` takes as `knownHosts` cannot disagree. `_desktop`/`_laptop`/
+      # `_server` are the templates to copy; `_mac` needs the darwin seam first.
+      inherit (aoideos) hostNames;
 
       # One per discovered host; lazy per attribute, so an output that names one
       # host never forces the others.
@@ -85,7 +77,7 @@
 
       # The packages walker — auto-discovers pkgs/<name>/default.nix. One source
       # feeds the `packages` output, the auto-generated `pkg-<name>` checks, and
-      # the host + vm overlays (lib/mkHost.nix, tests/vm-boot.nix).
+      # the host + vm overlays (lib/aoideos.nix, tests/vm-boot.nix).
       pkgsWalk = import ./lib/pkgs.nix { inherit lib; };
     in
     {
@@ -224,8 +216,9 @@
         // {
           surface-ownership = checks.surfaceOwnership (hostCfg.aoide.surfaces or { });
           no-song-read = checks.noSongRead (walk ./modules);
-          # Committed songs self-register from song/songbook (walked into each
-          # host by lib/mkHost.nix); song-shape asserts each is a rice.nix only.
+          # Committed songs self-register from song/songbook (imported into
+          # each host by the `songbook` lane's own discovery); song-shape
+          # asserts each is a rice.nix only.
           song-shape = checks.songShape (walk ./song/songbook);
           # The two livery fan-outs (baked Stylix, stage seed) agree under an
           # `aoide.livery.override` — proved against a fixed fixture inside

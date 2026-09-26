@@ -3,7 +3,8 @@
 # Dendrite shape v1 (CONTRACTS.md §2):
 #   - Guarded on aoide.neovim.enable (default false — shipped but off).
 #   - Carries its own dependencies; reads no other module.
-#   - Enable with one line in hosts/ (see hosts/common/default.nix).
+#   - Enable with one line in hosts/ (the `base` aggregation defaults it on —
+#     see modules/aggregations/base/default.nix).
 #
 # What this dendrite does:
 #   - The full dxflake nvf (Neovim-Flake) stack, ported from dxflake
