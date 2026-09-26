@@ -2147,8 +2147,27 @@ project/parent inheritance across local/remote/app/subagents;
   pubkey through `do_spawn` → `stamp_spawn_provenance` →
   `conduct::graph::stamp_remote_parent` (one registration retry loop, two
   change-once stamps; `parentSessionId` stays `None`; no env var exists for
-  it, and `resurrect` carries none); S4–S10 open, in the brief's order (S4
-  and S5 may run in parallel after S3; cargo builds serialize).
+  it, and `resurrect` carries none); S4 LANDED — both sides show the link.
+  The child's node publishes `remoteParent {node, sessionId}` on its
+  `graph.json` session node and its `session --json` row, resolved to the
+  CURRENT `nodes.json` name for the stored key (the stamped label only as a
+  fallback), with the roster line tagged `↑ <node>/<sessionId>`; the parent's
+  node publishes `remoteChildren [{node, sessionId}]` off its own
+  `state/stage/remote-children.json` ledger plus the `↓ <n> remote` roster
+  tag, and the ledger's rows leave on the same `prune_done_scoped` pass that
+  takes their parent off the roster. No `spawned` edge is minted either way —
+  a local id equal to a remote `sessionId` is pinned by test not to become a
+  local parent — and the remote child's own local descendants need no new
+  wire: the far document already nests under its `node:<name>` root with its
+  own `spawned` edges, so `par1 → nodeb/C → nodeb/G` is walkable through
+  `remoteChildren` plus the fold. One code fact the brief could not know:
+  `with_stage_lock` was documented non-re-entrant, and both real
+  `prune_done` callers hold it (`reap_inner`, `do_session_start_inner`), so
+  the ledger retain inside `prune_done_scoped` deadlocked until
+  `aoide_storage::fs::with_stage_lock` was made re-entrant for the holding
+  thread (`STAGE_LOCK_HELD`; other threads and other processes still wait,
+  and this now covers every prune pass, automatic included); S5–S10 open, in
+  the brief's order (S5 may run now; cargo builds serialize).
 - Review pass over S1–S3 (same branch, `8236675` onward): the caller now
   holds its own winning claim to `valid_claimed_session_id` and refuses
   locally before signing (the "one predicate, both sides" line was

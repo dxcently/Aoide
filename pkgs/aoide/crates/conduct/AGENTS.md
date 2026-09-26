@@ -1387,6 +1387,19 @@
   here fills a gap from another field, another session, or another host.
   `effective_project` stays out of this list on purpose — remote rows
   never carry one (S-D's territory), and `--mesh` does not change that.
+- **`SessionView`'s `remote_parent`/`remote_children` are the same two
+  additive fields, and they are NEVER resolved into `parent`** (P-RSA S4).
+  A local row fills them from `SessionRecord.remote_parent` and from
+  `aoide_storage::remote_children::load_remote_children()` (`build_local_node`
+  reads that one file itself — a two-field join, never worth widening four
+  call sites); a remote row reads the far document's own `remoteParent`/
+  `remoteChildren` back VERBATIM, because that node resolved the names against
+  ITS registry and a second lookup here would consult a registry the document
+  never came from. A link missing its `sessionId` is dropped, never rendered
+  blank. `parent` stays what it always was — the LOCAL `spawned` edge — and
+  `resolved_parent` never sees a remote field: that separation is the whole
+  point of the second field (the autogate grant and sibling rule in
+  `send.rs` read `parentSessionId`), so do not "unify" them.
 - **`mesh_path()` (`node_list.rs`) names ONE file, `state/stage/mesh.json`,
   and only `--mesh` may write it.** It resolves through
   `aoide_storage::fs::conducting_stage_dir()`, the same root

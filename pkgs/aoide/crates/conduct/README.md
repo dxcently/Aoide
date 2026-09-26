@@ -1104,6 +1104,30 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   territory) and on `node list` rows (that command's own concern).
   `project_for` itself is unchanged and stays the per-ancestor primitive
   this walk calls at each hop, never re-entering itself.
+- **The cross-machine parent link is projected on BOTH sides (remote
+  sub-agents lane, P-RSA S4; CONTRACTS.md §4's `graph.json` and the wiki's
+  [[Session-Graph]]).** `doc.rs::build_graph` adds `remoteParent: {node,
+  sessionId}` to a session node whose record carries `SessionRecord.
+  remote_parent`, and `remoteChildren: [{node, sessionId}]` — off
+  `aoide_storage::remote_children::load_remote_children`, matched on the
+  parent's own session id, present only when non-empty — to one that the
+  ledger names as a parent. Both resolve `node` through
+  `model::current_node_name(key, stored_label)`: the CURRENT `nodes.json` name
+  for that key, the stamped label when no entry claims it, so a local rename
+  re-labels the link rather than orphaning it. Neither republishes the key,
+  and neither mints an edge: a remote parent is not a node in this document,
+  and `parentSessionId` (the only thing that makes a local parent) is never
+  written for one — the same-name collision is pinned by test. The child's own
+  local descendants come free: the far node's document already nests under its
+  `node:<name>` root with its own `spawned` edges, so nothing here invents a
+  second wire call. `who.rs` reads the same two fields into `SessionView`
+  (`remote_parent`/`remote_children`, [`RemoteLink`]) for a local row off the
+  record plus the ledger and for a remote row verbatim off the node's
+  document, publishes them through the shared `session_view_json`, and renders
+  the roster tags `↑ <node>/<sessionId>` / `↓ <n> remote` (`remote_tags`) in
+  both the host- and project-grouped renders. A ledger row leaves with its
+  parent: `prune_done_scoped` retains `remote-children.json` against the ids
+  it removed, on every prune pass (`reap_inner`'s automatic one included).
 - **`session` (bare) — the ROSTER (session-surface redesign, command-defrag
   lane X, 2026-08-28; supersedes the U3 picker AND the standalone `aoide
   who` command, both retired — hard cutover, no alias).** `aoide session

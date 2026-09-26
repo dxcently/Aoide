@@ -159,6 +159,29 @@ pub(super) struct SessionView {
     /// absent discipline as `title`/`model`; `kind` above is untouched by it
     /// either way (a nested app child still reads `kind:"app"`).
     pub(super) native_role: Option<String>,
+    /// The parent this session was spawned by on ANOTHER node
+    /// (`SessionRecord.remote_parent`, CONTRACTS.md §4) — a local row reads the
+    /// record, a remote row reads the node's own published `remoteParent`
+    /// key. `None` on every record without one, which is every locally-spawned
+    /// session: this is never `parent` above under another name, and it is
+    /// never resolved into it.
+    pub(super) remote_parent: Option<RemoteLink>,
+    /// The children THIS session spawned on other nodes, off the caller-side
+    /// ledger (`state/stage/remote-children.json`, matched on
+    /// `parentSessionId`) for a local row, or off the node's own published
+    /// `remoteChildren` array for a remote one. Empty when there are none —
+    /// the ordinary case, and the only one a pre-P-RSA record can be in.
+    pub(super) remote_children: Vec<RemoteLink>,
+}
+
+/// One cross-machine link endpoint: the far node's CURRENT name and the
+/// session id on it. Identity is the node's key (`model::current_node_name`
+/// resolves the name from it at projection time), so this carries no key —
+/// it is what a display surface shows, never what a gate compares.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct RemoteLink {
+    pub(super) node: String,
+    pub(super) session_id: String,
 }
 
 /// One node (this box, or one registered node) as the host-grouped rendering
@@ -191,11 +214,15 @@ fn session_presence(state: &str) -> &'static str {
 
 /// This box's own [`NodeView`] — always `online` (we're running on it right
 /// now). `sessions`/`hooks`/`projects` are the caller's already-loaded stage
-/// files (`common::load_inputs`); pure otherwise. `pub(super)` for
-/// `node_list.rs` (see [`NodeView`]'s widening note).
+/// files (`common::load_inputs`); the caller-side remote-children ledger is the
+/// one file this reads itself (a two-field row join, never worth widening four
+/// call sites' signatures for — the same read `doc.rs::build_graph` makes for
+/// the graph projection). `pub(super)` for `node_list.rs` (see
+/// [`NodeView`]'s widening note).
 pub(super) fn build_local_node(sessions: &[SessionRecord], hooks: &[HookRecord], projects: &[Project], host: &str) -> NodeView {
     let merged = super::model::merged_sessions(sessions, hooks);
     let ids: HashSet<&str> = merged.iter().map(|s| s.session_id.as_str()).collect();
+    let remote_children = aoide_storage::remote_children::load_remote_children();
     let sessions = merged
         .iter()
         .map(|s| {
@@ -203,6 +230,18 @@ pub(super) fn build_local_node(sessions: &[SessionRecord], hooks: &[HookRecord],
             let role = if parent.is_some() { "child" } else { "root" };
             let effective_project = super::model::effective_project_for(s, &merged, projects)
                 .map(|i| projects[i].name.clone());
+            let remote_parent = s.remote_parent.as_ref().map(|rp| RemoteLink {
+                node: super::model::current_node_name(&rp.key, &rp.node),
+                session_id: rp.session_id.clone(),
+            });
+            let remote_children = remote_children
+                .iter()
+                .filter(|c| c.parent_session_id == s.session_id)
+                .map(|c| RemoteLink {
+                    node: super::model::current_node_name(&c.key, &c.node),
+                    session_id: c.session_id.clone(),
+                })
+                .collect();
             SessionView {
                 session_id: s.session_id.clone(),
                 label: aoide_storage::display::session_label(s, host, role),
@@ -219,6 +258,8 @@ pub(super) fn build_local_node(sessions: &[SessionRecord], hooks: &[HookRecord],
                 kind: s.kind.clone(),
                 parent,
                 native_role: s.native_role.clone(),
+                remote_parent,
+                remote_children,
             }
         })
         .collect();
@@ -278,9 +319,31 @@ pub(super) fn sessions_from_graph(graph: &Value, host: &str) -> Vec<SessionView>
                 kind: n["role"].as_str().map(String::from),
                 parent,
                 native_role: n["nativeRole"].as_str().map(String::from),
+                // Both cross-machine fields are published by the far node's own
+                // projection (it resolved the names against ITS `nodes.json`),
+                // so they are read back verbatim — re-resolving here would mean
+                // a second lookup against a registry this document never came
+                // from, and the label is display data either way.
+                remote_parent: remote_link(&n["remoteParent"]),
+                remote_children: n["remoteChildren"]
+                    .as_array()
+                    .map(|arr| arr.iter().filter_map(remote_link).collect())
+                    .unwrap_or_default(),
             }
         })
         .collect()
+}
+
+/// One `{node, sessionId}` object as a graph document publishes it — `None` for
+/// an absent/empty/mis-shaped one (a foreign node's document is untrusted
+/// display data: a link missing its session id names nothing and is dropped
+/// rather than rendered as a blank row).
+fn remote_link(v: &Value) -> Option<RemoteLink> {
+    let session_id = v["sessionId"].as_str().filter(|s| !s.is_empty())?;
+    Some(RemoteLink {
+        node: v["node"].as_str().unwrap_or("").to_string(),
+        session_id: session_id.to_string(),
+    })
 }
 
 /// The gate every CACHED session's presence passes through once its host's
@@ -467,7 +530,14 @@ fn render_nodes(nodes: &[NodeView]) -> String {
         for (i, s) in n.sessions.iter().enumerate() {
             let branch = if i + 1 == n.sessions.len() { "└─ " } else { "├─ " };
             let tag = if s.exempt { " exempt" } else { "" };
-            out.push(format!("{branch}{}  {}  {}  {}{tag}", s.label, s.agent, s.state, s.cwd));
+            out.push(format!(
+                "{branch}{}  {}  {}  {}{tag}{}",
+                s.label,
+                s.agent,
+                s.state,
+                s.cwd,
+                remote_tags(s)
+            ));
         }
     }
     if out.is_empty() {
@@ -510,7 +580,41 @@ fn session_view_json(s: &SessionView) -> Value {
     if let Some(nr) = &s.native_role {
         v["nativeRole"] = json!(nr);
     }
+    // The cross-machine parent link (P-RSA S4) — the same present-only-when-
+    // known rule the two keys above hold, so an ordinary locally-spawned row
+    // stays byte-for-byte as before. `remoteChildren` rides only when
+    // non-empty; its endpoints are `{node, sessionId}` exactly as the graph
+    // document publishes them, never the ledger's own `key`.
+    if let Some(p) = &s.remote_parent {
+        v["remoteParent"] = json!({ "node": p.node, "sessionId": p.session_id });
+    }
+    if !s.remote_children.is_empty() {
+        v["remoteChildren"] = json!(
+            s.remote_children
+                .iter()
+                .map(|c| json!({ "node": c.node, "sessionId": c.session_id }))
+                .collect::<Vec<_>>()
+        );
+    }
     v
+}
+
+/// The roster line's cross-machine tags: `↑ <node>/<parent>` for a session
+/// spawned elsewhere, `↓ <n> remote` for one that spawned elsewhere — both
+/// omitted when absent, so every pre-P-RSA row renders byte-for-byte as before.
+/// A session can carry both (spawned on one far node, having spawned on
+/// another); identity in the tag is the far node's name plus the bare session
+/// id, the only two things this box knows about a link whose other half lives
+/// somewhere else.
+fn remote_tags(s: &SessionView) -> String {
+    let mut tags = String::new();
+    if let Some(p) = &s.remote_parent {
+        tags.push_str(&format!("  ↑ {}/{}", p.node, p.session_id));
+    }
+    if !s.remote_children.is_empty() {
+        tags.push_str(&format!("  ↓ {} remote", s.remote_children.len()));
+    }
+    tags
 }
 
 /// The trailing catch-all bucket name for a session whose cwd resolves
@@ -592,7 +696,14 @@ fn render_groups(groups: &[ProjectGroup]) -> String {
         for (i, s) in g.sessions.iter().enumerate() {
             let branch = if i + 1 == g.sessions.len() { "└─ " } else { "├─ " };
             let tag = if s.exempt { " exempt" } else { "" };
-            out.push(format!("{branch}{}  {}  {}  {}{tag}", s.label, s.agent, s.state, s.cwd));
+            out.push(format!(
+                "{branch}{}  {}  {}  {}{tag}{}",
+                s.label,
+                s.agent,
+                s.state,
+                s.cwd,
+                remote_tags(s)
+            ));
         }
     }
     if out.is_empty() {
@@ -802,6 +913,121 @@ mod tests {
 
     // ── build_mesh_node: the pure probe-outcome + cache classifier ───────
 
+    fn remote_link_json(v: &Value) -> (String, String) {
+        (
+            v["node"].as_str().unwrap().to_string(),
+            v["sessionId"].as_str().unwrap().to_string(),
+        )
+    }
+
+    #[test]
+    fn the_local_rows_carry_the_remote_link_from_the_record_and_the_ledger() {
+        // P-RSA S4, this box's own sessions: `remoteParent` off the record,
+        // `remoteChildren` off the caller-side ledger (matched on the parent's
+        // own id), the node name resolved through the key — so a rename of the
+        // node record re-labels both directions.
+        let env = Env::set_up("remote-roster-local");
+        let key = "ab".repeat(32);
+        aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
+            name: "nodeb-renamed".into(),
+            url: "http://nodeb/".into(),
+            autogate: false,
+            token_file: None,
+            bearer_secret: None,
+            hub: false,
+            pubkey: Some(key.clone()),
+            verified: true,
+            allows: Vec::new(),
+            via: None,
+            added_at: "2026-08-14T00:00:00Z".into(),
+        }])
+        .unwrap();
+        aoide_storage::remote_children::append_remote_child(&aoide_storage::remote_children::RemoteChild {
+            parent_session_id: "par1".into(),
+            node: "nodeb".into(),
+            key: key.clone(),
+            session_id: "C".into(),
+            spawned_at: "2026-09-25T00:00:00Z".into(),
+            lines_after: 0,
+            extra: Default::default(),
+        })
+        .unwrap();
+
+        let mut spawned = session("par1", "/x", "working", "1", None);
+        spawned.petname = Some("brave-otter".into());
+        let mut far_child = session("child-1", "/x", "idle", "2", None);
+        far_child.remote_parent = Some(aoide_storage::records::RemoteParent {
+            node: "nodeb".into(),
+            key: key.clone(),
+            session_id: "par9".into(),
+            extra: Default::default(),
+        });
+
+        let node = build_local_node(&[spawned, far_child], &[], &[], "sakaki");
+        let par1 = node.sessions.iter().find(|s| s.session_id == "par1").unwrap();
+        assert_eq!(par1.remote_parent, None);
+        assert_eq!(
+            par1.remote_children,
+            vec![RemoteLink { node: "nodeb-renamed".into(), session_id: "C".into() }],
+            "the ledger row's node label resolves to the CURRENT name"
+        );
+        let child = node.sessions.iter().find(|s| s.session_id == "child-1").unwrap();
+        assert_eq!(
+            child.remote_parent,
+            Some(RemoteLink { node: "nodeb-renamed".into(), session_id: "par9".into() })
+        );
+        assert!(child.remote_children.is_empty());
+        assert_eq!(child.parent, None, "a remote parent never becomes a local `parent`");
+
+        // The shared row JSON: both keys present only when known, and no key.
+        let par_row = session_view_json(par1);
+        assert_eq!(remote_link_json(&par_row["remoteChildren"][0]), ("nodeb-renamed".into(), "C".into()));
+        assert!(par_row["remoteChildren"][0].get("key").is_none());
+        assert!(par_row.get("remoteParent").is_none());
+        let child_row = session_view_json(child);
+        assert_eq!(remote_link_json(&child_row["remoteParent"]), ("nodeb-renamed".into(), "par9".into()));
+        assert!(child_row.get("remoteChildren").is_none());
+
+        // The roster line, both markers.
+        let text = render_nodes(&[node]);
+        assert!(text.contains("↓ 1 remote"), "parent side: {text}");
+        assert!(text.contains("↑ nodeb-renamed/par9"), "child side: {text}");
+        drop(env);
+    }
+
+    #[test]
+    fn a_remote_node_rows_remote_link_is_read_back_verbatim_and_drops_a_blank_one() {
+        // The far document already resolved its names against ITS registry —
+        // these are read back, never re-resolved here. A link with no session
+        // id names nothing and is dropped rather than rendered as a blank row.
+        let graph = json!({
+            "nodes": [
+                { "id": "session:C", "kind": "session", "state": "working", "cwd": "/srv", "agent": "claude",
+                  "remoteParent": { "node": "yomi", "sessionId": "par1" },
+                  "remoteChildren": [
+                    { "node": "sakaki", "sessionId": "G" },
+                    { "node": "sakaki" },
+                    { "node": "sakaki", "sessionId": "" },
+                  ] },
+            ],
+            "edges": [],
+        });
+        let sessions = sessions_from_graph(&graph, "nodeb");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].remote_parent,
+            Some(RemoteLink { node: "yomi".into(), session_id: "par1".into() })
+        );
+        assert_eq!(
+            sessions[0].remote_children,
+            vec![RemoteLink { node: "sakaki".into(), session_id: "G".into() }],
+            "the two blank links are dropped, the shaped one survives"
+        );
+        let row = session_view_json(&sessions[0]);
+        assert_eq!(remote_link_json(&row["remoteParent"]), ("yomi".into(), "par1".into()));
+        assert_eq!(row["remoteChildren"].as_array().unwrap().len(), 1);
+    }
+
     #[test]
     fn build_mesh_node_online_when_the_live_probe_succeeds() {
         let p = node("yomi-strix");
@@ -982,8 +1208,8 @@ mod tests {
             fetched_at: None,
             error: None,
             sessions: vec![
-                SessionView { session_id: "s1".into(), label: "l1".into(), petname: None, agent: "claude".into(), state: "idle".into(), presence: "online", cwd: "/x".into(), project: None, effective_project: None, exempt: true, title: None, model: None, kind: None, parent: None, native_role: None },
-                SessionView { session_id: "s2".into(), label: "l2".into(), petname: None, agent: "claude".into(), state: "idle".into(), presence: "online", cwd: "/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None },
+                SessionView { session_id: "s1".into(), label: "l1".into(), petname: None, agent: "claude".into(), state: "idle".into(), presence: "online", cwd: "/x".into(), project: None, effective_project: None, exempt: true, title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new() },
+                SessionView { session_id: "s2".into(), label: "l2".into(), petname: None, agent: "claude".into(), state: "idle".into(), presence: "online", cwd: "/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new() },
             ],
         }];
         let rendered = render_nodes(&nodes);
@@ -1006,7 +1232,7 @@ mod tests {
                 cwd: "/x".into(), project: None,
                 effective_project: None,
                 exempt: true,
-                title: None, model: None, kind: None, parent: None, native_role: None,
+                title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new(),
             }],
         }];
         let rendered = render_groups(&groups);
@@ -1041,7 +1267,7 @@ mod tests {
                 cwd: "/y".to_string(), project: None,
                 effective_project: None,
                 exempt: false,
-                title: None, model: None, kind: None, parent: None, native_role: None,
+                title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new(),
             }],
         };
         (vec![local_node, mesh_node], locals)
@@ -1132,9 +1358,9 @@ mod tests {
             fetched_at: None,
             error: None,
             sessions: vec![
-                SessionView { session_id: "s1".into(), label: "l1".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/z/nowhere".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None },
-                SessionView { session_id: "s2".into(), label: "l2".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/proj/zeta/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None },
-                SessionView { session_id: "s3".into(), label: "l3".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/proj/alpha/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None },
+                SessionView { session_id: "s1".into(), label: "l1".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/z/nowhere".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new() },
+                SessionView { session_id: "s2".into(), label: "l2".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/proj/zeta/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new() },
+                SessionView { session_id: "s3".into(), label: "l3".into(), petname: None, agent: "claude".into(), state: "working".into(), presence: "online", cwd: "/proj/alpha/x".into(), project: None, effective_project: None, exempt: false, title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new() },
             ],
         }];
         let projects = vec![project("zeta", "/proj/zeta"), project("alpha", "/proj/alpha")];
@@ -1167,7 +1393,7 @@ mod tests {
                 cwd: "/home/k/Aoide/pkgs/aoide".into(), project: None,
                 effective_project: None,
                 exempt: false,
-                title: None, model: None, kind: None, parent: None, native_role: None,
+                title: None, model: None, kind: None, parent: None, native_role: None, remote_parent: None, remote_children: Vec::new(),
             }],
         }];
         let projects = vec![project("aoide", "/home/k/Aoide")];

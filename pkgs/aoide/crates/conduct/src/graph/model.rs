@@ -211,6 +211,24 @@ pub(in crate::graph) fn resolved_parent<'a>(
         .map(str::to_string)
 }
 
+/// The CURRENT `nodes.json` name for a stored `key` (the ed25519 pubkey hex a
+/// node's identity IS — `docs/architecture/PAIRING.md`), falling back to the
+/// label the value was stamped with when no registered node claims that key.
+/// Both cross-machine parentage projections resolve through this
+/// (`doc.rs`'s `remoteParent`/`remoteChildren`), so a local rename of the node
+/// record re-labels the link instead of orphaning it; hex is case-insensitive,
+/// hence `eq_ignore_ascii_case` rather than `==`.
+pub(in crate::graph) fn current_node_name(key: &str, stored_label: &str) -> String {
+    if key.is_empty() {
+        return stored_label.to_string();
+    }
+    aoide_storage::node_store::load_nodes()
+        .into_iter()
+        .find(|n| n.pubkey.as_deref().is_some_and(|k| k.eq_ignore_ascii_case(key)))
+        .map(|n| n.name)
+        .unwrap_or_else(|| stored_label.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

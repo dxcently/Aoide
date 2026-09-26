@@ -422,7 +422,14 @@
   concurrent CLI invocation can never silently drop each other's
   `approved` flag or `tries` increment (#119 review finding 4). A new
   mutator here wraps its whole load-modify-write in `with_stage_lock` the
-  same way, never a bare `load → save`. `PARK_LOCK`
+  same way, never a bare `load → save`. **`with_stage_lock` is re-entrant for
+  the thread that already holds it** (`fs.rs`'s own doc, P-RSA S4): a nested
+  call on that thread runs its closure directly instead of opening a second
+  fd and blocking on the lock it already owns — which is what let
+  `aoide-conduct`'s `prune_done_scoped` retain `remote-children.json` from
+  inside `reap_inner`'s and `do_session_start_inner`'s existing holds. Other
+  threads and other processes still wait; `try_stage_lock`/`lock_path` are
+  untouched and still nest nowhere. `PARK_LOCK`
   (process-local `static Mutex<()>`, poison-recovering) stays alongside as
   the cap's in-process guarantee: `with_stage_lock` is best-effort by
   contract (a lock hiccup runs the closure unlocked), the mutex is not.

@@ -55,6 +55,11 @@ pub fn build_graph(
     let mut nodes: Vec<Value> = Vec::new();
     let mut edges: Vec<Value> = Vec::new();
 
+    // The caller-side ledger (CONTRACTS.md §4): one row per child THIS node
+    // spawned on another node. Read once beside the node registry above — the
+    // projection below matches rows to a local parent's own session id.
+    let remote_children = aoide_storage::remote_children::load_remote_children();
+
     for p in &projects {
         let mut node = json!({
             "id": format!("project:{}", p.name),
@@ -178,6 +183,37 @@ pub fn build_graph(
         // publishing the stored value, resolved or not.
         if let Some(i) = super::model::effective_project_for(s, &sessions, &projects) {
             node["effectiveProject"] = json!(projects[i].name);
+        }
+        // The cross-machine parent link (P-RSA S4, CONTRACTS.md §4). `node` is
+        // the CURRENT `nodes.json` name for the stamped `key` — never the
+        // stored label when a rename has happened — and `key` itself is
+        // deliberately NOT republished: it is identity, and this document is a
+        // display projection. Rides only when the record carries one, so a
+        // locally-registered record stays byte-for-byte as before. No edge
+        // accompanies it: the parent is not on this node, and a local
+        // `spawned` edge would have to name a foreign id as a local session.
+        if let Some(rp) = &s.remote_parent {
+            node["remoteParent"] = json!({
+                "node": super::model::current_node_name(&rp.key, &rp.node),
+                "sessionId": rp.session_id,
+            });
+        }
+        // This node's own children that live on OTHER nodes, off the ledger
+        // above — the mirror of the same field, so both machines publish the
+        // link they can vouch for. Same present-only-when-non-empty rule the
+        // project node's `hosts` holds.
+        let kids: Vec<Value> = remote_children
+            .iter()
+            .filter(|c| c.parent_session_id == s.session_id)
+            .map(|c| {
+                json!({
+                    "node": super::model::current_node_name(&c.key, &c.node),
+                    "sessionId": c.session_id,
+                })
+            })
+            .collect();
+        if !kids.is_empty() {
+            node["remoteChildren"] = json!(kids);
         }
         nodes.push(node);
         if let Some(parent) = resolved_parent(s, &ids) {
@@ -551,6 +587,13 @@ pub fn prune_done(
 /// run, and even then it keeps an UNFILED one. After an explicit prune the
 /// history still lives on disk (the session ledger line, the letters, the PTY
 /// transcript, the instruction sidecar); only the roster record is gone.
+///
+/// The same pass drops every caller-side ledger row whose parent is among the
+/// removed ids ([`aoide_storage::remote_children::retain_remote_children`]) — a
+/// `state/stage/remote-children.json` row is a link TO a child on a far node,
+/// so it has no meaning once the local half of that link has left the roster.
+/// One retain covers both the explicitly-doomed ids and the cascaded subagent
+/// descendants, because it runs over the whole `removed` set this returns.
 pub fn prune_done_scoped(
     sessions: Vec<SessionRecord>,
     hooks: Vec<HookRecord>,
@@ -576,7 +619,22 @@ pub fn prune_done_scoped(
         })
         .map(|s| s.session_id.as_str())
         .collect();
-    drop_sessions(&sessions, &doomed, hooks)
+    let dropped = drop_sessions(&sessions, &doomed, hooks);
+    // The caller-side ledger rows of a parent that just left the roster leave
+    // with it (P-RSA S4): a row names a child on a far node THIS parent
+    // spawned, so once the parent is gone the row is the stale half of a link
+    // nothing on either machine can still resolve. Best-effort and only-on-a-
+    // real-drop (the retain writes nothing when it removes nothing), the same
+    // posture `ledger_session_exit` holds on this same pass.
+    let gone: HashSet<&str> = dropped.2.iter().map(String::as_str).collect();
+    if !gone.is_empty() {
+        if let Err(e) = aoide_storage::remote_children::retain_remote_children(|c| {
+            !gone.contains(c.parent_session_id.as_str())
+        }) {
+            eprintln!("[aoide/conduct] remote-children retain failed: {e}");
+        }
+    }
+    dropped
 }
 
 /// Drop exactly `roots` (+ their subagent descendants, + their hook records)
@@ -1583,6 +1641,317 @@ mod tests {
 
         let raw = std::fs::read_to_string(aoide_storage::ledger::session_ledger_path()).unwrap();
         assert!(raw.contains("\"restore\":null"), "line: {raw}");
+
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    // ── P-RSA S4: the cross-machine parent link, both sides ────────────────
+
+    fn remote_parent(node: &str, key: &str, session_id: &str) -> aoide_storage::records::RemoteParent {
+        aoide_storage::records::RemoteParent {
+            node: node.to_string(),
+            key: key.to_string(),
+            session_id: session_id.to_string(),
+            extra: Default::default(),
+        }
+    }
+
+    fn ledger_row(parent: &str, node: &str, key: &str, child: &str) -> aoide_storage::remote_children::RemoteChild {
+        aoide_storage::remote_children::RemoteChild {
+            parent_session_id: parent.to_string(),
+            node: node.to_string(),
+            key: key.to_string(),
+            session_id: child.to_string(),
+            spawned_at: "2026-09-25T00:00:00Z".to_string(),
+            lines_after: 0,
+            extra: Default::default(),
+        }
+    }
+
+    fn node_json_of<'a>(doc: &'a Value, id: &str) -> &'a Value {
+        doc["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["id"] == id)
+            .unwrap_or_else(|| panic!("no node {id} in {doc}"))
+    }
+
+    #[test]
+    fn a_remote_parent_projects_and_never_becomes_a_local_spawned_edge() {
+        // The child side: `remoteParent` rides the node as `{node, sessionId}`
+        // (no key — the document is display data) and the record's
+        // `parentSessionId` is untouched, so no `spawned` edge is minted and
+        // the session stays anchored/root locally.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let state = unique_stage("remote-parent");
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let mut child = session("a2a-1", "/remote/cwd", "running", "1", None);
+        child.remote_parent = Some(remote_parent("yomi-strix", "ab".repeat(32).as_str(), "par1"));
+
+        let doc = build_graph(&[], &[child], &[]);
+        let node = node_json_of(&doc, "session:a2a-1");
+        assert_eq!(node["remoteParent"]["node"], "yomi-strix");
+        assert_eq!(node["remoteParent"]["sessionId"], "par1");
+        assert!(
+            node["remoteParent"].get("key").is_none(),
+            "the key is identity, never republished as display data: {node}"
+        );
+        assert!(
+            node.get("remoteChildren").is_none(),
+            "a leaf child carries no remoteChildren: {node}"
+        );
+        assert!(
+            doc["edges"].as_array().unwrap().is_empty(),
+            "no local `spawned` edge for a parent that is not on this node, and no \
+             registered project to anchor to: {doc}"
+        );
+
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn a_local_id_equal_to_the_remote_session_id_is_not_a_local_parent() {
+        // The collision pin. `par1` happens to exist LOCALLY with the very id
+        // the far caller signed as its own session id. The projections must
+        // never join them: `parentSessionId` is what makes a local parent
+        // (autogate grant, sibling rule, project inheritance all read it), and
+        // the remote field never writes it.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let state = unique_stage("remote-collision");
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let par1 = session("par1", "/here", "running", "1", None);
+        let mut child = session("a2a-1", "/remote/cwd", "running", "2", None);
+        child.remote_parent = Some(remote_parent("yomi-strix", "ab".repeat(32).as_str(), "par1"));
+
+        let doc = build_graph(&[], &[par1, child], &[]);
+        assert!(
+            doc["edges"].as_array().unwrap().is_empty(),
+            "the same-named local session must not gain a spawned edge: {doc}"
+        );
+        assert!(
+            node_json_of(&doc, "session:par1").get("remoteChildren").is_none(),
+            "and must not gain remoteChildren either — the ledger is the only source of those: {doc}"
+        );
+        assert_eq!(node_json_of(&doc, "session:a2a-1")["remoteParent"]["sessionId"], "par1");
+
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn the_remote_parent_name_follows_a_rename_through_the_key() {
+        // Rename safety: `node` is the label stamped at spawn time; `key` is
+        // the identity. A reader resolves the CURRENT `nodes.json` name for the
+        // key, so renaming the node record re-labels every link instead of
+        // orphaning it — and a key no registered node claims falls back to the
+        // stored label rather than rendering blank.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let state = unique_stage("remote-rename");
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let key = "ab".repeat(32);
+        aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
+            name: "yomi-renamed".into(),
+            url: "http://yomi-strix:8710/".into(),
+            autogate: false,
+            token_file: None,
+            bearer_secret: None,
+            hub: false,
+            pubkey: Some(key.clone()),
+            verified: true,
+            allows: Vec::new(),
+            via: None,
+            added_at: "2026-08-14T00:00:00Z".into(),
+        }])
+        .unwrap();
+
+        let mut child = session("a2a-1", "/x", "running", "1", None);
+        child.remote_parent = Some(remote_parent("yomi-strix", &key, "par1"));
+        let mut orphan = session("a2a-2", "/x", "running", "2", None);
+        orphan.remote_parent = Some(remote_parent("sakaki", "cd".repeat(32).as_str(), "par2"));
+
+        let doc = build_graph(&[], &[child, orphan], &[]);
+        assert_eq!(
+            node_json_of(&doc, "session:a2a-1")["remoteParent"]["node"],
+            "yomi-renamed",
+            "the key resolves to the CURRENT name: {doc}"
+        );
+        assert_eq!(
+            node_json_of(&doc, "session:a2a-2")["remoteParent"]["node"],
+            "sakaki",
+            "an unregistered key falls back to the stamped label, never blank: {doc}"
+        );
+
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn the_parent_node_carries_its_ledger_children_and_only_its_own() {
+        // The parent side: `remoteChildren` comes off the caller-side ledger,
+        // matched on the parent's own session id, and rides only when
+        // non-empty (an ordinary record stays byte-for-byte as before).
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let state = unique_stage("remote-children");
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let key = "ab".repeat(32);
+        aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
+            name: "nodeb".into(),
+            url: "http://nodeb:8710/".into(),
+            autogate: false,
+            token_file: None,
+            bearer_secret: None,
+            hub: false,
+            pubkey: Some(key.clone()),
+            verified: true,
+            allows: Vec::new(),
+            via: None,
+            added_at: "2026-08-14T00:00:00Z".into(),
+        }])
+        .unwrap();
+        aoide_storage::remote_children::append_remote_child(&ledger_row("par1", "nodeb", &key, "C")).unwrap();
+        aoide_storage::remote_children::append_remote_child(&ledger_row("par1", "nodeb", &key, "C2")).unwrap();
+        aoide_storage::remote_children::append_remote_child(&ledger_row("someone-else", "nodeb", &key, "X")).unwrap();
+
+        let doc = build_graph(&[], &[session("par1", "/x", "running", "1", None)], &[]);
+        let kids = node_json_of(&doc, "session:par1")["remoteChildren"].as_array().unwrap();
+        assert_eq!(kids.len(), 2, "only this parent's rows: {doc}");
+        assert_eq!(kids[0]["node"], "nodeb");
+        assert_eq!(kids[0]["sessionId"], "C");
+        assert_eq!(kids[1]["sessionId"], "C2");
+        assert!(kids[0].get("key").is_none(), "no key on a display projection: {doc}");
+
+        // A second pass is byte-identical (the projection is derived, never a
+        // store), and a session with no rows carries no key at all.
+        let again = build_graph(&[], &[session("par1", "/x", "running", "1", None)], &[]);
+        assert_eq!(again, doc);
+        let alone = build_graph(&[], &[session("par2", "/x", "running", "2", None)], &[]);
+        assert!(node_json_of(&alone, "session:par2").get("remoteChildren").is_none());
+
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn pruning_the_parent_drops_its_ledger_rows_with_it() {
+        // A ledger row is the parent-side half of a link; once the parent has
+        // left the roster nothing can resolve it, so the row goes on the same
+        // pass — and a row belonging to a SURVIVING parent stays.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let state = unique_stage("remote-prune");
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let key = "ab".repeat(32);
+        aoide_storage::remote_children::append_remote_child(&ledger_row("done-par", "nodeb", &key, "C")).unwrap();
+        aoide_storage::remote_children::append_remote_child(&ledger_row("live-par", "nodeb", &key, "D")).unwrap();
+
+        let sessions = vec![
+            session("done-par", "/x", "done", "1", None),
+            session("live-par", "/x", "running", "2", None),
+        ];
+        let (kept, _hooks, removed, _cleared) = prune_done_scoped(sessions, Vec::new(), true);
+        assert_eq!(removed, vec!["done-par".to_string()]);
+        assert_eq!(kept.len(), 1);
+
+        let left = aoide_storage::remote_children::load_remote_children();
+        assert_eq!(left.len(), 1, "one row left: {left:?}");
+        assert_eq!(left[0].parent_session_id, "live-par");
+
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn the_remote_childs_local_descendants_nest_under_it_from_a_pulled_graph() {
+        // The §10 gate: on A, `par1 → nodeb/C → nodeb/G`, where C and G are
+        // both records on B (C spawned by par1 over the door, G spawned
+        // locally by C). Nothing here invents a wire: the fixture IS B's own
+        // resolved document — the exact bytes `aoide/graphSummary` serves and
+        // `node pull` caches — so the far subtree nests through the fold A
+        // already does, and `remoteChildren` is only the link into it.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let state = unique_stage("remote-nest");
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        // ── B's own records → B's own document (what the door stamped) ──
+        let key_a = "ab".repeat(32);
+        let mut c = session("C", "/srv/work", "running", "1", None);
+        c.remote_parent = Some(remote_parent("yomi", &key_a, "par1"));
+        let g = session("G", "/srv/work", "running", "2", Some("C"));
+        let b_doc = build_graph(&[], &[c, g], &[]);
+        assert_eq!(node_json_of(&b_doc, "session:C")["remoteParent"]["sessionId"], "par1");
+        assert!(
+            b_doc["edges"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["from"] == "session:C" && e["to"] == "session:G" && e["kind"] == "spawned"),
+            "B's own local lineage: {b_doc}"
+        );
+
+        // ── A's registry: the far node, freshly pulled ──
+        let key_b = "cd".repeat(32);
+        aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
+            name: "nodeb".into(),
+            url: "http://nodeb:8710/".into(),
+            autogate: false,
+            token_file: None,
+            bearer_secret: None,
+            hub: false,
+            pubkey: Some(key_b.clone()),
+            verified: true,
+            allows: Vec::new(),
+            via: None,
+            added_at: "2026-08-14T00:00:00Z".into(),
+        }])
+        .unwrap();
+        aoide_storage::node_store::save_node_cache(&aoide_storage::node_store::NodeCacheEntry {
+            schema_version: "0".into(),
+            name: "nodeb".into(),
+            instance: Some(json!({ "name": "nodeb" })),
+            graph: Some(b_doc),
+            fetched_at: Some(aoide_storage::time::now_iso_utc()),
+            stale: false,
+            last_error: None,
+        })
+        .unwrap();
+        aoide_storage::remote_children::append_remote_child(&ledger_row("par1", "nodeb", &key_b, "C")).unwrap();
+
+        // ── A's own document: par1 + the folded far subtree ──
+        let doc = build_graph(&[], &[session("par1", "/home/khoa", "running", "1", None)], &[]);
+        let link = &node_json_of(&doc, "session:par1")["remoteChildren"][0];
+        assert_eq!(link["node"], "nodeb");
+        assert_eq!(link["sessionId"], "C");
+
+        let far = node_json_of(&doc, "node:nodeb");
+        assert_eq!(far["state"], "fresh");
+        let far_sessions: Vec<&str> = far["children"]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|n| n["kind"] == "session")
+            .map(|n| n["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(far_sessions, vec!["session:C", "session:G"], "C AND its own descendant: {far}");
+        assert_eq!(
+            far["children"]["nodes"][1]["remoteParent"], Value::Null,
+            "G is B's OWN local child — a plain spawned edge, no remote link"
+        );
+        assert_eq!(
+            far["children"]["nodes"][0]["remoteParent"]["node"], "yomi",
+            "C names the parent it was spawned by, on A"
+        );
+        let far_edges = far["children"]["edges"].as_array().unwrap();
+        assert!(
+            far_edges.iter().any(|e| e["from"] == "session:C" && e["to"] == "session:G"),
+            "so the walk par1 → nodeb/C → nodeb/G resolves on A: {far}"
+        );
 
         let _ = std::fs::remove_dir_all(&state);
     }

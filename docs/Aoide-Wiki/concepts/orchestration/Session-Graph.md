@@ -402,6 +402,24 @@ are consumed internally and get no `graph.json` projection:
   forward. Change-only, like `origin`. Same attribution posture as `origin`:
   `sessions.json` stays a plain, same-uid-writable file, so the gate is the
   key comparison the door makes, never this field as read off disk.
+- **Both machines show the link, and neither invents an edge for it** (P-RSA
+  S4). On the child's node, `graph.json`'s session node and `aoide session
+  --json`'s row carry `remoteParent: {node, sessionId}` — the name resolved to
+  the CURRENT `nodes.json` entry for `key`, falling back to the label stamped
+  at spawn time, so a rename never orphans the link — and the roster line
+  appends `↑ <node>/<sessionId>`; the key itself is never republished. On the
+  parent's node, the caller-side ledger (`state/stage/remote-children.json`,
+  one row per child this box spawned elsewhere) projects onto the parent's own
+  node and roster row as `remoteChildren: [{node, sessionId}]` and `↓ <n>
+  remote`. The child keeps its ordinary `anchors`/`leads` edge and gets NO
+  `spawned` edge for the far parent: `parentSessionId` is what makes a local
+  parent, so a remote one never writes it — not even when a local session
+  happens to carry the same id. The child's own local descendants need no
+  projection at all: the far node's document nests under its `node:<name>` root
+  in this one, carrying that child's `spawned` edges, so `par1 → nodeb/C →
+  nodeb/G` is walkable off `remoteChildren` plus the fold, with no wire call of
+  its own. A ledger row leaves with its parent: `prune_done_scoped` retains
+  the file against the ids it removed.
 - **`seal` + `sealedIssuedAt`** — the sealed session credential, sharing
   one lifecycle (always both or neither). `aoided` mints an ed25519 keypair
   once per process and holds it in memory only, never on disk — a separate

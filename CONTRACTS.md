@@ -1462,6 +1462,16 @@ change-only as a stamp, exactly like `origin`/`seal` (a same-value re-stamp
 writes nothing; a genuinely different value overwrites, since the guard is the
 value already on the record, not a "has this ever been set" flag).
 
+**How it reaches a surface.** Three projections, all derived, all additive:
+`graph.json`'s session node and `aoide session --json`'s row carry
+`remoteParent: {node, sessionId}` (the name resolved through the key, no key
+itself), the roster line appends `↑ <node>/<sessionId>`, and the caller-side
+mirror below adds `remoteChildren: [{node, sessionId}]` plus a `↓ <n> remote`
+tag on the parent's own row. None of them writes a record, and the child keeps
+its own `anchors`/`leads` edge: `parentSessionId` stays `None`, so no local
+`spawned` edge is ever minted for a remote parent — not even when a LOCAL
+session happens to carry the very id the far caller signed.
+
 **Additive in v0:** a session record MAY also carry an optional `contextTokens`
 (integer) — the input-side token count (`input_tokens +
 cache_creation_input_tokens + cache_read_input_tokens`) of the freshest
@@ -2400,6 +2410,29 @@ It MAY also carry that project's `lead` session id, under the same rule
 "abc123" }`; the id is echoed as stored, whether or not the roster still
 holds it.
 
+**Additive in v0: the two cross-machine parentage keys.**
+`remoteParent` — `{ "node": "<current name>", "sessionId": "<id>" }` — rides a
+session node whose `sessions.json` record carries that field
+(the `state/stage/sessions.json` section above), and
+`remoteChildren` — `[ { "node", "sessionId" }, … ]` — rides a session node whose
+id is the `parentSessionId` of one or more rows in
+`state/stage/remote-children.json` (below), in that file's own order. Both are
+display projections: `node` is resolved to the CURRENT `nodes.json` name for the
+stored node key at publish time, and the key itself is never republished. Each
+rides only when it has something to say, so an ordinary locally-spawned session
+node stays byte-for-byte as before.
+
+Neither mints an edge. A remote parent is not a node in this document, so the
+child carries NO `spawned` edge for it — a `spawned` edge would have to name a
+foreign session id as a local one, and every reader of `parentSessionId` (the
+autogate grant, the sibling rule, project inheritance, `graph link`'s cycle
+check) reads that field as local. The two sides still agree without a new edge
+kind: the far graph nests under its own `node:<name>` root as `children`, and
+that document carries the child's own `remoteParent` naming this parent — with
+the child's local descendants beside it under their ordinary `spawned` edges —
+so `par1 → nodeb/C → nodeb/G` is walkable through `remoteChildren` plus the
+node fold alone, with no wire call of its own.
+
 ### `state/stage/herald.json` — **v0**
 
 The notification ledger the Quickshell herald draws from. dunst owns
@@ -2551,7 +2584,12 @@ Written only through `aoide_storage::remote_children`, inside one short
 `state/stage/.stage.lock` section and atomically (temp-then-rename); a missing
 or corrupt file reads as empty. Like `remoteParent` it is attribution, never a
 grant: a same-uid process can write it, and the door gates only on the key
-comparison it makes itself against the verifying node.
+comparison it makes itself against the verifying node. A row's own half of the
+link is the `parentSessionId` it names, so rows LEAVE on the same sweep that
+takes a parent off the roster — `conduct`'s `prune_done_scoped` retains the
+ledger against the removed ids (`reap_inner`'s automatic pass and
+`session prune`'s explicit one both route through it), and a row whose parent
+still lives is untouched.
 
 ### `state/stage/mesh.json` — **v0**
 
