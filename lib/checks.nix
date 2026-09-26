@@ -9,14 +9,18 @@
 #      the same registry and disables derivation for owned surfaces. Two
 #      modules claiming the same surface is a build-time error.
 #
-#   2. no-song-read — no module may make the nix build depend on a `song/`
-#      runtime path (`stage/`, `auditions/`, …). `stage/` can
-#      never become load-bearing for the frozen half. Enforced structurally:
-#      an evaluated nixos config never imports/reads those paths, so we assert
-#      over the module tree's source strings.
+#   2. song-runtime-untracked — a song's RUNTIME dirs (`song/stage/`,
+#      `song/auditions/`, `song/declared/`) must not exist in the source tree at
+#      all. This replaces `no-song-read`, which scanned module PATHS for those
+#      names and was vacuously true — a module never reads through its own path.
+#      What actually keeps runtime state out of evaluation is that pure flake
+#      eval reads only TRACKED files and `.gitignore` covers those three; this
+#      check is what fails if one is ever committed or left behind.
 #
-#   3. song-shape — a committed song under song/songbook/<name>/ is exactly
-#      one rice.nix, never a stray extra module riding along.
+#   3. song-shape — a committed song under song/songbook/<name>/ carries its
+#      `rice.nix` and its `livery.json`, and no `.nix` anywhere else: an extra
+#      module in a song folder would join the merge silently and could set
+#      arbitrary host options.
 #
 #   4. fmt — `nixfmt --check` over every `.nix` file in the flake's own
 #      COMMITTED source (flake.nix's declared `formatter`, run by nothing
@@ -101,40 +105,27 @@ let
       badOwner == [ ]
     ) "surfaces with no owner: ${builtins.toString badOwner}";
 
-  # ── Check 2: no song/ RUNTIME read at build time ───────────────────────────
-  # Asserts that no walked module path lives under a `song/` RUNTIME dir. The
-  # ban is scoped to ephemeral runtime state (stage/ · auditions/ · catalog/ ·
-  # index/) — `stage/` can never become load-bearing for the frozen half. It
-  # deliberately does NOT list `song/songbook/` wholesale: committed songs
-  # there are VERSIONED SCORE, legitimately read at eval by the lane that
-  # imports them (each song's rice.nix self-gates on `aoide.song`). Walking the
-  # songbook therefore never trips this check on its own — EXCEPT the `drafts/`
-  # subfolder nested inside each song (`song/songbook/<name>/drafts/`,
-  # `rice draft save`'s scratch tree): that one runtime dir sits INSIDE an
-  # otherwise-legitimate songbook path, so a flat infix can't name it (the
-  # song name varies) — matched by regex instead, scoped tightly to just the
-  # `drafts/` subfolder, never the songbook entry itself.
-  noSongRead =
-    modulePaths:
+  # ── Check 2: song RUNTIME state stays out of the source tree ───────────────
+  # `song/stage/`, `song/auditions/` and `song/declared/` are live state —
+  # what was last staged, what was auditioned, what was declared — and `.gitignore`
+  # covers all three. Pure flake eval reads only TRACKED files, so an untracked
+  # runtime dir cannot reach a build; this check is what catches one that was
+  # committed anyway, or left behind in a store copy that was taken from a dirty
+  # tree. (The old `no-song-read` scanned module PATHS for those names and could
+  # never fire: a module never reads through its own path.)
+  songRuntimeUntracked =
+    src:
     let
-      runtimeInfixes = [
-        "/song/stage/"
-        "/song/auditions/"
-        "/song/catalog/"
-        "/song/index/"
+      runtimeDirs = [
+        "stage"
+        "auditions"
+        "declared"
       ];
-      isSongDraft = s: builtins.match ".*/song/songbook/[^/]+/drafts/.*" s != null;
-      offenders = builtins.filter (
-        p:
-        let
-          s = toString p;
-        in
-        builtins.any (needle: lib.hasInfix needle s) runtimeInfixes || isSongDraft s
-      ) modulePaths;
+      present = builtins.filter (d: builtins.pathExists (src + "/song/${d}")) runtimeDirs;
     in
-    assertCheck "no-song-read" (
-      offenders == [ ]
-    ) "modules read song/ runtime paths at build time: ${builtins.toString offenders}";
+    assertCheck "song-runtime-untracked" (
+      present == [ ]
+    ) "song/ holds gitignored runtime state in the source tree: ${builtins.toString present}";
 
   # ── Check 3: song shape (host-agnostic discipline) ─────────────────────────
   # A committed song under song/songbook/<name>/ carries ONLY notes: its
@@ -151,23 +142,34 @@ let
   # TODO(song-shape v1): the full "only defines aoide.notes" invariant needs
   # per-module isolated eval + option-definition diffing — disproportionate for
   # v0. Until then the invariant is a DOCUMENTED CONVENTION (CONTRACTS.md §5 /
-  # docs/BUILD.md), backed by this structural rice.nix-only gate and code review.
+  # docs/BUILD.md), backed by this structural gate and code review.
   # Joins that convention: a song must never set `aoide.livery.override.*`
   # (CONTRACTS.md §5) — the override tier is HOST-set only.
+  #
+  # The walk is `lib/songbook.nix`'s `strayNixFiles` (builtins.readDir, `_widgets/`
+  # pruned by name), not a filesystem walker: the check has to keep working now
+  # that the walker is gone, and it has to agree with the discovery a host
+  # selection is validated against.
   songShape =
-    songbookPaths:
+    {
+      songbook,
+      songNames,
+      strayNixFiles,
+    }:
     let
-      strays = builtins.filter (
-        p:
-        let
-          s = toString p;
-        in
-        !lib.hasSuffix "/rice.nix" s
-      ) songbookPaths;
+      incomplete = builtins.filter (
+        name:
+        !(builtins.pathExists (songbook + "/${name}/rice.nix"))
+        || !(builtins.pathExists (songbook + "/${name}/livery.json"))
+      ) songNames;
     in
-    assertCheck "song-shape" (
-      strays == [ ]
-    ) "songbook holds non-rice.nix modules (a song is rice.nix only): ${builtins.toString strays}";
+    assertCheck "song-shape" (strayNixFiles == [ ] && incomplete == [ ])
+      "songbook shape is wrong — ${
+        if strayNixFiles != [ ] then
+          "stray .nix outside rice.nix/_widgets/: ${builtins.toString strayNixFiles}"
+        else
+          "no rice.nix or no livery.json in: ${builtins.toString incomplete}"
+      }";
 
   # ── Check 4: nixfmt --check over the committed source ──────────────────────
   # `src` is the flake's own store copy (flake.nix passes `self`), which nix
@@ -595,7 +597,7 @@ in
   inherit
     assertCheck
     surfaceOwnership
-    noSongRead
+    songRuntimeUntracked
     songShape
     fmt
     discovery

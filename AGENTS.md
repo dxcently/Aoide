@@ -68,7 +68,9 @@ and the staging/declarative/draft modes:
    brings into existence), `aoide.surfaces` (the render-surface ownership
    registry: a dendrite declares the surfaces it owns; `stylix` reads it to
    skip derivation for them), the identity scalars `aoide.user`,
-   `aoide.root` and `aoide.song`, and its own `aoide.<name>.*`. The list is
+   `aoide.root`, `aoide.song`, and the derived `aoide.songbook.builtIn` (what
+     this host BUILT IN, derived
+     from its own song selection), and its own `aoide.<name>.*`. The list is
    enumerated and closed, never "any `aoide.*`"; a new namespace needs the
    same explicit amendment each of these got. No module reads another
    module: cross-dendrite facts (`aoide.{quickshell,lyra,stylix,compositor,

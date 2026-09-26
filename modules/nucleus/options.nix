@@ -403,6 +403,30 @@ in
       '';
     };
 
+    # The songs this host BUILDS IN — the host record's `song.declared ∪
+    # song.available`, derived and set by the constructor's hook
+    # (`lib/aoideos.nix`, over `lib/songbook.nix`'s `builtIn`). A FACT about the
+    # selection, exactly as `aoide.song` is, and never hand-set: the lane that
+    # builds a song's widgets, installs its packages and seeds its folder reads
+    # it instead of asking the host record, which it cannot see.
+    #
+    # It is declared here, in the unconditional core, because the hook sets it
+    # on EVERY host — including one that selected no paint lane at all, where
+    # nothing reads it and it stays the empty default. A lane that reads it is
+    # reading a fact about the host, not another module (root AGENTS.md house
+    # rule 5 names it in the closed list for that reason).
+    songbook.builtIn = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      example = [ "sonata" ];
+      description = ''
+        The songs built into this system: the `rice.nix` files imported, the
+        widgets copied into the deployed shell tree, the packages installed and
+        the folders the machine songbook is seeded with. Derived from the host
+        record's song selection; a host record never sets it.
+      '';
+    };
+
     # ── Livery seam (v0 schema) — the ONLY thing paint lanes read ─────────
     livery = mkOption {
       description = ''

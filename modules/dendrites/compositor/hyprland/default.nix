@@ -31,7 +31,7 @@
 # rule 5). Here that is `aoide.livery` (palette + component tiers) and
 # `aoide.arrangement` (declared widget/surface types).
 #   - Component-tier fallback applied locally.
-#   - NEVER reads song/ runtime paths (checks.no-song-read enforced structurally).
+#   - NEVER reads song/ runtime paths (structurally: checks.song-runtime-untracked).
 let
   body =
     {

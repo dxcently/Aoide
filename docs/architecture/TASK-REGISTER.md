@@ -331,6 +331,23 @@ Fields per entry: status · owner · depends on · evidence · next.
   rider's "no aggregator or walker" mean docs) and Q8 (songbook scan stays,
   house rule 1); slice 1 landed; then the next (b) slice. The User
   activates a build when ready.
+- S8 (songs selectable per host) LANDED on `eidolon/phase5`, with the review's
+  fix pass folded in. **Q5** — the rider's "no aggregator or walker" meant
+  DOCS: `lib/walk.nix` is deleted, the songbook's discovery is
+  `lib/songbook.nix`'s typed `discover` (shallow, `_`-shelved), and the prose
+  that named the walker or `checks.no-song-read` is edited in the same commits.
+  **Q6** — a folder without `rice.nix` is still DISCOVERED (the manifest is
+  right to see a song being written) and can never be SELECTED:
+  `song <n> has no rice.nix`. **Q8** — the songbook's scan stays shallow, and
+  house rule 1 holds: a song is a new folder, no registry file is edited.
+  Also landed: `checks.no-song-read` (scanned module PATHS, could never fire)
+  replaced by `checks.song-runtime-untracked`; `checks.song-shape` reads the
+  song folders directly (`strayNixFiles`, builtins-only); the machine's
+  `~/.aoide/song/songbook` seeded only where a folder is absent (rule 10);
+  `pkgs/lyra-songbook` overridden per host to the built-in set plus
+  `builtin.json` (a lane overlay that only wins if the package walker yields a
+  name another overlay owns); `tests/selection` gains the song landmine pair
+  and the four selection refusals, 49 → 57 cases.
 - Owner: Fable (Opus design per phase).
 - Depends on: 1 for the runtime seams; docs/glossary/Mneme-optional changes
   accompany each phase, never trail it.

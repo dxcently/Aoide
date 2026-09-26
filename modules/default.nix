@@ -54,10 +54,6 @@
     qbittorrent = ./dendrites/qbittorrent.nix;
     quickshell = ./dendrites/quickshell.nix;
     screenshot = ./dendrites/screenshot.nix;
-    # The committed songs. Interim: it imports every song discovered (S8 makes
-    # the selection per-host). It carries no `enable` of its own — see its
-    # header — so a host's switch for songs is the aggregation that names it.
-    songbook = ./dendrites/songbook.nix;
     starship = ./dendrites/starship.nix;
     stylix = ./dendrites/stylix.nix;
     vision = ./dendrites/vision.nix;

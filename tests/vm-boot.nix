@@ -74,10 +74,8 @@ let
   # (pkgs/aoide/flake.nix) and named by neither aggregate — it arrives via
   # `inputs.aoide.nixosModules.default`, imported by `modules/nucleus/options.nix`
   # and carrying `overlays.default` with it, the same way a real host picks it up.
-  overlayModule = _: {
-    nixpkgs.overlays = [
-      (import ../lib/pkgs.nix { inherit lib; }).overlay
-    ];
+  overlay = (import ../lib/pkgs.nix { inherit lib; }).overlay {
+    stock = inputs.nixpkgs.legacyPackages.${system};
   };
 
   # The VM's host record — the same interface `hosts/<name>/default.nix`
@@ -110,7 +108,7 @@ let
     nucleus = ../modules/nucleus;
     hostModules = [ vmHost ];
     homeManagerModule = inputs.home-manager.nixosModules.home-manager;
-    extraModules = [ overlayModule ];
+    overlays = [ overlay ];
     # specialArgs mirror what lib/aoideos.nix passes (host/inputs/username).
     # Modules that reference these args (e.g. the lyra lane uses `inputs`)
     # receive the real values; the node is named "vm-test".
@@ -131,7 +129,7 @@ pkgs.testers.runNixOSTest {
   node.specialArgs = resolved.specialArgs;
 
   # Allow setting nixpkgs.overlays inside the test node — required so
-  # overlayModule (and any other module) can inject packages.
+  # overlay (and any other module) can inject packages.
   node.pkgsReadOnly = false;
 
   nodes.machine =

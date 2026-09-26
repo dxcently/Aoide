@@ -18,6 +18,13 @@
   # names it here.
   dendrites.claude-code.enable = true;
 
+  # The song this host performs, and what it additionally builds in. `sonata` is
+  # the shipped standard, the guaranteed-present baseline. Any committed rice is
+  # reachable from the machine's own songbook without a rebuild
+  # (`aoide rice stage <n>`) — `declared` is only what is painted at boot.
+  song.declared = "sonata";
+  song.available = [ ];
+
   users.khoa = {
     definition = ../../users/khoa.nix;
     homeManager.enable = true;
@@ -36,10 +43,5 @@
       time.timeZone = "UTC"; # ← your zone
 
       aoide.user = "khoa"; # ← your user
-      # The song this host performs. REQUIRED, not decorative: `aoide.song`
-      # defaults to null, and a host that names no song deploys no QML and runs
-      # no shell service — the paint lanes only activate once a song is named.
-      # `sonata` is the shipped standard, the guaranteed-present baseline.
-      aoide.song = "sonata";
     };
 }

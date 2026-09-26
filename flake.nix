@@ -72,8 +72,10 @@
       # host never forces the others.
       hosts = lib.genAttrs hostNames aoideos.mkHost;
 
-      # The walker, for checks that reason over the module tree.
-      walk = import ./lib/walk.nix { inherit lib; };
+      # The songbook's own discovery — the same file a host's song selection is
+      # validated against, so the `song-shape` check and the selection can never
+      # disagree about what a song is.
+      songbookLib = import ./lib/songbook.nix { inherit lib; };
 
       # The packages walker — auto-discovers pkgs/<name>/default.nix. One source
       # feeds the `packages` output, the auto-generated `pkg-<name>` checks, and
@@ -215,11 +217,18 @@
         pkgChecks
         // {
           surface-ownership = checks.surfaceOwnership (hostCfg.aoide.surfaces or { });
-          no-song-read = checks.noSongRead (walk ./modules);
-          # Committed songs self-register from song/songbook (imported into
-          # each host by the `songbook` lane's own discovery); song-shape
-          # asserts each is a rice.nix only.
-          song-shape = checks.songShape (walk ./song/songbook);
+          # A song's runtime dirs are gitignored state; this fails if one was
+          # committed anyway (it replaced `no-song-read`, which scanned module
+          # paths for those names and could not fire).
+          song-runtime-untracked = checks.songRuntimeUntracked self;
+          # Every discovered song carries rice.nix + livery.json and holds no
+          # other `.nix` (`lib/songbook.nix`'s strayNixFiles, builtins.readDir —
+          # the walker is gone). What a host builds in is the host's selection,
+          # not this check's business.
+          song-shape = checks.songShape {
+            inherit (songbookLib) songNames strayNixFiles;
+            songbook = ./song/songbook;
+          };
           # The two livery fan-outs (baked Stylix, stage seed) agree under an
           # `aoide.livery.override` — proved against a fixed fixture inside
           # lib/checks.nix, not this host's own config (see lib/livery.nix

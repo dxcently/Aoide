@@ -13,14 +13,20 @@ modules/dendrites/lyra/
 - **`default.nix` — the paint lane.** Renders the complete Aoide shell surface
   with Quickshell (bar, notifications, launcher, osd, lockscreen, wallpaper,
   agentWidgets, sessionGraph), builds the config from `pkgs/lyra-shell`'s QML
-  plus each committed song's `widgets/`, and deploys it to
+  plus the widget bodies of the songs this host BUILT IN
+  (`aoide.songbook.builtIn`, from its own record), and deploys it to
   `$AOIDE_ROOT/run/qml` (`home.activation.aoideDeployQml` — an rsync, not a
   symlink tree, so live QML edits survive until the next switch). It declares
   the surfaces it owns in `aoide.surfaces` (stylix stands down for those),
   seeds the live stage from the active song, reasserts the paint on every
   activation, runs the healthcheck timer, and installs `pkgs.aoide.rice` — the
-  lyra binary — as the `aoide.lyra.enable` fact. Guarded on that fact; the lane
-  sets it `mkDefault true`.
+  lyra binary — as the `aoide.lyra.enable` fact. It also owns what "built in"
+  means at the byte level: the deployed `manifest.json`/`registry.json` cover
+  the built-in songs only, `pkgs.lyra-songbook` is overridden to ship just those
+  folders plus `builtin.json` (`{ declared, songs, packages }`), and
+  `home.activation.aoideSeedSongbook` copies each one into the machine's own
+  songbook **only when it is absent** — a rebuild never rewrites what the machine
+  has. Guarded on that fact; the lane sets it `mkDefault true`.
 - **`shellbridge.nix` — the bridge.** The bidirectional seam between the daemon
   / agents and the live desktop: OUT as atomic JSON under `state/stage/`, IN as
   unix-socket commands, and the only consumer of Hyprland's IPC (QML never
@@ -64,10 +70,13 @@ fixtures; `pkgs/lyra-songbook` ships the built-in songs and their manifests.
 
 Only the dress (`aoide.livery`), the structure (`aoide.arrangement`), the
 surface registry it declares into (`aoide.surfaces`), the identity scalars
-(`aoide.user`, `aoide.root`, `aoide.song`) and its own fact — root `AGENTS.md`
-house rule 5. Component-tier fallback (null → palette) is applied locally and
+(`aoide.user`, `aoide.root`, `aoide.song`), the derived fact
+`aoide.songbook.builtIn` — the songs this host builds in, which is what the
+deployed tree, the installed packages, the shipped templates and the seed are
+built from — and its own fact: root `AGENTS.md` house rule 5. Component-tier
+fallback (null → palette) is applied locally and
 never pushed back into the option system. It never reads a `song/` RUNTIME path
-at build time (`checks.no-song-read` enforces that structurally); committed
+at build time (the structural half is `checks.song-runtime-untracked`); committed
 songbook score is not a runtime path.
 
 `checks.livery-fanout` guards the activation seed: the stage twin is the active

@@ -22,7 +22,7 @@
 # nine songs out of ten, silently. A plain function is importable by the
 # derivation regardless of which song is active.
 #
-# `_widgets/` is deliberately underscore-prefixed: `lib/walk.nix` drops any
+# `_widgets/` is deliberately underscore-prefixed: `lib/songbook.nix`'s scan drops any
 # path containing `/_`, so the shelf never joins the module merge and
 # `checks.song-shape` — which filters walk's output — never sees it. The shelf
 # is score, not a module.

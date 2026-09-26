@@ -16,7 +16,8 @@
 #   * It reads the `aoide.surfaces` ownership registry and stands down (disables
 #     its own derivation) for any surface the shell lane already owns (overlap
 #     resolution). Tolerates the registry being empty.
-#   * Never reads a `song/` runtime path at build time (checks.no-song-read).
+#   * Never reads a `song/` runtime path at build time — a `song/` tree has no
+#     runtime dirs at all (`checks.song-runtime-untracked`).
 #   * It carries its OWN dependency: the Stylix NixOS module, imported below
 #     when the `stylix` input is present. One import site for the whole tree.
 #

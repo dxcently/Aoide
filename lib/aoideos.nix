@@ -20,11 +20,13 @@
 # is assembled from the result. Nothing below imports a dendrite file, and a
 # capability the host did not select is never read.
 #
-# The songs are NOT threaded here yet. `dendrites/songbook.nix` is the lane that
-# imports them, and `aggregation.aoideos.enable = true` is what selects it; S8
-# makes song selection a host-record field and lands the hook that reads it
-# (`selectionModules` / `extraModulesFor`) here — one place, and the reason this
-# file exists apart from `flake.nix`.
+# The songs are the two hooks. `selectionModules` puts `song.declared` /
+# `song.available` on the host record, so the gate pass can read a selection the
+# constructor has never heard of; `extraModulesFor` turns that selection into
+# the platform modules — the built-in songs' `rice.nix` files, and the
+# `aoide.song` / `aoide.songbook.builtIn` facts the paint lanes read. Both are
+# generic hooks (`lib/composition.nix` names no song), and this is the only site
+# that wires them; `lib/songbook.nix` is the only site that says what they mean.
 {
   inputs,
   lib,
@@ -33,6 +35,8 @@
 }:
 let
   composition = import ./composition.nix { inherit lib; };
+
+  songbook = import ./songbook.nix { inherit lib; };
 
   # Every immediate child directory of `hosts/` holding a `default.nix`, minus
   # the `_`-prefixed shelved ones.
@@ -48,11 +52,11 @@ let
   # The flake's own packages (`pkgs/aoide`'s outputs and the walker's
   # `pkgs/<name>` dirs) reach a host's package set through this overlay — the
   # same source `flake.nix`'s `packages` output and the `pkg-<name>` checks
-  # read, so there is one build and no second list.
-  overlayModule = _: {
-    nixpkgs.overlays = [
-      (import ./pkgs.nix { inherit lib; }).overlay
-    ];
+  # read, so there is one build and no second list. It is a BASE, handed to the
+  # constructor as an `overlays` entry rather than as an extra module, because
+  # the lanes come after it and a lane may replace a name it provides.
+  overlay = (import ./pkgs.nix { inherit lib; }).overlay {
+    stock = inputs.nixpkgs.legacyPackages.${system};
   };
 in
 {
@@ -74,7 +78,33 @@ in
       nucleus = ../modules/nucleus;
       hostModules = [ ../hosts/${name} ];
       homeManagerModule = inputs.home-manager.nixosModules.home-manager;
-      extraModules = [ overlayModule ];
+      overlays = [ overlay ];
+
+      # The song fields a host record may set, and nothing else about songs.
+      selectionModules = [ songbook.selectionModule ];
+
+      # What that selection MEANS: first the checks (a song name the songbook
+      # does not hold, a song folder with no `rice.nix`, a song with no
+      # performer — all refused here, before the platform list is assembled),
+      # then the built-in songs' `rice.nix` files (declared ∪ available, and
+      # nothing else), then the facts they are read through. A host that names no
+      # song contributes no song module and sets `aoide.song` null, which every
+      # `rice.nix` self-gate reads as "not me".
+      extraModulesFor =
+        sel:
+        let
+          song = songbook.check {
+            inherit (sel) song;
+            lyra = sel.dendrites.lyra.enable;
+          };
+        in
+        songbook.songModules song
+        ++ [
+          {
+            aoide.song = song.declared;
+            aoide.songbook.builtIn = songbook.builtIn song;
+          }
+        ];
 
       # `system` is threaded to the modules rather than to `nixosSystem`: a host
       # record states its own platform (`nixpkgs.hostPlatform` in its `nixos`

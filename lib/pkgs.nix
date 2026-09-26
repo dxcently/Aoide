@@ -1,12 +1,12 @@
 # lib/pkgs.nix — the packages walker.
 #
-# Sibling to lib/walk.nix: where walk.nix hands every `.nix` under a dir to the
-# module system, this hands every package dir under `../pkgs` to `callPackage`,
+# Sibling to the directory walks: where a walk used to hand every `.nix` under a
+# dir to the module system, this hands every package dir under `../pkgs` to `callPackage`,
 # so a package placed under `pkgs/<name>/` self-registers with no hand-list to
 # maintain (flake `packages` output, host + vm overlays, and a `pkg-<name>`
 # check all read this one source).
 #
-# Discovery rule (same shelving convention as walk.nix): read `../pkgs`, keep
+# Discovery rule (the same `_`-shelving convention every discovery here uses): read `../pkgs`, keep
 # entries that are DIRECTORIES whose name does NOT start with `_` (the shelving
 # opt-out: prefix a package dir with `_` — e.g. `_wip/` — to hide it from
 # discovery without deleting it) and that contain a `default.nix`. Each kept
@@ -112,12 +112,27 @@ in
   # Overlay form for nixpkgs.overlays: injects every discovered package and
   # guards each name against ACCIDENTALLY masking a stock nixpkgs attribute
   # (intentional shadows are exempted — see header).
+  # The overlay, as a function of the UNOVERLAID set it is laid on.
+  #
+  # `stock` is the collision guard's question: a `pkgs/<name>` must not mask a
+  # nixpkgs attribute, so it asks the STOCK set — not the running composition,
+  # which also holds names ANOTHER overlay in the same list provided.
+  #
+  # And a name another overlay already provides is that overlay's answer: the
+  # walker supplies a DEFAULT per discovered package, so it steps aside rather
+  # than overwriting one. That is what makes a lane's replacement work — the
+  # lyra lane replaces `lyra-songbook` with the songs a host builds in, and two
+  # overlays writing one attribute is a race whose winner depends on the order
+  # `nixpkgs.overlays` happened to compose, not on either of them.
   overlay =
+    { stock }:
     final: prev:
     lib.genAttrs packageNames (
       name:
-      if prev ? ${name} && !(builtins.elem name intentionalShadows) then
+      if stock ? ${name} && !(builtins.elem name intentionalShadows) then
         throw "pkgs/${name} collides with a nixpkgs attribute — rename it (or add it to intentionalShadows in lib/pkgs.nix if the shadow is deliberate)"
+      else if prev ? ${name} && !(stock ? ${name}) then
+        prev.${name}
       else
         final.callPackage (pkgsDir + "/${name}") { }
     );

@@ -714,4 +714,87 @@ selectionCases
     "${if fingerprint viaHost.system.modules == fingerprint direct.modules then "same" else "differ"}:${
       lib.boolToString (builtins.toJSON viaHost.system.specialArgs == builtins.toJSON direct.specialArgs)
     }";
+
+  # ── Songs: discovery and selection (lib/songbook.nix) ──────────────────────
+  # The songbook the constructor validates a host record against, over a fixture
+  # with the shapes the real one holds: a plain song, a song whose `rice.nix` is
+  # a landmine, a folder with no `rice.nix`, a `_`-shelved folder, and a stray
+  # non-`.nix` file. Discovery names songs and nothing else; a selection decides
+  # which modules exist; an illegal one fails naming what it was given.
+  songbook = import ../../lib/songbook.nix {
+    inherit lib;
+    songbook = ./songbook;
+  };
+
+  songDiscovery = builtins.concatStringsSep " " songbook.songNames;
+
+  # The landmine is discovered and NEVER imported: the module list a selection
+  # produces names one file, and it is not the landmine's.
+  songLandmineUnread =
+    let
+      built = songbook.songModules {
+        declared = "alpha";
+        available = [ ];
+      };
+    in
+    "${builtins.toString (builtins.length built)}:${lib.boolToString (builtins.elem "landmine" songbook.songNames)}:${
+      lib.boolToString (builtins.all (m: lib.hasSuffix "/alpha/rice.nix" (toString m)) built)
+    }";
+
+  # …and the SAME file throws the moment it is selected. Paired with the case
+  # above, this is "an unselected song's file is never read" made executable
+  # rather than asserted — root AGENTS.md house rule 7's removable-without-a-trace
+  # claim, for songs.
+  songLandmineFires = import (
+    builtins.head (
+      songbook.songModules {
+        declared = "landmine";
+        available = [ ];
+      }
+    )
+  );
+
+  songUnknownName = songbook.check {
+    song = {
+      declared = "nope";
+      available = [ ];
+    };
+    lyra = true;
+  };
+
+  songAvailableUnknown = songbook.check {
+    song = {
+      declared = null;
+      available = [ "nope2" ];
+    };
+    lyra = true;
+  };
+
+  # A discovered folder with no `rice.nix` can never be selected: the manifest is
+  # right to see a song being written, a host is not allowed to perform one.
+  songNoRice = songbook.check {
+    song = {
+      declared = "noshelf";
+      available = [ ];
+    };
+    lyra = true;
+  };
+
+  # A song with no performer, refused in the field the record actually set —
+  # `declared` when it exists, `available` when it does not.
+  songWithoutLyra = songbook.check {
+    song = {
+      declared = "alpha";
+      available = [ ];
+    };
+    lyra = false;
+  };
+
+  songAvailableWithoutLyra = songbook.check {
+    song = {
+      declared = null;
+      available = [ "alpha" ];
+    };
+    lyra = false;
+  };
 }

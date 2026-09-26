@@ -42,7 +42,8 @@ covers only what's specific to dendrites.
   component that fails any leg belongs in a song's `widgets/` instead — a lane
   is not a component library.
 - **Nothing in a paint lane reads a `song/` RUNTIME path at build time** —
-  `checks.no-song-read` enforces this structurally, not just by convention.
+  `checks.song-shape` and `checks.song-runtime-untracked` enforce this
+  structurally, not just by convention.
   Committed songbook score (`song/songbook/**`) is not a runtime path.
 - **The activation seed goes through `lib/livery.nix`, never the raw committed
   file.** `stageLivery` patches the active song's committed `livery.json` with

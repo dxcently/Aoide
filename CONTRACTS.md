@@ -23,8 +23,10 @@ catalogue — is the only place a module file is named.
 The repo already runs this way and did before it had a name for it. A dendrite
 is one file (or one directory) plus **one catalogue line** — the whole-tree
 aggregate derives its imports from that catalogue, so no second list follows it.
-`lib/walk.nix` discovers `pkgs/*` and `song/songbook/*/rice.nix` by a
-directory's one typed scan the same way (§2, §5). `modules/nucleus/default.nix`
+`lib/pkgs.nix` discovers `pkgs/*`, and `lib/songbook.nix`'s `discover` finds
+`song/songbook/<song>/` — each a directory's one typed scan (§2, §5) — the same
+way. `lib/walk.nix` is gone: a host imports what it selected, and the check that
+catches a stray `.nix` in a song folder reads the directory itself. `modules/nucleus/default.nix`
 names its own files in directory order: it is the unconditional core, so a layer
 nothing selects has no name to be reached by, and its one line per file is what
 puts them in the tree. Each of those modules
@@ -4690,25 +4692,37 @@ the performance adapts to that host's specifics and its enabled dendrite
 set. The **venue (host) decides its instruments; the song carries only the
 notes.**
 
-### Selection — `aoide.song`
+### Selection — the host record
 
-`aoide.song` (nullOr str, default `null`, declared in
-`modules/nucleus/options.nix`) names the song this host performs. A host
-replays any committed song with **one line**:
+A host names its songs on its own RECORD, in two fields
+(`lib/songbook.nix`'s `selectionModule`, read in the constructor's gate pass —
+before any module graph exists, so a bad name fails before anything is built):
 
 ```nix
 # hosts/<host>/default.nix
-aoide.song = "moonlight";
+song.declared = "sonata";   # the song this host performs
+song.available = [ ];       # built in, stageable live, not performed
 ```
 
-Naming no song performs no song: `aoide.song` defaults to null, and every
-committed song's `rice.nix` self-gates on `config.aoide.song == "<name>"`,
-which is never true against null — so a host that names nothing gets no
+`declared` becomes the platform fact `aoide.song`; `declared ∪ available` is
+the built-in set, published as `aoide.songbook.builtIn`. **Built in** means five
+things: the song's `rice.nix` is imported, its `widgets/` are copied into the
+deployed shell tree, the package names its widget records declare
+(`composeSong`) are installed, its folder ships in `pkgs/lyra-songbook` (this
+host's copy holds only its built-ins), and it is recorded in
+`share/lyra/songbook/builtin.json` as `{ declared, songs, packages }`.
+
+Naming no song performs no song: `aoide.song` is null, and every committed
+song's `rice.nix` self-gates on `config.aoide.song == "<name>"`, which is never
+true against null — so a host that names nothing imports no song and gets no
 song's config, and the paint lanes (which read the active song to bake and
 deploy) activate only when a song IS named: no QML tree, no shell service
-otherwise, not an empty surface. A host wanting the desktop names its song
-explicitly; `sonata` is the shipped standard (`song/songbook/sonata/rice.nix`),
-the guaranteed-present baseline every fleet member can opt into by name.
+otherwise, not an empty surface. A song selected with no `lyra` lane is refused
+by name — `song.declared = "<n>" needs the lyra dendrite: select
+aggregations.aoideos (or dendrites.lyra) on this host` — because a song is QML
+painted by lyra, and every `rice.nix` self-gates on a name nothing else reads.
+`sonata` is the shipped standard, the guaranteed-present baseline every fleet
+member can opt into by name.
 **Renamed (2026-08-14):** the shipped standard song was `default`;
 `song/songbook/default/` is now retired outright (its Pantheon design
 grammar relocated to
@@ -4718,12 +4732,33 @@ git-recoverable history, not deleted knowledge). No shape change, no version
 bump: every "shipped baseline" reference in this section simply names
 `sonata` now. Full dated entry: `docs/Aoide-Wiki/ingest/log.md`.
 
+### The songbook belongs to the machine
+
+`~/.aoide/song/songbook` is the MACHINE's own: its built-in songs plus whatever
+it made itself. It is never a link to, or a copy synced from, the repo — and a
+rebuild never rewrites what it holds. The lyra lane's activation step
+`aoideSeedSongbook` copies each built-in song folder in **only when that folder
+does not exist**: no comparison, no merge, never an overwrite. `sonata/takes/`,
+`sonata/drafts/` and hand-edited `design/` notes on a machine that already has
+them survive every switch (root `AGENTS.md` rule 10 — staging never waits on
+the declared build, and is always the last song staged).
+
+When a song is both built in and present in the machine songbook, the MACHINE
+copy wins for staging: it is the one the user can edit without a rebuild. To
+return to the shipped copy, the user moves the machine's folder aside by hand —
+nothing does it for them.
+
 ### Self-registration (dendrite discipline)
 
-Committed songs live under `song/songbook/<name>/rice.nix`. `lib/mkHost.nix`
-walks `song/songbook` (via `lib/walk.nix`) into every
-host, so **adding a song is a new folder — never an edit to an import list**.
-The empty songbook (just `.gitkeep`) walks to `[]` and is tolerated.
+Committed songs live under `song/songbook/<name>/rice.nix`. `lib/songbook.nix`
+`discover`s them — one typed scan, an immediate child directory, `_`-prefixed
+entries shelved — and the constructor imports the `rice.nix` of the songs a host
+BUILT IN (its record's `declared ∪ available`), so **adding a song is a new
+folder — never an edit to an import list**, and an unselected song's file is
+never read at all (a landmine song proves it in `tests/selection`). A
+discovered folder with no `rice.nix` is still discovered — the manifest is right
+to see a song being written — but it can never be selected: naming it throws
+`song <n> has no rice.nix`.
 
 Each song's `rice.nix` **self-gates**, exactly like a dendrite:
 

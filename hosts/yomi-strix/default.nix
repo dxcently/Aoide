@@ -24,6 +24,18 @@
   dendrites.qbittorrent.enable = true;
   dendrites.inference.enable = true;
 
+  # ── Songs ──────────────────────────────────────────────────────────────────
+  # `declared` is the song this host PERFORMS — it becomes the fact
+  # `aoide.song`, which every `rice.nix` self-gates on. `available` is what it
+  # builds in to STAGE without a rebuild but does not perform.
+  #
+  # yomi builds in sonata and nothing else: the shipped standard, the one song
+  # this machine has performed since the beginning. The other committed rices
+  # are reached from the machine's own songbook (`aoide rice stage <n>`), which
+  # this host's songbook already holds — that is the point of the split.
+  song.declared = "sonata";
+  song.available = [ ];
+
   # ── People ─────────────────────────────────────────────────────────────────
   # The definition is shared between machines and attached, never copied.
   users.khoa = {
@@ -66,11 +78,10 @@
       zramSwap.enable = true;
 
       # ── Aoide ──────────────────────────────────────────────────────────────
-      # `aoide.enable` and `aoide.mcp.enable` are the `base` aggregation's. The
-      # song is named HERE, not selected: `song.declared` on the host record is
-      # S8's field, and until then the fact is what the imported song guards on.
+      # `aoide.enable` and `aoide.mcp.enable` are the `base` aggregation's, and
+      # `aoide.song` is DERIVED from the record's `song.declared` by the
+      # constructor's hook — none of the three is a line here.
       aoide.user = "khoa";
-      aoide.song = "sonata";
 
       aoide.hyprland.monitors = [ "HDMI-A-1,1920x1080@60,0x0,1,transform,3" ];
       aoide.hyprland.scrollingMonitor = "HDMI-A-1";

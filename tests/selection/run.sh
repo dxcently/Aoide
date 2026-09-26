@@ -65,6 +65,14 @@ extraModulesForCanReachTheCatalogue throws  landmine/default.nix was imported
 extraModulesForKeepsItsPosition     ok      "allhosts,hook"
 hookDefaultsChangeNothing           ok      "same:true"
 mkHostPassesTheModulesThrough       ok      "same:true"
+songDiscovery                       ok      "alpha landmine noshelf"
+songLandmineUnread                  ok      "1:true:true"
+songLandmineFires                   throws  songbook landmine: an unselected song's rice.nix was imported
+songUnknownName                     throws  'nope' is not in the songbook; discovered: alpha, landmine, noshelf
+songAvailableUnknown                throws  'nope2' is not in the songbook; discovered: alpha, landmine, noshelf
+songNoRice                          throws  song noshelf has no rice.nix
+songWithoutLyra                     throws  song.declared = "alpha" needs the lyra dendrite: select aggregations.aoideos (or dendrites.lyra) on this host
+songAvailableWithoutLyra            throws  song.available = ["alpha"] needs the lyra dendrite: select aggregations.aoideos (or dendrites.lyra) on this host
 EOF
 )
 

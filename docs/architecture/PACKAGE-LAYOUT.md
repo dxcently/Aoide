@@ -492,7 +492,10 @@ assumption:
 - a `lyra` flake, or any Quickshell/rice export — `lyra` is paint, per
   root `AGENTS.md`; the shell's own source package is the ROOT flake's
   `packages.<system>.lyra-shell`, never anything exported here.
-- removal of `lib/walk.nix` — the walker stays.
+- `lib/walk.nix` did NOT stay: the songbook's discovery is
+  `lib/songbook.nix`'s typed `discover` now — the same file that validates a
+  host's song selection and generates the manifest — so there is nothing left
+  for a second walker to do.
 
 ## Open questions (each tagged with when it must be settled)
 

@@ -8,6 +8,9 @@
 
   dendrites.claude-code.enable = true;
 
+  song.declared = "sonata";
+  song.available = [ ];
+
   users.khoa = {
     definition = ../../users/khoa.nix;
     homeManager.enable = true;
@@ -30,6 +33,5 @@
       powerManagement.enable = true;
 
       aoide.user = "khoa"; # ← your user
-      aoide.song = "sonata";
     };
 }

@@ -843,7 +843,7 @@ fn handle_rice_compose(inv: &Invocation) -> Outcome {
         "name": name,
         "from": from,
         "nextSteps": [
-            format!("truth: set aoide.song = \"{name}\" in the host's default.nix and rebuild"),
+            format!("truth: set song.declared = \"{name}\" in hosts/<host> and rebuild"),
             format!("sketch: `aoide rice stage {name}` to hot-load it live, no rebuild"),
         ],
     }))

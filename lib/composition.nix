@@ -550,6 +550,14 @@ rec {
       homeManagerModule,
       specialArgs ? { },
       extraModules ? [ ],
+      # Package overlays the CALLER provides, applied BEFORE the selection's own
+      # lanes. They are the base package set; a lane's overlay comes after and
+      # may therefore REPLACE a name supplied here — which is exactly how the
+      # lyra lane overrides `lyra-songbook` with the songs a host builds in.
+      # Order is the contract: for a list-merged `nixpkgs.overlays`, the last
+      # definition of an attribute wins, and a caller whose overlay landed last
+      # would silently undo every lane's replacement while both evaluated.
+      overlays ? [ ],
       selectionModules ? [ ],
       extraModulesFor ? (_: [ ]),
       system ? "x86_64-linux",
@@ -664,6 +672,7 @@ rec {
       modules = [
         nucleus
       ]
+      ++ lib.optional (overlays != [ ]) { nixpkgs.overlays = overlays; }
       ++ accountLanes
       ++ systemLanes
       ++ lib.optional (hmUsers != { }) homeWiring

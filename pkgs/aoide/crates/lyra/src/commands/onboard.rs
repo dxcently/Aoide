@@ -716,8 +716,14 @@ mod tests {
               flake = builtins.getFlake {checkout_lit};
               lib = flake.inputs.nixpkgs.lib;
               pkgs = import flake.inputs.nixpkgs {{ system = "x86_64-linux"; }};
-              walk = import ({checkout_lit} + "/lib/walk.nix") {{ inherit lib; }};
-              discovered = walk ({checkout_lit} + "/modules");
+              # The whole tree, as a consumer takes it: the two aggregates. The
+              # old `lib/walk.nix` handed every `.nix` under `modules/` to the
+              # evaluator; the aggregates are what name that set now, and they
+              # are what a whole-tree consumer imports.
+              discovered = [
+                ({checkout_lit} + "/modules/dendrites")
+                ({checkout_lit} + "/modules/nucleus")
+              ];
               evaled = lib.evalModules {{
                 modules = discovered ++ [ {{ config._module.check = false; }} {path_lit} ];
                 specialArgs = {{
