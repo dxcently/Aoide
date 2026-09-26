@@ -546,8 +546,10 @@ count.
   (P-C5) marks it a conducted shell, so it spawns windowed running its
   own login shell (`$SHELL` → passwd → `/bin/sh`, `-l`) instead. A
   candidate neither arm resolves is skipped with a taught message naming it,
-  never a guessed invocation. Once a terminal candidate's spawn registers,
-  its `restore` snapshot drives one more step, in-process through `send`,
+  never a guessed invocation. Once a terminal candidate's spawn registers AND
+  its target becomes READY (`aoide_conduct::graph::wait_ready`; a target that
+  never does is reported `not-ready` and typed at by nothing), its `restore`
+  snapshot drives one more step, in-process through `send`,
   never a direct socket write: a foreground command it was demonstrably
   running re-execs with `--yes --submit` (never for a recorded `sudo …`,
   which only restores the cwd); an idle session's clean unsubmitted
@@ -1751,6 +1753,25 @@ deliberately the opposite of `undying`'s own post-mortem posture below,
 because an exemption has nothing to mean once there is no record to hold it.
 Absent means "not exempt, or a legacy record"; readers must tolerate both
 forms and round-trip fields they do not know.
+
+**Additive in v0 (spawn readiness, 2026-09-26):** a session record MAY also
+carry an optional `sessionStartAt` (string, ISO-8601 UTC) — WHEN that
+harness's own `SessionStart` hook was recorded for this record. One writer:
+the hook door's `SessionStart` arm (`send.rs`), on every SessionStart a
+resume included. It exists so a launch can tell "this harness said hello, to
+THIS launch" from "a record exists, from some earlier run": `aoide spawn
+--prompt`, `resurrect`'s restore delivery and the A2A door's opening turn all
+wait on a child record of their wrapper carrying a stamp at or after their
+own start instant, and an unstamped (or older-stamped) leftover under a
+reused id is not readiness. Absent means "this harness's hooks never claimed
+this record" — never a readiness fact; readers must tolerate both forms and
+round-trip fields they do not know, and a record MAY also carry an optional
+`openingTurn` (string) — what became of the first turn the A2A door asked a
+spawned session to run (`pending` at the spawn acknowledgement, then the
+worker's `delivered`/`delivered-unverified`/`not-ready`/`skipped-shell`),
+written by `stamp_opening_turn` from the door that accepted the spawn and read
+by `tasks/get` as the task's `status.message`. Absent on every locally
+spawned session.
 
 **Additive in v0 (P-D7, `docs/architecture/AOIDED.md`'s "L5"):** a session
 record MAY also carry an optional `harnessSessionId` (string) — the

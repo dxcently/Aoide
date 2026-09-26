@@ -525,6 +525,38 @@ pub struct SessionRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub harness_session_id: Option<String>,
+    /// WHEN the harness's own `SessionStart` hook was recorded for this
+    /// session (ISO-8601 UTC). One fact, one writer: the hook door's
+    /// `SessionStart` arm stamps it as it registers the harness's session,
+    /// so a later reader can tell "the harness said hello, just now" from
+    /// "a record exists, from some earlier run" — which is the whole
+    /// difference between a first-turn injection that waits for the target
+    /// and one that types into a TUI that has not started
+    /// (`aoide_conduct::graph::wait_ready`). A resume re-fires
+    /// `SessionStart` and re-stamps it. Additive/v0-safe: absent on a legacy
+    /// record and on any record this harness's hooks never claimed, and
+    /// absent is exactly how such a record reads — *not* a readiness fact.
+    #[serde(
+        rename = "sessionStartAt",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub session_start_at: Option<String>,
+    /// The OPENING TURN of a session the A2A door spawned: what became of the
+    /// first turn a remote peer asked for (`pending` from the moment the door
+    /// accepts the spawn until its worker's wait-and-type concludes — then
+    /// `delivered`, `delivered-unverified`, `not-ready`, or `skipped-shell`).
+    /// One writer: the A2A door's own stamp (`a2a::do_spawn` + its worker),
+    /// which is the only party that knows; one reader: `tasks/get`, so a peer
+    /// whose opening turn never ran sees that instead of a bare `submitted`.
+    /// Additive/v0-safe: absent on every locally-spawned session and every
+    /// legacy record.
+    #[serde(
+        rename = "openingTurn",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub opening_turn: Option<String>,
     /// Additive/v0-safe (P-D8, `docs/architecture/AOIDED.md`'s "L5"): names
     /// the durable ledger entry's own `sessionId` this record was REVIVED
     /// from by `graph resurrect` — never a live lookup key (the named

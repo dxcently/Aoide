@@ -901,6 +901,74 @@ pub(in crate::graph) fn stamp_harness_session_id(id: &str, harness_session_id: &
     });
 }
 
+/// Stamp `sessionStartAt` — WHEN this harness's own `SessionStart` was
+/// recorded for this session. One writer (the hook door's `SessionStart`
+/// arm, `send.rs`), one consumer: `aoide_conduct::graph::wait_ready`, which
+/// will not type a first turn into a target whose harness has not said hello
+/// since that launch began. A record that merely EXISTS is not the fact —
+/// an earlier run's child under a reused `--id` lingers for days (a
+/// hook-registered child carries no pid, so the reaper's `/proc` signal
+/// never fires for it), and reading it as readiness is the original
+/// early-inject defect with a `delivered` message over it.
+///
+/// Same locked, change-only read-modify-write as
+/// [`stamp_harness_session_id`] above, and the same silent no-op for an
+/// unknown id: a later `SessionStart` (a resume, a compact) re-stamps it, so
+/// the guard is "would this write change anything", never "is this the
+/// first". No `restage_graph()` — the field is read by launch paths, not
+/// rendered by the widgets.
+pub(in crate::graph) fn stamp_session_start_at(id: &str, at: &str) {
+    if at.is_empty() {
+        return;
+    }
+    with_stage_lock(|| {
+        let mut file: SessionsFile = match load_stage(&sessions_path()) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        if let Some(s) = file.sessions.iter_mut().find(|s| {
+            s.session_id == id && s.session_start_at.as_deref() != Some(at)
+        }) {
+            s.session_start_at = Some(at.to_string());
+            if file.schema_version.is_empty() {
+                file.schema_version = STAGE_GRAPH_VERSION.to_string();
+            }
+            let _ = write_stage(&sessions_path(), &file);
+        }
+    });
+}
+
+/// Stamp `openingTurn` — what became of the first turn a REMOTE peer asked
+/// for when the A2A door spawned this session. One writer, from another
+/// crate: `aoide-server`'s `a2a::do_spawn` stamps `pending` as it accepts the
+/// spawn (the reply it hands back cannot yet know) and its worker stamps the
+/// conclusion once the wait-and-type is over; `tasks/get` reads it so a peer
+/// whose opening turn never ran is told that, rather than reading a bare
+/// `submitted` over a session no turn ever reached. Change-only and a silent
+/// no-op for an unknown id, like every other stamp here.
+pub fn stamp_opening_turn(id: &str, word: &str) {
+    if word.is_empty() {
+        return;
+    }
+    with_stage_lock(|| {
+        let mut file: SessionsFile = match load_stage(&sessions_path()) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        if let Some(s) = file
+            .sessions
+            .iter_mut()
+            .find(|s| s.session_id == id && s.opening_turn.as_deref() != Some(word))
+        {
+            s.opening_turn = Some(word.to_string());
+            if file.schema_version.is_empty() {
+                file.schema_version = STAGE_GRAPH_VERSION.to_string();
+            }
+            let _ = write_stage(&sessions_path(), &file);
+        }
+    });
+}
+
 /// Stamp `resumedFrom` on a just-registered session record — the ledger
 /// entry's own `sessionId` its resume argv was built from (P-D8,
 /// `docs/architecture/AOIDED.md`'s "L5"). Unlike [`stamp_harness_session_id`]

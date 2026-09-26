@@ -173,6 +173,12 @@ pub use self::session_store::stamp_origin;
 // crate/flag/env path may write it. `stamp_remote_parent`'s own doc has the
 // full argument.
 pub use self::session_store::stamp_remote_parent;
+// `stamp_opening_turn` — the A2A door's own record of what became of the
+// first turn a remote peer asked for (`pending` at the spawn ack, the worker's
+// conclusion after), so `tasks/get` can say `not-ready` instead of a bare
+// `submitted` over a session no turn ever reached. `pub` because the writer
+// lives in `aoide-server`, the authority that accepted the spawn.
+pub use self::session_store::stamp_opening_turn;
 // LANE IDENTITY P-ID1: `aoide-server`'s daemon `dispatch` handler is the one
 // legitimate caller — it stamps a just-minted sealed credential directly
 // onto the record it just registered a pid for, the same "stamp from the
@@ -199,7 +205,7 @@ pub use self::spawn::{live_run_for, live_run_refusal};
 // `AgentProfile::readiness`). `pub` for the third first-turn caller outside
 // this crate: `aoide-server`'s `a2a::spawn_inject_prompt`, whose opening turn
 // would otherwise be the one injection path with no readiness gate at all.
-pub use self::spawn::{wait_ready, READY_BUDGET};
+pub use self::spawn::{wait_ready, Ready, READY_BUDGET};
 // `command_basename` — the agent-name default a spawned command's own
 // `argv[0]` gives (spawn.rs's copy, widened for the `pub` caller below).
 pub use self::spawn::command_basename;

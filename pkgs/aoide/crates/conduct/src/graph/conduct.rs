@@ -1952,6 +1952,62 @@ mod tests {
         assert!(!envs.contains_key(std::ffi::OsStr::new("PATH")));
     }
 
+    /// L4 (branch review): the scrub pinned through the ONE exec point itself,
+    /// not just its helper — a test that calls `scrub_session_markers` on a
+    /// Command it built for the purpose cannot catch `spawn_on_pty` dropping
+    /// the call. This reads the real child's own environment back out of
+    /// `/proc`, so the invariant holds where the agent actually starts.
+    #[test]
+    fn spawn_on_pty_execs_the_agent_with_the_markers_actually_gone() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "CLAUDECODE",
+            "CLAUDE_CODE_CHILD_SESSION",
+            "CLAUDE_PID",
+            "CLAUDE_CODE_SESSION_ID",
+            "CLAUDE_CONFIG_DIR",
+            "AOIDE_SESSION_ID",
+        ]);
+        // The environment a claude-session child would inherit, plus one of
+        // the operator's own variables (which must survive).
+        std::env::set_var("CLAUDECODE", "1");
+        std::env::set_var("CLAUDE_CODE_CHILD_SESSION", "1");
+        std::env::set_var("CLAUDE_PID", "4242");
+        std::env::set_var("CLAUDE_CODE_SESSION_ID", "parent-uuid");
+        std::env::set_var("CLAUDE_CONFIG_DIR", "/home/someone/.claude");
+        std::env::set_var("AOIDE_SESSION_ID", "not-this-childs");
+
+        let args: Vec<String> = vec!["-c".to_string(), "sleep 5".to_string()];
+        let (child, _master) = spawn_on_pty("sh", &args, "scrub-exec-child", None, None)
+            .expect("a pty child starts");
+        let pid = child.id();
+        // The pty child is a session leader; its own environ is the fact.
+        let environ = std::fs::read(format!("/proc/{pid}/environ")).expect("own child, own /proc");
+        let env: Vec<String> = environ
+            .split(|b| *b == 0)
+            .map(|v| String::from_utf8_lossy(v).into_owned())
+            .collect();
+
+        for gone in ["CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_PID", "CLAUDE_CODE_SESSION_ID"] {
+            assert!(
+                !env.iter().any(|v| v.starts_with(&format!("{gone}="))),
+                "the exec'd child still carries {gone}: {env:?}"
+            );
+        }
+        assert!(
+            env.iter().any(|v| v == "CLAUDE_CONFIG_DIR=/home/someone/.claude"),
+            "the operator's own variable must survive the scrub"
+        );
+        assert!(
+            env.iter().any(|v| v == "AOIDE_SESSION_ID=scrub-exec-child"),
+            "the child exports its OWN aoide id: {env:?}"
+        );
+
+        let mut child = child;
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
     #[test]
     fn channel_socket_path_shares_conduct_socket_paths_parent_and_differs_only_by_prefix() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

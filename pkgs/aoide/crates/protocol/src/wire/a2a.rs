@@ -122,6 +122,18 @@ pub struct Artifact {
 pub struct TaskStatus {
     pub state: String,
     pub timestamp: String,
+    /// A2A's optional human-readable companion to `state` — aoide's use is
+    /// the OPENING TURN a spawned session was asked to run: `opening turn:
+    /// pending` while the door's worker is still waiting for the target,
+    /// then `opening turn: delivered` / `delivered-unverified` /
+    /// `not-ready`, so a remote peer reads what became of its first turn
+    /// instead of assuming `submitted` meant the turn ran. Absent (and
+    /// skipped on the wire, byte-identical to the pre-amendment shape) on
+    /// every task whose record carries no `openingTurn` — every locally
+    /// spawned session, every inject into an existing one, every legacy
+    /// record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 /// The FINAL event a `message/stream`/`tasks/resubscribe` SSE loop emits
@@ -318,7 +330,7 @@ mod tests {
         let task = Task {
             id: "sess-1".to_string(),
             context_id: "sess-1".to_string(),
-            status: TaskStatus { state: "working".to_string(), timestamp: "2026-01-01T00:00:00Z".to_string() },
+            status: TaskStatus { state: "working".to_string(), timestamp: "2026-01-01T00:00:00Z".to_string(), message: None },
             kind: "task".to_string(),
             artifacts: None,
             history: None,
@@ -343,7 +355,7 @@ mod tests {
         let task = Task {
             id: "sess-1".to_string(),
             context_id: "sess-1".to_string(),
-            status: TaskStatus { state: "working".to_string(), timestamp: "2026-01-01T00:00:00Z".to_string() },
+            status: TaskStatus { state: "working".to_string(), timestamp: "2026-01-01T00:00:00Z".to_string(), message: None },
             kind: "task".to_string(),
             artifacts: Some(vec![Artifact {
                 artifact_id: FRAME_ARTIFACT_ID.to_string(),

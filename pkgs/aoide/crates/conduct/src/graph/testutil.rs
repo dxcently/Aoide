@@ -72,6 +72,8 @@ pub(crate) fn session(
         spawned: false,
         exempt: false,
         harness_session_id: None,
+        session_start_at: None,
+        opening_turn: None,
         resumed_from: None,
         origin: None,
         seal: None,

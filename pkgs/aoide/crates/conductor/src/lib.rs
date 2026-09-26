@@ -1794,6 +1794,8 @@ mod tests {
             spawned: false,
             exempt: false,
             harness_session_id: None,
+            session_start_at: None,
+            opening_turn: None,
             resumed_from: None,
             native_role: None,
             origin: None,

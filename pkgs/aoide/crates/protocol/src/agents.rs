@@ -139,16 +139,25 @@ pub struct SettingsSpec {
 /// the submit keystroke is swallowed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Readiness {
-    /// The harness runs a hook system, so the hook door says so itself: a
-    /// `HookClass::SessionStart` payload for its own session id records a
-    /// session whose parent is the wrapper — the harness's own statement that
-    /// it has started. The strongest signal available, and per-harness by
-    /// construction (the payload vocabulary stays in `hook_event_map`).
+    /// The harness runs a hook system, so the hook door says so itself: its
+    /// `SessionStart`, recorded as its own session under the wrapper and
+    /// timestamped (`sessionStartAt`) — a launch reads only a stamp at or
+    /// after its own start instant, so an earlier run's leftover record under
+    /// the same `--id` can never pass for this launch's hello.
     Hook,
-    /// A harness with no hook file to fire: PTY output appeared and then went
-    /// quiet, the documented fallback proxy for "the child has drawn its
-    /// prompt and is waiting".
-    OutputQuiescence,
+    /// The harness's own prompt, as a substring of its PTY output — the
+    /// readiness fact for a harness that fires no hooks. Declared ONLY where
+    /// the harness's own material establishes it (read off a live frame, the
+    /// same way every other screen fact in this tree is), never guessed: a
+    /// harness whose prompt has not been observed declares nothing and gets
+    /// the unverified path below.
+    PromptMarker(&'static str),
+    /// Nothing about this harness's prompt is established, so no fact is
+    /// claimed: the launch waits for output to settle and then says the
+    /// delivery is UNVERIFIED (`delivered-unverified`). This is also the
+    /// answer for every harness NAME with no profile at all — the same
+    /// unregistered fallback every other profile lookup takes.
+    OutputSettled,
 }
 
 /// One agent harness's whole profile — the seam every agent-aware consumer
@@ -2963,10 +2972,16 @@ pub static EIDOLON_PROFILE: AgentProfile = AgentProfile {
     // `eidolon_native_send`'s own doc for the two contract halves a caller
     // must honour (stdin payload, accepted-not-consumed exit code).
     native_send: Some(eidolon_native_send),
-    // No hook file at all (this profile's own doc), so there is no
-    // `SessionStart` for the hook door to record: readiness is the pty
-    // telling us output arrived and then stopped.
-    readiness: Readiness::OutputQuiescence,
+    // The one hookless harness, so readiness has to come off its own screen:
+    // ` normal ` is the mode label its TUI paints into the prompt frame's
+    // title the moment that frame exists — read off a live frame of
+    // `eidolon tui` on this machine (the bytes carry the box corner, then the
+    // bold label ` normal `, and the frame is up 270ms after launch), never
+    // guessed from source. A mode other than normal, or a frame that never
+    // paints, simply does not match: the wait then falls back to the settled
+    // check and downgrades the claim to unverified rather than dropping the
+    // prompt.
+    readiness: Readiness::PromptMarker(" normal "),
     // eidolon's own session markers have not been established from its own
     // material — an empty list, never a guessed name (the harness's own
     // launch env here carries none of the claude-shaped names this list
@@ -3182,7 +3197,10 @@ mod tests {
         assert_eq!(CLAUDE_PROFILE.readiness, Readiness::Hook);
         assert_eq!(KIMI_PROFILE.readiness, Readiness::Hook);
         assert_eq!(PI_PROFILE.readiness, Readiness::Hook);
-        assert_eq!(EIDOLON_PROFILE.readiness, Readiness::OutputQuiescence);
+        // The one hookless harness carries the prompt marker its TUI paints
+        // (read off a live frame), NOT a quiescence guess: a profile that has
+        // no established prompt declares nothing and gets no claim.
+        assert_eq!(EIDOLON_PROFILE.readiness, Readiness::PromptMarker(" normal "));
         // Readiness only means anything for a harness whose `SessionStart`
         // actually maps — a `Hook` profile whose map dropped that event would
         // wait forever.

@@ -1578,10 +1578,24 @@
   socket appears: a bound socket is a wrapper that registered, not a harness
   that started — and with no readiness within the budget it is typed at by
   nothing and files no receipt, so the sender's letter stays unacknowledged
-  rather than acknowledged by a turn that never ran. It is typed before that session
+  rather than acknowledged by a turn that never ran. That readiness fact is
+  per-harness and three-valued (`Readiness`): `Hook` reads THIS launch's
+  harness `SessionStart` (its `sessionStartAt` stamp on a child record of the
+  wrapper, at or after the launch instant — a leftover record from an earlier
+  run under a reused id is not readiness), `PromptMarker` reads the harness's
+  own declared prompt out of the PTY output, and `OutputSettled` claims no
+  fact at all: it types once output settles and reports the delivery
+  `delivered-unverified`. It is typed before that session
   has a `SessionRecord` at all, so it can never reach
   `deliver_local`/`session_send` and has to file itself (see
-  `aoide_storage::mail`'s module doc for the full two-writer reasoning).
+  `aoide_storage::mail`'s module doc for the full two-writer reasoning). The
+  door runs that wait-and-type on its OWN WORKER, never on its connection
+  handler: the budget (20s) plus the socket retry (3s) against `MAX_CONN` is
+  `503 server busy` for every other RPC — read commands included. The worker
+  stamps the outcome on the record (`stamp_opening_turn`), which is what
+  `tasks/get` reports as `status.message` and what the door's own audit line
+  carries, so a peer whose opening turn never ran is told `not-ready` rather
+  than reading a bare `submitted`.
   **A THIRD, orthogonal filing call exists since P-M2** — `aoide-server`'s
   `mail_deposit` (`a2a.rs`) calls `aoide_storage::mail::deposit` directly
   for a letter/receipt arriving over the wire FROM a peer node. It never

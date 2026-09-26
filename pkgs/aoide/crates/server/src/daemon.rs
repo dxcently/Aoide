@@ -1211,7 +1211,23 @@ pub fn run_loop(
     // start). Runs ONCE here, at `run_loop` entry — never inside the tick
     // loop below — boot-epoch-guarded so a `Restart=on-failure` restart
     // within the same boot is a no-op; see `run_boot_auto_resume`'s own doc.
-    run_boot_auto_resume();
+    //
+    // OFF-THREAD, deliberately: a resume candidate's spawn now waits for its
+    // target to be READY before delivering a restore snapshot, so one
+    // never-ready candidate can cost `READY_BUDGET` (20s) — paid on this
+    // thread it would hold the tick's producers and the reaper for that long,
+    // times every candidate (4 stale candidates = 80s of stalled roster).
+    // The resumes themselves are independent of each other and of the tick:
+    // they proceed in parallel here, and the tick starts immediately.
+    if let Err(e) = std::thread::Builder::new()
+        .name("boot-auto-resume".to_string())
+        .spawn(run_boot_auto_resume)
+    {
+        // No thread to run them on: the resumes are best-effort by design, and
+        // stalling the tick to attempt them synchronously would trade one
+        // degradation for a worse one. Say so and carry on.
+        eprintln!("aoide aoided: boot auto-resume could not be scheduled ({e}); the tick proceeds");
+    }
 
     // Tick (~1s): the two P-D3 producers (module doc's "The tick's two
     // producers"), constructed once here, outside the loop.

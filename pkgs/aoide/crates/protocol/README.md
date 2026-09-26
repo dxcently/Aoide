@@ -120,8 +120,10 @@ other crate in this workspace sits above.
   message to a live session WITHOUT the pty composer at all —
   `native_send`, P-EIDOLON — plus the two launch-time facts a first turn
   needs: `readiness`, WHICH signal says a just-started process of this
-  harness can take a turn (`Hook` — its own `SessionStart` recorded by the
-  hook door — or `OutputQuiescence`, the hookless fallback), and
+  harness can take a turn (`Hook` — its own `SessionStart`, stamped
+  `sessionStartAt` for the launch that waits on it — `PromptMarker` for a
+  hookless harness's declared prompt, or `OutputSettled`, which claims no
+  fact and makes the delivery `delivered-unverified`), and
   `session_env_markers`, the variables this harness injects into the
   processes it launches that mean "you are inside a `<harness>` session";
   the union of every profile's list is `session_env_markers()`, the one list

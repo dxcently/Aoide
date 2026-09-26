@@ -49,7 +49,7 @@ use super::session_store::{
     clear_stale_parent, do_session_end, do_session_phase, do_session_phase_if, do_session_start,
     do_subagent_end, do_subagent_rekey, do_subagent_spawn, ensure_session_ceiling, now_iso_utc,
     refresh_subagent_says, refresh_transcript_fields, set_owner_activity, stamp_attested_parent,
-    stamp_harness_session_id, stamp_hook_ancestry, stored_phase,
+    stamp_harness_session_id, stamp_hook_ancestry, stamp_session_start_at, stored_phase,
 };
 use super::window::{discover_window, ensure_session_window, pid_ancestry, windowless_by_lineage_from_parent};
 use aoide_protocol::agents::{agent_profile, known_agents, AgentProfile, HookClass, CLAUDE_PROFILE};
@@ -1887,6 +1887,13 @@ fn hook_for_profile_gated(
                 pid,
             );
             stamp_hook_ancestry(&id, &my_hook_ancestry());
+            // The harness's own hello, timestamped: the one writer of
+            // `sessionStartAt`, and the fact a first-turn injection waits on
+            // (`wait_ready`). Stamped AFTER `do_session_start` above, so the
+            // record it lands on exists — and on every SessionStart, a resume
+            // included, so the stamp always names the most recent launch this
+            // harness announced.
+            stamp_session_start_at(&id, &now_iso_utc());
             // The check lane's own SessionStart trigger. Settled: run the
             // lane, drain any pending note, flag an already-red or
             // already-.nix-carrying tree. Mid-turn: no lane run, just replay

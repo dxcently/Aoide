@@ -382,6 +382,12 @@ fn resurrect_one(
         flags,
         door,
     };
+    // This launch's start instant, taken before the spawn exists — the
+    // readiness wait below reads only a harness `SessionStart` stamped at or
+    // after it, so a leftover record from the session this one is replacing
+    // (the ledger's own old id, or a reused `--id`) cannot pass for the new
+    // one's hello.
+    let launch_at = super::session_store::now_iso_utc();
     let out = session_spawn(&spawn_inv);
     if out.status != aoide_protocol::output::Status::Ok {
         failed.push(json!({
@@ -466,16 +472,38 @@ fn resurrect_one(
     } else {
         match c.entry.restore.as_ref().and_then(|r| restore_delivery(door, &new_id, r)) {
             None => "none".to_string(),
-            Some(_) if !super::spawn::wait_ready(&c.entry.agent, &new_id, super::spawn::READY_BUDGET) => {
-                "not-ready".to_string()
-            }
-            Some(inv) => {
-                let submit = inv.flags.contains_key("submit");
-                let inner = session_send(&inv);
-                if inner.status == Status::Ok {
-                    if submit { "reexec".to_string() } else { "preload".to_string() }
+            Some(_) => {
+                let ready = super::spawn::wait_ready(
+                    &c.entry.agent,
+                    &new_id,
+                    &launch_at,
+                    super::spawn::READY_BUDGET,
+                );
+                if ready == super::spawn::Ready::NotReady {
+                    "not-ready".to_string()
                 } else {
-                    format!("failed: {}", inner.message)
+                    let inv = c
+                        .entry
+                        .restore
+                        .as_ref()
+                        .and_then(|r| restore_delivery(door, &new_id, r))
+                        .expect("checked just above");
+                    let submit = inv.flags.contains_key("submit");
+                    let inner = session_send(&inv);
+                    if inner.status != Status::Ok {
+                        format!("failed: {}", inner.message)
+                    } else {
+                        // The branch that fired, and whether the readiness was
+                        // a fact or a settled guess: a terminal candidate whose
+                        // agent has no profile is typed at on the guess, and
+                        // says so.
+                        let word = if submit { "reexec" } else { "preload" };
+                        if ready == super::spawn::Ready::Verified {
+                            word.to_string()
+                        } else {
+                            format!("{word}-unverified")
+                        }
+                    }
                 }
             }
         }
@@ -487,7 +515,10 @@ fn resurrect_one(
         c.entry.agent,
         if registered { "" } else { " (not yet registered)" }
     ));
-    if restore_result == "reexec" || restore_result == "preload" {
+    if matches!(
+        restore_result.as_str(),
+        "reexec" | "preload" | "reexec-unverified" | "preload-unverified"
+    ) {
         changed.push(format!("session {new_id}: restore {restore_result}"));
     }
     if restore_result == "not-ready" {

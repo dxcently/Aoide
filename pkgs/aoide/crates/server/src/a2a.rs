@@ -668,11 +668,18 @@ fn build_task(sessions: &[SessionRecord], id: &str) -> Result<Task, (i64, String
         // MVP simplification: task id == sessionId, contextId == sessionId —
         // see the doc comment above.
         context_id: rec.session_id.clone(),
-        status: TaskStatus { state: state.to_string(), timestamp: now_iso_utc() },
+        status: TaskStatus { state: state.to_string(), timestamp: now_iso_utc(), message: opening_turn_message(rec) },
         kind: "task".to_string(),
         artifacts: None,
         history: None,
     })
+}
+
+/// What became of the opening turn, as `status.message` — `None` for every
+/// record that carries no `openingTurn` (a local spawn, an inject into an
+/// existing session, a legacy record), so those tasks stay byte-identical.
+fn opening_turn_message(rec: &SessionRecord) -> Option<String> {
+    rec.opening_turn.as_deref().map(|word| format!("opening turn: {word}"))
 }
 
 /// Load `sessions.json` off the stage and resolve one task by id.
@@ -1010,6 +1017,7 @@ fn ring_task(task_id: &str) -> Task {
         context_id: task_id.to_string(),
         status: TaskStatus {
             state: if ended { "completed" } else { "working" }.to_string(),
+            message: None,
             timestamp: now_iso_utc(),
         },
         kind: "task".to_string(),
@@ -1461,7 +1469,7 @@ fn submitted_task(session_id: &str) -> Value {
     let task = Task {
         id: session_id.to_string(),
         context_id: session_id.to_string(),
-        status: TaskStatus { state: "submitted".to_string(), timestamp: now_iso_utc() },
+        status: TaskStatus { state: "submitted".to_string(), timestamp: now_iso_utc(), message: None },
         kind: "task".to_string(),
         artifacts: None,
         history: None,
@@ -1602,9 +1610,15 @@ fn do_inject(
 /// delivery), so a failed mailbase write is no less tolerated. What the write
 /// error DOES decide is the receipt: it is filed only for a delivery that went
 /// out, so a letter is never acknowledged by a turn nobody received.
-fn spawn_inject_prompt(id: &str, agent_cmd: &str, prompt: &str, ready_budget: Duration) {
+fn spawn_inject_prompt(
+    id: &str,
+    agent_cmd: &str,
+    prompt: &str,
+    launch_at: &str,
+    ready_budget: Duration,
+) -> &'static str {
     if prompt.is_empty() {
-        return;
+        return "skipped-empty";
     }
     // Belt and braces on H1: `decide_send_action` already refuses a shell
     // `spawnAgent` before anything starts, and this is the last gate before a
@@ -1617,7 +1631,7 @@ fn spawn_inject_prompt(id: &str, agent_cmd: &str, prompt: &str, ready_budget: Du
     // taught one.
     let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
     if aoide_conduct::graph::program_is_a_shell(&configured) {
-        return;
+        return "skipped-shell";
     }
     // WHICH harness the configured command IS decides what readiness means
     // (an unconfigured/unknown program has no profile and takes the hookless
@@ -1627,8 +1641,9 @@ fn spawn_inject_prompt(id: &str, agent_cmd: &str, prompt: &str, ready_budget: Du
         .first()
         .map(|program| aoide_conduct::graph::command_basename(program))
         .unwrap_or_default();
-    if !aoide_conduct::graph::wait_ready(&agent, id, ready_budget) {
-        return;
+    let ready = aoide_conduct::graph::wait_ready(&agent, id, &launch_at, ready_budget);
+    if ready == aoide_conduct::graph::Ready::NotReady {
+        return "not-ready";
     }
     // The target harness's own submit keystroke, resolved from the SAME table
     // every other delivery reads (`profile_for_agent`; claude when the name is
@@ -1657,12 +1672,18 @@ fn spawn_inject_prompt(id: &str, agent_cmd: &str, prompt: &str, ready_budget: Du
                 // letter unacknowledged (retryable) instead of acknowledged.
                 if written.is_ok() {
                     let _ = aoide_storage::mail::file_receipt("", id, prompt);
+                    return if ready == aoide_conduct::graph::Ready::Verified {
+                        "delivered"
+                    } else {
+                        "delivered-unverified"
+                    };
                 }
-                return;
+                return "write-failed";
             }
         }
         std::thread::sleep(Duration::from_millis(10));
     }
+    "no-socket"
 }
 
 /// Stamp `origin=node:<name>` directly on the just-spawned session's own
@@ -2039,6 +2060,11 @@ fn do_spawn(
         .map_err(|e| (-32603_i64, format!("resolving the aoide binary: {e}")))?;
 
     let argv = spawn_argv(&id, agent_cmd, task);
+    // This launch's start instant, taken BEFORE the child exists: the worker's
+    // readiness wait reads only a harness `SessionStart` stamped at or after
+    // it, so a leftover child record from a previous run of a reused id cannot
+    // pass for this launch's hello.
+    let launch_at = now_iso_utc();
 
     let origin = format!("node:{node_name}");
     // Project roots are already loaded the same way `session_ref_lookup`
@@ -2099,8 +2125,48 @@ fn do_spawn(
                 let origin = origin.clone();
                 std::thread::spawn(move || stamp_spawn_provenance(&id, &origin, remote_parent));
             }
-            // Best-effort first-turn injection — see the doc comment above.
-            spawn_inject_prompt(&id, agent_cmd, prompt, aoide_conduct::graph::READY_BUDGET);
+            // Best-effort first-turn injection — see the doc comment above —
+            // on its OWN WORKER, never this handler thread: the readiness wait
+            // can run for `READY_BUDGET` (20s) and then the socket retry for
+            // ~3s more, and a handler parked that long against `MAX_CONN`
+            // hands `503 server busy` to every other RPC — read commands
+            // included. ONE worker per spawn is the cap (a spawn already owns
+            // a connection slot); nothing joins it, and the record carries the
+            // outcome so `tasks/get` can tell the peer what became of its turn.
+            aoide_conduct::graph::stamp_opening_turn(&id, "pending");
+            let worker_audit = audit_log.to_path_buf();
+            {
+                let worker_id = id.clone();
+                let agent_cmd = agent_cmd.to_string();
+                let prompt = prompt.to_string();
+                let launch_at = launch_at.clone();
+                let scheduled = std::thread::Builder::new()
+                    .name(format!("a2a-opening-turn-{worker_id}"))
+                    .spawn(move || {
+                        let word = spawn_inject_prompt(
+                            &worker_id,
+                            &agent_cmd,
+                            &prompt,
+                            &launch_at,
+                            aoide_conduct::graph::READY_BUDGET,
+                        );
+                        aoide_conduct::graph::stamp_opening_turn(&worker_id, word);
+                        let _ = audit(
+                            &worker_audit,
+                            Door::A2a,
+                            EventClass::Audit,
+                            "a2a.message/send",
+                            word,
+                            &format!("opening turn for `{worker_id}`: {word}"),
+                        );
+                    })
+                    .is_ok();
+                if !scheduled {
+                    // No worker means no turn will ever be typed; say so
+                    // rather than leave the record `pending` forever.
+                    aoide_conduct::graph::stamp_opening_turn(&id, "not-ready");
+                }
+            }
             let _ = audit(
                 audit_log,
                 Door::A2a,
@@ -2108,7 +2174,7 @@ fn do_spawn(
                 "a2a.message/send",
                 "ok",
                 &format!(
-                    "spawned conducted session `{id}` (configured agent, {origin}{})",
+                    "spawned conducted session `{id}` (configured agent, {origin}{}) — opening turn pending, typed by a worker once the target reports itself ready",
                     match task {
                         Some(slug) => format!(", managed run on task `{slug}`"),
                         None => String::new(),
@@ -2121,6 +2187,7 @@ fn do_spawn(
                 status: TaskStatus {
                     state: "submitted".to_string(),
                     timestamp: now_iso_utc(),
+                    message: Some("opening turn: pending".to_string()),
                 },
                 kind: "task".to_string(),
                 artifacts: None,
@@ -8838,6 +8905,7 @@ mod tests {
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
 
         let id = "spawn-inject-target";
+        let launch_at = now_iso_utc();
         // READINESS comes before the write, so this test stages the fact the
         // hook door would have written: the target harness's own session,
         // parented to the wrapper. Without it the gate refuses and nothing is
@@ -8855,6 +8923,10 @@ mod tests {
                     state: "idle".to_string(),
                     parent_session_id: Some(id.to_string()),
                     agent: "claude".to_string(),
+                    // THIS launch's `SessionStart`, stamped after it began —
+                    // the only child record that may satisfy the hook arm.
+                    session_start_at: Some(launch_at.clone()),
+                    harness_session_id: Some("claude-child".to_string()),
                     ..Default::default()
                 }],
             },
@@ -8882,7 +8954,7 @@ mod tests {
             (text, submit[..n].to_vec(), before_submit.elapsed())
         });
 
-        spawn_inject_prompt(id, "claude", "hello new session", Duration::from_millis(500));
+        assert_eq!(spawn_inject_prompt(id, "claude", "hello new session", &launch_at, Duration::from_millis(500)), "delivered");
         let (text, submit, gap) = acc.join().unwrap();
         assert_eq!(
             String::from_utf8(text).unwrap(),
@@ -8950,6 +9022,7 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
 
         let id = "spawn-inject-shape";
+        let launch_at = now_iso_utc();
         // The wrapper's own record, with a log that has already spoken — what
         // a hookless target's readiness is read off.
         let log = root.join("wrapper.log");
@@ -8985,7 +9058,7 @@ mod tests {
 
         // A budget comfortably past the quiescence window the readiness wait
         // uses for a target with no hook.
-        spawn_inject_prompt(id, "no-such-agent", "first turn", Duration::from_secs(10));
+        assert_eq!(spawn_inject_prompt(id, "no-such-agent", "first turn", &launch_at, Duration::from_secs(10)), "delivered-unverified", "no declarable fact for this name");
         let (text, submit, gap) = acc.join().unwrap();
         assert_eq!(String::from_utf8(text).unwrap(), "first turn", "the text, alone");
         assert_eq!(
@@ -9006,6 +9079,100 @@ mod tests {
         match saved_state {
             Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
             None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+        match saved_runtime {
+            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
+            None => std::env::remove_var("XDG_RUNTIME_DIR"),
+        }
+    }
+
+    /// M3/M4, at the read end: what the worker stamped is what `tasks/get`
+    /// shows. A record whose opening turn never ran carries `not-ready`, and
+    /// that reaches the peer as the task's `status.message` — never a bare
+    /// `submitted` over a session no turn ever reached.
+    #[test]
+    fn the_opening_turns_outcome_is_what_tasks_get_shows() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-openingturn-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+
+        let mut rec = fixture_session("spawned-remote", "idle", None);
+        rec.parent_session_id = Some("node-parent".to_string());
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".to_string(), sessions: vec![rec] },
+        )
+        .unwrap();
+
+        // Before any stamp: the task carries no opening-turn message at all
+        // (byte-identical to the pre-amendment shape).
+        let task = task_get("spawned-remote").unwrap();
+        assert!(task["status"].get("message").is_none(), "task: {task}");
+
+        // The door's own pending stamp, then the worker's verdict.
+        aoide_conduct::graph::stamp_opening_turn("spawned-remote", "pending");
+        let task = task_get("spawned-remote").unwrap();
+        assert_eq!(task["status"]["message"], "opening turn: pending", "task: {task}");
+
+        aoide_conduct::graph::stamp_opening_turn("spawned-remote", "not-ready");
+        let task = task_get("spawned-remote").unwrap();
+        assert_eq!(
+            task["status"]["message"], "opening turn: not-ready",
+            "a peer whose opening turn never ran is TOLD so: {task}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
+    /// M4, the cost the handler no longer pays: an unready target makes the
+    /// wait run its whole budget. That is exactly why `do_spawn` runs
+    /// `spawn_inject_prompt` on a worker instead of on its connection handler
+    /// — 20s of a `MAX_CONN` slot is `503 server busy` for every other RPC.
+    #[test]
+    fn the_readiness_wait_is_the_cost_that_moved_off_the_handler() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-waitcost-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".to_string(), sessions: Vec::new() },
+        )
+        .unwrap();
+
+        let budget = Duration::from_millis(400);
+        let launch_at = now_iso_utc();
+        let started = Instant::now();
+        let word = spawn_inject_prompt("never-ready", "claude", "hello", &launch_at, budget);
+        let took = started.elapsed();
+        assert_eq!(word, "not-ready");
+        assert!(
+            took >= Duration::from_millis(350),
+            "the wait must spend its budget on an unready target (took {took:?}) — this is the \
+             handler time the worker exists to absorb"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
         }
         match saved_runtime {
             Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
@@ -9041,12 +9208,13 @@ mod tests {
         .unwrap();
 
         let id = "spawn-inject-unready";
+        let launch_at = now_iso_utc();
         let socket = aoide_conduct::graph::conduct_socket_path(id);
         std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
         let listener = UnixListener::bind(&socket).unwrap();
         listener.set_nonblocking(true).unwrap();
 
-        spawn_inject_prompt(id, "claude", "hello unready target", Duration::from_millis(150));
+        assert_eq!(spawn_inject_prompt(id, "claude", "hello unready target", &launch_at, Duration::from_millis(150)), "not-ready");
 
         let deadline = Instant::now() + Duration::from_millis(600);
         let mut typed_at = false;
@@ -9093,7 +9261,8 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
 
-        spawn_inject_prompt("whatever-id", "claude", "", Duration::from_millis(50));
+        let launch_at = now_iso_utc();
+        assert_eq!(spawn_inject_prompt("whatever-id", "claude", "", &launch_at, Duration::from_millis(50)), "skipped-empty");
         assert!(aoide_storage::mail::read_base().unwrap().is_empty());
 
         let _ = std::fs::remove_dir_all(&root);

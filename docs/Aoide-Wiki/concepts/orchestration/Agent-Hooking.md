@@ -151,10 +151,18 @@ Everything the bridge knows about a specific agent harness lives on an
 - `readiness` (`Readiness`) — WHICH signal says a just-launched process of this
   harness is ready to take a turn, the fact every first-turn injection waits on
   before typing anything (`spawn --prompt`, `resurrect`'s restore delivery, the
-  A2A door's opening turn): `Hook` for the three harnesses that fire
-  `SessionStart` (the hook door records it as the harness's own session under
-  the wrapper), `OutputQuiescence` for a harness with no hook file at all
-  (`eidolon`) — output arrived, then stopped.
+  A2A door's opening turn). Three values, and the third is a refusal to claim:
+  `Hook` for the harnesses that fire `SessionStart` (the hook door stamps
+  `sessionStartAt` as it records the harness's own session under the wrapper,
+  and a launch reads only a stamp at or after its OWN start instant — a
+  leftover record from an earlier run under a reused `--id` is not readiness);
+  `PromptMarker(pattern)` for a hookless harness whose prompt has been read off
+  a live frame (`eidolon`: the ` normal ` mode label its TUI paints into the
+  prompt frame); `OutputSettled` for everything else. `OutputSettled` is also
+  the answer for every agent NAME with no profile at all — a name the table
+  does not know has no declared fact, so its prompt is typed once output
+  settles and the delivery is reported `delivered-unverified`, never
+  `delivered`.
 - `session_env_markers` — the variables this harness injects into the processes
   it launches that mean "you are running inside a `<harness>` session" (claude:
   `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, the

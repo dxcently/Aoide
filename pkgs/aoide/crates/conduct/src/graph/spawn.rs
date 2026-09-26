@@ -34,6 +34,7 @@
 use super::conduct::{conduct_socket_path, program_is_a_shell, unix_ts};
 use super::model::{canonical_state, load_stage, sessions_path, SessionsFile};
 use super::send::session_send;
+use super::session_store::now_iso_utc;
 use super::undying::nothing_to_restore_warning;
 use aoide_protocol::output::{Outcome, Status};
 use aoide_protocol::Invocation;
@@ -72,14 +73,21 @@ pub const READY_BUDGET: Duration = Duration::from_secs(20);
 #[cfg(test)]
 pub const READY_BUDGET: Duration = Duration::from_millis(500);
 
-/// The quiet window [`Readiness::OutputQuiescence`] requires: a hookless
-/// target is ready when its PTY log has produced output and then stopped
-/// growing for this long. Shortened under `cfg(test)` beside [`READY_BUDGET`]
-/// — a test budget smaller than the window could never see it elapse.
+/// The quiet window the no-declarable-fact arm waits for: output arrived and
+/// then stood still. That is NOT readiness (a harness can print a banner and
+/// spend seconds in init), which is exactly why the arm it belongs to reports
+/// [`Ready::Unverified`] — see [`aoide_protocol::agents::Readiness`].
+/// Shortened under `cfg(test)` beside [`READY_BUDGET`] — a test budget smaller
+/// than the window could never see it elapse.
 #[cfg(not(test))]
 const READY_QUIET: Duration = Duration::from_millis(2000);
 #[cfg(test)]
 const READY_QUIET: Duration = Duration::from_millis(100);
+
+/// How much of a PTY log's tail a prompt marker is searched in. One frame of
+/// a TUI is a few KB, and the marker is looked for on every poll — reading a
+/// whole transcript each time would be silly.
+const MARKER_TAIL: u64 = 8 * 1024;
 
 /// The command's basename — the agent-name default. Mirrors
 /// `conduct.rs::command_basename`'s own copy: each `graph` command that
@@ -502,82 +510,156 @@ fn wait_for(path: &std::path::Path, budget: Duration) -> bool {
     }
 }
 
-/// Has the harness's OWN `SessionStart` hook been recorded for the session
-/// wrapping `id`? The hook door keys a harness's session by the id the harness
-/// itself reports and parents it to the wrapper's `AOIDE_SESSION_ID`, so a
-/// record whose parent is `id` IS the harness saying "I have started" — the
-/// readiness fact [`Readiness::Hook`] names. A record already `done`
-/// (`SessionEnd`) is not readiness: the harness started and left.
-fn harness_hook_recorded(id: &str) -> bool {
+/// What a readiness wait concluded — three outcomes, because "we can type
+/// now" and "we KNOW it can hear us" are different claims and a caller must
+/// not conflate them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ready {
+    /// The target's own readiness fact arrived: its harness's `SessionStart`
+    /// recorded for THIS launch, or the prompt marker its profile declares.
+    Verified,
+    /// Nothing about this target is declarable (no profile for the name, or a
+    /// profile whose prompt marker the harness's own material has not
+    /// established). Output settled, so the caller may type — but the
+    /// delivery is UNVERIFIED and must be reported as such.
+    Unverified,
+    /// No readiness fact and no output worth the name: type nothing.
+    NotReady,
+}
+
+/// Has THIS launch's harness session been announced under `id`? The hook
+/// door's `SessionStart` arm is the single writer of a record's
+/// `sessionStartAt` (`send.rs`), so a record that carries one at or after
+/// the launch instant IS the harness saying hello to this launch — and a
+/// record from an earlier run under the same `--id` cannot pass, however
+/// long it lingers (a hook-registered child carries no pid, so the reaper's
+/// `/proc` signal never fires for it: `REAP_IDLE_STALE_SECS` is 72h).
+///
+/// The `sessionStartAt` clause is the CLASS check the earlier version of this
+/// predicate only claimed in prose: a record the hook door created for some
+/// other event (`hook_ensure_session` runs from every arm) never carries the
+/// stamp, so it cannot satisfy this. `harnessSessionId` is demanded too — it
+/// is the hook door's own footprint, and a conduct/shell registration has
+/// none.
+pub fn harness_session_started(id: &str, since: &str) -> bool {
     load_stage::<SessionsFile>(&sessions_path())
         .ok()
         .is_some_and(|f| {
-            f.sessions
-                .iter()
-                .any(|s| s.parent_session_id.as_deref() == Some(id) && canonical_state(&s.state) != "done")
+            f.sessions.iter().any(|s| {
+                s.parent_session_id.as_deref() == Some(id)
+                    && canonical_state(&s.state) != "done"
+                    && s.harness_session_id.as_deref().is_some_and(|h| !h.is_empty())
+                    && s.session_start_at.as_deref().is_some_and(|t| t >= since)
+            })
         })
 }
 
-/// Has the wrapper's own PTY log produced output and then stood still for
-/// [`READY_QUIET`]? [`Readiness::OutputQuiescence`]'s fact, for a harness with
-/// no hook file to fire. The log path is re-read beside the size because it is
-/// stamped by the conduct child at log open, i.e. possibly after this wait
-/// begins — and a target that never produces a byte is honestly not ready.
-fn output_has_settled(id: &str, budget: Duration) -> bool {
-    let deadline = Instant::now() + budget;
-    let mut last = 0u64;
-    let mut quiet_since: Option<Instant> = None;
-    loop {
-        let size = load_stage::<SessionsFile>(&sessions_path())
-            .ok()
-            .and_then(|f| f.sessions.into_iter().find(|s| s.session_id == id))
-            .and_then(|s| s.log_path)
-            .and_then(|p| std::fs::metadata(p).ok())
-            .map(|m| m.len())
-            .unwrap_or(0);
-        if size > 0 {
-            if size != last {
-                last = size;
-                quiet_since = Some(Instant::now());
-            } else if quiet_since.is_some_and(|t| t.elapsed() >= READY_QUIET) {
-                return true;
-            }
-        }
-        if Instant::now() >= deadline {
-            return false;
-        }
-        std::thread::sleep(REGISTRATION_POLL);
-    }
+/// A record's PTY log as `(size, tail)`, where `tail` is the last
+/// [`MARKER_TAIL`] bytes — enough for the frame a harness is painting now,
+/// without reading a whole transcript on every poll. `None` when the record
+/// or its log is not there yet (registration stamps the path at log open).
+fn pty_state(id: &str) -> Option<(u64, Vec<u8>)> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+
+    let path = load_stage::<SessionsFile>(&sessions_path())
+        .ok()
+        .and_then(|f| f.sessions.into_iter().find(|s| s.session_id == id))
+        .and_then(|s| s.log_path)?;
+    let size = std::fs::metadata(&path).ok()?.len();
+    let mut file = std::fs::File::open(&path).ok()?;
+    file.seek(SeekFrom::Start(size.saturating_sub(MARKER_TAIL))).ok()?;
+    let mut tail = Vec::new();
+    file.take(MARKER_TAIL).read_to_end(&mut tail).ok()?;
+    Some((size, tail))
 }
 
-/// Wait, up to `budget`, for the just-launched session `id` to become READY to
-/// take a turn — the gate every first-turn injection passes before typing
-/// anything. WHICH fact that is belongs to the harness
-/// ([`aoide_protocol::agents::AgentProfile::readiness`]); an unregistered
-/// agent name has no profile and takes the hookless answer, the same
-/// unregistered-agent fallback every other profile lookup in the tree takes.
+/// Wait, up to `budget` from now, for the just-launched session `id` to be
+/// READY to take a turn — the gate every first-turn injection passes before
+/// typing anything. WHICH fact that is belongs to the harness
+/// ([`aoide_protocol::agents::AgentProfile::readiness`]):
 ///
-/// `pub` for the three first-turn callers outside this module: `session_spawn`
-/// itself, `resurrect`'s restore delivery, and `aoide-server`'s
-/// `a2a::spawn_inject_prompt`. A `false` return is the caller's instruction to
-/// type NOTHING and report that it did not — never to inject anyway "just in
+/// - `Hook`: this launch's `SessionStart`, timestamped (`sessionStartAt`).
+/// - `PromptMarker(pattern)`: the harness's own prompt in its PTY output —
+///   verified as soon as it appears, so a harness that paints its composer
+///   fast is typed at as fast. Not seeing it is not fatal: the arm then falls
+///   back to the settled check below, so a wrong or mode-dependent marker can
+///   only downgrade the claim, never drop the prompt.
+/// - anything else (no marker declared — an unregistered name, or a profile
+///   whose marker is not established): output settled, and the delivery says
+///   so ([`Ready::Unverified`]).
+///
+/// `since` is the LAUNCH instant (ISO-8601 UTC, from `now_iso_utc()` before
+/// the spawn): it is what binds the hook arm to this launch rather than to a
+/// leftover. Returns [`Ready::NotReady`] when nothing was learned — the
+/// caller's instruction to type NOTHING, never to inject anyway "just in
 /// case".
-pub fn wait_ready(agent: &str, id: &str, budget: Duration) -> bool {
+pub fn wait_ready(agent: &str, id: &str, since: &str, budget: Duration) -> Ready {
+    let deadline = Instant::now() + budget;
     match aoide_protocol::agents::agent_profile(agent).map(|p| p.readiness) {
-        Some(aoide_protocol::agents::Readiness::Hook) => {
-            let deadline = Instant::now() + budget;
+        Some(aoide_protocol::agents::Readiness::Hook) => loop {
+            if harness_session_started(id, since) {
+                return Ready::Verified;
+            }
+            if Instant::now() >= deadline {
+                return Ready::NotReady;
+            }
+            std::thread::sleep(REGISTRATION_POLL);
+        },
+        Some(aoide_protocol::agents::Readiness::PromptMarker(pattern)) => {
+            let mut last = 0u64;
+            let mut quiet_since: Option<Instant> = None;
             loop {
-                if harness_hook_recorded(id) {
-                    return true;
+                if let Some((size, tail)) = pty_state(id) {
+                    if size > 0 {
+                        if size != last {
+                            last = size;
+                            quiet_since = Some(Instant::now());
+                        } else if quiet_since.is_some_and(|t| t.elapsed() >= READY_QUIET) {
+                            return Ready::Unverified;
+                        }
+                    }
+                    if let Some(at) = find_bytes(&tail, pattern.as_bytes()) {
+                        let _ = at;
+                        return Ready::Verified;
+                    }
                 }
                 if Instant::now() >= deadline {
-                    return false;
+                    return Ready::NotReady;
                 }
                 std::thread::sleep(REGISTRATION_POLL);
             }
         }
-        _ => output_has_settled(id, budget),
+        _ => {
+            let mut last = 0u64;
+            let mut quiet_since: Option<Instant> = None;
+            loop {
+                if let Some((size, _)) = pty_state(id) {
+                    if size > 0 {
+                        if size != last {
+                            last = size;
+                            quiet_since = Some(Instant::now());
+                        } else if quiet_since.is_some_and(|t| t.elapsed() >= READY_QUIET) {
+                            return Ready::Unverified;
+                        }
+                    }
+                }
+                if Instant::now() >= deadline {
+                    return Ready::NotReady;
+                }
+                std::thread::sleep(REGISTRATION_POLL);
+            }
+        }
     }
+}
+
+/// Does `haystack` contain `needle`? A plain substring search — the marker is
+/// read off the harness's own live frame, escapes and all, so it is matched
+/// against the raw bytes exactly as they were painted.
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 /// `aoide spawn [--agent <name>] [--parent <sessionId>] [--id <id>]
@@ -591,10 +673,12 @@ pub fn wait_ready(agent: &str, id: &str, budget: Duration) -> bool {
 /// `--prompt` is typed as the target's first turn, and only once it is READY
 /// to take one: registration is the wrapper being steerable, readiness is the
 /// harness having started ([`wait_ready`] — claude/kimi/pi say so with their
-/// own `SessionStart` hook, any other target is read off its PTY settling).
-/// `prompt` in the result is `none` (no flag), `skipped-unregistered`,
-/// `not-ready` (the flag, no readiness within [`READY_BUDGET`], nothing typed),
-/// `delivered`, or `failed: …`.
+/// own `SessionStart` hook, timestamped for THIS launch; a hookless harness
+/// with an established prompt marker says so with the marker; anything with
+/// no declarable fact at all gets output settling only, and its delivery is
+/// reported as unverified). `prompt` in the result is `none` (no flag),
+/// `skipped-unregistered`, `not-ready` (no readiness within [`READY_BUDGET`],
+/// nothing typed), `delivered`, `delivered-unverified`, or `failed: …`.
 ///
 /// `--task <slug>` turns the run into a MANAGED TASK WRAPPER run
 /// (`docs/Aoide-Wiki/concepts/orchestration/Managed-Task-Wrapper.md`): the
@@ -639,6 +723,13 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
 
     let windowed = inv.flag_present("windowed");
     let cwd = inv.flags.get("cwd").map(String::as_str);
+    // THIS launch's start instant, taken before any process exists. The
+    // readiness wait's hook arm reads only a harness `SessionStart` stamped at
+    // or after it, so a leftover child record from an earlier run of a reused
+    // `--id` can never pass for this launch's hello (M1 of the review: that
+    // leftover made `wait_ready` return instantly and the prompt land in a TUI
+    // that had not started).
+    let launch_at = now_iso_utc();
 
     // ── managed task wrapper mode (`--task <slug>`) ──────────────────────
     let task = inv
@@ -889,22 +980,36 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
     let prompt_result = match &prompt_flag {
         None => "none".to_string(),
         Some(_) if !registered => "skipped-unregistered".to_string(),
-        Some(_) if !wait_ready(&agent, &id, READY_BUDGET) => "not-ready".to_string(),
         Some(text) => {
-            let mut flags = BTreeMap::new();
-            flags.insert("id".to_string(), id.clone());
-            flags.insert("yes".to_string(), "true".to_string());
-            flags.insert("submit".to_string(), "true".to_string());
-            let inner = session_send(&Invocation {
-                path: vec!["send".to_string()],
-                args: vec![text.clone()],
-                flags,
-                door: inv.door,
-            });
-            if inner.status == Status::Ok {
-                "delivered".to_string()
-            } else {
-                format!("failed: {}", inner.message)
+            // The launch instant, captured BEFORE the readiness wait: the hook
+            // arm reads only a `SessionStart` stamped at or after it, which is
+            // what makes a leftover record under a reused `--id` unable to pass
+            // for this launch's hello.
+            let ready = wait_ready(&agent, &id, launch_at.as_str(), READY_BUDGET);
+            match ready {
+                Ready::NotReady => "not-ready".to_string(),
+                ready => {
+                    let mut flags = BTreeMap::new();
+                    flags.insert("id".to_string(), id.clone());
+                    flags.insert("yes".to_string(), "true".to_string());
+                    flags.insert("submit".to_string(), "true".to_string());
+                    let inner = session_send(&Invocation {
+                        path: vec!["send".to_string()],
+                        args: vec![text.clone()],
+                        flags,
+                        door: inv.door,
+                    });
+                    if inner.status != Status::Ok {
+                        format!("failed: {}", inner.message)
+                    } else if ready == Ready::Verified {
+                        "delivered".to_string()
+                    } else {
+                        // The target had no declarable readiness fact: the text
+                        // went out, and saying "delivered" would claim more than
+                        // this tree can know.
+                        "delivered-unverified".to_string()
+                    }
+                }
             }
         }
     };
@@ -916,6 +1021,11 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
     )];
     if prompt_result == "delivered" {
         changed.push(format!("session {id}: prompt injected"));
+    }
+    if prompt_result == "delivered-unverified" {
+        changed.push(format!(
+            "session {id}: prompt injected UNVERIFIED — `{agent}` declares no readiness fact"
+        ));
     }
     if prompt_result == "not-ready" {
         changed.push(format!("session {id}: prompt not injected — {agent} was not ready"));
@@ -956,9 +1066,18 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
     if prompt_result == "not-ready" {
         message = format!(
             "{message} — `--prompt` not injected: `{agent}` was not ready to take a turn within \
-             {}s (its readiness signal never arrived — a hook harness needs its hooks installed; \
-             watch `{id}` and send the turn when it is up)",
+             {}s (a hook harness needs its hooks installed, and its `--agent` name must match the \
+             program actually launched — a `Hook`-readiness harness whose program never fires \
+             hooks never reports itself ready, so nothing is typed; watch `{id}` and send the turn \
+             when it is up)",
             READY_BUDGET.as_secs_f64()
+        );
+    }
+    if prompt_result == "delivered-unverified" {
+        message = format!(
+            "{message} — `--prompt` injected but UNVERIFIED: `{agent}` has no declared readiness \
+             fact (no profile for that name), so the turn was typed once its output settled and \
+             whether it submitted is not known here"
         );
     }
     if let Some(slug) = &task {
@@ -1322,9 +1441,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The readiness wait's own facts, both arms, against a staged roster —
-    /// no process, no pty. The hook arm reads the harness's own session under
-    /// the wrapper; the quiescence arm reads the wrapper's PTY log.
+    /// The readiness wait's own facts, every arm, against a staged roster —
+    /// no process, no pty. The hook arm reads THIS launch's harness
+    /// `SessionStart`; the marker arm reads the harness's declared prompt in
+    /// the wrapper's PTY log; the settled arm is the honest fallback.
     #[test]
     fn wait_ready_reads_the_profiles_own_signal() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1335,47 +1455,182 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let id = "ready-wrapper";
-        let probe = std::time::Duration::from_millis(500);
+        let launch_at = now_iso_utc();
+        let probe = std::time::Duration::from_millis(150);
+        let stage_sessions = |sessions: Vec<crate::graph::model::SessionRecord>| {
+            write_stage(
+                &sessions_path(),
+                &SessionsFile { schema_version: String::new(), sessions },
+            )
+            .unwrap();
+        };
+        // A child record shaped exactly as the hook door writes one, stamped
+        // (or not) with its `SessionStart`.
+        let child = |state: &str, harness_id: Option<&str>, started: Option<&str>| {
+            let mut rec = session("claude-uuid", "/w", state, "2026-09-26T00:00:00Z", Some(id));
+            rec.harness_session_id = harness_id.map(str::to_string);
+            rec.session_start_at = started.map(str::to_string);
+            rec
+        };
 
-        // Nothing staged at all: neither arm is ready, and neither claims to be.
-        write_stage(&sessions_path(), &SessionsFile::default()).unwrap();
-        assert!(!wait_ready("claude", id, probe), "no hook session yet");
-        assert!(!wait_ready("bash", id, probe), "no output at all");
+        // Nothing staged at all: no arm is ready, and none claims to be.
+        stage_sessions(Vec::new());
+        assert_eq!(wait_ready("claude", id, &launch_at, probe), Ready::NotReady);
+        assert_eq!(wait_ready("bash", id, &launch_at, probe), Ready::NotReady, "no output at all");
 
-        // The hook arm: the harness's own `SessionStart` lands as a record
-        // parented to the wrapper.
-        let child = session("claude-uuid", "/w", "idle", "2026-09-26T00:00:00Z", Some(id));
-        write_stage(
-            &sessions_path(),
-            &SessionsFile { schema_version: String::new(), sessions: vec![child] },
-        )
-        .unwrap();
-        assert!(wait_ready("claude", id, probe), "the harness said it started");
+        // The hook arm: the harness's own `SessionStart`, stamped after this
+        // launch, is the fact.
+        stage_sessions(vec![child("idle", Some("claude-uuid"), Some(&now_iso_utc()))]);
+        assert_eq!(wait_ready("claude", id, &launch_at, probe), Ready::Verified);
+
+        // M1: a LEFTOVER child from an earlier run under the same `--id` — the
+        // review's staged record — is not this launch's hello, whether it
+        // predates the stamp field entirely or carries an old stamp.
+        stage_sessions(vec![child("idle", Some("claude-uuid"), None)]);
+        assert_eq!(
+            wait_ready("claude", id, &launch_at, probe),
+            Ready::NotReady,
+            "an unstamped leftover must never pass for readiness"
+        );
+        stage_sessions(vec![child("idle", Some("claude-uuid"), Some("2020-01-01T00:00:00Z"))]);
+        assert_eq!(
+            wait_ready("claude", id, &launch_at, probe),
+            Ready::NotReady,
+            "a stamp from before the launch is a leftover, not readiness"
+        );
+        // A hook-door record for some OTHER event (no `SessionStart` stamp)
+        // cannot pass either, and neither can a non-hook registration.
+        stage_sessions(vec![child("working", None, None)]);
+        assert_eq!(wait_ready("claude", id, &launch_at, probe), Ready::NotReady);
 
         // A harness that started and already ENDED is not ready to take a turn.
-        let gone = session("claude-uuid", "/w", "done", "2026-09-26T00:00:00Z", Some(id));
-        write_stage(
-            &sessions_path(),
-            &SessionsFile { schema_version: String::new(), sessions: vec![gone] },
-        )
-        .unwrap();
-        assert!(!wait_ready("claude", id, probe));
+        stage_sessions(vec![child("done", Some("claude-uuid"), Some(&now_iso_utc()))]);
+        assert_eq!(wait_ready("claude", id, &launch_at, probe), Ready::NotReady);
 
-        // The quiescence arm, for a harness with no hook file: the wrapper's
-        // own log appeared and then stood still.
+        // The MARKER arm: a hookless harness whose profile declares its prompt
+        // (`eidolon`'s ` normal `) is verified the moment that marker is in the
+        // log — early, without waiting for anything to settle.
         let log = root.join("wrapper.log");
-        std::fs::write(&log, "shell$ ").unwrap();
-        let mut wrapper = session(id, "/w", "idle", "2026-09-26T00:00:00Z", None);
-        wrapper.log_path = Some(log.to_string_lossy().into_owned());
+        let with_log = |content: &str| {
+            std::fs::write(&log, content).unwrap();
+            let mut wrap = session(id, "/w", "idle", "2026-09-26T00:00:00Z", None);
+            wrap.log_path = Some(log.to_string_lossy().into_owned());
+            stage_sessions(vec![wrap]);
+        };
+        with_log("booting\x1b[1m normal \x1b[0m┌────");
+        assert_eq!(wait_ready("eidolon", id, &launch_at, probe), Ready::Verified);
+        // The marker absent, but the log settled: typed at, and said to be
+        // unverified — never claimed as delivered.
+        with_log("booting up, still booting");
+        assert_eq!(wait_ready("eidolon", id, &launch_at, probe), Ready::Unverified);
+
+        // An unregistered name has no declared fact at all: settled output is
+        // the whole gate, and the answer is unverified.
+        with_log("shell$ ");
+        assert_eq!(wait_ready("bash", id, &launch_at, probe), Ready::Unverified);
+        // A target that never printed a byte is honestly not ready.
+        with_log("");
+        assert_eq!(wait_ready("bash", id, &launch_at, probe), Ready::NotReady);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// M1's live shape, end to end: a leftover child record under a reused
+    /// `--id` must not buy an early inject. With the leftover staged, the
+    /// prompt is reported `not-ready` and NOTHING is typed (the shim echoes
+    /// whatever it is handed, so an early inject would show up in its log) —
+    /// never the review's 357ms-`delivered`.
+    #[test]
+    fn a_leftover_child_record_under_a_reused_id_does_not_buy_an_early_inject() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_SPAWN_EXE",
+        ]);
+
+        let root = unique_stage("spawn-stale-leftover");
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("AOIDE_CONDUCT_SPAWN_EXE", built_aoide_bin());
+
+        let id = "spawn-reused-id";
+        // The previous run's child, still on the roster exactly as the review
+        // found it: parented to this same id, not done, and — being a
+        // hook-registered child — carrying no pid for the reaper to notice.
+        let mut leftover = session("stale-child-uuid", "/w", "idle", "2026-09-01T00:00:00Z", Some(id));
+        leftover.harness_session_id = Some("stale-child-uuid".to_string());
+        leftover.pid = None;
         write_stage(
             &sessions_path(),
-            &SessionsFile { schema_version: String::new(), sessions: vec![wrapper] },
+            &SessionsFile { schema_version: String::new(), sessions: vec![leftover] },
         )
         .unwrap();
-        assert!(wait_ready("bash", id, probe), "the target settled after output");
-        // A target that never printed a byte is honestly not ready.
-        std::fs::write(&log, "").unwrap();
-        assert!(!wait_ready("bash", id, probe), "silence is not a prompt");
+
+        let out = session_spawn(&spawn_invocation(
+            &["sh", "-c", "timeout 5 cat"],
+            &[("id", id), ("agent", "claude"), ("prompt", "say pong")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["prompt"], "not-ready", "data: {data}");
+        let log_path = data["logPath"].as_str().expect("logPath once registered");
+        let logged = std::fs::read_to_string(log_path).unwrap_or_default();
+        assert!(
+            !logged.contains("say pong"),
+            "the leftover record bought an early inject: {logged:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// M2's live shape, from the review: an UNREGISTERED target that prints a
+    /// banner and then spends seconds before its prompt. The tree cannot know
+    /// when it is ready, so it says exactly that — `delivered-unverified` —
+    /// never `delivered`.
+    #[test]
+    fn an_unregistered_target_is_injected_unverified_and_says_so() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_SPAWN_EXE",
+        ]);
+
+        let root = unique_stage("spawn-unverified");
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("AOIDE_CONDUCT_SPAWN_EXE", built_aoide_bin());
+
+        let id = "spawn-unverified";
+        let out = session_spawn(&spawn_invocation(
+            &["sh", "-c", "echo booting; sleep 6; echo READY; sleep 4"],
+            &[("id", id), ("agent", "bogus-harness"), ("prompt", "say pong")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["prompt"], "delivered-unverified", "data: {data}");
+        assert!(
+            out.message.contains("UNVERIFIED"),
+            "the message must not claim more than the tree knows: {}",
+            out.message
+        );
+        let logged = std::fs::read_to_string(data["logPath"].as_str().unwrap()).unwrap_or_default();
+        assert!(logged.contains("say pong"), "the text did go out: {logged:?}");
 
         let _ = std::fs::remove_dir_all(&root);
     }
