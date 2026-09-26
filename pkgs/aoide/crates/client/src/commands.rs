@@ -4257,10 +4257,11 @@ pub fn register_mail(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["mail", "send"],
-        summary: "File a letter into the mailbase. --to self/<name> files locally — self never crosses the wire. --to <node>/<name> spools it into that (already verified/paired) node's outbox and makes one best-effort delivery attempt right away; this command reports the WRITE, never the delivery outcome — see `mail outbox` for that.",
+        summary: "File a letter into the mailbase. --to self/<name> files locally — self never crosses the wire. --to <node>/<name> spools it into that (already verified/paired) node's outbox and makes one best-effort delivery attempt right away; this command reports the WRITE, never the delivery outcome — see `mail outbox` for that. --hold spools without ever dialing: the entry leaves when that node polls.",
         args: [arg!("text", "string", true, "The letter's text — put it after `--` so its own words/flags pass through verbatim.")],
         flags: [
             flag!("to", "string", "Recipient address, self/<name> or <node>/<name> (required). <node> must already be a verified node for anything but self. <name> is free text — a role name, never a session petname."),
+            flag!("hold", "bool", "Spool the letter but never dial it: it leaves only when that node itself polls (aoide/mailPoll), the relay-first flavor. Requires a <node>/<name> destination — self/<name> is filed locally and immediately, so there is nothing to hold."),
             flag!("from", "string", "Sender attribution override (default: AOIDE_SESSION_ID). Attribution only, not authentication."),
             flag!("subject", "string", "Single-line subject; enables structured signed letter content."),
             flag!("thread", "string", "Existing thread ID (64 lowercase hex); omitted starts a fresh thread."),
@@ -4597,8 +4598,21 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
     }
     let text = inv.args.join(" ");
     let from = mail_sender_attribution(inv).unwrap_or_default();
+    let hold = inv.flag_present("hold");
 
     if node == "self" || node == aoide_storage::display::local_host_name() {
+        if hold {
+            // A hold is a SPOOL fact — "wait to be polled" has no meaning for
+            // a filing that never leaves this box and has nobody to poll it.
+            // Refused rather than ignored: reporting a successful send that
+            // dropped the one thing the caller asked for is the lie the
+            // outbox's own write-is-the-report rule exists to avoid.
+            return Outcome::error(
+                cmd,
+                "`--hold` needs a node destination: self/<name> is filed locally and immediately, so there is nothing to hold",
+            )
+            .with_data(json!({ "reason": "hold-needs-a-node", "to": to }));
+        }
         return match aoide_storage::mail::file_letter(&from, name, &text) {
             Ok(entry) => {
                 let mut data = serde_json::to_value(&entry).unwrap_or_default();
@@ -4671,7 +4685,12 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
         Err(e) => return Outcome::error(cmd, format!("state/mail: {e}")),
     };
     let msgid = envelope.msgid.clone();
-    if let Err(e) = aoide_storage::outbox::write_entry(node, &aoide_storage::outbox::OutboxEntry::fresh(envelope.clone())) {
+    let entry = if hold {
+        aoide_storage::outbox::OutboxEntry::held(envelope.clone())
+    } else {
+        aoide_storage::outbox::OutboxEntry::fresh(envelope.clone())
+    };
+    if let Err(e) = aoide_storage::outbox::write_entry(node, &entry) {
         return Outcome::error(cmd, format!("state/outbox: {e}"));
     }
     // Best-effort — this command already reported the WRITE above and
@@ -4689,9 +4708,19 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
         obj.insert("delivery".to_string(), delivery);
     }
 
-    Outcome::ok(cmd, format!("spooled to {node}/{name} (msgid {msgid})"))
-        .changed(vec![format!("state/outbox/{node}/: +1 entry")])
-        .with_data(data)
+    Outcome::ok(
+        cmd,
+        if hold {
+            format!("held for {node}/{name} (msgid {msgid}) — a drain never dials it; it leaves when {node} polls")
+        } else {
+            format!("spooled to {node}/{name} (msgid {msgid})")
+        },
+    )
+    .changed(vec![format!(
+        "state/outbox/{node}/: +1 {} entry",
+        if hold { "hold" } else { "now" }
+    )])
+    .with_data(data)
 }
 
 /// `aoide mail read (--for <name> | --all-names) [--reread] [--json]`.
@@ -4892,6 +4921,7 @@ fn handle_mail_outbox(inv: &Invocation) -> Outcome {
                 "node": node,
                 "msgid": e.envelope.msgid,
                 "to": format!("{}/{}", to.node, to.name),
+                "flavor": e.flavor,
                 "tries": e.tries,
                 "lastTryAt": e.last_try_at,
                 "lastOutcome": e.last_outcome,
@@ -4913,6 +4943,9 @@ fn handle_mail_outbox(inv: &Invocation) -> Outcome {
                     r["to"].as_str().unwrap_or(""),
                     r["tries"],
                 );
+                if r["flavor"].as_str() == Some(aoide_storage::outbox::FLAVOR_HOLD) {
+                    line.push_str("  hold (leaves only when its node polls)");
+                }
                 if let Some(reason) = r["delivery"]["reason"].as_str() {
                     line.push_str(&format!("  reason {reason}"));
                 }
@@ -8252,9 +8285,60 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// `mail send --hold` (P-M3): the entry is spooled HELD — a drain will
+    /// never dial it, so the command says so plainly rather than reporting a
+    /// bare "spooled", and `mail outbox` shows which entries are held.
     #[test]
-    fn mail_outbox_reports_waiting_tries_and_last_outcome_per_entry() {
+    fn mail_send_hold_spools_a_held_entry_and_reports_it_as_held() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-hold");
+
+        aoide_storage::node_store::save_nodes(&[verified_node("osaka", "http://127.0.0.1:1/")]).unwrap();
+
+        let out = handle_mail_send(&mail_inv_with_flags(
+            &["mail", "send"],
+            &["wait for my ask"],
+            &[("to", "osaka/bob"), ("hold", "")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        assert!(out.message.contains("held for osaka/bob"), "a held send says it is held: {}", out.message);
+        assert!(out.message.contains("polls"), "and who moves it: {}", out.message);
+
+        let spooled = aoide_storage::outbox::list_entries("osaka").unwrap();
+        assert_eq!(spooled.len(), 1);
+        assert!(spooled[0].is_held(), "the spooled entry carries the hold flavor");
+        assert_eq!(spooled[0].tries, 0, "a hold entry is never dialed, so it is never attempted");
+
+        let listing = handle_mail_outbox(&mail_inv(&["mail", "outbox"], &[]));
+        let rows = listing.data.unwrap()["entries"].as_array().unwrap().clone();
+        assert_eq!(rows[0]["flavor"], aoide_storage::outbox::FLAVOR_HOLD);
+        assert!(listing.message.contains("hold (leaves only when its node polls)"), "the listing says it: {}", listing.message);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A hold with nothing to hold: `self` filing is local and immediate, so
+    /// the flag is refused by NAME rather than silently dropped — the caller
+    /// asked for a wait that cannot exist, and "Ok" would be a lie.
+    #[test]
+    fn mail_send_hold_to_self_is_refused_and_files_nothing() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-hold-self");
+
+        let out = handle_mail_send(&mail_inv_with_flags(
+            &["mail", "send"],
+            &["nothing to hold"],
+            &[("to", "self/bob"), ("hold", "")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "msg: {}", out.message);
+        assert_eq!(out.data.unwrap()["reason"], "hold-needs-a-node");
+        assert!(aoide_storage::mail::read_base().unwrap().is_empty(), "nothing was filed either way");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mail_outbox_reports_waiting_tries_and_last_outcome_per_entry() {        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-outbox-report");
 
         let envelope = aoide_storage::mail::mint_outbound_letter("here", "osaka", "bob", "hi").unwrap();

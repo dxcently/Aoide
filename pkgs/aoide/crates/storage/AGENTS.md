@@ -736,6 +736,30 @@
   does not remove it — the kill-list discipline `undying`/`manifest`
   above hold for their own state applies here too: only an explicit
   human action or a genuine delivery confirmation removes a record.
+- **`flavor` is a LOCAL entry fact, additive both ways (P-M3).** `now`
+  (attempted on every drain) vs `hold` (never attempted — it leaves only
+  through the destination's own `aoide/mailPoll`). The field must never
+  move onto the sealed `mail::Envelope`: an envelope is the immutable,
+  transfer-invariant unit whose `msgid` covers every byte of it, and the
+  flavor is the SENDER's routing intent, not part of the letter. On disk
+  the key is omitted for `now` (`flavor_is_now`), so every pre-P-M3 spool
+  file stays byte-identical and deserializes as `now`; and `is_held()` is
+  the only spelling of the check — anything that is not exactly `hold`
+  counts as attemptable, so an unknown/absent value fails toward DIALED,
+  never toward parked forever. `OutboxEntry::held` spools a held entry;
+  nothing else should construct the flavor by hand.
+- **A poll is a READ, and `poll_entries` is its only entry point (P-M3).**
+  The offer rule lives there and nowhere else: every held entry toward the
+  node, plus every `now` entry with `tries > 0` whose last outcome did not
+  reach the peer (parked/`refused` ones included — a poller asking for its
+  own mail is a new fact; a never-attempted `now` entry excluded, the drain
+  owns it and offering it would double-drive one entry from two callers).
+  **Never add state to it**: no `tries` stamp, no `last_polled_at`, no
+  handed-over bookmark. Re-poll-before-ack idempotence is a CONSEQUENCE of
+  writing nothing (the same set is offered again) plus the receiver's
+  `msgid` dedup; a bookmark would be a second, drifting source of truth,
+  and any `tries` stamp on a poll would silently change which entries the
+  NEXT poll offers (the predicate reads exactly that field).
 - **`write_ack_if_absent` gates on PENDING state, never a permanent
   ledger (mail register §26 outbox fix).** A duplicate letter redelivery
   mints a fresh ack via `mail::mint_ack` on every call — the gate lives

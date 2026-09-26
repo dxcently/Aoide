@@ -286,6 +286,13 @@ into the live inbox.
   satisfies the node-name grammar (`^[a-z0-9][a-z0-9-]*$`,
   `valid_node_name`) or the filing is refused before anything is
   written — never clamped, never rewritten.
+- **`--hold` needs a node destination.** It spools the entry with the
+  `hold` flavor — a drain never dials it, and it leaves only when that
+  node polls (`aoide/mailPoll`). A `self/<name>` filing is local and
+  immediate and has nobody to poll it, so the combination is refused by
+  name (`hold-needs-a-node`) rather than accepted with the flag silently
+  dropped: the write-is-the-report rule means a command may not report a
+  spool it did not make.
 - **Address role names, never session petnames.** Petnames are minted
   `adjective-noun` per session and change on every respawn; a role name
   (`rebuild-reports`, `conductor`) outlives the session that reads it.

@@ -430,7 +430,29 @@ never the inbound/serve half (that's `aoide-server`).
   confirmation (ruling 4: no separate ack-of-an-ack), so `drain_node`
   removes it outright; an ordinary letter waits for a REAL ack instead,
   only having its `tries`/`last_try_at`/`last_outcome` bookkeeping
-  updated. **Two
+  updated. **P-M3 adds hold, the poll, and poll-on-contact to this same
+  function.** `drain_node` skips a `hold` entry exactly the way it skips a
+  parked one — filtered BEFORE the cap, since a held entry is permanent to
+  a drain too — and a pass that reached the node at all (at least one
+  deposit answered, delivered or refused) ends by calling `poll_node` on
+  that same session, under the same `.bsy` lock and the same
+  `TunnelTeardownGuard`: one contact, both directions. A pass that never
+  got a response does not poll; and because nothing attemptable means no
+  dial at all, a `--hold`-only spool does not contact the node (`mail send
+  --hold`'s own post-spool report therefore still reads `queued`).
+  `post_signed(node, method, params)` is the dial/bearer/sign/POST/parse
+  half both methods share — `attempt_deposit` and `poll_node` are two
+  readings of its `SignedCall`, never two copies of the wire machinery.
+  `poll_node` posts `{"node": <this box's own name>}`, and receives each
+  handed-over envelope through the SAME `aoide_storage::mail::deposit`
+  chain a pushed deposit gets (hop = the node polled, origin = the
+  envelope's own `header.from.node`), then through `settle_deposit`:
+  filing a letter spools its ack toward the letter's origin, a receipt
+  retires the entry it confirms, and a re-poll before the ack files
+  nothing twice and spools nothing twice. `settle_deposit` is the ONLY
+  implementation of that outcome-follows dispatch — `aoide-server::a2a::
+  mail_deposit` reaches the same function through `aoide_conduct::
+  mail_bridge` rather than keeping its own copy. **Two
   locks, never nested** (mirrors `aoide_storage::outbox`'s own module
   doc): `drain_node` takes `.bsy` via `try_take_link_lock` — non-blocking,
   per-node, held across the whole function, safe to span network I/O — and

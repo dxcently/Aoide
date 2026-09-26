@@ -3022,12 +3022,25 @@ check, the ack re-spooled. A tool that moves or archives entries out of
 ```json
 {
   "envelope": { "...": "the sealed Envelope, byte-identical to mint time" },
+  "flavor": "hold",
   "tries": 2,
   "lastTryAt": "2026-09-07T14:03:10Z",
   "lastOutcome": "accepted",
   "refused": false
 }
 ```
+
+`flavor` is **v0+1 (P-M3, 2026-09-09, additive)**: `now` (deliver or
+queue+retry — attempted on every drain) or `hold` (wait to be polled —
+never attempted by a drain at all; it leaves only through the
+destination's own `aoide/mailPoll`). A `now` entry **omits the key
+entirely** and an absent key reads as `now`, so every pre-P-M3 spool file
+is byte-identical before and after this field existed; a value that is
+neither constant also reads as `now`, because an unrecognised flavor must
+fail toward being dialed rather than toward being parked forever. The
+flavor is a LOCAL fact of the entry and never a field of the sealed
+envelope — the `msgid` covers every byte of the envelope, and the flavor
+is the sender's routing intent, not part of the letter.
 
 The envelope is stored VERBATIM — a retry resends the exact signed bytes,
 never re-mints (a re-mint would also mint a fresh, different `msgid`,
@@ -6675,6 +6688,82 @@ simply matches nothing and retires nothing; every `state/outbox/` call
 here runs strictly AFTER `mail::deposit` has already released its own
 lock, never nested inside it (`mail`'s and `outbox`'s stage locks are the
 identical non-reentrant primitive).
+
+### `aoide/mailPoll` (P-M3, `docs/architecture/MAIL.md`)
+
+The second mail method on the SAME existing door, and the relay-first half
+of the model: a member with no inbound address asks a node it can reach
+for everything that node spooled toward it. No new transport, no new
+server, no new port, no new file — a poll is a READ.
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "method": "aoide/mailPoll",
+  "params": { "node": "yomi-strix" } }
+```
+
+`node` is required; a missing or empty one is `-32602`, refused BEFORE any
+lookup (the same shape-before-existence precedence `aoide/pairPoll`
+holds). **Admission** resolves the caller exactly as `mailDeposit` does —
+a verified per-request signature, key-resolved — and then requires BOTH
+`node_may_message` (paired, `verified`, `"message"` in this node's
+`allows`) AND `params.node` equal to the caller's own resolved name:
+MAIL.md §Wire's "the caller's verified identity must BE `node` (no polling
+on another's behalf)". A refusal is `-32010`, the SAME code the deposit arm
+mints (never `-32006`/`-32007`), in one of three shapes: the claim is not
+the signer (told both names), paired but `message` missing (told the exact
+`aoide node allow <name> message on` fix, which runs on the POLLED host),
+or no verified signature resolution at all (told to pair first).
+
+**`down` is not enforced here yet.** It is declared in
+`[mesh.<name>.status]`, a declaration the door does not read until P-M4
+(MAIL.md §Status); P-M3's reachable refusal is the `message` half, which
+`aoide node allow <node> message off` — the per-request quarantine that
+already exists — is expressed by. P-M4 adds the declaration read and the
+`down` clause to this same predicate; that is a scope line, not a stubbed
+branch.
+
+A successful poll answers
+
+```json
+{ "result": { "envelopes": [ { "...": "an Envelope, as mailDeposit takes it" } ] } }
+```
+
+— every entry this box spooled toward `node` that `node` itself may take,
+oldest first: all `hold`-flavored ones, and `now` ones whose own attempts
+have been failing (`tries > 0` with a last outcome that did not reach the
+peer; parked/`refused` entries included, never-attempted ones excluded —
+the drain owns those, and offering one here would double-drive it from two
+callers). Nothing else rides the answer: no flavor, no tries, no route.
+
+**A poll writes nothing at all.** No `tries` stamp, no `last_polled_at`,
+no "already handed over" bookmark — which is exactly why a re-poll before
+the ack hands the same envelopes over again, and why an entry still leaves
+the spool only when the far end's ordinary receipt retires it (a `letter`
+filed by the poller mints a receipt exactly as a deposit would; an ack is
+an envelope, so the poller's own next drain carries it back) or through
+`aoide mail outbox rm <msgid>`. The receiving side is the SAME receive path
+a pushed deposit takes — `aoide_client::mail_wire::poll_node` runs
+`mail::deposit`'s whole chain (recompute `msgid`, verify the ORIGIN
+against `header.from.node`'s own key, dedup against `seen.jsonl`, file)
+with the hop set to the node it polled, then the shared outcome dispatch
+(`settle_deposit`, the one implementation the door reaches through
+`aoide_conduct::mail_bridge`) — so the poller's `msgid` dedup, not any
+bookmark here, is what makes a re-poll harmless.
+
+**This method self-audits UNCONDITIONALLY under its own
+`a2a.aoide/mailPoll` label** — at the admission refusal and again with the
+handed-over count — and the connection handler's audit-name whitelist
+carries the name beside `aoide/mailDeposit`'s so a poll never logs as bare
+`a2a.rpc`. The count is the pull direction's flood signal: a relay
+answering one node with hundreds of letters is visible at the node that
+spooled them.
+
+`aoide/mailPoll` is driven from `aoide_client::mail_wire::poll_node`, called
+by `drain_node` at the end of any pass that actually reached the node
+(`docs/architecture/MAIL.md` §Outbox, "poll-on-contact"). There is no
+`aoide mail poll` command: the drain-on-contact is the whole of P-M3, and a
+standing poll trigger for a node with nothing to deposit is the HTTPS/`poll`
+address work's (HTTPS-MESH-API.md H1).
 
 ---
 
