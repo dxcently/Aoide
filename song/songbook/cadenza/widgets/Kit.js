@@ -66,7 +66,8 @@ function make(livery, fm) {
         // ── functions (so a helper needs only the object) ─────────────────
         withA: withA, helper: helper,
         gaugeText: gaugeText, sparkText: sparkText, brailleLines: brailleLines,
-        barColumn: barColumn, padL: padL, padR: padR, lampGlyph: lampGlyph
+        barColumn: barColumn, padL: padL, padR: padR, lampGlyph: lampGlyph,
+        rep: rep, clamp01: clamp01
     }
     k.cells = function(n) { return Math.round(n * k.cellW) }
     k.lines = function(n) { return Math.round(n * k.cellH) }
