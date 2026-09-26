@@ -16,6 +16,9 @@
 //       "click": { "action": "set"|"clear", "project": "melete", "new": false },
 //                             // with pane "jack": click that chip (the line
 //                             //   goes to the bridge below, never a socket)
+//       "riceClicks": 2,      // click the RICE cell that many times (one
+//                             //   bridge.toggleRiceMode in the canvas log,
+//                             //   the cell pending `…`)
 //       "reply": { "ok": false, "reason": "…", "message": "…" } }
 //                             // present: the bar gets a reply-stub bridge
 //                             //   whose workspaceAction answers THIS (and
@@ -81,6 +84,10 @@ Item {
         if (c.pane === "jack") Qt.callLater(function () { b.previewJack(c.jack || 1) })
         else if (c.pane) Qt.callLater(function () { b.previewPane(c.pane) })
         if (c.pane) retry.restart()
+        // the RICE cell: `riceClicks` clicks through the bar's own toggle (the
+        // first sends; the rest, and a second apply(), are swallowed while it
+        // is pending — the canvas log shows ONE bridge.toggleRiceMode)
+        for (var i = 0; i < (c.riceClicks || 0); i++) b.toggleRice()
     }
     // the jack row fills in when Hyprland's workspace list arrives, which can
     // land after the first apply(); retry briefly until the pane is up

@@ -37,7 +37,9 @@
 //   [⏻] → powermenu.toggle()          jack click → workspace.activate()
 //   AGT / NOTIF → dock.openTab("overview"|"notif"), falling back to
 //        dock.toggle() when the dock has no openTab
-//   RICE → bridge.toggleRiceMode()     session row → bridge.focusSession(id)
+//   RICE → bridge.toggleRiceMode() ONCE, then a dim `…` and no more clicks
+//        until livery.riceMode changes (or 10s)
+//   session row → bridge.focusSession(id)
 //   SOUND+BT/NET/BAT/TRAY/clock → their own pane (one open at a time, click
 //        the cell again to close; wheel on the sound cell steps the volume);
 //        jack hover → the jack insight pane.
@@ -1252,6 +1254,23 @@ Item {
     }
     function modeWord(m) { return m === "staging" ? "stg" : (m === "draft" ? "drft" : "decl") }
     function modeColor(m) { return m === "staging" ? root.kit.title : (m === "draft" ? root.kit.path : root.kit.dim) }
+    // The RICE toggle in flight. A click sends the toggle once and the cell
+    // reads a dim `…` at once; every further click is ignored until
+    // livery.riceMode (the facet's watch of song/stage/mode.json `mode`)
+    // actually changes, or 10s pass with it unchanged — then the cell is
+    // itself again and says nothing more. A switch reloads the whole shell,
+    // so the mark only has to hold until then; its job is to swallow the
+    // double click that sent two toggles.
+    property bool ricePending: false
+    readonly property string riceModeNow: root.livery.riceMode || "declarative"
+    onRiceModeNowChanged: { root.ricePending = false; ricePendingTimer.stop() }
+    function toggleRice() {
+        if (root.ricePending) return
+        root.ricePending = true
+        ricePendingTimer.restart()
+        if (root.bridge && root.bridge.toggleRiceMode) root.bridge.toggleRiceMode()
+    }
+    Timer { id: ricePendingTimer; interval: 10000; onTriggered: root.ricePending = false }
 
     // ── actions ─────────────────────────────────────────────────────────────
     function openBoard(tab) {
@@ -1857,9 +1876,12 @@ Item {
         Cell {
             kit: root.kit
             glyph: root.kit.glyph.rice
-            value: root.modeWord(root.livery.riceMode)
-            valueColor: root.modeColor(root.livery.riceMode)
-            onActivated: root.bridge.toggleRiceMode()
+            // pending: `…` padded to the word it replaces, so the clock never moves
+            value: root.ricePending
+                   ? "…" + root.kit.rep(" ", root.modeWord(root.livery.riceMode).length - 1)
+                   : root.modeWord(root.livery.riceMode)
+            valueColor: root.ricePending ? root.kit.dim : root.modeColor(root.livery.riceMode)
+            onActivated: root.toggleRice()
         }
         Sep { kit: root.kit }
         Cell {

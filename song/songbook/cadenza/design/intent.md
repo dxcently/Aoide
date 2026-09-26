@@ -235,6 +235,12 @@ One 28px line in the tmux/termui idiom, left to right:
   `󰁹 88%`, the tray, `󰏘 stg` (the rice-mode toggle), and the clock
   `14:02:31` (the calendar pane). CPU and spend are not on the bar; they
   live on the board's SYS tab.
+- **The rice-mode toggle is one click.** A click sends the toggle once and
+  the cell reads a dim `󰏘 …` (padded to the word, so nothing moves) at
+  once; further clicks do nothing until the mode (`song/stage/mode.json`
+  `mode`, through `livery.riceMode`) actually changes, or 10s pass. A
+  switch reloads the shell; a toggle that changed nothing in 10s simply
+  returns the cell to its word and says no more.
 - **The sound + bluetooth pane.** One pane, two sections. SOUND: the output
   and input with volume and mute (click toggles mute, wheel steps volume),
   and the default device picker. BLUETOOTH: a power toggle `[on]`/`[off]`,
@@ -487,6 +493,14 @@ list is real (Hyprland + `sessions.json`), the numbers read `no usage data
 A centred command pane: `> ` prompt, fuzzy list with `[n]` indices, modes as
 tabs in the rule (`apps │ clip │ ledger`) — clipboard and the grimoire ledger
 stay the facet data seams they are.
+- **Search first, then the number.** A query is searched in every mode,
+  digits included: apps and ledger match an app's name AND its desktop id
+  (so `2048` finds 2048), clip matches the preview text. Only when a query
+  that is wholly a positive integer n finds NOTHING in the current mode, and
+  n is no more than that mode's list at rest, does it name a row: the list
+  at rest shows, row n takes the selected styling (the one amber `[n]`),
+  and Enter fires row n. Any real match always wins; a number past the list
+  is a plain "no match".
 
 ### 3.6 Power menu (`powermenu`, `aoide-powermenu`)
 A centred pane like a shell prompt: `┌─ SHUTDOWN ─┐` with `[l] lock
@@ -600,3 +614,8 @@ reads a fixture path.
   name, one `workspaceaction` line pinned to that jack); special (negative)
   workspaces draw no pad; the switchboard fixture follows core's project
   rule (explicit > owner > workspace default > cwd) (§3.2).
+- 2026-09-26 — khoa: a digits-only launcher query still searches first
+  (names and desktop ids); only when it finds nothing does `n` name row n,
+  lit amber, and Enter fire it (§3.5). The RICE cell turns a dim `…` on the
+  click and swallows further clicks until the mode changes or 10s pass, so
+  a double click can no longer send two toggles (§3.1).
