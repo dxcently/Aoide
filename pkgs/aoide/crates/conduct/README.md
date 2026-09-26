@@ -1240,8 +1240,9 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   counts LIVE sessions only. A periodic refresh timer over this file is a
   later phase's concern, not this one's.
 - `mail_bridge` (P-M2, architect's ruling 1: "spool in storage, wire lane
-  in client, bridge through conduct") — a thin, two-function passthrough
-  onto `aoide_client::mail_wire`'s outbox drain, with no logic of its own.
+  in client, bridge through conduct") — a thin, three-function passthrough
+  onto `aoide_client::mail_wire`'s outbox drain and receive path, with no
+  logic of its own.
   It exists purely as a crate-DAG detour: `aoide-server` depends on
   `aoide-client` only as a dev-dependency (a production edge is refused by
   the manifest, not merely discouraged), but `aoide-conduct` already
@@ -1254,7 +1255,12 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   tick" shape — walks every node `aoide_storage::outbox::nodes_with_outbox`
   reports, letting one node's `Err` (a genuine local I/O failure, never an
   ordinary unreachable-node outcome) skip that node without stopping the
-  sweep.
+  sweep. `settle_deposit(envelope, outcome)` is P-M3's third: the one
+  place an envelope's deposit OUTCOME turns into spool side effects (the
+  ack a filed letter owes its origin, the `retire_by_ack` a filed receipt
+  performs), reached by `aoide-server::a2a::mail_deposit` from here so that
+  the door and `mail_wire::poll_node`'s own hand-over loop cannot drift on
+  what receiving a letter means.
 
 ## What it consumes
 
@@ -1267,8 +1273,9 @@ list`'s discovery sweep calls `aoide_client::discover::run_sweep` —
 P-P6's one sweep implementation, task #120 P2; `send --to`'s
 remote branch calls `aoide_client::commands::send_message_to_node`,
 workstream C3; every session-write handler calls `aoide_client::daemon::
-daemon_dispatch`, P-D6; `mail_bridge`'s two functions call
-`aoide_client::mail_wire::drain_node`, P-M2, ruling 1 — the ONE other edge
+daemon_dispatch`, P-D6; `mail_bridge`'s functions call
+`aoide_client::mail_wire::drain_node`/`settle_deposit`, P-M2/P-M3, ruling 1
+— the ONE other edge
 this crate carries specifically so `aoide-server` never has to; see
 `client`'s own README for why that edge stays).
 

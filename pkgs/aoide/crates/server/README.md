@@ -482,7 +482,8 @@ the inbound half of the two-door contract (the outbound half is
   lookup keyed on the receipt's own verified origin and acked msgid, so a
   forged or stale ack simply retires nothing). A **duplicate** re-sends the ack only
   when the original filing was a letter, and is a silent no-op otherwise,
-  so an ack is never itself acked — but `spool_and_drain_ack` spools that
+  so an ack is never itself acked — but `aoide_client::mail_wire::
+  settle_deposit` (through `aoide_conduct::mail_bridge`) spools that
   resend through `aoide_storage::outbox::write_ack_if_absent`, not a bare
   write (mail register §26 outbox fix): a redelivery is skipped only while
   an ack for the same msgid is still sitting undelivered in the origin's
@@ -497,6 +498,38 @@ the inbound half of the two-door contract (the outbound half is
   AFTER `mail::deposit` has already released its own lock — `mail` and
   `outbox` share the identical non-reentrant stage-lock primitive, so
   nesting one inside the other would deadlock a process against itself.
+  **`aoide/mailPoll` (P-M3, `docs/architecture/MAIL.md`, CONTRACTS.md
+  §6) is the relay-first half of the same model: a member with no inbound
+  address asks a node it reaches for everything that node spooled toward
+  it.** `mail_poll` demands `{node}` — a missing/empty one is `-32602`,
+  refused before any lookup, the same shape-before-existence precedence
+  `pair_poll` holds — resolves the caller the identical KEY-RESOLVED way
+  `mail_deposit` does, and then requires `poll_admitted`: `node_may_message`
+  AND `params.node == the caller's own resolved name`, because MAIL.md
+  §Wire's rule is "the caller's verified identity must BE `node` (no
+  polling on another's behalf)". A refusal is the SAME `-32010` the
+  deposit arm mints, in three shapes (claiming a node this request is not
+  signed as; paired but `message` not in `allows`, told the exact `node
+  allow … message on` fix; no verified signature resolution at all). The
+  answer is exactly `{envelopes: […]}` — the sealed envelopes, oldest
+  first, from `aoide_storage::outbox::poll_entries`: every `hold` entry
+  toward that node plus every `now` entry whose own attempts have been
+  failing. **A poll writes NOTHING** — no `tries`, no bookmark, no new
+  state file anywhere: hand-over leaves the entry exactly where it was, and
+  it retires only the two ways it always did (a valid ack, `mail outbox
+  rm`), which is what makes a re-poll before the ack hand the same
+  envelopes over again by construction. It self-audits UNCONDITIONALLY
+  under its own `a2a.aoide/mailPoll` label, carrying the caller and the
+  handed-over COUNT — the pull direction's flood signal, visible at the
+  node that spooled the letters. The answer is BOUNDED at
+  `aoide_storage::outbox::POLL_BATCH_CAP` (50), oldest first: the poller
+  acks what it files, so the next poll advances, and an unbounded batch
+  would be a body the client's own `MAX_RESPONSE_BYTES` refuses. `down` is
+  not part of this door's
+  admission yet: it is `[mesh.<name>.status]`, a declaration the door does
+  not read until P-M4 (MAIL.md §Status), so P-M3's reachable refusal is the
+  `message` half (`aoide node allow <node> message off`, the per-request
+  quarantine that already exists).
 - `discovery` — the discovery advertisement's SEND half (P-P6 + task
   #120, `docs/architecture/PAIRING.md`'s "Discovery
   (advertise-but-locked)" section, CONTRACTS.md §6's "Discovery

@@ -762,7 +762,7 @@
   own per-command audit, so this is the ONLY place a flood becomes
   visible, and volume must show whether every one of those deposits
   landed accepted, refused, or malformed. **Every `outbox` call
-  (`spool_and_drain_ack`'s spool, `retire_by_ack`) runs AFTER
+  (`settle_deposit`'s spool, `retire_by_ack`) runs AFTER
   `mail::deposit` has already returned and released its own lock — never
   nested inside it.** `mail`'s and `outbox`'s stage locks wrap the
   identical `fs::try_stage_lock`, a plain blocking `flock`, not
@@ -804,6 +804,40 @@
   survives the pending entry's own removal here; a prior attempt at
   exactly that broke
   `a2a::tests::a_duplicate_of_a_filed_letter_respools_its_ack`.
+- **`aoide/mailPoll` (P-M3) is the SAME admission question asked one node
+  narrower, and the hand-over side of mail rather than the deposit side.**
+  `poll_admitted` = `node_may_message` PLUS `params.node == the resolved
+  caller's own name` — MAIL.md §Wire's "the caller's verified identity must
+  BE `node`". A refusal reuses `-32010` (never a new code, never
+  `-32006`/`-32007`) in three shapes. **The `down` clause is NOT here yet**:
+  `down` lives in `[mesh.<name>.status]`, a declaration this door does not
+  read until P-M4 (`mail_poll`'s own doc says where the clause lands), so
+  don't invent a `down` lookup in the door to satisfy the spec line early —
+  `aoide node allow <node> message off` is the quarantine that exists.
+  **`mail_poll` writes nothing at all.** Its whole body is
+  `aoide_storage::outbox::poll_entries` (the ONE place the offer rule lives:
+  held always, `now` only when its own attempts have been failing) plus a
+  self-audit under `a2a.aoide/mailPoll` carrying the handed-over count. No
+  `tries` stamp, no bookmark, no "already handed over" flag may be added
+  here: the re-poll-before-ack idempotence comes from handing the SAME set
+  over again, and the entry retires only through a valid ack or `mail
+  outbox rm`, exactly as a pushed deposit's would. The answer is bounded by
+  `aoide_storage::outbox::POLL_BATCH_CAP`; that bound is what keeps a big
+  spool draining (the poller's acks retire the batch it took) and what
+  keeps the answer under the client's `MAX_RESPONSE_BYTES`. **The door has
+  two triggers, and neither may grow a second receive path:** the explicit
+  `aoide mail poll [<node>]` (which dials, then calls
+  `aoide_client::mail_wire::poll_node` — the same function the drain calls)
+  and a drain pass that actually reached this node. The audit-name whitelist
+  in the connection handler gains this name beside `aoide/mailDeposit`'s,
+  so no poll ever logs as bare `a2a.rpc`
+  (`a2a::tests::every_poll_self_audits_under_its_own_label_with_the_count`).
+- **`spool_and_drain_ack` no longer lives in this crate.** The
+  outcome-follows side of a deposit (mint/spool the ack, `retire_by_ack`)
+  is `aoide_client::mail_wire::settle_deposit`, reached from `mail_deposit`
+  through `aoide_conduct::mail_bridge::settle_deposit`, because the poll's
+  own hand-over loop in `aoide-client` must receive envelopes through the
+  identical code. Never re-add a second copy of that dispatch in `a2a.rs`.
 
 ## Extension points
 

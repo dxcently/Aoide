@@ -660,7 +660,33 @@ by decision — no embedded database yet
   the entry a transport failure actually hit before backing off), a thin
   bridge in `aoide-conduct::mail_bridge`, the same split `tunnel` above
   already holds between record CRUD (here) and the ssh child process
-  (`client`).
+  (`client`). **P-M3 adds the entry's own `flavor` and the poll's read.**
+  `flavor` is `now` (attempted on every drain) or `hold` (never attempted —
+  it leaves only through the destination's own `aoide/mailPoll`); it is a
+  LOCAL fact of the entry, never a field of the sealed envelope, and it is
+  additive on disk in both directions: a `now` entry omits the key entirely
+  (`flavor_is_now`), so a pre-P-M3 spool file stays byte-identical and reads
+  back as `now`, while any value that is not exactly `hold` also reads as
+  attemptable — an unknown flavor fails toward being dialed, never toward
+  being silently parked forever. `OutboxEntry::held` is the constructor a
+  held entry is spooled with; `is_held` is the one spelling of the check.
+  `poll_entries` is the WHOLE offer rule for a poll, in one place: every
+  held entry toward that node, plus every `now` entry whose own attempts
+  have been failing (`tries > 0` and its last outcome did not reach the
+  peer — parked/refused ones included, a never-attempted one excluded
+  because the drain owns it). **It writes nothing at all** — no `tries`,
+  no bookmark, no new file: that is what makes a re-poll before the ack
+  hand the same envelopes over again, and why retirement stays exactly the
+  two paths it always had (a valid ack, `mail outbox rm`). The offer is
+  bounded at `POLL_BATCH_CAP` (50 — the drain's own batch size,
+  re-derived rather than imported, since `storage` sits below `client` in
+  the DAG), oldest first, and the cap applies AFTER the filter for the
+  drain's own reason. **Why bounding is safe here and only here:** a
+  poller acks what it files, those entries retire, and the next poll
+  answers with the next batch — so a big spool drains in bounded steps.
+  Leaving it unbounded would hand one JSON array of whole envelopes to a
+  client that refuses any response over 20 MiB (`MAX_RESPONSE_BYTES`): a
+  stall no retry could clear, since nothing at the hub would change.
 - `identity` — this instance's lazily-minted ed25519 keypair (pairing
   workstream P-P1, `docs/architecture/PAIRING.md`, CONTRACTS.md §4's
   `state/identity/` subsection): `state/identity/ed25519.key` (the raw

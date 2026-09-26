@@ -286,6 +286,13 @@ into the live inbox.
   satisfies the node-name grammar (`^[a-z0-9][a-z0-9-]*$`,
   `valid_node_name`) or the filing is refused before anything is
   written — never clamped, never rewritten.
+- **`--hold` needs a node destination.** It spools the entry with the
+  `hold` flavor — a drain never dials it, and it leaves only when that
+  node polls (`aoide/mailPoll`). A `self/<name>` filing is local and
+  immediate and has nobody to poll it, so the combination is refused by
+  name (`hold-needs-a-node`) rather than accepted with the flag silently
+  dropped: the write-is-the-report rule means a command may not report a
+  spool it did not make.
 - **Address role names, never session petnames.** Petnames are minted
   `adjective-noun` per session and change on every respawn; a role name
   (`rebuild-reports`, `conductor`) outlives the session that reads it.
@@ -375,11 +382,23 @@ door's audit name whitelist gains both names so they never log as bare
 - **`aoide/mailPoll`** `{ node }` → `{ envelopes[] }`. The caller asks
   "anything waiting for me?" and receives every outbox entry spooled
   toward the caller's node — all `hold` ones, and `now` ones whose own
-  attempts have been failing. The caller's verified identity must BE
-  `node` (no polling on another's behalf), hold `message`, and not be
-  `down`. Handed-over entries stay in the outbox until acked like any
-  other; a re-poll before the ack re-hands them and the receiver's dedup
-  makes that harmless.
+  attempts have been failing — oldest first, at most fifty of them per
+  answer (a bounded batch, like the drain's own; the poller's acks retire
+  what it filed, so a spool bigger than one answer drains over the next
+  asks instead of being declined as one oversized body). The caller's
+  verified identity must BE `node` (no polling on another's behalf), hold
+  `message`, and not be `down`. Handed-over entries stay in the outbox
+  until acked like any other; a re-poll before the ack re-hands them and
+  the receiver's dedup makes that harmless.
+- **The ask has two triggers, and they are the same call.**
+  `aoide mail poll [<node>]` dials the node named — or, with no argument,
+  every paired node this box holds `message` for — polls, files what comes
+  back through the receiving chain below, and acks it. A drain pass that
+  reached a node also ends by polling it (poll-on-contact), which is the
+  free case: a node with something to send gets its reply without asking.
+  The command is what a node with NOTHING to send needs — an empty outbox
+  never dials, so it would otherwise never receive at all — and it is the
+  trigger an OS timer (H1) drives for a `poll`-addressed box.
 - **Acks** are `receipt` envelopes minted by the destination on filing a
   `letter`: `to` = the origin, `text` = the acked `msgid`, signed by the
   destination. Routed like any letter, never themselves acked. **An
@@ -914,6 +933,7 @@ aoide mail outbox [<node>] [rm <msgid>]                  the spool, truthfully, 
 aoide mail route <node>                                  dry-run the four steps
 aoide mail rm --older-than <Nd|Nh>                       prune the base, never seen.jsonl
 aoide mail export [--dir <path>]                         one Markdown note per thread (read-only)
+aoide mail poll [<node>]                                 ask without depositing; no <node> polls every paired node holding message
 aoide mail ring --for <name> [--from <session-id>]       the doorbell, by hand; --from excludes that reader
 aoide mesh                          nodelist view: + status, role, key source, liveness
 aoide node allow <node> message off                      quarantine this box's door, now (existing command)
@@ -986,7 +1006,8 @@ READMEs), no subagent spawning and no backgrounded cargo in any brief.
   only when signed by `to.node`, a second drain on a busy link skips it
   and leaves the first untouched, an unsigned caller is refused by both
   mail methods, no forward outlives a drain session.
-- **P-M3 — hold and poll (M).** `aoide/mailPoll`, `--hold`, the drain's
+- **P-M3 — hold and poll (M).** `aoide/mailPoll`, `aoide mail poll
+  [<node>]`, `--hold`, the drain's
   never-attempt rule for hold, poll-on-contact. Tests: a hold entry
   drains only via poll; a poller receives only its own entries; a
   non-`message` or `down` poller is refused; re-poll before ack is
