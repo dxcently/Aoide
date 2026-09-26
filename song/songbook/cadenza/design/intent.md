@@ -300,19 +300,22 @@ A right-edge pane, full height under the bar, tabbed. The dock is cadenza's
 own board; it mounts none of sonata's gadget slots.
 
 ```
-┌─ BOARD ─────────────────────────────────────────┐
-│ OVERVIEW │ aoide │ melete │ mneme │ SYS │ NOTIF  │
-├─────────────────────────────────────────────────┤
+┌─ BOARD ───────────────────────────────────── 12 live [x] ┐
+│ OVERVIEW │ aoide │ melete │ mneme │ SYS │ NOTIF           │
+├──────────────────────────────────────────────────────────┤
 ```
 
-- **OVERVIEW** (first tab) — four panes on one screen: **AGENTS** (every
+- **OVERVIEW** (first tab) — its panes on one screen: **AGENTS** (every
   live agent: lamp, name, project, state, age; focus/send actions),
   **PROJECTS** (registered projects, the jacks each is bound to, live
-  counts), **TERMINALS** (conducted terminals: name, cwd, jack), **MAIL**
-  (active mail threads: mailbox, subject, last sender, age).
-- **one tab per project** — the project's board feed (chatter, mail,
-  receipts, its summonses), with that project's own agents and terminals in
-  a narrow rail on the right, and the composer at the bottom.
+  counts), **TERMINALS** (conducted terminals: name, cwd, jack), and, once
+  the mail read is published, **MAIL** (active mail threads: mailbox,
+  subject, last sender, age).
+- **one tab per project** — today that project's agents and terminals as
+  two panes across the full width. Once the board feed is published, the
+  project's feed (chatter, mail, receipts, its summonses) takes the left,
+  the agents and terminals move to a narrow rail on the right, and, once
+  posting is published, the composer sits at the bottom.
   ```
   │ 14:02 rook      ● turn settled               │ ● rook     │
   │ 14:02 minerva   ◐ Bash: cargo test           │ ◐ minerva  │
@@ -321,31 +324,45 @@ own board; it mounts none of sonata's gadget slots.
   ├──────────────────────────────────────────────┴────────────┤
   │ to: aoide ▾ │ > _                                          │
   ```
-- **SYS** — machine and spend on one tab: CPU/memory gauges and per-jack
-  sparklines (`state/usage/now.json`), and token/cost usage — the account
-  block (`state/usage.json`, real today) plus per-workspace/project totals
-  from the new store.
+- **SYS** — machine and spend on one tab: the machine's CPU and memory
+  gauges (the kernel's `/proc/stat` and `/proc/meminfo`, read as sonata's
+  meters reads them), the account block (`state/usage.json`), and, once
+  `state/usage/now.json` is published, per-jack sparklines and
+  per-workspace/project token and cost totals.
 - **NOTIF** — the herald: toasts and summonses as borderless blocks, quoted
   plain text, `[y] approve [n] deny` on a summons (the existing
   `heraldverdict` / `heralddismiss` commands, nothing else).
-- Opened exactly as sonata's dock is (`toggle()` from the bar, `SUPER+G`);
-  the bar's cells open it on a named tab.
+- **Opening** is sonata's dock's: `toggle()` from `SUPER+G`, and the bar's
+  cells open it on a named tab.
+- **Closing**, any of: the `[x]` cut into the BOARD rule beside the stat
+  (dim at rest, `title` on hover); Escape; `SUPER+G`; the bar cell of the
+  tab already showing (a cell toggles: on another tab it switches); a click
+  anywhere off the board. The last is a transparent full-screen catcher
+  (`aoide-dock-scrim`), one layer under the board and clear of the bar's
+  reserved zone, mapped only while the board is up. It draws nothing and
+  consumes the click that closes: that click does not reach the window
+  under it. The bar is outside it and stays clickable.
 
 **Untrusted text (house rule 4).** Every board `text`, `summary`, `body`,
 `subject` is rendered `Text.PlainText`, never linkified, never actionable.
 The composer is never pre-filled from an item.
 
-**Until the seams land:**
-| part | real today | honest empty until |
+**Until the seams land.** A part whose source is not published is not
+drawn at all: no "bridge not wired" pane on the live board. Each hidden
+part keeps its code behind one switch in `BoardBody.qml`, false until the
+source exists; turning the part back on is that one line, and the fixture
+harness (`BoardPreview.qml`) flips them to show the full board.
+| part | real today | hidden until (switch) |
 |---|---|---|
 | OVERVIEW agents / terminals | `sessions.json` | — |
-| OVERVIEW projects | `projects.json` (bindings column empty) | S1 for bindings |
-| OVERVIEW mail | — | `no mail view — bridge not wired` until S9/S10 |
-| project tabs (names) | `projects.json` | — |
-| project feed | — | `no feed — bridge not wired` until S8/S10 |
-| composer | drawn disabled, `post: bridge not wired` | S11 (agents), S12 (project) |
+| OVERVIEW projects | `projects.json` (bindings column `—`) | S1 fills the bindings |
+| OVERVIEW mail | — | S9/S10 (`hasMailRead`) |
+| project tabs: agents + terminals | `projects.json`, `sessions.json` | — |
+| project feed | — | S8/S10 (`hasBoardFeed`) |
+| composer | — | S11 agents, S12 project (`hasBoardPost`); drawn disabled until `boardpost` exists |
+| SYS machine CPU/mem | `/proc/stat`, `/proc/meminfo` | — |
 | SYS account usage | `state/usage.json` | — |
-| SYS CPU/mem, per-jack tokens/cost | — | `no usage data — bridge not wired` until S5/S6 |
+| SYS per-jack CPU/mem/tokens/cost | — | S5/S6 (`hasJackUsage`) |
 | NOTIF | `stage/herald.json` | — |
 
 ### 3.4 The jack insight pane

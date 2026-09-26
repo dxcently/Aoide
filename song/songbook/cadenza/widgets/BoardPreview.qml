@@ -6,9 +6,12 @@
 //       <worktree>/song/songbook/cadenza/widgets/BoardPreview.qml --song cadenza \
 //       --fixture <worktree>/song/songbook/cadenza/design/fixtures/board
 //
-// It loads BoardBody by URL and sets the SAME properties the live adapter
-// will set once the seams land — `boardWired` + `boards` (the §D answer of
-// `aoide project board`, S8–S10) and `usageNow` (§C now.json, S5/S6). The
+// It loads BoardBody by URL, flips the per-seam switches the live board keeps
+// off (`hasBoardFeed`, `hasMailRead`, `hasBoardPost`, `hasJackUsage` — on
+// once the matching fixture file loads; the composer's switch rides the
+// feed's) and feeds the SAME properties the live source will — `boards` (the
+// §D answer of `aoide project board`, S8–S10) and `usageNow` (§C now.json,
+// S5/S6). The
 // stage files (sessions/projects/hooks/herald) come in through `--fixture`
 // as usual; BoardBody itself never reads a fixture path.
 //
@@ -77,7 +80,10 @@ Item {
             shared: Qt.binding(() => harness.shared),
             stagingEngine: Qt.binding(() => harness.stagingEngine),
             open: true,
-            boardWired: Qt.binding(() => harness.boardAnswer !== null),
+            hasBoardFeed: Qt.binding(() => harness.boardAnswer !== null),
+            hasMailRead: Qt.binding(() => harness.boardAnswer !== null),
+            hasBoardPost: Qt.binding(() => harness.boardAnswer !== null),
+            hasJackUsage: Qt.binding(() => harness.nowAnswer !== null),
             boards: Qt.binding(function () {
                 var b = {}
                 if (harness.boardAnswer && harness.boardAnswer.project)

@@ -12,11 +12,11 @@ widget bodies for what each one reaches. Status: `design` → `preview` →
 |---|---|---|---|---|
 | `bar` | WidgetSlot · shell.qml PanelWindow (`aoide-bar`), extras `shared` `powermenu` `dock` `stagingEngine` | Hyprland workspaces + active window; `shared` session counts; `powermenu.toggle()`, `dock.toggle()`; Pipewire sinks/sources + mute + default switch; Bluetooth adapter/devices; UPower battery; Networking; SystemTray (SNI); `bridge.toggleRiceMode` + `stage/mode.json`; clock | the switchboard line (intent §3.1, §3.2) | design |
 | `calendar` | WidgetSlot · inside the bar | month grid | `cal` pane from the clock cell | design |
-| `dock` | SurfaceSlot · shell.qml (`aoide-dock`), extras `shared` `stagingEngine`; `toggle()` from the bar and `SUPER+G` | toggle contract | the tabbed board: OVERVIEW · project tabs · SYS · NOTIF (intent §3.3) | design |
+| `dock` | SurfaceSlot · shell.qml (`aoide-dock`), extras `shared` `stagingEngine`; `toggle()` from the bar and `SUPER+G` | toggle contract; `openTab(tab)` from the bar cells | the tabbed board: OVERVIEW · project tabs · SYS · NOTIF (intent §3.3); closes by `[x]`, Escape, `SUPER+G`, the showing tab's bar cell, or a click off it (the `aoide-dock-scrim` catcher) | design |
 | `conductor` | WidgetSlot · sonata's dock | `stage/sessions.json` + `hooks.json`; `bridge.focusSession`, `sessionAction`, `traceSession`, `recheckSessions`, `heraldverdict` | not authored — the board OVERVIEW AGENTS pane + project rails draw agents | design |
 | `terminals` | WidgetSlot · sonata's dock | sessions.json (terminal sessions), `focusSession`, `focusWindow` | not authored — OVERVIEW TERMINALS pane + project rails | design |
-| `usage` | WidgetSlot · sonata's dock | `state/usage.json` (`livery.usagePath`), `bridge.refreshUsage` | not authored — the SYS tab | design |
-| `meters` | WidgetSlot · sonata's dock | CPU/mem (the paths sonata's meters reads) | not authored — the SYS tab | design |
+| `usage` | WidgetSlot · sonata's dock | `state/usage.json` (`livery.usagePath`), `bridge.refreshUsage` | not authored — the SYS tab ACCOUNT pane | design |
+| `meters` | WidgetSlot · sonata's dock | CPU/mem (the paths sonata's meters reads) | not authored — the SYS tab MACHINE pane (`/proc/stat`, `/proc/meminfo`) | design |
 | `power` | WidgetSlot · sonata's dock | power vitals (sonata's `routePath` FileView), UPower | not authored — the bar `BAT` cell + its pane | design |
 | `herald-center` | WidgetSlot · sonata's dock | `stage/herald.json`, `heralddismiss`, `heraldverdict` | not authored — the NOTIF tab | design |
 | `herald` | SurfaceSlot · shell.qml | `stage/herald.json`, `heralddismiss`, `heraldverdict` | borderless toast (intent §3.7) | design |
@@ -44,10 +44,10 @@ recolours them; their shapes are out of the song's reach.
 | tie lines | `graph.json` `ties[]` (`kind` `project` / `spawned`) | S3 | derived: `spawned`/`anchors` edges + session window → Hyprland workspace |
 | lamps | `activeAt` on `workspaces[]` / `ties[]` | S3 | derived: `hooks.json` `updatedAt` advancing |
 | live cover (agents lit on the board) | a song-owned `wallpaper` slot anchor in the facet | not scheduled — a core ask | the static cover; no agent map |
-| jack insight + SYS per-jack numbers | `state/usage/now.json` (`by: "workspace"`) | S5 tokens/cost, S6 CPU/mem, S7 history | honest empty |
-| board feed + OVERVIEW mail | `aoide project board` via a shellbridge read op | S8–S10 | honest empty |
-| composer → agent | `{cmd:"boardpost", to:{session}}` | S11 | disabled |
-| composer → project | `{cmd:"boardpost", to:{project}}` | S12 (after §15 ML1) | agent targets only |
+| jack insight + SYS per-jack numbers | `state/usage/now.json` (`by: "workspace"`) | S5 tokens/cost, S6 CPU/mem, S7 history | jack pane: honest empty (§3.4); SYS per-jack: hidden (`hasJackUsage`) |
+| board feed + OVERVIEW mail | `aoide project board` via a shellbridge read op | S8–S10 | hidden (`hasBoardFeed`, `hasMailRead`); a project tab is its agents + terminals |
+| composer → agent | `{cmd:"boardpost", to:{session}}` | S11 | hidden (`hasBoardPost`) |
+| composer → project | `{cmd:"boardpost", to:{project}}` | S12 (after §15 ML1) | hidden (`hasBoardPost`); agent targets only once shown |
 
 **The derivation bend.** Until S3 publishes `ties`/`activeAt`, the bar
 joins three published facts itself: `graph.json` edges, `sessions.json`

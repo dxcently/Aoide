@@ -1,5 +1,6 @@
-// BoardOverview.qml — the board's first tab (intent §3.3): four panes on one
-// screen, AGENTS · PROJECTS · TERMINALS · MAIL.
+// BoardOverview.qml — the board's first tab (intent §3.3): its panes on one
+// screen, AGENTS · PROJECTS · TERMINALS, and MAIL once `board.hasMailRead`
+// (the mail read is not published yet; until then the pane is not drawn).
 //
 //   ┌─ AGENTS ───────────────────────────────────── 3/5 ┐
 //   │ ● rook-lantern   aoide     working    4m  phase 5… │
@@ -132,11 +133,13 @@ Item {
                           rows: Qt.binding(() => Math.max(1, root.terminals.length)),
                           content: terminalsBody })
             }
+            // MAIL: hidden until the mail read is published (board.hasMailRead)
             Use {
                 width: col.width
+                visible: root.board.hasMailRead
                 kit: root.kit; helper: "Pane"
                 props: ({ title: "mail", glow: "bloom",
-                          stat: Qt.binding(() => root.board.boardWired ? "" + root.board.mailThreads.length : ""),
+                          stat: Qt.binding(() => "" + root.board.mailThreads.length),
                           rows: Qt.binding(() => Math.max(1, Math.min(8, root.board.mailThreads.length))),
                           content: mailBody })
             }
@@ -410,17 +413,12 @@ Item {
             width: parent ? parent.width : 0
             readonly property int w: root.kit.fit(width)
             Text {
-                visible: !root.board.boardWired
-                text: "no mail view — bridge not wired"
-                color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
-            }
-            Text {
-                visible: root.board.boardWired && root.board.mailThreads.length === 0
+                visible: root.board.mailThreads.length === 0
                 text: "no active mail"
                 color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
             }
             Repeater {
-                model: root.board.boardWired ? root.board.mailThreads.slice(0, 8) : []
+                model: root.board.hasMailRead ? root.board.mailThreads.slice(0, 8) : []
                 Row {
                     id: mrow
                     required property var modelData

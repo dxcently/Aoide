@@ -3,7 +3,7 @@
 // is only the thin PanelWindow shell around it (the canvas refuses window
 // roots, so this Item is what `lyra preview` shows).
 //
-//   ┌─ BOARD ─────────────────────────────────────────── 12 live ┐
+//   ┌─ BOARD ─────────────────────────────────────── 12 live [x] ┐
 //   │ OVERVIEW │ aoide │ melete │ mneme │ SYS │ NOTIF !1          │
 //   │ ─────────────────────────────────────────────────────────── │
 //   │  (the tab's view: BoardOverview / BoardProject / BoardSys /  │
@@ -18,17 +18,25 @@
 //   livery.usagePath              state/usage.json, the account block
 //   state/undying.json            the undying mark (SessionMenu's read)
 //   state/usage/now.json          §C per-jack numbers — absent until S5/S6
+//   /proc/stat · /proc/meminfo    SYS machine CPU/mem, read by BoardSys
+//                                 (sonata's meters mechanism)
 // Stage/state dirs resolve exactly as sonata's SessionMenu does
 // (AOIDE_STAGE_DIR / AOIDE_STATE_DIR, else under AOIDE_ROOT).
 //
-// ── What it cannot read yet (honest empty, intent §3.3's table) ──────────
-// The board feed and the mail view come from `aoide project board` through
-// a shellbridge read op that does not exist (S8–S10). The live adapter will
-// set `boardWired` + `boards`; until then both stay empty and the views say
-// `no feed — bridge not wired` / `no mail view — bridge not wired`. Posting
-// (`boardpost`, S11/S12) is not wired: the composer is drawn disabled.
-// BoardPreview.qml feeds the fixture answer through these SAME properties;
-// this file never reads a fixture path.
+// ── What it cannot read yet: hidden, one switch per seam ─────────────────
+// A part whose source is not published is NOT drawn on the live board — no
+// "bridge not wired" pane anywhere (intent §3.3's table). Each seam has one
+// boolean below, false until its real published source exists; bringing a
+// part back is that one line:
+//   hasBoardFeed   a project tab's feed: `aoide project board` through a
+//                  shellbridge read op (S8–S10), delivered into `boards`
+//   hasMailRead    OVERVIEW's MAIL pane: the mail items of that answer (S9/S10)
+//   hasBoardPost   a project tab's composer: `{cmd:"boardpost"}` (S11/S12)
+//   hasJackUsage   SYS per-jack numbers: `state/usage/now.json` (S5/S6)
+// While a switch is off the part's code stays and its path is still read
+// (the now.json watch below), so turning it on is the whole change.
+// BoardPreview.qml flips them and feeds the fixture answer through these
+// SAME properties; this file never reads a fixture path.
 //
 // ── Actions (house rule 7: QML paints, the bridge acts) ──────────────────
 //   bridge.focusSession(id)                 a row / rail click
@@ -57,8 +65,11 @@ Item {
     property string tab: "overview"
     signal closeRequested()
 
-    // ── unbuilt seams: the live adapter sets these once each slice lands ──
-    property bool boardWired: false     // S8–S10: the project board read op
+    // ── unbuilt seams: one switch each, off until the source is published ─
+    property bool hasBoardFeed: false   // S8–S10: the project board read op
+    property bool hasMailRead: false    // S9/S10: mail items in that answer
+    property bool hasBoardPost: false   // S11/S12: {cmd:"boardpost"}
+    property bool hasJackUsage: false   // S5/S6: state/usage/now.json
     property var boards: ({})           // project name → §D board answer
     property var usageNow: null         // §C now.json (FileView below, or a feeder)
 
@@ -445,9 +456,34 @@ Item {
             title: "board", glow: "bloom",
             open: Qt.binding(() => board.open),
             focused: Qt.binding(() => board.activeFocus),
-            stat: Qt.binding(() => board.model.agents.length + board.model.terminals.length + " live"),
+            // four no-break spaces widen the stat's cut in the rule: the
+            // [x] below sits in them (the kit's Pane has one stat, one colour)
+            stat: Qt.binding(() => board.model.agents.length + board.model.terminals.length + " live    "),
             content: frameBody
         })
+    }
+
+    // ── [x]: close, cut into the top rule at the right, beside the stat ──
+    // Placed over the last three of the stat's four trailing cells, so the
+    // Pane's own cut holds it. Dim at rest, `title` on hover.
+    Text {
+        id: closeX
+        readonly property var pane: frame.item
+        x: frame.x + frame.width - board.kit.cellW - Math.round(board.kit.cellW / 2) - board.kit.cells(3)
+        y: frame.y
+        visible: !!pane
+        opacity: pane && pane.fillA > 0 ? 1 : 0
+        text: "[x]"
+        color: closeHover.containsMouse ? board.kit.title : board.kit.dim
+        font: board.kit.font
+        textFormat: Text.PlainText
+        MouseArea {
+            id: closeHover
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: board.closeRequested()
+        }
     }
 
     Component {

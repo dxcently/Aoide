@@ -1,24 +1,33 @@
-// BoardProject.qml — one registered project's tab on the board (intent §3.3):
-// the project's feed on the left, its agents and terminals in a narrow rail
-// on the right, the composer along the bottom.
+// BoardProject.qml — one registered project's tab on the board (intent §3.3).
+//
+// Today (no feed published): the project's agents and terminals, full width.
+//
+//   ┌─ AGENTS ─────────────────────────────────────────────── 1/2 ┐
+//   │ ● rook-lantern   working    4m  phase 5 slice S8             │
+//   ┌─ TERMINALS ───────────────────────────────────────────── 1 ┐
+//   │ ○ brisk          [2]   ~/Aoide                               │
+//
+// Once `board.hasBoardFeed`: the feed on the left, the same agents and
+// terminals in a narrow rail on the right, and — once `board.hasBoardPost` —
+// the composer along the bottom.
 //
 //   │ 14:02 rook-lanter ● turn settled              │ ● rook-lan │
 //   │ 14:02 minerva-owl ◐ Bash: cargo test          │ ◐ minerva- │
 //   │ 14:03 nimble-come ↳ settled end_turn · 12 ca… │ ─ tty ──── │
 //   │ 14:05 human       » re: phase 5 slice S8 — …  │ ○ brisk [2]│
 //   ├───────────────────────────────────────────────┴────────────┤
-//   │ to: aoide ▾ │ post: bridge not wired                        │
+//   │ to: aoide ▾ │ post: not wired                                │
 //
 // A HELPER (uppercase — never a slot), loaded by URL from BoardBody with
 // `kit`, `board` and `project`.
 //
 // The feed is `board.boards[project].items` — the §D answer the unbuilt
-// shellbridge read op will deliver (S8–S10). Until `board.boardWired` the
-// feed says `no feed — bridge not wired`. Every item's text is untrusted
+// shellbridge read op will deliver (S8–S10). Every item's text is untrusted
 // model/sender output: PlainText, one line, elided, never actionable, and
 // never copied into the composer (house rule 4). The composer is drawn
-// DISABLED — `boardpost` does not exist (S11/S12); its target cycles over the
-// project and its agents so the shape is visible, and nothing is sent.
+// DISABLED even when its switch is on — `boardpost` does not exist
+// (S11/S12); its target cycles over the project and its agents so the shape
+// is visible, and nothing is sent.
 import QtQuick
 
 Item {
@@ -27,6 +36,22 @@ Item {
     required property var kit
     required property var board
     property string project: ""
+
+    component Use: Loader {
+        required property var kit
+        required property string helper
+        property var props: ({})
+        Component.onCompleted: {
+            var p = { kit: Qt.binding(() => kit) }
+            for (var k in props) p[k] = props[k]
+            setSource(kit.helper(helper), p)
+        }
+    }
+
+    // the two switches this tab reads (BoardBody owns them)
+    readonly property bool feedOn: board.hasBoardFeed
+    readonly property bool postOn: board.hasBoardPost
+    readonly property int composerH: postOn ? kit.lines(2) : 0
 
     readonly property int railCells: 14
     readonly property int railW: kit.cells(railCells + 1)
@@ -46,9 +71,10 @@ Item {
     readonly property var target: targets[Math.min(targetIndex, targets.length - 1)]
 
     function handleKey(e) {
-        if (e.key === Qt.Key_J || e.key === Qt.Key_Down) { feed.flick(0, -800); return true }
-        if (e.key === Qt.Key_K || e.key === Qt.Key_Up) { feed.flick(0, 800); return true }
-        if (e.key === Qt.Key_End || e.key === Qt.Key_G) { feed.positionViewAtEnd(); return true }
+        var f = root.feedOn ? feed : roster
+        if (e.key === Qt.Key_J || e.key === Qt.Key_Down) { f.flick(0, -800); return true }
+        if (e.key === Qt.Key_K || e.key === Qt.Key_Up) { f.flick(0, 800); return true }
+        if (root.feedOn && (e.key === Qt.Key_End || e.key === Qt.Key_G)) { feed.positionViewAtEnd(); return true }
         return false
     }
 
@@ -101,16 +127,12 @@ Item {
     // ══ FEED ══════════════════════════════════════════════════════════════
     Item {
         id: feedArea
-        width: parent.width - root.railW
-        height: parent.height - root.kit.lines(2)
+        visible: root.feedOn
+        width: root.feedOn ? parent.width - root.railW : 0
+        height: parent.height - root.composerH
 
         Text {
-            visible: !root.board.boardWired
-            text: "no feed — bridge not wired"
-            color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
-        }
-        Text {
-            visible: root.board.boardWired && root.items.length === 0
+            visible: root.items.length === 0
             text: "no board items for " + root.project
             color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
         }
@@ -120,10 +142,9 @@ Item {
             // never cut in half under the tab rule
             width: parent.width
             height: Math.floor(parent.height / root.kit.cellH) * root.kit.cellH
-            visible: root.board.boardWired
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            model: root.board.boardWired ? root.items : []
+            model: root.feedOn ? root.items : []
             onCountChanged: Qt.callLater(feed.positionViewAtEnd)
             Component.onCompleted: Qt.callLater(feed.positionViewAtEnd)
             delegate: Row {
@@ -159,14 +180,16 @@ Item {
         }
     }
 
-    // ══ RAIL ══════════════════════════════════════════════════════════════
+    // ══ RAIL (beside the feed) ════════════════════════════════════════════
     Rectangle {                                   // the rail's rule
+        visible: root.feedOn
         x: feedArea.width + Math.round(root.kit.cellW / 2)
-        width: 1; height: feedArea.height + Math.round(root.kit.cellH / 2)
+        width: 1; height: feedArea.height + (root.postOn ? Math.round(root.kit.cellH / 2) : 0)
         color: root.kit.dim
     }
     Column {
         id: rail
+        visible: root.feedOn
         x: feedArea.width + root.kit.cells(1)
         width: root.kit.cells(root.railCells)
         height: feedArea.height
@@ -239,14 +262,150 @@ Item {
         }
     }
 
-    // ══ COMPOSER (disabled until boardpost lands) ═════════════════════════
+    // ══ ROSTER (no feed): agents + terminals, full width ══════════════════
+    Flickable {
+        id: roster
+        visible: !root.feedOn
+        width: parent.width
+        height: parent.height - root.composerH
+        contentHeight: rosterCol.implicitHeight
+        boundsBehavior: Flickable.StopAtBounds
+        clip: true
+        Column {
+            id: rosterCol
+            width: parent.width
+            Use {
+                width: rosterCol.width
+                kit: root.kit; helper: "Pane"
+                props: ({ title: "agents", glow: "bloom",
+                          stat: Qt.binding(() => root.agents.filter(function (r) { return r.s.state === "working" }).length
+                                                  + "/" + root.agents.length),
+                          rows: Qt.binding(() => Math.max(1, root.agents.length)),
+                          content: rosterAgents })
+            }
+            Use {
+                width: rosterCol.width
+                kit: root.kit; helper: "Pane"
+                props: ({ title: "terminals", glow: "bloom",
+                          stat: Qt.binding(() => "" + root.terminals.length),
+                          rows: Qt.binding(() => Math.max(1, root.terminals.length)),
+                          content: rosterTerms })
+            }
+        }
+    }
+    Component {
+        id: rosterAgents
+        Column {
+            width: parent ? parent.width : 0
+            readonly property int w: root.kit.fit(width)
+            Text {
+                visible: root.agents.length === 0
+                text: "no live agents in " + root.project
+                color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
+            }
+            Repeater {
+                model: root.agents
+                Item {
+                    id: fa
+                    required property var modelData
+                    readonly property var s: modelData.s
+                    readonly property int w: parent ? parent.w : 0
+                    width: parent ? parent.width : 0; height: root.kit.cellH
+                    Row {
+                        Text {
+                            text: (fa.modelData.depth ? "└ " : "") + root.kit.lampGlyph(fa.s.state) + " "
+                            color: fa.s.sessionId === root.board.hotId ? root.kit.hot : root.kit.lampColor(fa.s.state)
+                            font: root.kit.font; textFormat: Text.PlainText
+                            style: Text.Outline; styleColor: root.kit.withA(color, 0.18)
+                        }
+                        Text {
+                            text: root.kit.padR(fa.s.petname || fa.s.agent || "agent", fa.modelData.depth ? 12 : 14) + " "
+                            color: root.kit.ink; font: root.kit.font; textFormat: Text.PlainText
+                            style: Text.Outline; styleColor: root.kit.withA(color, 0.18)
+                        }
+                        Text {
+                            text: root.kit.padR(fa.s.state || "", 9) + " "
+                            color: fa.s.state === "awaiting" ? root.kit.urgent : root.kit.mid
+                            font: root.kit.font; textFormat: Text.PlainText
+                        }
+                        Text {
+                            text: root.kit.padL(root.board.age(fa.modelData.since), 4) + " "
+                            color: root.kit.number; font: root.kit.font; textFormat: Text.PlainText
+                        }
+                        Text {
+                            // name 14 · state 9 · age 4 · title (rest)
+                            text: " " + root.kit.padR(fa.s.title || fa.s.agent || "", Math.max(0, fa.w - 2 - 15 - 10 - 5 - 1))
+                            color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.board.focus(fa.modelData)
+                    }
+                }
+            }
+        }
+    }
+    Component {
+        id: rosterTerms
+        Column {
+            width: parent ? parent.width : 0
+            readonly property int w: root.kit.fit(width)
+            Text {
+                visible: root.terminals.length === 0
+                text: "no conducted terminals in " + root.project
+                color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
+            }
+            Repeater {
+                model: root.terminals
+                Item {
+                    id: ft
+                    required property var modelData
+                    readonly property var s: modelData.s
+                    readonly property int w: parent ? parent.w : 0
+                    width: parent ? parent.width : 0; height: root.kit.cellH
+                    Row {
+                        Text {
+                            text: root.kit.lampGlyph(ft.s.state) + " "
+                            color: ft.s.sessionId === root.board.hotId ? root.kit.hot : root.kit.lampColor(ft.s.state)
+                            font: root.kit.font; textFormat: Text.PlainText
+                        }
+                        Text {
+                            text: root.kit.padR(ft.s.petname || ft.s.agent || "shell", 14) + " "
+                            color: root.kit.ink; font: root.kit.font; textFormat: Text.PlainText
+                            style: Text.Outline; styleColor: root.kit.withA(color, 0.18)
+                        }
+                        Text {
+                            text: root.kit.padR(ft.s.workspace !== null && ft.s.workspace !== undefined
+                                                ? "[" + ft.s.workspace + "]" : "[·]", 5) + " "
+                            color: root.kit.path; font: root.kit.font; textFormat: Text.PlainText
+                        }
+                        Text {
+                            text: root.kit.padR(root.board.shortPath(ft.s.cwd), Math.max(0, ft.w - 2 - 15 - 6))
+                            color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.board.focus(ft.modelData)
+                    }
+                }
+            }
+        }
+    }
+
+    // ══ COMPOSER (hasBoardPost; drawn disabled until boardpost lands) ═════
     Rectangle {
-        y: feedArea.height + Math.round(root.kit.cellH / 2)
+        visible: root.postOn
+        y: parent.height - root.composerH + Math.round(root.kit.cellH / 2)
         width: parent.width; height: 1
         color: root.kit.dim
     }
     Row {
-        y: feedArea.height + root.kit.cellH
+        visible: root.postOn
+        y: parent.height - root.composerH + root.kit.cellH
         Text { text: "to: "; color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText }
         Text {
             text: (root.target ? root.target.label : root.project) + " ▾"
@@ -261,7 +420,7 @@ Item {
         Text { text: " │ "; color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText }
         Text {
             // no input exists until boardpost does: nothing here can be typed into
-            text: "post: bridge not wired"
+            text: "post: not wired"
             color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
         }
     }
