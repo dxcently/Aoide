@@ -47,7 +47,7 @@ House rules — the repo's root `AGENTS.md`, with rules 5 and 7 in full:
      registry: a dendrite declares the surfaces it owns; `stylix` reads it to
      skip derivation for them), the identity scalars `aoide.user`,
      `aoide.root` and `aoide.song`, and its own `aoide.<name>.*`. The list is
-     enumerated and closed, never "any `aoide.*`"; a new namespace needs the
+     enumerated and closed, never \"any `aoide.*`\"; a new namespace needs the
      same explicit amendment each of these got. No module reads another
      module: cross-dendrite facts (`aoide.{quickshell,lyra,stylix,compositor,
      greeter}.enable`, `aoide.quickshell.config`, `aoide.sessionTarget`) are
