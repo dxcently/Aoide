@@ -699,11 +699,14 @@ forward is a pipe, not a party to the protocol.
   a route with no packet sent; a claimed OS hostname was tried first and
   found to resolve only through the router's DHCP-DNS on this LAN —
   resolution by luck, not something a transport marker can lean on),
-  falling back to the claimed hostname only if that route lookup itself
-  fails AND that route itself leaves the box — a route that resolves to
-  LOOPBACK claims nothing at all (`selfVia` absent, the wire's own "no
-  claim": the two ends are the same machine, so there is no hop between
-  them to name, and the naive `ssh://<login>@127.0.0.1` was a hop to this
+  falling back to the claimed hostname if that route lookup fails for any
+  reason — and the loopback refusal is decided BEFORE that lookup is even
+  attempted, on the target's own resolved address, so it is not one of the
+  fallback's cases: a `toward` that resolves to LOOPBACK in either family
+  (`127.0.0.1`, `[::1]`, `::1`, `::ffff:127.0.0.1`, `localhost`, the
+  unspecified `0.0.0.0`/`::`) claims nothing at all (`selfVia` absent, the
+  wire's own "no claim": the two ends are the same machine, so there is no
+  hop between them to name, and the naive `ssh://<login>@127.0.0.1` was a hop to this
   box's own sshd that the far end never asked for); `--self-via` overrides
   the whole default. Same trust class as the
   `url` field beside it on that same wire message either way:

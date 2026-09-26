@@ -2212,38 +2212,115 @@ pub(crate) fn default_self_url() -> String {
 /// the second daemon advertises over loopback — routed the outbound trick
 /// to `127.0.0.1`, so the record was stamped `via:"ssh://khoa@127.0.0.1"`:
 /// an ssh hop invented for a peer that IS this box, and one that would
-/// dial this box's own sshd at a port the far end never asked for. The
-/// route's own local address is the whole test (a non-loopback dial's is
-/// never loopback, and a hostname resolving to loopback is caught by the
-/// same comparison), so it is decided BEFORE the login is read: `None`
-/// here means "no claim", which is exactly what the wire's absent
-/// `selfVia` already means to the approver.
+/// dial this box's own sshd at a port the far end never asked for.
+///
+/// The target is resolved to a `SocketAddr` FIRST and refused there — a
+/// literal `::ffff:127.0.0.1` is the IPv4 loopback it names (normalized
+/// through `to_ipv4_mapped`, which `Ipv6Addr::is_loopback` alone does not
+/// do), `[::1]`/`::1`/`localhost` are loopback by resolution — BEFORE any
+/// route is probed, so no address family can reach the hostname fallback
+/// through a failed connect the way `[::1]` did. The probe itself then
+/// binds a socket of the TARGET's own family (`[::]:0` for a v6 target,
+/// `0.0.0.0:0` for a v4 one): a v4-only socket could never route a v6
+/// target, and that failure is precisely what resurrected the fabrication.
+/// `None` here means "no claim", which is exactly what the wire's absent
+/// `selfVia` already means to the approver; `--self-via` overrides the
+/// whole function.
 pub(crate) fn default_self_via(toward: &str) -> Option<String> {
-    let routed = outbound_ip_toward(toward);
-    if routed.is_some_and(|ip| ip.is_loopback()) {
+    default_self_via_with(toward, &resolve_toward, &outbound_ip_toward)
+}
+
+/// [`default_self_via`] with its two environment-touching steps injected —
+/// name resolution and the route probe — so the rule above is provable
+/// without a network, the shape `cwd_for`/`restore_snapshot` already use for
+/// their own lookups.
+fn default_self_via_with(
+    toward: &str,
+    resolve: impl Fn(&str) -> Option<std::net::SocketAddr>,
+    route: impl Fn(std::net::SocketAddr) -> Option<std::net::IpAddr>,
+) -> Option<String> {
+    let target = resolve(toward);
+    // The refusal is decided on the RESOLVED target, before any probe: a v6
+    // literal cannot slip past it by failing to connect. An UNSPECIFIED target
+    // (`0.0.0.0`, `::`) is refused with it — it names no peer at all, so it
+    // names no hop either, and the kernel's own reading of it (the local host)
+    // is not a fact to write into someone else's node record.
+    if target.is_some_and(|t| is_this_box(t.ip())) {
         return None;
     }
     let login = crate::tunnel::local_login().ok()?;
-    let host = routed
+    let host = target
+        .and_then(route)
+        .filter(|ip| !is_this_box(*ip))
         .map(|ip| ip.to_string())
         .unwrap_or_else(aoide_storage::display::local_host_name);
     Some(format!("ssh://{login}@{host}"))
 }
 
-/// The local address the kernel would route a packet toward `toward`
-/// (`host` or `host:port`) through — no packet is ever actually sent, a
-/// UDP `connect` only resolves a route and binds the socket's local
-/// endpoint to it. `toward` gets a dummy port appended (`8710`, never used
-/// for anything beyond satisfying `ToSocketAddrs` — any nonzero port picks
-/// the identical route) when it doesn't already carry one. `None` on any
-/// failure (unresolvable host, no route, socket error) — the caller's own
-/// fallback case, never a panic; this is a best-effort LAN heuristic, not
-/// a guarantee.
-fn outbound_ip_toward(toward: &str) -> Option<std::net::IpAddr> {
-    let target = if toward.contains(':') { toward.to_string() } else { format!("{toward}:8710") };
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect(&target).ok()?;
-    socket.local_addr().ok().map(|addr| addr.ip())
+/// The one normalization both loopback tests use: a v4-mapped v6 address
+/// (`::ffff:127.0.0.1`) IS the v4 address it embeds, and `is_loopback` on the
+/// v6 form says `false` — a miss that would hand back an invented hop.
+fn normalize_ip(ip: std::net::IpAddr) -> std::net::IpAddr {
+    match ip {
+        std::net::IpAddr::V6(v6) => {
+            v6.to_ipv4_mapped().map(std::net::IpAddr::V4).unwrap_or(std::net::IpAddr::V6(v6))
+        }
+        v4 => v4,
+    }
+}
+
+/// An address that names THIS box — loopback in either family, or the
+/// unspecified address (`0.0.0.0`/`::`, which names no peer at all and which
+/// the kernel itself reads as the local host).
+fn is_this_box(ip: std::net::IpAddr) -> bool {
+    normalize_ip(ip).is_loopback() || ip.is_unspecified()
+}
+
+/// Append the house door port to a `toward` that carries none, leaving every
+/// form that already does — and bracketing a BARE v6 literal, which no
+/// resolver accepts unbracketed. The old `contains(':')` test read `::1`'s own
+/// colons as a port separator, which is how a v6 target reached the route
+/// probe as an unparseable address and fell through to the hostname.
+fn with_default_port(toward: &str) -> String {
+    if let Some(rest) = toward.strip_prefix('[') {
+        return match rest.split_once(']') {
+            Some((_, after)) if after.starts_with(':') => toward.to_string(),
+            _ => format!("{toward}:8710"),
+        };
+    }
+    if toward.matches(':').count() > 1 {
+        return format!("[{toward}]:8710");
+    }
+    if toward.contains(':') {
+        toward.to_string()
+    } else {
+        format!("{toward}:8710")
+    }
+}
+
+/// Resolve `toward` (a host, `host:port`, or a v6 literal in either form) to
+/// one address — `None` when the name does not resolve at all, which is the
+/// caller's own fallback case, never a guess.
+fn resolve_toward(toward: &str) -> Option<std::net::SocketAddr> {
+    use std::net::ToSocketAddrs;
+    with_default_port(toward).to_socket_addrs().ok()?.next()
+}
+
+/// The local address the kernel would route a packet to `target` through — no
+/// packet is ever actually sent, a UDP `connect` only resolves a route and
+/// binds the socket's local endpoint to it. The socket's family follows the
+/// TARGET's: a v4 socket cannot route a v6 address at all, and that failure is
+/// what let a `[::1]` dial fall through to a fabricated hop. `None` on any
+/// failure (no route, socket error) — the caller's own fallback case, never a
+/// panic; this is a best-effort LAN heuristic, not a guarantee.
+fn outbound_ip_toward(target: std::net::SocketAddr) -> Option<std::net::IpAddr> {
+    let bind = match target {
+        std::net::SocketAddr::V4(_) => "0.0.0.0:0",
+        std::net::SocketAddr::V6(_) => "[::]:0",
+    };
+    let socket = std::net::UdpSocket::bind(bind).ok()?;
+    socket.connect(target).ok()?;
+    Some(normalize_ip(socket.local_addr().ok()?.ip()))
 }
 
 /// The house A2A door port this box assumes for itself AND for a
@@ -5109,19 +5186,33 @@ mod tests {
     /// same reasoning `outbound_ip_toward`'s own doc gives.
     #[test]
     fn outbound_ip_toward_resolves_to_loopback_when_dialing_127_0_0_1() {
-        assert_eq!(outbound_ip_toward("127.0.0.1"), Some("127.0.0.1".parse().unwrap()));
-        assert_eq!(outbound_ip_toward("127.0.0.1:9999"), Some("127.0.0.1".parse().unwrap()), "an explicit port in `toward` is honored, never overridden");
+        let target = resolve_toward("127.0.0.1").expect("a literal IP always resolves");
+        assert_eq!(target.ip().to_string(), "127.0.0.1");
+        assert_eq!(outbound_ip_toward(target), Some("127.0.0.1".parse().unwrap()));
+        // An explicit port in `toward` is honored, never overridden.
+        assert_eq!(resolve_toward("127.0.0.1:9999").unwrap().port(), 9999);
+    }
+
+    /// The port/parse shapes that decide whether a `toward` ever reaches the
+    /// route probe as something resolvable at all — `::1`'s own colons used to
+    /// read as a port separator, which is how a v6 target skipped the loopback
+    /// refusal entirely (M3).
+    #[test]
+    fn with_default_port_covers_both_ip_families_in_both_forms() {
+        assert_eq!(with_default_port("127.0.0.1"), "127.0.0.1:8710");
+        assert_eq!(with_default_port("127.0.0.1:18712"), "127.0.0.1:18712");
+        assert_eq!(with_default_port("localhost"), "localhost:8710");
+        assert_eq!(with_default_port("::1"), "[::1]:8710");
+        assert_eq!(with_default_port("[::1]"), "[::1]:8710");
+        assert_eq!(with_default_port("[::1]:18712"), "[::1]:18712");
+        assert_eq!(with_default_port("::ffff:127.0.0.1"), "[::ffff:127.0.0.1]:8710");
     }
 
     /// `default_self_via`'s own claim-formatting (`ssh://<login>@<host>`),
-    /// pinned deterministically: `$USER` is stamped to a known value and the
-    /// HOST half comes off the outbound trick, with no real network involved
-    /// either way (a UDP `connect` never sends a packet). `198.51.100.9`
-    /// (TEST-NET-2) is never a real peer, so on a routed box the local address
-    /// is this machine's own and on a route-less one the hostname fallback
-    /// answers — either way the claim is non-loopback, which is the part under
-    /// test; the exact host is deliberately not pinned, since that is the
-    /// network's answer, not this function's.
+    /// pinned deterministically by INJECTING both steps that would otherwise
+    /// consult the network (L2): resolution answers one fixed address and the
+    /// route answers one fixed local address, so the HOST half of the claim is
+    /// a constant the test states rather than a property it hopes for.
     #[test]
     fn default_self_via_formats_login_at_the_outbound_address_toward_the_node() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -5130,13 +5221,36 @@ mod tests {
         std::env::set_var("USER", "testuser");
         std::env::remove_var("LOGNAME");
 
-        let via = default_self_via("198.51.100.9").expect("a non-loopback dial still claims a hop");
-        assert!(via.starts_with("ssh://testuser@"), "{via}");
-        assert!(!via.ends_with("127.0.0.1"), "never a loopback host: {via}");
+        let via = default_self_via_with(
+            "198.51.100.9",
+            |t| {
+                assert_eq!(t, "198.51.100.9", "the resolver sees the dial target verbatim");
+                Some("198.51.100.9:8710".parse().unwrap())
+            },
+            |_| Some("192.168.1.175".parse().unwrap()),
+        );
+        assert_eq!(via.as_deref(), Some("ssh://testuser@192.168.1.175"));
+
+        // A target the kernel cannot route at all: the claimed-hostname
+        // fallback, unchanged from before this rule existed.
+        let unrouted = default_self_via_with(
+            "198.51.100.9",
+            |_| Some("198.51.100.9:8710".parse().unwrap()),
+            |_| None,
+        );
+        assert_eq!(unrouted.as_deref(), Some(&format!("ssh://testuser@{}", aoide_storage::display::local_host_name())[..]));
 
         std::env::remove_var("USER");
         std::env::remove_var("LOGNAME");
-        assert_eq!(default_self_via("198.51.100.9"), None, "no $USER/$LOGNAME at all — refuse rather than guess a login, same as resolve_login's own stance");
+        assert_eq!(
+            default_self_via_with(
+                "198.51.100.9",
+                |_| Some("198.51.100.9:8710".parse().unwrap()),
+                |_| Some("192.168.1.175".parse().unwrap()),
+            ),
+            None,
+            "no $USER/$LOGNAME at all — refuse rather than guess a login, same as resolve_login's own stance"
+        );
 
         match saved_user {
             Some(v) => std::env::set_var("USER", v),
@@ -5148,11 +5262,11 @@ mod tests {
         }
     }
 
-    /// D5: a dial that resolves to LOOPBACK — `pair` between two daemons on
+    /// D5/M3: a dial that RESOLVES to loopback — `pair` between two daemons on
     /// one machine, the acceptance report's `"via":"ssh://khoa@127.0.0.1"` —
-    /// claims NO hop at all, whatever `$USER` says. The refusal is decided
-    /// before the login is read, so it holds with the env unset too: this is
-    /// not a login-shaped `None`, it is "there is no far side to reach".
+    /// claims NO hop at all, in every spelling the CLI can produce and in both
+    /// address families, whatever `$USER` says. These all resolve from
+    /// `/etc/hosts` or as literals, so nothing here needs a network.
     #[test]
     fn default_self_via_claims_no_hop_over_loopback() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -5161,8 +5275,9 @@ mod tests {
         std::env::set_var("USER", "testuser");
         std::env::remove_var("LOGNAME");
 
-        assert_eq!(default_self_via("127.0.0.1"), None);
-        assert_eq!(default_self_via("127.0.0.1:18712"), None, "an explicit port never changes the route's own address");
+        for toward in ["127.0.0.1", "127.0.0.1:18712", "127.0.0.2", "0.0.0.0", "::1", "[::1]", "[::1]:18712", "::ffff:127.0.0.1", "localhost", "localhost:18712"] {
+            assert_eq!(default_self_via(toward), None, "`{toward}` names this box: no hop to claim");
+        }
 
         std::env::remove_var("USER");
         std::env::remove_var("LOGNAME");
@@ -5176,6 +5291,42 @@ mod tests {
             Some(v) => std::env::set_var("LOGNAME", v),
             None => std::env::remove_var("LOGNAME"),
         }
+    }
+
+    /// The refusal is decided on the RESOLVED target, BEFORE the route probe —
+    /// so a v6 literal cannot slip past it by failing to connect (the `[::1]`
+    /// hole). The route closure panics: reaching it at all is the failure.
+    #[test]
+    fn the_loopback_refusal_precedes_any_route_probe() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_user = std::env::var("USER").ok();
+        std::env::set_var("USER", "testuser");
+
+        for (toward, resolved) in [
+            ("[::1]", "[::1]:8710"),
+            ("::ffff:127.0.0.1", "[::ffff:127.0.0.1]:8710"),
+        ] {
+            let via = default_self_via_with(
+                toward,
+                |_| Some(resolved.parse().unwrap()),
+                |_| panic!("the route must never be probed for `{toward}`"),
+            );
+            assert_eq!(via, None, "`{toward}` is loopback: refused before any probe");
+        }
+
+        match saved_user {
+            Some(v) => std::env::set_var("USER", v),
+            None => std::env::remove_var("USER"),
+        }
+    }
+
+    /// The one shape the family change exists for, stated as a family fact
+    /// rather than a routing outcome: a v6 target is probed over a v6 socket
+    /// (a v4 socket can never route it), and a v4 target over a v4 one.
+    #[test]
+    fn the_route_probe_binds_the_targets_own_family() {
+        assert_eq!(outbound_ip_toward("[::1]:8710".parse().unwrap()).map(|ip| ip.is_loopback()), Some(true));
+        assert_eq!(outbound_ip_toward("127.0.0.1:8710".parse().unwrap()).map(|ip| ip.is_loopback()), Some(true));
     }
 
     // ── `handle_node_allow` (P-P3) — pure file I/O, so unlike most `node`

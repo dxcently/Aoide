@@ -207,17 +207,23 @@
   and leaves it PARKED for the requester's own poll to find — no wire call
   at all, so an unreachable or loopback-only requester never blocks this
   half.
-- **`default_self_via` refuses a LOOPBACK route before it reads a login
-  (D5) — `selfVia` is a claim about a hop BETWEEN boxes, so two daemons on
-  one machine claim nothing.** `outbound_ip_toward`'s answer is the test
-  (`ip.is_loopback()`), not the `toward` string: a loopback dial and a
-  hostname that resolves to loopback are the same "the far side is this
-  box" fact. Do NOT restore a `ssh://<login>@127.0.0.1` default, and keep
-  the check ahead of `local_login()` — a login-less box must refuse for the
-  same reason, not a different one. `--self-via` still overrides it
-  outright (an operator naming their own hop is not this function's
-  business), and `approve_inbound`'s `None`-untouched rule below is what
-  keeps an absent claim from wiping a `via` a previous pairing recorded.
+- **`default_self_via` refuses a LOOPBACK target before it reads a login or
+  probes a route (D5/M3) — `selfVia` is a claim about a hop BETWEEN boxes, so
+  two daemons on one machine claim nothing.** The refusal is decided on the
+  target's own resolved `SocketAddr`: `normalize_ip(...).is_loopback()` (the
+  `to_ipv4_mapped` step is what catches `::ffff:127.0.0.1`, which
+  `Ipv6Addr::is_loopback` alone answers `false` for) or the unspecified
+  `0.0.0.0`/`::`. Do NOT move it after the probe, and do NOT probe with a
+  fixed v4 socket: a v6 target needs a v6 socket (`[::]:0`), and a v4-only
+  probe failing is exactly how `[::1]` used to fall through to a fabricated
+  hostname hop. Do NOT restore a `ssh://<login>@127.0.0.1` default either,
+  and keep the check ahead of `local_login()` — a login-less box must refuse
+  for the same reason, not a different one. `default_self_via_with`'s
+  injected resolver + route are what let the tests pin the claim's host half
+  without a network; `--self-via` still overrides the whole function (an
+  operator naming their own hop is not this function's business), and
+  `approve_inbound`'s `None`-untouched rule below is what keeps an absent
+  claim from wiping a `via` a previous pairing recorded.
 - **`approve_inbound`'s commit maps `entry.self_via` to `{url, via}` — get
   this backwards and every loopback-only requester's node record comes out
   undialable (task #131).** Present, the commit is `url:
