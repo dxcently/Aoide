@@ -72,7 +72,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 /// The wording every inherited-red message carries alongside the fact — the
 /// load-bearing half, per the module doc: stating the fact WITHOUT this
@@ -206,10 +206,22 @@ pub fn untracked_nix_files(root: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Run the configured verify command at `root`, `sh -c`'d so the operator's
-/// TOML string can be anything a shell accepts (a bare binary, a pipeline, a
-/// `&&` chain) — exactly like `soundcheck`'s own C4-C6 shell-outs will. A
-/// command that cannot even launch is not this lane's finding to make (best-
+/// Run the configured verify command at `root`, through this host's OWN
+/// interpreter — `sh -c` on Unix, `cmd /C` on native Windows (which has no
+/// `sh`) — so the operator's stored string can be anything that interpreter
+/// accepts (a bare binary, a pipeline, a `&&` chain), exactly like
+/// `soundcheck`'s own C4-C6 shell-outs will. What differs per host is the
+/// template LANGUAGE, a configuration fact rather than a difference in this
+/// function: `aoide_storage::config::Upkeep::verify_command` is written by an
+/// operator for the host it runs on. The interpreter itself is the ONE seam
+/// both template-running crates share (`aoide_protocol::host_shell`, the same
+/// choice `aoide_secrets::backend::run_backend_command` makes for backend
+/// templates) — and a lane whose shell arm was missing would spawn a program
+/// this host does not have, swallow the spawn failure into `false`, and
+/// report GREEN for a red tree: the guarantee that lives here is precisely
+/// "the configured command's own exit status is the verdict", so the host's
+/// interpreter has to be a real one.
+/// A command that cannot even launch is not this lane's finding to make (best-
 /// effort, the same degrade-to-nothing stance `scan::run_git` holds).
 ///
 /// Both `stdout`/`stderr` are explicitly `Stdio::null()` — NOT inherited
@@ -224,9 +236,7 @@ pub fn untracked_nix_files(root: &Path) -> Vec<String> {
 /// reports red/green only, never the command's own words — the redirection
 /// is what actually keeps that promise, not just the absence of a parser.
 fn run_verify(root: &Path, command: &str) -> bool {
-    Command::new("sh")
-        .arg("-c")
-        .arg(command)
+    aoide_protocol::host_shell::command(command)
         .current_dir(root)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -396,6 +406,7 @@ fn prepend(pending: Option<String>, own: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     // ── Pure: parse_untracked_nix ───────────────────────────────────────────
 
@@ -556,12 +567,31 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// `exit 0` / `exit 1` are a command line BOTH interpreters this crate runs
+    /// accept (`sh -c`, `cmd /C`), so the lane's exit-code contract is asserted
+    /// on every host by this one test — no gate, no second host-shaped twin.
     #[test]
     fn run_lane_reflects_the_configured_commands_own_exit_code() {
         let root = aoide_test_support::unique_tmp("checklane-verify");
         std::fs::create_dir_all(&root).unwrap();
-        assert!(!run_lane(&root, "true").verify_red);
-        assert!(run_lane(&root, "false").verify_red);
+        assert!(!run_lane(&root, "exit 0").verify_red);
+        assert!(run_lane(&root, "exit 1").verify_red);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A `verify_command` is a `cmd` command line on this host, handed over
+    /// verbatim: a line that QUOTES its own program (the ordinary way to name
+    /// a path carrying a space) must run as written. Through `arg`'s
+    /// MSVC-style quoting the inner quotes become `\"`, which `cmd` does not
+    /// read as an escape, and this same line exits non-zero for that reason
+    /// alone.
+    #[cfg(windows)]
+    #[test]
+    fn the_verify_command_is_this_hosts_own_line_quotes_and_all() {
+        let root = aoide_test_support::unique_tmp("checklane-quoted");
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(!run_lane(&root, "\"%COMSPEC%\" /C exit 0").verify_red);
+        assert!(run_lane(&root, "\"%COMSPEC%\" /C exit 1").verify_red);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -578,10 +608,19 @@ mod tests {
         // bounded timeout, and reads back as the "clean" exit it actually is.
         let root = aoide_test_support::unique_tmp("checklane-large-stdout");
         std::fs::create_dir_all(&root).unwrap();
+        // The only per-host piece is the command that makes the volume: a
+        // pipeline both Unix tools share, and `type` reading a file this
+        // fixture wrote. Both write several times past the ~64KB pipe buffer.
+        #[cfg(windows)]
+        std::fs::write(root.join("big.txt"), "0".repeat(2_000_000)).unwrap();
+        #[cfg(unix)]
+        let command = "yes | head -c 2000000";
+        #[cfg(windows)]
+        let command = "type big.txt";
         let (tx, rx) = std::sync::mpsc::channel();
         let cwd = root.clone();
         std::thread::spawn(move || {
-            let run = run_lane(&cwd, "yes | head -c 2000000");
+            let run = run_lane(&cwd, command);
             let _ = tx.send(run);
         });
         let run = rx
@@ -621,10 +660,10 @@ mod tests {
     fn the_delivery_sequence_speaks_once_at_the_next_prompt_and_never_again() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "AOIDE_CONFIG"]);
-        let (state_root, tree) = e2e_fixture("checklane-delivery-state", "checklane-delivery-tree", "true");
+        let (state_root, tree) = e2e_fixture("checklane-delivery-state", "checklane-delivery-tree", "exit 0");
         let session_id = "checklane-delivery-session";
 
-        // Settled start: the command is `true`, so the baseline is green —
+        // Settled start: the command exits 0, so the baseline is green —
         // nothing to flag.
         assert!(on_session_start(session_id, &tree, false).is_none());
 
@@ -659,12 +698,16 @@ mod tests {
     /// attributes the red to last turn, correctly, not to "always been this
     /// way". The baseline file itself must be byte-identical across the
     /// mid-turn call — proof that it truly took no write path at all.
+    // `exit 0`/`exit 1` are accepted by BOTH interpreters this crate shells to
+    // (`sh -c`, `cmd /C`), so the compaction contract this test carries is
+    // asserted natively too — the fixture is not POSIX-only, so nothing is
+    // gated here.
     #[test]
     fn a_mid_turn_session_start_never_launders_this_turns_own_regression() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "AOIDE_CONFIG"]);
         let (state_root, tree) =
-            e2e_fixture("checklane-compaction-state", "checklane-compaction-tree", "true");
+            e2e_fixture("checklane-compaction-state", "checklane-compaction-tree", "exit 0");
         let session_id = "checklane-compaction-session";
 
         // Settled start: green baseline, nothing to flag.
@@ -672,7 +715,7 @@ mod tests {
         let baseline_bytes_before = std::fs::read(lane_path(session_id)).unwrap();
 
         // Mid-turn: the agent's own edit turns the verify command red.
-        aoide_storage::config::set("upkeep.verifyCommand", "false").unwrap();
+        aoide_storage::config::set("upkeep.verifyCommand", "exit 1").unwrap();
 
         // An auto-compact fires SessionStart mid-turn. Must run no lane, write
         // nothing, and replay the (still-green) recorded baseline's own

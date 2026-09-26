@@ -354,18 +354,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Both fixtures are SYMLINKS, which native Windows will only create with
+    /// `SeCreateSymbolicLinkPrivilege` (Developer Mode, or an elevated token):
+    /// where that is absent the test says so and returns, because there is
+    /// nothing for `clutter` to read. The CHECK itself is `symlink_metadata`
+    /// and has no Unix-only piece; the gate is the fixture's privilege.
     #[test]
     fn clutter_flags_a_nix_store_symlink_at_info_severity() {
         let root = scratch("clutter");
         init_repo(&root);
-        std::os::unix::fs::symlink(
-            "/nix/store/abc123-aoide-0.0.0",
-            root.join("result-9"),
-        )
-        .unwrap();
+        if !crate::test_fixture::plant_symlink("/nix/store/abc123-aoide-0.0.0", &root.join("result-9")) {
+            eprintln!("[test] no symlink privilege on this host: returning without a fixture to read");
+            return;
+        }
         // A ordinary symlink NOT into the store must not fire.
         std::fs::write(root.join("elsewhere.txt"), "x").unwrap();
-        std::os::unix::fs::symlink("elsewhere.txt", root.join("also-a-link")).unwrap();
+        if !crate::test_fixture::plant_symlink("elsewhere.txt", &root.join("also-a-link")) {
+            return;
+        }
 
         let findings = clutter(&root);
         assert_eq!(findings.len(), 1, "{findings:?}");
