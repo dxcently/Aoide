@@ -391,12 +391,14 @@ the inbound half of the two-door contract (the outbound half is
   silently, and the poll never retries unboundedly past it. Neither of
   these closes the FILE: a hand-crafted `sessions.json`/ledger line is
   still a readable, unflagged string on disk — sealing that is P-ID1/P-ID2,
-  still open. The Inject arm's own `resolved_node` (a SEPARATE, ungated
-  identity lookup — attribution, never a gate) rides `do_inject`'s existing
-  `--from` flag onto a QUEUED `pending.json` entry only (an
-  immediately-delivered payload's bytes stay untouched, so an
-  already-autogated node's delivery is byte-identical to before this
-  phase).
+  still open. The Inject arm's own `resolved_node` (a SEPARATE lookup from
+  Spawn's) now answers TWO questions, not one: its Signature-rung
+  `claimed_identity` is what AUTHORIZES the remote-parent deliver-now (S5,
+  CONTRACTS.md §6) — an identity proof used as a gate — while its `from`
+  attribution rides `do_inject`'s existing `--from` flag onto a QUEUED
+  `pending.json` entry only (an immediately-delivered payload's bytes stay
+  untouched, so an already-autogated node's delivery is byte-identical to
+  before this phase).
   **`tasks/get` reads a session's watch frame (P-RSA S6, CONTRACTS.md §6).**
   `params.metadata["aoide/frame"]` asks for the frame the local
   `session watch` renders; it rides as one `data` artifact, and is answered
@@ -412,8 +414,12 @@ the inbound half of the two-door contract (the outbound half is
   tail to 200 lines, each letter's body to 40 lines and the frame to 256 KiB,
   shedding the oldest letter then the oldest output line and setting
   `truncated`. A frame read audits under its own label, `a2a.tasks/get.frame`.
-  The refusal code is shared with `verify_signed_request` — that one is
-  decided BEFORE this arm runs, and the two texts never match.
+  The refusal code is this arm's own, `-32011` — minted like Spawn's `-32006`
+  and `mailDeposit`'s `-32010` — so a refused read and a refused signature
+  (`verify_signed_request`'s `-32007`, always decided before this arm runs)
+  are told apart by the code alone, never by matching prose. The refusal
+  TEXT is unchanged: one sentence for every refused read, the same whether
+  the named session exists or not.
   **`aoide/mailDeposit` (P-M2, `docs/architecture/MAIL.md`, CONTRACTS.md
   §6's new subsection) is the SECOND capability-gated method, after
   Spawn, and the first one not gated on `spawn`.** `mail_deposit` resolves

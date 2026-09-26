@@ -2180,14 +2180,20 @@ project/parent inheritance across local/remote/app/subagents;
   record's stored `remoteParent.key` equal to the caller's verified key, and
   its stored `sessionId` equal to the claim — all three or no match) delivers
   without pending, audited `autogate-remote-parent`, riding BOTH rails the
-  `sig_autogate` restoration rides: exempt from `origin_for_inject`'s downgrade
-  (the ssh `-L` shape classifies as loopback, where `autogate_match` is ignored
-  outright) and folded into `autogate_match` (so a genuinely remote origin does
-  not pend either). It overrides neither earlier question — the door-wide
+  `sig_autogate` restoration rides, each carrying one transport — the EXEMPTION
+  from `origin_for_inject`'s downgrade is what carries the loopback/ssh `-L`
+  shape (`should_deliver_now`'s `Loopback` arm delivers unconditionally, so the
+  exemption alone is enough there, and without it a tunneled parent coerces to
+  `Unknown`, which delivers nothing), and the FOLD into `autogate_match` is what
+  carries `ConnOrigin::Remote`'s shape (that arm consults `autogate_match` and
+  nothing else; the exemption is inert where the origin was never loopback).
+  It overrides neither earlier question — the door-wide
   bearer is still checked FIRST (a door with a token set admits a remote parent
   only if it presents the bearer) and the node's own `autogate` flag need not be
-  on, the same independence `send_gate`'s local parent rule has. The `-32602`
-  stays spawn-side: an inject reads a malformed claim as a non-match, exactly as
+  on, the same independence `send_gate`'s local parent rule has, which is also
+  why the rule has no off switch: the levers are unpairing the node (`node
+  remove`) or the child ending, and `node allow <n> spawn off` stops only NEW
+  children. The `-32602` stays spawn-side: an inject reads a malformed claim as a non-match, exactly as
   an absent one. On the client side `resolve_remote_parent` is now shared by
   both callers, and `send --to` carries that KERNEL-ATTESTED caller as its
   claim but DROPS an unruly one — it sends unclaimed and names the reason on one
@@ -2199,8 +2205,10 @@ project/parent inheritance across local/remote/app/subagents;
   with `allows∋read` (`node_may_read`, `node_may_spawn`'s twin), so a signed
   reader holding `read` reads ANY session's frame while the remote-parent key
   match stays required for steering (S5) and for S8's history; the refusal is
-  `-32007` — the code `verify_signed_request` already owns, decided before this
-  arm runs and never sharing its text — with ONE message whether the session
+  `-32011` — this arm's OWN code, minted like Spawn's `-32006` and
+  `mailDeposit`'s `-32010` (an orchestrator ruling: `-32007` stays
+  `verify_signed_request`'s, decided before this arm runs, so the code alone
+  names the arm) — with ONE message whether the session
   exists or not, and the read audits under its own label
   `a2a.tasks/get.frame`. `Task.artifacts`/`Task.history` are optional and
   omitted when absent (a status read stays byte-identical); `watch_frame` is
@@ -2213,7 +2221,7 @@ project/parent inheritance across local/remote/app/subagents;
   `clean_block`, so it applies to the local view too (one spec gap found: the
   brief's §10 test list asks for a `linesAfter` refusal case that belongs to
   S8's history ring, which does not exist yet; S6 keeps the Do's own table).
-  Tests: aoide-protocol 174, aoide-conduct 881, aoide-server 238 — all pass,
+  Tests: aoide-protocol 174, aoide-conduct 881, aoide-server 240 — all pass,
   `cargo test --workspace --no-run` clean. S7–S10 open, in the brief's order
   (cargo builds serialize).
 - Review pass over S1–S3 (same branch, `8236675` onward): the caller now
@@ -2314,9 +2322,42 @@ project/parent inheritance across local/remote/app/subagents;
   `a_genuinely_signed_remote_parent_steers_its_child_without_pending` (a
   non-loopback origin, so the `autogate_match` rail is what carries it), with
   `a_remote_parent_mismatch_leaves_todays_result_byte_for_byte` as the miss.
+  The S5 review's coverage gap (`f764f82`'s four rows all drove
+  `ConnOrigin::Remote`) is closed on the OTHER transport:
+  `a_tunneled_remote_parent_steers_its_child_without_pending` (the ssh `-L`
+  shape at `ConnOrigin::Loopback`, where only the `origin_for_inject` exemption
+  can deliver it — its pending check runs before the byte join, so deleting
+  the exemption fails it instead of hanging) and
+  `a_door_token_refuses_a_remote_parents_delivery_uniformly` (a door token
+  with no bearer presented gets #50's uniform `submitted` Task, nothing
+  delivered, nothing queued, and no `autogate-remote-parent` label — the
+  three docs that claim the bearer runs first, pinned).
   Tests (`aoide-conduct`, S5):
   `send_to_carries_the_attested_parent_as_its_from_claim` (a fake `curl`
   capturing the body it is handed on stdin proves the claim rides the wire) and
   `an_unruly_claim_still_sends_without_claiming_a_parent` (the ruling above,
   asserted against those same captured bytes).
+- Review pass over S5 and S6 (`f764f82`, `94a1151`; code fixed in `060e6e8`):
+  the S6 refusal gets its OWN code, `-32011` (orchestrator ruling — it had
+  borrowed `-32007`, `verify_signed_request`'s, which the register itself notes
+  is decided before the frame arm runs), so every capability-gated arm now
+  mints the code it refuses with. The S5 rationale was INVERTED in three
+  places (CONTRACTS §6, `server/AGENTS.md`, here): the two rails are not one
+  load-bearing and one belt — the exemption is what carries the loopback/ssh
+  `-L` shape and the fold is what carries `ConnOrigin::Remote`'s, and each is
+  load-bearing for its own transport. MED-2: CONTRACTS §4 said no security
+  decision keys on `remoteParent` read off disk, which the deliver-now
+  decision does — §4 now states the truth (same-uid is already
+  loopback-trusted; the key comparison against the verified signer is what
+  binds the read). MED-3: `client/AGENTS.md` still claimed an unruly claim is
+  refused flat; it is refused on the SPAWN path only, `send --to` drops it and
+  warns. MED-4: `server/README.md` still called the Inject arm's
+  `resolved_node` attribution, never a gate; its Signature-rung
+  `claimed_identity` is exactly what authorizes the deliver-now. LOW-5: the
+  remote-parent source is added to the auto-deliver enumerations in
+  A2A-Door.md, Node-Transport.md and PAIRING.md. LOW-7: the warning line now
+  prints the unruly id escaped (`{id:?}`) rather than verbatim. LOW-8: the
+  rule's missing off switch is documented in CONTRACTS §6 and
+  Conductor-Channel.md — `node remove` or the child ending are the levers, and
+  `node allow <n> spawn off` stops only NEW children.
 - Owner: Eidolon executor. Depends on: §13's S-D design half, ruled here.

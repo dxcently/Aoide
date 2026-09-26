@@ -363,11 +363,26 @@ nodes:
   request whose signature this door already verified is, by
   construction, never a local caller, so it is treated as remote for
   the auto-deliver-vs-pending question regardless of which address it
-  arrived from: `state/nodes.json`'s per-node `autogate` flag, not
-  connection origin, decides whether a signed node's send still
-  auto-delivers. An unsigned request's loopback trust is unaffected —
+  arrived from: `state/nodes.json`'s per-node `autogate` flag, or the
+  remote-parent rule below, decides whether a signed node's send still
+  auto-delivers — never the connection origin. An unsigned request's
+  loopback trust is unaffected —
   this narrowing only ever removes a free pass a signature was never
   entitled to in the first place.
+- **A remote parent steers the child it spawned, and the tunnel is its
+  production shape.** The Inject arm matches the `metadata["aoide/from"]`
+  claim against the target record's `remoteParent`: the caller must have
+  signed with a paired node's key this door verified, that key must equal the
+  record's stored `remoteParent.key`, and the claim must equal its stored
+  `remoteParent.sessionId`. A match delivers WITHOUT pending
+  (`autogate-remote-parent`) on both rails the signature-rung `autogate` flag
+  rides — the exemption from `origin_for_inject`'s downgrade, which is what
+  carries the loopback/`ssh -L` shape above, and the fold into
+  `autogate_match`, which is what carries a directly-addressed
+  `ConnOrigin::Remote` caller. Both are load-bearing; the node's own
+  `autogate` flag need not be set, the door-wide bearer is still checked
+  first, and there is no off switch (unpairing the node or the child ending
+  are the levers — `node allow <n> spawn off` stops only new children).
 - **Identity IS the key; the name is a label (#63 P-ID5).**
   `X-Aoide-Node` carries the caller's own self name
   (`aoide_storage::display::local_host_name()`), the same value the
@@ -729,7 +744,10 @@ forward is a pipe, not a party to the protocol.
   inject` strips loopback's free pass from it before the delivery decision
   runs (CONTRACTS.md §6). A signature-rung `autogate` flag restores
   auto-delivery for a node the operator already marked that way, exactly
-  the like-for-like an operator's existing grant expects. `via`/`--via` are
+  the like-for-like an operator's existing grant expects, and a matched
+  remote-parent claim does the same for the node that spawned this very
+  session — the tunneled parent is the shape that rule exists to serve.
+  `via`/`--via` are
   safe to use against a real node.
 
 ## Mesh declaration

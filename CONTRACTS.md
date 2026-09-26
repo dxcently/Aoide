@@ -1455,9 +1455,16 @@ body string. `node`/`key` are that record's, `sessionId` is the caller's
 env var and no `conduct`/`spawn` flag for it (`session_conduct` reads none, and
 refuses nothing because there is nothing to read), and `resurrect` never
 carries it forward. Like `origin`, the field is **attribution, not
-authentication** — `sessions.json` stays a plain, same-uid-writable file, so no
-security decision keys on `remoteParent` as read off disk; the gate is the key
-comparison the door makes against the verifying node's pubkey. It is
+authentication** — `sessions.json` stays a plain, same-uid-writable file, and
+same-uid is already loopback-trusted on its own host, so writing this field is
+no new authority: a local writer can hand itself a stamp, never a signature.
+One security decision does read it, though, and §6 states it: the Inject arm's
+deliver-now decision for a claimed remote parent keys on `remoteParent` as read
+off disk. What binds that read is the key comparison the door makes against the
+key it just verified — the stored `key` must equal the verified signer's, and
+the stored `sessionId` must equal the claim — so a hand-set `remoteParent` can
+only ever name a node whose OWN signature this door verified, on the one
+session id that record carries. It is
 change-only as a stamp, exactly like `origin`/`seal` (a same-value re-stamp
 writes nothing; a genuinely different value overwrites, since the guard is the
 value already on the record, not a "has this ever been set" flag).
@@ -4825,17 +4832,31 @@ target side is read off `sessions.json` (`session_remote_parent`) only for a
 request that BOTH carried a claim and proved a signature, so an ordinary inject,
 and every spawn, reads exactly what it read before. A match delivers WITHOUT the
 pending dance — audited `a2a.message/send`/`status:"autogate-remote-parent"` —
-on the same two rails the signature-rung `autogate` flag rides: exempt from
-`origin_for_inject`'s downgrade (the ssh `-L` shape classifies as loopback,
-where `autogate_match` is ignored outright, so an exemption alone would count
-for nothing) and folded into `autogate_match` (so a genuinely remote origin does
-not pend either). It overrides neither earlier question. The door-wide bearer
-runs FIRST: a door with a token set admits a remote parent only if it presents
-the bearer, and `effective_origin` still coerces a bearer that does not classify
-`Valid`. And the node's own `autogate` flag need not be on for a parent to steer
-the child it spawned — the same independence the LOCAL parent rule has
-(`--yes` ▸ global switch ▸ parent-of-target), which delivers whether the
-box-wide autogate switch is on or off. A malformed claim needs no handling here
+on the same two rails the signature-rung `autogate` flag rides, and both rails
+are load-bearing — each carries one of the two transports this rule has to
+serve. The EXEMPTION from `origin_for_inject`'s downgrade carries the
+loopback/`ssh -L` shape: a request through a forward terminates at loopback
+here, `should_deliver_now`'s `Loopback` arm delivers unconditionally, and the
+exemption is therefore all that shape needs — without it the tunneled parent is
+coerced to `Unknown`, whose arm delivers nothing at all. The FOLD into
+`autogate_match` carries the `Remote(<ip>)` shape: that arm consults
+`autogate_match` and nothing else, so a directly-addressed parent pends without
+the fold (the exemption is inert there — nothing coerced an origin that was
+never `Loopback`). Deleting either one silently breaks a whole transport, which
+is why neither is redundancy. It overrides neither earlier question. The
+door-wide bearer runs FIRST: a door with a token set admits a remote parent only
+if it presents the bearer, and `effective_origin` still coerces a bearer that
+does not classify `Valid`. And the node's own `autogate` flag need not be on for
+a parent to steer the child it spawned — the same independence the LOCAL parent
+rule has (`--yes` ▸ global switch ▸ parent-of-target), which delivers whether
+the box-wide autogate switch is on or off. **That independence is also why this
+rule has no off switch**: neither the per-node `autogate` flag nor
+`AOIDE_CONDUCT_AUTOGATE` gates its computation or its delivery, and the door
+consults no setting of its own. The levers an operator actually holds are
+unpairing the node (`node remove` — with no candidate record
+`verify_signed_request` has nothing to resolve, so every claim fails) and the
+child ending; `node allow <name> spawn off` stops only NEW children, and
+unpairs nothing already spawned. A malformed claim needs no handling here
 at all: this door never stamped a value outside `valid_claimed_session_id` as
 any record's `sessionId`, so equality is false, and the `-32602` stays spawn-side
 where the value is actually built. It follows that the CALLER need not refuse one
@@ -4873,11 +4894,14 @@ remote-parent key match is deliberately NOT required to read: a signed,
 verified node holding `read` reads any session's frame on this node, while
 steering without pending (above) and the ping-back history (`aoide/linesAfter`)
 still need the remote-parent key. Unsigned, bearer-token and bare-address rungs
-are refused — `-32007`, ONE text for every refusal and the same text whether the
-named session exists or not, so the gate reveals no more about the roster than
-the status read it shares the method with. `-32007` is also
-[`verify_signed_request`]'s own code; the two refusals never share a text, and a
-signature refusal is decided before the frame arm runs at all. A frame read
+are refused — `-32011`, this arm's OWN code, ONE text for every refusal and the
+same text whether the named session exists or not, so the gate reveals no more
+about the roster than the status read it shares the method with. `-32011` is
+minted here and nowhere else: `-32007` stays [`verify_signed_request`]'s own
+incomplete-headers/signature-mismatch family, decided before the frame arm runs
+at all. Every capability-gated arm mints its own code for this reason — Spawn's
+`-32006`, `mailDeposit`'s `-32010`, and now this one — so the code alone names
+the arm that refused, without matching prose. A frame read
 audits under its own label, `a2a.tasks/get.frame`, so an operator can tell which
 `tasks/get` calls read output from which were status polls. A session that has
 no frame to read — an unknown id, a `sub:` card, a record that keeps no

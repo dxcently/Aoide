@@ -132,16 +132,19 @@ to **rebuild time** instead.
   `ConnOrigin`: `Loopback` / `Remote(IpAddr)` / `Unknown`). A `Remote`
   caller falls back to the same interactive pending-approval queue
   `send` uses — auto-delivering on an autogate match: the OR of the
-  address check, the per-node `tokenFile` check, and the signature-rung
-  `autogate` flag on the resolved node's own record
-  ([[Node-Federation]]); an `Unknown` origin (the address couldn't be read
-  at all) is never auto-delivered, failing safe like an unmatched `Remote`.
+  address check, the per-node `tokenFile` check, the signature-rung
+  `autogate` flag on the resolved node's own record, and a matched
+  remote-parent claim — the node that spawned this very session steering its
+  own child ([[Node-Federation]]; the claim and its three-way match are
+  CONTRACTS.md §6's remote-parent rule); an `Unknown` origin (the address
+  couldn't be read at all) is never auto-delivered, failing safe like an
+  unmatched `Remote`.
   A verified signature outranks loopback for this question: a request
   `verify_signed_request` already verified is remote by construction (an
   ssh `-L` forward terminates at loopback on this end), so
-  `origin_for_inject` strips `Loopback`'s free pass from it and the node's
-  own `autogate` flag — not the arrival address — decides delivery
-  ([[Node-Transport]]).
+  `origin_for_inject` strips `Loopback`'s free pass from it — and then the
+  node's own `autogate` flag or a matched remote-parent claim decides
+  delivery, never the arrival address ([[Node-Transport]]).
   This is the one interactive per-request gate the wire otherwise lacks —
   added for [[Node-Federation|node federation]]'s non-loopback case, which
   the original loopback-only design didn't need to cover.
@@ -187,8 +190,10 @@ to **rebuild time** instead.
   above — a legacy escape for unpaired callers, like it.
   `node_store::is_autogated_node_token` folds a presented token
   against every registered node's own token file, and Inject's autogate
-  match is the OR of the address check, this token check, and the
-  signature-rung `autogate` flag — a shared
+  match is the OR of the address check, this token check, the
+  signature-rung `autogate` flag, and a matched remote-parent claim — the
+  node that spawned this very session steering its own child
+  (CONTRACTS.md §6's remote-parent rule, [[Node-Transport]]) — a shared
   secret could never tell two nodes apart, so identifying which node called
   needs one file per node, not one flag for the whole door.
 - **The outbound direction has its own bearer.** `node add --bearer-secret

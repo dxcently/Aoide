@@ -300,7 +300,11 @@ through.
     bearer-only caller with a claim gets one audit line and its send holds
     pending like any stranger's. The hit rides gate label
     `autogate-remote-parent` and does NOT exempt the door-wide bearer, which
-    is still checked first. An unruly claim (an id the far door could never
+    is still checked first. It has no off switch either: neither the node's own
+    `autogate` flag nor the box-wide `AOIDE_CONDUCT_AUTOGATE` gates it, so the
+    levers against a node that already spawned a child are unpairing it
+    (`node remove`) or the child ending — `node allow <n> spawn off` stops only
+    NEW children. An unruly claim (an id the far door could never
     have stamped) is dropped by the sender — one warning line, `not claiming
     parent: <reason>` — and the send goes out unclaimed rather than failing.
     `CONTRACTS.md` §6 carries the full rule.

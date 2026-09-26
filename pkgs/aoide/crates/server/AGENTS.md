@@ -461,16 +461,20 @@
   `claimed_from.as_deref().is_some_and(...)`: paid ONLY by a request that both
   carried a claim and proved a signature, so an ordinary inject and every spawn
   read exactly what they read before. The hit needs BOTH rails `sig_autogate`
-  rides — exempt from `origin_for_inject`'s downgrade (the ssh `-L` shape
-  classifies as loopback, where `autogate_match` is ignored outright, so an
-  exemption alone would count for nothing) AND folded into `autogate_match`
-  (otherwise a genuinely remote origin takes `ConnOrigin::Remote`'s arm and
-  pends). It overrides neither earlier question: the door-wide bearer still
-  runs FIRST — a door with `aoide.a2a.tokenFile`/`bearerSecret` set admits a
-  remote parent only if it presents the bearer, and `effective_origin` still
-  coerces a bearer that does not classify `Valid` — and a node's own `autogate`
-  flag need not be on for a parent to steer its child (the same independence
-  `send_gate`'s local parent rule has), so pass
+  rides, and each rail carries one transport — neither is redundancy. The
+  EXEMPTION from `origin_for_inject`'s downgrade carries the loopback/ssh `-L`
+  shape: `should_deliver_now(ConnOrigin::Loopback, _)` delivers
+  unconditionally, so the exemption alone is enough there, while without it a
+  tunneled parent is coerced to `Unknown` — whose arm delivers nothing at all.
+  The FOLD into `autogate_match` carries `ConnOrigin::Remote`'s shape: that arm
+  consults `autogate_match` and nothing else, so a directly-addressed parent
+  pends without the fold (the exemption is inert there — the origin was never
+  loopback to begin with). It overrides neither earlier question: the door-wide
+  bearer still runs FIRST — a door with `aoide.a2a.tokenFile`/`bearerSecret` set
+  admits a remote parent only if it presents the bearer, and `effective_origin`
+  still coerces a bearer that does not classify `Valid` — and a node's own
+  `autogate` flag need not be on for a parent to steer its child (the same
+  independence `send_gate`'s local parent rule has), so pass
   `autogate_match || remote_parent_hit`, never `remote_parent_hit` folded INTO
   `autogate_match`. A hit audits
   `a2a.message/send`/`status:"autogate-remote-parent"`; a MISS adds nothing at
@@ -487,7 +491,12 @@
   predicate's whole table; `a_remote_parent_steers_its_child_without_pending_
   with_autogate_off`/`_on` are the hit; `a_genuinely_signed_remote_parent_
   steers_its_child_without_pending` is the non-loopback origin;
-  `a_remote_parent_mismatch_leaves_todays_result_byte_for_byte` is the miss.
+  `a_tunneled_remote_parent_steers_its_child_without_pending` is the
+  loopback/ssh `-L` origin the exemption exists for (its pending check runs
+  before the byte join, so its regression fails instead of hanging);
+  `a_door_token_refuses_a_remote_parents_delivery_uniformly` is the bearer
+  running first; `a_remote_parent_mismatch_leaves_todays_result_byte_for_byte`
+  is the miss.
 - **`do_inject`'s `from` attribution (P-P3 decision 7) is scoped to the
   QUEUED path only — never an immediately-delivered payload's bytes.**
   `session_send`'s own `from` mechanism also prefixes DELIVERED text
@@ -613,6 +622,41 @@
   check into `decide_send_action` or `SessionRef` "for locality" — both
   types' own doc comments state the point of staying stage-file-free and
   unit-testable with a bare closure, no socket or tempdir required.
+- **`tasks/get` carries the session's watch frame, and the read that admits
+  it is `output_read_admitted` (P-RSA S6, CONTRACTS.md §6).** The request
+  signal is `params.metadata["aoide/frame"]` — `params` only, never
+  `message.metadata`, the `message/send` fallback `aoide/spawn` also accepts,
+  because this is a request about a session rather than a message — and the
+  answer is the SAME status read plus the frame as one `data` artifact, so a
+  request without the key stays byte-identical. The gate is three clauses at
+  once: `read_ok` (the door-wide bearer rule every read arm carries —
+  `token_authorized`), a caller resolved through the SIGNATURE rung, and that
+  record `verified` with `read` in its `allows` (`node_may_read`,
+  `node_may_spawn`'s twin one capability over). Resolution goes through
+  `resolved_caller`, which takes the rung from the PROOF rather than a second
+  lookup: no `SignedCaller` (unsigned, bearer, address) is `None` whatever the
+  registry holds. The remote-parent key match is deliberately NOT required to
+  READ — reading is wider than writing, and `send`'s remote-parent delivery
+  (S5) and the ping-back history still need the key. The refusal is this arm's
+  OWN code, `-32011` — minted like Spawn's `-32006` and `mailDeposit`'s
+  `-32010`, and never `-32007`, which stays `verify_signed_request`'s
+  incomplete-headers/signature-mismatch family decided BEFORE this arm runs —
+  with ONE text for every refusal and the same text whether the named session
+  exists or not, so the gate is no existence oracle beyond the status read it
+  shares the method with. The gate runs FIRST, so a refusal never depends on
+  whether the id exists; a session with no frame to read (unknown id, a `sub:`
+  card, a record keeping no conduct-owned PTY) answers `session watch`'s own
+  taught refusal under `-32001`, after the gate. A frame read audits under its
+  own label, `a2a.tasks/get.frame`; the frame leaves through `Frame::for_wire`
+  (this box's paths and the suggested command struck) inside the tail (1..=200),
+  letter-body (40 lines) and 256 KiB frame caps. Tests:
+  `output_read_admitted_is_a_signed_verified_node_with_read` is the gate's
+  whole table and `resolved_caller_needs_a_proof_and_finds_its_own_record` the
+  rung rule;
+  `an_unsigned_frame_read_is_refused_and_is_no_existence_oracle` pins the one
+  text and the `-32011` code, `a_signed_node_without_read_is_refused` the
+  revocation shape, and `a_signed_reader_reads_any_sessions_frame` the ruling
+  that reading needs no `remoteParent`.
 - **`aoide/mailDeposit` (P-M2) is the SECOND capability-gated A2A arm,
   after Spawn, and the first not gated on `spawn` — `deposit_admitted`
   mirrors `spawn_admitted` one capability over, but signature-only from

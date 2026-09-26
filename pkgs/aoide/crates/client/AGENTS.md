@@ -101,9 +101,17 @@
   A `--parent` naming no live local record is refused, never replaced by
   the attestation — and whichever id wins is then held to
   `aoide_storage::remote_children::valid_claimed_session_id`, the SAME
-  predicate the door applies inbound, so an unruly claim is refused HERE,
-  before anything is signed or sent, rather than one signature and one round
-  trip later as the door's `-32602`. `remote_child_row` holds the far node's
+  predicate the door applies inbound, so an unruly claim is refused at the
+  resolver, before anything is signed or sent, rather than one signature and
+  one round trip later as the door's `-32602`. **Which caller then refuses is
+  the SPAWN path's business alone (the User's ruling, 2026-09-25):** `node spawn` fails
+  the call it was asked to make, while `send --to` DROPS the claim, sends
+  unclaimed and names the reason on one warning line (`not claiming parent:
+  <reason>`) — `send` never named a parentage, the claim is an autogate
+  shortcut rather than the request, and the door's Inject arm reads a
+  malformed claim as a non-match, never as a refusal, so an unruly id costs
+  that send its autogate and nothing else. Don't "restore" a refusal on the
+  send path. `remote_child_row` holds the far node's
   ack id to that predicate too: it is a string this node did not mint and
   cannot vouch for. `build_message_send_body` is the one writer of the key;
   the claim rides inside the signed body, so never add it to headers or
