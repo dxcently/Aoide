@@ -153,11 +153,15 @@ pub struct MeshSection {
     /// is NOT the raw size of the mesh's `nodes` map in `config.toml` — a
     /// mesh naming itself plus two others declares 3 but compares 2.
     pub declared: usize,
-    /// Was this box's own name (`display::local_host_name()`) found among
-    /// this mesh's declared node keys? `false` means either this box
-    /// genuinely isn't part of the mesh, or it's declared under the wrong
-    /// key (a typo, an FQDN/uppercase hostname `node_store::valid_node_name`
-    /// can never accept — see `CONTRACTS.md §4`) — the two are
+    /// Was this box's own name (`display::local_node_name()` — the NODE name,
+    /// folded) found among this mesh's declared node keys? `false` means either
+    /// this box genuinely isn't part of the mesh, or it's declared under the
+    /// wrong key (a typo, a name outside the address grammar). The comparison
+    /// MUST use the folded form: a mesh key is forced through
+    /// `node_store::valid_node_name` (`storage::config`), so the raw,
+    /// case-preserving host name can never equal one — comparing the raw name
+    /// made a box whose host name differs in case report its OWN declared entry
+    /// as an unpaired row and `selfDeclared:false`. The two are
     /// indistinguishable from here, so this is a note, never a drift row:
     /// it changes neither `rows` nor `declared`.
     #[serde(rename = "selfDeclared")]
@@ -301,7 +305,12 @@ fn handle_mesh(_inv: &Invocation) -> Outcome {
         }
     };
     let nodes = aoide_storage::node_store::load_nodes();
-    let local_name = aoide_storage::display::local_host_name();
+    // As a NODE, not as a host: every mesh key and every node record's `name`
+    // is `valid_node_name`-shaped, so this box must present the folded form to
+    // be recognised as itself (`display::local_node_name`'s own doc has the
+    // host-case argument). See `MeshSection::self_declared`'s field doc for the
+    // defect this closes.
+    let local_name = aoide_storage::display::local_node_name();
     let report = drift(&loaded.config.mesh, &nodes, &local_name);
     let text = render_report(&report, &local_name);
     Outcome::ok(cmd, text).with_data(json!({ "report": report }))
@@ -713,7 +722,10 @@ fn handle_mesh_pair(inv: &Invocation) -> Outcome {
         }
     };
     let nodes = aoide_storage::node_store::load_nodes();
-    let local_name = aoide_storage::display::local_host_name();
+    // As a NODE (folded), for the same reason `handle_mesh`'s own call site is:
+    // the mesh's declared keys are `valid_node_name`-shaped, so the raw host
+    // name can never match one.
+    let local_name = aoide_storage::display::local_node_name();
     let report = drift(&loaded.config.mesh, &nodes, &local_name);
 
     let arg = inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty());
@@ -876,6 +888,38 @@ mod tests {
         let out = f(&dir);
         let _ = std::fs::remove_dir_all(&dir);
         out
+    }
+
+    // ── drift: this box as a NODE ────────────────────────────────────────────
+
+    /// The box is recognised as ITSELF — as a NODE — when this host's name
+    /// differs in case from the grammar-lowercase key a mesh must declare it
+    /// under. Driven through the SAME expression both production call sites use
+    /// (`display::local_node_name()`), so the fold is pinned at that boundary,
+    /// and the second half shows the defect the fold corrects: with the raw,
+    /// case-preserving host name, `self_declared` is false and this box's own
+    /// declared entry reads as an unpaired row — which is exactly what a host
+    /// named `ThinkChiyo` reported against a mesh declaring `thinkchiyo`,
+    /// because a mesh key is forced through `node_store::valid_node_name`.
+    #[test]
+    fn a_mixed_case_host_name_is_recognised_as_self_under_its_node_name() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _saver = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "ThinkChiyo");
+
+        let meshes = BTreeMap::from([("home".to_string(), mesh(&[("thinkchiyo", "ssh://k@h")]))]);
+        let report = drift(&meshes, &[], &aoide_storage::display::local_node_name());
+        assert!(report.sections[0].self_declared, "this box IS the declared node: {report:?}");
+        assert!(
+            report.sections[0].rows.is_empty(),
+            "and its own entry is never an unpaired row: {report:?}"
+        );
+
+        let raw = drift(&meshes, &[], &aoide_storage::display::local_host_name());
+        assert!(
+            !raw.sections[0].self_declared,
+            "the premise the fix corrects: the raw spelling matches no declared key: {raw:?}"
+        );
     }
 
     // ── drift: matches produce nothing ──────────────────────────────────────
