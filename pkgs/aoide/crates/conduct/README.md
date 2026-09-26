@@ -85,6 +85,37 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   harness_session_id` (P-D7) from the raw hook payload's own `session_id`
   on every event that carries one, mapped-to-an-action or not — see
   `CONTRACTS.md`'s `sessions.json` entry for the full field contract.
+- **The hook door's two self-reported facts, and the ONE rule that resolves
+  them.** A hook process is the only process that can read what a harness
+  reports about itself, so it reads its parent claim once
+  (`HOOK_PARENT_FLAG`) and sends it along; the PID is not its to send — the door
+  stamps its own `SO_PEERCRED` peer pid (`DAEMON_PEER_PID_FLAG`, written
+  unconditionally by `aoided`, so a wire-supplied value is discarded), because a
+  caller-supplied pid plus a caller-supplied claim is one caller's word twice
+  and verifies nothing. Whichever arm runs the action — the daemon's, or the
+  local no-daemon fallback — the parent resolves by the same order: the attested
+  wrap (`real_attested_wrap(door_pid)`, kernel-verified) first, then the claim,
+  which is itself CHECKED before use (`resolve_parent_claim`) against that
+  pid's real `/proc` ancestry. A claim naming a record that carries a pid this
+  hook process does not run under is contradicted: dropped, registered
+  parentless, and reported (`data.parentClaim`, plus the outcome's own message —
+  the text the door's audit record is written from); a claim that STOOD is
+  reported there too when it crossed the hop, so every cross-process claim
+  leaves a trace. `aoided`'s own ambient `AOIDE_SESSION_ID` is never a source,
+  the same accounting `server/README.md`'s G8 line holds for `send`, and a
+  daemon that stamps no pid means NO parent claim and NO ancestry stamp — never
+  `std::process::id()`, which daemon-side is `aoided`, and systemd's tree is not
+  the agent's. `hookAncestry` is stamped from `pid_ancestry(door_pid)` for the
+  same reason.
+- **An `aoided` older than this build silently registers hook sessions
+  parentless: restart `aoided` after upgrading.** Both keys this door reads are
+  ignored by an older daemon — it never overwrites `DAEMON_PEER_PID_FLAG` and
+  never forwards `HOOK_PARENT_FLAG` — so it falls back to its own env and the
+  record keeps no parent, which reads downstream as `spawn --prompt`'s "not
+  ready" after the full budget, with no error (that was this door's original
+  defect, verbatim). There is no version handshake to refuse it: `ping` reports
+  `AOIDE_VERSION` and no client compares it, daemon restarts are user-gated
+  (house rule 2), and the wire is otherwise compatible in both directions.
 - **The check lane (task #139), wired into `session hook`'s three lifecycle
   triggers — Stop records, the next context-reaching event speaks.**
   `hook_for_profile`'s `HookAction::Start` arm reads the STORED `hooks.json`

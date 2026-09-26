@@ -40,7 +40,13 @@ full node id or the bare id.
   instead resolves one automatically: its self-first `/proc` ancestry
   (`hookAncestry`, stamped once at registration) is intersected against
   every live agent-kind session's own `hookAncestry`, and the closest
-  matching ancestor wins as parent (CONTRACTS.md §4).
+  matching ancestor wins as parent (CONTRACTS.md §4). A harness that reports
+  itself through the hook door is launched by a wrap, so its parent is usually
+  that wrap directly, and the door resolves it the same way whichever door
+  serves the hook: the claim in the hook process's own `AOIDE_SESSION_ID`
+  (checked — a claim whose record carries a pid the hook process is not
+  running under is dropped and reported, never linked) with the attested
+  conducted ancestor as the kernel-verified path ahead of it.
 - **`leads`** (session → session): a project that names a **lead**
   (`aoide project lead <name> <session>`, CONTRACTS.md §4's
   `projects.json`) hangs its other parentless sessions off that one

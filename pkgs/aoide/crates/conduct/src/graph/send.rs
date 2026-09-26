@@ -597,8 +597,8 @@ fn real_attested_sender(sessions: &[SessionRecord]) -> Option<String> {
 /// [`real_attested_sender`] makes, delegated to
 /// [`crate::graph::identity::attested_wrap`] (the conducted-ancestor-only
 /// walk) instead of `attested_sender`'s any-sealed-ancestor one, walked from
-/// `hook_pid` — the HOOK process's own real pid (carried across the daemon
-/// hop by [`HOOK_PID_FLAG`]), never this process's own `std::process::id()`
+/// `hook_pid` — the HOOK process's own real pid (the pid the door stamped,
+/// `DAEMON_PEER_PID_FLAG`), never this process's own `std::process::id()`
 /// when running daemon-side. An unreachable daemon or an unreadable roster
 /// makes every hook unattested (`None`), never a benign fallback — same
 /// fail-closed posture as `real_attested_sender`.
@@ -617,9 +617,121 @@ fn real_attested_wrap(hook_pid: i32) -> Option<String> {
 /// pid to walk — so the preference order is directly testable without a
 /// live daemon: [`real_attested_wrap`] itself always resolves `None` under
 /// this crate's fixtures (a dead `AOIDE_DAEMON_SOCKET` by design,
-/// `aoide_test_support::isolated_mail_root`'s own doc).
-fn start_parent(attested: Option<String>, env_parent: Option<String>) -> Option<String> {
-    attested.or(env_parent)
+/// `aoide_test_support::isolated_mail_root`'s own doc). `env_parent` is
+/// borrowed because on both arms it is the caller's own claim
+/// ([`own_parent_claim`] / [`HOOK_PARENT_FLAG`]), never a value this function
+/// goes looking for.
+fn start_parent(attested: Option<String>, env_parent: Option<&str>) -> Option<String> {
+    attested.or_else(|| env_parent.map(str::to_string))
+}
+
+/// What a hook's own parent claim resolved to against the hook process's real
+/// ancestry — the ruling that a claim is never trusted blindly: the ID is
+/// whatever the caller says, but the CHECK is a `/proc` walk of `hook_pid`.
+#[derive(Debug, PartialEq, Eq)]
+enum ParentClaim {
+    /// Nothing claimed, or nothing to check a claim against (the record's own
+    /// id, filtered at the call sites), or no walkable pid at all — the
+    /// daemon-side "the door stamped no pid" case. Register parentless.
+    Unclaimed,
+    /// The claim stands. `checked` records WHICH way it stood: `true` when the
+    /// claimed record carries a pid that really is in `hook_pid`'s ancestry
+    /// (kernel evidence), `false` when there was no pid to compare — a
+    /// hook-registered parent is pid-less by construction (`payload_pid`'s own
+    /// doc) — or no record to find. The distinction exists only so the audit
+    /// note can say which one happened; both accept.
+    Linked { id: String, checked: bool },
+    /// The claim names a pid-carrying record this hook process is NOT running
+    /// under — a stale or fabricated `AOIDE_SESSION_ID`. DROPPED.
+    Contradicted(String),
+}
+
+impl ParentClaim {
+    /// The parent to register, when the claim survived.
+    fn linked(&self) -> Option<&str> {
+        match self {
+            ParentClaim::Linked { id, .. } => Some(id),
+            _ => None,
+        }
+    }
+}
+
+/// [`ParentClaim`]'s ONE decision, shared by both arms of the hook door:
+/// `session_hook` hands it the same two inputs either way — the hook process's
+/// own real pid, and the claim from THAT process's env — so the arms cannot
+/// drift. On the CLI arm `hook_pid` is this process (its env is the claim's
+/// source too); on the daemon arm both arrive over the dispatch hop, and the
+/// pid is the door's own `SO_PEERCRED` stamp rather than anything the caller
+/// typed (`DAEMON_PEER_PID_FLAG`).
+///
+/// The check is [`pid_ancestry`], the same real-`/proc` walk
+/// `window::ancestry_parent` and the attested-wrap resolution already stand on,
+/// so the answer is kernel evidence about the CLAIMER rather than anything the
+/// caller could assert: an ordinary same-user variable can name any session it
+/// likes, and a session whose own pid is not in this walking process's ancestry
+/// was never this harness's launcher. A pid-less record cannot contradict
+/// anything — there is no fact to check, and the CLI arm has always taken it
+/// (that is exactly how a hook-registered parent links its child), so it is
+/// taken here too. A claim naming no record at all is `Linked` on the same
+/// grounds: nothing contradicts it, and refusing it would change the CLI arm's
+/// own answer rather than verify it.
+///
+/// `hook_pid: None` — no walkable pid — is `Unclaimed` for every claim. That
+/// is the daemon arm with no door-stamped pid, and it must not be papered over
+/// with this process's own pid: daemon-side that is `aoided`, whose ancestry
+/// would "verify" whatever the caller asserted about the daemon's own tree.
+fn resolve_parent_claim(
+    hook_pid: Option<i32>,
+    claim: Option<&str>,
+    sessions: &[SessionRecord],
+) -> ParentClaim {
+    let (Some(hook_pid), Some(id)) = (hook_pid, claim) else {
+        return ParentClaim::Unclaimed;
+    };
+    match sessions.iter().find(|s| s.session_id == id).and_then(|s| s.pid) {
+        Some(pid) if !pid_ancestry(hook_pid).contains(&(pid as i32)) => {
+            ParentClaim::Contradicted(id.to_string())
+        }
+        Some(_) => ParentClaim::Linked { id: id.to_string(), checked: true },
+        None => ParentClaim::Linked { id: id.to_string(), checked: false },
+    }
+}
+
+/// The one wording for a dropped claim, folded onto the hook's own `Outcome`
+/// (and therefore into the audit record every door writes for that outcome) by
+/// both action sites that can resolve one.
+fn contradicted_claim_note(claim: &str) -> String {
+    format!("hook parent claim `{claim}` contradicted by this hook's own /proc ancestry — not used")
+}
+
+/// And the one wording for a claim that STOOD, on the daemon arm only: a claim
+/// that crossed the hop is a trust decision taken inside this process on
+/// another process's word, so it leaves a trace whether or not it was
+/// contradicted (the CLI arm's claim is this process's own env — the same
+/// process that walks it — and reporting it would say nothing the record does
+/// not already say on every launch).
+fn linked_claim_note(claim: &str, checked: bool) -> String {
+    if checked {
+        format!("hook parent claim `{claim}` verified against this hook's own /proc ancestry")
+    } else {
+        format!("hook parent claim `{claim}` taken unchecked (its record carries no pid)")
+    }
+}
+
+/// The trace a resolved claim leaves on the outcome — and therefore in the
+/// audit record every door writes for it. `daemon_arm` is `may_ring`'s own
+/// fact (`inv.door == Door::Daemon`, the only door that serves a hook over the
+/// hop): a claim that crossed the hop is reported whether it stood or was
+/// dropped, so every cross-process trust decision this door makes is legible
+/// after the fact; the local arm's own env claim is not (see
+/// [`linked_claim_note`]), while a CONTRADICTION is reported from either arm —
+/// a dropped claim is never routine, wherever it was dropped.
+fn claim_trace(claim: &ParentClaim, daemon_arm: bool) -> Option<String> {
+    match claim {
+        ParentClaim::Contradicted(c) => Some(contradicted_claim_note(c)),
+        ParentClaim::Linked { id, checked } if daemon_arm => Some(linked_claim_note(id, *checked)),
+        _ => None,
+    }
 }
 
 /// The exact body `--id` has always run, factored out so [`session_send_to`]'s
@@ -1574,13 +1686,32 @@ fn payload_ceiling(payload: &Value) -> Option<u64> {
     (n > 0).then_some(n)
 }
 
-/// Up to 8 ancestor pids of THIS hook-firing process, self-first — the
+/// Up to 8 ancestor pids of THE HOOK PROCESS, self-first — the
 /// `hookAncestry` a fresh hook session stamps ONCE at registration (task
 /// #89), consumed later by a `wrap`/`conduct`/`spawn` registration's own
 /// ancestry walk (`window::ancestry_parent`) to find its true launching
-/// agent.
-fn my_hook_ancestry() -> Vec<i32> {
-    pid_ancestry(std::process::id() as i32).into_iter().take(8).collect()
+/// agent. Walks `hook_pid`, never `std::process::id()`: on the daemon-routed
+/// path those are two different processes, and `aoided`'s own ancestry
+/// describes systemd's tree, not the agent's — the same substitution
+/// [`DAEMON_PEER_PID_FLAG`] exists for, and the same reason it must not be undone
+/// here (a session stamped with the daemon's chain would hand every later
+/// registration under that daemon's own process tree a false parent).
+fn hook_ancestry(hook_pid: i32) -> Vec<i32> {
+    pid_ancestry(hook_pid).into_iter().take(8).collect()
+}
+
+/// The parent claim a harness's hook subprocess carries in its own
+/// `AOIDE_SESSION_ID` — the id of the wrap that launched the harness
+/// (`conduct`'s own `spawn_on_pty` export). Read by whoever IS the hook
+/// process, and by nobody else: on the CLI arm that is this process's own
+/// env, and on the daemon arm the value arrives on [`HOOK_PARENT_FLAG`].
+/// **`aoided`'s own env is never a source** — the G8 accounting
+/// (`server/src/daemon.rs::invocation_from_dispatch_request`'s own doc) at
+/// this second door: a daemon that inherited an `AOIDE_SESSION_ID` from the
+/// terminal that launched IT would hand that session to every
+/// hook-registered child, which is a WRONG parent, not a missing one.
+fn own_parent_claim() -> Option<String> {
+    std::env::var("AOIDE_SESSION_ID").ok().filter(|p| !p.is_empty())
 }
 
 /// The profile-parametrized core of [`hook_from_str`].
@@ -1631,8 +1762,15 @@ fn my_hook_ancestry() -> Vec<i32> {
 /// registration below, unmodified. No daemon or no resolvable ancestor →
 /// `None` → nothing touched, no error (fail-closed, never a guess from
 /// cwd/title/workspace).
-fn hook_ensure_session(profile: &AgentProfile, payload: &Value, id: &str, attest: Option<i32>) {
-    hook_ensure_session_with(profile, payload, id, attest, real_attested_wrap)
+fn hook_ensure_session(
+    profile: &AgentProfile,
+    payload: &Value,
+    id: &str,
+    hook_pid: Option<i32>,
+    attest: bool,
+    claim: Option<&str>,
+) -> Option<ParentClaim> {
+    hook_ensure_session_with(profile, payload, id, hook_pid, attest, real_attested_wrap, claim)
 }
 
 /// [`hook_ensure_session`]'s actual body, parameterized over the
@@ -1642,17 +1780,31 @@ fn hook_ensure_session(profile: &AgentProfile, payload: &Value, id: &str, attest
 /// re-parenting behavior is table-testable without a live daemon: production
 /// wires [`real_attested_wrap`] via [`hook_ensure_session`]; tests inject a
 /// fixed resolver directly.
+///
+/// `hook_pid` and `attest` are two questions, deliberately not one: `hook_pid`
+/// is the pid the door stamped (or this process on the local arm) — the ancestry
+/// fact EVERY arm needs to stamp [`hook_ancestry`] on a fresh record, and the
+/// one the claim is checked against — while `attest` is whether THIS arm pays
+/// for the attested-wrap walk, a live-daemon round trip the once-per-tool-call
+/// arms must not spend (`hook_for_profile_gated`'s own doc has the rate
+/// argument). `claim` is the hook's own `AOIDE_SESSION_ID`, as
+/// [`own_parent_claim`] resolves it. Returns the decision it reached, or `None`
+/// when it never reached one (a `sub:` id, or an existing record) — the caller
+/// turns that into the outcome's trace, because only the caller knows which arm
+/// this hook arrived on ([`claim_trace`]).
 fn hook_ensure_session_with(
     profile: &AgentProfile,
     payload: &Value,
     id: &str,
-    attest: Option<i32>,
+    hook_pid: Option<i32>,
+    attest: bool,
     resolve_wrap: impl Fn(i32) -> Option<String>,
-) {
+    claim: Option<&str>,
+) -> Option<ParentClaim> {
     if id.starts_with("sub:") {
-        return;
+        return None;
     }
-    let attested = attest.and_then(resolve_wrap);
+    let attested = attest.then(|| hook_pid.and_then(&resolve_wrap)).flatten();
     if let Some(w) = attested.as_deref() {
         stamp_attested_parent(id, w);
     }
@@ -1690,18 +1842,17 @@ fn hook_ensure_session_with(
                 }
             });
         }
-        return;
+        return None;
     }
     let cwd = payload.get("cwd").and_then(Value::as_str).map(str::to_string);
-    let env_parent = std::env::var("AOIDE_SESSION_ID")
-        .ok()
-        .filter(|p| !p.is_empty() && *p != id);
+    let sessions = existing.as_ref().map(|f| f.sessions.as_slice()).unwrap_or(&[]);
+    let resolved = resolve_parent_claim(hook_pid, claim.filter(|p| *p != id), sessions);
     // Attested beats env — kernel truth over an ordinary same-user variable
     // a subprocess could set on itself. Same value feeds windowless
     // discovery below AND `do_session_start`: one resolution, no double
     // write (the fresh record doesn't exist yet, so `stamp_attested_parent`
     // above was a no-op; `do_session_start` is what actually stamps it).
-    let parent = attested.as_deref().or(env_parent.as_deref());
+    let parent = attested.as_deref().or_else(|| resolved.linked());
     // Windowless by construction (task #89): a hook session whose
     // (about-to-be-set) parent's own lineage runs through an unwindowed
     // conducted wrap must never discover a window at all — that walk would
@@ -1734,7 +1885,10 @@ fn hook_ensure_session_with(
         None,
         pid,
     );
-    stamp_hook_ancestry(id, &my_hook_ancestry());
+    if let Some(pid) = hook_pid {
+        stamp_hook_ancestry(id, &hook_ancestry(pid));
+    }
+    Some(resolved)
 }
 
 /// Test-only convenience wrapper: every existing test in this module drives
@@ -1745,7 +1899,7 @@ fn hook_ensure_session_with(
 /// [`hook_for_profile_gated`] directly with the real `may_ring` value.
 #[cfg(test)]
 fn hook_for_profile(profile: &'static AgentProfile, buf: &str) -> Outcome {
-    hook_for_profile_gated(profile, buf, true, std::process::id() as i32)
+    hook_for_profile_gated(profile, buf, true, Some(std::process::id() as i32), own_parent_claim().as_deref())
 }
 
 /// `may_ring` gates ONLY the Stop-hook ring replay inside `HookAction::
@@ -1754,19 +1908,20 @@ fn hook_for_profile(profile: &'static AgentProfile, buf: &str) -> Outcome {
 /// ring). Every other action, and every other line of this function, is
 /// unaffected by it. [`session_hook`] is the one production caller, passing
 /// `inv.door == Door::Daemon` straight through — never a global, a
-/// thread-local, or an env var. `hook_pid` (P-QOL-C §1) is the raw pid every
+/// thread-local, or an env var. `hook_pid` (P-QOL-C §1) is the pid every
 /// [`hook_ensure_session`] call site below could attest from — see
-/// [`HOOK_PID_FLAG`]'s doc for why it cannot be re-derived from
-/// `std::process::id()` on the daemon-routed path — but only the `Phase`
-/// self-heal and `PhaseIfRunning` arms actually pass it on
-/// (`Some(hook_pid)`); `ToolStart`/`ToolEnd`/`SubRekey`/`SubEnsure` pass
-/// `None` and skip the walk ([`hook_ensure_session`]'s own doc has the rate
-/// argument for the split).
+/// [`DAEMON_PEER_PID_FLAG`]'s doc for why it is `None` whenever the door
+/// stamped no pid, and why this process's own pid is never a substitute.
+/// The claim is the hook
+/// process's own parent claim, resolved by whoever IS the hook process and
+/// passed in — never read here, so the daemon-routed path can never pick up
+/// `aoided`'s own `AOIDE_SESSION_ID` (see [`own_parent_claim`]).
 fn hook_for_profile_gated(
     profile: &'static AgentProfile,
     buf: &str,
     may_ring: bool,
-    hook_pid: i32,
+    hook_pid: Option<i32>,
+    claim: Option<&str>,
 ) -> Outcome {
     let cmd = "session.hook";
     let noop = |reason: &str| {
@@ -1810,15 +1965,34 @@ fn hook_for_profile_gated(
     // Folded onto the final Outcome's message after the match so every OTHER
     // event stays exactly as chatty as it was.
     let mut lane_note: Option<String> = None;
+    // The other "the hook learned something the operator must be able to find
+    // later" note, on the same channel for the same reason: a parent claim the
+    // kernel contradicted (see [`resolve_parent_claim`]) is dropped, and the
+    // record of the drop is the outcome every door audits for this event.
+    let mut claim_note: Option<String> = None;
     let inner = match action {
         HookAction::Start { id, cwd } => {
             // A claude launched INSIDE a conducted session inherits its parent's
-            // `AOIDE_SESSION_ID` in the hook process env — thread it as the
+            // `AOIDE_SESSION_ID` in the HOOK PROCESS's env — thread it as the
             // parent so a claude-conducting-claude (or a claude-in-a-shell) nests
-            // in the graph. The hook door inherits the launcher's env.
-            let env_parent = std::env::var("AOIDE_SESSION_ID")
-                .ok()
-                .filter(|p| !p.is_empty() && *p != id);
+            // in the graph. `claim` is exactly that env value, read where the hook
+            // actually runs (`own_parent_claim`): on the daemon-routed path it
+            // arrives on [`HOOK_PARENT_FLAG`] rather than being re-read here, so a
+            // daemon whose own env happens to carry an `AOIDE_SESSION_ID` can
+            // never pass it off as this harness's launcher.
+            let env_parent = claim.filter(|p| *p != id);
+            // The claim is CHECKED before it is used (`resolve_parent_claim`):
+            // a claimed record carrying a pid this hook process does not run
+            // under is a stale or fabricated `AOIDE_SESSION_ID`, and the
+            // session registers parentless instead. The roster is loaded once
+            // here and reused for the windowless walk below.
+            let existing = load_stage::<SessionsFile>(&sessions_path()).ok();
+            let resolved = resolve_parent_claim(
+                hook_pid,
+                env_parent,
+                existing.as_ref().map(|f| f.sessions.as_slice()).unwrap_or(&[]),
+            );
+            claim_note = claim_trace(&resolved, may_ring);
             // Attested kernel evidence outranks `env_parent` (`start_parent`'s
             // own doc): `do_session_start` below re-stamps `parentSessionId`
             // on any EXISTING id whenever `parent` is `Some` (`upsert_session`
@@ -1832,7 +2006,7 @@ fn hook_for_profile_gated(
             // below rather than left standing — `session kill` then refuses
             // (`NO_DEDICATED_PROCESS`) instead of resolving through the
             // terminal that hosted that earlier run.
-            let parent = start_parent(real_attested_wrap(hook_pid), env_parent);
+            let parent = start_parent(hook_pid.and_then(real_attested_wrap), resolved.linked());
             if parent.is_none() {
                 clear_stale_parent(&id);
             }
@@ -1842,8 +2016,8 @@ fn hook_for_profile_gated(
             // outright rather than pid-ancestry-walking to the ENCLOSING
             // terminal's window (the exact same-window collision that made
             // the eviction pass treat two unrelated agents as stale twins).
-            let windowless = load_stage::<SessionsFile>(&sessions_path())
-                .ok()
+            let windowless = existing
+                .as_ref()
                 .map(|f| windowless_by_lineage_from_parent(parent.as_deref(), &f.sessions))
                 .unwrap_or(false);
             // Best-effort: the hook is a subprocess of the agent's terminal, so
@@ -1886,7 +2060,9 @@ fn hook_for_profile_gated(
                 None,
                 pid,
             );
-            stamp_hook_ancestry(&id, &my_hook_ancestry());
+            if let Some(pid) = hook_pid {
+                stamp_hook_ancestry(&id, &hook_ancestry(pid));
+            }
             // The harness's own hello, timestamped: the one writer of
             // `sessionStartAt`, and the fact a first-turn injection waits on
             // (`wait_ready`). Stamped AFTER `do_session_start` above, so the
@@ -1925,7 +2101,8 @@ fn hook_for_profile_gated(
             // env-parent threading), fresh idle. Attested (`Some(hook_pid)`):
             // this arm fires once per turn (Stop/UserPromptSubmit/Awaiting),
             // the rate the re-parenting walk is actually worth paying.
-            hook_ensure_session(profile, &payload, &id, Some(hook_pid));
+            claim_note = hook_ensure_session(profile, &payload, &id, hook_pid, true, claim)
+                .and_then(|c| claim_trace(&c, may_ring));
             // Backfill a still-empty windowAddress on any later hook — covers a
             // session that registered before the window mapped (or before this
             // discovery shipped), so it becomes jumpable without a restart.
@@ -2018,7 +2195,8 @@ fn hook_for_profile_gated(
         HookAction::PhaseIfRunning { id, phase } => {
             // Attested — the other once-per-turn hook (an idle ping outside
             // an active turn), same rate as the `Phase` self-heal above.
-            hook_ensure_session(profile, &payload, &id, Some(hook_pid));
+            claim_note = hook_ensure_session(profile, &payload, &id, hook_pid, true, claim)
+                .and_then(|c| claim_trace(&c, may_ring));
             ensure_session_window(&id);
             do_session_phase_if(&id, &phase, "working")
         }
@@ -2028,10 +2206,12 @@ fn hook_for_profile_gated(
             activity,
             spawn,
         } => {
-            // Unattested (`None`) — PreToolUse fires on EVERY tool call; the
-            // walk buys nothing here (a wrap cannot change mid-tool-call),
-            // so only the pid refresh / fresh registration below runs.
-            hook_ensure_session(profile, &payload, &session, None);
+            // Unattested (`attest: false`) — PreToolUse fires on EVERY tool
+            // call; the walk buys nothing here (a wrap cannot change
+            // mid-tool-call), so only the pid refresh / fresh registration
+            // below runs.
+            claim_note = hook_ensure_session(profile, &payload, &session, hook_pid, false, claim)
+                .and_then(|c| claim_trace(&c, may_ring));
             ensure_session_window(&session);
             // Spawn the child FIRST so it exists before its parent's activity
             // points at it, then mark the owner working + its current activity.
@@ -2048,7 +2228,8 @@ fn hook_for_profile_gated(
         } => {
             // Unattested — PostToolUse, the same every-tool-call rate as
             // ToolStart above.
-            hook_ensure_session(profile, &payload, &session, None);
+            claim_note = hook_ensure_session(profile, &payload, &session, hook_pid, false, claim)
+                .and_then(|c| claim_trace(&c, may_ring));
             ensure_session_window(&session);
             if let Some(sub) = end_sub {
                 do_subagent_end(&sub);
@@ -2065,7 +2246,8 @@ fn hook_for_profile_gated(
             to_sub_id,
         } => {
             // Unattested — a subagent handoff, not a wrap change.
-            hook_ensure_session(profile, &payload, &session, None);
+            claim_note = hook_ensure_session(profile, &payload, &session, hook_pid, false, claim)
+                .and_then(|c| claim_trace(&c, may_ring));
             ensure_session_window(&session);
             do_subagent_rekey(&from_sub_id, &to_sub_id);
             // The launch returned; the parent is no longer running that tool in
@@ -2084,7 +2266,8 @@ fn hook_for_profile_gated(
             create,
         } => {
             // Unattested — same reasoning as SubRekey above.
-            hook_ensure_session(profile, &payload, &session, None);
+            claim_note = hook_ensure_session(profile, &payload, &session, hook_pid, false, claim)
+                .and_then(|c| claim_trace(&c, may_ring));
             do_subagent_spawn(&sub_id, &session, &agent_type, &agent_type, create);
             Outcome::ok("session.hook", format!("subagent {sub_id}"))
         }
@@ -2172,9 +2355,13 @@ fn hook_for_profile_gated(
     // (`hooks::door_command`'s claude wrapper stopped swallowing stdout for
     // exactly this reason), so the note has nowhere else to go.
     let note_for_data = lane_note.clone();
-    let message = match lane_note {
-        Some(note) => format!("{} — {note}", inner.message),
-        None => inner.message,
+    let claim_for_data = claim_note.clone();
+    let message = match (lane_note, claim_note) {
+        (None, None) => inner.message,
+        (lane, claim) => {
+            let notes: Vec<String> = [lane, claim].into_iter().flatten().collect();
+            format!("{} — {}", inner.message, notes.join("; "))
+        }
     };
     Outcome::ok(cmd, message)
         .changed(inner.changed)
@@ -2183,6 +2370,7 @@ fn hook_for_profile_gated(
             "innerStatus": format!("{:?}", inner.status),
             "innerData": inner.data,
             "checkLane": note_for_data,
+            "parentClaim": claim_for_data,
         }))
 }
 
@@ -2220,30 +2408,50 @@ fn hook_profile_for(inv: &Invocation) -> Result<&'static AgentProfile, Outcome> 
 /// which is never the calling hook's own pipe.
 const STDIN_PAYLOAD_FLAG: &str = "__daemon-stdin-payload";
 
-/// Internal-only flag key carrying the HOOK process's own real pid across the
-/// same daemon hop `STDIN_PAYLOAD_FLAG` rides (P-QOL-C §1) — never set by a
-/// real CLI/MCP/A2A caller, never registered in `commands/graph.rs`'s
-/// `flags:` list, no schema surface. `std::process::id()` read daemon-side
-/// (inside `hook_ensure_session`'s attested-wrap walk) is `aoided`'s OWN
-/// pid, not the hook's — useless as ancestry evidence (its parent is
-/// `systemd --user`, not the agent's terminal tree). The hook process is
-/// blocked on the daemon's reply while this rides along, so its `/proc`
-/// entry is still live when the daemon walks it.
+/// Internal-only flag key carrying the DOOR's own kernel-attested peer pid —
+/// stamped by `aoided` on every dispatch request it builds
+/// (`server/src/daemon.rs::invocation_from_dispatch_request`, from the same
+/// `SO_PEERCRED` read `cross_uid_gate` admits the connection on), and NEVER set
+/// by a caller: the wire's value for this key is overwritten before the
+/// invocation exists. That is the whole point of it being a door stamp rather
+/// than a hook-carried flag — the hook's own pid is a fact about the caller,
+/// and only the door can observe it (the review's M1: a hook-carried pid and a
+/// hook-carried claim are the same caller's word twice, which verifies
+/// nothing).
 ///
-/// **This pid is trusted verbatim, not attested.** It rides the SAME
-/// dispatch socket `cross_uid_gate`'s doc (`server/src/daemon.rs`) and
-/// `daemon_seal_pubkey_hex`'s doc (`client/src/daemon.rs`) already give the
-/// honest accounting for: a same-uid process can already dispatch over that
-/// socket and could name any pid here it likes, real or fabricated — "NOT a
-/// channel a same-uid attacker is locked out of". Not a privilege
-/// escalation: `terminate_verified` re-verifies the resolved kill target's
-/// OWN seal before ever signaling it (`actions.rs`), and a same-uid attacker
-/// could already signal any process of its own directly, flag or no flag —
-/// but a lied-about pid can still walk to, and re-parent onto, a real
-/// conducted wrap that pid's true ancestry has no business near, so treat
-/// this flag as ordinary same-uid input, never as kernel evidence in its own
-/// right.
-const HOOK_PID_FLAG: &str = "__daemon-hook-pid";
+/// Read by `session hook`'s daemon arm as the ONLY pid it will walk
+/// (attestation, the ancestry stamp, and the claim check all key on it).
+/// Absent or unparsable — an older `aoided`, a non-peercred host, an empty
+/// stamp — means NO pid, which means no claim and no ancestry stamp, never
+/// `std::process::id()`: daemon-side that is `aoided` itself, and stamping its
+/// ancestry onto a harness record is the false fact this door just stopped
+/// manufacturing.
+///
+/// Not registered in `commands/graph.rs`'s `flags:` list and no schema surface,
+/// the same posture the payload/claim keys hold; being door-written, it is also
+/// the one of the three that is not ordinary same-uid input.
+pub const DAEMON_PEER_PID_FLAG: &str = "__daemon-peer-pid";
+
+/// Internal-only flag key carrying the HOOK PROCESS's own `AOIDE_SESSION_ID`
+/// across the same daemon hop the payload rides — never set by a real
+/// CLI/MCP/A2A caller, never registered in `commands/graph.rs`'s `flags:`
+/// list, no schema surface. The value is what [`own_parent_claim`] read in the
+/// hook process itself; the daemon-side arm takes its parent claim from HERE
+/// and never from its own env (`invocation_from_dispatch_request`'s G8
+/// accounting), so "the harness's launcher" is a fact about the CALLER in both
+/// arms rather than about whichever process happens to answer the door.
+///
+/// **Ordinary same-uid input, and only as far as the door itself is.** It rides the
+/// dispatch socket `cross_uid_gate` (`server/src/daemon.rs`) admits only
+/// same-uid peers on — a same-uid process could already export any
+/// `AOIDE_SESSION_ID` it likes and take the CLI arm (`session_hook`'s own
+/// no-daemon fallback) with it, so carrying the claim over this hop grants no
+/// capability that door does not already grant. It is ordinary same-uid input,
+/// never kernel evidence: the attested-wrap walk stays FIRST
+/// (`start_parent`/`hook_ensure_session_with`), so a conducted parent is proven
+/// whenever it can be, and a claim only ever fills the gap the CLI arm's own
+/// env fallback fills today.
+const HOOK_PARENT_FLAG: &str = "__daemon-hook-parent";
 
 /// `session hook [--agent <name>]` — the hook door for agent harnesses.
 /// Reads ONE JSON object from stdin and maps it (through the selected agent
@@ -2256,6 +2464,19 @@ const HOOK_PID_FLAG: &str = "__daemon-hook-pid";
 /// on [`STDIN_PAYLOAD_FLAG`] instead of the wire growing a new field. The
 /// daemon-side invocation (flag present) skips both the routing attempt AND
 /// the real stdin read, using the forwarded payload directly.
+///
+/// **The two arms, and the one rule between them.** The hook is the only
+/// process that can read what a harness reports about itself — its own pid and
+/// the parent claim in its own env ([`HOOK_PARENT_FLAG`]) — and on the daemon
+/// arm the DOOR is the only party that can see the pid
+/// ([`DAEMON_PEER_PID_FLAG`]). Whichever arm runs the action, the parent resolves
+/// the same way — [`start_parent`]'s attested-wrap-first order, then the
+/// claim — and the ancestry stamp walks the same pid ([`hook_ancestry`]); the
+/// ONLY difference is where those two values come from: daemon-side they
+/// arrive on the routed invocation, and locally they ARE this process.
+/// Nothing in the action below reads `std::env::var("AOIDE_SESSION_ID")`, so
+/// `aoided`'s own ambient session can never be mistaken for the harness's
+/// launcher.
 pub fn session_hook(inv: &Invocation) -> Outcome {
     use std::io::Read;
     let profile = match hook_profile_for(inv) {
@@ -2272,26 +2493,40 @@ pub fn session_hook(inv: &Invocation) -> Outcome {
     // is whatever door the ORIGINAL caller actually used.
     let may_ring = inv.door == Door::Daemon;
     if let Some(payload) = inv.flags.get(STDIN_PAYLOAD_FLAG) {
-        // Daemon side: `std::process::id()` here is `aoided`'s own pid, not
-        // the hook's — use the pid the hook stamped onto the routed
-        // invocation before the hop, falling back to this process's pid on
-        // an absent or unparsable flag (never a hard failure of the hook).
-        let hook_pid = inv
+        // Daemon side: the ONLY pid this arm may walk is the door's own
+        // `SO_PEERCRED` stamp (`DAEMON_PEER_PID_FLAG`) — a caller-supplied pid
+        // and a caller-supplied claim are one caller's word twice, and the door
+        // is holding the real one. Absent/blank/unparsable (an older `aoided`
+        // that does not stamp it yet, a host with no peer credentials) means NO
+        // pid: `hook_for_profile_gated` then registers the session parentless
+        // and stamps no ancestry, never falling back to this process's own —
+        // that would be `aoided`'s ancestry, the false fact this door exists to
+        // stop recording.
+        let door_pid = inv
             .flags
-            .get(HOOK_PID_FLAG)
+            .get(DAEMON_PEER_PID_FLAG)
             .and_then(|s| s.parse::<i32>().ok())
-            .unwrap_or_else(|| std::process::id() as i32);
-        return hook_for_profile_gated(profile, payload, may_ring, hook_pid);
+            .filter(|p| *p > 0);
+        // The claim comes off the wire or not at all — deliberately no env
+        // fallback here (`own_parent_claim`'s own doc). It is CHECKED against
+        // `door_pid`'s ancestry before it is used.
+        let claim = inv.flags.get(HOOK_PARENT_FLAG).map(String::as_str).filter(|p| !p.is_empty());
+        return hook_for_profile_gated(profile, payload, may_ring, door_pid, claim);
     }
     let mut buf = String::new();
     let _ = std::io::stdin().lock().read_to_string(&mut buf);
+    // THIS process is the hook: its own pid IS the kernel fact, and its own env
+    // claim is the harness's launcher. Read once, so a daemon appearing or dying
+    // between two events cannot change the answer.
+    let hook_pid = std::process::id() as i32;
+    let claim = own_parent_claim();
     let routed = Invocation {
         path: inv.path.clone(),
         args: inv.args.clone(),
         flags: {
             let mut f = inv.flags.clone();
             f.insert(STDIN_PAYLOAD_FLAG.to_string(), buf.clone());
-            f.insert(HOOK_PID_FLAG.to_string(), std::process::id().to_string());
+            f.insert(HOOK_PARENT_FLAG.to_string(), claim.clone().unwrap_or_default());
             f
         },
         door: inv.door,
@@ -2300,7 +2535,7 @@ pub fn session_hook(inv: &Invocation) -> Outcome {
         return outcome;
     }
     // Local, no-daemon fallback: THIS process is the hook itself.
-    hook_for_profile_gated(profile, &buf, may_ring, std::process::id() as i32)
+    hook_for_profile_gated(profile, &buf, may_ring, Some(hook_pid), claim.as_deref())
 }
 
 #[cfg(test)]
@@ -6363,15 +6598,15 @@ mod tests {
     }
 
     /// The gate itself (`hook_ensure_session`'s own doc has the rate
-    /// argument): `attest: Some(pid)` on the Start-shaped self-heal and
-    /// PhaseIfRunning arms runs the walk, `None` on a tool/sub arm never
+    /// argument): `attest: true` on the Start-shaped self-heal and
+    /// PhaseIfRunning arms runs the walk, `false` on a tool/sub arm never
     /// even calls the resolver. Driven straight at [`hook_ensure_session_with`]
     /// with each arm's actual `attest` argument shape — the SAME injection
     /// seam [`deliver_local_with`]'s own tests use for
     /// [`real_attested_sender`] — rather than a live daemon (out of scope
     /// for this crate's fixtures, `isolated_mail_root`'s own doc).
     #[test]
-    fn attested_walk_fires_only_when_attest_carries_a_pid() {
+    fn attested_walk_fires_only_where_the_arm_asks_for_it() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env_sid = EnvVars::save(&["AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
@@ -6403,41 +6638,43 @@ mod tests {
         );
         let payload = json!({ "session_id": "c1", "hook_event_name": "Stop" });
 
-        // (i) Start-shaped: the `Phase` arm's registration self-heal passes
-        // `Some(hook_pid)` — re-stamps the stale parent onto the attested wrap.
-        hook_ensure_session_with(profile, &payload, "c1", Some(4242), resolve_wrap_x);
+        // (i) Start-shaped: the `Phase` arm's registration self-heal asks for
+        // the walk (`attest: true`) — re-stamps the stale parent onto it.
+        hook_ensure_session_with(profile, &payload, "c1", Some(4242), true, resolve_wrap_x, None);
         assert_eq!(parent_of("c1"), Some("wrap-x".to_string()), "Start-shaped re-stamps");
         assert_eq!(calls.get(), 1);
 
-        // (ii) PhaseIfRunning-shaped: same `Some(hook_pid)`, same treatment.
+        // (ii) PhaseIfRunning-shaped: same `attest: true`, same treatment.
         restage_stale("c1");
-        hook_ensure_session_with(profile, &payload, "c1", Some(4242), resolve_wrap_x);
+        hook_ensure_session_with(profile, &payload, "c1", Some(4242), true, resolve_wrap_x, None);
         assert_eq!(parent_of("c1"), Some("wrap-x".to_string()), "PhaseIfRunning-shaped re-stamps");
         assert_eq!(calls.get(), 2);
 
-        // (iii) ToolStart-shaped: `None` — the resolver is never even
+        // (iii) ToolStart-shaped: `attest: false` — the resolver is never even
         // invoked (the call count does not move), so the stale parent from
         // ToolStart/ToolEnd/SubRekey/SubEnsure's shared shape survives untouched.
         restage_stale("c1");
-        hook_ensure_session_with(profile, &payload, "c1", None, resolve_wrap_x);
+        hook_ensure_session_with(profile, &payload, "c1", Some(4242), false, resolve_wrap_x, None);
         assert_eq!(parent_of("c1"), Some("old-wrap".to_string()), "ToolStart-shaped never re-stamps");
-        assert_eq!(calls.get(), 2, "attest: None must never call the resolver");
+        assert_eq!(calls.get(), 2, "attest: false must never call the resolver");
     }
 
     /// (iv) The FRESH branch's own resolution order — `attested.or(env_parent)`
-    /// — survives the `attest: Option<i32>` gate: an attested wrap still
-    /// outranks `AOIDE_SESSION_ID` when both are present, exactly as it did
-    /// when the walk ran unconditionally.
+    /// — survives the `attest` gate: an attested wrap still outranks the
+    /// caller's `AOIDE_SESSION_ID` claim when both are present, exactly as it
+    /// did when the walk ran unconditionally. The claim is PASSED here rather
+    /// than set in the ambient env: since the daemon arm has no env of the
+    /// hook's to read, the claim is a value the caller hands in
+    /// (`own_parent_claim` / [`HOOK_PARENT_FLAG`]), and that is what this test
+    /// is asserting the precedence against.
     #[test]
     fn attested_wins_over_env_parent_on_the_fresh_branch() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env_sid = EnvVars::save(&["AOIDE_SESSION_ID"]);
         let (_env, _root) = aoide_test_support::isolated_mail_root("hook-attest-fresh");
         let profile = agent_profile(CLAUDE_PROFILE.name).unwrap();
-        std::env::set_var("AOIDE_SESSION_ID", "env-parent");
 
         let payload = json!({ "session_id": "c2", "hook_event_name": "Stop" });
-        hook_ensure_session_with(profile, &payload, "c2", Some(4242), |_| Some("wrap-x".to_string()));
+        hook_ensure_session_with(profile, &payload, "c2", Some(4242), true, |_| Some("wrap-x".to_string()), Some("env-parent"));
 
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
         let rec = s.sessions.iter().find(|s| s.session_id == "c2").unwrap();
@@ -6455,16 +6692,210 @@ mod tests {
     #[test]
     fn start_parent_prefers_attested_over_env_and_falls_back() {
         assert_eq!(
-            start_parent(Some("wrap-x".to_string()), Some("env-parent".to_string())),
+            start_parent(Some("wrap-x".to_string()), Some("env-parent")),
             Some("wrap-x".to_string()),
             "an attested wrap outranks the env parent"
         );
         assert_eq!(
-            start_parent(None, Some("env-parent".to_string())),
+            start_parent(None, Some("env-parent")),
             Some("env-parent".to_string()),
             "no attested wrap falls back to the env parent"
         );
         assert_eq!(start_parent(None, None), None, "neither present resolves to no parent");
+    }
+
+    /// The claim gate itself (`resolve_parent_claim`'s own doc): a claim is
+    /// accepted on kernel evidence about the CLAIMER — this walking process's
+    /// own real ancestry — never on the claim's text.
+    #[test]
+    fn a_parent_claim_is_accepted_only_against_the_hooks_own_ancestry() {
+        let me = std::process::id() as i32;
+        let rec = |id: &str, pid: Option<u32>| SessionRecord {
+            session_id: id.to_string(),
+            pid,
+            ..Default::default()
+        };
+        let sessions = vec![
+            // This very process IS self-first in its own chain — the CLI arm's
+            // own shape (hook process == the claimed wrap's descendant).
+            rec("self-wrap", Some(me as u32)),
+            // A real-looking pid this process does not run under: the shape a
+            // stale `AOIDE_SESSION_ID` from an earlier run leaves behind, and
+            // the shape a fabricated claim has.
+            rec("elsewhere-wrap", Some(2_000_000_000)),
+            // A hook-registered parent: no pid, so nothing to contradict.
+            rec("hook-parent", None),
+        ];
+        assert_eq!(
+            resolve_parent_claim(Some(me), Some("self-wrap"), &sessions),
+            ParentClaim::Linked { id: "self-wrap".to_string(), checked: true },
+            "a pid-carrying claim inside the hook's own ancestry stands"
+        );
+        assert_eq!(
+            resolve_parent_claim(Some(me), Some("elsewhere-wrap"), &sessions),
+            ParentClaim::Contradicted("elsewhere-wrap".to_string()),
+            "a pid-carrying claim OUTSIDE the hook's own ancestry is dropped"
+        );
+        assert_eq!(
+            resolve_parent_claim(Some(me), Some("hook-parent"), &sessions),
+            ParentClaim::Linked { id: "hook-parent".to_string(), checked: false },
+            "a pid-less record cannot be contradicted — the CLI arm's own long-standing answer"
+        );
+        assert_eq!(
+            resolve_parent_claim(Some(me), Some("names-no-record"), &sessions),
+            ParentClaim::Linked { id: "names-no-record".to_string(), checked: false },
+            "and a claim naming no record is not contradicted either: nothing checkable refuses it"
+        );
+        assert_eq!(
+            resolve_parent_claim(Some(me), None, &sessions), ParentClaim::Unclaimed,
+            "no claim at all"
+        );
+        // L2: no walkable pid means no decision, whatever the claim says — the
+        // daemon arm with no door-stamped pid. Falling back to this process's
+        // own pid here would be `aoided` checking a claim against its OWN tree.
+        assert_eq!(
+            resolve_parent_claim(None, Some("self-wrap"), &sessions),
+            ParentClaim::Unclaimed,
+            "with no door pid, even a claim that would verify is Unclaimed"
+        );
+        assert_eq!(
+            resolve_parent_claim(None, Some("hook-parent"), &sessions),
+            ParentClaim::Unclaimed,
+            "and the pid-less arm is Unclaimed too — the arm an attacker would pick"
+        );
+        assert_eq!(ParentClaim::Unclaimed.linked(), None);
+        assert_eq!(ParentClaim::Contradicted("x".to_string()).linked(), None);
+    }
+
+    /// The trace side of the same decision: what each resolved claim leaves on
+    /// the outcome (and therefore in the audit record every door writes). A
+    /// claim that crossed the hop is reported whether it stood or was dropped;
+    /// the local arm's own env claim is reported only when it was dropped.
+    #[test]
+    fn a_claim_leaves_a_trace_on_the_arm_that_had_to_trust_it() {
+        let checked = ParentClaim::Linked { id: "w".to_string(), checked: true };
+        let unchecked = ParentClaim::Linked { id: "w".to_string(), checked: false };
+        let dropped = ParentClaim::Contradicted("w".to_string());
+
+        let daemon_checked = claim_trace(&checked, true).expect("the daemon arm reports a linked claim");
+        assert!(daemon_checked.contains("verified against"), "{daemon_checked}");
+        let daemon_unchecked = claim_trace(&unchecked, true).expect("...including one it could not check");
+        assert!(daemon_unchecked.contains("taken unchecked"), "{daemon_unchecked}");
+        let daemon_dropped = claim_trace(&dropped, true).expect("a drop is always reported");
+        assert!(daemon_dropped.contains("contradicted"), "{daemon_dropped}");
+
+        assert_eq!(claim_trace(&checked, false), None, "the local arm's own verified claim is routine");
+        assert_eq!(claim_trace(&unchecked, false), None, "...and so is its unchecked one");
+        let local_dropped = claim_trace(&dropped, false).expect("but a drop is news on either arm");
+        assert!(local_dropped.contains("contradicted"), "{local_dropped}");
+        assert_eq!(claim_trace(&ParentClaim::Unclaimed, true), None, "nothing claimed, nothing to say");
+    }
+
+    /// L2, at the door's own entry point: a `session hook` served with a payload
+    /// but NO door-stamped pid registers the session parentless and stamps no
+    /// `hookAncestry` — it must not fall back to this process's own pid, which
+    /// on the daemon arm is `aoided` and would "verify" a claim against the
+    /// daemon's own process tree. The same claim on the local arm (this very
+    /// process IS the hook) links normally, because the difference is the pid,
+    /// not the claim: one rule, two arms.
+    #[test]
+    fn a_daemon_served_hook_with_no_door_pid_links_nothing_and_stamps_no_ancestry() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _root) = aoide_test_support::isolated_mail_root("hook-no-door-pid");
+        let profile = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        // A pid-LESS parent — the arm that is normally "taken" (a
+        // hook-registered session), so only the missing pid can stop it.
+        do_session_start(
+            "w", Some("claude"), Some("/p"), None, None, Some(true), None, None, None,
+        );
+
+        let start = |id: &str| {
+            format!(
+                r#"{{ "session_id": "{id}", "hook_event_name": "SessionStart", "cwd": "/p" }}"#
+            )
+        };
+
+        // The daemon arm (`may_ring` is `inv.door == Door::Daemon`) with the
+        // door's pid absent.
+        let out = hook_for_profile_gated(profile, &start("d1"), true, None, Some("w"));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok);
+        let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = file.sessions.iter().find(|s| s.session_id == "d1").unwrap();
+        assert_eq!(rec.parent_session_id, None, "no pid to check a claim against ⇒ parentless");
+        assert!(rec.hook_ancestry.is_empty(), "and no ancestry stamp at all: got {:?}", rec.hook_ancestry);
+        assert_eq!(out.data.as_ref().unwrap()["parentClaim"], json!(null));
+
+        // The local arm, the same claim, its own real pid: linked.
+        let out = hook_for_profile_gated(
+            profile,
+            &start("d2"),
+            false,
+            Some(std::process::id() as i32),
+            Some("w"),
+        );
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok);
+        let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = file.sessions.iter().find(|s| s.session_id == "d2").unwrap();
+        assert_eq!(
+            rec.parent_session_id.as_deref(),
+            Some("w"),
+            "the local arm's own pid is a real fact, so the pid-less record links"
+        );
+        assert!(!rec.hook_ancestry.is_empty(), "and the ancestry is this process's own chain");
+    }
+
+    /// The CLI arm's half of the ruling, through the real hook door: a claim
+    /// contradicted by this process's OWN ancestry registers the session
+    /// parentless — and says so, on the one text channel the audit record for
+    /// this event is written from. Same rule, same answer as the daemon arm's
+    /// (driven end to end in `crates/cli/tests/daemon_dispatch_door.rs`).
+    #[test]
+    fn a_claim_the_hooks_own_ancestry_contradicts_registers_parentless() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env_sid = EnvVars::save(&["AOIDE_SESSION_ID"]);
+        let (_env, _root) = aoide_test_support::isolated_mail_root("hook-claim-contradicted");
+
+        // A live wrap from an EARLIER run, still on the roster, with a pid this
+        // test process does not run under — exactly what a leaked
+        // `AOIDE_SESSION_ID` points at.
+        do_session_start(
+            "stale-wrap",
+            Some("claude"),
+            Some("/p"),
+            None,
+            None,
+            Some(true),
+            None,
+            None,
+            Some(2_000_000_000),
+        );
+        std::env::set_var("AOIDE_SESSION_ID", "stale-wrap");
+
+        let out = hook_from_str(
+            r#"{ "session_id": "c9", "hook_event_name": "SessionStart", "cwd": "/p" }"#,
+        );
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok);
+        let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = file.sessions.iter().find(|s| s.session_id == "c9").unwrap();
+        assert_eq!(
+            rec.parent_session_id, None,
+            "a contradicted claim must not become the parent"
+        );
+        assert_eq!(
+            rec.harness_session_id.as_deref(),
+            Some("c9"),
+            "the session still registers normally — only the parent was dropped"
+        );
+        assert!(
+            out.message.contains("stale-wrap") && out.message.contains("contradicted"),
+            "the drop must be reported, not silent: {}",
+            out.message
+        );
+        assert_eq!(
+            out.data.as_ref().unwrap()["parentClaim"].as_str().map(|s| s.contains("stale-wrap")),
+            Some(true),
+            "and on the outcome's own data, which is the text the audit record carries"
+        );
     }
 
     /// The exact upsert path the `HookAction::Start` arm now relies on
@@ -6557,8 +6988,18 @@ mod tests {
         std::env::set_var("AOIDE_SESSION_ID", "w");
         let (_env, _root) = aoide_test_support::isolated_mail_root("resume-inside-wrap-keeps");
 
+        // `w` carries one of THIS process's own real ancestors (its parent) —
+        // the claim check (`resolve_parent_claim`) asks whether the claimed
+        // wrap's pid really is in the claiming process's ancestry, and a fixture
+        // wrap this process is not running under would be — correctly — refused.
+        // Not this process's OWN pid: the kill guard below declines a target
+        // that is the caller itself (a shared app, not a dedicated wrap).
+        let host = pid_ancestry(std::process::id() as i32)
+            .get(1)
+            .copied()
+            .expect("the test process has a parent") as u32;
         do_session_start(
-            "w", Some("claude"), Some("/p"), None, None, Some(true), None, None, Some(4242),
+            "w", Some("claude"), Some("/p"), None, None, Some(true), None, None, Some(host),
         );
         do_session_start(
             "c1", Some("claude"), Some("/p"), None, Some("w"), None, None, None, None,
