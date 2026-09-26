@@ -866,6 +866,14 @@ mod tests {
 
     /// A `receipt` entry acking `acked_msgid`, addressed back to `to_node`
     /// — the shape `write_ack_if_absent` scans for.
+    ///
+    /// **The msgid is a filename, so it is built like one.** This spool names
+    /// each entry `<msgid>.json` (`entry_path`), and production mints a msgid
+    /// as a hex digest (`mail::compute_msgid`) — safe on every host. The
+    /// fixture used to build one out of `minted_at`, whose `:` is ILLEGAL in a
+    /// Windows filename, so the entry could not be spooled there at all
+    /// (`ERROR_INVALID_NAME`, os error 123). The ISO timestamp still lives in
+    /// the header, where colons are just characters.
     fn ack_for(to_node: &str, acked_msgid: &str, minted_at: &str) -> Envelope {
         Envelope {
             header: Header {
@@ -878,7 +886,7 @@ mod tests {
             },
             text: acked_msgid.to_string(),
             sig: "ef".repeat(32),
-            msgid: format!("ack-{minted_at}"),
+            msgid: format!("ack-{acked_msgid}-{}", minted_at.replace(':', "-")),
         }
     }
 

@@ -1240,7 +1240,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn set_refuses_an_unwritable_config_without_touching_it() {
-        use aoide_protocol::owner_only::{OWNER_ONLY_MASK, READ_ONLY_MASK, set_dir_access};
+        use aoide_protocol::owner_only::{PRIVATE_DIR_MASK, READ_ONLY_MASK, set_dir_access};
         with_temp_root("unwritable", |dir| {
             let path = dir.join(CONFIG_FILE);
             std::fs::write(&path, "[pairing]\ndefaultGrant = [\"read\"]\n").unwrap();
@@ -1249,7 +1249,7 @@ mod tests {
             // the directory's policy is what decides writability.
             set_dir_access(dir, READ_ONLY_MASK).unwrap();
             let refusal = set("pairing.defaultGrant", "spawn");
-            set_dir_access(dir, OWNER_ONLY_MASK).unwrap();
+            set_dir_access(dir, PRIVATE_DIR_MASK).unwrap();
             let err = refusal.expect_err("a read-only directory must refuse, never half-write");
             assert!(matches!(err, SetRefusal::Unwritable { .. }), "{err}");
             assert_eq!(

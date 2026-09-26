@@ -1573,39 +1573,46 @@ mod tests {
         // Pure tier logic — no real env/filesystem, mirroring
         // `aoide_protocol::bin::tiers_resolve_in_order`'s table shape for
         // the same two-tier resolver applied to a directory.
+        // The fixtures are HOST-absolute (`scratch`'s doc): a `/opt/...` or
+        // `/usr/bin` literal is not absolute on Windows, so the env tier the
+        // case is about would be ignored and the sibling tier would answer
+        // instead — the assertion would then be measuring the wrong tier.
+        let env_dir = scratch("opt/custom/songbook");
+        let exe_dir = scratch("usr/bin");
+        let sibling = format!("{exe_dir}/../share/lyra/songbook");
         let cases: &[(&str, Option<&str>, Option<&str>, bool, Option<&str>)] = &[
             (
                 "env wins even when a sibling dir exists",
-                Some("/opt/custom/songbook"),
-                Some("/usr/bin"),
+                Some(env_dir.as_str()),
+                Some(exe_dir.as_str()),
                 true,
-                Some("/opt/custom/songbook"),
+                Some(env_dir.as_str()),
             ),
             (
                 "env wins over the no-sibling case too",
-                Some("/opt/custom/songbook"),
+                Some(env_dir.as_str()),
                 None,
                 false,
-                Some("/opt/custom/songbook"),
+                Some(env_dir.as_str()),
             ),
             (
                 "a relative env value is ignored, falls through to the sibling",
                 Some("relative/songbook"),
-                Some("/usr/bin"),
+                Some(exe_dir.as_str()),
                 true,
-                Some("/usr/bin/../share/lyra/songbook"),
+                Some(sibling.as_str()),
             ),
             (
                 "sibling used only when it actually exists",
                 None,
-                Some("/usr/bin"),
+                Some(exe_dir.as_str()),
                 true,
-                Some("/usr/bin/../share/lyra/songbook"),
+                Some(sibling.as_str()),
             ),
             (
                 "sibling absent (not a dir) resolves to nothing",
                 None,
-                Some("/usr/bin"),
+                Some(exe_dir.as_str()),
                 false,
                 None,
             ),

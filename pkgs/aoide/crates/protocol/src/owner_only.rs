@@ -60,7 +60,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     CREATE_ALWAYS, CREATE_NEW, CreateDirectoryW, CreateFileW, FILE_APPEND_DATA, FILE_ATTRIBUTE_NORMAL,
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_READ_EA, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, FileAttributeTagInfo, GetFileInformationByHandleEx,
+    FILE_EXECUTE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, FileAttributeTagInfo, GetFileInformationByHandleEx,
     OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE, WRITE_DAC,
 };
 use windows_sys::Win32::System::SystemServices::{ACCESS_ALLOWED_ACE_TYPE, SECURITY_DESCRIPTOR_REVISION, SID_REVISION};
@@ -92,13 +92,26 @@ pub const OWNER_ONLY_MASK: u32 =
 /// undone through this module — which is exactly how the first version of
 /// this mask failed its own test.
 pub const READ_ONLY_MASK: u32 =
-    FILE_READ_DATA | FILE_READ_EA | FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC | SYNCHRONIZE;
+    FILE_READ_DATA | FILE_READ_EA | FILE_READ_ATTRIBUTES | FILE_EXECUTE | READ_CONTROL | WRITE_DAC | SYNCHRONIZE;
 
 /// What an existing object's DACL must cover before this module calls it
 /// owner-only: the whole [`OWNER_ONLY_MASK`], so an object this module
 /// created always validates and a write-only one (which its own reader could
 /// not open) never does.
 pub(crate) const REQUIRED_ACCESS: u32 = OWNER_ONLY_MASK;
+
+/// The directory half of the private policy — the native spelling of `0o700`,
+/// which on Unix is read + write + EXECUTE. For a directory `FILE_EXECUTE` is
+/// `FILE_TRAVERSE`: the right to open anything INSIDE it by path. `0o700`
+/// without it is a directory nobody can list through, which is not `0700` in
+/// any sense — and the difference is observable, not theoretical: a directory
+/// read back as private and then used as a parent fails the child's own open.
+/// Files keep [`OWNER_ONLY_MASK`] (`0o600` has no execute bit to map).
+///
+/// Deleting an entry is deliberately NOT here, on either host: on Unix `rm`
+/// asks for write on the PARENT, and on Windows the parent's
+/// `FILE_DELETE_CHILD` is the same door.
+pub const PRIVATE_DIR_MASK: u32 = OWNER_ONLY_MASK | FILE_EXECUTE;
 
 /// The access a validated open asks for on a FILE: enough to read its policy
 /// and its bytes, and — for the create-if-absent caller — to append.
@@ -390,7 +403,7 @@ pub fn set_dir_access(path: &Path, access: u32) -> io::Result<()> {
 /// leaving a directory entries can be listed from.
 pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
     match std::fs::symlink_metadata(path) {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => create_dir(path, OWNER_ONLY_MASK)?,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => create_dir(path, PRIVATE_DIR_MASK)?,
         Err(e) => return Err(e),
         Ok(meta) if !meta.is_dir() => {
             return Err(io::Error::new(
@@ -400,7 +413,7 @@ pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
         }
         Ok(_) => {
             if dir_privacy(path)?.is_some() {
-                set_dir_access(path, OWNER_ONLY_MASK)?;
+                set_dir_access(path, PRIVATE_DIR_MASK)?;
             }
         }
     }
@@ -433,12 +446,20 @@ pub(crate) struct SecurityFacts {
 
 impl SecurityFacts {
     pub(crate) fn is_owner_only(&self) -> bool {
+        self.covers(REQUIRED_ACCESS)
+    }
+
+    /// Does every fact hold for the mask `required`? The refusal reader asks
+    /// this with the mask of the OBJECT it is looking at — a file's
+    /// [`OWNER_ONLY_MASK`], a directory's [`PRIVATE_DIR_MASK`] — so the same
+    /// walk answers for both without a second implementation.
+    fn covers(&self, required: u32) -> bool {
         self.dacl_present
             && self.dacl_protected
             && self.ace_count > 0
             && self.all_aces_are_current_user_allows
             && self.owner_is_current_user
-            && self.covered_mask & REQUIRED_ACCESS == REQUIRED_ACCESS
+            && self.covered_mask & required == required
     }
 }
 
@@ -560,10 +581,12 @@ pub(crate) fn security_facts(file: &File) -> io::Result<SecurityFacts> {
 
 /// The named refusal when an existing object is not the owner-only object a
 /// caller is willing to use. `None` means it is, and only then may a caller
-/// seek, truncate, write, or list.
-pub(crate) fn file_refusal(file: &File) -> io::Result<Option<String>> {
+/// seek, truncate, write, or list. `required` is the mask that object's own
+/// kind must cover — [`OWNER_ONLY_MASK`] for a file, [`PRIVATE_DIR_MASK`] for
+/// a directory — never a weaker one.
+fn refusal(file: &File, required: u32) -> io::Result<Option<String>> {
     let facts = security_facts(file)?;
-    if facts.is_owner_only() {
+    if facts.covers(required) {
         return Ok(None);
     }
     let reason = if !facts.dacl_present {
@@ -578,27 +601,33 @@ pub(crate) fn file_refusal(file: &File) -> io::Result<Option<String>> {
         "its owner is not the current user".to_string()
     } else {
         format!(
-            "its DACL mask {:#x} does not cover the owner's own read/write bits {:#x}",
-            facts.covered_mask, REQUIRED_ACCESS
+            "its DACL mask {:#x} does not cover the owner's own read/write bits {required:#x}",
+            facts.covered_mask
         )
     };
     Ok(Some(reason))
+}
+
+/// A file's refusal, with the file mask: what `feed` reads back after it
+/// creates or opens one.
+pub(crate) fn file_refusal(file: &File) -> io::Result<Option<String>> {
+    refusal(file, REQUIRED_ACCESS)
 }
 
 /// Is the file at `path` owner-only? `None` is the yes; a `Some` is the named
 /// reason, so a caller can report WHY rather than only that it refused. The
 /// object's own handle answers — never the path, never a second open.
 pub fn file_privacy(path: &Path) -> io::Result<Option<String>> {
-    file_refusal(&open_existing(path, PRIVACY_ACCESS, false)?)
+    refusal(&open_existing(path, PRIVACY_ACCESS, false)?, REQUIRED_ACCESS)
 }
 
 /// The directory half of [`file_privacy`], opened with
 /// `FILE_FLAG_BACKUP_SEMANTICS` (without it `CreateFileW` refuses a
 /// directory) and read the same way: a protected, non-empty, current-user-only
-/// allow DACL whose mask covers the directory's own read/write/list bits, with
-/// the owner pinned to the current user.
+/// allow DACL whose mask covers the directory's own read/write/list/traverse
+/// bits, with the owner pinned to the current user.
 pub fn dir_privacy(path: &Path) -> io::Result<Option<String>> {
-    file_refusal(&open_existing(path, PRIVACY_ACCESS, true)?)
+    refusal(&open_existing(path, PRIVACY_ACCESS, true)?, PRIVATE_DIR_MASK)
 }
 
 /// Open an existing object with the given access: no creation, no
