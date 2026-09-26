@@ -1,6 +1,6 @@
 // bar.qml — cadenza's "bar" slot: the switchboard line (intent §3.1, §3.2).
 //
-//   [⏻] ▯1▯ ▮2▮aoide ▯3▯aoide ▯5▯ ▯7▯melete ▯9▯mneme   title…   <agents> 6/10 <notif> 3 │ <vol> 62% <bt> <net> <bat> 88% │ TRAY 2 <rice> stg │ 14:02:31
+//   [⏻] (1) (2)aoide (3)aoide (5) (7)melete (10)mneme   title…   <agents> 6/10 <notif> 3 │ <vol> 62% <bt> <net> <bat> 88% │ TRAY 2 <rice> stg │ 14:02:31
 //          │     │         │                               (pads; a tied pad grows a lead)
 //          ●─────┴─────────┘                               (a bus on lane 0, a junction)
 //          ┆╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┆                      (a spawned wire on lane 1)
@@ -50,8 +50,10 @@
 // bar, because the canvas grabs an item, not a popup window.
 //
 // ── Jacks, ties and lamps (paint of core's `ties` + `activeAt`) — a schematic
-// Every jack is a PAD: a square-cornered 1px outline hugging its number (one
-// cell per digit plus half a cell each side), drawn for every jack — ink when
+// Every jack is a PAD: a round 1px outline hugging its number — a circle the
+// pad row's 14px across for one digit, a pill of the same height for two
+// (the digits' cells + half a pad height; the song's one rounded shape), centred in a slot
+// of (digits + 1) cells — drawn for every jack — ink when
 // occupied, dim when empty, filled `title` with a `ground` number when
 // active, red when a session on it is awaiting. The project label follows
 // the pad, blue. Ties hang in the band between the pads and the trunk,
@@ -116,7 +118,7 @@ Item {
     }
 
     // ── geometry: the pad row, the schematic band, the trunk ─────────────────
-    // rows (px): pad outline 0..13 (text lifted 2px, digits centred inside) ·
+    // rows (px): round pad 0..13 (14 across) (text lifted 2px, digits centred inside) ·
     // lead from 14 · lane 0 on 17..18 · clear 19..21 · lane 1 on 22..23 ·
     // clear 24..26 · trunk 27. A junction dot is 6px on its wire's centre
     // (lane 0: 15..20, lane 1: 20..25), so a dot never reaches the pad, the
@@ -562,7 +564,7 @@ Item {
         return { routes: routes, badges: badges }
     }
 
-    // jack geometry: the pad (one cell per digit + half a cell each side),
+    // jack geometry: the pad's slot (one cell per digit + half a cell each side),
     // then the project label and the "+n" badge on the cell grid after it
     readonly property var jackModel: {
         var J = root.jacks, B = root.routing.badges
@@ -573,16 +575,20 @@ Item {
             var badge = B[j.id] ? "+" + B[j.id] : ""
             var padC = num.length + 1
             var n = padC + j.project.length + badge.length
-            var x = root.kit.cells(xc), padW = root.kit.cells(padC)
+            var x = root.kit.cells(xc), slotW = root.kit.cells(padC)
+            // round: a padH circle for one digit; for more, a pill of the same
+            // height, the digits' cells plus half a pad height, centred in its slot
+            var padW = num.length < 2 ? root.padH : root.kit.cells(num.length) + root.padH / 2
+            var padX = Math.floor((slotW - padW) / 2)
             out.push({
                 id: j.id, ws: j.ws, focused: j.focused, urgent: j.urgent,
                 occupied: j.occupied, project: j.project, live: j.live,
                 sessions: j.sessions, num: num, badge: badge,
                 x: x,
                 w: root.kit.cells(n),
-                padW: padW,
-                // the lead's left px column: the middle of the pad's bottom edge
-                lx: x + Math.floor(padW / 2) - 1
+                slotW: slotW, padX: padX, padW: padW,
+                // the lead's left px column: under the pad's bottom point
+                lx: x + padX + Math.floor(padW / 2) - 1
             })
             xc += n + 1
         }
@@ -1318,20 +1324,23 @@ Item {
                 width: modelData.w
                 height: root.barH
 
-                // the pad: a square-cornered 1px outline, filled `title` when
-                // active; the board's terminal-row hover fills it `select`
+                // the pad: a round 1px outline (a circle, a pill for two
+                // digits) — the song's one rounded shape (intent §3.2) —
+                // filled `title` when active; the board's row hover fills it `select`
                 Rectangle {
+                    x: jack.modelData.padX
                     y: root.padTop
                     width: jack.modelData.padW; height: root.padH
-                    radius: 0
+                    radius: root.padH / 2
                     color: jack.modelData.focused ? root.kit.title
                            : (jack.previewed ? root.kit.select : "transparent")
                     border.width: 1
                     border.color: jack.tone
-                    antialiasing: false
+                    antialiasing: true
                 }
                 Text {
                     y: root.textY
+                    x: jack.modelData.padX
                     width: jack.modelData.padW
                     horizontalAlignment: Text.AlignHCenter
                     text: jack.modelData.num
@@ -1342,7 +1351,7 @@ Item {
                     styleColor: root.kit.withA(color, 0.18)
                 }
                 Text {
-                    x: jack.modelData.padW; y: root.textY
+                    x: jack.modelData.slotW; y: root.textY
                     visible: jack.modelData.project.length > 0
                     text: jack.modelData.project
                     color: root.kit.path
@@ -1350,7 +1359,7 @@ Item {
                     textFormat: Text.PlainText
                 }
                 Text {
-                    x: jack.modelData.padW + root.kit.cells(jack.modelData.project.length); y: root.textY
+                    x: jack.modelData.slotW + root.kit.cells(jack.modelData.project.length); y: root.textY
                     visible: jack.modelData.badge.length > 0
                     text: jack.modelData.badge
                     color: root.kit.number
