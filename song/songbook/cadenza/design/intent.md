@@ -325,14 +325,64 @@ own board; it mounts none of sonata's gadget slots.
 ├──────────────────────────────────────────────────────────┤
 ```
 
-- **OVERVIEW** (first tab) — its panes on one screen: **AGENTS** (every
-  live agent: lamp, name, project, state, age; focus/send actions),
-  **PROJECTS** (registered projects, the jacks each is bound to, live
-  counts), **TERMINALS** (conducted terminals: name, cwd, jack), and, once
-  the mail read is published, **MAIL** (active mail threads: mailbox,
-  subject, last sender, age).
-- **one tab per project** — today that project's agents and terminals as
-  two panes across the full width. Once the board feed is published, the
+- **OVERVIEW** (first tab) — its panes stacked, the column scrolling when
+  long: **AGENTS** (the agent cards, grouped by project), **TERMINALS**
+  (the terminal cards), **PROJECTS** (registered projects, the jacks each
+  is bound to, live counts), and, once the mail read is published, **MAIL**
+  (active mail threads: mailbox, subject, last sender, age).
+- **The cards** carry sonata's conductor and terminals data, field for
+  field, in termui rows; the look is cadenza's.
+  ```
+  aoide ────────────────────────────── 4 agt · 2 working · 361k tok
+  ● phase 5 slice S8 — the board read op                 [2]   #02
+    claude / claude-opus-5-5                                working
+    rook-lantern · …0001 · yomi · aoide
+    » land the board read op behind hasBoardFeed
+    ▸ Bash: cargo test -p aoide-conduct -- graph::ties
+    The ties block needs the spawned edge before the anchors edge,
+    otherwise the clique collapses into one bus; reading graph.rs…
+    ~/Aoide/…/crates/conduct        ctx ██████░░ 142k/200k  up 1h14m
+  ├─ ● subagent: read the mail store             up  16m   #2.1
+  │    general-purpose / claude-opus-5-5 · shiny-kite · …000a  working
+  │    » read the mail store index and list the open threads
+  │    ▸ Read: ~/.aoide/state/mail/index.json
+  │    Reading the index; three threads are open, the newest from…
+  │
+  └─ ◐ subagent: audit the fixtures              up   9m   #2.2
+       …
+       ! quick-wren wants to run Bash          [approve] [deny]
+  ```
+  - An **agent card** is one live session, nine lines, fixed: the title
+    (else the harness), the jack and the `#NN` ordinal; harness / model
+    and the state word; petname · short id · host · project; the prompt
+    (`»`); the current tool (`▸`, one line); the agent's words in a fixed
+    three-line box whose last line elides; then the cwd (the tail kept)
+    beside the context gauge and the time up. Streaming data never moves
+    it. The hook phase, when there is one, is the card's state.
+  - A **subagent** hangs under its nearest live main (its
+    `parentSessionId`, else the `graph.json` `spawned` edge), indented on
+    a tree limb (`├─` `└─`), six lines: no place line, no cwd, no gauge,
+    a two-line box, its `#NN.k` and time up on the title line.
+  - The **summons lane** is the one line that comes and goes: it exists
+    only while `herald.json` holds a permission summons for that session,
+    with `[approve] [deny]` answering through the NOTIF tab's own
+    `heraldverdict` (click only).
+  - Groups follow `projects.json`; sessions outside every project fall in
+    a dim **unanchored** group, and with no project registered there is no
+    group rule at all.
+  - A **terminal card** is one window, two lines: what runs in it (the
+    agent's title, else the harness; a bare shell's live command, else
+    `shell`), its state, jack and time up, then the cwd. The live agent in
+    a window wins over the shell hosting it.
+  - A click on a card focuses its window (a subagent's, its parent's). A
+    right-click, or `j`/`k`, selects a card and opens its action line:
+    focus, project, undying, kill (kill asks `y/N`; subagents cannot be
+    killed).
+  - Only lamps move: a working or awaiting card's lamp breathes (2s), off
+    one shared step at 12.5 fps that stops when nothing works or waits.
+- **one tab per project** — today that project's agent cards (its mains,
+  their subagents under them) and its terminal cards as two panes across
+  the full width. Once the board feed is published, the
   project's feed (chatter, mail, receipts, its summonses) takes the left,
   the agents and terminals move to a narrow rail on the right, and, once
   posting is published, the composer sits at the bottom.
@@ -380,10 +430,10 @@ source exists; turning the part back on is that one line, and the fixture
 harness (`BoardPreview.qml`) flips them to show the full board.
 | part | real today | hidden until (switch) |
 |---|---|---|
-| OVERVIEW agents / terminals | `sessions.json` | — |
+| OVERVIEW agent + terminal cards | `sessions.json`, `hooks.json`, `herald.json` summonses, `graph.json` `spawned` edges | — |
 | OVERVIEW projects | `projects.json` (bindings column `—`) | S1 fills the bindings |
 | OVERVIEW mail | — | S9/S10 (`hasMailRead`) |
-| project tabs: agents + terminals | `projects.json`, `sessions.json` | — |
+| project tabs: agent + terminal cards | `projects.json`, `sessions.json`, `hooks.json`, `herald.json`, `graph.json` | — |
 | project feed | — | S8/S10 (`hasBoardFeed`) |
 | composer | — | S11 agents, S12 project (`hasBoardPost`); drawn disabled until `boardpost` exists |
 | SYS machine CPU/mem | `/proc/stat`, `/proc/meminfo` | — |
@@ -509,3 +559,6 @@ reads a fixture path.
   works (per state, not per tool call), and a conductor send runs a lamp
   from the sender's jack to the receiver's, on a transient wire when no
   tie joins them, read from core's coming `graph.json` `sends` (§3.2).
+- 2026-09-26 — khoa: the board shows agents and subagents as cards, with
+  the data sonata's conductor and terminals cards show, drawn in cadenza's
+  theme, on OVERVIEW and every project tab (§3.3 "The cards").

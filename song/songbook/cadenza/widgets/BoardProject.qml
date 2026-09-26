@@ -1,11 +1,16 @@
 // BoardProject.qml — one registered project's tab on the board (intent §3.3).
 //
-// Today (no feed published): the project's agents and terminals, full width.
+// Today (no feed published): the project's agent cards (mains with their
+// subagents hung under them) and its terminal cards, full width — the same
+// BoardCards the OVERVIEW draws, filtered to this project, no group chrome.
 //
 //   ┌─ AGENTS ─────────────────────────────────────────────── 1/2 ┐
-//   │ ● rook-lantern   working    4m  phase 5 slice S8             │
+//   │ ● phase 5 slice S8 — the board read op             [2]  #01 │
+//   │   claude / claude-opus-5-5                          working │
+//   │   …                                    (a 9-line agent card) │
 //   ┌─ TERMINALS ───────────────────────────────────────────── 1 ┐
-//   │ ○ brisk          [2]   ~/Aoide                               │
+//   │ ● cargo test -p aoide-conduct       working  [2]      1h02m │
+//   │   ~/Aoide                                          brisk-tor │
 //
 // Once `board.hasBoardFeed`: the feed on the left, the same agents and
 // terminals in a narrow rail on the right, and — once `board.hasBoardPost` —
@@ -70,7 +75,10 @@ Item {
                    .map(function (r) { return { label: r.s.petname || r.s.agent || "agent", id: r.s.sessionId } }))
     readonly property var target: targets[Math.min(targetIndex, targets.length - 1)]
 
+    // without the feed, keys drive the agent cards (select · focus · actions)
+    function cancel() { return (!root.feedOn && root.agentCards) ? root.agentCards.cancel() : false }
     function handleKey(e) {
+        if (!root.feedOn && root.agentCards) return root.agentCards.handleKey(e)
         var f = root.feedOn ? feed : roster
         if (e.key === Qt.Key_J || e.key === Qt.Key_Down) { f.flick(0, -800); return true }
         if (e.key === Qt.Key_K || e.key === Qt.Key_Up) { f.flick(0, 800); return true }
@@ -262,7 +270,21 @@ Item {
         }
     }
 
-    // ══ ROSTER (no feed): agents + terminals, full width ══════════════════
+    // ══ ROSTER (no feed): the agent cards + the terminal cards, full width ═
+    // BoardCards with `project` set: this project's mains with their
+    // subagents hung under them, then its terminals (no group chrome).
+    property var agentCards: null
+    property var ttyCards: null
+    readonly property int cardAgents: {
+        var gs = board.cards.groups
+        for (var i = 0; i < gs.length; i++) if (gs[i].anchored && gs[i].name === root.project) return gs[i].agents
+        return 0
+    }
+    readonly property int cardWorking: {
+        var gs = board.cards.groups
+        for (var i = 0; i < gs.length; i++) if (gs[i].anchored && gs[i].name === root.project) return gs[i].working
+        return 0
+    }
     Flickable {
         id: roster
         visible: !root.feedOn
@@ -278,121 +300,38 @@ Item {
                 width: rosterCol.width
                 kit: root.kit; helper: "Pane"
                 props: ({ title: "agents", glow: "bloom",
-                          stat: Qt.binding(() => root.agents.filter(function (r) { return r.s.state === "working" }).length
-                                                  + "/" + root.agents.length),
-                          rows: Qt.binding(() => Math.max(1, root.agents.length)),
+                          stat: Qt.binding(() => root.cardWorking + "/" + root.cardAgents),
+                          rows: Qt.binding(() => root.agentCards ? root.agentCards.lineCount : 1),
                           content: rosterAgents })
             }
             Use {
                 width: rosterCol.width
                 kit: root.kit; helper: "Pane"
                 props: ({ title: "terminals", glow: "bloom",
-                          stat: Qt.binding(() => "" + root.terminals.length),
-                          rows: Qt.binding(() => Math.max(1, root.terminals.length)),
+                          stat: Qt.binding(() => "" + (root.ttyCards ? root.ttyCards.entries.length : 0)),
+                          rows: Qt.binding(() => root.ttyCards ? root.ttyCards.lineCount : 1),
                           content: rosterTerms })
             }
         }
     }
     Component {
         id: rosterAgents
-        Column {
+        Use {
             width: parent ? parent.width : 0
-            readonly property int w: root.kit.fit(width)
-            Text {
-                visible: root.agents.length === 0
-                text: "no live agents in " + root.project
-                color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
-            }
-            Repeater {
-                model: root.agents
-                Item {
-                    id: fa
-                    required property var modelData
-                    readonly property var s: modelData.s
-                    readonly property int w: parent ? parent.w : 0
-                    width: parent ? parent.width : 0; height: root.kit.cellH
-                    Row {
-                        Text {
-                            text: (fa.modelData.depth ? "└ " : "") + root.kit.lampGlyph(fa.s.state) + " "
-                            color: fa.s.sessionId === root.board.hotId ? root.kit.hot : root.kit.lampColor(fa.s.state)
-                            font: root.kit.font; textFormat: Text.PlainText
-                            style: Text.Outline; styleColor: root.kit.withA(color, 0.18)
-                        }
-                        Text {
-                            text: root.kit.padR(fa.s.petname || fa.s.agent || "agent", fa.modelData.depth ? 12 : 14) + " "
-                            color: root.kit.ink; font: root.kit.font; textFormat: Text.PlainText
-                            style: Text.Outline; styleColor: root.kit.withA(color, 0.18)
-                        }
-                        Text {
-                            text: root.kit.padR(fa.s.state || "", 9) + " "
-                            color: fa.s.state === "awaiting" ? root.kit.urgent : root.kit.mid
-                            font: root.kit.font; textFormat: Text.PlainText
-                        }
-                        Text {
-                            text: root.kit.padL(root.board.age(fa.modelData.since), 4) + " "
-                            color: root.kit.number; font: root.kit.font; textFormat: Text.PlainText
-                        }
-                        Text {
-                            // name 14 · state 9 · age 4 · title (rest)
-                            text: " " + root.kit.padR(fa.s.title || fa.s.agent || "", Math.max(0, fa.w - 2 - 15 - 10 - 5 - 1))
-                            color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
-                        }
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.board.focus(fa.modelData)
-                    }
-                }
-            }
+            kit: root.kit; helper: "BoardCards"
+            props: ({ board: root.board, what: "agents", project: root.project })
+            onLoaded: root.agentCards = item
+            Component.onDestruction: if (root.agentCards === item) root.agentCards = null
         }
     }
     Component {
         id: rosterTerms
-        Column {
+        Use {
             width: parent ? parent.width : 0
-            readonly property int w: root.kit.fit(width)
-            Text {
-                visible: root.terminals.length === 0
-                text: "no conducted terminals in " + root.project
-                color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
-            }
-            Repeater {
-                model: root.terminals
-                Item {
-                    id: ft
-                    required property var modelData
-                    readonly property var s: modelData.s
-                    readonly property int w: parent ? parent.w : 0
-                    width: parent ? parent.width : 0; height: root.kit.cellH
-                    Row {
-                        Text {
-                            text: root.kit.lampGlyph(ft.s.state) + " "
-                            color: ft.s.sessionId === root.board.hotId ? root.kit.hot : root.kit.lampColor(ft.s.state)
-                            font: root.kit.font; textFormat: Text.PlainText
-                        }
-                        Text {
-                            text: root.kit.padR(ft.s.petname || ft.s.agent || "shell", 14) + " "
-                            color: root.kit.ink; font: root.kit.font; textFormat: Text.PlainText
-                            style: Text.Outline; styleColor: root.kit.withA(color, 0.18)
-                        }
-                        Text {
-                            text: root.kit.padR(ft.s.workspace !== null && ft.s.workspace !== undefined
-                                                ? "[" + ft.s.workspace + "]" : "[·]", 5) + " "
-                            color: root.kit.path; font: root.kit.font; textFormat: Text.PlainText
-                        }
-                        Text {
-                            text: root.kit.padR(root.board.shortPath(ft.s.cwd), Math.max(0, ft.w - 2 - 15 - 6))
-                            color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
-                        }
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.board.focus(ft.modelData)
-                    }
-                }
-            }
+            kit: root.kit; helper: "BoardCards"
+            props: ({ board: root.board, what: "terms", project: root.project })
+            onLoaded: root.ttyCards = item
+            Component.onDestruction: if (root.ttyCards === item) root.ttyCards = null
         }
     }
 

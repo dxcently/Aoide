@@ -15,6 +15,13 @@
 // stage files (sessions/projects/hooks/herald) come in through `--fixture`
 // as usual; BoardBody itself never reads a fixture path.
 //
+// The cards (agents, subagents, summonses, terminals) have their own set,
+// `design/fixtures/cards`: pass it as both `--fixture` and
+// `CADENZA_BOARD_FIXTURE` (it holds no board.json / now.json, so every seam
+// switch stays off, as live), and copy its `graph.json` (the `spawned`
+// edges one subagent hangs by) into `<preview root>/state/stage/` after the
+// root is built — `--fixture` places only the four stage files.
+//
 // The fixture directory: `$CADENZA_BOARD_FIXTURE`, else the checkout's
 // `song/songbook/cadenza/design/fixtures/board` under `$AOIDE_FLAKE_ROOT`.
 // The tab: clicking works as live. For scripted shots the harness also
