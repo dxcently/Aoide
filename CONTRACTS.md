@@ -4804,15 +4804,47 @@ would be a new oracle where today there is silence. A claim from a genuinely
 signed caller is validated with `valid_claimed_session_id`, and a malformed
 one is an error the CALLER applies — `-32602`, on the SPAWN side only: the
 claim rode inside the body that caller signed, so a bad one is a client bug
-worth surfacing. The Inject arm consumes the claim nowhere (S5 is what threads
-it), so a malformed one there is ignored exactly as an absent one is — never a
-refusal on the one arm that does not use the field. The value passed to
+worth surfacing. The Inject arm consumes the claim as a COMPARISON instead
+(below), where a malformed one is matched by nothing — never a refusal on the
+one arm that builds no value out of the field. The value passed to
 `do_spawn` is built from that verified caller: the `name` and the `key` that
 actually verified THIS request, threaded out of `verify_signed_request` rather
 than re-found by name — with the claim as `sessionId` alone, no name or key
 from a header or the body ever reaches the stamp, so a paired node can only
 ever name parents inside its own namespace. The child itself gets no such value in its environment — the
 door stamps the record, exactly as it does for `node:*` `origin`.
+
+**A remote parent steers the child it spawned, without pending.** The Inject
+arm reads the SAME one claim as the answer to one question: is this caller the
+target record's remote parent? `remote_parent_match(caller, claim, target)` is
+the whole predicate, and it is true only for all three at once — the caller
+`verify_signed_request` proved (the signature rung, so every weaker rung's
+`None` can never match), the target record's `remoteParent.key` equal to that
+caller's verified key, and its `remoteParent.sessionId` equal to the claim. The
+target side is read off `sessions.json` (`session_remote_parent`) only for a
+request that BOTH carried a claim and proved a signature, so an ordinary inject,
+and every spawn, reads exactly what it read before. A match delivers WITHOUT the
+pending dance — audited `a2a.message/send`/`status:"autogate-remote-parent"` —
+on the same two rails the signature-rung `autogate` flag rides: exempt from
+`origin_for_inject`'s downgrade (the ssh `-L` shape classifies as loopback,
+where `autogate_match` is ignored outright, so an exemption alone would count
+for nothing) and folded into `autogate_match` (so a genuinely remote origin does
+not pend either). It overrides neither earlier question. The door-wide bearer
+runs FIRST: a door with a token set admits a remote parent only if it presents
+the bearer, and `effective_origin` still coerces a bearer that does not classify
+`Valid`. And the node's own `autogate` flag need not be on for a parent to steer
+the child it spawned — the same independence the LOCAL parent rule has
+(`--yes` ▸ global switch ▸ parent-of-target), which delivers whether the
+box-wide autogate switch is on or off. A malformed claim needs no handling here
+at all: this door never stamped a value outside `valid_claimed_session_id` as
+any record's `sessionId`, so equality is false, and the `-32602` stays spawn-side
+where the value is actually built. It follows that the CALLER need not refuse one
+either, and `send --to` does not: the claim it resolves is the same
+KERNEL-ATTESTED id `node spawn` reads (`resolve_remote_parent`), and an unruly
+one is DROPPED — the send goes out with no claim and one warning line
+(`not claiming parent: <reason>`), because the door answers that send the same
+way either way. `node spawn` still refuses the call outright, its caller having
+named a parentage.
 
 **The command a spawn runs is `aoide.a2a.spawnAgent`** — a nix option, off
 (`""`) by default, resolved once at `a2a serve` launch (`--spawn-agent` flag →
@@ -5491,8 +5523,8 @@ signing every request with the identity that ceremony verified —
 strictly stronger than `token_file`'s bare replayable shared secret, and
 the ONLY rung Spawn accepts (`a2a.rs::spawn_admitted`) — and the only rung on
 which a `metadata["aoide/from"]` parent claim is honoured at all (the
-`remoteParent` stamp; that paragraph above carries the rule and the audit
-line). A verified
+`remoteParent` stamp on a spawn, and the Inject arm's remote-parent autogate on
+a send; that paragraph above carries the rule and both audit lines). A verified
 signature also outranks loopback for the Inject gate: an ssh `-L` forward
 (or any other loopback-terminating proxy) delivers a tunneled node's
 packets from its own end's sshd, so `classify_origin` sees loopback for
@@ -5505,7 +5537,9 @@ signature-rung `autogate` flag (folded into `autogate_match` alongside
 a signed node, exactly as an operator already granted it. In short: the
 read arms and attribution tolerate any of the four; Spawn accepts exactly
 one; and once a request is signed, its delivery timing is decided by
-autogate, never by which address it happened to arrive from. §7's
+autogate or by a PROVEN remote-parent match, never by which address it happened
+to arrive from — with the door-wide bearer still ahead of both, so a door that
+sets a token admits a remote parent only if it presents that token too. §7's
 "`state/nodes.json`" subsection below has the full mechanical detail
 (which field backs which rung, `resolve_node`'s ladder, tie-break order).
 

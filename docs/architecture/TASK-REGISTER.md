@@ -2174,8 +2174,26 @@ project/parent inheritance across local/remote/app/subagents;
   the ledger retain (then inside `prune_done_scoped`) deadlocked until
   `aoide_storage::fs::with_stage_lock` was made re-entrant for the holding
   thread (`STAGE_LOCK_HELD`; other threads and other processes still wait,
-  and this now covers every prune pass, automatic included); S5–S10 open, in
-  the brief's order (S5 may run now; cargo builds serialize).
+  and this now covers every prune pass, automatic included); S5 LANDED — the
+  door's Inject arm consumes the claim the spawn path already stamps:
+  `remote_parent_match(caller, claim, target)` (Signature rung, the target
+  record's stored `remoteParent.key` equal to the caller's verified key, and
+  its stored `sessionId` equal to the claim — all three or no match) delivers
+  without pending, audited `autogate-remote-parent`, riding BOTH rails the
+  `sig_autogate` restoration rides: exempt from `origin_for_inject`'s downgrade
+  (the ssh `-L` shape classifies as loopback, where `autogate_match` is ignored
+  outright) and folded into `autogate_match` (so a genuinely remote origin does
+  not pend either). It overrides neither earlier question — the door-wide
+  bearer is still checked FIRST (a door with a token set admits a remote parent
+  only if it presents the bearer) and the node's own `autogate` flag need not be
+  on, the same independence `send_gate`'s local parent rule has. The `-32602`
+  stays spawn-side: an inject reads a malformed claim as a non-match, exactly as
+  an absent one. On the client side `resolve_remote_parent` is now shared by
+  both callers, and `send --to` carries that KERNEL-ATTESTED caller as its
+  claim but DROPS an unruly one — it sends unclaimed and names the reason on one
+  warning line (`not claiming parent: <reason>`) instead of refusing, the S5
+  ruling on the previous executor's Q3 (`node spawn` still refuses the call
+  outright); S6–S10 open, in the brief's order (cargo builds serialize).
 - Review pass over S1–S3 (same branch, `8236675` onward): the caller now
   holds its own winning claim to `valid_claimed_session_id` and refuses
   locally before signing (the "one predicate, both sides" line was
@@ -2267,4 +2285,16 @@ project/parent inheritance across local/remote/app/subagents;
   `a2a_spawn_clears_the_daemons_own_session_id_from_the_child` still pins
   the child's env. `aoide-conduct`'s S3 test:
   `stamp_remote_parent_is_change_only_and_leaves_parent_session_id_none`.
+- Tests (`aoide-server`, S5): `remote_parent_match_needs_a_signed_caller_its_
+  key_and_its_session` (the predicate's whole table),
+  `a_remote_parent_steers_its_child_without_pending_with_autogate_off`,
+  `..._with_autogate_on`, and
+  `a_genuinely_signed_remote_parent_steers_its_child_without_pending` (a
+  non-loopback origin, so the `autogate_match` rail is what carries it), with
+  `a_remote_parent_mismatch_leaves_todays_result_byte_for_byte` as the miss.
+  Tests (`aoide-conduct`, S5):
+  `send_to_carries_the_attested_parent_as_its_from_claim` (a fake `curl`
+  capturing the body it is handed on stdin proves the claim rides the wire) and
+  `an_unruly_claim_still_sends_without_claiming_a_parent` (the ruling above,
+  asserted against those same captured bytes).
 - Owner: Eidolon executor. Depends on: §13's S-D design half, ruled here.

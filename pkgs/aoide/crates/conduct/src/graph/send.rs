@@ -4814,6 +4814,176 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // ── P-RSA S5: the `aoide/from` claim a remote send carries ────────────
+
+    /// A fake `curl` at the front of `PATH` that CAPTURES the body handed to
+    /// it on stdin and answers like a door (`{response}` + curl's
+    /// `-w "\n%{http_code}"` trailer, `run_curl_with_timeout`'s own protocol).
+    /// The two claim tests below are the only readers: this is where the bytes
+    /// `deliver_remote_with` would put on the wire are actually inspectable,
+    /// with no network, no daemon and no real `curl` process. Same shim
+    /// technique `aoide-client`'s transport tests use; kept local because a
+    /// remote send's BODY is built in this crate and the conduct suite should
+    /// not reach into that crate's test-only helpers.
+    ///
+    /// The stdin redirect is load-bearing twice: `post_json` always writes the
+    /// body to curl's stdin (`--data-binary @-`), so a shim that exits without
+    /// reading turns a descheduled caller's write into an EPIPE
+    /// (`crates/AGENTS.md`) — and the captured copy IS the assertion.
+    fn install_capturing_curl(
+        tag: &str,
+        capture: &Path,
+        response: &str,
+    ) -> (PathBuf, Option<String>) {
+        let shim_dir = std::env::temp_dir().join(format!(
+            "aoide-conduct-curlshim-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&shim_dir).unwrap();
+        let shim = shim_dir.join("curl");
+        std::fs::write(
+            &shim,
+            format!(
+                "#!/bin/sh\ncat > '{capture}'\ncat <<'JSONBODY'\n{response}\nJSONBODY\nprintf '200'\n",
+                capture = capture.display(),
+            ),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let saved_path = std::env::var("PATH").ok();
+        std::env::set_var(
+            "PATH",
+            format!("{}:{}", shim_dir.display(), saved_path.clone().unwrap_or_default()),
+        );
+        (shim_dir, saved_path)
+    }
+
+    fn uninstall_capturing_curl(shim_dir: &Path, saved_path: Option<String>) {
+        match saved_path {
+            Some(p) => std::env::set_var("PATH", p),
+            None => std::env::remove_var("PATH"),
+        }
+        let _ = std::fs::remove_dir_all(shim_dir);
+    }
+
+    /// The fixture both claim tests share: isolated stage/state, a VERIFIED
+    /// node record and that node's cached graph naming one session. Isolation
+    /// is what makes the verified node signable with no daemon anywhere —
+    /// `sign_headers_for_node` mints its identity under `AOIDE_STATE_DIR`,
+    /// which is this temp dir. Straight at `deliver_remote_with`, so no node
+    /// registry is involved (the record is passed in) and `--to` resolution
+    /// reads only the cache written here.
+    fn remote_claim_fixture(tag: &str) -> (PathBuf, aoide_storage::node_store::Node) {
+        let root = unique_stage(tag);
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::create_dir_all(&state).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+
+        let mut node = test_node("yomi-strix", "http://127.0.0.1:9/");
+        node.verified = true;
+        node.pubkey = Some("aa11".to_string());
+        aoide_storage::node_store::save_node_cache(&test_cache(
+            "yomi-strix",
+            node_graph_json(&[("sess-remote-1", Some("misty-comet"), "child")]),
+        ))
+        .unwrap();
+        (root, node)
+    }
+
+    /// The client half of S5: `send --to <node>/<query>` carries the
+    /// KERNEL-ATTESTED parent as its `aoide/from` claim, inside the body it
+    /// signs. That is the same resolution `node spawn` stamps into a child's
+    /// `remoteParent`, which is the whole point — the door's Inject arm can
+    /// only recognise the parent steering the child it spawned if the two
+    /// sides read ONE resolution. The injected claim resolver is the seam (no
+    /// daemon, no seal key in the picture); the captured stdin is the proof
+    /// the value actually rides the wire, on an ordinary inject to the
+    /// resolved remote session.
+    #[test]
+    fn send_to_carries_the_attested_parent_as_its_from_claim() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "AOIDE_AUDIT_LOG"]);
+        let (root, node) = remote_claim_fixture("to-remote-claim");
+
+        let capture = root.join("captured.json");
+        let (shim_dir, saved_path) = install_capturing_curl("claim", &capture, "{}");
+        let out = deliver_remote_with(
+            &send_invocation(&["hi", "there"], &[]),
+            &node,
+            "misty-comet",
+            || Ok(Some("parent-1".to_string())),
+        );
+        uninstall_capturing_curl(&shim_dir, saved_path);
+
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+        assert!(!out.message.contains("not claiming parent"), "msg: {}", out.message);
+
+        let sent: Value = serde_json::from_str(&std::fs::read_to_string(&capture).unwrap()).unwrap();
+        assert_eq!(
+            sent["params"]["message"]["metadata"][aoide_protocol::wire::FROM_SESSION_KEY],
+            "parent-1",
+            "the attested parent is the claim the door reads: {sent}",
+        );
+        assert_eq!(sent["params"]["message"]["contextId"], "sess-remote-1");
+        assert_eq!(sent["params"]["message"]["parts"][0]["text"], "hi there");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The ruling on S5's client half: an UNRULY attested id does not refuse
+    /// the send. `node spawn` would — its caller named a parentage — but a
+    /// `send --to` was never asked for one: the claim is an autogate shortcut,
+    /// and the door's Inject arm reads a malformed claim as a non-match
+    /// (`remote_parent_match`), never as a refusal. So the send goes out with
+    /// NO claim (the same delivery it gets today with no daemon to attest
+    /// against) and names the reason on one warning line, rather than failing
+    /// a send that works.
+    #[test]
+    fn an_unruly_claim_still_sends_without_claiming_a_parent() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "AOIDE_AUDIT_LOG"]);
+        let (root, node) = remote_claim_fixture("to-remote-unruly");
+
+        let capture = root.join("captured.json");
+        let (shim_dir, saved_path) = install_capturing_curl("unruly", &capture, "{}");
+        let out = deliver_remote_with(
+            &send_invocation(&["hi"], &[]),
+            &node,
+            "misty-comet",
+            || Err("`bogus/1` is not a legal claim".to_string()),
+        );
+        uninstall_capturing_curl(&shim_dir, saved_path);
+
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+        assert!(
+            out.message.contains("not claiming parent: `bogus/1` is not a legal claim"),
+            "one warning line naming the reason: {}",
+            out.message
+        );
+        assert!(
+            out.message.contains("delivered to `sess-remote-1`"),
+            "the send itself still succeeded: {}",
+            out.message
+        );
+
+        let sent: Value = serde_json::from_str(&std::fs::read_to_string(&capture).unwrap()).unwrap();
+        assert!(
+            sent["params"]["message"].get("metadata").is_none(),
+            "no claim reaches the wire at all: {sent}",
+        );
+        assert_eq!(sent["params"]["message"]["contextId"], "sess-remote-1");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn to_remote_ambiguous_in_the_cache_lists_node_session_labels() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

@@ -381,9 +381,10 @@
   its own claim with (never a second spelling), and the `-32602` is applied on
   the SPAWN side only — the value rode inside the body the caller signed, so a
   bad one is a client bug worth surfacing, but the Inject arm consumes the
-  claim nowhere yet (S5 threads it) and a malformed one there is ignored
-  exactly as an absent one is. `claimed_remote_parent` itself stays a pure
-  `Result` so both halves are unit-testable without a spawn.
+  claim as a COMPARISON (the S5 bullet below) and a malformed one there is
+  matched by nothing, exactly as an absent one is. `claimed_remote_parent`
+  itself stays a pure `Result` so both halves are unit-testable without a
+  spawn.
   (3) `node`/`key` come off the `SignedCaller` — the key that actually
   verified this request — with the claim supplying `sessionId` alone; a name
   read off `X-Aoide-Node` or the body would be exactly the forgery the key
@@ -446,6 +447,47 @@
   is the restoration; `origin_for_inject_is_the_identity_function_when_unsigned`
   and `origin_for_inject_downgrades_loopback_once_the_request_is_signed`
   pin the pure predicate directly.
+- **A REMOTE PARENT steers the child it spawned without pending — the
+  claim's second consumer, riding exactly those two rails (P-RSA S5,
+  CONTRACTS.md §6).** `remote_parent_match(caller, claim, target)` is the whole
+  predicate, true only for all three at once: the caller
+  `verify_signed_request` proved (Signature rung, so every weaker rung's `None`
+  can never match), the target record's `remoteParent.key` equal to that
+  caller's verified key, and its `remoteParent.sessionId` equal to the claim.
+  Both equalities are load-bearing — the key is what this door's own spawn
+  stamped from the key that verified THAT request, so a caller can only ever
+  match the child of the node it actually is. The target side is
+  `session_remote_parent`, a stage read behind
+  `claimed_from.as_deref().is_some_and(...)`: paid ONLY by a request that both
+  carried a claim and proved a signature, so an ordinary inject and every spawn
+  read exactly what they read before. The hit needs BOTH rails `sig_autogate`
+  rides — exempt from `origin_for_inject`'s downgrade (the ssh `-L` shape
+  classifies as loopback, where `autogate_match` is ignored outright, so an
+  exemption alone would count for nothing) AND folded into `autogate_match`
+  (otherwise a genuinely remote origin takes `ConnOrigin::Remote`'s arm and
+  pends). It overrides neither earlier question: the door-wide bearer still
+  runs FIRST — a door with `aoide.a2a.tokenFile`/`bearerSecret` set admits a
+  remote parent only if it presents the bearer, and `effective_origin` still
+  coerces a bearer that does not classify `Valid` — and a node's own `autogate`
+  flag need not be on for a parent to steer its child (the same independence
+  `send_gate`'s local parent rule has), so pass
+  `autogate_match || remote_parent_hit`, never `remote_parent_hit` folded INTO
+  `autogate_match`. A hit audits
+  `a2a.message/send`/`status:"autogate-remote-parent"`; a MISS adds nothing at
+  all — no new error, no new pending wording, the same bytes the same request
+  got before. A malformed claim needs no arm here: this door never stamped a
+  value outside `valid_claimed_session_id` as any record's `sessionId`, so
+  equality is false exactly as for an absent claim, and the `-32602` stays
+  spawn-side where the value is actually built. That is also why the client
+  stops refusing one on the send path: `send --to` drops an unruly claim, sends
+  unclaimed, and names the reason on one warning line
+  (`not claiming parent: <reason>`) — the door answers the same send the same
+  way either way — while `node spawn` still refuses the call outright. Tests:
+  `remote_parent_match_needs_a_signed_caller_its_key_and_its_session` is the
+  predicate's whole table; `a_remote_parent_steers_its_child_without_pending_
+  with_autogate_off`/`_on` are the hit; `a_genuinely_signed_remote_parent_
+  steers_its_child_without_pending` is the non-loopback origin;
+  `a_remote_parent_mismatch_leaves_todays_result_byte_for_byte` is the miss.
 - **`do_inject`'s `from` attribution (P-P3 decision 7) is scoped to the
   QUEUED path only — never an immediately-delivered payload's bytes.**
   `session_send`'s own `from` mechanism also prefixes DELIVERED text
