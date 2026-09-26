@@ -8924,6 +8924,95 @@ mod tests {
         }
     }
 
+    /// The opening turn's WRITE SHAPE, on its own: the text, then the target
+    /// profile's own submit key as a SECOND write after the keystroke gap —
+    /// never `{prompt}\n`, which is what this door used to type.
+    ///
+    /// The configured program names no profile at all, so this also pins the
+    /// resolution's fallback (claude's key, through `profile_for_agent`) and
+    /// drives the READINESS arm such a target gets: output quiescence, since it
+    /// has no `SessionStart` hook to fire — the wrapper's own log appears and
+    /// then stands still.
+    #[test]
+    fn the_opening_turn_writes_the_text_then_the_targets_submit_key_as_a_second_write() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-spawninject-shape-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+
+        let id = "spawn-inject-shape";
+        // The wrapper's own record, with a log that has already spoken — what
+        // a hookless target's readiness is read off.
+        let log = root.join("wrapper.log");
+        std::fs::write(&log, "no-such-agent$ ").unwrap();
+        let mut wrap = fixture_session(id, "idle", None);
+        wrap.log_path = Some(log.to_string_lossy().into_owned());
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".to_string(), sessions: vec![wrap] },
+        )
+        .unwrap();
+
+        let socket = aoide_conduct::graph::conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+
+        let expected = aoide_protocol::agents::CLAUDE_PROFILE.submit_key;
+        let acc = std::thread::spawn(move || {
+            use std::io::Read as _;
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut text = Vec::new();
+            let mut chunk = [0u8; 64];
+            while text.len() < "first turn".len() {
+                let n = conn.read(&mut chunk).unwrap();
+                assert!(n > 0, "the writer closed before the text arrived");
+                text.extend_from_slice(&chunk[..n]);
+            }
+            let before_submit = Instant::now();
+            let mut submit = [0u8; 8];
+            let n = conn.read(&mut submit).unwrap();
+            (text, submit[..n].to_vec(), before_submit.elapsed())
+        });
+
+        // A budget comfortably past the quiescence window the readiness wait
+        // uses for a target with no hook.
+        spawn_inject_prompt(id, "no-such-agent", "first turn", Duration::from_secs(10));
+        let (text, submit, gap) = acc.join().unwrap();
+        assert_eq!(String::from_utf8(text).unwrap(), "first turn", "the text, alone");
+        assert_eq!(
+            String::from_utf8(submit).unwrap(),
+            expected,
+            "the target profile's submit key, resolved through the table"
+        );
+        assert!(
+            gap >= Duration::from_millis(150),
+            "the keystroke is a separate, later write — it arrived {gap:?} after the text"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+        match saved_runtime {
+            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
+            None => std::env::remove_var("XDG_RUNTIME_DIR"),
+        }
+    }
+
     #[test]
     fn spawn_inject_prompt_types_nothing_and_files_no_receipt_when_the_target_is_never_ready() {
         // The readiness gate's refusal arm, against a real bound listener: a
