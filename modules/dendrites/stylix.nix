@@ -297,15 +297,14 @@ in
   # It must NOT ride `body`: `lib/options.nix` imports every body into a bare
   # `evalModules` to render `aoideOptions`, and Stylix's home-manager half
   # reads NixOS options (`options.programs`) that a bare eval has not declared.
-  # So the whole-tree path (S5–S6 only; `lib/mkHost.nix`, deleted in S7) still
-  # adds the module itself — see `stylixModule` there.
+  # So the lane imports it here, and this lane is the ONLY path that adds it —
+  # the whole-tree path went with `lib/mkHost.nix` (S7). `lib.optional` returns
+  # a LIST, so it is appended rather than nested: a list inside `imports` is a
+  # module-system error, not a shorthand.
   nixos =
     { lib, inputs, ... }:
     {
-      imports = [
-        body
-        (lib.optional (inputs ? stylix) inputs.stylix.nixosModules.stylix)
-      ];
+      imports = [ body ] ++ lib.optional (inputs ? stylix) inputs.stylix.nixosModules.stylix;
       config.aoide.stylix.enable = lib.mkDefault true;
     };
 }

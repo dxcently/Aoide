@@ -37,6 +37,31 @@ never listed in a `default.nix`. Prefix a work-in-progress file (`_wip.nix`) or
 dir (`_scratch/`) with `_` to shelve it; `modules/dendrites/_example.nix` is the
 checked-in template.
 
+### Aggregations and overrides
+
+Two siblings of the catalogue are read one level deep beside it, names and paths
+only, by their own directories' discovery files:
+
+- `modules/aggregations/` — memberships. `modules/aggregations/default.nix`
+  discovers every child directory holding a `default.nix`; a body is inert data
+  (`system.members`, `system.providers`, `system.nixos`). The constructor imports
+  only the bodies a host or one of its users selected, so an unselected group is
+  never read. See `modules/aggregations/README.md`.
+- `modules/overrides/` — capability-scoped fixes.
+  `modules/overrides/default.nix` discovers every `*.nix` file beside it. Every
+  host READS every record (matching means reading what it targets); what an
+  unmatched one never costs is its work. See `modules/overrides/README.md`.
+
+### Hosts are discovered too
+
+`flake.nix` reads `hosts/` one level deep — every immediate child holding a
+`default.nix`, minus the `_`-prefixed shelved ones — and builds
+`nixosConfigurations.<name>` and `inventory.<name>` from that same list. Adding a
+machine is a new directory; no file is edited to add one. A host record's shape is
+`hosts/README.md`; the constructor that assembles it is `lib/aoideos.nix`, over
+`lib/composition.nix`. `nix eval --json .#inventory.<host>` is the review surface
+for what a host selected.
+
 ---
 
 ## The option contract (what you read)
@@ -158,9 +183,9 @@ by naming it — the score adapts to that host's specifics and its enabled
 dendrite set. **The venue (host) decides its instruments; the song
 carries only the notes.**
 
-Drop a folder under `song/songbook/<name>/` — `lib/mkHost.nix` walks it in
-like a dendrite, so there is no import list to edit. The song's `rice.nix`
-self-gates on `aoide.song`:
+Drop a folder under `song/songbook/<name>/` — the `songbook` lane walks it in
+(`lib/walk.nix`, until S8 makes the selection per host), so there is no import
+list to edit. The song's `rice.nix` self-gates on `aoide.song`:
 
 ```nix
 # song/songbook/moonlight/rice.nix
@@ -291,8 +316,8 @@ session records) are contract §4.
 
 ## Non-cargo tests (`tests/`)
 
-`lib/` holds build/eval machinery (`checks.nix`, `mkHost.nix`, `pkgs.nix`,
-`walk.nix`); `tests/` holds what those checks actually test — the headless VM
+`lib/` holds build/eval machinery (`checks.nix`, `aoideos.nix`, `composition.nix`,
+`pkgs.nix`, `walk.nix`); `tests/` holds what those checks actually test — the headless VM
 boot (`vm-boot.nix`) and the static-artifact portability assertions
 (`portability.nix`), plus the manual container suite (`distrobox.md`).
 See `tests/README.md` for why Rust's own tests do NOT live here.

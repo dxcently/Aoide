@@ -12,8 +12,10 @@
 # before any module graph exists and imports only what selection kept.
 #
 # `aggregations` and `overrides` are read one level deep beside the catalogue —
-# names and paths only, no body imported — and are empty until
-# `modules/aggregations/` and `modules/overrides/` land.
+# names and paths only, no body imported — by their own directories' discovery
+# files. An aggregation is inert data whose only effect is the gate it answers;
+# an override is read by every host, because matching means reading what it
+# targets, and what an unmatched one never costs is its work.
 {
   catalogue = {
     audio = ./dendrites/audio.nix;
@@ -52,12 +54,16 @@
     qbittorrent = ./dendrites/qbittorrent.nix;
     quickshell = ./dendrites/quickshell.nix;
     screenshot = ./dendrites/screenshot.nix;
+    # The committed songs. Interim: it imports every song discovered (S8 makes
+    # the selection per-host). It carries no `enable` of its own — see its
+    # header — so a host's switch for songs is the aggregation that names it.
+    songbook = ./dendrites/songbook.nix;
     starship = ./dendrites/starship.nix;
     stylix = ./dendrites/stylix.nix;
     vision = ./dendrites/vision.nix;
     yazi = ./dendrites/yazi.nix;
   };
 
-  aggregations = { };
-  overrides = { };
+  aggregations = import ./aggregations;
+  overrides = import ./overrides;
 }

@@ -55,12 +55,30 @@
       forAllSystems = f: nixpkgs.lib.genAttrs systems f;
       inherit (nixpkgs) lib;
 
-      # Per-host assembly (walker + host + home-manager + stylix).
-      mkHost = import ./lib/mkHost.nix {
+      # Per-host assembly (selection constructor + host record + home-manager).
+      aoideos = import ./lib/aoideos.nix {
         inherit inputs lib;
         system = "x86_64-linux";
         username = "khoa";
       };
+
+      # The machines this flake builds: every immediate child directory of
+      # `hosts/` that holds a `default.nix`, minus the `_`-prefixed shelved
+      # ones. Discovered, never listed — adding a machine is a new directory,
+      # and this file is not edited to add one. `_desktop`/`_laptop`/`_server`
+      # are the templates to copy; `_mac` needs the darwin seam first.
+      hostNames = builtins.attrNames (
+        lib.filterAttrs (
+          name: type:
+          type == "directory"
+          && !lib.hasPrefix "_" name
+          && builtins.pathExists (./hosts + "/${name}/default.nix")
+        ) (builtins.readDir ./hosts)
+      );
+
+      # One per discovered host; lazy per attribute, so an output that names one
+      # host never forces the others.
+      hosts = lib.genAttrs hostNames aoideos.mkHost;
 
       # The walker, for checks that reason over the module tree.
       walk = import ./lib/walk.nix { inherit lib; };
@@ -72,13 +90,19 @@
     in
     {
       # ── NixOS configurations ───────────────────────────────────────────────
-      # One line per host. Shelved skeletons live at hosts/_{desktop,laptop,
-      # server,mac} — copy one to hosts/<name>/, register it here, done (the
-      # `_mac` one is forward-looking: it needs the darwin class seam in
-      # lib/mkHost.nix first). yomi-strix remains the living reference host.
-      nixosConfigurations = {
-        yomi-strix = mkHost "yomi-strix";
-      };
+      # One per DISCOVERED host (see `hostNames` above) — this file never names
+      # a machine. Both outputs are derived from the same `hosts`, so what
+      # `nixosConfigurations.<name>` builds and what `inventory.<name>` says it
+      # resolved can never disagree.
+      nixosConfigurations = lib.mapAttrs (_: h: h.system) hosts;
+
+      # What each host actually resolved: its aggregations, every dendrite it
+      # selected with the provider answering it and the file that answered, its
+      # users, and which override records matched. Derived from selection in
+      # `lib/composition.nix`, never maintained by hand — this is the review
+      # surface for "no accidental all-dendrite loading":
+      # `nix eval --json .#inventory.yomi-strix`.
+      inventory = lib.mapAttrs (_: h: h.inventory) hosts;
 
       # ── Packages ───────────────────────────────────────────────────────────
       # Auto-discovered by lib/pkgs.nix: every `pkgs/<name>/default.nix` (not

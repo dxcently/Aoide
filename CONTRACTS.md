@@ -400,6 +400,7 @@ song             closed-dir
 statix.toml      closed-file
 templates        closed-dir
 tests            closed-dir
+users            closed-dir
 .pi              runtime-dir
 .pi-subagents    runtime-dir
 evidence         runtime-dir

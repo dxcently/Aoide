@@ -2,32 +2,34 @@
 # desktop stack.
 #
 # Lives in tests/, not lib/: lib/ holds build/eval machinery (checks.nix,
-# mkHost.nix, pkgs.nix, walk.nix); this is test content. See tests/README.md.
+# aoideos.nix, pkgs.nix, walk.nix); this is test content. See tests/README.md.
 #
-# Exercises the module tree (same assembly as mkHost), the aoide
-# package, greeter wiring, the aoided user service, and the graph commands —
-# without real hardware or external network access.  shellbridge is NOT
-# exercised: its module gates on the lyra enable fact (it exists to feed the
-# painted shell), and this VM leaves that fact off — see the trims below.
+# Exercises the module tree through the SAME assembly a real host gets — the
+# constructor (`lib/composition.nix` driving `composition.mkNixosModules`, as
+# lib/aoideos.nix does) over the record below — plus the aoide package, greeter
+# wiring, the aoided user service, and the graph commands, without real hardware
+# or external network access. shellbridge is NOT exercised: its module gates on
+# the lyra enable fact (it exists to feed the painted shell), and this VM does
+# not select the lyra lane at all — see the trims below.
 #
 # Wired in flake.nix as:
 #   checks.<system>.vm-boot = import ./tests/vm-boot.nix { inherit pkgs inputs lib; };
 #
 # ── Trims applied (headless VM) ───────────────────────────────────────────────
-#   aoide.stylix.enable = false
+#   stylix NOT SELECTED
 #     Reason: Stylix builds a wallpaper with ImageMagick and imports a large
 #     theme-target set; the closure is expensive and adds no value for a boot
-#     test.
+#     test. Its lane is simply not in the record, so the fact stays false.
 #
-#   aoide.quickshell.enable = false, aoide.lyra.enable = false
+#   quickshell and lyra NOT SELECTED
 #     Reason: Quickshell sources an upstream flake input with a significant
 #     NixOS Wayland closure; its autostart (`quickshell -c shell.qml`) cannot
-#     render on the virtual GPU.  The compositor lane is KEPT because it wires
-#     programs.hyprland, and the greeter lane because the test asserts the ly
-#     unit.  Leaving lyra off also removes shellbridge.service entirely:
-#     shellbridge.nix gates on the lyra fact, so the test neither starts nor
-#     asserts it. With lyra off the VM also names NO song: a song with no lyra
-#     lane to paint it is refused by the platform
+#     render on the virtual GPU.  The compositor lane IS selected because it
+#     wires programs.hyprland, and the greeter lane because the test asserts the
+#     ly unit.  Not selecting lyra also means shellbridge.service does not
+#     exist: shellbridge.nix gates on the lyra fact, so the test neither starts
+#     nor asserts it. With lyra unselected the VM also names NO song: a song
+#     with no lyra lane to paint it is refused by the platform
 #     (`modules/nucleus/assertions.nix`), and the palette the greeter reads is
 #     then nucleus's own default — still palette-shaped and non-stock, which is
 #     all the ly assertion below claims.
@@ -58,57 +60,75 @@
   system ? "x86_64-linux",
 }:
 let
-  walk = import ../lib/walk.nix { inherit lib; };
+  # The constructor, exactly as a real host reaches it: the same module-list
+  # assembly `lib/aoideos.nix` drives, with the VM's own record in place of
+  # `hosts/<name>/`. `lib/mkHost.nix` used to hand-assemble this list; that file
+  # is gone, so the test that exists to exercise the real assembly goes through
+  # the real assembly.
+  composition = import ../lib/composition.nix { inherit lib; };
 
-  # Committed songs (same as mkHost).
-  songbook = walk ../song/songbook;
-
-  # Optional modules — same tolerance guard as mkHost. stylix rides here for
-  # the whole-tree path only: the stylix LANE carries it for the constructor
-  # (see lib/mkHost.nix).
-  optionalModule = attr: path: lib.optional (inputs ? ${attr}) path;
-  hmModule = optionalModule "home-manager" (inputs.home-manager.nixosModules.home-manager or { });
-  stylixModule = optionalModule "stylix" (inputs.stylix.nixosModules.stylix or { });
-
-  # The pkgs overlay injecting the discovered packages — now literally the SAME
-  # source as mkHost: both import lib/pkgs.nix's overlay, which auto-discovers
-  # pkgs/<name> and guards each name against shadowing a nixpkgs attribute.
-  # `aoide` itself is self-flaked (pkgs/aoide/flake.nix) and named by neither
-  # aggregate — it arrives via `inputs.aoide.nixosModules.default`, imported
-  # by `modules/nucleus/options.nix` and carrying `overlays.default` with it,
-  # the same way mkHost's own node picks it up (this VM imports the same
-  # modules/{dendrites,nucleus} aggregates).
+  # The pkgs overlay injecting the discovered packages — literally the same
+  # source `lib/aoideos.nix` hands a real host: both import lib/pkgs.nix's
+  # overlay, which auto-discovers pkgs/<name> and guards each name against
+  # shadowing a nixpkgs attribute. `aoide` itself is self-flaked
+  # (pkgs/aoide/flake.nix) and named by neither aggregate — it arrives via
+  # `inputs.aoide.nixosModules.default`, imported by `modules/nucleus/options.nix`
+  # and carrying `overlays.default` with it, the same way a real host picks it up.
   overlayModule = _: {
     nixpkgs.overlays = [
       (import ../lib/pkgs.nix { inherit lib; }).overlay
     ];
   };
 
-  # home-manager defaults — same as mkHost.
-  hmDefaultsModule =
-    _:
-    lib.optionalAttrs (inputs ? home-manager) {
-      home-manager.useGlobalPkgs = lib.mkDefault true;
-      home-manager.useUserPackages = lib.mkDefault true;
+  # The VM's host record — the same interface `hosts/<name>/default.nix`
+  # answers, inline because this machine exists only for the test.
+  #
+  # `compositor` is selected with its provider named (hyprland, the only one),
+  # and `greeter` with it: the test asserts the ly unit and wants
+  # `programs.hyprland` wired. Everything else the desktop carries is trimmed —
+  # see the trim notes above. The person is a real user DEFINITION rather than a
+  # hand-written account, because the constructor wires Home Manager only where
+  # a user asks for it and the tree's lanes write into that user's home.
+  vmHost = {
+    dendrites.compositor = {
+      enable = true;
+      provider = "hyprland";
     };
+    dendrites.greeter.enable = true;
 
-  # specialArgs mirror what mkHost passes (host/inputs/username/system).
-  # Modules that reference these args (e.g. the lyra lane uses `inputs`)
-  # receive the real values; the VM node is named "vm-test".
-  testSpecialArgs = {
-    host = "vm-test";
-    username = "khoa";
-    system = "x86_64-linux";
-    inherit inputs;
+    users.khoa = {
+      definition = ./vm-boot-user.nix;
+      homeManager.enable = true;
+    };
+  };
+
+  # The platform pass, resolved once: `modules` is the module list a
+  # `nixosSystem` would get and `specialArgs` the args it would get them with.
+  resolved = composition.mkNixosModules {
+    hostName = "vm-test";
+    registry = import ../modules;
+    nucleus = ../modules/nucleus;
+    hostModules = [ vmHost ];
+    homeManagerModule = inputs.home-manager.nixosModules.home-manager;
+    extraModules = [ overlayModule ];
+    # specialArgs mirror what lib/aoideos.nix passes (host/inputs/username).
+    # Modules that reference these args (e.g. the lyra lane uses `inputs`)
+    # receive the real values; the node is named "vm-test".
+    specialArgs = {
+      inherit inputs;
+      username = "khoa";
+    };
+    inherit system;
   };
 in
 pkgs.testers.runNixOSTest {
   name = "aoide-vm-boot";
 
   # node.specialArgs is the per-node specialArgs seam exposed by the NixOS
-  # test framework (nixos/lib/testing/nodes.nix).  Modules receiving `host`,
-  # `inputs`, `username`, `system` from specialArgs get the values above.
-  node.specialArgs = testSpecialArgs;
+  # test framework (nixos/lib/testing/nodes.nix). Modules receiving `host`,
+  # `inputs`, `username`, `system` from specialArgs get the constructor's own
+  # values, so what the node receives is what a real host receives.
+  node.specialArgs = resolved.specialArgs;
 
   # Allow setting nixpkgs.overlays inside the test node — required so
   # overlayModule (and any other module) can inject packages.
@@ -122,62 +142,36 @@ pkgs.testers.runNixOSTest {
       ...
     }:
     {
-      imports = [
-        # The same two aggregates lib/mkHost.nix imports: modules/default.nix
-        # is the registry data the constructor reads, not a module.
-        ../modules/dendrites
-        ../modules/nucleus
-      ]
-      ++ songbook
-      ++ hmModule
-      ++ stylixModule
-      ++ [
-        overlayModule
-        hmDefaultsModule
-        # ── Aoide VM configuration ──────────────────────────────────────
-        # Mirrors yomi-strix but without real hardware + a trimmed lane set.
+      imports = resolved.modules ++ [
+        # ── This machine ────────────────────────────────────────────────
+        # Inline rather than in `vmHost.nixos`, so the test's own settings sit
+        # beside the test's own assertions. Mirrors yomi-strix with the lane set
+        # trimmed.
         (
           { lib, ... }:
           {
-            # ── Aoide flags ─────────────────────────────────────────────
-            aoide.enable = true;
-            aoide.user = "khoa";
+            # ── Aoide ────────────────────────────────────────────────────
+            # `aoide.compositor.enable` and `aoide.greeter.enable` are the
+            # selected lanes' own mkDefault — selection is what turns them on,
+            # and a line here would be a second answer to the same question.
+            #
+            # Quickshell/lyra/stylix are not SELECTED (heavy closure, and
+            # quickshell cannot render on the virtual GPU), so nothing has to
+            # switch them off: their facts default false in nucleus and their
+            # lanes are never imported. With lyra off, shellbridge.service does
+            # not exist at all, so the test neither starts nor asserts it.
+            #
             # No song: the song half of the stack is lyra's (deploy, stage seed,
             # restart), and a song named with no lyra lane is refused by the
             # platform (`modules/nucleus/assertions.nix`). The livery the greeter
-            # reads is nucleus's default palette — palette-shaped and non-stock,
-            # which is all the ly assertion below claims.
-            # Compositor + greeter kept: wires programs.hyprland and the ly unit
-            # the test asserts exists and is enabled.
-            aoide.compositor.enable = true;
-            aoide.greeter.enable = true;
-            # Quickshell/lyra omitted: heavy closure + cannot render headless.
-            aoide.quickshell.enable = false;
-            aoide.lyra.enable = false;
-            # Stylix omitted: ImageMagick wallpaper + large target set.
-            aoide.stylix.enable = false;
-            # Obsidian off (same as yomi-strix).
-            aoide.obsidian.enable = false;
+            # reads is then nucleus's own default palette — still palette-shaped
+            # and non-stock, which is all the ly assertion below claims.
+            aoide.enable = true;
+            aoide.user = "khoa";
 
             # ── Baseline ────────────────────────────────────────────────
             networking.hostName = "vm-test";
-            system.stateVersion = lib.mkDefault "25.11";
-            nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
-
-            # ── User account ─────────────────────────────────────────────
-            users.users.khoa = {
-              isNormalUser = lib.mkDefault true;
-              extraGroups = lib.mkDefault [
-                "wheel"
-                "video"
-                "audio"
-                "networkmanager"
-              ];
-              # Passwordless-friendly for test invocations.
-              initialPassword = "test";
-            };
-
-            home-manager.users.khoa.home.stateVersion = lib.mkDefault "25.11";
+            nixpkgs.hostPlatform = "x86_64-linux";
 
             # ── System packages on PATH ───────────────────────────────────
             # jq only (JSON validation). aoide comes from the
