@@ -71,7 +71,7 @@ let
   # aggregate — it arrives via `inputs.aoide.nixosModules.default`, imported
   # by `modules/nucleus/options.nix` and carrying `overlays.default` with it,
   # the same way mkHost's own node picks it up (this VM imports the same
-  # `../modules` tree).
+  # modules/{dendrites,facets,nucleus} aggregates).
   overlayModule = _: {
     nixpkgs.overlays = [
       (import ../lib/pkgs.nix { inherit lib; }).overlay
@@ -117,7 +117,11 @@ pkgs.testers.runNixOSTest {
     }:
     {
       imports = [
-        ../modules
+        # The same three aggregates lib/mkHost.nix imports: modules/default.nix
+        # is the registry data the constructor reads, not a module.
+        ../modules/dendrites
+        ../modules/facets
+        ../modules/nucleus
       ]
       ++ songbook
       ++ hmModule

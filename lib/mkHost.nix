@@ -1,9 +1,10 @@
 # lib/mkHost.nix — assemble one host's nixosSystem.
 #
-# A host is: the module tree (modules/default.nix names its own nucleus +
-# dendrites + facets) + every committed song (still discovered by
-# lib/walk.nix) + the host's own dir + home-manager + stylix. This only
-# wires the fixed inputs and passes `specialArgs` every module can rely on.
+# A host is: the module tree (each of modules/{dendrites,facets,nucleus} names
+# its own files; modules/default.nix is the registry the constructor reads, not
+# a module) + every committed song (still discovered by lib/walk.nix) + the
+# host's own dir + home-manager + stylix. This only wires the fixed inputs and
+# passes `specialArgs` every module can rely on.
 #
 # `hosts/` knows dendrites; dendrites never know hosts (dxflake separation,
 # verbatim). A host `default.nix` only flips `aoide.*` flags and imports its
@@ -46,7 +47,13 @@ inputs.nixpkgs.lib.nixosSystem {
       ;
   };
   modules = [
-    ../modules
+    # The three aggregates, in the order the module system merges them:
+    # dendrites (opt-in), facets (render surfaces), nucleus (unconditional
+    # core). `modules/default.nix` is the registry — data the constructor
+    # reads — so a host imports the directories directly.
+    ../modules/dendrites
+    ../modules/facets
+    ../modules/nucleus
   ]
   ++ songbook
   ++ hmModule

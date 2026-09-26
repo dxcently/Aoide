@@ -277,38 +277,65 @@ and `livery.json` from v0 to v1 when the design-system workstream lands v1.
 
 ---
 
-## 2. Dendrite shape — **v0**
+## 2. Dendrite shape — **v1**
 
-A dendrite is a module named in `modules/dendrites/default.nix` that guards
-its `config` on a per-feature or role flag. Discovery imports the file; gating
-decides activation (dxflake pattern, verbatim).
+A dendrite is one file (or a directory with `default.nix`) at
+`modules/dendrites/<name>`, named once in `modules/default.nix`'s catalogue.
+It evaluates to a **lane record** — a plain attribute set naming the evaluators
+this capability answers for:
 
 ```nix
 # modules/dendrites/<name>.nix
-{ config, lib, ... }:
+let
+  body =
+    { config, lib, ... }:
+    {
+      options.aoide.<name>.enable = lib.mkEnableOption "<name>";
+      config = lib.mkIf config.aoide.<name>.enable {
+        # a dendrite carries its own dependencies (narrowest scope wins)
+      };
+    };
+in
 {
-  options.aoide.<name>.enable = lib.mkEnableOption "<name>";
-  config = lib.mkIf config.aoide.<name>.enable {
-    # a dendrite carries its own dependencies (narrowest scope wins)
-  };
+  inherit body;
+
+  nixos =
+    { lib, ... }:
+    {
+      imports = [ body ];
+      config.aoide.<name>.enable = lib.mkDefault true;
+    };
 }
 ```
 
+`body` is the module: it declares the options and guards the config. The
+`nixos` lane imports `body` and sets the flag `mkDefault true`, so selecting
+the dendrite for the system is what turns the capability on. The constructor
+(`lib/composition.nix`) imports the lane of what a host selected and nothing
+else; `modules/dendrites/default.nix` imports every `body`, which is how a
+host taking the whole tree still sees each `aoide.<name>.*` option.
+
 Rules:
 
-- **Guard on `aoide.<name>.enable`** (per-feature) or an aggregation/role flag.
+- **Guard on `aoide.<name>.enable`** (per-feature) or an aggregation/role flag,
+  in `body`.
+- **A capability with alternatives is a provider registry** — a directory
+  whose file is `{ providers.<p> = <path>; }` — and its catalogue entry is the
+  directory, not a provider file.
 - **A dendrite never reads another module** — only `config.aoide.*` options it
   declares itself, plus stock NixOS options.
-- **Growth is additive**: new dendrites are new files; upstream merges stay
-  conflict-free by construction.
+- **Growth is additive**: new dendrites are new files plus one catalogue line;
+  upstream merges stay conflict-free by construction.
 - **Shelving opt-out**: prefix a filename with `_` (`_wip.nix`) — a
-  `_`-prefixed file is not listed in `default.nix` and so is not a module,
-  shelved without being deleted. Any path containing `/_` is skipped.
+  `_`-prefixed file is neither catalogued nor listed in `default.nix` and so is
+  not a module, shelved without being deleted. Any path containing `/_` is
+  skipped.
 - Subfolders under `modules/dendrites/` are grouping only; a file inside one
-  still needs its own line in `modules/dendrites/default.nix` to be a module.
+  still needs its own catalogue line to be selectable.
 
-Facets (`modules/facets/`) are the same shape but MAY read `aoide.livery` and
-MAY declare `aoide.surfaces.<name>.owner` — they read no other module.
+Facets (`modules/facets/`) are bare modules, not lane records: they MAY read
+`aoide.livery` and MAY declare `aoide.surfaces.<name>.owner` — they read no
+other module.
 
 ### Repo shape (the root is closed)
 

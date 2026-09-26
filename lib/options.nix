@@ -2,11 +2,12 @@
 # lane, docs/architecture/ONBOARD.md "The vars-file generator"). Feeds `lyra
 # onboard`'s `aoide.nix` generator: `nix eval --json <checkout>#aoideOptions`
 # returns every VISIBLE, non-internal `aoide.*` option declared across
-# modules/{nucleus,facets,dendrites}, narrowed to exactly what the generator
-# needs to render one commented line — name, description, and the default
-# already rendered as nix SOURCE TEXT (nixpkgs' own doc renderer does the
-# quoting/escaping; the generator pastes it verbatim, never re-serializes a
-# value itself). DERIVED from the option declarations via `lib.evalModules`
+# modules/{nucleus,facets} and the dendrite bodies the registry catalogues,
+# narrowed to exactly what the generator needs to render one commented line —
+# name, description, and the default already rendered as nix SOURCE TEXT
+# (nixpkgs' own doc renderer does the quoting/escaping; the generator pastes
+# it verbatim, never re-serializes a value itself). DERIVED from the option
+# declarations via `lib.evalModules`
 # + `lib.optionAttrSetToDocList` — no hand-list. The emitted JSON deliberately
 # carries only {name, description, default} — no `type` field, since nothing
 # downstream consumes one; a future consumer adds it then, not speculatively.
@@ -40,9 +41,18 @@
   inputs,
 }:
 let
+  registry = import ../modules;
+
+  # A dendrite file is a lane record (CONTRACTS.md §2): the option
+  # declarations and the guard live on `body`, and the lane is the module the
+  # constructor imports for a host that selected it. Only `body` is read here —
+  # a lane that nothing selected must not be evaluated to render a doc line.
+  bodies = map (path: (import path).body) (lib.attrValues registry.catalogue);
+
   evaled = lib.evalModules {
-    modules = [
-      ../modules
+    modules = bodies ++ [
+      ../modules/facets
+      ../modules/nucleus
       { config._module.check = false; }
     ];
     specialArgs = {

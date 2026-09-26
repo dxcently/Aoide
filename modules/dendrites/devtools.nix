@@ -1,6 +1,6 @@
 # modules/dendrites/devtools.nix — the CLI dev-tool toolbox.
 #
-# Dendrite shape v0 (CONTRACTS.md §2):
+# Dendrite shape v1 (CONTRACTS.md §2):
 #   - Guarded on aoide.devtools.enable (default false — shipped but off;
 #     defaulted ON fleet-wide in hosts/common/default.nix).
 #   - Carries its own dependencies; reads no other module.
@@ -20,34 +20,48 @@
 #   - The "Hardware & System Administration" section is OMITTED (sysadmin, not
 #     dev); sops/age belong to dxflake's secrets stack, which Aoide doesn't have.
 #   - dxflake's openldap overlay is NOT ported (a dxflake-local build fix).
+
+let
+  body =
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
+    {
+      options.aoide.devtools.enable = lib.mkEnableOption "the CLI dev-tool toolbox (lazygit, neovide, nix tooling, …)";
+
+      config = lib.mkIf config.aoide.devtools.enable {
+        # ngrok is unfree. Scoped here: the dendrite that needs unfree carries the
+        # switch (narrowest scope wins).
+        nixpkgs.config.allowUnfree = true;
+
+        environment.systemPackages = with pkgs; [
+          # ── Editors & Git ──
+          neovide # GPU-accelerated Neovim GUI
+          lazygit # terminal UI for git
+
+          # ── Runtimes ──
+          nodejs # cross-platform JavaScript runtime
+
+          # ── Nix tooling ──
+          nixfmt # formatter for Nix source code
+          nix-tree # browse Nix derivation closures
+
+          # ── Networking (dev) ──
+          ngrok # expose local servers via secure tunnels
+        ];
+      };
+    };
+in
 {
-  config,
-  lib,
-  pkgs,
-  ...
-}:
-{
-  options.aoide.devtools.enable = lib.mkEnableOption "the CLI dev-tool toolbox (lazygit, neovide, nix tooling, …)";
+  inherit body;
 
-  config = lib.mkIf config.aoide.devtools.enable {
-    # ngrok is unfree. Scoped here: the dendrite that needs unfree carries the
-    # switch (narrowest scope wins).
-    nixpkgs.config.allowUnfree = true;
-
-    environment.systemPackages = with pkgs; [
-      # ── Editors & Git ──
-      neovide # GPU-accelerated Neovim GUI
-      lazygit # terminal UI for git
-
-      # ── Runtimes ──
-      nodejs # cross-platform JavaScript runtime
-
-      # ── Nix tooling ──
-      nixfmt # formatter for Nix source code
-      nix-tree # browse Nix derivation closures
-
-      # ── Networking (dev) ──
-      ngrok # expose local servers via secure tunnels
-    ];
-  };
+  nixos =
+    { lib, ... }:
+    {
+      imports = [ body ];
+      config.aoide.devtools.enable = lib.mkDefault true;
+    };
 }
