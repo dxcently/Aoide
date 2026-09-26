@@ -138,16 +138,24 @@ to **rebuild time** instead.
   built by the ONE argv builder a local `aoide spawn` uses
   ([[Managed-Task-Wrapper]]). A caller may also name a task
   (`metadata["aoide/task"]`) — an illegal slug is refused `-32602` with a
-  taught message, before any id, argv or process exists — and that turns the
-  child into a full managed task run on the far node: a mailbox named by the
-  caller's slug, an exit report, and a record routine cleanup retains. Two
-  consequences a caller should know: the mailbox namespace is shared, so a
-  slug another live run already holds is not refused here (the door composes
-  `conduct` directly, so `spawn --task`'s one-live-run check does not run),
-  and a task run's record is retained indefinitely until an explicit
-  `session prune`, so a node taking repeated remote task spawns grows a roster
-  rather than recycling one. Both are the local wrapper's own semantics,
-  reached through this door — not a second set of rules.
+  taught message (the echoed value cleaned and capped by the shared sanitizer),
+  before any id, argv or process exists — and that turns the child into a full
+  managed task run on the far node: a mailbox named by the caller's slug, an
+  exit report, and a record `session watch` resolves. A slug a live run already
+  holds is refused `-32602` too, through the same admission step a local
+  `spawn --task` consults — the door reaches the wrapper WITHOUT bypassing the
+  wrapper's own checks, so a peer cannot squat the operator's task name.
+  Three consequences a caller should know. The mailbox namespace is FLAT and
+  shares the roster's label space: no name is reserved (`conductor` included),
+  and the slug becomes the run's own session name in the roster and the
+  [[Session-Graph|graph]] — the same power a local `spawn --task` has always
+  had, now reachable by a paired peer. A door-summoned run is retained only
+  until its report is filed, then swept like any finished session, so a peer
+  cannot grow this node's roster without bound. And because the child is
+  headless, it is REACHABLE, not merely watchable: a ping-back line or a
+  mail-side doorbell write lands in its input, where a non-headless wrap with no
+  channel would have been skipped. All of it is the local wrapper's own
+  semantics, reached through this door — not a second set of rules.
 - **Non-loopback callers are gated at request time.** `message/send`
   classifies the caller's address first (`a2a::classify_origin` →
   `ConnOrigin`: `Loopback` / `Remote(IpAddr)` / `Unknown`). A `Remote`

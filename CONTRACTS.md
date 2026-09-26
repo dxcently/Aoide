@@ -5099,15 +5099,58 @@ value, states the shape and names the way out (a legal slug, or no key). Like
 S3's malformed `aoide/from`, that refusal is applied **spawn-side only**: an
 Inject request that happens to carry the key builds nothing out of it and is
 answered exactly as before. The check runs before an id is minted or
-`current_exe()` resolves, so an illegal slug costs one RPC and no process.
+`current_exe()` resolves, so an illegal slug costs one RPC and no process. The
+quoted value is CLEANED first (`aoide_conduct::graph::clean_line`, the one
+sanitizer every surface that shows a peer's bytes uses) and that same call caps
+it: an illegal slug is illegal precisely because it may hold a newline, an
+escape or a bidi override, and this string is printed by a caller's own UI.
+
+**A slug a live run holds is refused, through the wrapper's own admission
+step.** `-32602` again — nothing is wrong with the caller's authority; the
+request collides with state this node already holds — and the message is
+`aoide-conduct`'s ONE refusal sentence (`live_run_for`/`live_run_refusal`,
+shared with local `spawn --task` rather than reworded here), naming the holding
+session and its start instant. Without it the door would be the one spawn path
+that never asks, and a peer's child could deny the operator their own task name
+for as long as the peer chose, since this door imposes no deadline. It is a
+courtesy, not a lock: two concurrent spawns of one slug can still both pass it,
+and no code claims slug uniqueness.
+
+**The task namespace is flat, and the caller picks a roster label.** No name is
+reserved: `conductor` (the report role fallback), a registered node's name, a
+project name and a name a live run holds are all either acceptable or refused
+by the one predicate above and the live-run check alone. The slug also becomes
+the run's own session NAME (`conduct`'s task registration), so it is what the
+roster, the graph and `session watch` show — a paired peer choosing it is the
+same power a local `spawn --task` has always had, handed one door over. That is
+stated rather than reserved away: an operator's own habits are the namespace's
+only convention, and a reserved list would be a second, undocumented rule.
+
+**A finished door-summoned run is retained only until its report is filed.**
+Retention is per-provenance (`prune_done_scoped`): a task-carrying record whose
+`origin` is a `node:*` value — the shape only this door writes — is kept while
+the report lane is still owed a filing, exactly as an unfiled local run is, and
+is swept by the automatic sweep and by `session prune` alike once that filing
+has landed. Otherwise a peer could mint permanent records one request at a
+time, which no unpairing would ever collect. Local runs are unaffected: they
+stay retained as §4 states.
+
+**The report of a door-summoned run does not leave its node, and it is not a
+letter.** A remote spawn passes neither `--parent` nor `--report-to`, and this
+door clears `AOIDE_SESSION_ID` on the child, so the run has no report mailbox
+at all: it is reported WITHOUT a letter — the `no_mailbox` rail of the exit
+report lane, audited as `unmailed` — while its outcome rides the report cursor
+entry (`taskreport.json`), the record's own end facts and the audit line, all
+on the child's node. Nothing is mailed cross-node, and no `self/<slug>` letter
+appears for a remote caller: what a remote parent hears is the ping-back, over
+`tasks/get` (`aoide/linesAfter`), never mail (Q5).
 
 Three things a managed spawn is NOT: `--parent` (the door never writes the
 LOCAL `parentSessionId` — the remote parent is the `remoteParent` RECORD field
 `stamp_spawn_provenance` stamps), `--instructions-path` (a remote caller names
 no sidecar; the prompt is injected as the first turn), and `--timeout` (the
 door has no deadline to impose, and a default one would kill a long remote run
-mid-flight). `--report-to` is equally absent, so the run's report is filed to
-its own slug on the child's node and stays there (Q5).
+mid-flight).
 
 **The child is always headless, and its argv is the local one.** `do_spawn`
 builds its argv through `aoide_conduct::graph::build_conduct_args` — the ONE

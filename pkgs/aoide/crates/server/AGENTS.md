@@ -365,19 +365,34 @@
   two pure halves, split out for the same reason `spawn_child_command` was
   (a `cargo test` binary's `current_exe()` is the harness): the argv is asserted
   with `Command::get_args()` and the env with `get_envs()`, never by driving a
-  real spawn. Two invariants to hold while editing:
-  (a) **the slug check stays FIRST in `do_spawn`** — before `spawn_session_id`
-  mints an id and before `current_exe()` resolves — so an illegal slug costs one
-  RPC and no process (moving it later would make the refusal test spawn the test
-  binary); (b) **the slug refusal is `-32602` and spawn-side only**, the same
-  discipline S3's malformed `aoide/from` claim holds — an Inject request
-  carrying the key is answered exactly as before, because it builds no value
-  from it. The predicate is `aoide_storage::node_store::valid_node_name`
+  real spawn. Three invariants to hold while editing:
+  (a) **the slug check and the live-slug check stay FIRST in `do_spawn`** —
+  before `spawn_session_id` mints an id and before `current_exe()` resolves — so
+  both refusals cost one RPC and no process.
+  `do_spawn_refuses_an_illegal_and_a_live_held_slug_through_its_own_boundary`
+  drives `do_spawn` ITSELF to hold that: it is safe only because both checks
+  return before any spawn, and it will fail loudly (the test binary trying to
+  conduct itself) if either is moved below `cmd.spawn()`. Do not "simplify" it
+  into a pure-function test.
+  (b) **the live-slug check is SHARED, not rewritten**:
+  `aoide_conduct::graph::live_run_for` + `live_run_refusal` are the wrapper's own
+  admission step and its own sentence (M2 of the S10 review — the door composed
+  `conduct` directly and so bypassed them, letting a peer squat the operator's
+  task name). Never add a second copy of the message here.
+  (c) **the slug refusal is `-32602` and spawn-side only** — the same discipline
+  S3's malformed `aoide/from` claim holds; an Inject request carrying the key is
+  answered exactly as before, because it builds no value from it. A live-held
+  slug is `-32602` too (state this node holds, not a capability the caller
+  lacks), NOT one of the capability codes `-32004`/`-32006`.
+  The predicate is `aoide_storage::node_store::valid_node_name`
   (there is no separate task-slug validator to call: the slug IS the mailbox
-  name). Do NOT add `--timeout`/`--report-to`/`--instructions-path`/`--parent`
+  name), and the echoed value goes through
+  `aoide_conduct::graph::clean_line` first — a caller's illegal slug may carry
+  control or `Cf` bytes and this string reaches an RPC body (L6). Do NOT add
+  `--timeout`/`--report-to`/`--instructions-path`/`--parent`
   here without a source for each — a default deadline would kill long remote
-  runs, the report stays on the child's node (Q5), and `parentSessionId` is a
-  LOCAL field (§4).
+  runs, the report stays on the child's node as the `no_mailbox` rail (never a
+  letter, Q5), and `parentSessionId` is a LOCAL field (§4).
 - **The `metadata["aoide/from"]` parent claim is honoured on the Signature
   rung ONLY, and the value is built from the RESOLVED record, never from wire
   bytes (P-RSA S3, CONTRACTS.md §4/§6).** `parse_message_send_params`' fourth

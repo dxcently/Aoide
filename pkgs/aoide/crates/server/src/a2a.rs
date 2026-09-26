@@ -1180,13 +1180,22 @@ fn requested_task(message: &Value, params: &Value) -> Option<String> {
 /// on the SPAWN side only (`do_spawn`, after `spawn_admitted`) — an Inject
 /// request carrying the key builds nothing out of it and is answered exactly
 /// as before.
+///
+/// **The echoed value is cleaned first** (L6 of the S10 review): an illegal slug
+/// is illegal precisely because it may hold anything — newlines, ANSI, a bidi
+/// override — and this string reaches an RPC error body and whatever local UI
+/// prints it, so it goes through `aoide_conduct::graph::clean_line`, the ONE
+/// sanitizer every surface that shows a peer's bytes uses (control, Unicode
+/// `Cf`, the invisible fillers, whitespace flattened, clipped). Trimmed and
+/// capped by that same call: a caller cannot buy a longer echo than a line.
 fn spawn_task_slug(task: Option<&str>) -> Result<Option<&str>, String> {
     match task {
         Some(slug) if !aoide_storage::node_store::valid_node_name(slug) => Err(format!(
-            "metadata[\"{}\"] `{slug}` is not a legal task slug (^[a-z0-9][a-z0-9-]*$ — the \
+            "metadata[\"{}\"] `{}` is not a legal task slug (^[a-z0-9][a-z0-9-]*$ — the \
              same name a mailbox and `spawn --task`'s own slug take); send a legal slug, or \
              omit the key for an unmanaged spawn",
             aoide_protocol::wire::TASK_KEY,
+            aoide_conduct::graph::clean_line(slug),
         )),
         other => Ok(other),
     }
@@ -1678,8 +1687,15 @@ fn spawn_died_immediately_message(agent_cmd: &str, status: std::process::ExitSta
 /// automatic prune retains). `--spawned` rides unconditionally, as it does for
 /// every spawn: it is the registration fact the reaper's abandoned-shell arm
 /// reads, and that arm's own shape test (`spawned && restore.is_some() &&
-/// idle`) cannot match an agent child at all, since `restore` is stamped only
-/// for a session whose wrapped program captures like a shell.
+/// idle`) cannot match a non-shell child at all — `restore` is stamped only for
+/// a session whose wrapped program captures like a shell, so an ordinary agent
+/// `spawnAgent` is never collected by it. An operator who sets `spawnAgent` to
+/// a SHELL (`bash -lc …`) does get that arm, exactly as a local `spawn -- bash`
+/// does (L5 of the S10 review — the door's child is a spawn like any other).
+/// And `--headless` is what makes the child REACHABLE with a keystroke, not
+/// just watchable: a headless wrap accepts the ping-back line and a mail-side
+/// doorbell write, where a non-headless one with no channel is skipped as
+/// `interactive-composer`.
 ///
 /// The other four flags have no source at this door and stay absent, each for
 /// a stated reason: `--parent` because `parentSessionId` is a LOCAL id and this
@@ -1860,7 +1876,7 @@ fn do_spawn(
     task: Option<&str>,
 ) -> Result<Value, (i64, String)> {
     // Refused FIRST and for free: an unusable slug must cost one RPC, never a
-    // process — nothing below this line has run when it fires.
+    // process — nothing below these lines has run when either fires.
     let task = match spawn_task_slug(task) {
         Ok(task) => task,
         Err(msg) => {
@@ -1875,6 +1891,32 @@ fn do_spawn(
             return Err((-32602, msg));
         }
     };
+    // The wrapper's own admission step, shared rather than copied (M2 of the
+    // S10 review): a slug a live run already holds is refused HERE, for the
+    // same reason `spawn --task` refuses it — two live runs must never share
+    // one mailbox, and without this the door is the one spawn path with no
+    // admission step at all, so a peer's child could deny the operator their
+    // own task name for as long as the peer chooses (this door imposes no
+    // deadline by design). `-32602` and not one of the capability codes
+    // (`-32004`/`-32006`): nothing is wrong with the CALLER's authority here,
+    // the request collides with state this node already holds — the same
+    // invalid-params family the malformed-slug refusal above uses, whose key
+    // this is. The text is `aoide-conduct`'s ONE refusal sentence, so the
+    // peer reads exactly what a local operator would.
+    if let Some(slug) = task {
+        if let Some((held_by, started_at)) = aoide_conduct::graph::live_run_for(slug) {
+            let msg = aoide_conduct::graph::live_run_refusal(slug, &held_by, &started_at);
+            let _ = audit(
+                audit_log,
+                Door::A2a,
+                EventClass::Audit,
+                "a2a.message/send",
+                "error",
+                &msg,
+            );
+            return Err((-32602, msg));
+        }
+    }
     let id = spawn_session_id();
     let aoide_bin = std::env::current_exe()
         .map_err(|e| (-32603_i64, format!("resolving the aoide binary: {e}")))?;
@@ -4995,14 +5037,17 @@ mod tests {
     /// The slug is held to the ONE predicate every mailbox name takes, and the
     /// refusal is taught: it quotes the value, states the shape and names the
     /// way out (`-32602`, applied by `do_spawn` — the same spawn-side-only
-    /// discipline S3's malformed `aoide/from` claim holds).
+    /// discipline S3's malformed `aoide/from` claim holds). The quoted value is
+    /// the CLEANED one (L6 of the S10 review): a slug may be illegal precisely
+    /// because it carries a newline, an escape or a bidi override, and this
+    /// string is printed by a caller's UI.
     #[test]
     fn a_task_slug_off_the_shape_is_refused_with_a_taught_message() {
         assert_eq!(spawn_task_slug(None), Ok(None), "naming no task is not a malformed one");
         assert_eq!(spawn_task_slug(Some("fix-flaky")), Ok(Some("fix-flaky")));
         assert_eq!(spawn_task_slug(Some("a1-b2")), Ok(Some("a1-b2")));
 
-        for bad in ["Upper", "-leading", "under_score", "a/b", "../evil", "a b", "fix-flaky "] {
+        for bad in ["Upper", "-leading", "under_score", "a/b", "../evil", "a b"] {
             let refusal = spawn_task_slug(Some(bad))
                 .expect_err(&format!("`{bad}` must not be accepted as a task slug"));
             assert!(refusal.contains(bad), "quotes the offending value: {refusal}");
@@ -5015,6 +5060,32 @@ mod tests {
                 "names the key it read: {refusal}"
             );
         }
+
+        // The hostile shapes: what reaches the error body is the SANITIZED
+        // value, and the raw bytes never do. The expectation is the shared
+        // sanitizer's OWN output (never a hand-guessed literal: `strip_unsafe`
+        // drops a whole ESC sequence, not just the `\u{1b}`).
+        for hostile in ["evil\nslug", "evil\u{1b}[31mslug", "evil\u{202e}slug", "evil\u{200b}slug"] {
+            let refusal = spawn_task_slug(Some(hostile))
+                .expect_err(&format!("`{hostile}` must not be accepted as a task slug"));
+            assert!(
+                !refusal.contains('\n') && !refusal.contains('\u{1b}') && !refusal.contains('\u{202e}'),
+                "no raw control/format byte survives into the refusal: {refusal:?}"
+            );
+            assert!(
+                refusal.contains(&aoide_conduct::graph::clean_line(hostile)),
+                "the cleaned value is what is taught: {refusal:?}"
+            );
+            assert!(refusal.contains("evil"), "and the useful part is still legible: {refusal:?}");
+        }
+        // And the echo is bounded: a long ILLEGAL value comes back as one
+        // clipped line (the sanitizer's own 200-character cap), never whole.
+        let refusal = spawn_task_slug(Some(&"X".repeat(4096))).unwrap_err();
+        assert!(
+            refusal.chars().count() < 1024,
+            "the echo is capped, not echoed whole: {} chars",
+            refusal.chars().count()
+        );
     }
 
     /// The claim is read off `message.metadata` ONLY (CONTRACTS.md §6): a
@@ -5252,6 +5323,67 @@ mod tests {
             SendAction::Spawn { agent_cmd: "claude".to_string() },
             "routes to Spawn with `do_spawn`'s prompt arg equal to `prompt` above (\"status check please\")"
         );
+    }
+
+    /// P-RSA S10 review, L10 + M2's door half: the two refusals that must fire
+    /// BEFORE an id is minted, before an argv exists and before `current_exe()`
+    /// is consulted — driven through `do_spawn` ITSELF, which is safe here for
+    /// exactly that reason: both return early, so this never reaches the real
+    /// process spawn the rest of this suite deliberately stops short of. That
+    /// early-return is the invariant; if either check ever moves below
+    /// `cmd.spawn()`, this test will try to spawn the test binary and fail
+    /// loudly rather than quietly.
+    #[test]
+    fn do_spawn_refuses_an_illegal_and_a_live_held_slug_through_its_own_boundary() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = std::env::temp_dir().join(format!(
+            "aoide-a2a-dospawn-refusal-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let audit_log = stage.join("audit.log");
+
+        // (1) An illegal slug: `-32602`, taught, audited — and NOTHING spawned
+        // (no record exists, so no child ever registered).
+        let (code, msg) = do_spawn("claude", "hi", &audit_log, "peer", "", None, Some("Upper"))
+            .expect_err("an illegal slug must be refused");
+        assert_eq!(code, -32602);
+        assert!(msg.contains("Upper") && msg.contains("^[a-z0-9][a-z0-9-]*$"), "{msg}");
+        assert!(!sessions_path().exists(), "a refused spawn writes no record");
+        let audited = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(audited.contains("not a legal task slug"), "audited: {audited}");
+
+        // (2) A slug a live run already holds — the shape a peer's door child
+        // leaves behind — refused with `aoide-conduct`'s OWN sentence.
+        let mut held = fixture_session("a2a-held", "working", None);
+        held.task = Some("build-reports".to_string());
+        held.origin = Some("node:peer".to_string());
+        let sf = SessionsFile { schema_version: "0".to_string(), sessions: vec![held] };
+        write_stage(&sessions_path(), &sf).unwrap();
+        let (held_by, started_at) = aoide_conduct::graph::live_run_for("build-reports")
+            .expect("the held run is visible to the door");
+
+        let (code, msg) =
+            do_spawn("claude", "hi", &audit_log, "peer", "", None, Some("build-reports"))
+                .expect_err("a live-held slug must be refused");
+        assert_eq!(code, -32602, "state this node holds, not a capability the caller lacks");
+        assert_eq!(
+            msg,
+            aoide_conduct::graph::live_run_refusal("build-reports", &held_by, &started_at),
+            "the shared refusal text, byte for byte"
+        );
+        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert_eq!(after.sessions.len(), 1, "nothing was spawned, nothing was written");
+        assert!(std::fs::read_to_string(&audit_log).unwrap().contains("already has a live run"));
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
     }
 
     // ── P-RSA S10: a remote spawn is a headless managed run ──────────────
