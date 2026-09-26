@@ -1,6 +1,8 @@
 //! Shared command/arg/error glue used by every handler-bearing `graph` submodule:
-//! positional/flag arg validation, the stage-error envelope, and the
-//! three-registry loader.
+//! positional/flag arg validation, the stage-error envelope, the
+//! three-registry loader, and the text sanitizers (`clean_line`/`clip_flat`)
+//! every surface that prints text this process did not write shares — mail
+//! fragments in `view.rs`, a pulled node's own fields in `who.rs`.
 
 use super::model::{
     hooks_path, load_stage, projects_path, sessions_path, HooksFile, ProjectsFile, SessionsFile,
@@ -78,5 +80,83 @@ pub(in crate::graph) fn require_flag(inv: &Invocation, name: &str) -> Result<Str
                 inv.path.join(" "),
             ),
         )),
+    }
+}
+
+/// The longest untrusted line any graph surface prints, in characters —
+/// [`clip_flat`]'s bound, one constant for every caller (a mail fragment, a
+/// far node's own `cwd`, a link's `sessionId`).
+pub(in crate::graph) const LINE_MAX: usize = 200;
+
+/// One line of text this process did not write, made safe to print: every
+/// control character stripped — `\r` included, it is an Enter at whoever
+/// pastes it — whitespace flattened, clipped to [`LINE_MAX`] with an ellipsis.
+/// The single sanitizer `view.rs` (mail fragments) and `who.rs` (a pulled node
+/// document's own fields) both reach a terminal through, so neither surface
+/// can hold a laxer rule than the other.
+pub(in crate::graph) fn clean_line(s: &str) -> String {
+    let stripped: String = s.chars().filter(|c| !is_unsafe(*c)).collect();
+    clip_flat(&stripped, LINE_MAX)
+}
+
+/// A character no terminal may be handed: every [`char::is_control`] (`\u{1b}`
+/// colour/bell/`\r`/`\n`) plus the INVISIBLE formatting marks a terminal
+/// honours but `is_control` does not — the bidi overrides and embedding marks
+/// Trojan-Source uses to make one string read as another (Cf, not Cc).
+fn is_unsafe(c: char) -> bool {
+    c.is_control()
+        || matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+}
+
+/// Flatten runs of whitespace to single spaces and clip to `max` characters
+/// with an ellipsis. Character-counted, never byte-counted, so a multi-byte
+/// glyph is never cut in half.
+pub(in crate::graph) fn clip_flat(s: &str, max: usize) -> String {
+    let flat: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= max {
+        return flat;
+    }
+    let mut out: String = flat.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_line_strips_colour_and_keeps_its_literal_text() {
+        assert_eq!(clean_line("\u{1b}[31mred\u{1b}[0m"), "[31mred[0m");
+        assert_eq!(clean_line("bell\u{7}here"), "bellhere");
+    }
+
+    #[test]
+    fn clean_line_strips_the_bidi_marks_that_reorder_a_line() {
+        assert_eq!(clean_line("\u{202e}gpj.exe"), "gpj.exe");
+        assert_eq!(clean_line("a\u{200f}b\u{2066}c\u{2069}d"), "abcd");
+    }
+
+    #[test]
+    fn clean_line_flattens_a_newline_rather_than_printing_a_second_row() {
+        // `\n`/`\r` are control characters, so they are STRIPPED before the
+        // flattening pass ever sees them — the two halves join, and the line
+        // stays one line. Never a second row, never a bare CR that would
+        // overwrite the row above it.
+        assert_eq!(clean_line("first\nsecond"), "firstsecond");
+        assert_eq!(clean_line("carriage\rreturn"), "carriagereturn");
+        assert_eq!(clean_line("  padded \t line  "), "padded line");
+    }
+
+    #[test]
+    fn clean_line_bounds_a_megabyte_to_one_clipped_line() {
+        let out = clean_line(&"x".repeat(1_000_000));
+        assert_eq!(out.chars().count(), LINE_MAX);
+        assert!(out.ends_with('…'));
+        // Character-counted, never byte-counted: a multi-byte glyph is never
+        // cut in half (`clip_flat`'s own note).
+        let out = clean_line(&"é".repeat(LINE_MAX + 50));
+        assert_eq!(out.chars().count(), LINE_MAX);
+        assert!(out.ends_with('…'));
     }
 }

@@ -1294,7 +1294,8 @@ fn refuse_app_record(cmd: &'static str, id: &str, sessions: &[SessionRecord]) ->
 /// Core of `session phase`: UPSERT the hook record (audit), land the
 /// canonical live state on sessions.json (the widget file), re-stage. The whole
 /// load-modify-write is serialised against every other stage writer by the
-/// stage lock (its inner helpers stay lock-free — the lock is not re-entrant).
+/// stage lock, held ONCE around the whole body — its inner helpers stay
+/// lock-free, and the lock nests only for the thread already holding it.
 pub(in crate::graph) fn do_session_phase(id: &str, phase: &str) -> Outcome {
     with_stage_lock(|| do_session_phase_inner(id, phase))
 }

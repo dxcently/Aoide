@@ -43,9 +43,10 @@ the rice `stage_dir` under `song/stage/`). The state dir is
 Every stage write goes through
 `aoide_storage::fs::atomic_write` (temp `<stem>.tmp.<pid>`, `fsync`, rename,
 symlink-transparent) and multi-file load-modify-writes serialise through
-`with_stage_lock` (a non-reentrant `.stage.lock` flock, still fixed to the
-rice `stage_dir()` so conducting writes stay serialised against rice writers
-sharing the same lock file). Every mutation re-stages `state/stage/graph.json`
+`with_stage_lock` (an exclusive `.stage.lock` flock that nests for the thread
+already holding it, still fixed to the rice `stage_dir()` so conducting writes
+stay serialised against rice writers sharing the same lock file). Every
+mutation re-stages `state/stage/graph.json`
 via `restage_graph` so the hot-reloaded document never drifts from the
 registries. The audit log resolves to `$AOIDE_ROOT/log` (default
 `~/.aoide/log`; `$AOIDE_AUDIT_LOG`, or the `--audit-log` flag, override).

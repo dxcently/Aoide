@@ -35,7 +35,7 @@
 //! as `0`. Whether a run's work was any good is the operator's own reading of
 //! the output and the mail.
 
-use super::common::{require_args, stage_error};
+use super::common::{self, require_args, stage_error};
 use super::doc::is_conductable_now;
 use super::model::{
     canonical_state, load_stage, resolved_parent, sessions_path, SessionRecord, SessionsFile,
@@ -58,10 +58,10 @@ const WATCH_POLL: Duration = Duration::from_millis(500);
 const DEFAULT_TAIL: usize = 50;
 /// How many letters of the task mailbox the rail shows (the newest ones).
 const MAIL_RAIL: usize = 20;
-/// Per-line clip for a sanitized field (a subject, a sender, a letter line).
-const LINE_MAX: usize = 200;
 /// How many lines of a sanitized block (instructions, a letter body) are
-/// rendered — a bound on the render buffer, never on what is stored.
+/// rendered — a bound on the render buffer, never on what is stored. The
+/// per-line clip is [`common::LINE_MAX`], shared with every other graph
+/// surface that prints text this process did not write.
 const BLOCK_LINES_MAX: usize = 400;
 /// The bounded window read from the tail of a run's PTY transcript: a runaway
 /// log can never pull an unbounded amount of bytes into a render buffer.
@@ -458,14 +458,14 @@ fn mail_lines(entries: &[Entry], _slug: &str, rec: &SessionRecord, roster: &[Ses
 /// already [`clean_block`]ed (control characters stripped, lines clipped, the
 /// line count bounded), which is what makes the live delta bounded too.
 fn mail_line(e: &Entry, this_run: &str, roster: &[SessionRecord]) -> MailLine {
-    let from = clean_field(&e.envelope.header.from.name);
+    let from = common::clean_line(&e.envelope.header.from.name);
     let (subject, body) = match aoide_storage::letter::decode(&e.envelope.text) {
-        Some(content) => (clean_field(&content.subject), clean_block(&content.body)),
+        Some(content) => (common::clean_line(&content.subject), clean_block(&content.body)),
         None => (String::new(), clean_block(&e.envelope.text)),
     };
     MailLine {
         seq: e.seq,
-        received_at: clean_field(&e.received_at),
+        received_at: common::clean_line(&e.received_at),
         run: run_label(&e.envelope.header.from.name, this_run, roster),
         from,
         subject,
@@ -515,7 +515,7 @@ fn run_label(from: &str, this_run: &str, roster: &[SessionRecord]) -> String {
     // Every id/label this returns is printed, so the sender is sanitized HERE
     // too: a live line once rendered a raw `sender\u{1b}[0m` because the
     // display form and the lookup key were the same string.
-    let shown = clean_field(from);
+    let shown = common::clean_line(from);
     let roster_name = roster
         .iter()
         .find(|s| s.session_id == from)
@@ -530,7 +530,7 @@ fn run_label(from: &str, this_run: &str, roster: &[SessionRecord]) -> String {
         })
     };
     match roster_name.or_else(ledger_name) {
-        Some(name) => format!("earlier run ({})", clean_field(&name)),
+        Some(name) => format!("earlier run ({})", common::clean_line(&name)),
         None if roster.iter().any(|s| s.session_id == from) => format!("earlier run ({shown})"),
         None => format!("not this run ({shown})"),
     }
@@ -553,7 +553,7 @@ fn end_words(outcome: Option<&str>, exit_code: Option<i32>) -> String {
         Some("signal") => "died by signal".to_string(),
         Some("timeout") => "timed out".to_string(),
         Some("stopped") => "stopped (no status)".to_string(),
-        Some(other) => clean_field(other),
+        Some(other) => common::clean_line(other),
         None => match exit_code {
             Some(code) => format!("exited {code}"),
             None => "stopped (no exit status recorded)".to_string(),
@@ -778,7 +778,7 @@ fn follow(
                     if line.is_empty() {
                         continue;
                     }
-                    let line = if raw_output { line.to_string() } else { clean_line(line) };
+                    let line = if raw_output { line.to_string() } else { common::clean_line(line) };
                     println!("{line}");
                     printed_lines += 1;
                 }
@@ -894,7 +894,7 @@ fn read_log_tail(path: &Path, lines: usize, raw: bool) -> (Vec<String>, u64) {
         .rev()
         .take(lines)
         .rev()
-        .map(|l| if raw { (*l).to_string() } else { clean_line(l) })
+        .map(|l| if raw { (*l).to_string() } else { common::clean_line(l) })
         .collect();
     (window, len)
 }
@@ -911,21 +911,6 @@ fn read_log_from(path: &Path, offset: u64) -> Option<Vec<u8>> {
     Some(buf)
 }
 
-/// One field of untrusted text as one clipped line: control characters
-/// (`\r` included — it is an Enter at whoever pastes it) stripped, whitespace
-/// flattened, clipped with `…`. A letter's subject, sender and every mail
-/// fragment pass through here before they reach a terminal.
-fn clean_field(s: &str) -> String {
-    let stripped: String = s.chars().filter(|c| !c.is_control()).collect();
-    clip_flat(&stripped, LINE_MAX)
-}
-
-/// One untrusted line, [`clean_field`]'s rule without the clip.
-fn clean_line(s: &str) -> String {
-    let stripped: String = s.chars().filter(|c| !c.is_control()).collect();
-    clip_flat(&stripped, LINE_MAX)
-}
-
 /// A block of untrusted/operator text kept multi-line: control characters
 /// other than `\n` are stripped (a `\r`, an escape sequence, a bell none of
 /// them reach a terminal), each line is clipped, and the block is bounded to
@@ -936,21 +921,8 @@ fn clean_block(s: &str) -> Vec<String> {
         .collect::<String>()
         .split('\n')
         .take(BLOCK_LINES_MAX)
-        .map(|l| clip_flat(l.trim_end(), LINE_MAX))
+        .map(|l| common::clip_flat(l.trim_end(), common::LINE_MAX))
         .collect()
-}
-
-/// Flatten runs of whitespace to single spaces and clip to `max` characters
-/// with an ellipsis. Character-counted, never byte-counted, so a multi-byte
-/// glyph is never cut in half.
-fn clip_flat(s: &str, max: usize) -> String {
-    let flat: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
-    if flat.chars().count() <= max {
-        return flat;
-    }
-    let mut out: String = flat.chars().take(max.saturating_sub(1)).collect();
-    out.push('…');
-    out
 }
 
 /// Is stdout a terminal? Raw PTY bytes are printed only here; every other
@@ -1340,7 +1312,7 @@ mod tests {
         let body = mail[0]["body"].as_array().unwrap();
         let long = body.last().unwrap().as_str().unwrap();
         assert!(long.ends_with('…'), "clipped with an ellipsis: {long}");
-        assert_eq!(long.chars().count(), LINE_MAX);
+        assert_eq!(long.chars().count(), common::LINE_MAX);
         for line in body {
             let line = line.as_str().unwrap();
             assert!(!line.chars().any(char::is_control), "body line: {line:?}");

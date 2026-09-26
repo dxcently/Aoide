@@ -1395,11 +1395,36 @@
   call sites); a remote row reads the far document's own `remoteParent`/
   `remoteChildren` back VERBATIM, because that node resolved the names against
   ITS registry and a second lookup here would consult a registry the document
-  never came from. A link missing its `sessionId` is dropped, never rendered
-  blank. `parent` stays what it always was — the LOCAL `spawned` edge — and
+  never came from. A link missing its `sessionId`, or naming no `node`, is
+  dropped, never rendered blank (`remote_link` — a foreign document is display
+  data either way). `parent` stays what it always was — the LOCAL `spawned`
+  edge — and
   `resolved_parent` never sees a remote field: that separation is the whole
   point of the second field (the autogate grant and sibling rule in
   `send.rs` read `parentSessionId`), so do not "unify" them.
+- **Every string `who.rs` prints off a pulled document goes through
+  `common::clean_line`** (`shown`/`endpoint` — control characters and the bidi
+  formatting marks stripped, flattened, clipped to `common::LINE_MAX`), in the
+  two renderings AND in the shared `session_view_json`: the conductor paints
+  that JSON, so the terminal is not the only consumer. Nothing off a far node
+  is printed raw, and no field reaches a terminal unbounded — a 1 MB `cwd`
+  costs one clipped line. If you add a rendered field, it goes through them.
+- **`attach_subtrees` is the one place the remote `(node, sessionId)` link is
+  joined to the node fold**, and it runs once in `collect_roster` — after every
+  node is probed, before any filter or grouping, so both renderings and the JSON
+  read ONE answer. It fills `RemoteChild`'s `fold` (`Fresh`/`Stale`/`Absent`)
+  and `subtree`; a row the fold does not carry stays visible as `(not pulled)`,
+  because hiding a link this box still knows about is a lie of omission, and a
+  row whose cache is past `NODE_CACHE_TTL_SECS` stays visible as `(stale)`. Do
+  not re-derive the nesting in a renderer — `subtree_lines` reads the joined
+  rows, and a second walk would drift. The conductor TUI's `graphview.rs` reads
+  neither key yet; teaching it means rendering THIS join, not a second one.
+- **A ledger row's doom belongs to the caller that lands the roster.** The
+  retain is `doc.rs::drop_remote_child_rows`, called by BOTH roster-exit paths
+  (`reap_inner`, `session prune`) AFTER their `sessions.json` write succeeds —
+  never inside `drop_sessions`/`prune_done_scoped`, and never before the write:
+  the ledger is a projection of the roster, so a failed stage write must leave
+  it untouched rather than a live parent whose rows are already gone.
 - **`mesh_path()` (`node_list.rs`) names ONE file, `state/stage/mesh.json`,
   and only `--mesh` may write it.** It resolves through
   `aoide_storage::fs::conducting_stage_dir()`, the same root

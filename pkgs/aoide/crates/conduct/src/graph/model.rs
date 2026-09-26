@@ -12,6 +12,7 @@
 //! here — they're conduct's charter and move in Phase 3b.
 
 use std::collections::{BTreeMap, HashSet};
+use aoide_storage::node_store::Node;
 
 /// Record shapes — originally plain `pub struct`s/`pub const` here, so a glob
 /// re-export preserves the exact original (fully public) visibility.
@@ -218,14 +219,19 @@ pub(in crate::graph) fn resolved_parent<'a>(
 /// (`doc.rs`'s `remoteParent`/`remoteChildren`), so a local rename of the node
 /// record re-labels the link instead of orphaning it; hex is case-insensitive,
 /// hence `eq_ignore_ascii_case` rather than `==`.
-pub(in crate::graph) fn current_node_name(key: &str, stored_label: &str) -> String {
+///
+/// The registry is the caller's already-loaded one, never a fresh read: this
+/// resolves once per link, and the two callers that own links in a loop
+/// (`build_graph`'s projection and the roster's) each load `nodes.json` once
+/// for every row they resolve.
+pub(in crate::graph) fn current_node_name(nodes: &[Node], key: &str, stored_label: &str) -> String {
     if key.is_empty() {
         return stored_label.to_string();
     }
-    aoide_storage::node_store::load_nodes()
-        .into_iter()
+    nodes
+        .iter()
         .find(|n| n.pubkey.as_deref().is_some_and(|k| k.eq_ignore_ascii_case(key)))
-        .map(|n| n.name)
+        .map(|n| n.name.clone())
         .unwrap_or_else(|| stored_label.to_string())
 }
 

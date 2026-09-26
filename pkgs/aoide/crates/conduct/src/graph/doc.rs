@@ -59,6 +59,10 @@ pub fn build_graph(
     // spawned on another node. Read once beside the node registry above — the
     // projection below matches rows to a local parent's own session id.
     let remote_children = aoide_storage::remote_children::load_remote_children();
+    // `nodes.json` once for the whole document: every link's `key` resolves
+    // against it (`model::current_node_name`), and the node fold at the bottom
+    // folds the same registry — one read, one parse, both uses.
+    let mesh_nodes = aoide_storage::node_store::load_nodes();
 
     for p in &projects {
         let mut node = json!({
@@ -194,7 +198,7 @@ pub fn build_graph(
         // `spawned` edge would have to name a foreign id as a local session.
         if let Some(rp) = &s.remote_parent {
             node["remoteParent"] = json!({
-                "node": super::model::current_node_name(&rp.key, &rp.node),
+                "node": super::model::current_node_name(&mesh_nodes, &rp.key, &rp.node),
                 "sessionId": rp.session_id,
             });
         }
@@ -207,7 +211,7 @@ pub fn build_graph(
             .filter(|c| c.parent_session_id == s.session_id)
             .map(|c| {
                 json!({
-                    "node": super::model::current_node_name(&c.key, &c.node),
+                    "node": super::model::current_node_name(&mesh_nodes, &c.key, &c.node),
                     "sessionId": c.session_id,
                 })
             })
@@ -267,7 +271,7 @@ pub fn build_graph(
     // an absent/empty registry (`state/nodes.json`) adds nothing and this
     // whole block is a no-op.
     let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap_or(0);
-    for mesh_node in aoide_storage::node_store::load_nodes() {
+    for mesh_node in mesh_nodes {
         let mut node = json!({
             "id": format!("node:{}", mesh_node.name),
             "kind": "node",
@@ -588,12 +592,12 @@ pub fn prune_done(
 /// history still lives on disk (the session ledger line, the letters, the PTY
 /// transcript, the instruction sidecar); only the roster record is gone.
 ///
-/// The same pass drops every caller-side ledger row whose parent is among the
-/// removed ids ([`aoide_storage::remote_children::retain_remote_children`]) — a
-/// `state/stage/remote-children.json` row is a link TO a child on a far node,
-/// so it has no meaning once the local half of that link has left the roster.
-/// One retain covers both the explicitly-doomed ids and the cascaded subagent
-/// descendants, because it runs over the whole `removed` set this returns.
+/// The `removed` set this returns is also the ledger's own doom list: the
+/// caller hands it to [`drop_remote_child_rows`] once its `sessions.json` write
+/// has landed (both callers do), because a `state/stage/remote-children.json`
+/// row is a link TO a child on a far node and has no meaning once the local half
+/// of that link has left the roster. It covers the explicitly-doomed ids and the
+/// cascaded subagent descendants alike, since it is the whole set.
 pub fn prune_done_scoped(
     sessions: Vec<SessionRecord>,
     hooks: Vec<HookRecord>,
@@ -620,21 +624,31 @@ pub fn prune_done_scoped(
         .map(|s| s.session_id.as_str())
         .collect();
     let dropped = drop_sessions(&sessions, &doomed, hooks);
-    // The caller-side ledger rows of a parent that just left the roster leave
-    // with it (P-RSA S4): a row names a child on a far node THIS parent
-    // spawned, so once the parent is gone the row is the stale half of a link
-    // nothing on either machine can still resolve. Best-effort and only-on-a-
-    // real-drop (the retain writes nothing when it removes nothing), the same
-    // posture `ledger_session_exit` holds on this same pass.
-    let gone: HashSet<&str> = dropped.2.iter().map(String::as_str).collect();
-    if !gone.is_empty() {
-        if let Err(e) = aoide_storage::remote_children::retain_remote_children(|c| {
-            !gone.contains(c.parent_session_id.as_str())
-        }) {
-            eprintln!("[aoide/conduct] remote-children retain failed: {e}");
-        }
-    }
     dropped
+}
+
+/// Drop the caller-side ledger rows of every parent in `removed`
+/// ([`aoide_storage::remote_children::retain_remote_children`]) — a
+/// `state/stage/remote-children.json` row is a link TO a child on a far node,
+/// so it has no meaning once the local half of that link has left the roster.
+///
+/// BOTH roster-exit paths call this (the explicit sweep and the reaper's
+/// superseded-tombstone drop), and each calls it only AFTER its own
+/// `sessions.json` write has succeeded: the ledger is a projection of the
+/// roster, so a stage write that bailed or failed must never leave the two
+/// disagreeing — a row outliving its parent, or a parent outliving its row.
+/// Best-effort (a failed retain is reported, never fatal), the same posture
+/// `ledger_session_exit` holds on those same two paths.
+pub(crate) fn drop_remote_child_rows(removed: &[String]) {
+    if removed.is_empty() {
+        return;
+    }
+    let gone: HashSet<&str> = removed.iter().map(String::as_str).collect();
+    if let Err(e) = aoide_storage::remote_children::retain_remote_children(|c| {
+        !gone.contains(c.parent_session_id.as_str())
+    }) {
+        eprintln!("[aoide/conduct] remote-children retain failed: {e}");
+    }
 }
 
 /// Drop exactly `roots` (+ their subagent descendants, + their hook records)
@@ -1838,10 +1852,13 @@ mod tests {
     }
 
     #[test]
-    fn pruning_the_parent_drops_its_ledger_rows_with_it() {
+    fn dropping_a_parents_ledger_rows_leaves_a_surviving_parents_alone() {
         // A ledger row is the parent-side half of a link; once the parent has
-        // left the roster nothing can resolve it, so the row goes on the same
-        // pass — and a row belonging to a SURVIVING parent stays.
+        // left the roster nothing can resolve it, so the row goes with it — and
+        // a row belonging to a SURVIVING parent stays. This is the helper both
+        // roster-exit paths call after their own `sessions.json` write; each
+        // path's own end-to-end half lives beside it (`manage.rs`'s
+        // `session prune` test, `reap.rs`'s superseded-tombstone test).
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
         let state = unique_stage("remote-prune");
@@ -1859,9 +1876,18 @@ mod tests {
         assert_eq!(removed, vec!["done-par".to_string()]);
         assert_eq!(kept.len(), 1);
 
+        // Nothing has dropped the rows yet: the prune alone is not the ledger's
+        // owner, only the caller that lands the roster is.
+        assert_eq!(aoide_storage::remote_children::load_remote_children().len(), 2);
+
+        drop_remote_child_rows(&removed);
         let left = aoide_storage::remote_children::load_remote_children();
         assert_eq!(left.len(), 1, "one row left: {left:?}");
         assert_eq!(left[0].parent_session_id, "live-par");
+
+        // An empty drop set writes nothing at all.
+        drop_remote_child_rows(&[]);
+        assert_eq!(aoide_storage::remote_children::load_remote_children().len(), 1);
 
         let _ = std::fs::remove_dir_all(&state);
     }

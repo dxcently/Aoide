@@ -426,7 +426,7 @@ by decision — no embedded database yet
   child THIS node spawned on another node over its A2A door — the
   caller-side mirror of `records::RemoteParent`, keyed by the child's
   verified identity `(key, sessionId)`. `append_remote_child` is idempotent
-  on that identity; `retain_remote_children` is the prune pass's drop;
+  on that identity; `retain_remote_children` is how a roster exit drops them;
   `advance_lines_after` moves one child's ping-back pull cursor forward only
   (a replayed pull never rewinds it). All three run inside one short
   `fs::with_stage_lock` section, `load_remote_children` tolerates a

@@ -857,9 +857,11 @@ pub fn with_stage_lock<T>(f: impl FnOnce() -> T) -> T {
         .map(|f| unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } == 0)
         .unwrap_or(false);
     // RAII so an unwind inside `f` clears the flag with the fd, never after it:
-    // declared AFTER `lock`, so it drops BEFORE it (locals drop in reverse) —
-    // the flag is cleared while the flock is still held, then the close
-    // releases the lock itself.
+    // declared AFTER `lock`, so it drops BEFORE it. On an unwind that is the
+    // whole story — the flag is cleared while the flock is still held, then the
+    // close releases the lock itself. The normal path returns through the
+    // explicit `LOCK_UN` below, which releases the lock first and clears the
+    // flag as `_stamp` drops; nothing of this thread runs between the two.
     struct StampedByThisThread;
     impl StampedByThisThread {
         fn take() -> Self {
@@ -1153,17 +1155,31 @@ mod tests {
     #[test]
     fn with_stage_lock_nests_for_one_thread_and_still_releases_on_unwind() {
         // A nested call on the thread that already holds `.stage.lock` runs its
-        // closure directly: `flock` is per open-file-description, so opening a
-        // second fd would block on a lock this same thread owns — a deadlock
-        // rather than a wait. `aoide-conduct`'s `prune_done_scoped` (reached
-        // from inside `reap_inner`'s own hold) is the caller that needs it.
+        // closure directly — asserted from INSIDE both closures, so the test
+        // tells re-entrancy apart from "the lock was never taken" (`held` false
+        // would lock on its own and the outer asserts would still pass).
+        // `aoide-conduct`'s prunes are the callers that need it. `flock` is per
+        // open-file-description, so without the flag that second fd would block
+        // on a lock this same thread owns — a deadlock rather than a wait.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let stage = std::env::temp_dir().join(format!("aoide-stage-lock-nest-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&stage);
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
-        assert_eq!(with_stage_lock(|| with_stage_lock(|| 7)), 7);
+        assert_eq!(
+            with_stage_lock(|| {
+                assert!(STAGE_LOCK_HELD.with(std::cell::Cell::get), "the outer call holds it");
+                with_stage_lock(|| {
+                    assert!(
+                        STAGE_LOCK_HELD.with(std::cell::Cell::get),
+                        "a nested call runs INSIDE the outer hold, not past it"
+                    );
+                    7
+                })
+            }),
+            7
+        );
         assert!(!STAGE_LOCK_HELD.with(std::cell::Cell::get), "released on the way out");
 
         // An unwind inside the outer closure clears the flag with the fd: a

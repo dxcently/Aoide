@@ -199,7 +199,7 @@ pub use self::session_store::now_iso_utc;
 // `use crate::graph::{...}`" section) — never reached from root, so they stay
 // `pub(crate)`.
 pub(crate) use self::common::stage_error;
-pub(crate) use self::doc::{drop_sessions, ledger_session_exit, prune_done};
+pub(crate) use self::doc::{drop_remote_child_rows, drop_sessions, ledger_session_exit, prune_done};
 pub use self::doc::restage_graph;
 pub(crate) use self::model::{hooks_path, STAGE_GRAPH_VERSION};
 pub(crate) use self::session_store::{

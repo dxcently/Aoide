@@ -363,8 +363,9 @@ fn seal(header: &Header, text: &str, kp: &identity::Keypair) -> (String, String)
 /// ([`crate::fs::try_stage_lock`]), runs [`migrate_if_needed`], then `f`.
 /// **Never call this from inside a function that is itself only ever
 /// reached through `with_lock`** — `try_stage_lock` opens a fresh fd per
-/// call and is not re-entrant (same contract `with_stage_lock` documents),
-/// so nesting it deadlocks a real second acquisition and merely
+/// call and never nests, unlike `with_stage_lock`, which runs a nested call
+/// on the thread that already holds it (`fs.rs`): nesting this one deadlocks
+/// a real second acquisition and merely
 /// double-locks/unlocks in the best case. Every raw helper below
 /// (`read_entries_unlocked`, `append_base_line`, `next_seq`, …) is written
 /// assuming its caller already holds this lock.

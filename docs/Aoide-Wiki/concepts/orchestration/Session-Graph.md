@@ -417,9 +417,17 @@ are consumed internally and get no `graph.json` projection:
   happens to carry the same id. The child's own local descendants need no
   projection at all: the far node's document nests under its `node:<name>` root
   in this one, carrying that child's `spawned` edges, so `par1 → nodeb/C →
-  nodeb/G` is walkable off `remoteChildren` plus the fold, with no wire call of
-  its own. A ledger row leaves with its parent: `prune_done_scoped` retains
-  the file against the ids it removed.
+  nodeb/G` resolves off `remoteChildren` plus the fold, with no wire call of
+  its own — and `aoide session` renders exactly that chain: each
+  `remoteChildren` row joins the probed fold by `(node name, sessionId)` and is
+  drawn indented under the parent's own row, its far descendants beneath it,
+  with the same join feeding `--json`'s `fold`/`subtree` on the entry. A row
+  the fold does not carry is shown `(not pulled)`, never hidden; one behind an
+  expired cache TTL is shown `(stale)`, because the ledger link itself never
+  expires. The conductor TUI's DAG reads neither key yet — terminal-only.
+  A ledger row leaves with its parent: both roster-exit paths call
+  `drop_remote_child_rows` over the ids they removed, after their own
+  `sessions.json` write lands.
 - **`seal` + `sealedIssuedAt`** — the sealed session credential, sharing
   one lifecycle (always both or neither). `aoided` mints an ed25519 keypair
   once per process and holds it in memory only, never on disk — a separate

@@ -67,10 +67,11 @@
 use aoide_protocol::Invocation;
 use aoide_protocol::agents::{agent_profile, AgentProfile, CLAUDE_PROFILE};
 use crate::graph::{
-    canonical_state, codex_home, drop_sessions, hooks_path, hyprctl_clients, ledger_session_exit,
-    lineage_of, load_stage, normalize_addr, now_iso_utc, pingback, prune_done, refresh_subagent_says,
-    refresh_transcript_fields, restage_graph, sessions_path, stage_error, sync_codex_app_threads,
-    sync_eidolon_sessions, upsert_hook, write_stage, HookRecord, HooksFile, SessionRecord,
+    canonical_state, codex_home, drop_remote_child_rows, drop_sessions, hooks_path, hyprctl_clients,
+    ledger_session_exit, lineage_of, load_stage, normalize_addr, now_iso_utc, pingback, prune_done,
+    refresh_subagent_says, refresh_transcript_fields, restage_graph, sessions_path, stage_error,
+    sync_codex_app_threads, sync_eidolon_sessions, upsert_hook, write_stage, HookRecord, HooksFile,
+    SessionRecord,
     SessionsFile, STAGE_GRAPH_VERSION,
 };
 use aoide_protocol::output::Outcome;
@@ -1695,6 +1696,13 @@ fn reap_inner(
         (removed, cleared)
     };
 
+    // Every id that leaves the roster on this pass, from BOTH exit paths below:
+    // each is a local parent whose caller-side ledger rows must go with it. Kept
+    // beside `removed` rather than merged into it — `removed` is `prune_done`'s
+    // own reported drop set, and the superseded tombstones are reported as
+    // themselves.
+    let mut gone_parents: Vec<String> = removed.clone();
+
     // The check lane's own baseline for every id actually leaving the roster
     // here (task #139 review finding: nothing ever deleted
     // `state/checklane/<id>.json` on THIS exit path — `removed` is
@@ -1717,10 +1725,11 @@ fn reap_inner(
     // uses so the subagent cascade and the dangling-parent clearing still apply.
     if !superseded_done.is_empty() {
         let doomed: HashSet<&str> = superseded_done.iter().map(String::as_str).collect();
-        let (kept_s, kept_h, _, also_cleared) =
+        let (kept_s, kept_h, also_gone, also_cleared) =
             drop_sessions(&s_file.sessions, &doomed, std::mem::take(&mut h_file.hooks));
         s_file.sessions = kept_s;
         h_file.hooks = kept_h;
+        gone_parents.extend(also_gone);
         cleared.extend(also_cleared);
     }
 
@@ -1745,6 +1754,9 @@ fn reap_inner(
     if let Err(e) = write_stage(&sessions_path(), &s_file) {
         return (stage_error(cmd, e), Vec::new());
     }
+    // The roster is down; the ledger rows of every parent that just left it
+    // follow it, never the other way round.
+    drop_remote_child_rows(&gone_parents);
     if let Err(e) = write_stage(&hooks_path(), &h_file) {
         return (stage_error(cmd, e), Vec::new());
     }
@@ -2677,6 +2689,25 @@ mod tests {
         )
         .unwrap();
 
+        // Caller-side ledger rows: one for a ghost that this pass supersedes, one
+        // for a session it leaves alone. The superseded drop goes through
+        // `drop_sessions` DIRECTLY (not `prune_done`), so it is the path that
+        // used to leave the row behind forever.
+        for (parent, child) in [("ghost-1", "C"), ("lonely", "D")] {
+            aoide_storage::remote_children::append_remote_child(
+                &aoide_storage::remote_children::RemoteChild {
+                    parent_session_id: parent.into(),
+                    node: "nodeb".into(),
+                    key: "ab".repeat(32),
+                    session_id: child.into(),
+                    spawned_at: "2026-09-25T00:00:00Z".into(),
+                    lines_after: 0,
+                    extra: Default::default(),
+                },
+            )
+            .unwrap();
+        }
+
         let out = reap(&crate::graph::testutil::invocation(&["session", "reap"], &[]));
         assert_eq!(out.status, aoide_protocol::output::Status::Ok);
         let data = out.data.unwrap();
@@ -2707,6 +2738,15 @@ mod tests {
         assert_eq!(
             hook_ids,
             ["live", "lonely"].into_iter().collect::<HashSet<&str>>()
+        );
+
+        // And so does the superseded ghost's caller-side ledger row — on this
+        // same quiet pass, which never went near `prune_done`.
+        let rows = aoide_storage::remote_children::load_remote_children();
+        assert_eq!(
+            rows.iter().map(|r| r.parent_session_id.as_str()).collect::<Vec<_>>(),
+            vec!["lonely"],
+            "the superseded tombstone's row left with it: {rows:?}"
         );
 
         let _ = std::fs::remove_dir_all(&stage);

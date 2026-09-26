@@ -2154,16 +2154,24 @@ project/parent inheritance across local/remote/app/subagents;
   fallback), with the roster line tagged `↑ <node>/<sessionId>`; the parent's
   node publishes `remoteChildren [{node, sessionId}]` off its own
   `state/stage/remote-children.json` ledger plus the `↓ <n> remote` roster
-  tag, and the ledger's rows leave on the same `prune_done_scoped` pass that
-  takes their parent off the roster. No `spawned` edge is minted either way —
-  a local id equal to a remote `sessionId` is pinned by test not to become a
-  local parent — and the remote child's own local descendants need no new
+  tag, and the ledger's rows leave with the parent that leaves the roster —
+  both exit paths call `drop_remote_child_rows` once their own `sessions.json`
+  write has landed. No `spawned` edge is minted either way —
+  a local id equal to a remote `sessionId` does not become a local parent in
+  the projection, though that is pinned by test at the DOCUMENT level only (no
+  test drives the autogate, sibling rule, reaper or mailbox against a remote
+  child, and `graph link` can still mint one by hand) — and the remote child's
+  own local descendants need no new
   wire: the far document already nests under its `node:<name>` root with its
-  own `spawned` edges, so `par1 → nodeb/C → nodeb/G` is walkable through
-  `remoteChildren` plus the fold. One code fact the brief could not know:
+  own `spawned` edges, so `par1 → nodeb/C → nodeb/G` is rendered on `aoide
+  session` as an indented chain under the parent's own row, with `--json`
+  carrying the same join (`fold`/`subtree` on the `remoteChildren` entry; the
+  HIGH finding of the S4 review was that nothing walked the data). The
+  conductor TUI's DAG (`graphview.rs`) still reads neither key — a follow-up,
+  named and open. One code fact the brief could not know:
   `with_stage_lock` was documented non-re-entrant, and both real
   `prune_done` callers hold it (`reap_inner`, `do_session_start_inner`), so
-  the ledger retain inside `prune_done_scoped` deadlocked until
+  the ledger retain (then inside `prune_done_scoped`) deadlocked until
   `aoide_storage::fs::with_stage_lock` was made re-entrant for the holding
   thread (`STAGE_LOCK_HELD`; other threads and other processes still wait,
   and this now covers every prune pass, automatic included); S5–S10 open, in
@@ -2181,6 +2189,42 @@ project/parent inheritance across local/remote/app/subagents;
   version does not know survives a rewrite; and the stamped `key` is the key
   `verify_signed_request` actually verified (threaded down as `SignedCaller`
   with the name), not a second lookup of the resolved name.
+- Review pass over S4 (same branch, `42218f2` onward): the HIGH finding — the
+  link was true as DATA and rendered nowhere, and the subtree was TTL-gated —
+  is closed by `who.rs::attach_subtrees`, one join of every `remoteChildren`
+  row to the probed fold by `(node name, sessionId)`, run in `collect_roster`
+  before any filter, marking each row `Fresh`/`Stale`/`Absent` and filling its
+  `subtree` from that fold's own `spawned` edges; both renderings draw the
+  chain indented under the parent's own row and `session_view_json` carries the
+  same join as `fold`/`subtree`, so a row with no fold behind it is visible as
+  `(not pulled)` while a TTL-expired one is `(stale)` rather than dressed up as
+  current. The conductor TUI's `graphview.rs` still reads neither key: a named,
+  open follow-up. The MED — a pulled document's own text neither sanitized nor
+  bounded in the roster — is closed by moving `clean_line` to
+  `graph/common.rs` (one definition, `LINE_MAX` shared with `view.rs`'s mail
+  fragments) and running every string `who.rs` prints off a pulled document
+  through it, in the renderings and the JSON alike; `remote_link` now drops a
+  link naming no `node` as well as one with no `sessionId`. The second MED —
+  "a ledger row leaves with its parent" was true for one of three exit paths,
+  and the retain committed before the caller did — is closed by
+  `doc.rs::drop_remote_child_rows`, called by both roster-exit paths AFTER
+  their own `sessions.json` write lands. The LOWs: the `fs.rs` normal-path
+  comment, the re-entrancy test now asserting `held` from inside both closures,
+  the six stale "not re-entrant" statements (`song`'s `take.rs` module doc and
+  its two inline notes, plus the two CLI wiki pages), and `current_node_name`
+  now taking the caller's already-loaded `nodes.json` (one read per document,
+  not one per link).
+- Tests (S4 review fixups, `aoide-conduct`):
+  `the_remote_chain_renders_under_its_parent_from_b_graph_and_the_json_agrees`
+  (fresh/stale/not-pulled, from B's own `build_graph` document),
+  `a_hostile_documents_own_text_is_stripped_and_bounded_on_every_rendered_path`,
+  `dropping_a_parents_ledger_rows_leaves_a_surviving_parents_alone`,
+  `local_only_commands_ignore_node_ids` (extended: the explicit prune's row
+  leaves, the survivor's stays), `reap_drops_superseded_done_siblings_on_an_
+  otherwise_quiet_pass` (extended: same for the superseded-tombstone path), and
+  `common`'s four `clean_line` cases (ANSI, bidi, newline, 1 MB). The ordering
+  itself — retain after the write — is code position, not pinned by an
+  independent failing-write test.
 - Tests (`aoide-storage`, S1):
   `session_record_remote_parent_round_trips_and_stays_absent_when_unset`,
   `remote_parent_round_trips_unknown_fields_beside_it`,

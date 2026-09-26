@@ -1121,13 +1121,27 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   local descendants come free: the far node's document already nests under its
   `node:<name>` root with its own `spawned` edges, so nothing here invents a
   second wire call. `who.rs` reads the same two fields into `SessionView`
-  (`remote_parent`/`remote_children`, [`RemoteLink`]) for a local row off the
+  (`remote_parent`/`remote_children`, [`RemoteLink`]/[`RemoteChild`]/[`Fold`])
+  for a local row off the
   record plus the ledger and for a remote row verbatim off the node's
   document, publishes them through the shared `session_view_json`, and renders
   the roster tags `↑ <node>/<sessionId>` / `↓ <n> remote` (`remote_tags`) in
-  both the host- and project-grouped renders. A ledger row leaves with its
-  parent: `prune_done_scoped` retains `remote-children.json` against the ids
-  it removed, on every prune pass (`reap_inner`'s automatic one included).
+  both the host- and project-grouped renders. The link is a VIEW too, not only
+  data: `who.rs::attach_subtrees`, run once in `collect_roster` after every node
+  is probed and before any rendering or filter, joins each `remoteChildren` row
+  to the probed fold by `(node name, sessionId)` and marks it `Fold::Fresh`,
+  `Fold::Stale` (the fold's own `NodeView.stale`, i.e. a cache past
+  `node_store::NODE_CACHE_TTL_SECS`) or `Fold::Absent` (no fold at all). Both
+  renderings then draw the far chain indented under the parent's own row —
+  `par1`, `nodeb/C`, then C's far descendants from that fold's own `spawned`
+  edges — and `session_view_json` carries the same join as `fold` + `subtree` on
+  the entry, so the view and `--json` cannot disagree; a row the fold cannot
+  back is shown `(not pulled)`, never hidden. A ledger row leaves with its
+  parent: `doc.rs::drop_remote_child_rows` retains `remote-children.json` against
+  the removed ids, and BOTH roster-exit paths call it after their own
+  `sessions.json` write has landed (`reap_inner`, for its automatic pass and for
+  the superseded tombstones it drops through `drop_sessions` directly, and
+  `session prune`'s explicit sweep).
 - **`session` (bare) — the ROSTER (session-surface redesign, command-defrag
   lane X, 2026-08-28; supersedes the U3 picker AND the standalone `aoide
   who` command, both retired — hard cutover, no alias).** `aoide session

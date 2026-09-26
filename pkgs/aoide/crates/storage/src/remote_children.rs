@@ -11,9 +11,10 @@
 //!
 //! Keyed by CHILD, and the parent's own record is never touched: that
 //! record's writer is its own wrap, so a second writer would be exactly the
-//! shape this whole field split exists to avoid. An entry leaves the file on
-//! the same sweep that prunes the parent record off the roster
-//! (`aoide-conduct`'s `graph/doc.rs::prune_done`, via
+//! shape this whole field split exists to avoid. An entry leaves the file when
+//! the parent leaves the roster — `aoide-conduct`'s
+//! `graph/doc.rs::drop_remote_child_rows`, called by both roster-exit paths
+//! once their `sessions.json` write has landed, via
 //! [`retain_remote_children`]).
 //!
 //! Same discipline `undying.rs`/`node_store.rs` set: a `schemaVersion`
@@ -136,8 +137,8 @@ pub fn append_remote_child(child: &RemoteChild) -> Result<bool, String> {
 }
 
 /// Drop every entry the predicate rejects, under the stage lock; returns how
-/// many were removed. The prune path (`prune_done`'s pass) uses this to clear
-/// the children of a parent that has left the roster.
+/// many were removed. The roster-exit paths use this to clear the children of a
+/// parent that has left the roster.
 pub fn retain_remote_children(keep: impl Fn(&RemoteChild) -> bool) -> Result<usize, String> {
     with_stage_lock(|| {
         let mut file: RemoteChildrenFile = load_stage(&remote_children_path()).unwrap_or_default();

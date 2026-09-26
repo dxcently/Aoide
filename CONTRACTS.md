@@ -2430,8 +2430,20 @@ check) reads that field as local. The two sides still agree without a new edge
 kind: the far graph nests under its own `node:<name>` root as `children`, and
 that document carries the child's own `remoteParent` naming this parent — with
 the child's local descendants beside it under their ordinary `spawned` edges —
-so `par1 → nodeb/C → nodeb/G` is walkable through `remoteChildren` plus the
+so `par1 → nodeb/C → nodeb/G` resolves through `remoteChildren` plus the
 node fold alone, with no wire call of its own.
+
+Who walks that: `aoide session` (both groupings and `--json`) joins each
+`remoteChildren` row to the probed fold by `(node name, sessionId)` and renders
+the far chain indented under the parent's own roster row — `par1`, then
+`nodeb/C`, then C's far descendants beneath it — with the row's own `fold`
+(`fresh`/`stale`/`not pulled`) as the JSON's marker, so the view and the JSON
+cannot disagree. A row the fold does not carry is still shown, marked
+`(not pulled)`, never hidden; a row found in a fold past
+`node_store::NODE_CACHE_TTL_SECS` is marked `(stale)` — the ledger link itself
+never expires, so it can render with nothing current behind it. The conductor
+TUI's own DAG (`conductor/src/graphview.rs`) does NOT yet walk either key: it
+reads project/session nodes only, so this chain is terminal-only for now.
 
 ### `state/stage/herald.json` — **v0**
 
@@ -2585,11 +2597,16 @@ Written only through `aoide_storage::remote_children`, inside one short
 or corrupt file reads as empty. Like `remoteParent` it is attribution, never a
 grant: a same-uid process can write it, and the door gates only on the key
 comparison it makes itself against the verifying node. A row's own half of the
-link is the `parentSessionId` it names, so rows LEAVE on the same sweep that
-takes a parent off the roster — `conduct`'s `prune_done_scoped` retains the
-ledger against the removed ids (`reap_inner`'s automatic pass and
-`session prune`'s explicit one both route through it), and a row whose parent
-still lives is untouched.
+link is the `parentSessionId` it names, so rows LEAVE with the parent that leaves
+the roster — `conduct`'s `drop_remote_child_rows` retains the ledger against the
+removed ids, and BOTH roster-exit paths call it once their own `sessions.json`
+write has landed (the reaper's `reap_inner`, for its automatic pass and for the
+superseded tombstones it drops through `drop_sessions` directly, and
+`session prune`'s explicit sweep). Committing the roster first is the point: a
+stage write that fails leaves the ledger untouched rather than a live parent with
+its rows already gone. A row whose parent still lives is untouched, and a row
+whose far child died is never reconciled — nothing on the child's side reports
+the death, so `↓ n remote` and the entry persist until the parent leaves.
 
 ### `state/stage/mesh.json` — **v0**
 
