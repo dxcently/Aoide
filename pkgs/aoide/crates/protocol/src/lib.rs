@@ -4,6 +4,13 @@ pub mod bin;
 pub mod dialog;
 pub mod door;
 pub mod feed;
+/// The one place a stored command LINE is handed to this host's own
+/// interpreter (`sh -c`, or `cmd /C` on native Windows) — one seam for the
+/// two crates that run operator-authored command text.
+pub mod host_shell;
+/// Random bytes from this host's own OS CSPRNG (`/dev/urandom`, or CNG's
+/// `BCryptGenRandom` on native Windows) — no pool, no fallback.
+pub mod host_random;
 pub mod invocation;
 pub mod model;
 /// The owner-only policy a native-Windows core attaches to a private file or
@@ -18,6 +25,11 @@ pub mod output;
 /// arm is `/proc` itself.
 #[cfg(windows)]
 pub mod win_proc;
+/// The native local socket — an `AF_UNIX` listener and stream with the
+/// surface `std::os::unix::net` gives on Unix. Windows-only: the Unix arm is
+/// `std` itself.
+#[cfg(windows)]
+pub mod win_unix;
 pub mod pick;
 pub mod policy;
 pub mod registry;

@@ -9,10 +9,14 @@
 //! file before touching it ([`open_existing`] + [`reject_reparse_point`] +
 //! [`file_refusal`]), then the EOF append below.
 //!
-//! **`0o600` is the only supported creation mode here.** The group-shared
-//! `0o640` (`aoide-secrets`' broker feed) has no Windows mapping in this
-//! slice and a world-readable mode is not silently narrowed to owner-only:
-//! both are refused by name, before any directory or file is touched.
+//! **The caller's `create_mode` is ADVISORY here, and the policy attached is
+//! ALWAYS a protected owner-only DACL.** There is no group reader on native
+//! Windows (no `lyra`/desktop surface) and no gid to name, so the group-shared
+//! `0o640` (`aoide-secrets`' broker feed) is not unavailable — it is delivered
+//! STRICTER than it asked: that same user, and nobody else. A world-readable
+//! mode is written owner-only for the same reason. On this host no mode can
+//! widen an object, which is what makes this a narrowing rather than a
+//! weakening of the caller's request.
 //!
 //! **An existing file is validated before it is used.** A successful open is
 //! not evidence of privacy, so the handle is opened without truncation and
@@ -42,7 +46,6 @@
 //! the native runtime stress test, and is recorded as a residual difference
 //! rather than claimed as Unix `O_APPEND` equivalence.
 
-use super::owner_only_mode;
 use crate::owner_only::{
     APPEND_ACCESS, CreateError, create_new, file_refusal, last_error, open_existing, reject_reparse_point, wide,
 };
@@ -189,19 +192,16 @@ fn truncate_to_zero(file: &File) -> io::Result<()> {
     Ok(())
 }
 
-/// One Windows append: refuse an unsupported mode before anything is
-/// touched, create with the policy attached, or validate the existing
-/// object and only then truncate/write. Every outcome is a message for the
-/// caller's `eprintln!` — the same best-effort posture as Unix, minus the
-/// silent branches.
+/// One Windows append: create with the owner-only policy attached, or
+/// validate the existing object and only then truncate/write. Every outcome is
+/// a message for the caller's `eprintln!` — the same best-effort posture as
+/// Unix, minus the silent branches.
 pub(super) fn append(path: &Path, cap: u64, create_mode: u32, line: &[u8]) -> Result<(), String> {
-    if !owner_only_mode(create_mode) {
-        return Err(format!(
-            "refusing create_mode {:o}: native Windows supports only 0o600 (a protected owner-only DACL) — \
-             this host has no group mapping for the broker's group-shared feed, so {:#o} is unavailable, not narrowed",
-            create_mode, create_mode
-        ));
-    }
+    // `create_mode` is the caller's ADVISORY intent on this host (see the
+    // module doc): whatever it says, what gets attached is the protected
+    // owner-only DACL `create_new` applies — the strictest policy this host
+    // can express for one user, and therefore never a widening.
+    let _ = create_mode;
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             if let Err(e) = std::fs::create_dir_all(parent) {
@@ -412,16 +412,22 @@ mod tests {
     }
 
     #[test]
-    fn an_unsupported_mode_is_refused_before_anything_on_disk_is_touched() {
+    fn a_group_shared_mode_is_written_owner_only_and_its_owner_can_read_it() {
         let dir = std::env::temp_dir().join(format!("aoide-feed-win-mode-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        for mode in [0o640, 0o644, 0o400, 0o700] {
-            let path = dir.join(format!("feed-{mode:o}"));
-            let error = append(&path, 1024, mode, b"{\"event\":\"x\"}\n").expect_err("an unsupported mode must refuse");
-            assert!(error.contains("0o600"), "the refusal must name the one supported mode: {error}");
-            assert!(!path.exists(), "mode {mode:o} must not create the file");
-        }
-        assert!(!dir.exists(), "an unsupported mode must not even create the directory");
+        // The broker's own feed mode: group-shared on Unix, written owner-only
+        // here (module doc — stricter, never weaker).
+        let path = dir.join("feed-640");
+        append(&path, 1024, 0o640, b"{\"event\":\"parked\"}\n").expect("a group-shared mode is written owner-only");
+        append(&path, 1024, 0o640, b"{\"event\":\"completed\"}\n").expect("and a second append lands on it too");
+        let body = std::fs::read_to_string(&path).expect("the feed file exists and is readable by its owner");
+        assert!(body.contains("parked") && body.contains("completed"), "{body}");
+        assert_eq!(
+            crate::owner_only::file_privacy(&path).expect("read the feed's own policy back"),
+            None,
+            "the file this host wrote must read back as owner-only, whatever mode was asked for"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
