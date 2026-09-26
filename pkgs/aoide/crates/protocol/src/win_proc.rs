@@ -1,5 +1,5 @@
-//! The native process table: the three facts Unix reads out of `/proc`,
-//! answered by the APIs that own them on Windows.
+//! The native process table: the facts Unix reads out of `/proc` and the two
+//! acts it performs on a pid, answered by the APIs that own them on Windows.
 //!
 //! | fact | Unix | here |
 //! | --- | --- | --- |
@@ -7,12 +7,15 @@
 //! | a pid's start time | `/proc/<pid>/stat` field 22 | `GetProcessTimes` creation `FILETIME` |
 //! | is a pid live | `kill(pid, 0)` | `OpenProcess` + `GetExitCodeProcess` |
 //! | whose token a pid is | `/proc/<pid>/status` `Uid:` | `OpenProcess`+`OpenProcessToken`+`GetTokenInformation` |
+//! | a pid's argv | `/proc/<pid>/cmdline` | `NtQueryInformationProcess(ProcessCommandLineInformation)` + `CommandLineToArgvW` |
+//! | end a pid | `kill(pid, SIGTERM\|SIGKILL)` | `TerminateProcess` |
+//! | wait for a pid's end | `waitpid(pid, …, WNOHANG)` | `WaitForSingleObject(h, 0)` |
 //!
-//! Two callers, one implementation (`pkgs/aoide/crates/AGENTS.md`: no
+//! Three callers, one implementation (`pkgs/aoide/crates/AGENTS.md`: no
 //! cross-crate copying): `aoide_storage::attest`'s pid-ancestry walk and
-//! pid-reuse defence, and `crate::dialog`'s locker probe. It lives in this
-//! crate because `aoide-protocol` is the DAG leaf both of them already depend
-//! on.
+//! pid-reuse defence, `aoide_storage::fs`'s process acts, and `crate::dialog`'s
+//! locker probe. It lives in this crate because `aoide-protocol` is the DAG
+//! leaf all of them already depend on.
 //!
 //! **Liveness keeps the Unix reading, one-for-one.** `ERROR_INVALID_PARAMETER`
 //! (and `ERROR_NOT_FOUND`) is the one absent verdict — the exact stand-in for
@@ -40,7 +43,7 @@ use std::io;
 
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, ERROR_NOT_FOUND, FILETIME, HANDLE, HLOCAL,
-    INVALID_HANDLE_VALUE, LocalFree, STILL_ACTIVE,
+    INVALID_HANDLE_VALUE, LocalFree, STILL_ACTIVE, UNICODE_STRING, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
 use windows_sys::Win32::Security::{LookupAccountSidW, PSID, SidTypeUnknown};
@@ -48,8 +51,11 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::Threading::{
-    GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    GetExitCodeProcess, GetProcessTimes, INFINITE, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
 };
+use windows_sys::Win32::UI::Shell::CommandLineToArgvW;
+use windows_sys::Wdk::System::Threading::{NtQueryInformationProcess, ProcessCommandLineInformation};
 
 /// One row of the process table: what a pid is, who started it, and the
 /// executable's file name (`comm`'s role on Unix, with Windows' own
@@ -174,6 +180,85 @@ pub fn is_alive(pid: u32) -> bool {
     ok == 0 || code == STILL_ACTIVE as u32
 }
 
+/// End `pid`. **`TerminateProcess` is the only termination primitive this
+/// host has**: there is no signal to send and nothing to catch — a Windows
+/// child cannot trap, ignore or be politely asked (measured: an attempt to
+/// make one ignore termination has no primitive to call), so a caller's
+/// "ask, then wait a bound" and "force" are the same call here. The exit code
+/// is a nonzero failure code, the convention every Windows task manager
+/// follows. Access is checked by the kernel: another user's process is an
+/// `ERROR_ACCESS_DENIED` error, never a silent no-op.
+///
+/// `0` is refused before the call, as every other function here refuses it.
+pub fn terminate(pid: u32) -> io::Result<()> {
+    if pid == 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "pid 0 names no process"));
+    }
+    let handle = unsafe { OpenProcess(PROCESS_TERMINATE, 0, pid) };
+    if handle.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let ok = unsafe { TerminateProcess(handle, 1) };
+    unsafe { CloseHandle(handle) };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+/// A wait on `pid`'s end: `waitpid(pid, …, WNOHANG)`'s three verdicts, with
+/// `WaitForSingleObject` under them.
+///
+/// | `waitpid` | here |
+/// | --- | --- |
+/// | returns `pid`: reaped | `WAIT_OBJECT_0`: the process object is signalled, `pid` has ended |
+/// | returns `0`: still running | `WAIT_TIMEOUT`: the zero-length test timed out |
+/// | returns `-1` (`ECHILD`): no wait can succeed | an unopenable handle: no wait can succeed |
+///
+/// **Two facts differ, and neither is hidden from a caller.** There is no
+/// zombie on this host: a process object is signalled when it ends and is
+/// freed with its last handle, so `Exited` says "it has ended" and never "this
+/// process collected a child's status". And a wait here is not restricted to
+/// this process's own children: `SYNCHRONIZE` is available for any process
+/// this token may open, so unlike `waitpid`, a pid left by an EARLIER
+/// invocation's spawn is waitable — a strictly wider answer, and a caller that
+/// treats `NotWaitable` as "not our child, poll liveness instead" takes the
+/// same branch it always took.
+///
+/// `block` distinguishes the two `waitpid` modes a caller here uses:
+/// `false` is `WNOHANG` (a zero-length test), `true` is a real wait.
+pub fn wait_for_exit(pid: u32, block: bool) -> Waited {
+    if pid == 0 {
+        return Waited::NotWaitable;
+    }
+    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+    if handle.is_null() {
+        return Waited::NotWaitable;
+    }
+    let timeout = if block { INFINITE } else { 0 };
+    let event = unsafe { WaitForSingleObject(handle, timeout) };
+    unsafe { CloseHandle(handle) };
+    match event {
+        WAIT_OBJECT_0 => Waited::Exited,
+        WAIT_TIMEOUT => Waited::Running,
+        // `WAIT_FAILED`/`WAIT_ABANDONED` on a process handle: nothing here can
+        // answer "has it ended", which is `NotWaitable`'s whole meaning.
+        _ => Waited::NotWaitable,
+    }
+}
+
+/// The three verdicts of a wait — see [`wait_for_exit`] for the mapping from
+/// `waitpid` and for the two places Windows answers differently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Waited {
+    /// The process has ended.
+    Exited,
+    /// It is still running (the non-blocking wait's timeout).
+    Running,
+    /// No wait can succeed for this pid from this process.
+    NotWaitable,
+}
+
 /// The user a token belongs to, as the canonical `S-1-5-…` string Windows
 /// prints — the native answer to the `Uid:` line of `/proc/<pid>/status`,
 /// and the only form of "who" a Windows caller can compare or show. There is
@@ -188,6 +273,129 @@ pub fn process_user_sid(pid: u32) -> io::Result<String> {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "pid 0 names no user"));
     }
     sid_of_pid(pid)
+}
+
+/// `pid`'s command line, split into the arguments Windows itself would read
+/// it as — `argv` from `/proc/<pid>/cmdline` on Unix. The one fact a caller
+/// cannot get from the process table: `PROCESSENTRY32W` carries the image
+/// name, never the line.
+///
+/// The string comes from `NtQueryInformationProcess(ProcessCommandLineInformation)`
+/// (class 60, `windows-sys`'s `Wdk_System_Threading`), the read Task Manager
+/// itself makes, into a buffer this process owns — the answer describes bytes
+/// inside that buffer, so **nothing here frees memory it did not take** (a
+/// class that ever answered with an allocation of its own would leak a few
+/// hundred bytes here, never free a block this process never owned). The
+/// split is `CommandLineToArgvW`'s, because how a Windows command line
+/// tokenizes is the host's rule and not a caller's dialect.
+///
+/// `0` and an unopenable pid are refused exactly as the other reads refuse
+/// them: a pid this process may not query is an error, never a guess. An EMPTY
+/// command line is not that error — a process can genuinely have none, and the
+/// answer then is an empty argument list, because tokenizing an empty line
+/// would fabricate one empty argument that no process ever passed.
+pub fn command_argv(pid: u32) -> io::Result<Vec<String>> {
+    let raw = command_line(pid)?;
+    if raw.is_empty() {
+        return Ok(Vec::new());
+    }
+    let wide: Vec<u16> = raw.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut argc: i32 = 0;
+    let argv = unsafe { CommandLineToArgvW(wide.as_ptr(), &mut argc) };
+    if argv.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let mut args = Vec::with_capacity(argc.max(0) as usize);
+    for i in 0..argc as isize {
+        let start = unsafe { *argv.offset(i) };
+        if start.is_null() {
+            continue;
+        }
+        let mut len = 0usize;
+        while unsafe { *start.add(len) } != 0 {
+            len += 1;
+        }
+        args.push(String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(start, len) }));
+    }
+    unsafe { LocalFree(argv as HLOCAL) };
+    Ok(args)
+}
+
+/// [`command_argv`]'s raw string, before this host's own tokenizing: the exact
+/// line `NtQueryInformationProcess` wrote into a buffer this process owns —
+/// see [`command_argv`]'s doc for why that ownership matters.
+fn command_line(pid: u32) -> io::Result<String> {
+    if pid == 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "pid 0 names no process"));
+    }
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let mut size: u32 = 0;
+    let probe = unsafe {
+        NtQueryInformationProcess(handle, ProcessCommandLineInformation, std::ptr::null_mut(), 0, &mut size)
+    };
+    let floor = std::mem::size_of::<UNICODE_STRING>() as u32;
+    if probe >= 0 || size < floor {
+        unsafe { CloseHandle(handle) };
+        // A success with no length, or a length that cannot hold the
+        // descriptor the answer starts with: a line this reader cannot read,
+        // reported rather than returned as an empty string.
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("the process reports no readable command line (status {probe:#x}, {size} bytes)"),
+        ));
+    }
+    let mut buf = vec![0u8; size as usize];
+    let status = unsafe {
+        NtQueryInformationProcess(
+            handle,
+            ProcessCommandLineInformation,
+            buf.as_mut_ptr().cast(),
+            size,
+            &mut size,
+        )
+    };
+    unsafe { CloseHandle(handle) };
+    if status < 0 {
+        return Err(io::Error::other(format!(
+            "NtQueryInformationProcess(ProcessCommandLineInformation) failed: {status:#x}"
+        )));
+    }
+    // The descriptor is READ unaligned rather than borrowed as a reference:
+    // `buf` is a byte buffer (alignment 1) and `UNICODE_STRING` is not, so a
+    // `&*` cast would be an alignment assumption this code has no right to
+    // make — `read_unaligned` copies the three fields out instead.
+    let unicode = unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const UNICODE_STRING) };
+    // A process with no command line at all: the answer's length is zero, so
+    // there is no string to read and — load-bearing — no `Buffer` to trust.
+    // Answered as an empty line, which the caller turns into an empty argv;
+    // refusing here would report a real state as a read failure.
+    if unicode.Length == 0 {
+        return Ok(String::new());
+    }
+    // The string must lie inside the buffer THIS process allocated: the
+    // descriptor's own pointer is what decides, so a host that ever answered
+    // with a buffer of its own (or a length past the end) is refused by name
+    // rather than read through.
+    let start = unicode.Buffer as usize;
+    let base = buf.as_ptr() as usize;
+    if unicode.Length % 2 != 0 || start < base || start + unicode.Length as usize > base + buf.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "the command line ({len} bytes at {start:#x}) does not lie inside the buffer this process \
+                 allocated ({base:#x}..{end:#x})",
+                len = unicode.Length,
+                start = start,
+                base = base,
+                end = base + buf.len()
+            ),
+        ));
+    }
+    let len = unicode.Length as usize / 2;
+    Ok(String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(unicode.Buffer, len) }))
 }
 
 /// The SID of the user THIS process's token is for — the native stand-in for
@@ -421,5 +629,86 @@ mod tests {
             ),
             Err(_) => {}
         }
+    }
+
+    // ── a pid's command line ─────────────────────────────────────────────
+
+    /// The contract, against a child spawned with a line this test knows
+    /// exactly: the arguments come back in order, whole, and unmangled —
+    /// including an argument with spaces and one that would be a quote
+    /// character to a naive splitter. A constant, an empty vec or a
+    /// never-run arm cannot pass it.
+    ///
+    /// The child is `cmd` with a held-open stdin: MEASURED on this host, `cmd`
+    /// with arguments but no `/C` ignores them, prints its banner and waits on
+    /// stdin, so it is a live process whose line this test chose — the same
+    /// shape `cmd /C exit 0` cannot be, since that one is gone before the read.
+    #[test]
+    fn a_childs_command_line_reads_back_as_the_arguments_it_was_given() {
+        let mut child = std::process::Command::new("cmd")
+            // The marker is what the assertion hunts for; the two arguments
+            // around it are the interesting shapes.
+            .args(["aoide-argvo-marker", "two words", "1234:127.0.0.1:8710"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn a child that waits on stdin");
+        let held = child.stdin.take().expect("the piped stdin this test holds open");
+        let pid = child.id();
+        let args = command_argv(pid).expect("a live child's command line");
+
+        assert!(args.len() >= 4, "a spawned line keeps its arguments: {args:?}");
+        assert_eq!(args[args.len() - 3], "aoide-argvo-marker", "{args:?}");
+        assert_eq!(args[args.len() - 2], "two words", "an argument with a space stays one argument: {args:?}");
+        assert_eq!(args[args.len() - 1], "1234:127.0.0.1:8710", "{args:?}");
+        let head = args[0].to_ascii_lowercase();
+        assert!(head.ends_with("cmd.exe") || head.ends_with("cmd"), "argv[0] names the program: {args:?}");
+
+        drop(held);
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn a_pid_that_cannot_name_one_process_has_no_command_line() {
+        assert_eq!(
+            command_argv(0).expect_err("pid 0 is refused").kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert!(command_argv(u32::MAX).is_err(), "a pid above the real range names no process");
+    }
+
+    // ── ending a process, and waiting for it ─────────────────────────────
+
+    /// `terminate` then a blocking wait: the process is gone, and the wait
+    /// that would have found it running does not. The exit is not a signal —
+    /// there is none to send — so what this pins is the verdict trail, not a
+    /// politeness nobody can ask for on this host.
+    #[test]
+    fn terminate_ends_a_child_and_the_wait_reports_exactly_that() {
+        let mut child = std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("ping -n 60 127.0.0.1 > NUL")
+            .spawn()
+            .expect("spawn a long-lived child");
+        let pid = child.id();
+
+        assert_eq!(wait_for_exit(pid, false), Waited::Running, "a spawned child is still running while its work is");
+
+        terminate(pid).expect("terminate a child of this process");
+        assert_eq!(wait_for_exit(pid, true), Waited::Exited, "after the kill the wait is satisfied");
+        assert!(!is_alive(pid), "and the liveness probe agrees it has ended");
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn a_pid_that_cannot_name_one_process_is_never_terminated_or_waited_on() {
+        assert_eq!(
+            terminate(0).expect_err("pid 0 is refused").kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert_eq!(wait_for_exit(0, false), Waited::NotWaitable);
+        assert_eq!(wait_for_exit(u32::MAX, false), Waited::NotWaitable);
     }
 }

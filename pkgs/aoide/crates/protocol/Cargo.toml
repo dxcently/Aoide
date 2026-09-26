@@ -23,6 +23,7 @@ inquire = { version = "0.9.4", default-features = false, features = ["crossterm"
 # Native feed permissions, file identity and EOF writes; only Windows needs these APIs.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
+    "Wdk_System_Threading",
     "Win32_Foundation",
     "Win32_Networking_WinSock",
     "Win32_Security",
@@ -33,4 +34,5 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_System_SystemServices",
     "Win32_System_Threading",
     "Win32_System_Diagnostics_ToolHelp",
+    "Win32_UI_Shell",
 ] }
