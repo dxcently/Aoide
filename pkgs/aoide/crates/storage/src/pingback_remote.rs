@@ -85,6 +85,14 @@ pub struct ChildRing {
     /// ring has one owner, and a later pass cannot hand it to another parent.
     #[serde(default)]
     pub key: String,
+    /// Unix seconds the ring last took an event — the ring's whole retention
+    /// clock (L3 of the S8/S9 review). Nothing else in an entry carries a
+    /// time: the events are opaque at this layer and a child's record may be
+    /// long gone while its parent is still owed what is here. Updated on every
+    /// spool, so a ring that keeps taking events is never a candidate for
+    /// [`retain_rings`].
+    #[serde(default)]
+    pub at: u64,
     #[serde(default)]
     pub events: Vec<RemoteEvent>,
     #[serde(flatten)]
@@ -183,6 +191,33 @@ pub fn ring_key(child: &str) -> Option<String> {
         .filter(|k| !k.is_empty())
 }
 
+/// Drop every ring entry the predicate rejects, under the stage lock, and
+/// return how many left (L3 of the S8/S9 review). The child-side pass calls
+/// this with its roster: a ring whose child's record is gone stays while it is
+/// young (its parent may be mid-pull, or down), and the whole point of the
+/// retention clock is that it eventually goes — a ring is rewritten WHOLE on
+/// every spool, so an unbounded set of dead children costs every live event a
+/// rewrite proportional to their number.
+///
+/// Same change-only discipline as [`crate::remote_children::retain_remote_children`]:
+/// nothing rejected is not a write.
+pub fn retain_rings(keep: impl Fn(&str, &ChildRing) -> bool) -> Result<usize, String> {
+    with_stage_lock(|| {
+        let mut file: PingbackRemoteFile = load_stage(&pingback_remote_path()).unwrap_or_default();
+        let before = file.children.len();
+        file.children.retain(|child, ring| keep(child, ring));
+        let removed = before - file.children.len();
+        if removed > 0 {
+            let body = serde_json::to_string_pretty(&file)
+                .map_err(|e| format!("serialize pingback-remote.json: {e}"))?
+                + "\n";
+            atomic_write(&pingback_remote_path(), &body)
+                .map_err(|e| format!("{}: {e}", pingback_remote_path().display()))?;
+        }
+        Ok(removed)
+    })
+}
+
 /// Append one event to a child's ring, under the stage lock, and return the
 /// `seq` it was given — `None` when the file could not be written (the event
 /// is then LOST, which is the same direction every other at-most-once step of
@@ -192,8 +227,11 @@ pub fn ring_key(child: &str) -> Option<String> {
 /// `key` is the child's own `remoteParent.key` — the parent's node key this
 /// node stamped when it admitted the spawn — and it is written into the ring
 /// on the FIRST event ([`ChildRing::key`]); an empty `key` stamps nothing, and
-/// once stamped the ring's own key is never replaced.
-pub fn spool_event(child: &str, key: &str, event: Value) -> Option<u64> {
+/// once stamped the ring's own key is never replaced. `at` is the same
+/// timestamp the caller keeps for the tick: this module mints no clock of its
+/// own (the same discipline `RemoteChild::spawned_at` holds), and it is what
+/// [`retain_rings`] measures a ring's age against.
+pub fn spool_event(child: &str, key: &str, at: u64, event: Value) -> Option<u64> {
     with_stage_lock(|| {
         let mut file: PingbackRemoteFile = load_stage(&pingback_remote_path()).unwrap_or_default();
         if file.schema_version.is_empty() {
@@ -203,6 +241,7 @@ pub fn spool_event(child: &str, key: &str, event: Value) -> Option<u64> {
         if ring.key.is_empty() && !key.is_empty() {
             ring.key = key.to_string();
         }
+        ring.at = at;
         let seq = push_event(ring, event);
         let body = match serde_json::to_string_pretty(&file) {
             Ok(body) => body + "\n",
@@ -340,11 +379,33 @@ mod tests {
         // The ring holds nothing at all (a child that only ever pushed into a
         // file that was then emptied) — the read is empty AND gapped, so the
         // reader can move to `last` rather than re-reading nothing forever.
-        let empty = ChildRing { last: 19, key: String::new(), events: Vec::new(), extra: Map::new() };
+        let empty = ChildRing { last: 19, key: String::new(), at: 0, events: Vec::new(), extra: Map::new() };
         let read = events_after(&empty, 3);
         assert!(read.events.is_empty());
         assert!(read.gap, "{read:?}");
         assert_eq!(read.last, 19);
+    }
+
+    #[test]
+    fn retain_rings_drops_exactly_the_rejected_entries() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = StageEnv::new("retain-rings");
+        spool_event("dead-old", "ab", 100, json!({ "settled": {} }));
+        spool_event("dead-new", "ab", 900, json!({ "settled": {} }));
+        spool_event("live", "ab", 100, json!({ "settled": {} }));
+
+        // The decision is the CALLER's (it holds the roster); this is the
+        // mechanism: a child with no record whose ring is old goes.
+        let removed = retain_rings(|child, ring| child == "live" || ring.at > 500).unwrap();
+        assert_eq!(removed, 1);
+        let left: Vec<String> = load_pingback_remote().children.keys().cloned().collect();
+        assert_eq!(left, vec!["dead-new".to_string(), "live".to_string()]);
+        assert!(events_for("dead-old", 0).events.is_empty(), "and its events are gone");
+
+        // Nothing rejected is not a write: the bytes stay untouched.
+        let before = std::fs::read_to_string(pingback_remote_path()).unwrap();
+        assert_eq!(retain_rings(|_, _| true).unwrap(), 0);
+        assert_eq!(std::fs::read_to_string(pingback_remote_path()).unwrap(), before);
     }
 
     #[test]
@@ -353,22 +414,23 @@ mod tests {
         let _env = StageEnv::new("ring-key");
         assert!(ring_key("sess-1").is_none(), "no ring, no key");
 
-        spool_event("sess-1", "ab", json!({ "settled": {} }));
+        spool_event("sess-1", "ab", 100, json!({ "settled": {} }));
         assert_eq!(ring_key("sess-1").as_deref(), Some("ab"));
 
         // One ring has ONE owner: a later spool cannot hand it to another
         // parent, whatever key it carries.
-        spool_event("sess-1", "cd", json!({ "settled": {} }));
+        spool_event("sess-1", "cd", 200, json!({ "settled": {} }));
         assert_eq!(ring_key("sess-1").as_deref(), Some("ab"), "stamped once, never replaced");
 
         // An empty key stamps nothing — and clears nothing.
-        spool_event("sess-2", "", json!({ "settled": {} }));
+        spool_event("sess-2", "", 100, json!({ "settled": {} }));
         assert!(ring_key("sess-2").is_none());
         assert_eq!(ring_key("sess-1").as_deref(), Some("ab"));
 
         // The key is on disk, not in this process: a re-read agrees.
         let raw = std::fs::read_to_string(pingback_remote_path()).unwrap();
         assert!(raw.contains("\"key\": \"ab\""), "{raw}");
+        assert!(raw.contains("\"at\": 200"), "the retention clock is the last spool's: {raw}");
         assert_eq!(ring_key("sess-1").as_deref(), Some("ab"));
 
         // A ring written before the field existed carries no key at all, reads
@@ -387,8 +449,8 @@ mod tests {
     fn a_spooled_event_lands_on_disk_and_an_unknown_child_reads_empty() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = StageEnv::new("spool");
-        assert_eq!(spool_event("sess-1", "ab", json!({ "kind": "Exited" })), Some(1));
-        assert_eq!(spool_event("sess-1", "ab", json!({ "kind": "Exited" })), Some(2));
+        assert_eq!(spool_event("sess-1", "ab", 100, json!({ "kind": "Exited" })), Some(1));
+        assert_eq!(spool_event("sess-1", "ab", 200, json!({ "kind": "Exited" })), Some(2));
 
         let read = events_for("sess-1", 0);
         assert_eq!(seqs(&read), vec![1, 2]);
@@ -415,7 +477,7 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = StageEnv::new("cap");
         for _ in 0..PINGBACK_REMOTE_MAX + 4 {
-            spool_event("sess-1", "ab", json!({ "kind": "Settled" }));
+            spool_event("sess-1", "ab", 300, json!({ "kind": "Settled" }));
         }
         let ring = load_pingback_remote().children.remove("sess-1").unwrap();
         assert_eq!(ring.events.len(), PINGBACK_REMOTE_MAX);

@@ -424,7 +424,12 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
     // delivery above loses a line.
     for claim in claims.spool {
         match serde_json::to_value(&claim.event) {
-            Ok(event) => match aoide_storage::pingback_remote::spool_event(&claim.child, &claim.key, event) {
+            Ok(event) => match aoide_storage::pingback_remote::spool_event(
+                &claim.child,
+                &claim.key,
+                (now_ms / 1000) as u64,
+                event,
+            ) {
                 Some(seq) => eprintln!(
                     "[aoide/reap] ping-back spooled seq {seq} for {} (parent on another node)",
                     claim.child
@@ -436,6 +441,24 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
                 report.skipped.push((claim.child, "encode-failed".to_string()));
             }
         }
+    }
+    // ── the rings that can never be read again (L3) ─────────────────────
+    // A ring is written WHOLE on every spool, so an unbounded set of children
+    // this node no longer has costs every future event a rewrite
+    // proportional to their number. A ring whose child's record is gone is
+    // kept for a grace period — its parent may be mid-pull, or its own daemon
+    // down — and dropped once that has passed: nothing can ever be added to
+    // it again, and the far parent has had every tick it could need.
+    let live: HashSet<&str> = roster.iter().map(|s| s.session_id.as_str()).collect();
+    let now_secs = (now_ms / 1000) as u64;
+    match aoide_storage::pingback_remote::retain_rings(|child, ring| {
+        live.contains(child) || ring.at.saturating_add(RING_GRACE_SECS) > now_secs
+    }) {
+        Ok(0) => {}
+        Ok(pruned) => eprintln!(
+            "[aoide/reap] dropped {pruned} ping-back ring(s) whose child is gone and whose last event is old"
+        ),
+        Err(e) => eprintln!("[aoide/reap] ping-back ring prune failed: {e}"),
     }
     report
 }
@@ -1062,6 +1085,13 @@ fn unreceptive(rec: &SessionRecord) -> Option<&'static str> {
 }
 
 // ── the pull (the parent's own side) ─────────────────────────────────────
+
+/// How long a ring whose child's record is gone is KEPT before the child-side
+/// pass drops it (L3 of the S8/S9 review). A week: long enough that a parent
+/// whose own daemon was down — or whose row was simply behind others — still
+/// gets the child's last words, and short enough that a node which ran a
+/// thousand short-lived remote children does not carry their rings forever.
+const RING_GRACE_SECS: u64 = 7 * 24 * 60 * 60;
 
 /// How long ONE pull pass may take, all rows together (M3 of the S8/S9
 /// review): half the ~12 s tick the pass lives inside, so the tick's other
@@ -3043,6 +3073,60 @@ mod tests {
         });
         assert_eq!(report, PingbackReport::default(), "no duplicate lines: {report:?}");
         assert_eq!(cursor_of("a2a-4411-1790"), 2);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_ring_whose_child_is_gone_is_kept_for_a_week_and_then_dropped() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = setup("pingback-ring-prune");
+        // One child still on the roster; two whose records are gone.
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".into(),
+                sessions: vec![session("live-child", "/w", "working", "2026-09-12T00:00:00Z", None)],
+            },
+        )
+        .unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let path = aoide_storage::pingback_remote::pingback_remote_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "schemaVersion": "0",
+                "children": {
+                    "live-child": { "last": 1, "key": "aa", "at": 10,
+                        "events": [{ "seq": 1, "event": { "settled": {} } }] },
+                    "gone-old": { "last": 1, "key": "aa", "at": now - RING_GRACE_SECS - 1,
+                        "events": [{ "seq": 1, "event": { "exited": {} } }] },
+                    "gone-fresh": { "last": 1, "key": "aa", "at": now - 60,
+                        "events": [{ "seq": 1, "event": { "exited": {} } }] }
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        pingback(&daemon_inv(), &[]);
+
+        // The dead-and-old ring is gone; a live child's ring and a fresh one's
+        // stay — the grace is what a parent whose own daemon was down spends.
+        let ring: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let left: Vec<&str> = ring["children"].as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        assert_eq!(left, vec!["gone-fresh", "live-child"], "old dead ring dropped: {ring}");
 
         let _ = std::fs::remove_dir_all(&root);
     }
