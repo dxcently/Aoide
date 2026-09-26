@@ -1,0 +1,27 @@
+{
+  "schemaVersion": "0",
+  "projects": [
+    {
+      "name": "aoide",
+      "path": "/home/user/Aoide",
+      "roots": [
+        "/home/user/Aoide"
+      ],
+      "lead": "f3000000-0000-4000-8000-000000000001"
+    },
+    {
+      "name": "melete",
+      "path": "/home/user/melete",
+      "roots": [
+        "/home/user/melete"
+      ]
+    },
+    {
+      "name": "mneme",
+      "path": "/home/user/mneme",
+      "roots": [
+        "/home/user/mneme"
+      ]
+    }
+  ]
+}
