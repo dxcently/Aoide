@@ -439,6 +439,7 @@ Item {
         id: frame
         anchors.fill: parent
         anchors.topMargin: board.topInset
+        anchors.rightMargin: board.topInset   // off the screen edge: all four rules + glow show
         kit: board.kit; helper: "Pane"
         props: ({
             title: "board", glow: "bloom",

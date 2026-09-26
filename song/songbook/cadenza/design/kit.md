@@ -233,7 +233,7 @@ Every helper takes `required property var kit`. All text is
 | `open` | true | false→true: reveal; true→false: close |
 | `animateOnCreate` | false | a pane created open skips the reveal unless set. A list delegate must never animate |
 | `glow` | `"outline"` | title glow: `off` / `outline` / `bloom` (§5) |
-| `innerGlow` | true | `title` phosphor bleeding inward from all four edges (below); `false` opts out |
+| `innerGlow` | true | `title` phosphor blooming inward from all four edges (below); `false` opts out |
 | `content` | null | a `Component`, instantiated inset one cell and one line, clipped |
 | `cols`, `rows` | 20, 3 | INNER size in cells |
 | *out* `innerCols`, `innerRows`, `contentItem` | | the inner size when sized from outside; the live body |
@@ -249,16 +249,28 @@ over **160ms**, linear: each edge gets its share of the perimeter. Then the
 fill and content arrive over **60ms**. Close runs pen and fill back
 together over **120ms**, InQuad. The fill is `ground` at 0.94. Radius 0.
 
-The inner glow is `title` phosphor bleeding **12px** inward from all four
-edges (clamped to half the pane on a small one), fading to transparent
-(intent §2 "Inner glow"). It is four static gradient `Rectangle`s drawn
-between the fill and the rules, behind the content, and the only gradient
-in the song. The top strip is cut into the same three runs as the top rule,
-so no light sits under the title or the stat: the light comes from the
-rule. The colour is always `title`, whatever the rule's colour, so a pane
-at rest is lit too. It starts at **0.14** alpha at rest and **0.26**
-focused, with a 150ms ease. It fades in with the fill on reveal and out with
-it on close. Nothing animates at rest. Block has no rules and no glow.
+The inner glow is `title` phosphor blooming inward from all four edges (intent
+§2 "Inner glow"). One `Canvas`, sized to the pane below the top rule and
+drawn between the fill and the rules, behind the content, fills a solid
+`title` frame just outside its own rect with a Context2D `shadowBlur`; only
+the blurred shadow lands inside, so the light is a gaussian from every edge
+with round, even corners. It runs under the title and the stat too: they
+sit on no box, and the cut top rule lets the glow show behind them. The
+colour is always `title`, whatever the rule's colour. Measured on the
+specimen (first pixel inside the rule = 0px), the green channel (the ground
+is 10):
+
+| px in | 0 | 6 | 12 | 20 | 28 |
+|---|---|---|---|---|---|
+| focused | 101 | 77 | 55 | 33 | 20 |
+| rest | 56 | 44 | 32 | 22 | 15 |
+
+The canvas paints once when it gets its size, and again only when its size
+or `kit.title` changes. Focus eases its `opacity` from rest (0.5 of focused)
+to full over 150ms, and it fades with the fill on reveal and close. Neither
+repaints. The knobs are Pane's
+`_glowBlur` (34), `_glowPeak` (0.8 shadow alpha) and `_glowRest` (0.5).
+Block has no rules and no glow.
 
 ### Block
 `label`, `stamp` (right-aligned time), `tone` (the label colour, default

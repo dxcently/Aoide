@@ -31,16 +31,15 @@
 // unless `animateOnCreate` — a list delegate must never animate.
 //
 // ── INNER GLOW ────────────────────────────────────────────────────────────
-// `kit.title` phosphor bleeds 12px inward from all four edges, fading to
-// transparent: the phosphor lit just inside the tube's frame (intent §2
-// "Inner glow"). Four static gradient Rectangles between the fill and the
-// rules, behind the content. The top strip is cut into the same three runs
-// as the top rule, so no light hangs under the title or the stat — the
-// light comes FROM the rule. Always `title`, whatever the rule's colour, so
-// a pane at rest is lit too. Start alpha 0.14 at rest, 0.26 focused (150ms
-// ease); it arrives with the fill on reveal and leaves with
-// it on close. No shader, no blur; nothing animates at rest. It is the only
-// gradient in the song. `innerGlow: false` opts a pane out.
+// `kit.title` phosphor blooms inward from all four edges and fades softly,
+// visible ~28px in: the phosphor lit just inside the tube's frame (intent §2
+// "Inner glow"). ONE Canvas below the top rule, between the fill and the
+// rules, behind the content: a gaussian baked by shadowBlur, painted when
+// the size or `kit.title` changes and never per frame. It runs under the
+// title and the stat too (they sit on no box). Always `title`, whatever the
+// rule's colour. Focus eases the canvas's opacity (rest = `_glowRest` of
+// focused, 150ms); reveal/close fade it with the fill; neither repaints.
+// `innerGlow: false` opts a pane out.
 //
 // ── SIZE ──────────────────────────────────────────────────────────────────
 // Whole cells: `cols`/`rows` are the INNER content size; the pane reports
@@ -79,8 +78,6 @@ Item {
     property real fillA: 0
     property color ruleColor: focused ? kit.title : kit.dim
     Behavior on ruleColor { ColorAnimation { duration: 150 } }
-    property real _glowA: focused ? 0.26 : 0.14
-    Behavior on _glowA { NumberAnimation { duration: 150 } }
 
     Component.onCompleted: {
         if (!open) return
@@ -125,56 +122,40 @@ Item {
         color: pane.kit.withA(pane.kit.ground, pane.fillA)
     }
 
-    // ── inner glow: title → transparent, 12px in from each edge ────────────
-    readonly property int _glowDepth: 12
-    readonly property color _glowOn: kit.withA(kit.title, _glowA)
-    readonly property color _glowOff: kit.withA(kit.title, 0)
-    Item {
-        id: glowLayer
-        visible: pane.innerGlow && pane.fillA > 0
-        opacity: pane.fillA / pane.kit.paneAlpha
-        readonly property real d: Math.max(0, Math.min(pane._glowDepth,
-            Math.floor((pane._side - 2) / 2), Math.floor((pane._w - 2) / 2)))
-        readonly property real y0: pane._ruleY + 1
-        readonly property real y1: pane._h - 1
-        // top: three runs under the three rule runs (never under title/stat)
-        Repeater {
-            model: [[0, pane._lead],
-                    [pane._titleEnd, pane._statStart - pane._titleEnd],
-                    [pane._tailX, pane.stat.length ? pane._w - pane._tailX : 0]]
-            Rectangle {
-                required property var modelData
-                x: modelData[0]; y: glowLayer.y0
-                width: Math.max(0, modelData[1]); height: glowLayer.d
-                gradient: Gradient {
-                    GradientStop { position: 0; color: pane._glowOn }
-                    GradientStop { position: 1; color: pane._glowOff }
-                }
-            }
-        }
-        Rectangle {   // bottom
-            x: 0; y: glowLayer.y1 - glowLayer.d; width: pane._w; height: glowLayer.d
-            gradient: Gradient {
-                GradientStop { position: 0; color: pane._glowOff }
-                GradientStop { position: 1; color: pane._glowOn }
-            }
-        }
-        Rectangle {   // left
-            x: 1; y: glowLayer.y0; width: glowLayer.d; height: glowLayer.y1 - glowLayer.y0
-            gradient: Gradient {
-                orientation: Gradient.Horizontal
-                GradientStop { position: 0; color: pane._glowOn }
-                GradientStop { position: 1; color: pane._glowOff }
-            }
-        }
-        Rectangle {   // right
-            x: pane._w - 1 - glowLayer.d; y: glowLayer.y0; width: glowLayer.d
-            height: glowLayer.y1 - glowLayer.y0
-            gradient: Gradient {
-                orientation: Gradient.Horizontal
-                GradientStop { position: 0; color: pane._glowOff }
-                GradientStop { position: 1; color: pane._glowOn }
-            }
+    // ── inner glow: one Canvas, a gaussian painted once ─────────────────────
+    // A solid `title` frame is filled just OUTSIDE the pane rect with a
+    // shadowBlur; only its blurred shadow falls inside the canvas, so the
+    // light is a true gaussian from every edge, the corners round and even.
+    // It repaints on size/colour change only; focus and reveal move its
+    // `opacity`, which never repaints.
+    readonly property real _glowBlur: 34          // Context2D shadowBlur
+    readonly property real _glowPeak: 0.8         // shadowColor alpha (focused)
+    readonly property real _glowRest: 0.5        // rest strength, of focused
+    property real _glowLevel: focused ? 1 : _glowRest
+    Behavior on _glowLevel { NumberAnimation { duration: 150 } }
+    Canvas {
+        id: glowCanvas
+        x: 0; y: pane._ruleY
+        width: pane._w; height: pane._side
+        visible: pane.innerGlow && width > 0 && height > 0   // reveal moves opacity only
+        opacity: pane.fillA / pane.kit.paneAlpha * pane._glowLevel
+        readonly property color tint: pane.kit.title
+        onTintChanged: requestPaint()
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+        onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            ctx.clearRect(0, 0, width, height)
+            var t = 4 * pane._glowBlur          // frame thicker than the blur reach
+            ctx.fillRule = Qt.OddEvenFill
+            ctx.fillStyle = tint
+            ctx.shadowColor = pane.kit.withA(tint, pane._glowPeak)
+            ctx.shadowBlur = pane._glowBlur
+            ctx.beginPath()
+            ctx.rect(-t, -t, width + 2 * t, height + 2 * t)
+            ctx.rect(0, 0, width, height)
+            ctx.fill()
         }
     }
 
