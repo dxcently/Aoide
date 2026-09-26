@@ -44,6 +44,7 @@
     "gapsIn": 4,
     "borderSize": 1,
     "rounding": 0,
-    "blurEnabled": false
+    "blurEnabled": false,
+    "terminalOpacity": 0.7
   }
 }
