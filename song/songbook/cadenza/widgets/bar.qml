@@ -75,6 +75,24 @@
 // 600ms linear, along the wire's own path (lead, lane, lead) or up from the
 // trunk into a jack's pad, only when `activeAt` ADVANCES between two reads;
 // one in flight per wire, later advances coalesce into it.
+//
+// ── The working pulse and the send lamps ──────────────────────────────────
+// Pulse: a pad breathes (ring toward `bright`, a faint `title` fill; the
+// active pad's fill toward `bright`) for as long as ANY session on its jack
+// has `hooks.json` phase "working", and stops the moment none does. One
+// shared 2s breath drives every working pad, so a roster write that rebuilds
+// the jack delegates never restarts it, and nothing runs when no pad works.
+// An urgent pad keeps its red ring; amber stays the lamp's.
+// Session → jack is `sessionJack`: core's `workspaces[].sessions` when
+// graph.json carries them, the derivation (window → toplevel) until then;
+// a session with no window lights nothing.
+// Sends: graph.json `sends: [{from, to, at}]` (core's conductor ring, newest
+// last; unbuilt today → nothing). An entry NEW between two reads (never on
+// the first read that carries a ring) runs a lamp from the sender's jack
+// to the receiver's — along a standing tie joining the two when one is laid, else along a
+// TRANSIENT dim wire (a free lane over the span, else down to the trunk)
+// drawn for the lamp's run only and removed with it; no tie is invented.
+// Same jack, or one end without a jack → that jack's own lamp.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -229,8 +247,9 @@ Item {
             root.graphOk = true
             root.graphDoc = d
             root.detectLamps(d)
+            root.detectSends(d)
         }
-        onLoadFailed: { root.graphOk = false; root.graphDoc = null }
+        onLoadFailed: { root.graphOk = false; root.graphDoc = null; root._sendInit = false }
     }
     // state/usage/now.json — the S5/S6 store (core-seams §C); absent today
     property bool nowOk: false
@@ -323,8 +342,8 @@ Item {
     // intent §3.2 "Where ties come from"). DELETE THIS BLOCK WHEN S3 LANDS:
     // `coreTies` becomes always-true, and `derived`, `toplevelWs`, `normAddr`
     // and `derivedActivity` go with it (the two `root.coreTies ? … : derived`
-    // switches above collapse to their core arm, and detectActivity's
-    // `derivedActivity` call goes).
+    // switches above collapse to their core arm, detectActivity's
+    // `derivedActivity` call goes, and so does `sessionJack`'s derived arm).
     //
     // Until core publishes graph.json `workspaces`/`ties`/`activeAt`, the bar
     // joins three published facts itself — paint over published data, never
@@ -445,6 +464,33 @@ Item {
         }
     }
     // ═══ end of the derivation bend ═════════════════════════════════════════
+
+    // session id → jack: core's `workspaces[].sessions` when graph.json
+    // carries them; the derivation's window → toplevel join until then
+    // (that arm goes with the bend). A session with no window has no jack.
+    function sessionOf(ref) {
+        var v = "" + (ref || "")
+        return v.indexOf("session:") === 0 ? v.slice(8) : v
+    }
+    readonly property var sessionJack: {
+        if (!root.coreTies) return root.derived.sessionWs
+        var m = {}
+        var a = Array.isArray(root.graphDoc.workspaces) ? root.graphDoc.workspaces : []
+        for (var i = 0; i < a.length; i++) {
+            var w = a[i]
+            if (!w || typeof w.workspace !== "number" || !(w.workspace > 0)) continue
+            var ss = Array.isArray(w.sessions) ? w.sessions : []
+            for (var j = 0; j < ss.length; j++) m[root.sessionOf(ss[j])] = w.workspace
+        }
+        return m
+    }
+    // the jacks with a session whose hooks.json phase is "working" right now
+    readonly property var workingJacks: {
+        var m = {}, P = root.hookPhase, J = root.sessionJack
+        for (var id in P)
+            if (P[id] === "working" && J[id] > 0) m[J[id]] = true
+        return m
+    }
 
     readonly property var hyprWs: {
         var m = {}
@@ -615,6 +661,42 @@ Item {
         if (j.focused) return root.kit.ground
         return root.padColor(j)
     }
+
+    // ── the working pulse: ONE breath, 0 → 1 → 0 over 2s, shared by every
+    // working pad; it runs only while a drawn pad works (CPU 0 at rest) and
+    // survives the jack delegates being rebuilt on every roster write
+    readonly property bool pulsing: {
+        var M = root.jackModel, W = root.workingJacks
+        for (var i = 0; i < M.length; i++) if (W[M[i].id]) return true
+        return false
+    }
+    // Stepped, not a 60fps animation: 25 steps of 80ms (12.5 fps) on a
+    // cosine. A pad's brightness moves a few percent a step, which reads as
+    // a breath, and the bar redraws 12.5 times a second instead of every
+    // vsync while an agent works — most of the day.
+    readonly property int breathSteps: 25
+    property int _breathAt: 0
+    property real breath: 0
+    Timer {
+        interval: 80; repeat: true
+        running: root.pulsing
+        onTriggered: {
+            root._breathAt = (root._breathAt + 1) % root.breathSteps
+            root.breath = 0.5 - 0.5 * Math.cos(2 * Math.PI * root._breathAt / root.breathSteps)
+        }
+        onRunningChanged: if (!running) { root._breathAt = 0; root.breath = 0 }
+    }
+    // a working pad's ring: its tone toward `bright` (an urgent ring stays red)
+    function pulseRing(j, g) {
+        var c = root.padColor(j)
+        return (g > 0 && !j.urgent) ? Qt.tint(c, root.kit.withA(root.kit.bright, 0.85 * g)) : c
+    }
+    // its fill: the active pad's `title` toward `bright`; else a faint `title`
+    function pulseFill(j, g, previewed) {
+        if (j.focused) return g > 0 ? Qt.tint(root.kit.title, root.kit.withA(root.kit.bright, 0.7 * g)) : root.kit.title
+        if (previewed) return root.kit.select
+        return g > 0 ? root.kit.withA(root.kit.title, 0.3 * g) : "transparent"
+    }
     // ── the schematic, in board pixels (integers; a wire is its top-left px) ──
     //   runs[]  {x, y, w, h, dashed}          leads and lane wires (2px thick)
     //   dots[]  {x, y}                        filled junction dot, centred on (x, y)
@@ -623,6 +705,10 @@ Item {
         var M = root.jackModel, rs = root.routing.routes
         var W = root.wireW
         var runs = [], dots = [], paths = {}
+        // a roster change can re-run this between `routing` and `jackModel`
+        // catching up; draw nothing for that one pass rather than index past M
+        for (var g = 0; g < rs.length; g++)
+            if (rs[g].b >= M.length) return { runs: runs, dots: dots, paths: paths }
         // 1. which lanes attach to each jack's lead; the lead runs down to the deepest
         var depth = {}                                   // idx → deepest lane
         var ends = function (L) { return L.kind === "spawned" ? [L.from, L.to] : L.members }
@@ -686,12 +772,81 @@ Item {
             for (var f = 0; f < fire.length; f++) root.fireLamp(fire[f])
         })
     }
+    // ── send lamps: graph.json `sends` (core's conductor ring, newest last).
+    // A key (from|to|at) not in the previous read's ring is a new send; the
+    // first read that CARRIES `sends` only records — after a load, after the
+    // file went away, or when a ring first appears mid-session — so a ring
+    // that appears never fires its backlog. Absent `sends` runs nothing.
+    property var _sendSeen: ({})
+    property bool _sendInit: false
+    function detectSends(doc) {
+        if (!Array.isArray(doc.sends)) { root._sendSeen = ({}); root._sendInit = false; return }
+        var S = doc.sends
+        var next = {}, fresh = []
+        for (var i = 0; i < S.length; i++) {
+            var e = S[i]
+            if (!e || !e.from || !e.to) continue
+            var k = e.from + "|" + e.to + "|" + (e.at || "")
+            if (root._sendInit && !root._sendSeen[k] && !next[k]) fresh.push({ from: e.from, to: e.to })
+            next[k] = true
+        }
+        root._sendSeen = next
+        root._sendInit = true
+        if (fresh.length > 0) Qt.callLater(function () {
+            for (var f = 0; f < fresh.length; f++) root.fireSend(fresh[f].from, fresh[f].to)
+        })
+    }
+    // is lane `l` clear of every laid route over jack indices lo..hi?
+    function laneFree(l, lo, hi) {
+        var rs = root.routing.routes
+        for (var r = 0; r < rs.length; r++)
+            if (rs[r].lane === l && !(rs[r].b < lo || rs[r].a > hi)) return false
+        return true
+    }
+    function fireSend(from, to) {
+        var a = root.sessionJack[root.sessionOf(from)], b = root.sessionJack[root.sessionOf(to)]
+        var ia = a > 0 ? root.jackIndex(a) : -1, ib = b > 0 ? root.jackIndex(b) : -1
+        if (ia < 0 && ib < 0) return
+        if (ia < 0 || ib < 0 || ia === ib) { root.fireLamp("w:" + (ia >= 0 ? a : b)); return }
+        var M = root.jackModel, W = root.wireW
+        var fx = M[ia].lx, tx = M[ib].lx
+        var path = function (y) {
+            return [{ x: fx, y: root.leadTop }, { x: fx, y: y }, { x: tx, y: y }, { x: tx, y: root.leadTop }]
+        }
+        // a standing tie that joins both jacks carries the lamp on its own lane
+        var rs = root.routing.routes
+        for (var r = 0; r < rs.length; r++) {
+            var R = rs[r]
+            if (R.lane < 0) continue
+            var E = R.kind === "spawned" ? [R.from, R.to] : R.members
+            if (E.indexOf(ia) >= 0 && E.indexOf(ib) >= 0) {
+                root.fireLamp("x:" + a + ">" + b, false, path(root.laneY(R.lane)))
+                return
+            }
+        }
+        // none: a transient wire for this run only — a lane free over the
+        // span, else down to the trunk — removed when the lamp is done
+        var lo = Math.min(ia, ib), hi = Math.max(ia, ib), y = root.trunkY - 1
+        for (var l = 0; l < root.lanes; l++)
+            if (root.laneFree(l, lo, hi)) { y = root.laneY(l); break }
+        var wire = [
+            { x: fx, y: root.leadTop, w: W, h: y + W - root.leadTop },
+            { x: tx, y: root.leadTop, w: W, h: y + W - root.leadTop },
+            { x: Math.min(fx, tx), y: y, w: Math.abs(tx - fx) + W, h: W }
+        ]
+        root.fireLamp("x:" + a + ">" + b, false, path(y), wire)
+    }
+
     // `upward`: run the wire backwards, child jack → parent jack (a derived
-    // activity is the child reporting in; core's `activeAt` runs from → to)
-    function fireLamp(key, upward) {
+    // activity is the child reporting in; core's `activeAt` runs from → to).
+    // `path`/`wire` (sends only): the polyline to run, and the transient wire
+    // drawn under it for this run only.
+    function fireLamp(key, upward, path, wire) {
         if (root._lamps[key]) return                    // coalesce into the one in flight
         var pts = null
-        if (key.indexOf("w:") === 0) {
+        if (path) {
+            pts = path
+        } else if (key.indexOf("w:") === 0) {
             // a jack's own lamp: up from the trunk into the middle of its pad
             var i = root.jackIndex(parseInt(key.slice(2)))
             if (i < 0) return
@@ -702,7 +857,7 @@ Item {
             if (!pts) return
             if (upward) pts = pts.slice().reverse()
         }
-        var o = lampComp.createObject(board, { key: key, pts: pts, dur: root.lampMs })
+        var o = lampComp.createObject(board, { key: key, pts: pts, wire: wire || [], dur: root.lampMs })
         if (o) root._lamps[key] = o
     }
     function lampDone(key, o) {
@@ -710,51 +865,69 @@ Item {
         o.destroy()
     }
     // the lamp: one Rectangle, one NumberAnimation on `t`, 0 → 1 along the wire's
-    // polyline (lead, lane, lead); 12px long on a run, 6px on a lead, 2px thick
+    // polyline (lead, lane, lead); 12px long on a run, 6px on a lead, 2px thick.
+    // A send with no standing tie brings its transient wire (dim, 2px), which
+    // lives exactly as long as the lamp.
     Component {
         id: lampComp
-        Rectangle {
-            id: lamp
-            property string key: ""
-            property var pts: []
-            property int dur: 600
-            property real t: 0
-            readonly property var segs: {
-                var out = [], total = 0
-                for (var i = 1; i < pts.length; i++) {
-                    var len = Math.abs(pts[i].x - pts[i - 1].x) + Math.abs(pts[i].y - pts[i - 1].y)
-                    out.push({ a: pts[i - 1], b: pts[i], s: total, len: len })
-                    total += len
+        Item {
+            id: lampRun
+            property alias key: lamp.key
+            property alias pts: lamp.pts
+            property alias dur: lamp.dur
+            property var wire: []
+            Repeater {
+                model: lampRun.wire
+                delegate: Rectangle {
+                    required property var modelData
+                    x: modelData.x; y: modelData.y
+                    width: modelData.w; height: modelData.h
+                    color: root.kit.dim
                 }
-                return { list: out, total: total }
             }
-            readonly property var at: {
-                var S = segs.list, d = t * segs.total
-                for (var i = 0; i < S.length; i++) {
-                    var g = S[i]
-                    if (d <= g.s + g.len || i === S.length - 1) {
-                        var u = g.len > 0 ? Math.min(1, Math.max(0, (d - g.s) / g.len)) : 0
-                        return { x: g.a.x + (g.b.x - g.a.x) * u, y: g.a.y + (g.b.y - g.a.y) * u,
-                                 horiz: g.a.y === g.b.y,
-                                 x0: Math.min(g.a.x, g.b.x), x1: Math.max(g.a.x, g.b.x),
-                                 y0: Math.min(g.a.y, g.b.y), y1: Math.max(g.a.y, g.b.y) }
+            Rectangle {
+                id: lamp
+                property string key: ""
+                property var pts: []
+                property int dur: 600
+                property real t: 0
+                readonly property var segs: {
+                    var out = [], total = 0
+                    for (var i = 1; i < pts.length; i++) {
+                        var len = Math.abs(pts[i].x - pts[i - 1].x) + Math.abs(pts[i].y - pts[i - 1].y)
+                        out.push({ a: pts[i - 1], b: pts[i], s: total, len: len })
+                        total += len
                     }
+                    return { list: out, total: total }
                 }
-                return { x: 0, y: 0, horiz: true, x0: 0, x1: 0, y0: 0, y1: 0 }
+                readonly property var at: {
+                    var S = segs.list, d = t * segs.total
+                    for (var i = 0; i < S.length; i++) {
+                        var g = S[i]
+                        if (d <= g.s + g.len || i === S.length - 1) {
+                            var u = g.len > 0 ? Math.min(1, Math.max(0, (d - g.s) / g.len)) : 0
+                            return { x: g.a.x + (g.b.x - g.a.x) * u, y: g.a.y + (g.b.y - g.a.y) * u,
+                                     horiz: g.a.y === g.b.y,
+                                     x0: Math.min(g.a.x, g.b.x), x1: Math.max(g.a.x, g.b.x),
+                                     y0: Math.min(g.a.y, g.b.y), y1: Math.max(g.a.y, g.b.y) }
+                        }
+                    }
+                    return { x: 0, y: 0, horiz: true, x0: 0, x1: 0, y0: 0, y1: 0 }
+                }
+                width: at.horiz ? 12 : root.wireW
+                height: at.horiz ? root.wireW : 6
+                // centred on the head, held inside the segment so it never overhangs a wire end
+                x: Math.round(at.horiz ? Math.max(at.x0, Math.min(at.x - 5, at.x1 + root.wireW - width)) : at.x)
+                y: Math.round(at.horiz ? at.y : Math.max(at.y0, Math.min(at.y - 3, at.y1 + root.wireW - height)))
+                color: root.kit.hot
+                NumberAnimation on t {
+                    id: run
+                    running: false
+                    from: 0; to: 1; duration: lamp.dur; easing.type: Easing.Linear
+                    onFinished: root.lampDone(lamp.key, lampRun)
+                }
+                Component.onCompleted: run.start()
             }
-            width: at.horiz ? 12 : root.wireW
-            height: at.horiz ? root.wireW : 6
-            // centred on the head, held inside the segment so it never overhangs a wire end
-            x: Math.round(at.horiz ? Math.max(at.x0, Math.min(at.x - 5, at.x1 + root.wireW - width)) : at.x)
-            y: Math.round(at.horiz ? at.y : Math.max(at.y0, Math.min(at.y - 3, at.y1 + root.wireW - height)))
-            color: root.kit.hot
-            NumberAnimation on t {
-                id: run
-                running: false
-                from: 0; to: 1; duration: lamp.dur; easing.type: Easing.Linear
-                onFinished: root.lampDone(lamp.key, lamp)
-            }
-            Component.onCompleted: run.start()
         }
     }
 
@@ -1320,22 +1493,24 @@ Item {
                 required property var modelData
                 readonly property color tone: root.padColor(modelData)
                 readonly property bool previewed: !!root.shared && root.shared.hoveredWorkspace === modelData.id
+                // the shared breath, on this pad only while a session on it works
+                readonly property real glow: root.workingJacks[modelData.id] ? root.breath : 0
                 x: modelData.x
                 width: modelData.w
                 height: root.barH
 
                 // the pad: a round 1px outline (a circle, a pill for two
                 // digits) — the song's one rounded shape (intent §3.2) —
-                // filled `title` when active; the board's row hover fills it `select`
+                // filled `title` when active; the board's row hover fills it
+                // `select`; a working pad breathes (pulseRing/pulseFill)
                 Rectangle {
                     x: jack.modelData.padX
                     y: root.padTop
                     width: jack.modelData.padW; height: root.padH
                     radius: root.padH / 2
-                    color: jack.modelData.focused ? root.kit.title
-                           : (jack.previewed ? root.kit.select : "transparent")
+                    color: root.pulseFill(jack.modelData, jack.glow, jack.previewed)
                     border.width: 1
-                    border.color: jack.tone
+                    border.color: root.pulseRing(jack.modelData, jack.glow)
                     antialiasing: true
                 }
                 Text {

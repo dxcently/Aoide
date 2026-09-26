@@ -277,6 +277,26 @@ One 28px line in the tmux/termui idiom, left to right:
   - At most 2 lanes below the jacks; a further tie collapses into a
     `+n` badge (cyan) on its left jack.
 - Lamps run on activity (§2 Motion).
+- **A working pad breathes.** While any session on a jack has `hooks.json`
+  phase `working`, its pad breathes slowly: the ring toward `bright`, a
+  faint `title` fill (the active pad's fill toward `bright`), 0 → 1 → 0
+  over 2s on a cosine, and it stops the moment no session on it works. It
+  follows the working state, never a tool call. One shared breath drives
+  every working pad, stepped at 12.5 fps (the bar redraws 12.5 times a
+  second while an agent works, not every vsync), and nothing runs when no
+  pad works. An urgent pad keeps its red ring; amber stays the lamp's. The
+  session's jack is the same join the ties use (below); no window, no
+  pulse.
+- **A send runs a lamp.** The core publishes recent conductor sends in
+  `graph.json` as `sends: [{from, to, at}]` (a short ring, newest last). An
+  entry new between two reads (never on the first read that carries a
+  ring, so a ring that appears never fires its backlog) runs a lamp from
+  the sender's jack to the receiver's: along a standing tie that joins the
+  two when one is laid, otherwise along a **transient** wire, `dim`, on a
+  lane free over the span (else down to the trunk and along it), drawn for
+  the lamp's run only and gone with it. It is never a tie. A send within
+  one jack, or with one end on no jack, lights that jack's own lamp.
+  Until core publishes `sends`, nothing runs.
 - Hovering a jack opens the **jack insight pane** (§3.4).
 - **Where ties come from.** When `graph.json` carries the core's
   `workspaces`/`ties`/`activeAt`, the bar draws those. Until then it
@@ -485,3 +505,7 @@ reads a fixture path.
   toggle and per-device connect (§3.1).
 - 2026-09-26 — khoa: the jack pads are round (a circle, a pill for two
   digits), like a board's pads; the only rounded shape in the song.
+- 2026-09-26 — khoa: a jack's pad breathes slowly while a session on it
+  works (per state, not per tool call), and a conductor send runs a lamp
+  from the sender's jack to the receiver's, on a transient wire when no
+  tie joins them, read from core's coming `graph.json` `sends` (§3.2).
