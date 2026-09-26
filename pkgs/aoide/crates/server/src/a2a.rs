@@ -12094,4 +12094,234 @@ mod tests {
         assert_eq!(data["mail"][0]["body"][39], "line 39", "the FIRST 40 lines are the ones kept");
         assert!(data.get("truncated").is_none(), "the byte cap is what raises the flag: {data}");
     }
+
+    // ── P-RSA S8: the ping-back history on `tasks/get` (CONTRACTS.md §6) ─────
+
+    /// The frame's own stage, plus the two things history adds: a
+    /// `remoteParent` stamp naming `key` as the parent's verifying key, and a
+    /// ring holding `n` events for that child. Called AFTER the signed node is
+    /// set up: `setup_signed_node_with_allows` writes `nodes.json` into
+    /// whatever state root is current, and the door resolves the caller there.
+    fn stamp_history_parent(id: &str, key: &str, n: u64) {
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        file.sessions.iter_mut().find(|s| s.session_id == id).unwrap().remote_parent =
+            Some(RemoteParent {
+                node: "sakaki".to_string(),
+                key: key.to_string(),
+                session_id: "parent-1".to_string(),
+                extra: Default::default(),
+            });
+        write_stage(&sessions_path(), &file).unwrap();
+        for i in 0..n {
+            aoide_storage::pingback_remote::spool_event(id, json!({ "exited": { "code": i } }));
+        }
+    }
+
+    /// A `tasks/get` body asking for ping-back history. The wire key is
+    /// spelled out here, never taken from the const: a renamed const must fail
+    /// this test, not silently move the wire (the same rule [`frame_request`]
+    /// holds).
+    fn history_request(id: &str, after: u64) -> Value {
+        json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tasks/get",
+            "params": { "id": id, "metadata": { "aoide/linesAfter": after } },
+        })
+    }
+
+    /// Both output keys in ONE request — the shape that has to fail closed.
+    fn both_request(id: &str) -> Value {
+        json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tasks/get",
+            "params": { "id": id, "metadata": { "aoide/frame": { "tail": 5 }, "aoide/linesAfter": 0 } },
+        })
+    }
+
+    /// A signed caller's context, from a body signed by `kp`.
+    fn signed_ctx(kp: &aoide_storage::identity::Keypair, body: &[u8]) -> (String, String) {
+        verified_caller(kp, body)
+    }
+
+    /// `linesAfter` is read off `params.metadata` only, and a value that is not
+    /// a number reads as the start of the ring — a wrong cursor costs
+    /// duplicates, never a refusal.
+    #[test]
+    fn lines_after_reads_only_params_metadata_and_tolerates_any_value() {
+        assert_eq!(lines_after(&json!({})), None, "no params at all");
+        assert_eq!(lines_after(&json!({ "metadata": {} })), None, "no linesAfter key: a status read");
+        assert_eq!(lines_after(&history_request("s", 0)["params"]), Some(0));
+        assert_eq!(lines_after(&history_request("s", 7)["params"]), Some(7));
+        assert_eq!(
+            lines_after(&json!({ "metadata": { "aoide/linesAfter": null } })),
+            Some(0),
+            "a cursor nobody wrote a number for starts at the beginning"
+        );
+        assert_eq!(lines_after(&json!({ "metadata": { "aoide/linesAfter": "many" } })), Some(0));
+        assert_eq!(
+            lines_after(&json!({ "message": { "metadata": { "aoide/linesAfter": 5 } } })),
+            None,
+            "`message.metadata` is message/send's own fallback, never tasks/get's"
+        );
+    }
+
+    /// The history gate's whole table at the predicate (P-RSA S8): the output
+    /// gate AND the target's stamped key equal to the caller's verifying key.
+    /// Nothing else — not the stored `node` label, and never a wildcard.
+    #[test]
+    fn history_is_admitted_only_for_the_key_this_door_stamped() {
+        let mut reader = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        reader.verified = true;
+        reader.allows = vec!["read".to_string()];
+        let nodes = vec![reader.clone()];
+        let sig = |key: &'static str| Some(SignedCaller { name: "box-b", key });
+        let stamp = |key: &str| RemoteParent {
+            node: "sakaki".to_string(),
+            key: key.to_string(),
+            session_id: "parent-1".to_string(),
+            extra: Default::default(),
+        };
+
+        let mine = stamp("key-of-mine");
+        assert!(history_admitted(true, sig("key-of-mine"), &nodes, Some(&mine)), "the key that was stamped reads it");
+        assert!(!history_admitted(true, sig("key-of-someone-else"), &nodes, Some(&mine)), "a foreign key does not");
+        assert!(!history_admitted(true, sig("key-of-mine"), &nodes, None), "a local session has nothing to read");
+
+        // Not a wildcard in either direction: an EMPTY stored key (a
+        // hand-written record) matches nobody, and an empty caller key is not
+        // a `SignedCaller` at all (the door resolves one only from a key that
+        // verified).
+        assert!(!history_admitted(true, sig("key-of-mine"), &nodes, Some(&stamp(""))));
+
+        // Unsigned, a weaker rung, no `read`, unverified: all refused, and all
+        // by the output gate that runs first.
+        assert!(!history_admitted(true, None, &nodes, Some(&mine)), "no proof, no key to match");
+        assert!(!history_admitted(false, sig("key-of-mine"), &nodes, Some(&mine)), "the bearer gate still runs first");
+        let mut no_read = reader.clone();
+        no_read.allows = vec!["spawn".to_string()];
+        assert!(!history_admitted(true, sig("key-of-mine"), &[no_read], Some(&mine)), "`read` is still required");
+        let mut unverified = reader.clone();
+        unverified.verified = false;
+        assert!(!history_admitted(true, sig("key-of-mine"), &[unverified], Some(&mine)), "a pairing is still required");
+    }
+
+    /// The matching key reads the ring: the events after the cursor, the
+    /// newest `seq`, and no gap — as ONE `data` message under `history`,
+    /// leaving the status read and the frame artifact exactly as they were.
+    #[test]
+    fn a_signed_parent_reads_its_childs_ping_back_history() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _roots = frame_stage("history-admitted", "sess-1", "working");
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
+        stamp_history_parent("sess-1", &kp.info().pubkey_hex, 3);
+        let body = serde_json::to_vec(&history_request("sess-1", 0)).unwrap();
+        let (name, key_used) = signed_ctx(&kp, &body);
+        let ctx = RequestCtx {
+            signed_caller: Some(SignedCaller { name: &name, key: &key_used }),
+            ..test_ctx(Path::new("/dev/null"), "")
+        };
+        let parsed = serde_json::from_slice::<Value>(&body).unwrap();
+
+        let resp = handle_jsonrpc(&parsed, &ctx);
+        assert!(resp.get("error").is_none(), "admitted: {resp}");
+        let task = &resp["result"];
+        assert_eq!(task["id"], "sess-1");
+        assert_eq!(task["status"]["state"], "working", "the status read is the same one");
+        assert!(task.get("artifacts").is_none(), "history is not a frame: {task}");
+
+        let message = &task["history"][0];
+        assert_eq!(message["messageId"], "pingback", "found by identity, not by position");
+        assert_eq!(message["parts"][0]["kind"], "data");
+        let ring = &message["parts"][0]["data"];
+        assert_eq!(ring["events"].as_array().unwrap().len(), 3, "{ring}");
+        assert_eq!(ring["events"][0]["seq"], 1);
+        assert_eq!(ring["events"][0]["event"], json!({ "exited": { "code": 0 } }));
+        assert_eq!(ring["gap"], false);
+        assert_eq!(ring["last"], 3);
+
+        // The cursor is the request's own input, and the ring's own seq is what
+        // a parent advances to.
+        let body = serde_json::to_vec(&history_request("sess-1", 2)).unwrap();
+        let (name, key_used) = signed_ctx(&kp, &body);
+        let ctx = RequestCtx {
+            signed_caller: Some(SignedCaller { name: &name, key: &key_used }),
+            ..test_ctx(Path::new("/dev/null"), "")
+        };
+        let resp = handle_jsonrpc(&serde_json::from_slice::<Value>(&body).unwrap(), &ctx);
+        let ring = &resp["result"]["history"][0]["parts"][0]["data"];
+        assert_eq!(ring["events"].as_array().unwrap().len(), 1, "only what is past the cursor: {ring}");
+        assert_eq!(ring["events"][0]["seq"], 3);
+        assert_eq!(ring["last"], 3);
+    }
+
+    /// A caller holding `read` but NOT this child's stamped key: refused for
+    /// history with `-32011` and the history's own text — while the frame it
+    /// asks for on its own is still admitted (the 2026-09-25 ruling: reading
+    /// is wider than reading a child's ping-back), and a request carrying BOTH
+    /// keys fails closed.
+    #[test]
+    fn a_foreign_key_is_refused_for_history_while_its_frame_is_admitted() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _roots = frame_stage("history-foreign", "sess-1", "working");
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
+        stamp_history_parent("sess-1", &"cc".repeat(32), 2);
+
+        let refused = |request: Value| -> Value {
+            let body = serde_json::to_vec(&request).unwrap();
+            let (name, key) = signed_ctx(&kp, &body);
+            let ctx = RequestCtx {
+                signed_caller: Some(SignedCaller { name: &name, key: &key }),
+                ..test_ctx(Path::new("/dev/null"), "")
+            };
+            handle_jsonrpc(&serde_json::from_slice::<Value>(&body).unwrap(), &ctx)
+        };
+
+        let resp = refused(history_request("sess-1", 0));
+        assert_eq!(resp["error"]["code"], OUTPUT_READ_REFUSED_CODE);
+        assert_eq!(resp["error"]["message"], HISTORY_READ_REFUSED);
+        assert_ne!(
+            HISTORY_READ_REFUSED, OUTPUT_READ_REFUSED,
+            "the reason a caller reads must be the reason it was refused"
+        );
+
+        // The same caller, the same session, asked for as a FRAME: admitted.
+        let resp = refused(frame_request("sess-1", Some(5)));
+        assert!(resp.get("error").is_none(), "a reader may still watch the frame: {resp}");
+        assert_eq!(resp["result"]["artifacts"][0]["artifactId"], "frame");
+        assert!(resp["result"].get("history").is_none(), "{resp}");
+
+        // BOTH keys in one request: asking for the history is asking for the
+        // history, so the stricter gate decides the whole request — the
+        // alternative is a frame answered around a silently missing ring.
+        let resp = refused(both_request("sess-1"));
+        assert_eq!(resp["error"]["code"], OUTPUT_READ_REFUSED_CODE);
+        assert_eq!(resp["error"]["message"], HISTORY_READ_REFUSED);
+
+        // And the refusal is no existence oracle: an id this node never had
+        // reads exactly the same, because the gate runs before the status read.
+        let resp = refused(history_request("ghost", 0));
+        assert_eq!(resp["error"]["code"], OUTPUT_READ_REFUSED_CODE);
+        assert_eq!(resp["error"]["message"], HISTORY_READ_REFUSED);
+    }
+
+    /// No signature at all, and no door token configured (`read_ok` true for
+    /// everyone — the shape that matters): the output gate refuses first, so
+    /// the caller reads the grant it is missing and not the parent it is not.
+    #[test]
+    fn an_unsigned_history_read_is_refused() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _roots = frame_stage("history-unsigned", "sess-1", "working");
+        stamp_history_parent("sess-1", &"cc".repeat(32), 2);
+        let ctx = test_ctx(Path::new("/dev/null"), "");
+
+        let resp = handle_jsonrpc(&history_request("sess-1", 0), &ctx);
+        assert_eq!(resp["error"]["code"], OUTPUT_READ_REFUSED_CODE);
+        assert_eq!(resp["error"]["message"], OUTPUT_READ_REFUSED, "{resp}");
+
+        // The same request without the key is the untouched status read.
+        let status = handle_jsonrpc(
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": "sess-1" } }),
+            &ctx,
+        );
+        assert_eq!(status["result"]["status"]["state"], "working");
+        assert!(status["result"].get("history").is_none(), "{status}");
+    }
 }
