@@ -24,9 +24,9 @@ covers only what's specific to nucleus.
   has not migrated yet (`mcp`, `a2a`, `usage`, `secrets`, `pairing`) stays
   here beside its unit — core, not paint, just not yet relocated.
 - **Nucleus reads FACTS, never a lane's option.** The enable facts
-  (`aoide.{quickshell,lyra,stylix,compositor,greeter}.enable`,
-  `aoide.quickshell.config`) are declared here, each defaulting `false`; the
-  lane that owns one sets it `mkDefault true`. A nucleus file that needs to
+  (`aoide.{quickshell,lyra,stylix,compositor,greeter}.enable`, each
+  defaulting `false`, and `aoide.quickshell.config`, defaulting `null`) are
+  declared here; the lane that owns one sets it with `mkDefault`. A nucleus file that needs to
   know "is there a shell / a session here" reads the fact — never
   `aoide.facets.*`, never a lane's own option. `aoide.sessionTarget` is the
   same rule from the other side: it is core-declared

@@ -60,8 +60,8 @@ that can be deleted.
 
 A lane cannot be read (first rule above), so the one question every layer has to
 ask — *is there a shell / a session on this host?* — is answered by a FACT that
-nucleus declares once, in `modules/nucleus/options.nix`, each defaulting
-`false`:
+nucleus declares once, in `modules/nucleus/options.nix`. Each `enable` fact
+defaults `false`; `aoide.quickshell.config` defaults `null`:
 
 | Fact | What it means | Set by |
 |---|---|---|

@@ -588,8 +588,8 @@ in
     # another module (root AGENTS.md house rule 5), so a cross-lane question —
     # "does this host paint", "is there a shell here" — is never answered by
     # reading the lane's own option. The lane that owns the thing sets its own
-    # fact `mkDefault true` when it is on (the lane that owns this fact is the
-    # one whose name it carries); core plumbing and other lanes read the fact.
+    # fact `mkDefault true` when it is on (today `aoide.greeter.enable` is still
+    # set by the compositor facet); core plumbing and other lanes read the fact.
     # Each defaults to `false`: a host with no paint lane is headless.
     # `aoide.lyra.enable` below — declared beside the package it installs — is
     # the fifth fact in this family, same rule.
