@@ -8868,6 +8868,71 @@ mod tests {
     }
 
     #[test]
+    fn spawn_inject_prompt_types_nothing_and_files_no_receipt_when_the_target_is_never_ready() {
+        // The readiness gate's refusal arm, against a real bound listener: a
+        // socket nobody's harness has announced itself behind is NOT a session
+        // ready to take a turn, so nothing is written into it and no receipt is
+        // filed — the sender's letter stays unacknowledged rather than
+        // acknowledged by a turn that never ran.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-spawninject-unready-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        // An empty roster: no harness under this wrapper has started.
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".to_string(), sessions: Vec::new() },
+        )
+        .unwrap();
+
+        let id = "spawn-inject-unready";
+        let socket = aoide_conduct::graph::conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+
+        spawn_inject_prompt(id, "claude", "hello unready target", Duration::from_millis(150));
+
+        let deadline = Instant::now() + Duration::from_millis(600);
+        let mut typed_at = false;
+        while Instant::now() < deadline {
+            if listener.accept().is_ok() {
+                typed_at = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!typed_at, "an unready target was typed at");
+        assert!(
+            aoide_storage::mail::read_base().unwrap().is_empty(),
+            "no receipt may be filed for an opening turn that never ran"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+        match saved_runtime {
+            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
+            None => std::env::remove_var("XDG_RUNTIME_DIR"),
+        }
+    }
+
+    #[test]
     fn spawn_inject_prompt_on_an_empty_prompt_files_nothing() {
         // The existing early return (`if prompt.is_empty() { return; }`) —
         // an empty prompt never connects at all, so it must not file a
