@@ -54,6 +54,21 @@ let
 
       builtIn = config.aoide.songbook.builtIn;
 
+      # ── The songs this derivation reads, as their OWN store paths ────────────
+      # The same contract `pkgs/lyra-songbook` keeps, for the same reason: a path
+      # literal that names the songbook DIRECTORY makes every song in the repo
+      # part of this derivation, and this derivation's path rides the deploy
+      # activation — so editing a song this host does not even build in moved its
+      # whole toplevel drvPath. `builtins.path` copies the folder, so the input
+      # is exactly the built-in set. Same `name` as the package's copy of a song,
+      # so the two derivations share one store path per song.
+      songDirOf =
+        name:
+        builtins.path {
+          path = songbook + "/${name}";
+          name = "lyra-song-${name}";
+        };
+
       # The deployed tree describes the songs the shell can actually resolve: a
       # slot record naming a song whose `widgets/` is not in this tree would
       # point at nothing.
@@ -258,8 +273,12 @@ let
         # disk so the slot file's relative imports resolve, but never
         # independently resolvable as a slot itself (nix already decided the
         # slot list, above — this loop no longer re-derives it).
-        for name in ${lib.concatStringsSep " " builtIn}; do
-          d="${songbook}/$name/"
+        # Each song's folder is a nix-built store path (`songDirOf`), handed to
+        # the shell as `<name>:<dir>`; nothing here interpolates the songbook
+        # directory, so this derivation reads the built-in songs and no others.
+        for entry in ${lib.concatStringsSep " " (map (name: "\"${name}:${songDirOf name}\"") builtIn)}; do
+          name="''${entry%%:*}"
+          d="''${entry#*:}/"
           if [ -d "$d/widgets" ]; then
             mkdir -p "$out/qml/songs/$name"
             cp -r "$d/widgets/." "$out/qml/songs/$name/"

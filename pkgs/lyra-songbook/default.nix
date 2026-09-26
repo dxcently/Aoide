@@ -67,6 +67,27 @@ let
 
   shipped = if songs == null then songbookData.songNames else songs;
 
+  # ── What this derivation actually reads ─────────────────────────────────────
+  # Each shipped song enters as ITS OWN store path (`builtins.path` copies the
+  # folder), never as a subdirectory of the whole `song/songbook` tree. That is
+  # not tidiness: a path literal naming the songbook DIRECTORY makes every song's
+  # content part of this derivation — and the templates path is a string in a
+  # host's session variables and activation, so a host's whole toplevel drvPath
+  # moved whenever any song changed. A host that builds one song in reads that
+  # one song's folder, and a song it does not build in cannot move its system.
+  #
+  # The manifest/registry below are the same story from the other side: they are
+  # `builtins.toFile` over the SHIPPED set, so they do not carry the others
+  # either. The unoverridden package (`songs = null`) is every discovered song,
+  # each with its own folder path — so the flake's own `packages` output still
+  # ships the whole songbook.
+  songDir =
+    name:
+    builtins.path {
+      path = songbook + "/${name}";
+      name = "lyra-song-${name}";
+    };
+
   files = {
     manifest = builtins.toFile "lyra-songbook-manifest.json" (
       builtins.toJSON (keep songbookData.manifestAttrs)
@@ -84,7 +105,7 @@ runCommand "lyra-songbook-templates" { nativeBuildInputs = [ jq ]; } ''
   mkdir -p "$out_dir"
 
   ${lib.concatMapStrings (name: ''
-    cp -r ${songbook}/${name} "$out_dir/${name}"
+    cp -r ${songDir name} "$out_dir/${name}"
   '') shipped}
 
   jq . ${files.manifest} > "$out_dir/manifest.json"

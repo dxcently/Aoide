@@ -418,6 +418,23 @@ surface: everything that paints, or that only a desktop needs.
   document `packages.<system>.lyra` is core's rice output — one name, one
   meaning, per flake.
 
+- **The shipped songbook is a package — `pkgs/lyra-songbook`.** The score a
+  machine with no checkout falls back to: `share/lyra/songbook/` holding the song
+  folders this instance ships plus baked `manifest.json`/`registry.json` and —
+  for a host that selected songs — `builtin.json`.
+  `aoide_storage::fs::song_templates_dir` finds it through
+  `AOIDE_SONG_TEMPLATES` or the exe-sibling path, and only `aoide-song` reads
+  it. Two arguments, both defaulted for this flake's own
+  `packages.<system>.lyra-songbook` (every discovered song) and both overridden
+  per host by the `lyra` lane: `songs` (which folders ship) and `builtin` (the
+  selection, written to `builtin.json`). **What it copies is a host contract,**
+  not tidiness: each shipped song enters the derivation as its OWN store path
+  and the baked manifest/registry are over the shipped set only, because this
+  package's path is a STRING in a host's session variables and activation — so
+  anything that rehashes it moves that host's toplevel drvPath. While the build
+  read the songbook DIRECTORY, every song in the repo could move a host that
+  builds one song in.
+
 ## Flake outputs — the export surface
 
 `pkgs/aoide/flake.nix` is the seam a consumer builds against — this
