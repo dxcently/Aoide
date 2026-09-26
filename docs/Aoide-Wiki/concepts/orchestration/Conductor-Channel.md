@@ -145,8 +145,8 @@ sitting at a terminal — or be a terminal at all — to launch `conduct`.
   appears and `spawn` reports `registered: false` honestly. An optional
   `--prompt` is injected only AFTER the target is READY to take a turn —
   registration is the wrapper being steerable, readiness is a per-harness fact
-  (its own `SessionStart` stamped for THIS launch, its declared prompt marker
-  in the PTY output, or nothing at all). The result says which: `delivered`,
+  (its own `SessionStart` stamped for THIS launch, or nothing at all). The
+  result says which: `delivered`,
   `delivered-unverified` (no declared fact existed for that harness name — the
   text went out once output settled, and whether it submitted is not known),
   `not-ready` (nothing typed; a hook harness needs its hooks installed, and its

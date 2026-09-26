@@ -71,8 +71,8 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   or neither `$WAYLAND_DISPLAY` nor `$DISPLAY` present (a headless host,
   steered back to plain `spawn`). `--prompt` is typed only once the target is
   READY to take a turn (`wait_ready`, a per-harness fact: `Hook` reads THIS
-  launch's timestamped `SessionStart`, `PromptMarker` the harness's declared
-  prompt in its PTY output, `OutputSettled` neither — the same gate
+  launch's timestamped `SessionStart`; `OutputSettled` claims no fact at all,
+  so its deliveries are unverified — the same gate
   `resurrect`'s restore delivery and `aoide-server`'s
   `a2a::spawn_inject_prompt` pass). The result says which it was:
   `delivered`, `delivered-unverified` (no declared fact for that name — the

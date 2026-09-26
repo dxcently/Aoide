@@ -84,11 +84,6 @@ const READY_QUIET: Duration = Duration::from_millis(2000);
 #[cfg(test)]
 const READY_QUIET: Duration = Duration::from_millis(100);
 
-/// How much of a PTY log's tail a prompt marker is searched in. One frame of
-/// a TUI is a few KB, and the marker is looked for on every poll — reading a
-/// whole transcript each time would be silly.
-const MARKER_TAIL: u64 = 8 * 1024;
-
 /// The command's basename — the agent-name default. Mirrors
 /// `conduct.rs::command_basename`'s own copy: each `graph` command that
 /// spawns a labelled agent keeps its own small copy of this one-liner rather
@@ -554,23 +549,16 @@ pub fn harness_session_started(id: &str, since: &str) -> bool {
         })
 }
 
-/// A record's PTY log as `(size, tail)`, where `tail` is the last
-/// [`MARKER_TAIL`] bytes — enough for the frame a harness is painting now,
-/// without reading a whole transcript on every poll. `None` when the record
-/// or its log is not there yet (registration stamps the path at log open).
-fn pty_state(id: &str) -> Option<(u64, Vec<u8>)> {
-    use std::io::{Read as _, Seek as _, SeekFrom};
-
+/// A record's PTY log SIZE — the fact the hookless arm watches (`None` when
+/// the record or its log is not there yet; registration stamps the path at
+/// log open). Only the size: a hookless harness has no marker this tree can
+/// anchor, so there is nothing in the bytes to look for.
+fn pty_log_size(id: &str) -> Option<u64> {
     let path = load_stage::<SessionsFile>(&sessions_path())
         .ok()
         .and_then(|f| f.sessions.into_iter().find(|s| s.session_id == id))
         .and_then(|s| s.log_path)?;
-    let size = std::fs::metadata(&path).ok()?.len();
-    let mut file = std::fs::File::open(&path).ok()?;
-    file.seek(SeekFrom::Start(size.saturating_sub(MARKER_TAIL))).ok()?;
-    let mut tail = Vec::new();
-    file.take(MARKER_TAIL).read_to_end(&mut tail).ok()?;
-    Some((size, tail))
+    Some(std::fs::metadata(&path).ok()?.len())
 }
 
 /// Wait, up to `budget` from now, for the just-launched session `id` to be
@@ -579,14 +567,14 @@ fn pty_state(id: &str) -> Option<(u64, Vec<u8>)> {
 /// ([`aoide_protocol::agents::AgentProfile::readiness`]):
 ///
 /// - `Hook`: this launch's `SessionStart`, timestamped (`sessionStartAt`).
-/// - `PromptMarker(pattern)`: the harness's own prompt in its PTY output —
-///   verified as soon as it appears, so a harness that paints its composer
-///   fast is typed at as fast. Not seeing it is not fatal: the arm then falls
-///   back to the settled check below, so a wrong or mode-dependent marker can
-///   only downgrade the claim, never drop the prompt.
-/// - anything else (no marker declared — an unregistered name, or a profile
-///   whose marker is not established): output settled, and the delivery says
-///   so ([`Ready::Unverified`]).
+/// - `OutputSettled`, and every harness NAME with no profile at all: output
+///   arrived and then stood still. That is NOT readiness — which is exactly
+///   why the answer is [`Ready::Unverified`], and why the caller must report
+///   the delivery as unverified rather than as delivered. There is no
+///   prompt-pattern variant on purpose: the tree tried one and a banner
+///   containing the label bought a false `Verified` plus an early inject
+///   (branch re-review N1), so a hookless harness claims nothing until it can
+///   offer an ANCHORED fact.
 ///
 /// `since` is the LAUNCH instant (ISO-8601 UTC, from `now_iso_utc()` before
 /// the spawn): it is what binds the hook arm to this launch rather than to a
@@ -605,35 +593,11 @@ pub fn wait_ready(agent: &str, id: &str, since: &str, budget: Duration) -> Ready
             }
             std::thread::sleep(REGISTRATION_POLL);
         },
-        Some(aoide_protocol::agents::Readiness::PromptMarker(pattern)) => {
-            let mut last = 0u64;
-            let mut quiet_since: Option<Instant> = None;
-            loop {
-                if let Some((size, tail)) = pty_state(id) {
-                    if size > 0 {
-                        if size != last {
-                            last = size;
-                            quiet_since = Some(Instant::now());
-                        } else if quiet_since.is_some_and(|t| t.elapsed() >= READY_QUIET) {
-                            return Ready::Unverified;
-                        }
-                    }
-                    if let Some(at) = find_bytes(&tail, pattern.as_bytes()) {
-                        let _ = at;
-                        return Ready::Verified;
-                    }
-                }
-                if Instant::now() >= deadline {
-                    return Ready::NotReady;
-                }
-                std::thread::sleep(REGISTRATION_POLL);
-            }
-        }
         _ => {
             let mut last = 0u64;
             let mut quiet_since: Option<Instant> = None;
             loop {
-                if let Some((size, _)) = pty_state(id) {
+                if let Some(size) = pty_log_size(id) {
                     if size > 0 {
                         if size != last {
                             last = size;
@@ -650,16 +614,6 @@ pub fn wait_ready(agent: &str, id: &str, since: &str, budget: Duration) -> Ready
             }
         }
     }
-}
-
-/// Does `haystack` contain `needle`? A plain substring search — the marker is
-/// read off the harness's own live frame, escapes and all, so it is matched
-/// against the raw bytes exactly as they were painted.
-fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || haystack.len() < needle.len() {
-        return None;
-    }
-    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 /// `aoide spawn [--agent <name>] [--parent <sessionId>] [--id <id>]
@@ -1507,9 +1461,11 @@ mod tests {
         stage_sessions(vec![child("done", Some("claude-uuid"), Some(&now_iso_utc()))]);
         assert_eq!(wait_ready("claude", id, &launch_at, probe), Ready::NotReady);
 
-        // The MARKER arm: a hookless harness whose profile declares its prompt
-        // (`eidolon`'s ` normal `) is verified the moment that marker is in the
-        // log — early, without waiting for anything to settle.
+        // The HOOKLESS arm claims nothing, marker or not (branch re-review
+        // N1): a hookless harness whose output merely CONTAINS the label its
+        // TUI would paint is not readiness, and neither is its real frame — a
+        // substring cannot be anchored to the frame, so the delivery is
+        // `Unverified` either way.
         let log = root.join("wrapper.log");
         let with_log = |content: &str| {
             std::fs::write(&log, content).unwrap();
@@ -1517,20 +1473,67 @@ mod tests {
             wrap.log_path = Some(log.to_string_lossy().into_owned());
             stage_sessions(vec![wrap]);
         };
+        with_log("banner [1m normal [0m x");
+        assert_eq!(
+            wait_ready("eidolon", id, &launch_at, probe),
+            Ready::Unverified,
+            "a banner string must never buy a verified readiness"
+        );
         with_log("booting\x1b[1m normal \x1b[0m┌────");
-        assert_eq!(wait_ready("eidolon", id, &launch_at, probe), Ready::Verified);
-        // The marker absent, but the log settled: typed at, and said to be
-        // unverified — never claimed as delivered.
-        with_log("booting up, still booting");
-        assert_eq!(wait_ready("eidolon", id, &launch_at, probe), Ready::Unverified);
+        assert_eq!(
+            wait_ready("eidolon", id, &launch_at, probe),
+            Ready::Unverified,
+            "not even the harness's own frame label buys Verified on its own"
+        );
 
-        // An unregistered name has no declared fact at all: settled output is
-        // the whole gate, and the answer is unverified.
+        // An unregistered name is the same arm: settled output is the whole
+        // gate, and the answer is unverified.
         with_log("shell$ ");
         assert_eq!(wait_ready("bash", id, &launch_at, probe), Ready::Unverified);
         // A target that never printed a byte is honestly not ready.
         with_log("");
         assert_eq!(wait_ready("bash", id, &launch_at, probe), Ready::NotReady);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// N1, end to end, on the reviewer's exact shape: a hookless target that
+    /// prints a banner CONTAINING the label (` normal `) used to come back
+    /// `delivered` in ~393ms — the strongest claim, plus an inject before the
+    /// prompt existed. It must now be `delivered-unverified`, and the claim
+    /// must survive the settle window rather than jumping the queue.
+    #[test]
+    fn a_banner_containing_the_prompt_label_never_buys_a_verified_delivery() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_SPAWN_EXE",
+        ]);
+
+        let root = unique_stage("spawn-banner-label");
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("AOIDE_CONDUCT_SPAWN_EXE", built_aoide_bin());
+
+        let id = "spawn-banner-label";
+        let out = session_spawn(&spawn_invocation(
+            &["sh", "-c", "printf 'banner \\033[1m normal \\033[0m x'; sleep 6"],
+            &[("id", id), ("agent", "eidolon"), ("prompt", "say pong")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(
+            data["prompt"], "delivered-unverified",
+            "a banner must not buy `delivered`: {data}"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }

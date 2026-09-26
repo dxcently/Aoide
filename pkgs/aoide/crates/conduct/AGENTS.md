@@ -1579,13 +1579,15 @@
   that started — and with no readiness within the budget it is typed at by
   nothing and files no receipt, so the sender's letter stays unacknowledged
   rather than acknowledged by a turn that never ran. That readiness fact is
-  per-harness and three-valued (`Readiness`): `Hook` reads THIS launch's
+  per-harness and two-valued (`Readiness`): `Hook` reads THIS launch's
   harness `SessionStart` (its `sessionStartAt` stamp on a child record of the
   wrapper, at or after the launch instant — a leftover record from an earlier
-  run under a reused id is not readiness), `PromptMarker` reads the harness's
-  own declared prompt out of the PTY output, and `OutputSettled` claims no
+  run under a reused id is not readiness), and `OutputSettled` claims no
   fact at all: it types once output settles and reports the delivery
-  `delivered-unverified`. It is typed before that session
+  `delivered-unverified`. (A third value, a prompt-pattern marker, was tried
+  here and withdrawn as unanchorable — branch re-review N1: a banner
+  containing the label bought a false `Verified` plus an early inject.) It is
+  typed before that session
   has a `SessionRecord` at all, so it can never reach
   `deliver_local`/`session_send` and has to file itself (see
   `aoide_storage::mail`'s module doc for the full two-writer reasoning). The
