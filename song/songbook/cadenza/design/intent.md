@@ -40,6 +40,7 @@ At rest nothing moves.
 | **jack** | a workspace, drawn `[3]` on the switchboard | paint only; the data noun is core's *workspace* (an integer) |
 | **tie** | a real edge between two workspaces, kind `project` or `spawned` | core's noun (`graph.json` `ties`); the paint draws it as a tie line |
 | **trunk** | the bar's bottom rule; every tie line drops from it | paint only |
+| **pad** | the hollow ring under a tied jack where its tie lines meet it | paint only |
 | **lamp** | the lit dash that runs a line when its `activeAt` advances | paint only; core publishes `activeAt` |
 | **board** | the dock: the per-project message board | core's noun (`aoide project board`) |
 | **pane** | one termui box | paint only |
@@ -212,20 +213,20 @@ One 28px line in the tmux/termui idiom, left to right:
 - **Tie lines are a schematic**, drawn in the band between the jack row
   and the trunk (the bar's lower ~9px). Every line is 2px in phosphor fg
   (idle rule ink), never dim: a tie must read at 1:1.
-  - **Nodes:** a tied jack gets a hollow node `○` (a ~5px ring) centred
+  - **Pads:** a tied jack gets a hollow pad `○` (a ~5px ring) centred
     under its number. Untied jacks get none.
-  - **Bus:** a `project` tie is a solid wire on the node row, joining the
-    nodes directly. The core publishes a clique for a project shared by
-    3+ jacks; the paint draws it as ONE bus through all of its nodes, not
+  - **Bus:** a `project` tie is a solid wire on the pad row, joining the
+    pads directly. The core publishes a clique for a project shared by
+    3+ jacks; the paint draws it as ONE bus through all of its pads, not
     n² lines.
-  - **Spawned wires:** a `spawned` tie drops from its node, runs dashed on
-    a lower lane, and rises into the other node — the schematic's
+  - **Spawned wires:** a `spawned` tie drops from its pad, runs dashed on
+    a lower lane, and rises into the other pad — the schematic's
     side-wire.
   - **Junctions:** a filled dot `●` marks every point where a wire meets
     another (a spawned wire leaving a bus, two buses meeting), the
     schematic convention; a plain crossing without a dot is not a
     connection.
-  - At most 2 lanes below the node row; a further tie collapses into a
+  - At most 2 lanes below the pad row; a further tie collapses into a
     `+n` badge (cyan) on its left jack.
 - Lamps run on `activeAt` (§2 Motion).
 - Hovering a jack opens the **jack insight pane** (§3.4).
@@ -352,5 +353,5 @@ reads a fixture path.
   Nouns: switchboard (jack · tie · trunk · lamp), adopting core's `tie`.
 - 2026-09-26 — first bar shots: 1px dim ties vanished at 1:1. khoa chose
   brighter ties on the same 28px bar, drawn as a circuit schematic —
-  hollow nodes under tied jacks, a solid bus per project, dashed spawned
+  hollow pads under tied jacks, a solid bus per project, dashed spawned
   side-wires, filled junction dots (§3.2).
