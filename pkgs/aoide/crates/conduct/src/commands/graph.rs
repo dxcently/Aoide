@@ -544,4 +544,18 @@ pub fn register_mail_ring(r: &mut Registry) {
         handler: crate::graph::workspace_list,
         examples: ["workspace list", "workspace list --json"],
     ));
+    r.insert(cmd!(
+        path: ["workspace", "root"],
+        summary: "Print the first folder of the project bound to a workspace (or to the FOCUSED one), for a launcher to open a terminal in — one bare path on stdout, nothing at all when it refuses.",
+        args: [arg!("workspace", "integer", false, "Workspace id; omit it to use the focused workspace, resolved through the compositor adapter.")],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::workspace_root,
+        examples: [
+            "workspace root 3",
+            "workspace root",
+            r#"kitty --directory "$(aoide workspace root 2>/dev/null || echo "$HOME")""#,
+        ],
+    ));
 }

@@ -274,6 +274,77 @@ pub fn workspace_list(_inv: &Invocation) -> Outcome {
     Outcome::ok("workspace.list", message).with_data(data)
 }
 
+/// `workspace root [<workspace>]` — the FIRST folder of the project bound to
+/// the given (or FOCUSED) workspace, for a launcher that opens a new terminal
+/// in the right directory:
+///
+/// ```text
+/// kitty --directory "$(aoide workspace root 2>/dev/null || echo "$HOME")"
+/// ```
+///
+/// Read-only: no lock, no daemon, no write. The success message IS the path,
+/// alone, because the CLI door prints it raw for exactly that substitution
+/// (`cli`'s own `special` arm) — nothing else goes to stdout on success, and
+/// NOTHING goes to stdout on failure, where the exit code is the whole answer
+/// (no binding, no folder, or no workspace given and no compositor to ask).
+pub fn workspace_root(inv: &Invocation) -> Outcome {
+    let ws = match inv.args.as_slice() {
+        [] => match focused_workspace() {
+            Some(ws) => ws,
+            None => {
+                return Outcome::usage(
+                    "workspace.root",
+                    format!("{NO_COMPOSITOR}\nusage: aoide workspace root [<workspace>]"),
+                )
+                .with_data(json!({ "reason": "no-compositor" }));
+            }
+        },
+        [raw] => match workspace_id("workspace.root", raw) {
+            Ok(ws) => ws,
+            Err(e) => return e,
+        },
+        _ => {
+            return Outcome::usage(
+                "workspace.root",
+                "usage: aoide workspace root [<workspace>] — with no workspace, the focused one is used",
+            );
+        }
+    };
+
+    let file: ProjectsFile = match load_stage(&projects_path()) {
+        Ok(f) => f,
+        Err(e) => return stage_error("workspace.root", e),
+    };
+    let Some(i) = binding_for(ws, &file.projects) else {
+        return Outcome::error(
+            "workspace.root",
+            format!("workspace {ws} is not bound to any project"),
+        )
+        .with_data(json!({ "reason": "no-binding", "workspace": ws }));
+    };
+    let project = &file.projects[i];
+    let Some(root) = project.roots().first().copied() else {
+        return Outcome::error(
+            "workspace.root",
+            format!(
+                "project `{}` has no folder — add one with `project add {} <root>`",
+                project.name, project.name
+            ),
+        )
+        .with_data(json!({
+            "reason": "no-folder",
+            "workspace": ws,
+            "project": project.name,
+        }));
+    };
+    // The message is the path and nothing else: the CLI door substitutes it.
+    Outcome::ok("workspace.root", root).with_data(json!({
+        "workspace": ws,
+        "project": project.name,
+        "root": root,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -556,6 +627,102 @@ mod tests {
         let rows = out.data.as_ref().unwrap()["workspaces"].as_array().unwrap();
         assert_eq!(rows.len(), 1, "a binding survives an empty roster: {rows:?}");
 
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn root_prints_the_first_folder_of_the_bound_project() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("ws-root");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let root = two_projects(&stage);
+        // A SECOND folder on the same project: `root` answers with the FIRST.
+        let second = stage.join("aoide-second");
+        std::fs::create_dir_all(&second).unwrap();
+        let second = second.to_string_lossy().into_owned();
+        crate::graph::project_add(&daemon_invocation(
+            &["project", "add"],
+            &["aoide", &second],
+        ));
+        workspace_set(&daemon_invocation(&["workspace", "set"], &["3", "aoide"]));
+
+        let out = workspace_root(&daemon_invocation(&["workspace", "root"], &["3"]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        assert_eq!(out.message, root, "the message IS the bare path");
+        assert_eq!(out.data.as_ref().unwrap()["root"], root);
+        assert_eq!(out.data.as_ref().unwrap()["project"], "aoide");
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn root_refuses_an_unbound_workspace_and_a_project_with_no_folder() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("ws-root-refusals");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        two_projects(&stage);
+
+        // Unbound: no binding to answer with.
+        let out = workspace_root(&daemon_invocation(&["workspace", "root"], &["3"]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "no-binding");
+        assert_ne!(out.status.exit_code(), 0, "a launcher's `||` must fire");
+        assert!(
+            out.data.as_ref().unwrap().get("root").is_none(),
+            "no path is ever published for a refusal"
+        );
+
+        // Bound, but the project is NAME-ONLY: no folder to print.
+        workspace_set(&daemon_invocation(&["workspace", "set"], &["5", "cadenza"]));
+        let out = workspace_root(&daemon_invocation(&["workspace", "root"], &["5"]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "no-folder");
+        assert!(out.message.contains("has no folder"), "{}", out.message);
+        assert_ne!(out.status.exit_code(), 0);
+
+        // A non-integer id is refused by name.
+        let out = workspace_root(&daemon_invocation(&["workspace", "root"], &["three"]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Usage);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "invalid-workspace");
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn root_with_no_workspace_needs_the_compositor_and_never_guesses() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_sig = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok();
+        let stage = unique_stage("ws-root-focused");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        two_projects(&stage);
+        workspace_set(&daemon_invocation(&["workspace", "set"], &["3", "aoide"]));
+
+        let out = workspace_root(&daemon_invocation(&["workspace", "root"], &[]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Usage);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "no-compositor");
+        assert_ne!(out.status.exit_code(), 0);
+        assert!(out.message.contains("give the workspace id"), "{}", out.message);
+
+        match saved_sig {
+            Some(v) => std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", v),
+            None => std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"),
+        }
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
             None => std::env::remove_var("AOIDE_STAGE_DIR"),

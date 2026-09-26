@@ -204,6 +204,27 @@ carries its project, so sessions born on a bound workspace join it.
   a named `reason` on a host where no session reports one. `--json` publishes
   `data.workspaces[].{workspace, project}` — no `project` key on an unbound id.
 
+### aoide workspace root
+
+```
+aoide workspace root [<workspace>] [--json]
+```
+
+The FIRST folder of the project bound to a workspace (or to the FOCUSED one
+when `<workspace>` is omitted) — the one read a launcher needs:
+
+    kitty --directory "$(aoide workspace root 2>/dev/null || echo "$HOME")"
+
+- Read-only: no lock, no daemon, no stage write.
+- Text mode prints ONE BARE PATH on stdout (the command is special-cased in the
+  CLI door for exactly that, so the generic `[ok] …` envelope never lands in the
+  substitution) and NOTHING on stdout when it refuses — the exit code plus the
+  line on stderr is the whole report. Refusals: an unbound workspace
+  (`data.reason: "no-binding"`), a project with no folder (`"no-folder"`), an
+  omitted workspace with no compositor to ask (exit 2, `"no-compositor"`), and a
+  non-integer id (`"invalid-workspace"`).
+- `--json` keeps the envelope: `data: {workspace, project, root}`.
+
 ### aoide graph link
 
 ```

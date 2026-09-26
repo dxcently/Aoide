@@ -295,6 +295,10 @@ mod tests {
         // design §B) — the binding that makes a workspace carry a project.
         // Registered from `aoide-conduct`'s `commands/graph.rs`, appended at
         // that `register()`'s tail; the sort slot falls after `usage`.
+        // Bumped by 1 more for `workspace root` (W-P4 of that slice lane) —
+        // the launcher's bare-path read of a bound project's first folder, the
+        // second special-cased command here after the `secrets` value-printers
+        // (`cli/README.md`'s named-seam list).
         let mut expected: Vec<&str> = vec![
             "a2a.serve",
             "adapter.melete",
@@ -396,6 +400,7 @@ mod tests {
             "update",
             "usage",
             "workspace.clear",
+            "workspace.root",
             "workspace.list",
             "workspace.set",
         ];

@@ -38,7 +38,13 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
 
 - **The workspace ↔ project binding (§B)**: `graph/workspace.rs` implements
   `workspace set [<workspace>] <project> [--new]`, `workspace clear
-  <workspace>` and `workspace list [--json]`, over `Project.workspaces`
+  <workspace>`, `workspace list [--json]` and `workspace root [<workspace>]`
+  — the last one prints the bound project's FIRST folder as a bare path on
+  stdout (one value, nothing else; a refusal prints nothing on stdout at all),
+  because a launcher substitutes it straight into an argv:
+  `kitty --directory "$(aoide workspace root 2>/dev/null || echo "$HOME")"`.
+  The rest is
+  over `Project.workspaces`
   (`aoide-storage`'s record, `CONTRACTS.md` §4). A **workspace** is the
   compositor's own workspace id — an integer, exactly what
   `SessionRecord.workspace` already holds — and a **binding** is "workspace N

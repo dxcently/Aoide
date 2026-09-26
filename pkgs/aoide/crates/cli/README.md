@@ -15,7 +15,9 @@ correspondence").
   `aoide_protocol::door::run`'s shared skeleton with core's own `special`
   hook (`mcp serve --stdio`, `a2a serve`, `secrets serve`, `secrets exec`,
   `secrets enroll`, `secrets watch`, `events tail`, `pair watch`
-  (P-P5), `conductor`, `guide`/`schema` raw output). `dispatch` is also the
+  (P-P5), `conductor`, `guide`/`schema` raw output, `workspace root` — one
+  bare path on stdout and NOTHING on stdout when it refuses, because a
+  launcher substitutes it into an argv). `dispatch` is also the
   one seam where every door's audit line is written, so it owns the rule
   that a line's message is not automatically the command's outcome text:
   the pairing ceremony (`pair`, `pair.reject`, `pair.watch`, and

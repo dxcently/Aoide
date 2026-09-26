@@ -266,7 +266,7 @@ pub use self::window::{focus_session, focus_window, focused_workspace, run_hypr_
 // one compositor-shaped fact (`focused_workspace`) is re-exported above
 // beside the other window-adapter reads.
 mod workspace;
-pub use self::workspace::{workspace_clear, workspace_list, workspace_set};
+pub use self::workspace::{workspace_clear, workspace_list, workspace_root, workspace_set};
 
 // Storage/time passthroughs root's `a2a.rs` / `commands/{a2a,usage}.rs` still
 // reach at `crate::graph::{load_stage, now_iso_utc, sessions_path,
