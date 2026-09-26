@@ -196,6 +196,14 @@ pub const HISTORY_MESSAGE_ID: &str = "pingback";
 /// teaching text silently stops firing when the minting side renumbers.
 pub const OUTPUT_READ_REFUSED_CODE: i64 = -32011;
 
+/// The code an id this node holds **no** record and **no** ring for answers
+/// with, on any `tasks/get` arm — `build_task`'s own "task not found", named
+/// here because the pull reads it as a PERMANENT answer (the child is gone and
+/// always will be), while a refusal is not. It is also the code the plain
+/// status read has always used for an unknown id, so naming it changes no
+/// behaviour: one number, one spelling, both ends of the wire.
+pub const TASK_NOT_FOUND_CODE: i64 = -32001;
+
 /// One A2A `Message` (`message/send`'s `params.message`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Message {

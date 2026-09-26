@@ -1887,8 +1887,11 @@ fn reap_inner(
             }),
             // Every row here carries `remoteParent`: that is what put it in
             // `remote_before`, and it is why this record's exit is owed to a
-            // parent on another node rather than to a local report.
+            // parent on another node rather than to a local report. The key
+            // rides along so the ring entry the exit lands on is readable by
+            // that parent after this record is gone (H2 of the S8/S9 review).
             remote: true,
+            remote_key: r.remote_parent.as_ref().map(|rp| rp.key.clone()),
             exit_code: r.exit_code,
             outcome: r.outcome.clone(),
         })

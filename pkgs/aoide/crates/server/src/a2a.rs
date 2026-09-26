@@ -57,7 +57,7 @@ use aoide_protocol::registry::{Command, Registry};
 use aoide_protocol::wire::{
     AgentCapabilities, AgentCard, AgentSkill, Artifact, JsonRpcResponse, Message, Part, Task,
     TaskStatus, TaskStatusUpdateEvent, FRAME_ARTIFACT_ID, FRAME_KEY, HISTORY_MESSAGE_ID,
-    LINES_AFTER_KEY, OUTPUT_READ_REFUSED_CODE,
+    LINES_AFTER_KEY, OUTPUT_READ_REFUSED_CODE, TASK_NOT_FOUND_CODE,
 };
 use aoide_protocol::{audit, Door, EventClass, Invocation};
 use aoide_storage::records::RemoteParent;
@@ -726,8 +726,8 @@ const OUTPUT_READ_REFUSED: &str = "output read refused: reading a session's outp
 /// session asked for — the same words whether the id exists or not — so the
 /// gate stays no existence oracle.
 const HISTORY_READ_REFUSED: &str = "output read refused: a session's ping-back history is readable \
-     only with `read` on this host AND the key this node stamped on the child's record for the \
-     parent that spawned it";
+     only with `read` on this host AND the key this node stamped for the parent that spawned the \
+     child — on its record, or on the ring entry that outlives it";
 /// The output-read gate (CONTRACTS.md §6, P-RSA S6). True only when all three
 /// hold:
 /// - `read_ok` — the door's own bearer gate ([`token_authorized`]), the same
@@ -761,33 +761,48 @@ fn node_may_read(node: &aoide_storage::node_store::Node) -> bool {
     node.verified && node.allows.iter().any(|a| a == "read")
 }
 
-/// The ping-back HISTORY gate (CONTRACTS.md §6, P-RSA S8): the output gate
-/// AND the target's own stamped `remoteParent.key` equal to the key that
-/// verified the caller's signature.
+/// The ping-back HISTORY gate (CONTRACTS.md §6, P-RSA S8/S9): the output gate
+/// AND the child's own stamped parent key equal to the key that verified the
+/// caller's signature.
 ///
 /// History is the one read the 2026-09-25 ruling does NOT widen, because these
 /// events belong to a parent: a signed, `read`-holding node may watch any
 /// session's FRAME (above), but only the node that spawned this child — the
-/// one whose key this door stamped on the child's record when it admitted the
-/// spawn — may read what the child published for it. The comparison is the
-/// key, never the stored `node` label, for [`remote_parent_match`]'s own
-/// reason: a name follows a rename, a key is the identity.
+/// one whose key this door stamped when it admitted the spawn — may read what
+/// the child published for it. The comparison is the key, never the stored
+/// `node` label, for [`remote_parent_match`]'s own reason: a name follows a
+/// rename, a key is the identity.
+///
+/// **The key is read off the RING first, the record second** ([`stamped_key`]):
+/// the ring outlives the record by design — that is the whole reason it exists
+/// — so a gate that could only consult `sessions.json` would refuse the parent
+/// its own child's last events the moment the record was pruned.
 ///
 /// A `None` on either side is `false`, never a wildcard: an unsigned caller
-/// (or a weaker rung, which has no proof and so no key) matches nothing, and a
-/// session with no `remoteParent` — a local session — has nothing to match.
-/// Pure, so the whole table is provable without a socket or a stage file.
+/// (or a weaker rung, which has no proof and so no key) matches nothing, an
+/// unknown id has no key on either side, and a session with no `remoteParent`
+/// and no ring — a local session — has nothing to match. Pure, so the whole
+/// table is provable without a socket or a stage file.
 fn history_admitted(
     read_ok: bool,
     signed: Option<SignedCaller<'_>>,
     nodes: &[aoide_storage::node_store::Node],
-    target: Option<&RemoteParent>,
+    target_key: Option<&str>,
 ) -> bool {
     let Some(caller) = signed else {
         return false;
     };
     output_read_admitted(read_ok, resolved_caller(nodes, signed))
-        && target.is_some_and(|t| !t.key.is_empty() && t.key == caller.key)
+        && target_key.is_some_and(|k| !k.is_empty() && k == caller.key)
+}
+
+/// The key this node stamped for one child: the RING's own entry first (it is
+/// the one that survives the record), the roster record's `remoteParent`
+/// second. `None` when neither knows the id — which is exactly the id this
+/// node does not hold.
+fn stamped_key(id: &str) -> Option<String> {
+    aoide_storage::pingback_remote::ring_key(id)
+        .or_else(|| session_remote_parent(id).map(|rp| rp.key).filter(|k| !k.is_empty()))
 }
 
 /// The caller as the frame gate judges it: the CURRENT record for the name
@@ -931,22 +946,76 @@ fn task_get_outputs(
     if !output_read_admitted(read_ok, resolved_caller(&nodes, signed_caller)) {
         return Err((OUTPUT_READ_REFUSED_CODE, OUTPUT_READ_REFUSED.to_string()));
     }
-    if history.is_some() && !history_admitted(read_ok, signed_caller, &nodes, session_remote_parent(task_id).as_ref()) {
-        return Err((OUTPUT_READ_REFUSED_CODE, HISTORY_READ_REFUSED.to_string()));
+    // The ring's own stamped key is the gate input for history, and the record
+    // is the fallback — never the other way round: the ring outlives the
+    // record, so a record-first gate would refuse a parent the events the ring
+    // was kept for.
+    let key = stamped_key(task_id);
+    if history.is_some() {
+        // An id with NEITHER a ring NOR a record is not a refusal at all: it is
+        // the same "task not found" every other `tasks/get` arm answers an
+        // unknown id with, and the pull reads it as the permanent answer it is
+        // (the child is gone for good). Answering the history-specific refusal
+        // here would tell a caller only that the id is not ITS child, and leave
+        // the puller retrying an id that can never come back.
+        if key.is_none() {
+            return Err((TASK_NOT_FOUND_CODE, "task not found".to_string()));
+        }
+        if !history_admitted(read_ok, signed_caller, &nodes, key.as_deref()) {
+            return Err((OUTPUT_READ_REFUSED_CODE, HISTORY_READ_REFUSED.to_string()));
+        }
     }
     let path = sessions_path();
     let sf: SessionsFile =
         load_stage(&path).map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
-    let mut task = build_task(&sf.sessions, task_id)?;
+    let mut task = match build_task(&sf.sessions, task_id) {
+        Ok(task) => task,
+        // A ring whose child's record is gone: the history read is served from
+        // the ring itself (`ring_task`), because that is the read this child's
+        // parent is owed and the ring is the only thing that still has it. Any
+        // other request for the id keeps the plain not-found answer — a frame
+        // needs a record, and there is none.
+        Err(not_found) => match (history, key.as_deref()) {
+            (Some(_), Some(_)) => ring_task(task_id),
+            _ => return Err(not_found),
+        },
+    };
     if let Some(tail) = frame {
         let frame = aoide_conduct::graph::watch_frame(task_id, tail as usize)
-            .map_err(|o| (-32001_i64, o.message))?;
+            .map_err(|o| (TASK_NOT_FOUND_CODE, o.message))?;
         task.artifacts = Some(vec![frame_artifact(frame)]);
     }
     if let Some(after) = history {
         task.history = Some(vec![history_message(task_id, after)]);
     }
     Ok(serde_json::to_value(&task).expect("Task always serializes"))
+}
+
+/// The envelope a history read gets for a child whose roster record is GONE —
+/// the ring's own tail, and nothing invented about the child itself.
+///
+/// The status is the one thing that must be derived rather than read: a
+/// `Task` has one, and there is no record left to fold a state from. It comes
+/// from the ring's LAST event, which is the honest answer and the only one
+/// this node still holds: an `exited` tail means the child ended (the state
+/// A2A calls terminal, `completed`), anything else means no exit was ever
+/// published and the child is not known to have stopped. The timestamp is the
+/// observation instant, which is what `TaskStatus.timestamp` means on every
+/// other arm of this door (`build_task` sets it the same way).
+fn ring_task(task_id: &str) -> Task {
+    let read = aoide_storage::pingback_remote::events_for(task_id, 0);
+    let ended = read.events.last().is_some_and(|e| e.event.get("exited").is_some());
+    Task {
+        id: task_id.to_string(),
+        context_id: task_id.to_string(),
+        status: TaskStatus {
+            state: if ended { "completed" } else { "working" }.to_string(),
+            timestamp: now_iso_utc(),
+        },
+        kind: "task".to_string(),
+        artifacts: None,
+        history: None,
+    }
 }
 
 // ── `message/send`: the inject-or-spawn execution door (Phase B2) ───────────
@@ -12113,7 +12182,7 @@ mod tests {
             });
         write_stage(&sessions_path(), &file).unwrap();
         for i in 0..n {
-            aoide_storage::pingback_remote::spool_event(id, json!({ "exited": { "code": i } }));
+            aoide_storage::pingback_remote::spool_event(id, key, json!({ "exited": { "code": i } }));
         }
     }
 
@@ -12180,27 +12249,39 @@ mod tests {
             extra: Default::default(),
         };
 
-        let mine = stamp("key-of-mine");
-        assert!(history_admitted(true, sig("key-of-mine"), &nodes, Some(&mine)), "the key that was stamped reads it");
-        assert!(!history_admitted(true, sig("key-of-someone-else"), &nodes, Some(&mine)), "a foreign key does not");
-        assert!(!history_admitted(true, sig("key-of-mine"), &nodes, None), "a local session has nothing to read");
+        let _mine = stamp("key-of-mine");
+        assert!(
+            history_admitted(true, sig("key-of-mine"), &nodes, Some("key-of-mine")),
+            "the key this door stamped for the child reads it"
+        );
+        assert!(
+            !history_admitted(true, sig("key-of-someone-else"), &nodes, Some("key-of-mine")),
+            "a foreign key does not"
+        );
+        assert!(
+            !history_admitted(true, sig("key-of-mine"), &nodes, None),
+            "an id with neither a record nor a ring has no key to match"
+        );
 
-        // Not a wildcard in either direction: an EMPTY stored key (a
+        // Not a wildcard in either direction: an EMPTY stamped key (a
         // hand-written record) matches nobody, and an empty caller key is not
         // a `SignedCaller` at all (the door resolves one only from a key that
         // verified).
-        assert!(!history_admitted(true, sig("key-of-mine"), &nodes, Some(&stamp(""))));
+        assert!(!history_admitted(true, sig("key-of-mine"), &nodes, Some("")));
 
         // Unsigned, a weaker rung, no `read`, unverified: all refused, and all
         // by the output gate that runs first.
-        assert!(!history_admitted(true, None, &nodes, Some(&mine)), "no proof, no key to match");
-        assert!(!history_admitted(false, sig("key-of-mine"), &nodes, Some(&mine)), "the bearer gate still runs first");
+        assert!(!history_admitted(true, None, &nodes, Some("key-of-mine")), "no proof, no key to match");
+        assert!(
+            !history_admitted(false, sig("key-of-mine"), &nodes, Some("key-of-mine")),
+            "the bearer gate still runs first"
+        );
         let mut no_read = reader.clone();
         no_read.allows = vec!["spawn".to_string()];
-        assert!(!history_admitted(true, sig("key-of-mine"), &[no_read], Some(&mine)), "`read` is still required");
+        assert!(!history_admitted(true, sig("key-of-mine"), &[no_read], Some("key-of-mine")), "`read` is still required");
         let mut unverified = reader.clone();
         unverified.verified = false;
-        assert!(!history_admitted(true, sig("key-of-mine"), &[unverified], Some(&mine)), "a pairing is still required");
+        assert!(!history_admitted(true, sig("key-of-mine"), &[unverified], Some("key-of-mine")), "a pairing is still required");
     }
 
     /// The matching key reads the ring: the events after the cursor, the
@@ -12295,11 +12376,69 @@ mod tests {
         assert_eq!(resp["error"]["code"], OUTPUT_READ_REFUSED_CODE);
         assert_eq!(resp["error"]["message"], HISTORY_READ_REFUSED);
 
-        // And the refusal is no existence oracle: an id this node never had
-        // reads exactly the same, because the gate runs before the status read.
+        // And an id this node holds NEITHER a record NOR a ring for is the
+        // plain not-found every other `tasks/get` arm answers an unknown id
+        // with — never the history-specific refusal, which would tell the
+        // caller only "not your child" about an id that will never come back
+        // (the pull latches a row on exactly this code, H2 of the S8/S9
+        // review). It stays no oracle about a RING: an id that has one answers
+        // only its own parent's key, as above.
         let resp = refused(history_request("ghost", 0));
+        assert_eq!(resp["error"]["code"], TASK_NOT_FOUND_CODE);
+        assert_eq!(resp["error"]["message"], "task not found");
+    }
+
+    /// H2 of the S8/S9 review: the ring is DESIGNED to outlive the child's
+    /// roster record, and the read the whole lane exists for is the one a
+    /// pruned child's parent still owes itself — so the door serves the ring
+    /// without the record, gated on the key the RING was stamped with.
+    #[test]
+    fn a_pruned_childs_ring_is_still_readable_by_its_own_parent_key() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _roots = frame_stage("history-ring-outlives", "sess-1", "working");
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
+        let key = kp.info().pubkey_hex;
+        stamp_history_parent("sess-1", &key, 2);
+
+        // An unrelated reap prunes the child: the record is gone, the ring is
+        // not (nothing prunes a ring while its parent may still read it).
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        file.sessions.retain(|s| s.session_id != "sess-1");
+        write_stage(&sessions_path(), &file).unwrap();
+
+        let ask = |request: Value, caller_key: &str| -> Value {
+            let body = serde_json::to_vec(&request).unwrap();
+            let ctx = RequestCtx {
+                signed_caller: Some(SignedCaller { name: "yomi-strix", key: caller_key }),
+                ..test_ctx(Path::new("/dev/null"), "")
+            };
+            handle_jsonrpc(&serde_json::from_slice::<Value>(&body).unwrap(), &ctx)
+        };
+
+        // The parent that was stamped reads it, and the envelope is the ring's
+        // own tail: the last event is the child's exit, so the child is
+        // `completed` — the one state this node can still honestly derive.
+        let resp = ask(history_request("sess-1", 0), &key);
+        assert!(resp.get("error").is_none(), "the ring outlives the record: {resp}");
+        assert_eq!(resp["result"]["id"], "sess-1");
+        assert_eq!(resp["result"]["contextId"], "sess-1");
+        assert_eq!(resp["result"]["status"]["state"], "completed", "{resp}");
+        assert!(resp["result"].get("artifacts").is_none(), "a ring is not a frame: {resp}");
+        let ring = &resp["result"]["history"][0]["parts"][0]["data"];
+        assert_eq!(ring["events"].as_array().unwrap().len(), 2, "{ring}");
+        assert_eq!(ring["last"], 2);
+
+        // Any other key is refused, with the history's own words — a ring does
+        // not become public just because its record is gone.
+        let resp = ask(history_request("sess-1", 0), &"dd".repeat(32));
         assert_eq!(resp["error"]["code"], OUTPUT_READ_REFUSED_CODE);
         assert_eq!(resp["error"]["message"], HISTORY_READ_REFUSED);
+
+        // A FRAME for the same pruned child is still the not-found it always
+        // was: a frame needs a record, and there is none.
+        let resp = ask(frame_request("sess-1", Some(5)), &key);
+        assert_eq!(resp["error"]["code"], TASK_NOT_FOUND_CODE);
+        assert_eq!(resp["error"]["message"], "task not found");
     }
 
     /// No signature at all, and no door token configured (`read_ok` true for

@@ -180,6 +180,12 @@ pub(crate) struct DroppedEidolon {
     /// only one that can ever tell its parent so: the record is gone from the
     /// roster, so no later tick will decide over it again.
     pub remote: bool,
+    /// The dropped record's own `remoteParent.key` — the key this node stamped
+    /// when it admitted the spawn (P-RSA S9 review H2). It rides with the
+    /// event because the RING entry, not the record, is what the far door
+    /// gates on once this record is gone: an exit spooled without it would be
+    /// unreadable to the one parent it is for.
+    pub remote_key: Option<String>,
     /// The dropped record's own end facts, carried for the same reason — a run
     /// that exited cleanly stamped them before its presence was removed.
     pub exit_code: Option<i32>,
@@ -802,6 +808,7 @@ fn dropped_this_pass(before: &[SessionRecord], after: &[SessionRecord]) -> Vec<D
                 (p.transcript.locate)(&s.session_id, Some(&s.cwd), s.log_path.as_deref())
             }),
             remote: s.remote_parent.is_some(),
+            remote_key: s.remote_parent.as_ref().map(|rp| rp.key.clone()),
             exit_code: s.exit_code,
             outcome: s.outcome.clone(),
         })

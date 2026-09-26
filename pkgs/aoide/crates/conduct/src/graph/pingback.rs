@@ -75,6 +75,7 @@ use super::model::{canonical_state, load_stage, sessions_path, SessionRecord, Se
 use super::permit::profile_for_agent;
 use super::send::{audit_send, write_delivery, SUBMIT_KEYSTROKE_DELAY};
 use super::trace::{one_line_clip, tool_result_summary};
+use aoide_client::node::FrameReadError;
 use aoide_protocol::agents::{agent_profile, eidolon_trace_record, TraceRecord};
 use aoide_protocol::{Door, Invocation};
 use aoide_storage::pingback_remote::RingRead;
@@ -222,8 +223,12 @@ struct Child {
     dropped_mid_turn: bool,
     /// The record carries `remoteParent`: this child's parent is on ANOTHER
     /// node, so its events spool to the ring instead of being delivered here
-    /// (CONTRACTS.md §4, P-RSA S8).
+    /// (CONTRACTS.md §4, P-RSA S8). `remote_key` is that stamp's own key — the
+    /// parent's node key, and the ring entry's gate input (H2 of the S8/S9
+    /// review): the ring outlives this record, so the key must ride with the
+    /// event, not with the record the far door may no longer find.
     remote: bool,
+    remote_key: String,
     /// The record's own end facts, present only once it says `done` — the one
     /// signal every agent kind publishes, and the whole input of
     /// [`PingEvent::Exited`].
@@ -255,6 +260,10 @@ struct ChildClaim {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SpoolClaim {
     child: String,
+    /// The key the child's own `remoteParent` was stamped with — written into
+    /// the ring entry on its first event ([`aoide_storage::pingback_remote::
+    /// spool_event`]), and the door's only gate input once the record is gone.
+    key: String,
     event: PingEvent,
 }
 
@@ -320,6 +329,7 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
             lines: locate_trace(&rec.agent, &rec.session_id, &rec.cwd, rec.log_path.as_deref()),
             dropped_mid_turn: false,
             remote,
+            remote_key: rec.remote_parent.as_ref().map(|rp| rp.key.clone()).unwrap_or_default(),
             ended: ended_of(rec),
         });
     }
@@ -352,6 +362,11 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
                 .and_then(|path| read_trace(&drop.agent, path)),
             dropped_mid_turn: true,
             remote,
+            // A dropped child's key comes off the record it was built from,
+            // like every other end fact on this path (H2 of the S8/S9 review):
+            // its ring entry is stamped with it, so the far parent can still
+            // read the exit after this record is gone.
+            remote_key: drop.remote_key.clone().unwrap_or_default(),
             // No record is left to say `done`: the sync's own drop IS the
             // observation that this child ended.
             ended: remote.then(|| Ended { code: drop.exit_code, outcome: drop.outcome.clone() }),
@@ -393,7 +408,7 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
     // delivery above loses a line.
     for claim in claims.spool {
         match serde_json::to_value(&claim.event) {
-            Ok(event) => match aoide_storage::pingback_remote::spool_event(&claim.child, event) {
+            Ok(event) => match aoide_storage::pingback_remote::spool_event(&claim.child, &claim.key, event) {
                 Some(seq) => eprintln!(
                     "[aoide/reap] ping-back spooled seq {seq} for {} (parent on another node)",
                     claim.child
@@ -456,7 +471,11 @@ fn claim_locked(
             // remote parent has no local transport, and this node's `deliver`
             // is that transport.
             if child.remote {
-                claimed.spool.push(SpoolClaim { child: child.id.clone(), event });
+                claimed.spool.push(SpoolClaim {
+                    child: child.id.clone(),
+                    key: child.remote_key.clone(),
+                    event,
+                });
             } else {
                 let tag = child_tag(child.petname.as_deref(), &child.id);
                 claimed.lines.push(ChildClaim { parent: child.parent.clone(), line: render_line(&tag, &event) });
@@ -1069,7 +1088,7 @@ pub(crate) fn pingback_pull(inv: &Invocation) -> PingbackReport {
 /// fetch.
 fn pingback_pull_with(
     inv: &Invocation,
-    fetch: impl Fn(&aoide_storage::node_store::Node, &str, u64, &str) -> Result<RingRead, String>,
+    fetch: impl Fn(&aoide_storage::node_store::Node, &str, u64, &str) -> Result<RingRead, FrameReadError>,
 ) -> PingbackReport {
     let mut report = PingbackReport::default();
     if inv.door != Door::Daemon {
@@ -1107,8 +1126,37 @@ fn pingback_pull_with(
         };
         let read = match fetch(node, &entry.session_id, entry.lines_after, parent) {
             Ok(read) => read,
-            Err(why) => {
-                let why = clean_line(&why);
+            Err(e) => {
+                let why = clean_line(&e.message);
+                // A PERMANENT answer: the far node holds neither a record nor a
+                // ring for this child, so it is gone for good and every later
+                // tick would ask the same question forever — unbounded audit
+                // growth and one wasted request per tick. The row is latched
+                // exactly as a drained exit latches it. A refusal is NOT this
+                // (a wrong key may be a re-pair the operator can fix), and
+                // neither is a transport failure: both stay retryable.
+                if e.code == Some(aoide_protocol::wire::a2a::TASK_NOT_FOUND_CODE) {
+                    eprintln!(
+                        "[aoide/reap] remote ping-back child `{}`/{} is gone; latched and never pulled again",
+                        node.name, entry.session_id
+                    );
+                    audit_pull(
+                        inv,
+                        "child-gone",
+                        &format!(
+                            "remote ping-back child `{}`/{} is gone; row latched",
+                            node.name, entry.session_id
+                        ),
+                    );
+                    if let Err(e) = aoide_storage::remote_children::mark_drained(&entry.key, &entry.session_id) {
+                        eprintln!(
+                            "[aoide/reap] remote ping-back drain latch failed for `{}`/{}: {e}",
+                            node.name, entry.session_id
+                        );
+                    }
+                    report.skipped.push((parent.to_string(), "child-gone".to_string()));
+                    continue;
+                }
                 eprintln!(
                     "[aoide/reap] remote ping-back pull from `{}`/{} failed: {why}",
                     node.name, entry.session_id
@@ -1156,8 +1204,7 @@ fn pingback_pull_with(
             lines.push(render_line(&tag, &event));
         }
         for line in lines {
-            match deliver(&line, parent, &roster, inv, "autogate-child remote") {
-                Ok(()) => {
+            match deliver(&line, parent, &roster, inv, "autogate-child remote") {                Ok(()) => {
                     eprintln!("[aoide/reap] ping-back (remote) → {parent}: {line}");
                     report.delivered.push((parent.to_string(), line));
                 }
@@ -1185,16 +1232,22 @@ fn pingback_pull_with(
 /// but not as a ring read is a failure with no code — the far side is a peer,
 /// and a peer answering a shape this version cannot read is named as that,
 /// never rendered as an empty ring (an empty ring is a real answer).
+///
+/// The failure is a [`FrameReadError`] and never a `String` (H2 of the S8/S9
+/// review): the door's own CODE is what tells this side a permanent answer
+/// (`TASK_NOT_FOUND_CODE` — no record and no ring, the child is gone) from a
+/// transient one, and a flattened message would throw exactly that away.
 fn fetch_history(
     node: &aoide_storage::node_store::Node,
     id: &str,
     after: u64,
     tunnel_key: &str,
-) -> Result<RingRead, String> {
-    let value = aoide_client::commands::task_history_on_node(node, id, after, tunnel_key)
-        .map_err(|e| e.message)?;
-    serde_json::from_value::<RingRead>(value)
-        .map_err(|e| format!("the far node's ping-back read did not parse: {e}"))
+) -> Result<RingRead, FrameReadError> {
+    let value = aoide_client::commands::task_history_on_node(node, id, after, tunnel_key)?;
+    serde_json::from_value::<RingRead>(value).map_err(|e| FrameReadError {
+        code: None,
+        message: format!("the far node's ping-back read did not parse: {e}"),
+    })
 }
 
 /// Which registered node holds this row's child — by the row's KEY, which is
@@ -1371,6 +1424,7 @@ mod tests {
             lines: Some(lines(body)),
             dropped_mid_turn: false,
             remote: false,
+            remote_key: String::new(),
             ended: None,
         }
     }
@@ -2113,6 +2167,7 @@ mod tests {
                 agent: "eidolon".to_string(),
                 trace: Some(trace),
                 remote: false,
+                remote_key: None,
                 exit_code: None,
                 outcome: None,
             }],
@@ -2308,6 +2363,7 @@ mod tests {
                 agent: "eidolon".to_string(),
                 trace: Some(trace),
                 remote: true,
+                remote_key: Some("aa".repeat(32)),
                 exit_code: Some(7),
                 outcome: Some("exit".to_string()),
             }],
@@ -2719,8 +2775,12 @@ mod tests {
             calls.set(calls.get() + 1);
             if id == "dead-child" {
                 assert_eq!(after, 4, "the retry starts from the cursor the ledger holds");
-                // A peer's own bytes: hostile ones included.
-                return Err("the far node refused\u{1b}[31m the read\u{202e}".to_string());
+                // A peer's own bytes: hostile ones included, and a transport
+                // failure carries no code — retryable, never a latch.
+                return Err(FrameReadError {
+                    code: None,
+                    message: "the far node refused\u{1b}[31m the read\u{202e}".to_string(),
+                });
             }
             Ok(read_of(&[(1, settled("still here"))]))
         });
@@ -2741,6 +2801,66 @@ mod tests {
         let log = std::fs::read_to_string(root.join("log")).unwrap();
         assert!(log.contains("pull-failed"), "{log}");
         assert!(!log.contains('\u{1b}') && !log.contains('\u{202e}'), "{log}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_gone_child_latches_the_row_on_the_permanent_not_found() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = setup("pingback-pull-child-gone");
+        register_far_node("nodeb");
+        let _listener = headless_parent("wrap-1", "claude");
+        ledger_row("wrap-1", "a2a-4411-1790");
+
+        // The far door's "no record and no ring" answer, with the code it
+        // carries: the child is gone for good.
+        let calls = std::cell::Cell::new(0);
+        let report = pingback_pull_with(&daemon_inv(), |_, _, _, _| {
+            calls.set(calls.get() + 1);
+            Err(FrameReadError {
+                code: Some(aoide_protocol::wire::a2a::TASK_NOT_FOUND_CODE),
+                message: "task not found".to_string(),
+            })
+        });
+        assert_eq!(calls.get(), 1);
+        assert_eq!(report.skipped, vec![("wrap-1".to_string(), "child-gone".to_string())], "{report:?}");
+        assert!(drained_of("a2a-4411-1790"), "a child that is gone is never asked about again");
+
+        // The latch is what stops the forever-retry: no second request, ever.
+        let report = pingback_pull_with(&daemon_inv(), |_, _, _, _| {
+            panic!("a latched row is never pulled again")
+        });
+        assert_eq!(report, PingbackReport::default(), "{report:?}");
+
+        // And it is audited for what it was — distinct from a transient
+        // failure, which never latches.
+        let log = std::fs::read_to_string(root.join("log")).unwrap();
+        assert!(log.contains("child-gone"), "{log}");
+        assert!(log.contains("row latched"), "{log}");
+
+        // A REFUSAL is not a gone child: the key may be fixable (a re-pair),
+        // so the row stays and the next tick retries.
+        ledger_row("wrap-1", "a2a-4411-9999");
+        let report = pingback_pull_with(&daemon_inv(), |_, _, _, _| {
+            Err(FrameReadError {
+                code: Some(aoide_protocol::wire::a2a::OUTPUT_READ_REFUSED_CODE),
+                message: "output read refused".to_string(),
+            })
+        });
+        assert_eq!(
+            report.skipped,
+            vec![("wrap-1".to_string(), "pull-failed".to_string())],
+            "a refusal is retryable: {report:?}"
+        );
+        assert!(!drained_of("a2a-4411-9999"), "a refusal must never latch the row");
 
         let _ = std::fs::remove_dir_all(&root);
     }
