@@ -1568,7 +1568,7 @@ mod sealed_spool_tests {
     /// A sealed entry for a real container: this node sealed to itself, so
     /// the container is a genuine one rather than a hand-built stub.
     fn sealed_entry(body: &str) -> OutboxEntry {
-        let me = crate::display::local_host_name();
+        let me = crate::display::local_node_name();
         let kp = crate::identity::load_or_mint().unwrap().0;
         let mut nodes = crate::node_store::load_nodes();
         crate::node_store::upsert_paired_node(
@@ -1668,7 +1668,7 @@ mod sealed_spool_tests {
         // is what this asserts; the ack side is covered by its own tests.
         let spooled = &listed[0];
         assert_eq!(spooled.envelope.msgid, msgid, "the msgid a retire keys on");
-        assert_eq!(spooled.envelope.header.from.node, crate::display::local_host_name(), "the from.node a retire keys on");
+        assert_eq!(spooled.envelope.header.from.node, crate::display::local_node_name(), "the from.node a retire keys on");
         assert!(
             spooled.envelope.header.from.name.is_empty(),
             "and the mailbox name is gone from the spool"

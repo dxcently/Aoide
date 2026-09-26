@@ -1270,8 +1270,10 @@ pub fn deposit_container(container: &Container) -> Result<ContainerOutcome, Stri
         }
     }
 
-    // Destination branch: self is `to.node`.
-    if container.to.node != crate::display::local_host_name() {
+    // Destination branch: self is `to.node`. The ADDRESS form of this box's own
+    // name (`display::local_node_name`): whoever minted the container wrote the
+    // sender-side node name, which is that form on every host.
+    if container.to.node != crate::display::local_node_name() {
         // Not ours to open. A hub reaching here has spooled it onward
         // without ever calling this; a direct-lane receiver that is not the
         // destination has nothing to do with it either.
@@ -1415,7 +1417,8 @@ pub fn walk_chain(
         expected_next = Some(entry.next.clone());
     }
     match expected_next {
-        Some(last) if last == crate::display::local_host_name() => Ok(()),
+        // Address form — see the destination branch above.
+        Some(last) if last == crate::display::local_node_name() => Ok(()),
         Some(last) => Err(format!("the last hop hands the letter to `{last}`, not this node")),
         None => Err("the hop chain is empty".to_string()),
     }
@@ -1734,7 +1737,7 @@ mod container_tests {
         static SEQ: AtomicU64 = AtomicU64::new(0);
         let body = format!("sealed letter body {}", SEQ.fetch_add(1, Ordering::SeqCst));
 
-        let me = crate::display::local_host_name();
+        let me = crate::display::local_node_name();
         let kp = identity::load_or_mint().unwrap().0;
         let mut nodes = node_store::load_nodes();
         node_store::upsert_paired_node(
@@ -2036,7 +2039,7 @@ mod container_tests {
         // container would correctly come back `duplicate` instead. That is
         // the property, not a limitation — it is what makes a retry over
         // another route a duplicate rather than a collision.
-        let me = crate::display::local_host_name();
+        let me = crate::display::local_node_name();
         let msgid_of = |c: &Container| Ctx::from_container(c).unwrap().msgid;
 
         // A hop signing itself as an entry, with an origin it is not: the
@@ -2159,7 +2162,7 @@ mod container_tests {
         // A second, undeposited letter sealed to the SAME generation-1 key:
         // the first one is already through the dedup gate.
         let gen1_binding = publish_binding().unwrap();
-        let me = crate::display::local_host_name();
+        let me = crate::display::local_node_name();
         let second_letter = mail::mint_outbound_letter("alice", &me, "bob", "second body").unwrap();
         let to_gen1 = seal_envelope(&second_letter, &gen1_binding, "", "", &me, &now_iso_utc()).unwrap();
         assert_eq!(to_gen1.to.age, container.to.age);
@@ -2302,7 +2305,7 @@ mod review_fix_tests {
         let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-two-hop"));
 
-        let me = crate::display::local_host_name();
+        let me = crate::display::local_node_name();
         let origin_kp = identity::load_or_mint().unwrap().0;
         let relay_kp = identity::mint_ephemeral().unwrap();
         let mut nodes = node_store::load_nodes();
@@ -2408,7 +2411,7 @@ mod review_fix_tests {
         let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
         env(&aoide_test_support::unique_tmp("seal-filed-survives"));
 
-        let me = crate::display::local_host_name();
+        let me = crate::display::local_node_name();
         let (kp, _) = identity::load_or_mint().unwrap();
         let mut nodes = node_store::load_nodes();
         node_store::upsert_paired_node(&mut nodes, &me, "ssh://self", &kp.info().pubkey_hex, &now_iso_utc(), &["message".to_string()]);

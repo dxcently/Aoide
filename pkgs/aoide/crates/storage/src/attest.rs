@@ -54,16 +54,14 @@
 use crate::records::{SessionRecord, SessionsFile};
 use crate::sealed_id::{verify_seal, SealedIdentity};
 use aoide_protocol::state::canonical_state;
-#[cfg(unix)]
 use serde_json::Value;
-#[cfg(unix)]
 use std::io::{BufRead, BufReader, Write};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
-#[cfg(unix)]
+#[cfg(windows)]
+use aoide_protocol::win_unix::UnixStream;
 use std::path::Path;
 use std::path::PathBuf;
-#[cfg(unix)]
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -280,19 +278,18 @@ pub fn daemon_socket_path() -> PathBuf {
     runtime.join("aoided.sock")
 }
 
-/// Bound a Unix-socket connect with a background-thread-plus-channel race
+/// Bound a local-socket connect with a background-thread-plus-channel race
 /// (moved from `aoide_client::daemon`, same mechanism, same doc): `None`
 /// when the connect fails or `timeout` elapses first — including the racer
 /// thread failing to spawn at all, treated as "no daemon."
 ///
-/// Unix-only by construction: `UnixStream` is the one transport this channel
-/// has, and native Windows has no arm for it in this slice. That is not a
-/// missing refusal — the refusal is [`daemon_seal_pubkey_hex`]'s own `None`,
-/// which is the documented "unidentified" every caller already fail-closes
-/// on. It exists as a separate function precisely so ONE answer covers
-/// "no daemon", "a daemon that cannot be reached" and "a host without the
-/// channel", rather than three shapes a caller would have to tell apart.
-#[cfg(unix)]
+/// **One seam, two hosts, the same mechanism**: `UnixStream` is `std`'s on
+/// Unix and `aoide_protocol::win_unix`'s native `AF_UNIX` on Windows, so the
+/// body below — the thread, the channel, the timeout — is not host-split at
+/// all. [`daemon_seal_pubkey_hex`] therefore answers on BOTH hosts, and the
+/// "unreachable daemon" `None` covers "no daemon", "a daemon that cannot be
+/// reached" and a socket path whose directory does not exist as ONE answer
+/// rather than three shapes a caller would have to tell apart.
 pub fn connect_bounded(socket_path: &Path, timeout: Duration) -> Option<UnixStream> {
     let (tx, rx) = mpsc::channel();
     let sp = socket_path.to_path_buf();
@@ -321,7 +318,12 @@ pub fn connect_bounded(socket_path: &Path, timeout: Duration) -> Option<UnixStre
 /// cached process-wide, and never a file read — module doc's "live round
 /// trip" rule; the same-uid unlink-then-bind honesty note on this channel
 /// lives in `CONTRACTS.md`'s identity section, unchanged by the move.
-#[cfg(unix)]
+///
+/// **Both hosts, one body**: the channel is an `AF_UNIX` socket on either
+/// one (`std`'s on Unix, `aoide_protocol::win_unix`'s native binding on
+/// Windows), so this is not a Unix arm with a Windows refusal beside it — the
+/// same round trip runs on both, and the only difference a caller can see is
+/// the socket PATH, which `crate::runtime_dir` already answers per host.
 pub fn daemon_seal_pubkey_hex() -> Option<String> {
     let socket_path = daemon_socket_path();
     let stream = connect_bounded(&socket_path, CONNECT_TIMEOUT)?;
@@ -341,23 +343,6 @@ pub fn daemon_seal_pubkey_hex() -> Option<String> {
     v.get("sealPubkeyHex").and_then(Value::as_str).map(str::to_string)
 }
 
-/// The Windows arm, and it is a REFUSAL BY NAME rather than a second
-/// discovery path: the daemon's seal channel is an `AF_UNIX` socket, which
-/// this slice has no native client for, so every lookup here resolves
-/// UNIDENTIFIED. That is the same fail-closed answer the channel already
-/// gives for an unreachable daemon, and the same one the matrix's
-/// peer-credential row takes on hosts without that mechanism — it is what
-/// [`attested_caller`] and `aoide-conduct`'s send gate already refuse on.
-/// What is emphatically NOT here: a fabricated key, a stubbed signature
-/// check, or a weaker "verified" that would let the sealed-identity lane
-/// pass. The pid-reuse half of that lane is untouched and real on Windows —
-/// [`verify_seal_over`] re-derives a live start time there from the native
-/// process table, and its own tests run on that host.
-#[cfg(windows)]
-pub fn daemon_seal_pubkey_hex() -> Option<String> {
-    None
-}
-
 // ── Tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -367,6 +352,8 @@ mod tests {
     use crate::sealed_id::mint_seal;
     #[cfg(unix)]
     use std::os::unix::net::UnixListener;
+    #[cfg(windows)]
+    use aoide_protocol::win_unix::UnixListener;
 
     fn sealed_record(
         session_id: &str,
@@ -396,11 +383,10 @@ mod tests {
     }
 
     /// A one-shot fake daemon: binds `path`, answers exactly one connection's
-    /// first line with a canned `ping` reply carrying `pubkey_hex`.
-    /// Unix-only shape: the fake daemon binds an AF_UNIX socket, and the
-    /// channel it stands in for is the one `connect_bounded` opens — which
-    /// native Windows has no arm for (see `daemon_seal_pubkey_hex`).
-    #[cfg(unix)]
+    /// first line with a canned `ping` reply carrying `pubkey_hex`. Both
+    /// hosts: the listener is `std`'s `AF_UNIX` on Unix and
+    /// `aoide_protocol::win_unix`'s native binding on Windows, which is the
+    /// same channel [`connect_bounded`] opens on either one.
     fn spawn_fake_daemon(path: &std::path::Path, pubkey_hex: &str) {
         let listener = UnixListener::bind(path).expect("bind fake daemon socket");
         let pk = pubkey_hex.to_string();
@@ -538,20 +524,21 @@ mod tests {
 
     // ── daemon_seal_pubkey_hex / attested_caller ─────────────────────────
 
-    /// Unix-only: this builds a path under `/tmp` to bind an AF_UNIX socket
-    /// at, which is the fixture the three tests below share — the channel
-    /// itself has no Windows arm (`daemon_seal_pubkey_hex`).
-    #[cfg(unix)]
+    /// A socket path neither host has bound yet: this process's own temp
+    /// directory (the `/tmp` of each host) plus a name unique per call. Short
+    /// on purpose — a socket path is bounded by the target's `sun_path`, which
+    /// is what both binds below check and refuse by name.
     fn short_tmp(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .subsec_nanos();
-        PathBuf::from(format!("/tmp/av-attest-{tag}-{}-{nanos}", std::process::id()))
+        std::env::temp_dir().join(format!("av-attest-{tag}-{}-{nanos}", std::process::id()))
     }
 
-    /// Unix-only: the daemon it round-trips against binds an AF_UNIX socket.
-    #[cfg(unix)]
+    /// Both hosts: [`short_tmp`] is built under this process's own temp
+    /// directory, and the daemon it round-trips against binds an `AF_UNIX`
+    /// socket there — the one channel `daemon_seal_pubkey_hex` speaks.
     #[test]
     fn daemon_seal_pubkey_hex_round_trips_against_a_fake_daemon() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -563,10 +550,9 @@ mod tests {
         let _ = std::fs::remove_file(&sock);
     }
 
-    /// Unix-only: "a dead socket" is a Unix-socket fact, and on a host with
-    /// no channel at all the same `None` would be trivially true rather than
-    /// evidence of anything.
-    #[cfg(unix)]
+    /// Both hosts: "a dead socket" is a socket-path fact on either one — the
+    /// path names no listener, and the connect fails or times out into the
+    /// same `None` an unreachable daemon gives.
     #[test]
     fn daemon_seal_pubkey_hex_against_a_dead_socket_is_none() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -579,8 +565,8 @@ mod tests {
     /// roster on disk → live pubkey off a (fake) daemon ping → verified
     /// origin. Also pins the fail-to-unidentified halves: a daemon serving
     /// the WRONG key, and no daemon at all, both resolve `None`.
-    /// Unix-only: the whole broker-side path needs the fake daemon above.
-    #[cfg(unix)]
+    /// Both hosts: the whole broker-side path runs against the fake daemon
+    /// above, which is a real `AF_UNIX` listener on either one.
     #[test]
     fn attested_caller_resolves_a_sealed_remote_origin_session_and_fails_to_none_otherwise() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

@@ -357,6 +357,20 @@
   `pid > pid_t::MAX` are refused BEFORE the syscall: both name a process group.
   Live is NOT identity, so a caller about to SIGNAL a pid still checks its own
   argv/port. Callers re-export or import this probe; never fork a `/proc` copy.
+- **The two process ACTS live beside the probe and promise DIFFERENT things per
+  host** — `fs::terminate` is `SIGTERM` (a request a trapped or hung child can
+  survive) on Unix and `TerminateProcess` (uncatchable) on native Windows, and
+  `fs::wait_for_exit` is `waitpid` there and `WaitForSingleObject` here. An
+  agent editing either must keep the doc's table honest and keep callers
+  written for the WEAKER arm; the one caller, `aoide-client::tunnel`, reaches
+  `terminate` only through its argv guard, which is what makes the hard arm
+  safe. Never add a second kill/wait path: this is the seam.
+- **A node name this box gives itself is `display::local_node_name()`, never
+  `local_host_name()`** — an address grammar (`^[a-z0-9][a-z0-9-]*$`) is
+  lowercase and an OS host name need not be (native Windows' DNS name is
+  conventionally upper-case). Any new site that stamps, declares or compares
+  this box as a NODE uses the folded form; the raw name stays for display and
+  for an ssh target.
 - **`fs::atomic_write`'s temp cleanup is directory-wide, and every failing
   half unlinks its own temp.** `sweep_stale_temps` reclaims any sibling
   `<stem>.tmp.<pid>` whose pid is dead, not only temps sharing the target's

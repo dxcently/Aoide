@@ -117,6 +117,15 @@ by decision — no embedded database yet
   and `pid > pid_t::MAX` refused before the syscall, both naming a process
   group). Live is not identity. Backs the stale-temp sweep, is re-exported as
   `aoide_conduct::reap::proc_exists`, and is imported by `aoide-client`.
+- `fs::terminate` / `fs::wait_for_exit` (`Waited`) — the two process ACTS, in
+  the same module for the same reason the probe is: one seam, two hosts. Unix
+  sends `SIGTERM` and really waits (`waitpid`, `WNOHANG` or blocking); native
+  Windows `TerminateProcess`es and waits on the process handle
+  (`aoide_protocol::win_proc`). **The arms do not promise the same thing** —
+  Unix's is a request a trapped or hung child can survive, Windows' cannot be
+  caught at all — so the docs state the degradation and callers are written for
+  the weaker arm; `aoide-client::tunnel`'s record-keeping (a survivor keeps its
+  record) is the one caller, always behind its own argv guard.
 - `records::Project` — a project is a set of anchor roots, not one
   directory: `path` is always the first root, mirrored at `roots[0]`;
   `roots` is the FULL ordered root list, always written by
@@ -602,8 +611,11 @@ by decision — no embedded database yet
 
   P-M2 adds the wire for directly-paired nodes: `mint_outbound_letter`/
   `mint_ack` seal a fresh envelope with THIS instance's own identity key
-  (`from.node` always `display::local_host_name()` — `self` never crosses
-  the wire); `verify_origin_signature` is the OTHER lookup a P-P4 caller
+  (`from.node` always `display::local_node_name()` — `self` never crosses
+  the wire, and the form it crosses as is the ADDRESS one: an OS host name is
+  case-preserved and native Windows' is conventionally upper-case while a node
+  name is grammar-lowercase, so the folded name is the single name this box
+  mints, declares and is looked up under); `verify_origin_signature` is the OTHER lookup a P-P4 caller
   doesn't need — not the connection's signer (`ctx.signed_caller`, a
   door concern) but `header.from.node`'s own key, tried against the ONE
   entry `node_store` has on record under that exact name, never every
@@ -783,7 +795,9 @@ by decision — no embedded database yet
   reconstruction — the pid-reuse defense), `attested_session` (the
   verified nearest-ancestor walk the send gate keys on), the daemon
   seal-pubkey channel (`daemon_socket_path`/`connect_bounded`/
-  `daemon_seal_pubkey_hex` — a LIVE `ping` round trip, never a file), and
+  `daemon_seal_pubkey_hex` — a LIVE `ping` round trip, never a file, and ONE
+  body on both hosts now that the socket type is `std`'s on Unix and
+  `aoide_protocol::win_unix`'s native `AF_UNIX` on Windows), and
   `attested_caller` — the secrets broker's one-stop: peercred pid →
   verified `(sessionId, originClass)`, `None` = UNIDENTIFIED. Lives here
   because the crate DAG forbids every other shared home (`aoide-secrets`
