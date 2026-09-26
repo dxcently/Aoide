@@ -42,8 +42,20 @@ pub fn iso_utc_from_epoch(secs: i64) -> String {
     format!("{year:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z")
 }
 
-/// Parse `YYYY-MM-DDTHH:MM:SS` (a trailing `Z` tolerated) to UTC epoch seconds,
-/// or `None` when the shape doesn't hold — a hand-rolled civil-days conversion
+/// `stamp` moved by `secs` (negative moves back), in the same ISO-8601 UTC
+/// shape. An unparsable `stamp` is returned unchanged rather than replaced
+/// with a fabricated time, which makes a window built from it close
+/// immediately — fail-closed, never widened. Used for the age binding's
+/// validity window, where a wrong `now` must never open a window wider than
+/// intended.
+pub fn shift_iso_utc(stamp: &str, secs: i64) -> String {
+    match parse_iso_utc(stamp) {
+        Some(epoch) => iso_utc_from_epoch(epoch + secs),
+        None => stamp.to_string(),
+    }
+}
+
+/// Parse `YYYY-MM-DDTHH:MM:SS` (a trailing `Z` tolerated) to UTC epoch seconds,/// or `None` when the shape doesn't hold — a hand-rolled civil-days conversion
 /// so the lock never grows a chrono just to subtract two timestamps.
 pub fn parse_iso_utc(s: &str) -> Option<i64> {
     let s = s.trim();

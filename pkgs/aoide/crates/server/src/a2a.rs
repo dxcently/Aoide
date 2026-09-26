@@ -2950,6 +2950,12 @@ fn deposit_refusal(resolved: Option<&aoide_storage::node_store::Node>) -> (i64, 
 /// forever, which the vocabulary (`letter`/`receipt` only) has no third
 /// shape to end.
 fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
+    // P-SEAL: a sealed container takes the same admission and then the
+    // container's own two halves; a plaintext envelope is the direct-lane
+    // per-peer upgrade path, unchanged from P-M2.
+    if params.get("container").map(|v| !v.is_null()).unwrap_or(false) {
+        return deposit_sealed(params, ctx);
+    }
     let envelope: aoide_storage::mail::Envelope =
         match serde_json::from_value(params.get("envelope").cloned().unwrap_or(Value::Null)) {
             Ok(e) => e,
@@ -3083,7 +3089,7 @@ fn poll_refusal(resolved: Option<&aoide_storage::node_store::Node>, claimed: &st
 /// `aoide/mailPoll` (P-M3): `{ node }` → `{ envelopes: [ <Envelope>, … ] }`.
 /// Every outbox entry this box spooled toward `node` that `node` itself may
 /// take — all `hold`-flavored ones, and `now` ones whose own attempts have
-/// been failing ([`aoide_storage::outbox::poll_entries`]'s rule, and the ONE
+/// been failing ([`aoide_storage::outbox::poll_payloads`]'s rule, and the ONE
 /// place that rule lives). Handed over oldest-first; nothing is marked,
 /// moved, or counted, and an entry leaves the spool only when its ack lands
 /// (`mail_deposit`'s receipt arm, the same retirement a push would earn).
@@ -3111,8 +3117,39 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
     }
     let poller = resolved.map(|n| n.name.clone()).unwrap_or_default();
 
-    let envelopes = aoide_storage::outbox::poll_entries(&poller)
+    let payloads = aoide_storage::outbox::poll_payloads(&poller)
         .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
+    // P-SEAL: one answer, two lists. A sealed entry's container is what a
+    // destination holding this node's binding needs; the plaintext envelope
+    // rides beside it for one that has published none, which is the per-peer
+    // upgrade path on the pull direction. A sealed entry deliberately hands
+    // over NO envelope list — the plaintext is inside `ct` and handing it
+    // out again would put letter bytes on the wire for a destination that
+    // asked to be sealed to.
+    //
+    // H1 (the branch review): an entry spooled before this node held the
+    // poller's binding is upgraded HERE, before it is handed over, and the
+    // upgrade is persisted — the same rule the drain applies in the other
+    // direction.
+    //
+    // H2 (the re-review): the decision is made against the LIVE spool, entry
+    // by entry, not against the snapshot `poll_payloads` offered. Between the
+    // two a drain can retire the entry or seal it concurrently, and handing
+    // over the snapshot's envelope then would put a stale plaintext on the
+    // wire for a destination that holds a binding. An entry that is gone, or
+    // whose destination holds a binding that is not usable now, hands over
+    // NOTHING.
+    let mut containers: Vec<aoide_storage::seal::Container> = Vec::new();
+    let mut envelopes: Vec<aoide_storage::mail::Envelope> = Vec::new();
+    for (_, offered) in payloads {
+        match aoide_storage::outbox::hand_over(&poller, &offered.msgid)
+            .map_err(|e| (-32603_i64, format!("internal error: {e}")))?
+        {
+            aoide_storage::outbox::HandOver::Container(container) => containers.push(*container),
+            aoide_storage::outbox::HandOver::Envelope(envelope) => envelopes.push(*envelope),
+            aoide_storage::outbox::HandOver::Nothing => {}
+        }
+    }
 
     let _ = audit(
         ctx.audit_log,
@@ -3120,9 +3157,207 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
         EventClass::Audit,
         "a2a.aoide/mailPoll",
         "ok",
-        &format!("node {poller} polled: {} envelope(s) handed over", envelopes.len()),
+        &format!(
+            "node {poller} polled: {} container(s) and {} plaintext envelope(s) handed over",
+            containers.len(),
+            envelopes.len()
+        ),
     );
-    Ok(json!({ "envelopes": envelopes }))
+    Ok(json!({ "containers": containers, "envelopes": envelopes }))
+}
+
+/// The sealed half of `aoide/mailDeposit` (P-SEAL): the same admission the
+/// plaintext arm runs, then `seal::deposit_container`'s shared steps and
+/// destination branch. A refusal carries the taught word CONTRACTS.md §6
+/// names; an opened container is handed to the SAME `mail::deposit` the
+/// plaintext arm uses, so filing, the seen set and the receipt rule have one
+/// implementation and not two.
+fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
+    let container: aoide_storage::seal::Container =
+        match serde_json::from_value(params.get("container").cloned().unwrap_or(Value::Null)) {
+            Ok(c) => c,
+            Err(e) => return Err((-32602, format!("invalid params: container: {e}"))),
+        };
+
+    let nodes = aoide_storage::node_store::load_nodes();
+    let resolved = ctx.signed_caller.and_then(|c| nodes.iter().find(|p| p.name == c.name));
+    if !deposit_admitted(resolved) {
+        let (code, msg) = deposit_refusal(resolved);
+        let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "unauthorized", &msg);
+        return Err((code, msg));
+    }
+    let hop_name = ctx
+        .signed_caller
+        .map(|c| c.name)
+        .expect("deposit_admitted only returns true when a signed caller resolved")
+        .to_string();
+
+    let outcome = aoide_storage::seal::deposit_container(&container)
+        .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
+
+    let (audit_status, audit_detail) = match &outcome {
+        aoide_storage::seal::ContainerOutcome::Opened { envelope, .. } => (
+            "ok",
+            format!(
+                "sealed from {}/{} to {}/{} via {hop_name}: opened",
+                envelope.header.from.node,
+                envelope.header.from.name,
+                envelope.header.to.node,
+                envelope.header.to.name
+            ),
+        ),
+        aoide_storage::seal::ContainerOutcome::Duplicate { .. } => {
+            ("ok", format!("sealed msgid {} via {hop_name}: duplicate", container.msgid))
+        }
+        aoide_storage::seal::ContainerOutcome::Refused { reason, detail } => {
+            ("invalid", format!("sealed msgid {} via {hop_name}: {reason}: {detail}", container.msgid))
+        }
+    };
+    let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", audit_status, &audit_detail);
+
+    match outcome {
+        aoide_storage::seal::ContainerOutcome::Refused { reason, detail } => {
+            Ok(json!({ "status": "refused", "reason": reason, "detail": detail }))
+        }
+        aoide_storage::seal::ContainerOutcome::Duplicate { filed_letter } => {
+            // Nothing is opened here — that is the point of deciding dedup
+            // before the open. The receipt the first delivery never got is
+            // recovered from the FILED record instead, which is where the
+            // opened envelope already lives, so a lost ack costs no second
+            // open and no second filing.
+            if filed_letter {
+                if let Ok(Some(entry)) = aoide_storage::mail::show(&container.msgid) {
+                    aoide_conduct::mail_bridge::settle_deposit(
+                        &entry.envelope,
+                        &aoide_storage::mail::DepositOutcome::Duplicate { filed_letter: true },
+                    );
+                }
+            }
+            Ok(json!({ "status": "duplicate" }))
+        }
+        aoide_storage::seal::ContainerOutcome::Opened { envelope, digest } => {
+            let filed = aoide_storage::mail::deposit((*envelope).clone(), &hop_name)
+                .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
+            // M1: record the container only now that it is FILED (either
+            // freshly filed, or already in `seen.jsonl` — both mean the
+            // letter is on this disk). Recording any earlier would answer
+            // `duplicate` to a refusal that should re-run and would claim a
+            // filing a crash between the gate and `base.jsonl` never made.
+            match &filed {
+                aoide_storage::mail::DepositOutcome::Filed { .. }
+                | aoide_storage::mail::DepositOutcome::Duplicate { .. } => {
+                    // L17: the gate's write failing is NOT silent. The letter
+                    // is filed either way and the next identical container is
+                    // still answered correctly (from `seen.jsonl`), but a
+                    // `containers.jsonl` that cannot be written costs an
+                    // unnecessary open every time — an operator needs to see
+                    // that, not a clean-looking audit line.
+                    if let Err(e) = aoide_storage::seal::record_admitted(&container, &digest) {
+                        let _ = audit(
+                            ctx.audit_log,
+                            Door::A2a,
+                            EventClass::Audit,
+                            "a2a.aoide/mailDeposit",
+                            "invalid",
+                            &format!("dedup record write failed for {}: {e}", container.msgid),
+                        );
+                    }
+                }
+                _ => {}
+            }
+            aoide_conduct::mail_bridge::settle_deposit(&envelope, &filed);
+            match &filed {
+                aoide_storage::mail::DepositOutcome::Filed { msgid, .. } => {
+                    Ok(json!({ "status": "accepted", "msgid": msgid }))
+                }
+                aoide_storage::mail::DepositOutcome::Duplicate { .. } => Ok(json!({ "status": "duplicate" })),
+                aoide_storage::mail::DepositOutcome::BadMsgid => Ok(json!({
+                    "status": "refused",
+                    "reason": "bad-msgid",
+                    "detail": "envelope msgid does not match the recomputed value",
+                })),
+                aoide_storage::mail::DepositOutcome::UnverifiedOrigin => Ok(json!({
+                    "status": "refused",
+                    "reason": "unverified-origin",
+                    "detail": "the inner envelope's origin signature does not verify",
+                })),
+            }
+        }
+    }
+}
+
+/// `aoide/binding` (P-SEAL, CONTRACTS.md §6): `{ binding? }` →
+/// `{ binding }`. A signed read of THIS node's own current binding, and —
+/// when the caller includes its own — the moment this node stores the
+/// caller's, so one authenticated round trip upgrades both ends.
+///
+/// Admission is `mailDeposit`'s own question (a verified caller holding
+/// `message`): the binding is what a peer needs before it can seal anything
+/// TO this node, so refusing it to a node that may already deposit mail
+/// would leave the two halves of the same exchange gated differently.
+fn node_binding(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
+    let nodes = aoide_storage::node_store::load_nodes();
+    let resolved = ctx.signed_caller.and_then(|c| nodes.iter().find(|p| p.name == c.name));
+    if !deposit_admitted(resolved) {
+        let (code, msg) = deposit_refusal(resolved);
+        let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/binding", "unauthorized", &msg);
+        return Err((code, msg));
+    }
+    let caller = resolved.map(|n| n.name.clone()).unwrap_or_default();
+
+    if let Some(raw) = params.get("binding").filter(|v| !v.is_null()) {
+        match serde_json::from_value::<aoide_storage::seal::Binding>(raw.clone()) {
+            Ok(binding) => {
+                // `stale-binding` and `binding-mismatch` are refusals the
+                // CALLER must see — its own binding was not accepted as
+                // current, and it has to know before it starts sealing.
+                //
+                // L4 (the branch review): the audit line comes FIRST. The
+                // contract is that this method audits unconditionally, and a
+                // refusal that returns before the audit is the one line an
+                // operator most needs — a peer repeatedly publishing a
+                // superseded binding is exactly what a downgrade attempt
+                // looks like from here.
+                if let Err(e) = aoide_storage::seal::learn_binding(&caller, &binding) {
+                    let _ = audit(
+                        ctx.audit_log,
+                        Door::A2a,
+                        EventClass::Audit,
+                        "a2a.aoide/binding",
+                        "invalid",
+                        &format!("binding REFUSED for {caller}: {e}"),
+                    );
+                    return Err((-32010_i64, format!("binding refused: {e}")));
+                }
+            }
+            Err(e) => {
+                let _ = audit(
+                    ctx.audit_log,
+                    Door::A2a,
+                    EventClass::Audit,
+                    "a2a.aoide/binding",
+                    "invalid",
+                    &format!("malformed binding from {caller}: {e}"),
+                );
+                return Err((-32602, format!("invalid params: binding: {e}")));
+            }
+        }
+    }
+
+    let mine = aoide_storage::seal::publish_binding()
+        .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
+    let _ = audit(
+        ctx.audit_log,
+        Door::A2a,
+        EventClass::Audit,
+        "a2a.aoide/binding",
+        "ok",
+        &format!(
+            "binding generation {} to {caller} (age fingerprint {})",
+            mine.generation, mine.age_fingerprint
+        ),
+    );
+    Ok(json!({ "binding": mine }))
 }
 
 // ── The pairing ceremony wire (CONTRACTS.md §6, P-P2,
@@ -3329,6 +3564,27 @@ fn pair_request(params: &Value, origin: ConnOrigin, audit_log: &Path) -> Result<
     if !valid_pubkey_hex(pubkey_hex) {
         return Err((-32602, "invalid params: pubkeyHex must be 64 hex characters".to_string()));
     }
+
+    // P-SEAL: the requester's own self-signed age binding, when it has one.
+    // A request that carries one is checked against the key it claims BEFORE
+    // anything is parked: a binding whose signer is not `pubkeyHex` is a
+    // malformed request, not an older-peer request, and parking it would
+    // only defer the same refusal to the commit.
+    let binding: Option<aoide_storage::seal::Binding> = match params.get("binding") {
+        None | Some(Value::Null) => None,
+        Some(raw) => match serde_json::from_value::<aoide_storage::seal::Binding>(raw.clone()) {
+            Ok(binding) => {
+                if !aoide_storage::seal::verify_binding(&binding, Some(pubkey_hex)) {
+                    return Err((
+                        -32602,
+                        "invalid params: binding does not verify under the pubkeyHex it claims".to_string(),
+                    ));
+                }
+                Some(binding)
+            }
+            Err(_) => return Err((-32602, "invalid params: binding is malformed".to_string())),
+        },
+    };
     if !aoide_storage::node_store::valid_node_name(name) {
         return Err((
             -32602,
@@ -3361,6 +3617,16 @@ fn pair_request(params: &Value, origin: ConnOrigin, audit_log: &Path) -> Result<
         self_via,
     )
     .map_err(|e| (-32000_i64, e))?;
+
+    // P-SEAL: attach the requester's binding after parking, never as part of
+    // it — a request that carries none (an older aoide) parks and pairs
+    // exactly as before. The binding was already verified under the claimed
+    // `pubkeyHex` above, so a failure here is a local write failure, not a
+    // refusal of the request: the ceremony is what the caller asked for and
+    // the binding is what it offered.
+    if let Some(binding) = &binding {
+        let _ = aoide_storage::pairing::set_inbound_binding(&entry.id, binding);
+    }
 
     // R3 (one live parked request per requester identity,
     // `aoide_storage::pairing`'s own module doc): a same-pubkey retry
@@ -3569,6 +3835,12 @@ fn pair_poll(params: &Value, audit_log: &Path) -> Result<Value, (i64, String)> {
     let (kp, _) = aoide_storage::identity::load_or_mint().map_err(|e| (-32603_i64, format!("loading this instance's identity: {e}")))?;
     let info = kp.info();
 
+    // P-SEAL: release this node's own age binding alongside the pubkey, so
+    // one ceremony leaves both ends able to seal to each other. Best-effort
+    // by construction: an instance whose age key cannot be minted still
+    // pairs, it simply seals nothing until it can.
+    let released_binding = aoide_storage::seal::publish_binding().ok();
+
     let _ = audit(
         audit_log,
         Door::A2a,
@@ -3578,7 +3850,7 @@ fn pair_poll(params: &Value, audit_log: &Path) -> Result<Value, (i64, String)> {
         &format!("pairing request `{id}` released to `{}`'s own verified poll", entry.name),
     );
 
-    Ok(json!({ "status": "approved", "pubkeyHex": info.pubkey_hex }))
+    Ok(json!({ "status": "approved", "pubkeyHex": info.pubkey_hex, "binding": released_binding }))
 }
 
 /// Per-request context [`handle_jsonrpc`]/[`handle_jsonrpc_bytes`] thread
@@ -3657,6 +3929,12 @@ fn handle_jsonrpc(req: &Value, ctx: &RequestCtx) -> Value {
         "aoide/pairPoll" => pair_poll(&params, ctx.audit_log),
         "aoide/mailDeposit" => mail_deposit(&params, ctx),
         "aoide/mailPoll" => mail_poll(&params, ctx),
+        // P-SEAL: the binding exchange. A signed READ of this node's own
+        // current binding, and — when the caller includes its own — the
+        // moment this node stores the caller's. One round trip both ways,
+        // which is what a direct lane wants and what the per-peer upgrade
+        // needs before the first sealed letter can go anywhere.
+        "aoide/binding" => node_binding(&params, ctx),
         "" => Err((-32600, "invalid request: missing method".to_string())),
         other => Err((-32601, format!("method not found: {other}"))),
     };
@@ -4518,6 +4796,7 @@ fn route(
                     Some("aoide/pairPoll") => "aoide/pairPoll",
                     Some("aoide/mailDeposit") => "aoide/mailDeposit",
                     Some("aoide/mailPoll") => "aoide/mailPoll",
+                    Some("aoide/binding") => "aoide/binding",
                     _ => "rpc",
                 };
                 let self_url = self_url(bind, port);
@@ -12051,6 +12330,7 @@ mod tests {
         let sas_a = aoide_storage::pairing::derive_sas(&pubkey_a, &pubkey_b, &nonce_a, &nonce_b);
         let now_epoch = aoide_storage::time::parse_iso_utc(&now_iso_utc()).unwrap();
         aoide_storage::pairing::park_outbound(aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
             id: id.clone(),
             url: "http://box-b:9-a2a/".to_string(),
             name: "box-b".to_string(),
@@ -13484,8 +13764,17 @@ mod tests {
         let audit_log = root.join("log");
         let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
         let answer = mail_poll(&json!({ "node": "box-b" }), &ctx).unwrap();
+        // P-SEAL: the answer carries both lists. This entry is unsealed (it
+        // was spooled with no container), so it rides `envelopes` and
+        // `containers` is empty — a sealed entry would be the other way
+        // round, with no plaintext handed over at all.
         assert_eq!(answer["envelopes"][0]["msgid"], Value::String(msgid.clone()), "{answer}");
-        assert_eq!(answer.as_object().unwrap().len(), 1, "the result is exactly `envelopes`, per the wire shape: {answer}");
+        assert_eq!(answer["containers"].as_array().unwrap().len(), 0, "{answer}");
+        assert_eq!(
+            answer.as_object().unwrap().len(),
+            2,
+            "the result is exactly `containers` and `envelopes`, per the wire shape: {answer}"
+        );
 
         let rows = aoide_storage::outbox::list_entries("box-b").unwrap();
         assert_eq!(rows.len(), 1, "handing over retires nothing");
@@ -13579,7 +13868,10 @@ mod tests {
 
         let log = std::fs::read_to_string(&audit_log).unwrap();
         assert!(log.contains("a2a.aoide/mailPoll"), "{log}");
-        assert!(log.contains("1 envelope(s) handed over"), "the count rides the line: {log}");
+        assert!(
+            log.contains("0 container(s) and 1 plaintext envelope(s) handed over"),
+            "the counts ride the line: {log}"
+        );
         assert!(!log.contains("a2a.rpc"), "never falls back to the generic label: {log}");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);

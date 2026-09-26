@@ -101,10 +101,24 @@ pub fn parse_graph_summary_response(resp: &Value, name: &str, fetched_at: &str) 
 /// this field). Omitted (`None`) when the caller has no such claim, so an
 /// old approver — which never looks for `selfVia` at all — sees exactly the
 /// shape it always has. Pure.
-pub fn build_pair_request_body(pubkey_hex: &str, self_name: &str, commit_hex: &str, self_url: &str, self_via: Option<&str>) -> Value {
+pub fn build_pair_request_body(
+    pubkey_hex: &str,
+    self_name: &str,
+    commit_hex: &str,
+    self_url: &str,
+    self_via: Option<&str>,
+    binding: Option<&aoide_storage::seal::Binding>,
+) -> Value {
     let mut params = json!({ "pubkeyHex": pubkey_hex, "name": self_name, "commitHex": commit_hex, "url": self_url });
     if let Some(via) = self_via {
         params["selfVia"] = json!(via);
+    }
+    // P-SEAL: this instance's own self-signed age binding, when it has one.
+    // Omitted outright for a caller with none, so an old approver sees the
+    // byte shape it always has — the same discipline `selfVia` above holds,
+    // and the reason a bindingless request still pairs.
+    if let Some(binding) = binding {
+        params["binding"] = json!(binding);
     }
     let req = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
@@ -199,7 +213,14 @@ pub fn build_pair_poll_body(id: &str, timestamp_iso: &str, nonce_hex: &str, sign
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PairPollStatus {
     Pending,
-    Approved { pubkey_hex: String },
+    Approved {
+        pubkey_hex: String,
+        /// P-SEAL: the approver's own signed age binding, when it released
+        /// one. Absent for an approver running an older aoide — the pairing
+        /// completes either way and neither side seals anything until a
+        /// binding arrives over `aoide/binding`.
+        binding: Option<Box<aoide_storage::seal::Binding>>,
+    },
 }
 
 /// Parse the `aoide/pairPoll` response. Pure.
@@ -216,7 +237,15 @@ pub fn parse_pair_poll_response(resp: &Value) -> Result<PairPollStatus, String> 
                 .and_then(Value::as_str)
                 .ok_or_else(|| "an `approved` poll response has no `pubkeyHex`".to_string())?
                 .to_string();
-            Ok(PairPollStatus::Approved { pubkey_hex })
+            // P-SEAL: optional, and a malformed one is ignored rather than
+            // fatal — the binding is enrichment the pairing must not depend
+            // on, and a bad one is caught by `learn_binding`'s own
+            // verification at the commit.
+            let binding = result
+                .get("binding")
+                .and_then(|v| serde_json::from_value::<aoide_storage::seal::Binding>(v.clone()).ok())
+                .map(Box::new);
+            Ok(PairPollStatus::Approved { pubkey_hex, binding })
         }
         Some("pending") => Ok(PairPollStatus::Pending),
         other => Err(format!("unrecognized poll status: {other:?}")),
@@ -525,7 +554,7 @@ mod tests {
 
     #[test]
     fn build_pair_request_body_matches_the_jsonrpc_shape() {
-        let body = build_pair_request_body("pk", "box-b", "commit", "http://a/", None);
+        let body = build_pair_request_body("pk", "box-b", "commit", "http://a/", None, None);
         assert_eq!(body["method"], "aoide/pairRequest");
         assert_eq!(body["params"]["pubkeyHex"], "pk");
         assert_eq!(body["params"]["name"], "box-b");
@@ -537,7 +566,7 @@ mod tests {
 
     #[test]
     fn build_pair_request_body_carries_self_via_when_given() {
-        let body = build_pair_request_body("pk", "box-b", "commit", "http://a/", Some("ssh://khoa@box-b"));
+        let body = build_pair_request_body("pk", "box-b", "commit", "http://a/", Some("ssh://khoa@box-b"), None);
         assert_eq!(body["params"]["selfVia"], "ssh://khoa@box-b");
     }
 
@@ -547,7 +576,7 @@ mod tests {
         // simulate its `Deserialize` over a body this (new) requester sent
         // with no claim, and confirm the shape round-trips with nothing
         // extra required.
-        let body = build_pair_request_body("pk", "box-b", "commit", "http://a/", None);
+        let body = build_pair_request_body("pk", "box-b", "commit", "http://a/", None, None);
         let params = body["params"].clone();
         assert!(params.get("selfVia").is_none());
         // And the reverse: an old requester's body (no selfVia key at all)
@@ -613,7 +642,7 @@ mod tests {
         assert_eq!(parse_pair_poll_response(&json!({ "result": { "status": "pending" } })).unwrap(), PairPollStatus::Pending);
         assert_eq!(
             parse_pair_poll_response(&json!({ "result": { "status": "approved", "pubkeyHex": "b".repeat(64) } })).unwrap(),
-            PairPollStatus::Approved { pubkey_hex: "b".repeat(64) }
+            PairPollStatus::Approved { pubkey_hex: "b".repeat(64), binding: None }
         );
     }
 

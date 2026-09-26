@@ -13,6 +13,15 @@ by decision — no embedded database yet
 
 ## Named seams (what it exposes)
 
+- `seal` — the P-SEAL container and the signed age key binding
+  (`docs/architecture/HTTPS-MESH-API.md`). Exposes `frame` (the one encoding
+  primitive every signed byte is built from), the node's own age X25519 key
+  and its self-signed `Binding` with its generation high-water mark, retired
+  keys and validity window, the per-peer binding store
+  (`binding_for`/`learn_binding`), `Container`/`Ctx` with
+  `seal_envelope`/`deposit_container`, and the hop-chain and dedup frames. It
+  is the ONLY module in this workspace that depends on the `age` crate.
+
 - `letter` defines optional `AOIDE-LETTER/1` content within the existing
   signed envelope text: Subject, To, Cc, body, and optional threadId/replyTo.
   Absent thread metadata preserves the four-field format. It performs no I/O
@@ -684,7 +693,7 @@ by decision — no embedded database yet
   attemptable — an unknown flavor fails toward being dialed, never toward
   being silently parked forever. `OutboxEntry::held` is the constructor a
   held entry is spooled with; `is_held` is the one spelling of the check.
-  `poll_entries` is the WHOLE offer rule for a poll, in one place: every
+  `poll_payloads` is the WHOLE offer rule for a poll, in one place: every
   held entry toward that node, plus every `now` entry whose own attempts
   have been failing (`tries > 0` and its last outcome did not reach the
   peer — parked/refused ones included, a never-attempted one excluded
@@ -838,7 +847,10 @@ for the version/feature reasoning). `toml`/`toml_edit` join them at P-C for
 split by direction (`toml` deserializes into the typed schema, `toml_edit`
 rewrites one key in place so comments survive); both are pure Rust over one
 shared parser/writer stack, which is what keeps `checks.portability`'s
-static-musl artifact buildable. It is the second-lowest crate in the DAG —
+static-musl artifact buildable. `age` joins them at P-SEAL for `seal` — the
+third sanctioned break, with its weight measured and accepted up front (see
+that manifest entry's own comment) and every use of it confined to that one
+module. It is the second-lowest crate in the DAG —
 everything that persists state sits above it.
 
 ## How it composes
