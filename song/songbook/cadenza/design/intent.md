@@ -27,7 +27,7 @@ Companion files: `coverage.md` (every bridged surface and cadenza's answer),
 
 Everything is a terminal. Every surface is a termui **pane**: a single-line
 rule (`┌─ TITLE ───┐ │ │ └───┘`) with the title cut into the top edge in
-phosphor green, content on a monospace character grid, no radius, no glass,
+phosphor green, content on a monospace character grid, no radius (the switchboard's round pads aside), no glass,
 no drop shadow, and one gradient only: the phosphor glowing just inside a
 pane's rule. Colour is spent the way a 16-colour terminal
 spends it: green is the default voice, amber is the one live thing, and a
@@ -78,14 +78,16 @@ Conductor Channel).
 - A **borderless block** (termui's magenta one) holds a single message that
   is not a pane — a herald toast, one board item.
 - Panes are opaque `base00` at 0.94. Black glass, not frost.
-- **Inner glow:** the phosphor green (`title`) bleeds ~12px inward from all
-  four edges, fading to nothing — the phosphor lit just inside the tube's
-  frame (`refs/ref-inner-glow.png`). It is `title` whatever the rule's
-  colour, so a box at rest is lit too: it starts at 0.14 alpha at rest and
-  at 0.26 on a focused pane. Four static gradient `Rectangle`s drawn once by
-  the kit's Pane, behind the content: no shader, no blur, nothing redrawn
-  at rest, so it costs what tier-0 text glow costs. It is the only
-  gradient in the song.
+- **Inner glow:** the phosphor green (`title`) blooms inward from all four
+  edges and fades softly to nothing, visible ~28px in — the phosphor lit
+  just inside the tube's frame (`refs/ref-inner-glow.png`). It runs all the
+  way round, under the title and the stat too, and its corners are round and
+  even. It is `title` whatever the rule's colour, so a box at rest is lit
+  too; a focused pane's is about twice as bright. It is a gaussian baked
+  once by one `Canvas` in the kit's Pane, behind the content: painted on a
+  size or palette change only, never per frame. Focus and reveal move the
+  canvas's opacity and never repaint it. No shader, no live blur, nothing
+  redrawn at rest. It is the only soft fall-off in the song.
 
 ### Instruments (termui's widgets, re-drawn)
 | instrument | glyphs | used by |
@@ -243,11 +245,13 @@ One 28px line in the tmux/termui idiom, left to right:
 - The bar's bottom rule is the **trunk**.
 
 ### 3.2 The switchboard (inside the bar)
-- **Every jack is a pad.** Each workspace number sits inside a pad: a
-  square-cornered 1px outline hugging the number (one cell wide plus a
-  half-cell of padding each side, the bar's text height), drawn for every
-  jack whether or not it is tied, so the row reads as a line of pads on a
-  board. An occupied jack's pad is `ink` with the number `ink`; an empty
+- **Every jack is a pad.** Each workspace number sits inside a round pad,
+  the way a board's pads and vias are round: a 1px circle hugging a
+  one-digit number (the bar's text height across), stretched to a pill of
+  the same height for two digits. It is drawn for every jack whether or
+  not it is tied, so the row reads as a line of pads on a board. Pads are
+  the one rounded shape in the song; every pane and block keeps radius 0.
+  An occupied jack's pad is `ink` with the number `ink`; an empty
   jack's pad and number are `dim`; the active jack's pad is filled `title`
   with the number in `ground`; a jack with an awaiting/blocked session has
   a red pad.
@@ -456,3 +460,5 @@ reads a fixture path.
   Every jack becomes a pad with its number inside, tied or not (§3.2).
   Sound and bluetooth share one cell and one pane, with a bluetooth power
   toggle and per-device connect (§3.1).
+- 2026-09-26 — khoa: the jack pads are round (a circle, a pill for two
+  digits), like a board's pads; the only rounded shape in the song.
