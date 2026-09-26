@@ -800,24 +800,36 @@
   with exactly one `Exited`.
   **Never a shell parent.** A target is unreceptive on either of two reads:
   its `rec.agent` is `""`/`"shell"` or names no registered harness profile, or
-  its WRAPPED program is a shell
-  (`conduct.rs::wrapped_program_is_a_shell` — `restore.is_some()`, the P-C5
-  capture) — a line submitted into a shell would RUN as a command, and `agent`
-  is only a label a caller picks: `--agent pi -- bash` names a registered
-  profile over a pty running a shell, which is how a ping-back line came to be
-  executed (N1). The wrapped-program read is the SAME predicate the tick
-  already applies (`captures_like_a_shell`), so the two can never drift; it is
-  stamped on the multiplexer's opening tick, so a record carries it for the
-  whole life of a live shell and misses it only for the microseconds between
-  the socket being bound and that first tick — never a lane's actual window,
-  since a ping-back needs its child to have ended first. Skipped and counted
-  `shell-parent`. The same applies to `not-conductable`, `parent-done` and
-  `no-parent-record`; those four predicates live in ONE function
-  (`unreceptive`), which `deliver` itself calls, so nothing may restate them.
-  The LOCAL parent/sibling autogate in `send.rs` is deliberately not this rule:
-  the caller there is a resident session steering a shell it can see in its own
-  roster, with no remote text riding the line, and conducting shells is the
-  product's headline.
+  its WRAPPED command is a shell
+  (`conduct.rs::wrapped_program_is_a_shell` = the record's durable `shell`
+  field OR a `Some` `restore`). A line submitted into a shell would RUN as a
+  command, and `agent` is only a label a caller picks: `--agent pi -- bash`
+  names a registered profile over a pty running a shell, which is how a
+  ping-back line came to be executed (N1). Both reads come from the ONE
+  predicate (`program_is_a_shell`), so they can never drift: it walks the
+  whole argv and resolves the launchers a shell actually arrives through
+  (`env bash`, `nix develop -c bash`, `setsid`/`timeout`/`nice`/`stdbuf`/
+  `chrt`/`ionice`/`nohup`/`exec`/`script`), its shell list is wider than the
+  four names the capture path began with, and `su`/`doas`/`sudo` answer shell
+  (no command of their own lands in one). `conduct` STAMPS `shell` at
+  registration from its own argv, so the durable half is there from the first
+  moment the record is visible — on both `upsert_session` arms, so
+  re-registering an id as `-- env bash` sets it and re-registering it as a
+  harness clears it. The LIMIT is argv-only: a wrapper script that execs a
+  shell (`-- ./rig.sh`) is not a shell to it and stays receptive. A false
+  POSITIVE is silent-safe and deliberately not narrowed: a harness reached
+  through a shell (`spawnAgent = "bash -lc <harness>"`) reads as a shell for
+  the whole run, costing it a ping-back, a PTY ring and every unapproved
+  remote inject — a dead lane, never a line typed where it would run. Skipped
+  and counted `shell-parent`. The same applies to `not-conductable`,
+  `parent-done` and `no-parent-record`; those four predicates live in ONE
+  function (`unreceptive`), which `deliver` itself calls, so nothing may
+  restate them. The LOCAL parent/sibling autogate in `send.rs` is deliberately
+  not this rule: that caller is a resident session steering a shell it can see
+  in its own roster, no remote text rides its line, and an agent that
+  hand-relays a peer's words into it is steering with its OWN authority —
+  by design, and not something a second guard here could fix. Conducting
+  shells is the product's headline.
   **The parent pulls its own remote children (P-RSA S9, `CONTRACTS.md`
   §4/§6).** `pingback_pull` runs in the SAME post-lock block, right after
   `pingback`, and only under `Door::Daemon`: for every row in
@@ -1036,13 +1048,14 @@
   the wrong binary (a collapsed `argv[0]`) or a truncated one; don't share
   the two even though they both start from the same `/proc` read
   (`parse_cmdline` is the pure split they DO share).
-- **Shell-likeness is derived from the WRAPPED COMMAND, never the display
+- **Shell-likeness is derived from the WRAPPED ARGV, never the display
   name (task #100, the P-C7 soak's live finding).** `session_conduct`'s
   `is_shell` — which gates the ENTIRE P-C5 refresh/capture path (cwd
   tracking, working/idle state, foreground argv, the restore snapshot, and
-  `typed_capture_active`'s buffer below) — comes from `conduct.rs::
-  captures_like_a_shell(&program)`: `program`'s own basename (what actually
-  execs on the pty) against `bash`/`zsh`/`fish`/`sh`. It is NOT `agent ==
+  `typed_capture_active`'s buffer below) — comes from the SAME
+  `conduct.rs::program_is_a_shell(&inv.args)` the refusal lanes read
+  (`program`'s own basename against the shell list, with the launchers a
+  shell arrives through resolved first). It is NOT `agent ==
   "shell"` — `agent` is a caller-chosen label (`--agent <name>`, or the
   command's own basename by default) that can disagree with what is
   actually conducted on purpose (a soak harness, an experiment). `spawn
@@ -1168,7 +1181,7 @@
   keeps a human's later use of an agent-spawned terminal safe from this
   signal without ever needing to know who touched it. `restore.is_some()`
   (stamped only by the P-C5 tick, itself gated on
-  `captures_like_a_shell`) keeps this from ever reaching a headless
+  `program_is_a_shell`) keeps this from ever reaching a headless
   AGENT or a one-shot command — neither ever populates `restore`, so
   `log_mtime` structurally has nothing to read for them and the signal
   never fires. **A shell has no self-heal, unlike an agent** (whose hook
@@ -1242,7 +1255,7 @@
   time (task #100).** `undying.rs::nothing_to_restore_warning(agent,
   has_capture)` mirrors `resolve_candidate`'s own two arms — a registered
   harness `AgentProfile.resume_args`, or `has_capture` (this session's own
-  P-C5 restore snapshot, gated by `captures_like_a_shell` above) — and both
+  P-C5 restore snapshot, gated by `program_is_a_shell` above) — and both
   mark sites (`spawn --undying`, `session grant undying on --id <id>`) append its
   text onto their own Outcome MESSAGE, never a log line, whenever NEITHER
   arm would resolve. `spawn --undying` computes `has_capture` directly off

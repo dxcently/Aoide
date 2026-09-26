@@ -13,7 +13,7 @@ use super::model::{
 use super::identity::peer_cred;
 use super::session_store::{
     do_session_end, do_session_start, set_session_log_path, stamp_headless, stamp_origin,
-    stamp_session_exit, stamp_spawned, stamp_task,
+    stamp_session_exit, stamp_shell, stamp_spawned, stamp_task,
 };
 use super::window::{discover_window_address, resolve_registration_parent};
 use aoide_protocol::Invocation;
@@ -35,41 +35,199 @@ fn command_basename(program: &str) -> String {
         .unwrap_or_else(|| program.to_string())
 }
 
-/// The interactive-shell basenames the P-C5 refresh/capture path (cwd
-/// tracking, working/idle state, foreground argv, the restore snapshot, and
-/// `typed_capture_active`'s buffer) treats as "this is a shell to watch".
-const SHELL_BASENAMES: &[&str] = &["bash", "zsh", "fish", "sh"];
+/// The shell basenames [`program_is_a_shell`] resolves to — the ONE list, in
+/// the one place shell-likeness is decided: the P-C5 capture path
+/// (`is_shell`, the refresh tick, the `typed` buffer, the restore snapshot),
+/// the auto-typing refusals (ping-back, the doorbell's PTY arm, the A2A
+/// door) and `spawn`'s own gates all read THIS verdict, never a private copy
+/// of the names.
+const SHELL_BASENAMES: &[&str] = &[
+    "bash", "zsh", "fish", "sh", "dash", "ksh", "mksh", "pdksh", "csh", "tcsh", "nu", "xonsh",
+    "busybox", "elvish", "osh", "ash", "yash",
+];
 
-/// Shell-likeness derived from the WRAPPED COMMAND, never the roster display
-/// name (P-C5 follow-up, task #100 — the P-C7 soak's live finding: `spawn
-/// --agent soak-a -- bash` ran a real interactive shell whose roster record
-/// never ticked, because the old gate compared `agent == "shell"` and a
-/// caller is free to label a shell anything it likes). `agent` is a label a
-/// caller chooses (`--agent <name>`, or the command's own basename by
-/// default) — it names WHO is being conducted, not WHAT kind of process it
-/// wraps, and the two can disagree on purpose (a soak harness, an
-/// experiment, a differently-named shell wrapper). `program` is what
-/// actually execs on the pty; only ITS basename can answer "does this have
-/// a readline prompt to tick/reconstruct". This covers kitty.nix's own
-/// terminal wrapper for free: it always execs the resolved login shell
-/// explicitly (`$SHELL`/passwd/`/bin/sh`, `<login_shell> -l`) as the
-/// conducted command, so its basename lands in [`SHELL_BASENAMES`] the same
-/// way any other bash/zsh/fish/sh invocation does — no separate "bare
-/// spawn" case to special-case here.
-pub(in crate::graph) fn captures_like_a_shell(program: &str) -> bool {
-    SHELL_BASENAMES.contains(&command_basename(program).as_str())
+/// Launchers that only FORWARD to the program after them: skipped whole,
+/// options and all, so `env bash`, `nice -n 5 bash`, `stdbuf -oL bash`,
+/// `timeout 60 bash` and `setsid bash` all resolve to `bash` rather than to
+/// their own basename.
+const FORWARDING_LAUNCHERS: &[&str] = &[
+    "env", "exec", "setsid", "nohup", "stdbuf", "chrt", "ionice", "nice",
+];
+
+/// Among a launcher's own options, the ones taking their value as a SEPARATE
+/// token (`nice -n 5`, `stdbuf -o L`, `timeout -k 5`) rather than attached
+/// (`stdbuf -oL`). Per LAUNCHER, never one global set: `env -i` takes no value
+/// while `stdbuf -i M` does, and a shared table would have to guess — a guess
+/// here swallows the program name and misses a shell, which is the direction
+/// this predicate must never err in. Anything else merely numeric (a
+/// priority, a duration) is skipped by [`skip_launcher_options`] too.
+fn option_takes_its_value(launcher: &str, arg: &str) -> bool {
+    match launcher {
+        "env" => matches!(arg, "-u" | "--unset" | "-C" | "--chdir" | "-S" | "--split-string"),
+        "nice" => matches!(arg, "-n" | "--adjustment"),
+        "stdbuf" => matches!(arg, "-i" | "-o" | "-e"),
+        "ionice" => matches!(arg, "-c" | "-n" | "-p" | "-u"),
+        "chrt" => matches!(arg, "-p" | "-T" | "-P" | "-D" | "-R" | "-O" | "-b"),
+        "timeout" => matches!(arg, "-k" | "--kill-after" | "-s" | "--signal"),
+        "script" => matches!(arg, "-c" | "-t" | "-T" | "-F" | "-B" | "--log-out" | "--log-in"),
+        _ => false,
+    }
 }
 
-/// [`captures_like_a_shell`]'s verdict, read back off a RECORD: `Some` restore
-/// snapshot ⟺ this session's wrapped command is a shell. Not a second
-/// predicate — the same one, projected: [`SHELL_BASENAMES`] above stays the
-/// only place shell-likeness is decided, and the only writer of `restore` is
-/// the P-C5 tick this file runs (`conduct_refresh_shell`, entered only under
-/// `is_shell`), so the field cannot be set for a session the predicate did not
-/// call a shell. Stamped on the very first tick (the multiplexer's opening
-/// refresh, before its loop), so it is present for the whole life of a live
-/// shell session; `reap.rs` and `resurrect.rs` already read the same field for
-/// the same question.
+/// A `VAR=value` prefix (`env FOO=bar bash`, and `env`'s own assignment
+/// form) — never a program name.
+fn is_assignment(arg: &str) -> bool {
+    match arg.split_once('=') {
+        Some((name, _)) => {
+            !name.is_empty()
+                && !name.starts_with('-')
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }
+        None => false,
+    }
+}
+
+fn is_number(arg: &str) -> bool {
+    !arg.is_empty() && arg.chars().all(|c| c.is_ascii_digit() || c == '.')
+}
+
+/// Skip a launcher's own leading options: anything dashed, a dashed option's
+/// separate value ([`option_takes_its_value`]), and — when
+/// `numbers_are_options` — any bare number. Stops at the first token that
+/// could be a program.
+///
+/// The flag exists for exactly one caller shape: a bare number is a priority
+/// or a schedule argument for every forwarding launcher, but it is the
+/// DURATION itself in `timeout <duration> <cmd>`, which the caller skips as
+/// its own positional token. Skipping it twice there would step over the
+/// program name.
+fn skip_launcher_options(
+    argv: &[String],
+    mut i: usize,
+    launcher: &str,
+    numbers_are_options: bool,
+) -> usize {
+    while i < argv.len() {
+        let arg = argv[i].as_str();
+        if option_takes_its_value(launcher, arg) {
+            i += 2;
+        } else if arg.starts_with('-') || (numbers_are_options && is_number(arg)) {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    i
+}
+
+/// `nix develop|shell … -c <cmd>` / `--command[=<cmd>]`: those subcommands
+/// exist to run a command in a dev environment, so their payload is the
+/// question. With no `-c`/`--command` at all, nix opens an INTERACTIVE shell
+/// — which is this predicate's question, and "shell" is the safe answer.
+fn nix_runs_a_shell(argv: &[String], i: usize) -> bool {
+    let sub = argv.get(i + 1).map(|s| command_basename(s)).unwrap_or_default();
+    if sub != "develop" && sub != "shell" {
+        return false;
+    }
+    let mut j = i + 2;
+    while j < argv.len() {
+        match argv[j].as_str() {
+            "-c" | "--command" => return j + 1 >= argv.len() || program_is_a_shell(&argv[j + 1..]),
+            // The attached form carries a whole command LINE in one token.
+            a if a.starts_with("--command=") => {
+                let words: Vec<String> = a["--command=".len()..]
+                    .split_whitespace()
+                    .map(str::to_string)
+                    .collect();
+                return program_is_a_shell(&words);
+            }
+            _ => j += 1,
+        }
+    }
+    true
+}
+
+/// Where `script -q <typescript> [<command> …]`'s payload starts, or `None`
+/// when it carries no command of its own — then `script` runs the user's own
+/// `$SHELL`, which is a shell. (`script -c <cmd>` is caught by the option
+/// skip: it runs its argument through a shell, so both tokens are options.)
+fn script_command(argv: &[String], i: usize) -> Option<usize> {
+    let mut j = skip_launcher_options(argv, i + 1, "script", true);
+    if j < argv.len() {
+        j += 1; // the typescript FILE
+    }
+    (j < argv.len()).then_some(j)
+}
+
+/// Whether a conducted command IS a shell — one question, one list, one
+/// implementation for every reader: the P-C5 capture path (`is_shell`
+/// below), the auto-typing refusals (ping-back, the doorbell's PTY arm, the
+/// A2A door) and `spawn`'s own gates.
+///
+/// Derived from the WRAPPED ARGV, never the roster display name (P-C5
+/// follow-up, task #100 — the P-C7 soak's live finding: `spawn --agent
+/// soak-a -- bash` ran a real interactive shell whose record never ticked,
+/// because the old gate compared `agent == "shell"` and a caller is free to
+/// label a shell anything it likes). The first token alone could not answer
+/// it either: a shell is routinely reached through a launcher, so the walk
+/// below skips [`FORWARDING_LAUNCHERS`] and their options until it reaches
+/// the program that will actually exec. `su`/`doas`/`sudo` are the one
+/// resolved-TO case — with no command of their own they land in a login
+/// shell — and answering `true` there is the safe direction. A path basename
+/// counts (`/usr/bin/bash`), so kitty.nix's terminal wrapper needs no
+/// special case: it always execs the resolved login shell explicitly
+/// (`$SHELL`/passwd/`/bin/sh`, `<login_shell> -l`) as the conducted command.
+///
+/// The LIMIT, stated because a refusal's silence must not read as a
+/// clearance: this reads ARGV, never file contents, so a wrapper script that
+/// execs a shell (`-- ./rig.sh`) is NOT a shell by this predicate and stays
+/// receptive — the allowlisted names above are the whole claim.
+///
+/// A false POSITIVE (something shell-like that is not) costs a skipped
+/// auto-typing, the silent-safe direction; a false negative is the hole this
+/// exists to close, so every unresolved case errs toward "shell".
+pub fn program_is_a_shell(argv: &[String]) -> bool {
+    let mut i = 0;
+    while i < argv.len() {
+        if is_assignment(&argv[i]) {
+            i += 1;
+            continue;
+        }
+        let base = command_basename(&argv[i]);
+        match base.as_str() {
+            b if FORWARDING_LAUNCHERS.contains(&b) => {
+                i = skip_launcher_options(argv, i + 1, &b, true)
+            }
+            // `timeout <duration> <cmd>`: the duration is a positional, not an
+            // option, so the options are skipped without touching bare
+            // numbers and then exactly one token goes — however the duration
+            // is spelled (`60`, `1m`, `0.5s`).
+            "timeout" => i = skip_launcher_options(argv, i + 1, "timeout", false) + 1,
+            "nix" => return nix_runs_a_shell(argv, i),
+            "script" => match script_command(argv, i) {
+                Some(next) => i = next,
+                None => return true,
+            },
+            "su" | "doas" | "sudo" => return true,
+            b => return SHELL_BASENAMES.contains(&b),
+        }
+    }
+    false
+}
+
+/// [`program_is_a_shell`]'s verdict, read back off a RECORD: `shell` (the
+/// durable registration fact below) OR a `Some` restore snapshot. Not a
+/// second predicate — [`SHELL_BASENAMES`] above stays the only place
+/// shell-likeness is decided, and both fields are written by this file
+/// alone.
+///
+/// `rec.shell` is the honest primitive: `conduct` stamps it at REGISTRATION
+/// from its own argv, so it is there for the whole life of the session —
+/// including the window before the multiplexer's opening tick, and across a
+/// re-registration of the same id. `restore.is_some()` is kept as the second
+/// arm because it predates the field and is the same verdict for every
+/// session already running when it landed; a lane refusing on either read is
+/// refusing on this one question.
 ///
 /// This is how a caller who was NOT there at spawn time — the daemon's
 /// ping-back, the doorbell, the A2A door — can tell a shell from a harness
@@ -78,11 +236,20 @@ pub(in crate::graph) fn captures_like_a_shell(program: &str) -> bool {
 /// insufficient), and the wrapped argv is not on the record. Never type into
 /// what this returns true for.
 ///
+/// The converse is NOT claimed: a harness reached through a shell
+/// (`spawnAgent = "bash -lc <harness>"`, `conduct --agent <harness> --
+/// sh -c <harness>`) reads as a shell here for the whole run, because argv
+/// says so and the pty's foreground process is not a fact this record
+/// carries. The cost is a silent skip — the ping-back, the doorbell's PTY
+/// arm and every unapproved remote inject — never a line typed somewhere it
+/// would run, so it stays the safe direction rather than being narrowed by a
+/// hook-shaped guess.
+///
 /// `pub`, not `pub(in crate::graph)`: `aoide-server`'s A2A door applies the
 /// same read before its own inject (`server/src/a2a.rs`), the same
 /// pre-Phase-3b visibility `conduct_socket_path` carries one screen down.
 pub fn wrapped_program_is_a_shell(rec: &SessionRecord) -> bool {
-    rec.restore.is_some()
+    rec.shell || rec.restore.is_some()
 }
 
 pub(in crate::graph) fn unix_ts() -> u64 {
@@ -1521,6 +1688,14 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     if inv.flag_present("spawned") {
         stamp_spawned(&id);
     }
+    // `shell`, on the same footing: a registration fact about THIS record,
+    // stamped from the argv this process is actually conducting (launchers
+    // resolved by `program_is_a_shell`), so every lane that refuses to type
+    // into a shell can read it off the record without having been here. Not
+    // once-only like the two above — a re-registration of the same id must
+    // follow the CURRENT argv, setting it for `-- env bash` and clearing it
+    // for a harness.
+    stamp_shell(&id, program_is_a_shell(&inv.args));
     // Managed task wrapper: stamp the run's own two task keys (`task` =
     // the slug AND its mailbox name, `instructionsPath` = the write-once
     // sidecar the spawner wrote). One writer — this child — so there is no
@@ -1619,7 +1794,7 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         listener.as_ref(),
         &mut child,
         &id,
-        captures_like_a_shell(&program),
+        program_is_a_shell(&inv.args),
         !headless,
         &mut sink,
         deadline,
@@ -2113,36 +2288,94 @@ mod tests {
         assert!(!typed_capture_active(false, false));
     }
     #[test]
-    fn captures_like_a_shell_reads_the_wrapped_argv_never_the_agent_label() {
+    fn program_is_a_shell_reads_the_wrapped_argv_never_the_agent_label() {
         // The task #100 defect, table-driven: shell-likeness is a property of
-        // WHAT is being conducted (the wrapped command's basename), never of
-        // WHO it is labelled as (`--agent <name>`). `spawn --agent soak-a --
-        // bash` is a real interactive shell that must tick the same as a
-        // plain `bash` conduct — the old `agent == "shell"` gate missed
-        // exactly this case.
-        let cases: &[(&str, bool)] = &[
-            ("bash", true),
-            ("zsh", true),
-            ("fish", true),
-            ("sh", true),
-            ("/bin/bash", true),
-            ("/usr/bin/zsh", true),
-            ("/run/current-system/sw/bin/fish", true),
-            ("claude", false),
-            ("kimi", false),
-            ("pi", false),
-            ("cargo", false),
-            ("/usr/bin/vim", false),
+        // WHAT is being conducted (the wrapped argv), never of WHO it is
+        // labelled as (`--agent <name>`). `spawn --agent soak-a -- bash` is a
+        // real interactive shell that must tick the same as a plain `bash`
+        // conduct — the old `agent == "shell"` gate missed exactly this case.
+        let cases: &[(&[&str], bool)] = &[
+            (&["bash"], true),
+            (&["zsh"], true),
+            (&["fish"], true),
+            (&["sh"], true),
+            (&["/bin/bash"], true),
+            (&["/usr/bin/zsh"], true),
+            (&["/run/current-system/sw/bin/fish"], true),
+            // The wider list the guard lanes need: a login shell that is not
+            // one of the four the capture path happens to start with.
+            (&["dash"], true),
+            (&["ksh"], true),
+            (&["mksh"], true),
+            (&["csh"], true),
+            (&["tcsh"], true),
+            (&["nu"], true),
+            (&["xonsh"], true),
+            (&["busybox"], true),
+            (&["elvish"], true),
+            (&["osh"], true),
+            (&["ash"], true),
+            (&["yash"], true),
+            // Reached through a launcher: the basename of the FIRST token
+            // would answer "env"/"nice"/…, never "shell".
+            (&["env", "bash"], true),
+            (&["env", "FOO=bar", "bash"], true),
+            (&["env", "-u", "FOO", "bash"], true),
+            (&["env", "-i", "bash"], true),
+            (&["exec", "bash"], true),
+            (&["setsid", "bash"], true),
+            (&["nohup", "bash"], true),
+            (&["nice", "bash"], true),
+            (&["nice", "-n", "5", "bash"], true),
+            (&["stdbuf", "-oL", "bash"], true),
+            (&["stdbuf", "-o", "L", "bash"], true),
+            (&["chrt", "-f", "10", "bash"], true),
+            (&["ionice", "-c", "2", "bash"], true),
+            (&["timeout", "60", "bash"], true),
+            (&["timeout", "1m", "bash"], true),
+            (&["timeout", "-k", "5", "60", "bash"], true),
+            (&["script", "-q", "/dev/null", "bash"], true),
+            (&["bash", "-l"], true),
+            (&["/bin/sh", "-c", "sleep 1"], true),
+            // `nix develop|shell`: the `-c` payload is the question, and with
+            // no payload nix opens an interactive shell.
+            (&["nix", "develop", "-c", "bash"], true),
+            (&["nix", "develop", "--command", "bash"], true),
+            (&["nix", "shell", "nixpkgs#foo", "-c", "bash"], true),
+            (&["nix", "develop"], true),
+            // The one resolved-TO case: no command of their own lands in a
+            // login shell, and that is the safe answer.
+            (&["su", "-", "khoa"], true),
+            (&["doas", "bash"], true),
+            (&["sudo", "-u", "root", "bash"], true),
+            // The launcher is now transparent — what it forwards to decides.
+            (&["env", "claude"], false),
+            (&["nice", "-n", "5", "cargo", "test"], false),
+            (&["timeout", "600", "claude"], false),
+            (&["nix", "develop", "-c", "claude"], false),
+            (&["nix", "build", "."], false),
+            // Plain non-shells.
+            (&["claude"], false),
+            (&["kimi"], false),
+            (&["pi"], false),
+            (&["cargo"], false),
+            (&["/usr/bin/vim"], false),
             // A shell-shaped binary named something else entirely still
             // reads by its OWN basename, not any caller-chosen label — this
             // function never sees `--agent` at all.
-            ("bashful", false),
+            (&["bashful"], false),
+            // The stated LIMIT, pinned so it is a known edge and not a
+            // surprise: argv is all this reads, so a script that execs a
+            // shell is not a shell to it.
+            (&["./rig.sh"], false),
+            (&["/home/khoa/bin/deploy.sh", "--prod"], false),
         ];
-        for (program, expected) in cases {
+        for (argv, expected) in cases {
+            let argv: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
             assert_eq!(
-                captures_like_a_shell(program),
+                program_is_a_shell(&argv),
                 *expected,
-                "captures_like_a_shell({program:?}) should be {expected}"
+                "program_is_a_shell({argv:?}) should be {expected}"
             );
         }
     }
@@ -2667,6 +2900,78 @@ mod tests {
         assert!(
             rec.restore.is_some(),
             "a real shell must be captured regardless of its agent label — restore was never populated"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+    /// M1/the durable field, end to end: REGISTRATION itself answers "is the
+    /// wrapped command a shell", launcher and all, without waiting for a tick
+    /// and without reading `agent`. `env sh -c …` is the launcher shape the
+    /// 4-name basename read used to miss entirely.
+    #[test]
+    fn registration_stamps_shell_from_the_argv_it_conducts() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR"]);
+
+        let root = unique_stage("conduct-shell-stamp");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+
+        for (id, argv, expected) in [
+            ("stamp-env-shell", vec!["env", "sh", "-c", "sleep 1"], true),
+            ("stamp-harness", vec!["cat", "/dev/null"], false),
+        ] {
+            let out = session_conduct(&conduct_invocation(
+                &argv,
+                &[("id", id), ("agent", "pi")],
+            ));
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+            let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+            let rec = s.sessions.iter().find(|r| r.session_id == id).unwrap();
+            assert_eq!(
+                rec.shell, expected,
+                "`{}` conducted as {argv:?} must stamp shell={expected}",
+                rec.agent
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+    /// The field is NOT once-only like `headless`/`spawned`: an id re-registers
+    /// under its CURRENT argv, so `--env sh` sets it and a later `--cat` on the
+    /// same id CLEARS it. The other direction leaves a record claiming a shell
+    /// forever, which is a silently dead lane rather than a hole — but it is
+    /// still wrong, and this is the test that says so.
+    #[test]
+    fn re_registering_an_id_flips_the_shell_stamp_both_ways() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR"]);
+
+        let root = unique_stage("conduct-shell-restamp");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+
+        let id = "re-registered";
+        let out = session_conduct(&conduct_invocation(
+            &["env", "sh", "-c", "sleep 1"],
+            &[("id", id), ("agent", "pi")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert!(s.sessions.iter().find(|r| r.session_id == id).unwrap().shell);
+
+        let out = session_conduct(&conduct_invocation(&["cat", "/dev/null"], &[("id", id), ("agent", "pi")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert!(
+            !s.sessions.iter().find(|r| r.session_id == id).unwrap().shell,
+            "re-registering the same id as a non-shell must CLEAR the stamp"
         );
 
         let _ = std::fs::remove_dir_all(&root);

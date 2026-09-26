@@ -86,6 +86,12 @@ pub fn upsert_session(
             // A freshly registered session is at rest until a prompt/tool (agent)
             // or a foreground command (shell) moves it to `working`.
             state: "idle".to_string(),
+            // Whether the wrapped command is a shell is a fact only the
+            // process CONDUCTING it holds (`conduct`'s own argv), stamped
+            // right after this registration by `stamp_shell` — every other
+            // registration path (a hook, a door, a test fixture) leaves it
+            // false rather than guessing.
+            shell: false,
             started_at: now.to_string(),
             parent_session_id: parent.map(str::to_string),
             // A remote parent is stamped by the A2A door on its own record

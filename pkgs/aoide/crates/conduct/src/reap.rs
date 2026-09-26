@@ -686,12 +686,15 @@ fn orphaned_subagents(
 ///     when a shell has become leftover.
 ///   * `restore.is_some()` — stamped ONLY by `conduct`'s P-C5 tick
 ///     (`graph/conduct.rs::conduct_refresh_shell`), which itself only runs
-///     when the wrapped command's own basename is `bash`/`zsh`/`fish`/`sh`
-///     (`captures_like_a_shell`) — the same `restore.is_some()` proxy
+///     when the wrapped command IS a shell (`program_is_a_shell`, launchers
+///     and all) — the same `restore.is_some()` proxy
 ///     `resurrect.rs`'s own terminal-candidate arm already uses for
 ///     "was this actually ticked as a shell". An agent or a one-shot
 ///     command spawned headless never sets this field at all, so this
-///     signal structurally can never reach either.
+///     signal structurally can never reach either. (The record's own
+///     `shell` field is the wider read the auto-typing refusals use; THIS
+///     arm stays on `restore` deliberately, because its touch signal is the
+///     pty log and a session that never ticked has none.)
 ///   * `state == "idle"` (the bare prompt) — never `working` (a live
 ///     foreground command, however quiet) or `awaiting` (a sudo prompt
 ///     mid-conversation). Only a terminal doing NOTHING right now is even

@@ -667,6 +667,37 @@ pub(in crate::graph) fn stamp_spawned(id: &str) {
     });
 }
 
+/// Stamp whether this session's wrapped command IS a shell — the durable
+/// half of `conduct::program_is_a_shell`'s verdict, and the ONE registration
+/// fact the auto-typing refusals read off a record.
+///
+/// Unlike `stamp_headless`/`stamp_spawned` above this is not once-only, and
+/// the difference is the point: re-registering an id is a real shape (`spawn
+/// --id X -- bash` onto a live id), and the answer must follow the CURRENT
+/// argv — setting it for `-- bash` and CLEARING it for a harness on the same
+/// id. Change-only, so a no-op write when the value already matches, and both
+/// arms of `upsert_session` are covered because this reads and writes the
+/// record that exists, whichever arm produced or refreshed it.
+pub(in crate::graph) fn stamp_shell(id: &str, is_shell: bool) {
+    with_stage_lock(|| {
+        let mut file: SessionsFile = match load_stage(&sessions_path()) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        if let Some(s) = file
+            .sessions
+            .iter_mut()
+            .find(|s| s.session_id == id && s.shell != is_shell)
+        {
+            s.shell = is_shell;
+            if file.schema_version.is_empty() {
+                file.schema_version = STAGE_GRAPH_VERSION.to_string();
+            }
+            let _ = write_stage(&sessions_path(), &file);
+        }
+    });
+}
+
 /// Stamp `origin` on a just-registered session record (P-P3,
 /// `docs/architecture/PAIRING.md` decision 7). A PERMANENT birth fact, like
 /// `headless`/`hookAncestry`: stamped once, change-only (a no-op once

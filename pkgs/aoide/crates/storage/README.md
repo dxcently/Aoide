@@ -99,6 +99,16 @@ by decision — no embedded database yet
   invocation ever touched round-trips byte-identical. `Project::roots()`
   never reads it: local anchoring and host membership are two disjoint
   facts about a project.
+- `records::SessionRecord.shell` — the durable half of
+  `aoide_conduct::graph::program_is_a_shell`'s verdict (wire name `shell`,
+  `skip_serializing_if` false, so every record written before it stays
+  byte-identical): whether this session's wrapped command IS a shell, written
+  by the conducting process at registration from its own argv. It exists so a
+  lane that refuses to type a line into a shell — the ping-back, the
+  doorbell's PTY arm, the A2A door's injects and spawn arm — can read that
+  answer off a record instead of trusting the `agent` label, which a caller
+  chooses freely (`--agent pi -- bash`). Re-registration re-stamps it, so an
+  id re-conducted as a harness stops claiming to be one.
 - `records::SessionRecord.sources` — an optional, additive
   `field name -> "<absolute path>#<record ordinal>"` provenance map (wire
   name `sources`, serialised only when `Some`, CONTRACTS.md §4), for a

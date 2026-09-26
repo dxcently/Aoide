@@ -129,7 +129,7 @@ pub(super) fn undying_grant(inv: &Invocation, cmd: &str, state: &str) -> Outcome
 /// (task #100 follow-up to P-C6): the harness arm (`agent_profile(agent)`
 /// carrying a verified `resume_args`) and the terminal arm (`has_capture` —
 /// whether this session's own P-C5 restore snapshot was ever populated,
-/// which `conduct.rs::captures_like_a_shell` now gates on the WRAPPED
+/// which `conduct.rs::program_is_a_shell` now gates on the WRAPPED
 /// command, never the agent label). Neither present means a later
 /// resurrect has nothing to work with but the spec itself — worth telling
 /// the operator NOW, at mark time, rather than only discovering it silently

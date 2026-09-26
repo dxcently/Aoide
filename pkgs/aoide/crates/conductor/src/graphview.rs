@@ -1267,6 +1267,7 @@ mod tests {
             window_address: format!("0x{id}"),
             cwd: cwd.into(),
             state: state.into(),
+            shell: false,
             started_at: id.into(),
             parent_session_id: parent.map(str::to_string),
             remote_parent: None,

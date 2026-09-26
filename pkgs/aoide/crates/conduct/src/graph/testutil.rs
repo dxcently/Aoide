@@ -40,6 +40,9 @@ pub(crate) fn session(
         window_address: format!("0x{id}"),
         cwd: cwd.into(),
         state: state.into(),
+        // Every fixture here is a harness-shaped record unless a test says
+        // otherwise; `stamp_shell`/`program_is_a_shell` tests set it directly.
+        shell: false,
         started_at: started.into(),
         parent_session_id: parent.map(str::to_string),
         remote_parent: None,
@@ -252,7 +255,7 @@ pub(crate) fn built_aoide_bin() -> PathBuf {
     bin
 }
 /// Stamp the P-C5 capture onto an already-registered stage record — the one
-/// durable trace `conduct.rs::captures_like_a_shell`'s verdict leaves on a
+/// durable trace `conduct.rs::program_is_a_shell`'s verdict leaves on a
 /// record, and therefore what
 /// [`crate::graph::conduct::wrapped_program_is_a_shell`] reads. Its only real
 /// writer is conduct's own ~1 Hz tick, out of reach from a unit test, so the
@@ -266,6 +269,20 @@ pub(crate) fn stamp_shell_capture(id: &str) {
         .find(|s| s.session_id == id)
         .unwrap_or_else(|| panic!("no stage record for `{id}`"));
     rec.restore = Some(aoide_storage::records::RestoreSnapshot::default());
+    write_stage(&sessions_path(), &file).unwrap();
+}
+/// Stamp the DURABLE half instead: `shell = true` with no capture at all —
+/// what `conduct`'s own registration writes (via `stamp_shell`) and what a
+/// record looks like before its first tick. Separate helper, because the two
+/// reads are deliberately independent arms of `wrapped_program_is_a_shell`.
+pub(crate) fn stamp_shell_field(id: &str) {
+    let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+    let rec = file
+        .sessions
+        .iter_mut()
+        .find(|s| s.session_id == id)
+        .unwrap_or_else(|| panic!("no stage record for `{id}`"));
+    rec.shell = true;
     write_stage(&sessions_path(), &file).unwrap();
 }
 pub(crate) fn flag_invocation(path: &[&str], flags: &[(&str, &str)]) -> Invocation {

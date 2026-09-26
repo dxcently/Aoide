@@ -1763,6 +1763,7 @@ mod tests {
             window_address: String::new(),
             cwd: "/tmp".into(),
             state: "running".into(),
+            shell: false,
             started_at: "s1".into(),
             parent_session_id: None,
             remote_parent: None,

@@ -1077,7 +1077,7 @@ fn deliver(
 /// live shape that executed a ping-back line as a command — passes an
 /// `agent`-only test while the pty on the other end is a shell with a
 /// readline prompt. [`wrapped_program_is_a_shell`] is the same
-/// `captures_like_a_shell` verdict read off the record, so the two halves
+/// `program_is_a_shell` verdict read off the record, so the two halves
 /// cannot drift.
 fn unreceptive(rec: &SessionRecord) -> Option<&'static str> {
     if matches!(rec.agent.as_str(), "" | "shell")
@@ -2279,12 +2279,14 @@ mod tests {
         );
     }
 
-    /// The guard's two arms on one fixture, so what makes the difference is
-    /// unambiguous: the SAME harness-labelled record, conducting the same
-    /// kind of session, refused with the P-C5 capture on it and delivered
-    /// without. A label-only rule cannot tell these apart — which is N1.
+    /// The guard's three arms on one fixture, so what makes the difference is
+    /// unambiguous: the SAME harness-labelled record, refused on EITHER read
+    /// (the durable `shell` stamp, or the P-C5 capture) and delivered with
+    /// neither. A label-only rule cannot tell these apart — which is N1 — and
+    /// a `restore`-only rule cannot see a shell that has not ticked yet, or
+    /// one reached through a launcher the capture path never resolved.
     #[test]
-    fn a_harness_parent_is_unreceptive_only_when_it_wrapped_a_shell() {
+    fn a_harness_parent_is_unreceptive_when_either_read_says_shell() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(&[
             "AOIDE_STAGE_DIR",
@@ -2296,9 +2298,20 @@ mod tests {
         ]);
         let root = setup("pingback-harness-label-arms");
 
+        // Arm 1: the durable registration stamp, no capture at all — the
+        // record a shell is in the moment `stamp_shell` has run and the
+        // first tick has not.
+        let stamped = headless_parent("wrap-stamped", "pi");
+        child_fixture(&root, "user-stamped", "wrap-stamped", &[USER, SETTLED]);
+        stamp_shell_field("wrap-stamped");
+
+        // Arm 2: the P-C5 capture, no stamp — the shape every session that
+        // predates the field carries.
         let shelled = headless_parent("wrap-bash", "pi");
         child_fixture(&root, "user-shell", "wrap-bash", &[USER, SETTLED]);
         stamp_shell_capture("wrap-bash");
+
+        // Arm 3: neither read says shell — a real harness wrap, delivered.
         let bare = headless_parent("wrap-harness", "pi");
         child_fixture(&root, "user-harness", "wrap-harness", &[USER, SETTLED]);
 
@@ -2306,9 +2319,17 @@ mod tests {
         let report = pingback(&daemon_inv(), &[]);
         let bytes = acc.join().unwrap();
 
+        stamped.set_nonblocking(true).unwrap();
+        assert!(stamped.accept().is_err(), "shell=true alone is enough to refuse");
         shelled.set_nonblocking(true).unwrap();
-        assert!(shelled.accept().is_err(), "a shell wrap is never written to");
-        assert_eq!(report.skipped, vec![("wrap-bash".to_string(), "shell-parent".to_string())]);
+        assert!(shelled.accept().is_err(), "a capture alone is enough to refuse");
+        assert_eq!(
+            report.skipped,
+            vec![
+                ("wrap-stamped".to_string(), "shell-parent".to_string()),
+                ("wrap-bash".to_string(), "shell-parent".to_string()),
+            ]
+        );
         let text = String::from_utf8_lossy(&bytes);
         assert!(text.starts_with("[eidolon brave-otter] settled end_turn"), "the harness wrap still hears its child: {text:?}");
         assert_eq!(report.delivered.len(), 1, "{report:?}");

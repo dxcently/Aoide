@@ -1370,7 +1370,7 @@ fn session_remote_parent(id: &str) -> Option<RemoteParent> {
 
 /// Whether `id`'s record is conducting a SHELL — the same read the ping-back
 /// and doorbell lanes make (`aoide_conduct::graph::wrapped_program_is_a_shell`,
-/// the record-side half of `captures_like_a_shell`), so the whole box agrees
+/// the record-side half of `program_is_a_shell`), so the whole box agrees
 /// on which sessions a submitted line must never reach.
 ///
 /// Unlike [`session_remote_parent`], an unreadable stage answers **true**:
@@ -1580,8 +1580,21 @@ fn do_inject(
 /// Best-effort, same tolerance as the rest of this function — a write error
 /// above is already swallowed (the retry loop only confirms a bound socket,
 /// never delivery), so a failed mailbase write is no less tolerated.
-fn spawn_inject_prompt(id: &str, prompt: &str) {
+fn spawn_inject_prompt(id: &str, agent_cmd: &str, prompt: &str) {
     if prompt.is_empty() {
+        return;
+    }
+    // Belt and braces on H1: `decide_send_action` already refuses a shell
+    // `spawnAgent` before anything starts, and this is the last gate before a
+    // REMOTE prompt becomes a line on a pty — so the write asks the same
+    // question itself instead of trusting its caller to have asked it (the
+    // same `program_is_a_shell` walk `-32004` above and the ping-back,
+    // doorbell and inject lanes all read). Silent by construction: this
+    // function's contract is best-effort, and a refusal that cannot be
+    // reported here would only be noise — the caller's own refusal is the
+    // taught one.
+    let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
+    if aoide_conduct::graph::program_is_a_shell(&configured) {
         return;
     }
     let socket = aoide_conduct::graph::conduct_socket_path(id);
@@ -1711,9 +1724,10 @@ fn spawn_died_immediately_message(agent_cmd: &str, status: std::process::ExitSta
 /// reads, and that arm's own shape test (`spawned && restore.is_some() &&
 /// idle`) cannot match a non-shell child at all — `restore` is stamped only for
 /// a session whose wrapped program captures like a shell, so an ordinary agent
-/// `spawnAgent` is never collected by it. An operator who sets `spawnAgent` to
-/// a SHELL (`bash -lc …`) does get that arm, exactly as a local `spawn -- bash`
-/// does (L5 of the S10 review — the door's child is a spawn like any other).
+/// `spawnAgent` is never collected by it. A `spawnAgent` that IS a shell never
+/// reaches this point at all: `do_spawn` refuses it (`-32004`, audited
+/// `shell-spawn-agent`) before any process starts, because that child's first
+/// turn is a line typed into a pty and a shell would RUN it (H1).
 /// And `--headless` is what makes the child REACHABLE with a keystroke, not
 /// just watchable: a headless wrap accepts the ping-back line and a mail-side
 /// doorbell write, where a non-headless one with no channel is skipped as
@@ -1897,10 +1911,38 @@ fn do_spawn(
     remote_parent: Option<RemoteParent>,
     task: Option<&str>,
 ) -> Result<Value, (i64, String)> {
+    // Refused FIRST and for free, the slug refusal's own shape below: a
+    // `spawnAgent` that IS a shell must cost one RPC, never a process and
+    // never a line typed into a shell (H1, house rule 4). The spawn arm's
+    // first turn is written straight into the child's pty by
+    // `spawn_inject_prompt`, and a shell's stdin is a COMMAND LINE: a remote
+    // peer's prompt would RUN. The `agent` label is not the question — the
+    // configured argv is (`program_is_a_shell`, the same walk the ping-back,
+    // doorbell and inject lanes read), so `bash -lc <harness>` is the shell on
+    // its face and a launcher (`env bash`) is resolved rather than skipped.
+    // `-32004` is this door's own "spawn cannot be used as configured" family
+    // (the empty-`spawnAgent` arm one layer up): nothing about the CALLER's
+    // authority is wrong, so `-32005`/`-32006` would blame the wrong party.
+    let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
+    if aoide_conduct::graph::program_is_a_shell(&configured) {
+        let msg = format!(
+            "A2A spawn not configured: `aoide.a2a.spawnAgent` is `{agent_cmd}`, which is a SHELL — \
+             a remote prompt typed into it would run as a command. Set it to the harness to \
+             conduct (e.g. `claude`), not to a shell that launches one."
+        );
+        let _ = audit(
+            audit_log,
+            Door::A2a,
+            EventClass::Audit,
+            "a2a.message/send",
+            "shell-spawn-agent",
+            &msg,
+        );
+        return Err((-32004, msg));
+    }
     // Refused FIRST and for free: an unusable slug must cost one RPC, never a
     // process — nothing below these lines has run when either fires.
-    let task = match spawn_task_slug(task) {
-        Ok(task) => task,
+    let task = match spawn_task_slug(task) {        Ok(task) => task,
         Err(msg) => {
             let _ = audit(
                 audit_log,
@@ -2005,7 +2047,7 @@ fn do_spawn(
                 std::thread::spawn(move || stamp_spawn_provenance(&id, &origin, remote_parent));
             }
             // Best-effort first-turn injection — see the doc comment above.
-            spawn_inject_prompt(&id, prompt);
+            spawn_inject_prompt(&id, agent_cmd, prompt);
             let _ = audit(
                 audit_log,
                 Door::A2a,
@@ -4836,6 +4878,56 @@ mod tests {
             panic!("session_lookup must not be consulted with no contextId")
         });
         assert_eq!(action, SendAction::Spawn { agent_cmd: "claude".to_string() });
+    }
+
+    /// H1: a `spawnAgent` that IS a shell is refused at the ACT boundary, in
+    /// `do_spawn`'s own prologue — the shape the illegal-slug refusal beside it
+    /// already holds — so the refusal is audited by name and no process, no
+    /// session and no first-turn keystroke ever happens. The exact shell, a
+    /// shell reached through a launcher, and the `bash -lc <harness>` form the
+    /// door's own comment used to call legitimate are all refused; a harness
+    /// (wrapped or not) still spawns.
+    #[test]
+    fn do_spawn_refuses_a_shell_spawn_agent_before_anything_starts() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-shell-spawn-agent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        let audit_log = root.join("log");
+
+        for configured in ["bash", "bash -lc claude", "env bash", "dash", "nix develop -c bash"] {
+            let err = do_spawn(configured, "remote prompt", &audit_log, "nodeb", "", None, None)
+                .expect_err("a shell spawnAgent must be refused, not run");
+            assert_eq!(err.0, -32004, "`{configured}`: this door's own config code");
+            assert!(err.1.contains("aoide.a2a.spawnAgent"), "the refusal names the option: {}", err.1);
+            assert!(err.1.contains(configured), "and the value it saw: {}", err.1);
+            let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+            assert!(log.contains("shell-spawn-agent"), "the refusal is audited by name: {log}");
+            assert!(log.contains(configured), "{log}");
+        }
+        // Nothing was spawned: no record, no log, no session file.
+        let sessions: Vec<aoide_storage::records::SessionRecord> =
+            load_stage::<SessionsFile>(&sessions_path())
+                .map(|f| f.sessions)
+                .unwrap_or_default();
+        assert!(sessions.is_empty(), "no session may exist after a refused spawn: {sessions:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
     }
 
     #[test]
@@ -8705,7 +8797,7 @@ mod tests {
             buf
         });
 
-        spawn_inject_prompt(id, "hello new session");
+        spawn_inject_prompt(id, "claude", "hello new session");
         let got = acc.join().unwrap();
         assert_eq!(String::from_utf8(got).unwrap(), "hello new session\n", "--submit's newline, same as do_spawn's payload");
 
@@ -8741,7 +8833,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
 
-        spawn_inject_prompt("whatever-id", "");
+        spawn_inject_prompt("whatever-id", "claude", "");
         assert!(aoide_storage::mail::read_base().unwrap().is_empty());
 
         let _ = std::fs::remove_dir_all(&root);

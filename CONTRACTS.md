@@ -1421,6 +1421,24 @@ The shellbridge roster + live hook phases (full field tables in
 windowAddress, cwd, state, startedAt }`; hook records: `{ sessionId, phase,
 updatedAt }`.
 
+**`shell` — the one durable answer to "is this session conducting a shell".**
+A session record MAY carry a `shell` bool, `true` only for a session whose
+wrapped command IS a shell (`aoide_conduct::graph::program_is_a_shell`: the
+program's own basename against the shell list, with `env`/`nix develop -c`/
+`setsid`/`timeout`/`nice`/… resolved to what they forward to). Written by the
+conducting process at REGISTRATION (`stamp_shell`), on both `upsert_session`
+arms, so re-registering an id as `-- env bash` sets it and re-registering it
+as a harness clears it. It exists because a line submitted into a shell RUNS
+as a command: the ping-back, the doorbell's PTY arm and the A2A door's own
+injects all refuse a record for which
+`aoide_conduct::graph::wrapped_program_is_a_shell` holds — that field OR a
+`Some` `restore` — rather than trusting the `agent` label, which is a
+caller's choice (`--agent pi -- bash` names a registered profile over a
+shell). A harness reached THROUGH a shell reads as a shell; the cost is a
+skipped auto-typing, never a line typed somewhere it would run. Absent (the
+default, skipped on serialization) means `false`, byte-identical to every
+record written before the field existed.
+
 **Additive in v0:** a session record MAY carry an optional `parentSessionId`
 (string) naming the session that spawned it — the graph's spawned-by edge. Set
 by `aoide graph link` (cycle-checked), cleared by `aoide session prune` when the
@@ -4949,7 +4967,7 @@ unpairs nothing already spawned.
 above** (N1, house rule 4): the Inject arm reads the target record's own
 wrapped-program shape (`session_wrapped_is_a_shell` →
 `aoide_conduct::graph::wrapped_program_is_a_shell`, the record-side half of
-conduct's `captures_like_a_shell`) and holds the line PENDING when it is a
+conduct's `program_is_a_shell`) and holds the line PENDING when it is a
 shell — the loopback arm, the exemption, the fold and a door-wide bearer all
 deliver to a harness, never to a pty whose submitted input RUNS. Audited
 `a2a.message/send`/`status:"shell-wrapped"`, paid only where it can change the
@@ -5078,7 +5096,15 @@ external A2A caller can do to aoide: task the operator's own
 already-configured agent, or steer a session already running under aoide's
 conductor, but never execute an arbitrary binary. If `spawnAgent` is empty,
 the spawn path returns `{"code": -32004, "message": "A2A spawn not
-configured"}` rather than silently doing nothing.
+configured"}` rather than silently doing nothing. **A `spawnAgent` that IS a
+shell is refused the same way, `-32004`, in `do_spawn`'s own prologue and
+before any process starts** (H1): the spawn's first turn is typed into the
+child's pty, a shell's stdin is a command line, and a remote peer's prompt
+would RUN. The check reads the configured ARGV through
+`aoide_conduct::graph::program_is_a_shell` — so `bash`, `bash -lc claude`
+and `env bash` are all shells — and the refusal is audited by name
+(`a2a.message/send`/`status:"shell-spawn-agent"`) rather than left for the
+caller to infer.
 
 **Security model.** The capability is admitted **at rebuild time**, not
 per-request: setting `aoide.a2a.spawnAgent` to a non-empty command is the

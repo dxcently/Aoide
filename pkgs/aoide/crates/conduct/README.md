@@ -196,12 +196,18 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   `TranscriptSpec::say`, and `graph/eidolon.rs::eidolon_state_from_trace` —
   never a second formatter, extractor or state fold. A shell parent is
   skipped, never injected into — on the label (`""`/`"shell"`, no registered
-  profile) OR the wrapped program
-  (`wrapped_program_is_a_shell`, the P-C5 capture), so a session labelled
-  from a harness profile over a `bash` pty is refused like any other shell.
+  profile) OR the wrapped command
+  (`wrapped_program_is_a_shell` = the durable `shell` stamp OR a P-C5
+  `restore`), so a session labelled from a harness profile over a `bash` pty
+  is refused like any other shell, launchers included (`env bash`,
+  `nix develop -c bash`, `dash`, `nu`, `xonsh`, …). The read is argv-only: a
+  wrapper script that execs a shell stays receptive, and a harness reached
+  THROUGH a shell reads as a shell for its whole run — a skipped lane, never
+  a line typed where it would run.
   The LOCAL parent/sibling autogate in `send.rs` is not this rule: that
-  caller steers a shell it can see in its own roster and no remote text
-  rides the line.
+  caller steers a shell it can see in its own roster, no remote text rides
+  its line, and an agent hand-relaying a peer's words into one steers with
+  its OWN authority — by design.
 - **The undying mark (P-C2/P-C3, durable-sessions plan; renamed from "carry"
   at command-defrag lane U1, 2026-08-27; relocated under `session grant` at
   the session-surface redesign, command-defrag lane X, 2026-08-28):**
@@ -233,7 +239,7 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   later: no restore capture (`has_capture`, the P-C5 snapshot above) and no
   registered harness `AgentProfile.resume_args`. `spawn --undying` computes
   `has_capture` directly off the command it just built
-  (`captures_like_a_shell`, no race against the conducted child's own first
+  (`program_is_a_shell`, no race against the conducted child's own first
   tick); `session grant undying on --id <id>` reads it off the LIVE roster
   record's own `restore` field, and stays silent for an id absent from the
   roster (no live signal to warn from, the same posture `live` already
@@ -895,11 +901,17 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   that an early return must never silently skip the audit line a full run
   gets.
 - **Terminal restore capture (P-C5, durable-sessions plan) — gated on the
-  WRAPPED COMMAND, never the agent label (task #100).**
+  WRAPPED ARGV, never the agent label (task #100).**
   `session_conduct`'s `is_shell` (everything below this bullet: the ~1 Hz
   refresh tick, `typed_capture_active`'s buffer, the restore snapshot) comes
-  from `captures_like_a_shell(&program)` — `program`'s own basename against
-  `bash`/`zsh`/`fish`/`sh`, never `agent == "shell"`. `agent` is a caller-
+  from the SAME `program_is_a_shell(&inv.args)` every refusal lane reads —
+  the program's own basename against the shell list, with the launchers a
+  shell arrives through (`env`, `nix develop -c`, `setsid`, `timeout`,
+  `nice`, …) resolved to what they forward to — never `agent == "shell"`.
+  Its verdict is also stamped on the record at registration as the durable
+  `shell` field (`wrapped_program_is_a_shell` = that field OR a `Some`
+  `restore`), which is how a lane that was not there at spawn time can
+  refuse to type into a shell without knowing the argv. `agent` is a caller-
   chosen label (`--agent <name>`, or the command's own basename by default)
   that can disagree with what actually execs on the pty; the P-C7 soak's
   live finding was exactly that gap — `spawn --agent soak-a -- bash` ran a

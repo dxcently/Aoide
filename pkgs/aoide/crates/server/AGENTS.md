@@ -540,7 +540,7 @@
   reads the TARGET's own record
   (`session_wrapped_is_a_shell` → `aoide_conduct::graph::
   wrapped_program_is_a_shell`, the record-side half of
-  `captures_like_a_shell`) before it folds `deliver_now`, and holds the line
+  `program_is_a_shell`) before it folds `deliver_now`, and holds the line
   PENDING when it comes back true — a shell's input is a command line, and
   `--agent <harness> -- bash` names a harness over a pty running a shell, so
   the `agent` label is not the question. Paid only where it can change the

@@ -214,6 +214,18 @@ pub struct SessionRecord {
     pub cwd: String,
     #[serde(default)]
     pub state: String,
+    /// Whether the conducted command IS a shell, decided once by the process
+    /// that conducts it (`aoide_conduct::graph::program_is_a_shell`) from its
+    /// own argv at REGISTRATION. Durable on purpose: the auto-typing refusals
+    /// (ping-back, the doorbell's PTY arm, the A2A door) must be able to tell
+    /// a shell from a harness wrap without having been there at spawn time,
+    /// and a line submitted into a shell runs as a command. Written by
+    /// `stamp_shell` on both registration arms, so re-registering an id as
+    /// `-- bash` sets it and re-registering it as a harness clears it.
+    /// `false` is skipped, so every record written before this field existed
+    /// stays byte-identical.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub shell: bool,
     #[serde(rename = "startedAt", default)]
     pub started_at: String,
     #[serde(

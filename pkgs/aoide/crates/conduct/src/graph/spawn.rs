@@ -28,7 +28,7 @@
 //! nix anywhere in this path — a terminal emulator is a shell concern, never
 //! `lyra`'s.
 
-use super::conduct::{captures_like_a_shell, conduct_socket_path, unix_ts};
+use super::conduct::{conduct_socket_path, program_is_a_shell, unix_ts};
 use super::model::{canonical_state, load_stage, sessions_path, SessionsFile};
 use super::send::session_send;
 use super::undying::nothing_to_restore_warning;
@@ -751,10 +751,10 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
     // Same nothing-to-restore warning `session grant undying on` carries
     // (`undying.rs::nothing_to_restore_warning`, task #100): `program` (this
     // function's own, not a roster read-back) is the WRAPPED command
-    // `captures_like_a_shell` decides on directly, no race against the
+    // `program_is_a_shell` decides on directly, no race against the
     // conducted child's own first refresh tick.
     let undying_warning = undying
-        .then(|| nothing_to_restore_warning(&agent, captures_like_a_shell(&program)))
+        .then(|| nothing_to_restore_warning(&agent, program_is_a_shell(&inv.args)))
         .flatten();
 
     // `--prompt`: only after registration succeeded, through the one gated

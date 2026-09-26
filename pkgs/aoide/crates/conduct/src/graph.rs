@@ -112,6 +112,10 @@ pub use self::conduct::channel_socket_path;
 // doorbell lanes make, re-exported for the same reason
 // `conduct_socket_path` above is. One predicate, three lanes, no copy.
 pub use self::conduct::wrapped_program_is_a_shell;
+// The same predicate, for the doors that hold an ARGV rather than a record:
+// `aoide-server`'s spawn arm refuses a `spawnAgent` that is a shell, and that
+// decision happens before any record exists.
+pub use self::conduct::program_is_a_shell;
 pub use self::doc::{build_graph, render, resolve_graph_document};
 // `mail ring` (P-M5a-2, MAIL.md "Delivery and the doorbell"): the ring
 // itself, callable in-process by any door that has this crate (the daemon
