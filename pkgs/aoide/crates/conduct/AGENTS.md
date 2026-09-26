@@ -471,7 +471,34 @@
   `dispatch_session_action`/`run_session_step`/`session_action_reply`) so
   the two whitelists share one runner instead of two copies of it — the
   five original session actions are byte-identical through that sequencer
-  to before the split. `safe_session_id` (session ids: no whitespace) and
+  to before the split. `workspaceaction` (the bar's bind click, W-P5) is a
+  THIRD whitelist that does NOT join that sequencer, and its shape is why:
+  its plan is ONE argv (`WorkspaceBinding::plan` — the CLI's own `workspace
+  set <ws> <project> [--new]` / `workspace clear <ws>`), and its reply is
+  keyed by a workspace id with an optional project beside it, which the
+  `ActionSubject` identity pair (one key, one string value) does not fit; a
+  one-step plan can have no partial state either. It shares the parts that
+  ARE common instead: `run_core_step` (the one mutation-side spawn) and
+  `outcome_triple` (the one `--json` envelope read), so CLI answers are read
+  in one place and replies are shaped in one place across all three actions.
+  `WorkspaceBinding::from_wire` is the ONE authority for that wire's shape
+  and `parse_command`'s only gate call site — SHAPE only, never state: the
+  CLI stays the authority on whether a project exists, and a `clear`
+  carrying a binding field is refused by name rather than ignored, so a
+  mis-shaped click can never read as a successful unbind. Its one resolved
+  field is the workspace: an omitted one is the FOCUSED one, read with
+  `crate::graph::focused_workspace` in `dispatch_workspace_action` (never a
+  second compositor read), so the forwarded argv always carries an integer —
+  `workspace clear` takes an id and has no focused default of its own. A
+  host with no adapter is ANSWERED (`reason: "no-compositor"`, message =
+  `graph/workspace.rs::NO_COMPOSITOR`, the CLI's own sentence, one authority
+  for the text), never dropped: a well-formed click is parked on a reply, so
+  even a malformed line that NAMES this verb is ANSWERED with a `bad-request`
+  refusal — the same rule `sessiontrace` holds, one rule for every parked
+  caller — while a malformed line that names some OTHER verb is dropped with
+  none. The wire takes a
+  NEGATIVE workspace id (`as_i64`), matching `SessionRecord.workspace` and
+  the CLI's own `workspace_id`. `safe_session_id` (session ids: no whitespace) and
   `safe_action_value` (project/host/create/edit names: ordinary spaces
   allowed) are two different checks — an id is a bookkeeping key, a name is
   user-facing text — and both reject empty, `-`-prefixed, or
@@ -2022,10 +2049,38 @@
   report is delivered" (the remote-parent paragraph), and `EIDOLON-TRACE.md`'s
   "Second slice" beside the spool half: the two lanes are one conversation,
   and a doc that describes only the sending end is half a page.
-- A change to shellbridge's `sessionaction`/`projectaction` whitelists or
-  reply shape updates `ShellBridge.qml`'s protocol comment and
-  `concepts/cli/Doors-and-Nodes.md`'s socket-command list, in the same
-  commit.
+- A change to shellbridge's `sessionaction`/`projectaction`/`workspaceaction`
+  whitelists or reply shape updates `ShellBridge.qml`'s protocol comment
+  (`modules/facets/quickshell/qml/ShellBridge.qml`, which names the verbs it
+  answers) and `concepts/cli/Doors-and-Nodes.md`'s socket-command list, in the
+  same commit. `workspaceaction` (W-P5) is the ONE deliberate debt here: the
+  QML protocol line for it, and the bar's bind click in
+  `song/songbook/cadenza/widgets/`, are the cadenza rice slice's to write
+  (house rule 7 — bridge first), so the next commit touching either owes both.
+- **`graph.json`'s compositor block (`doc::workspace_block`) is ONE seam.**
+  `build_graph` publishes it and `aoide workspace list --json` prints it from
+  the same function — never a second builder, never a reader re-deriving the
+  rows, because the two doors disagreeing about a binding is exactly the bug
+  this seam exists to prevent. The block rides only when some session reports a
+  workspace or some project has a binding, and a session node's `activeAt`
+  rides under the SAME gate (it feeds the block, so it travels with it): a
+  document with no compositor in play must stay byte-identical, test or no
+  test (`nothing_in_play_leaves_the_document_byte_identical`). Rows and ties
+  are built from LOCAL sessions only — the input IS the local roster, and
+  another node's rows arrive nested under a fresh node's `children`, which the
+  block never reads. Both lineage walks (a headless session's activity folding
+  into its nearest windowed ancestor's row, and a spawned tie's leaving end)
+  go through `windowed_ancestor`, which is visited-set bounded: a malformed
+  parent cycle must never spin the builder. A headless session's pulse folds
+  in as ACTIVITY ONLY — no session id joins that row's `sessions`, no count
+  moves, and no tie is drawn. `projects.json` stays the RECORD; this block is
+  its projection, so a binding change belongs in `workspace set`/`clear` and
+  nowhere else.
+- A change to that block's shape, its gate, or its definitions updates
+  `CONTRACTS.md` §4's `state/stage/graph.json` section (the field tables),
+  `docs/Aoide-Wiki/concepts/orchestration/Session-Graph.md`'s bindings
+  paragraph, and `conduct/README.md`'s workspace-binding bullet, in the same
+  commit — the paint layer reads this shape and has no schema of its own.
 
 ## Managed task wrapper (`spawn --task`, `session watch`)
 

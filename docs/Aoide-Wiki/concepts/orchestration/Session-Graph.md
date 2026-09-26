@@ -94,6 +94,17 @@ its workspace default is not offered by those views. On a host with no
 compositor no session carries a default at all, and the ladder is exactly the
 two rungs it was before.
 
+The BINDINGS are published for the desktop in `graph.json`'s top-level
+`workspaces` block (core-seams §E, slice S3, `CONTRACTS.md` §4): one row per
+workspace a session sits on or a project is bound to — `workspace`, `project`
+when bound, `projects` (the binding plus the effective projects of that
+workspace's live sessions), `sessions`, `live`/`working`/`awaiting`, and
+`activeAt` — plus `ties`, the pairs that share a project or cross a `spawned`
+edge. A bar or dock draws "workspace 3 → project aoide" and pulses it off the
+document it already hot-reloads, rewritten atomically by every `workspace
+set`/`clear`; the block rides only when a workspace is in play, and
+`projects.json` stays the record.
+
 ## The viewer — bare `graph`
 
 Bare `graph` renders the DAG as a Unicode box-drawing tree in the terminal;

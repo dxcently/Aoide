@@ -25,8 +25,9 @@ use super::common::{require_args, stage_error};
 use super::doc::restage_graph;
 use super::manage::local_daemon;
 use super::model::{
-    binding_for, load_stage, projects_path, sessions_path, write_stage, Project, ProjectsFile,
-    SessionsFile, STAGE_GRAPH_VERSION,
+    binding_for, hooks_path, load_stage, merged_sessions, projects_path, sessions_path,
+    sorted_projects, write_stage, HooksFile, Project, ProjectsFile, SessionsFile,
+    STAGE_GRAPH_VERSION,
 };
 use super::window::focused_workspace;
 use aoide_protocol::output::Outcome;
@@ -36,8 +37,11 @@ use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
 /// The taught refusal an omitted `<workspace>` gets when the compositor cannot
-/// be asked. One text, both commands: the caller is told to give the number.
-const NO_COMPOSITOR: &str =
+/// be asked. One text, both doors: the CLI's own caller-side resolution here,
+/// and shellbridge's `workspaceaction` (which resolves an omitted workspace in
+/// the same process that owns the adapter, `dispatch_workspace_action`) — one
+/// authority for the sentence, so an operator greps one string.
+pub(crate) const NO_COMPOSITOR: &str =
     "no compositor adapter here to say which workspace is focused — give the workspace id";
 
 /// One `<workspace>` argument as a workspace ID, or a taught refusal naming
@@ -237,18 +241,19 @@ pub fn workspace_list(_inv: &Invocation) -> Outcome {
         Ok(f) => f,
         Err(e) => return stage_error("workspace.list", e),
     };
-    let observed: BTreeSet<i64> = sessions.sessions.iter().filter_map(|s| s.workspace).collect();
-    let mut ids: BTreeSet<i64> = observed.clone();
-    for p in &file.projects {
-        ids.extend(p.workspaces.iter().copied());
-    }
-    let rows: Vec<Value> = ids
-        .iter()
-        .map(|ws| match binding_for(*ws, &file.projects) {
-            Some(i) => json!({ "workspace": ws, "project": file.projects[i].name }),
-            None => json!({ "workspace": ws }),
-        })
-        .collect();
+    let hooks: HooksFile = match load_stage(&hooks_path()) {
+        Ok(f) => f,
+        Err(e) => return stage_error("workspace.list", e),
+    };
+    // §E: `list --json` prints the SAME block `graph.json` publishes — one
+    // builder, consulted by both doors, so the two can never disagree. The
+    // session set is the merged one (hook phases folded over the roster) for
+    // the same reason: the block counts the state a widget sees.
+    let merged = merged_sessions(&sessions.sessions, &hooks.hooks);
+    let observed: BTreeSet<i64> = merged.iter().filter_map(|s| s.workspace).collect();
+    let projects = sorted_projects(&file.projects);
+    let (rows, ties) =
+        super::doc::workspace_block(&projects, &merged, &hooks.hooks).unwrap_or_default();
     let bound = rows.iter().filter(|r| r.get("project").is_some()).count();
 
     let mut message = if rows.is_empty() {
@@ -267,7 +272,10 @@ pub fn workspace_list(_inv: &Invocation) -> Outcome {
         message.push_str("\n(no session on this host reports a workspace)");
     }
 
-    let mut data = json!({ "observed": !observed.is_empty(), "workspaces": rows });
+    // Both keys are ALWAYS present here, even when nothing rides (this
+    // command's shape is stable, unlike the document's): an empty list is the
+    // honest answer for a host with no workspace in play.
+    let mut data = json!({ "observed": !observed.is_empty(), "workspaces": rows, "ties": ties });
     if observed.is_empty() {
         data["reason"] = json!("no session on this host reports a workspace");
     }

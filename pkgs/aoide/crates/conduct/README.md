@@ -64,10 +64,22 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   read, in the CALLER's process — `aoided` is a service with no compositor
   environment — and the forwarded argv carries the resolved integer, never the
   word "focused". With no adapter the caller gets a taught refusal asking for
-  the number (exit 2). `list` is a READ (no lock, no daemon, no write): the
-  bindings plus every workspace a local session reports, sorted by id, with
-  `"observed": false` and a named `reason` on a host where no session reports
-  one — §A's taught-refusal shape without a refusal.
+  the number (exit 2). Every write republishes `graph.json` (the same
+  `restage_graph` every project mutation runs), whose TOP-LEVEL `workspaces`
+  block (§E of the core-seams design, slice S3) is the desktop's read: one row
+  per workspace a session sits on or a project is bound to — the binding
+  (`project`, absent when unbound), the effective `projects` of its live
+  sessions, `sessions`, `live`/`working`/`awaiting` and `activeAt` — plus
+  `ties` between rows sharing a project or crossing a spawned edge, so the
+  bar/dock draws "workspace N → project X" and pulses it off the document it
+  already hot-reloads (a headless host's document carries neither key at all).
+  `aoide workspace list --json` prints the SAME block, from the same builder.
+  A desktop click reaches the same two mutations through the shellbridge
+  socket's `workspaceaction` (the action list below). `list` is a READ (no
+  lock, no daemon, no write): the bindings plus every workspace a local
+  session reports, sorted by id, with `"observed": false` and a named `reason`
+  on a host where no session reports one — §A's taught-refusal shape without a
+  refusal.
 
   A binding is a BIRTH DEFAULT, and the seam that applies it is
   `graph/model.rs::observe_workspace`: it writes `SessionRecord.workspace`
@@ -759,8 +771,8 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
 - `shellbridge`, `herald` — files only; their CLI commands (registry lines)
   moved to `lyra` at P-A2, but both stay resident here (see charter smudge
   below). The socket answers two commands with a reply, run through the
-  same sequencer over either subject a command names by: a SESSION id
-  (`sessionaction`) or a PROJECT name (`projectaction`, zero-session — no
+  same sequencer over either subject those two commands name by: a SESSION
+  id (`sessionaction`) or a PROJECT name (`projectaction`, zero-session — no
   session id anywhere on that wire, in its plan, its reply, or its audit
   line; the reply's identity key is `name` where `sessionaction`'s is
   `sessionId`). `sessionaction` is a closed five-action whitelist
@@ -783,6 +795,27 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   with no roots for a host uses `add` instead, so a host with nothing to
   replace keeps its existing roots rather than being wiped); `removehost`
   runs `project remove <name> --host <host>` and requires exactly one host.
+  `workspaceaction` is the third replying command, a closed two-action
+  whitelist of its own (`set` / `clear`, `shellbridge.rs::WorkspaceBinding`)
+  for the bar's bind click: zero-session too, and it plans the exact argv the
+  CLI takes — `aoide workspace set <ws> <project> [--new]` /
+  `aoide workspace clear <ws>` — so no second binding exists anywhere. It is
+  the one acknowledged action that resolves a field itself: an omitted
+  `workspace` means the FOCUSED workspace, read in-process through the
+  compositor adapter (`window.rs::focused_workspace`, the same function the
+  CLI's own caller-side resolution uses) because `workspace clear` takes an
+  id and no caller can be expected to know the focused one, so the child
+  always receives an integer. A host with no adapter is ANSWERED
+  (`reason: "no-compositor"`, the CLI's own sentence) rather than dropped,
+  because a click is parked on a reply. Its one reply line is
+  `{ok, message, action, workspace, project?, data?}` — the CLI's `message`
+  and `data` verbatim, keyed by the RESOLVED workspace id, `project` riding
+  only on `set`. `workspace` is ABSENT on the `no-compositor` refusal
+  (`{ok:false, action, reason, message}` — nothing was resolved to name), and
+  both `workspace` and `action` are absent on a `bad-request` refusal
+  (nothing parsed to echo) — and a malformed line that NAMES this verb is
+  ANSWERED with that refusal rather than dropped, the same rule
+  `sessiontrace` holds: one rule for every parked caller.
   Every other socket command stays fire-and-forget.
 - `commands` — this crate's CLI commands, registered from one `register()`
   call (`conduct/src/commands/graph.rs`, still that file's name

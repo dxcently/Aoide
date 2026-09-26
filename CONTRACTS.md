@@ -2401,7 +2401,9 @@ keeps it off the wire for a project no binding has touched — the
 `hosts`/`autoResume` discipline, so every `projects.json` written before this
 field stays byte-identical. Written by `workspace set` (under the same stage
 lock local roots go through; daemon-owned, like every other `projects.json`
-mutation) and by `workspace clear`. ONE INVARIANT: a workspace id appears in AT
+mutation) and by `workspace clear` — and, from a desktop click, through the
+shellbridge socket's `workspaceaction` (W-P5), which re-execs those same two
+commands and writes nothing itself. ONE INVARIANT: a workspace id appears in AT
 MOST ONE project — `workspace set` MOVES it off whatever project held it —
 while two workspaces may show the same project. A binding is not a root: it
 anchors nothing by cwd, a rootless project may carry one, and `project remove
@@ -2409,6 +2411,26 @@ NAME ROOT` leaves bindings alone; the bare `project remove NAME` takes them
 with the record. Read with `aoide workspace list [--json]`, which merges the
 bindings with every workspace a local session reports (`observed` is `false`
 by name on a host where no session reports one).
+
+**The binding's desktop door and read path (W-P5).** The RECORD is
+`$AOIDE_ROOT/state/stage/projects.json`, field `projects[].workspaces` (an
+integer array per project — invert it for a workspace → project map), and the
+desktop's READ is this document's top-level `workspaces`/`ties` block (S3,
+below) — the resolved projection the bar/dock widgets already hot-reload, so a
+binding arrives in the same atomic rewrite as the roster. `aoide workspace
+list --json` prints the same block for a terminal door. A
+click binds or unbinds by sending ONE line to
+shellbridge's socket: `{"cmd":"workspaceaction","action":"set|clear",
+"workspace":<int, omitted = the focused one>,"project":"<name>","new":<bool>}`,
+answered with one JSON reply — `{ok, message, action, workspace, project?,
+data?}`, the CLI's own `message`/`data` verbatim, `project` only on `set`.
+`workspace` is ABSENT only on the `no-compositor` refusal (`{ok:false, action,
+reason, message}` — nothing was resolved to name), and BOTH `workspace` and
+`action` are absent on a `bad-request` refusal (nothing parsed to echo back). A
+malformed line that NAMES this verb is answered rather than dropped, the same
+rule `sessiontrace` holds — one rule for every parked caller.
+The action re-execs `aoide workspace set|clear` and writes nothing itself, so
+the invariant above holds no matter which door the mutation came through.
 
 **Additive in v0 (P-D8, `docs/architecture/AOIDED.md`'s "L5"/"Open
 knobs"):** a project entry MAY also carry an optional `autoResume` (bool,
@@ -2542,6 +2564,48 @@ It MAY also carry that project's `lead` session id, under the same rule
 (only when one is named) — `{ "id": "project:aoide", …, "lead":
 "abc123" }`; the id is echoed as stored, whether or not the roster still
 holds it.
+
+**Additive in v0, at the TOP LEVEL: `workspaces` + `ties` — the compositor
+block (core-seams §E; the S3 slice).** Two keys beside `nodes`/`edges`, built
+by the same `build_graph` and printed identically by `aoide graph --json` and
+`aoide workspace list --json` (ONE builder, `doc::workspace_block`, so the two
+doors can never disagree — the command's own `data` carries both keys even when
+empty, while the document omits them):
+
+```json
+"workspaces": [
+  {"workspace":3,"project":"aoide","projects":["aoide"],"sessions":["s1","s2"],
+   "live":2,"working":1,"awaiting":0,"activeAt":"2026-09-26T14:02:31Z"}
+],
+"ties": [
+  {"kind":"project","from":3,"to":5,"project":"aoide","activeAt":"…"},
+  {"kind":"spawned","from":3,"to":7,"pairs":[["s1","s9"]],"activeAt":"…"}
+]
+```
+
+`project` is the BINDING and is absent when the workspace is unbound;
+`projects` is the binding PLUS the effective projects of that workspace's live
+sessions; `sessions` lists every session whose record carries that workspace id
+and `live`/`working`/`awaiting` are counts over it (`live` is "not `done`" — a
+`stopped` session has ended a TURN, not died). A **project tie** is emitted
+once per shared project for each pair of workspaces whose `projects` intersect
+(a clique at three or more workspaces; the song collapses lanes itself). A
+**spawned tie** runs from the parent's — or its nearest WINDOWED ancestor's —
+workspace to the child's, only when the two differ, so a headless child has no
+tie of its own and its activity shows on its parent's workspace. Every
+`activeAt` is the latest hook `updatedAt` for that session, else its
+`startedAt`, and a row's or tie's is the max over the sessions contributing to
+it: session nodes carry the same per-session value, which a watcher compares
+between two reads to pulse.
+
+**Both keys ride only when something is in play** — some session reports a
+workspace, or some project has a binding — and a session node's `activeAt`
+rides with them, since it feeds the block; a headless host's document
+therefore stays byte-for-byte what it was before this block existed. **Local
+sessions only**: another node's rows reach this document only nested under a
+fresh node's `children`, which the block never reads. The block is a
+PROJECTION: `projects.json` above stays the binding RECORD and the mutation's
+own write.
 
 **Additive in v0: the two cross-machine parentage keys.**
 `remoteParent` — `{ "node": "<current name>", "sessionId": "<id>" }` — rides a

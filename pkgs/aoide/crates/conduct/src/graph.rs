@@ -278,6 +278,11 @@ pub use self::window::{focus_session, focus_window, focused_workspace, run_hypr_
 // beside the other window-adapter reads.
 mod workspace;
 pub use self::workspace::{workspace_clear, workspace_list, workspace_root, workspace_set};
+// The one sentence an omitted `<workspace>` with no compositor to ask gets —
+// `pub(crate)`, because `shellbridge` (a SIBLING of this module, not a
+// descendant) resolves an omitted `workspaceaction` workspace with the very
+// `focused_workspace` above and refuses with these words.
+pub(crate) use self::workspace::NO_COMPOSITOR;
 
 // Storage/time passthroughs root's `a2a.rs` / `commands/{a2a,usage}.rs` still
 // reach at `crate::graph::{load_stage, now_iso_utc, sessions_path,
