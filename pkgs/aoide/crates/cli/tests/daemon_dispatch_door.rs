@@ -307,6 +307,312 @@ fn a_daemon_dispatched_send_never_resolves_this_processs_own_ambient_session_id(
     let _ = std::fs::remove_file(&socket);
 }
 
+/// The built `aoide` binary beside this test's own executable — the hook process
+/// this test needs is a REAL one (its own argv, its own env, its own stdin, and
+/// the daemon probe that routes it), not an in-process imitation. `cargo test -p
+/// aoide-cli` builds this package's own bins, so the sibling is there whenever
+/// this test binary is (`aoide-conduct`'s `testutil::built_aoide_bin` holds the
+/// same shape and the same assertion).
+fn built_aoide_bin() -> PathBuf {
+    let test_exe = std::env::current_exe().expect("current_exe resolves under cargo test");
+    let profile_dir = test_exe
+        .parent() // .../target/<profile>/deps
+        .and_then(|p| p.parent()) // .../target/<profile>
+        .expect("test exe has a target/<profile>/deps parent");
+    let bin = profile_dir.join("aoide");
+    assert!(
+        bin.exists(),
+        "expected a pre-built `aoide` binary at {bin:?} — run `cargo build --bin aoide` first"
+    );
+    bin
+}
+
+/// Run a REAL `aoide session hook` the way a harness runs one — its own process,
+/// its own env (the claimed wrap's `AOIDE_SESSION_ID`), its own stdin, probing
+/// exactly one daemon (`socket`) — and return once the hook has exited. This is
+/// the CLI half of the hop; the daemon half is `serve_daemon` above it.
+fn run_harness_session_start(socket: &Path, claim: &str, harness_session_id: &str) {
+    let mut child = std::process::Command::new(built_aoide_bin())
+        .args(["session", "hook", "--agent", "claude"])
+        .env("AOIDE_SESSION_ID", claim)
+        .env("AOIDE_DAEMON_SOCKET", socket)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("the built aoide binary runs");
+    {
+        use std::io::Write as _;
+        let payload = format!(
+            r#"{{"session_id":"{harness_session_id}","hook_event_name":"SessionStart","cwd":"/w","source":"startup"}}"#
+        );
+        child
+            .stdin
+            .as_mut()
+            .expect("the hook's stdin is piped")
+            .write_all(payload.as_bytes())
+            .expect("the hook payload reaches the hook process");
+    }
+    assert!(
+        child.wait().expect("the hook process is awaited").success(),
+        "a hook never fails its harness"
+    );
+}
+
+/// The other half of the ruling, on the door that actually regressed: a claim
+/// the hook's own ancestry CONTRADICTS is dropped by the daemon arm too — the
+/// session registers parentless (never under a parent the kernel says this hook
+/// was not running beneath), the dropped claim is reported on the outcome every
+/// door audits, and readiness therefore does NOT open. Same rule as the CLI
+/// arm's, which `aoide-conduct`'s own
+/// `a_claim_the_hooks_own_ancestry_contradicts_registers_parentless` drives
+/// through the real door without a daemon.
+#[test]
+fn a_daemon_served_hook_drops_a_contradicted_parent_claim() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _saver = aoide_test_support::EnvSaver::capture(&["AOIDE_SESSION_ID", "AOIDE_AUDIT_LOG"]);
+    std::env::remove_var("AOIDE_SESSION_ID");
+    let audit_log = short_tmp("hook-claim-audit").with_extension("jsonl");
+    std::env::set_var("AOIDE_AUDIT_LOG", &audit_log);
+    floor_stage_env();
+
+    // A live-looking wrap carrying a pid no hook could be running under — the
+    // shape a leaked `AOIDE_SESSION_ID` points at.
+    let wrapper = "hook-stale-wrapper";
+    let sf = aoide_conduct::graph::SessionsFile {
+        schema_version: "0".to_string(),
+        sessions: vec![aoide_conduct::graph::SessionRecord {
+            session_id: wrapper.to_string(),
+            state: "idle".to_string(),
+            conductable: Some(true),
+            pid: Some(2_000_000_000),
+            ..Default::default()
+        }],
+    };
+    aoide_conduct::graph::write_stage(&aoide_conduct::graph::sessions_path(), &sf).unwrap();
+
+    let (_stream, socket_path, events_path) = start_daemon("hook-claim");
+    let since = aoide_conduct::graph::now_iso_utc();
+
+    run_harness_session_start(&socket_path, wrapper, "hook-child-2");
+
+    let file: aoide_conduct::graph::SessionsFile =
+        aoide_conduct::graph::load_stage(&aoide_conduct::graph::sessions_path()).unwrap();
+    let rec = file
+        .sessions
+        .iter()
+        .find(|s| s.session_id == "hook-child-2")
+        .unwrap_or_else(|| panic!("the daemon must have registered the harness session: {file:?}"));
+    assert_eq!(
+        rec.parent_session_id, None,
+        "a contradicted claim is dropped, never trusted: {rec:?}"
+    );
+    assert_eq!(rec.harness_session_id.as_deref(), Some("hook-child-2"));
+    assert!(
+        !aoide_conduct::graph::harness_session_started(wrapper, &since),
+        "nothing may claim that readiness opened under a parent this hook has no ancestry for"
+    );
+
+    let audited = std::fs::read_to_string(&audit_log).unwrap_or_default();
+    assert!(
+        audited
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .any(|rec| rec["door"] == "daemon"
+                && rec["command"] == "session.hook"
+                && rec["message"].as_str().is_some_and(|m| m.contains("contradicted"))),
+        "the drop must be audited, not silent, got:\n{audited}"
+    );
+
+    cleanup(&socket_path, &events_path);
+    let _ = std::fs::remove_file(&audit_log);
+}
+
+/// The daemon arm of `session hook` links the parent the CLI arm links.
+///
+/// Live on yomi (2026-09-26) it did not: with a real `aoided` serving the hook,
+/// a `spawn --prompt` child's `parentSessionId` came back `null` and
+/// `harness_session_started` never opened, so a fully-drawn, idle harness was
+/// reported "not ready" after 20s. The cause was not the attested-wrap walk
+/// (which is fine, and first) but the FALLBACK under it: the CLI arm falls back
+/// to the hook process's own `AOIDE_SESSION_ID`, and the daemon arm was reading
+/// that variable from `aoided`'s own environment — a daemon's env, never the
+/// harness launcher's (`invocation_from_dispatch_request`'s G8 accounting, one
+/// door over from the `send` attribution this file's G8 test pins).
+///
+/// So this test makes the claim the ONLY possible route to the parent: the
+/// wrapper record carries NO pid, which means the daemon's seal sweep can never
+/// seal it and the attested walk can never match it (both key on a live pid).
+/// Before the fix the record came back parentless; the assertion below is what
+/// that failure looked like.
+#[test]
+fn a_daemon_served_session_hook_links_the_hook_processs_own_parent() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _saver = aoide_test_support::EnvSaver::capture(&["AOIDE_SESSION_ID", "AOIDE_AUDIT_LOG"]);
+    // Whatever THIS process inherited is not a harness launcher's claim — that
+    // is the whole point: the daemon must never answer with its own env, and the
+    // child below gets the claim explicitly.
+    std::env::remove_var("AOIDE_SESSION_ID");
+    let audit_log = short_tmp("hook-parent-audit").with_extension("jsonl");
+    std::env::set_var("AOIDE_AUDIT_LOG", &audit_log);
+    floor_stage_env();
+
+    let wrapper = "hook-parent-wrapper";
+    let sf = aoide_conduct::graph::SessionsFile {
+        schema_version: "0".to_string(),
+        sessions: vec![aoide_conduct::graph::SessionRecord {
+            session_id: wrapper.to_string(),
+            state: "idle".to_string(),
+            conductable: Some(true),
+            // No pid, deliberately — see this test's own doc.
+            ..Default::default()
+        }],
+    };
+    aoide_conduct::graph::write_stage(&aoide_conduct::graph::sessions_path(), &sf).unwrap();
+
+    let (_stream, socket_path, events_path) = start_daemon("hook-parent");
+    let since = aoide_conduct::graph::now_iso_utc();
+
+    // The harness's own SessionStart, run the way a harness runs it: a real
+    // `aoide session hook` child, inheriting the wrap's `AOIDE_SESSION_ID` and
+    // probing exactly one daemon — the one this test started.
+    run_harness_session_start(&socket_path, wrapper, "hook-child-uuid");
+
+    // The door really was the daemon's: the child's own dispatch audits
+    // `"door":"cli"` and the daemon's audits `"door":"daemon"`, both to the log
+    // this test set — a silent local fallback would leave only the first.
+    let audited = std::fs::read_to_string(&audit_log).unwrap_or_default();
+    assert!(
+        audited
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .any(|rec| rec["door"] == "daemon" && rec["command"] == "session.hook"),
+        "the hook must be served by the daemon arm, got:\n{audited}"
+    );
+
+    let file: aoide_conduct::graph::SessionsFile =
+        aoide_conduct::graph::load_stage(&aoide_conduct::graph::sessions_path()).unwrap();
+    let rec = file
+        .sessions
+        .iter()
+        .find(|s| s.session_id == "hook-child-uuid")
+        .unwrap_or_else(|| panic!("the daemon must have registered the harness session: {file:?}"));
+    assert_eq!(
+        rec.parent_session_id.as_deref(),
+        Some(wrapper),
+        "the daemon arm must link the hook's own claimed parent, exactly as the CLI arm does"
+    );
+    assert_eq!(
+        rec.harness_session_id.as_deref(),
+        Some("hook-child-uuid"),
+        "the record is the harness's own SessionStart"
+    );
+    assert!(
+        aoide_conduct::graph::harness_session_started(wrapper, &since),
+        "readiness must open on a daemon-served SessionStart — this is the fact `spawn --prompt` waits on"
+    );
+    // ...and the claim that made it open is on the record the door audits: a
+    // claim that CROSSED THE HOP is a decision taken here on another process's
+    // word, so it leaves a trace either way (review, "every claim leaves an
+    // audit trace"). The wrapper is pid-less, so this one could not be checked.
+    let audited = std::fs::read_to_string(&audit_log).unwrap_or_default();
+    assert!(
+        audited
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .any(|rec| rec["door"] == "daemon"
+                && rec["command"] == "session.hook"
+                && rec["message"].as_str().is_some_and(|m| {
+                    m.contains("hook parent claim") && m.contains("taken unchecked")
+                })),
+        "a linked claim on the daemon arm must be audited too, got:\n{audited}"
+    );
+
+    cleanup(&socket_path, &events_path);
+    let _ = std::fs::remove_file(&audit_log);
+}
+
+/// The forge this fix closes (review M1). Before it, `session hook`'s daemon
+/// arm walked a pid the CALLER supplied — `HOOK_PID_FLAG`, straight off the
+/// wire — so a same-uid process could name any session and have the door
+/// "verify" the claim against it (`pid_ancestry(that pid)` contains it
+/// itself). The door now stamps its OWN `SO_PEERCRED` pid and discards any
+/// wire value for that key, so the same forged request is contradicted and the
+/// session registers parentless.
+#[test]
+fn a_wire_supplied_door_pid_is_discarded_not_walked() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _saver = aoide_test_support::EnvSaver::capture(&["AOIDE_SESSION_ID", "AOIDE_AUDIT_LOG"]);
+    std::env::remove_var("AOIDE_SESSION_ID");
+    let audit_log = short_tmp("hook-forge-audit").with_extension("jsonl");
+    std::env::set_var("AOIDE_AUDIT_LOG", &audit_log);
+    floor_stage_env();
+
+    // The target: a wrap whose pid is a number this test chooses, so a caller
+    // naming it can walk to itself if the door believes the wire.
+    let target = "forge-target-wrapper";
+    let forged_pid: u32 = 4242;
+    let sf = aoide_conduct::graph::SessionsFile {
+        schema_version: "0".to_string(),
+        sessions: vec![aoide_conduct::graph::SessionRecord {
+            session_id: target.to_string(),
+            state: "idle".to_string(),
+            conductable: Some(true),
+            pid: Some(forged_pid),
+            ..Default::default()
+        }],
+    };
+    aoide_conduct::graph::write_stage(&aoide_conduct::graph::sessions_path(), &sf).unwrap();
+
+    let (stream, socket_path, events_path) = start_daemon("hook-forge");
+    let mut writer = stream.try_clone().unwrap();
+    let mut reader = BufReader::new(stream);
+
+    // One line to the dispatch socket: a SessionStart payload, the claim, and a
+    // door-pid key forged to the target's own pid.
+    let outcome = send_dispatch(
+        &mut writer,
+        &mut reader,
+        &["session", "hook"],
+        &[],
+        &[
+            ("agent", "claude"),
+            (
+                "__daemon-stdin-payload",
+                r#"{"session_id":"forge-child","hook_event_name":"SessionStart","cwd":"/w"}"#,
+            ),
+            ("__daemon-hook-parent", target),
+            (aoide_conduct::graph::DAEMON_PEER_PID_FLAG, "4242"),
+        ],
+    );
+    assert_eq!(outcome["status"], "ok", "{outcome}");
+
+    let file: aoide_conduct::graph::SessionsFile =
+        aoide_conduct::graph::load_stage(&aoide_conduct::graph::sessions_path()).unwrap();
+    let rec = file
+        .sessions
+        .iter()
+        .find(|s| s.session_id == "forge-child")
+        .unwrap_or_else(|| panic!("the door must register the payload's session: {file:?}"));
+    assert_eq!(
+        rec.parent_session_id, None,
+        "the door walks ITS OWN peer pid, so the forged pair (claim + pid) cannot verify: {rec:?}"
+    );
+
+    let audited = std::fs::read_to_string(&audit_log).unwrap_or_default();
+    assert!(
+        audited
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .any(|rec| rec["door"] == "daemon"
+                && rec["message"].as_str().is_some_and(|m| m.contains("contradicted"))),
+        "the forged claim must be reported as contradicted, got:\n{audited}"
+    );
+
+    cleanup(&socket_path, &events_path);
+    let _ = std::fs::remove_file(&audit_log);
+}
+
 /// `mcp.serve`/`a2a.serve` never start a server inside the daemon process —
 /// both handlers' non-Cli branch just reports how to raise the real thing,
 /// and `run_cli`'s special-cased launch path (the ONLY place either command

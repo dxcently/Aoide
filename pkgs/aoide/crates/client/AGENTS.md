@@ -447,13 +447,29 @@
   `spawn_ssh`/`open_or_reuse` return on a failed or timed-out open name the
   one-time manual step (add this box's key to the far box's
   `authorized_keys`) but never attempt it themselves. The recycled-pid
-  guard (`looks_like_our_ssh`, reading `/proc/<pid>/cmdline`; wrapped as
+  guard (`looks_like_our_ssh`; wrapped as
   `kill_if_still_our_ssh`) is a DELIBERATE, documented tiny race, not an
   oversight: a pid recorded by an earlier `aoide` invocation may have been
   recycled by the OS to an unrelated process by the time anything acts on
-  it, so a pid is never trusted alone — only one whose own cmdline is still
-  `ssh` carrying this record's exact `-L` spec is ever signaled. **This
-  guard is not `close`'s alone** — `open_or_reuse_with`'s own stale-record
+  it, so a pid is never trusted alone — only one whose own argv is still
+  `ssh` carrying this record's exact `-L` spec is ever signaled. **The guard
+  and the program it guards are host-split and must stay one seam each**:
+  the argv read is `/proc/<pid>/cmdline` on Unix and
+  `aoide_protocol::win_proc::command_argv` on native Windows (there is no
+  `/proc`, and the process table carries no command line — that reader is the
+  kernel's own `ProcessCommandLineInformation` plus this host's
+  `CommandLineToArgvW`), the program is the bare name `ssh` through `PATH` on
+  Unix and `%SystemRoot%\System32\OpenSSH\ssh.exe` by FULL PATH on Windows
+  (`ssh_program`, the one place the choice is written: `ssh` is not a name
+  `PATH` there is guaranteed to carry), the login chain ends in `%USERNAME%`
+  there (`$USER`/`$LOGNAME` are not variables that OS sets), and argv[0] is
+  therefore `ssh` on one host and `ssh.exe` (folded, either separator) on the
+  other. **The kill and the wait are `aoide_storage::fs::terminate` /
+  `wait_for_exit`, never `libc` here** — and their two arms do NOT promise the
+  same thing: `SIGTERM` is a request a trapped or hung child can survive,
+  while Windows' `TerminateProcess` cannot be caught at all. `terminate_pid`
+  is written for the weaker arm (a survivor keeps its record) and is reachable
+  only through this guard, which is what makes the harder arm safe. **This guard is not `close`'s alone** — `open_or_reuse_with`'s own stale-record
   path runs it on a live-but-dead-port record's OLD pid before that record
   is REPLACED by a freshly opened one at the same `(session_id, key)`;
   skipping this on the reopen path would make the old child permanently

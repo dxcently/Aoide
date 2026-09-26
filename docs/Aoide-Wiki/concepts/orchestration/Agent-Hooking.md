@@ -111,8 +111,14 @@ like a foreground one.
 
 A headless `claude`, `kimi`, or `pi` session each hooks into the graph the
 same way: the wrapper session and the harness's own hook-registered session
-nest as parent/child, so the hook door is genuinely harness-agnostic rather
-than claude-shaped with the others bolted on. `pi`'s provider requests can
+nest as parent/child — resolved by the door's one rule, so an `aoided`
+serving the hook does not change the answer a bare CLI gives: the claim in the
+hook process's own `AOIDE_SESSION_ID` (taken only when the claimed record's pid
+really is in that process's ancestry, or when it carries no pid to check at
+all; a contradicted claim is dropped and registered parentless rather than
+linked) with the attested conducted wrap ahead of it on kernel evidence. The
+hook door is genuinely harness-agnostic rather than claude-shaped with the
+others bolted on. `pi`'s provider requests can
 time out (3 retries) — a gap in its provider-network path, not in the
 launch or hook-registration mechanism; the pi profile and `hooks install
 pi` are otherwise unaffected. A sibling send between two headless sessions

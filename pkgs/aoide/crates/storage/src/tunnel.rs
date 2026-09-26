@@ -216,16 +216,11 @@ fn is_safe_id(id: &str) -> bool {
         && !id.starts_with('.')
 }
 
-/// `$XDG_RUNTIME_DIR/aoide/` — the same directory
-/// `aoide_conduct::graph::conduct_socket_path` resolves its socket into
-/// (module doc's "runtime-dir convention" note): `$XDG_RUNTIME_DIR` when set
-/// to a non-empty value, else `/run/user/1000`.
+/// `$XDG_RUNTIME_DIR/aoide/` — the directory `aoide_storage::runtime_dir::
+/// socket_dir` resolves, which is the ONE authority for this convention
+/// (native Windows: `%LOCALAPPDATA%\aoide`, created owner-only there).
 fn runtime_dir() -> PathBuf {
-    let runtime = std::env::var("XDG_RUNTIME_DIR")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "/run/user/1000".into());
-    PathBuf::from(runtime).join("aoide")
+    crate::runtime_dir::socket_dir()
 }
 
 /// The path a tunnel record for `(session_id, key)` lives at:

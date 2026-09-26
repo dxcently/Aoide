@@ -1254,12 +1254,13 @@ secret (base32): <base32>
 (qrencode not found on PATH — scan the URI above by hand, or install qrencode for a QR code)
 ```
 
-- `enroll::generate_secret` reads 20 raw bytes from `/dev/urandom` — zero
-  new deps (no `rand`/`getrandom` crate). `enroll::local_hostname` names
-  the enrollment (the `otpauth://` label) via `libc::gethostname`, the SAME
-  precedent `aoide_storage::display::local_host_name` uses (this crate
-  stays off `aoide-storage` — `policy.rs`'s module doc — so the call is
-  repeated, not reached for).
+- `enroll::generate_secret` takes 20 raw bytes from OS randomness through
+  `aoide_protocol::host_random` (`/dev/urandom` on Unix, CNG's
+  `BCryptGenRandom` on native Windows) — zero new deps (no
+  `rand`/`getrandom` crate) and no second spelling of "ask the host".
+  `enroll::local_hostname` names the enrollment (the `otpauth://` label)
+  through `aoide_storage::display::os_hostname` (`gethostname(2)` |
+  `GetComputerNameExW`), the ONE hostname answer in the tree.
 - The secret is persisted RAW (not base32-text) at `<secrets_home>/
   totp.secret`, `0600` (`store::save_totp_secret`) — `enroll::run` prints
   the human-facing base32/URI form itself; there's no reason to also

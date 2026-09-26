@@ -934,15 +934,12 @@ fn poll_pending_outbound(now_epoch: i64, backoff: &mut HashMap<String, (Duration
 
 // ── the pid-marker arbiter (F6, task #135 popup phase, part 4) ──────────
 
-/// `$XDG_RUNTIME_DIR/aoide/` — RE-DERIVED here rather than imported
-/// (`aoide_storage::tunnel`'s own module doc states the identical rule for
-/// this SAME directory, and re-derives it rather than depending upward for
-/// the identical reason [`ZENITY_CMD`]'s own doc gives for its literal: a
-/// three-line resolution carries none of the "no cross-crate copying"
-/// weight a moved TYPE or FUNCTION would).
+/// `$XDG_RUNTIME_DIR/aoide/` — [`aoide_storage::runtime_dir::socket_dir`], the
+/// ONE authority for this convention (`aoide-storage` sits BELOW this crate,
+/// so reaching for it is a downward edge — never the inversion importing
+/// `aoide_conduct::graph::conduct_socket_path` would have been).
 fn marker_runtime_dir() -> std::path::PathBuf {
-    let runtime = std::env::var("XDG_RUNTIME_DIR").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/run/user/1000".into());
-    std::path::PathBuf::from(runtime).join("aoide")
+    aoide_storage::runtime_dir::socket_dir()
 }
 
 /// Where a LIVE blocking `aoide pair <id>`'s own pid marker lives —
@@ -1472,6 +1469,7 @@ mod tests {
         with_node_state("awaiting-approval", || {
             let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap();
             aoide_storage::pairing::park_outbound(aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
                 id: "deadbeef".to_string(),
                 url: "http://box-b/".to_string(),
                 name: "box-b".to_string(),
@@ -1536,7 +1534,24 @@ mod tests {
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         ));
+        // The feed file's POLICY is attached at creation on native Windows,
+        // where the reader refuses one whose DACL still carries inherited ACEs
+        // — `std::fs::write` creates exactly such a file there (measured: "its
+        // DACL is not SE_DACL_PROTECTED"). Unix's mode bits have no such reader,
+        // so the plain write is the whole fixture on that host.
+        #[cfg(unix)]
         std::fs::write(&path, b"").unwrap();
+        #[cfg(windows)]
+        match aoide_protocol::owner_only::create_new(&path) {
+            Ok(file) => drop(file),
+            Err(aoide_protocol::owner_only::CreateError::Exists) => {
+                panic!("the fixture's own feed path already existed")
+            }
+            Err(aoide_protocol::owner_only::CreateError::Failed(e)) => {
+                panic!("create the feed file owner-only: {e}")
+            }
+        }
+
         let mut follower = Follower::open_at_end(&path).unwrap();
         let feed = aoide_protocol::feed::FeedWriter::new(path.clone(), 1024 * 1024, 0o600);
 
@@ -1720,6 +1735,7 @@ mod tests {
             let url = format!("http://127.0.0.1:{port}/");
             let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap();
             aoide_storage::pairing::park_outbound(aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
                 id: "deadbeef".to_string(),
                 url,
                 name: "box-b".to_string(),
@@ -1777,6 +1793,7 @@ mod tests {
             // with a `Refused` (`poll-unreachable`) every single call —
             // this test is not exercising a lucky race, EVERY attempt fails.
             aoide_storage::pairing::park_outbound(aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
                 id: "deadbeef".to_string(),
                 url: "http://127.0.0.1:1/".to_string(),
                 name: "box-b".to_string(),
@@ -1818,6 +1835,7 @@ mod tests {
             let url = format!("http://127.0.0.1:{port}/");
             let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap();
             aoide_storage::pairing::park_outbound(aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
                 id: "deadbeef".to_string(),
                 url,
                 name: "box-b".to_string(),
@@ -1989,6 +2007,14 @@ mod tests {
     /// provides — `/usr/bin/env` does not exist there; secrets' shims set
     /// the precedent), shell builtins only (`echo`/`exit` — never an
     /// external `sleep`).
+    // cfg(unix): the fixture is a `#!/bin/sh` script standing in for `zenity`/
+    // `lyra` by PATH-invocation — native Windows has no shebang, and a program
+    // it could run at that path would have to be a compiled binary these tests
+    // cannot build at run time. The runner's contract (a child's stdout and exit
+    // code decide the result, and a dialog that never exits is still killed and
+    // reported) keeps its native evidence in
+    // `run_zenity_entry_reports_a_spawn_error_for_a_nonexistent_shim`.
+    #[cfg(unix)]
     fn write_shim(tag: &str, script: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "aoide-client-pair-confirm-shim-{tag}-{}-{}",
@@ -2004,12 +2030,15 @@ mod tests {
         shim
     }
 
+    #[cfg(unix)]
     fn remove_shim(shim: &std::path::Path) {
         if let Some(dir) = shim.parent() {
             std::fs::remove_dir_all(dir).ok();
         }
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_zenity_entry_exit_zero_is_approved_with_the_typed_code() {
         let _guard = shim_lock();
@@ -2019,6 +2048,8 @@ mod tests {
         remove_shim(&shim);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_zenity_entry_reject_label_on_stdout_is_dismissed() {
         let _guard = shim_lock();
@@ -2028,6 +2059,8 @@ mod tests {
         remove_shim(&shim);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_zenity_entry_bare_cancel_is_cancelled_not_dismissed() {
         let _guard = shim_lock();
@@ -2052,6 +2085,8 @@ mod tests {
 
     // ── run_ask_dialog: the lyra/zenity choice + fallback ─────────────────
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_ask_dialog_prefers_lyra_when_a_bin_resolves() {
         let _guard = shim_lock();
@@ -2063,6 +2098,8 @@ mod tests {
         remove_shim(&zenity_shim);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_ask_dialog_falls_back_to_zenity_on_a_lyra_spawn_error() {
         let _guard = shim_lock();
@@ -2072,6 +2109,8 @@ mod tests {
         remove_shim(&zenity_shim);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_ask_dialog_with_no_lyra_bin_goes_straight_to_zenity() {
         let _guard = shim_lock();
@@ -2127,6 +2166,8 @@ mod tests {
         assert!(!dbody.starts_with("--"), "body must not start with a flag: {dbody}");
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_show_dialog_prefers_lyra_when_a_bin_resolves() {
         let _guard = shim_lock();
@@ -2138,6 +2179,8 @@ mod tests {
         remove_shim(&zenity_shim);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_show_dialog_falls_back_to_zenity_on_a_lyra_spawn_error() {
         let _guard = shim_lock();
@@ -2156,6 +2199,8 @@ mod tests {
         remove_shim(&zenity_shim);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_show_dialog_with_no_lyra_bin_goes_straight_to_zenity() {
         let _guard = shim_lock();
@@ -2165,6 +2210,8 @@ mod tests {
         remove_shim(&zenity_shim);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_show_dialog_cancels_on_interrupt_with_no_deadline_involved() {
         // R2's own point: there is no timer left to race — `should_cancel`
@@ -2292,6 +2339,7 @@ mod tests {
             let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap();
             let pubkey_b = "b".repeat(64);
             aoide_storage::pairing::park_outbound(aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
                 id: "deadbeef".to_string(),
                 url: "http://box-b/".to_string(),
                 name: "box-b".to_string(),
@@ -2339,6 +2387,7 @@ mod tests {
         with_node_state("commit-approval-outbound-wrong-code", || {
             let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap();
             aoide_storage::pairing::park_outbound(aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
                 id: "deadbeef".to_string(),
                 url: "http://box-b/".to_string(),
                 name: "box-b".to_string(),
@@ -2376,6 +2425,7 @@ mod tests {
         with_node_state("outbound-reject-and-ignore-untouched", || {
             let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap();
             aoide_storage::pairing::park_outbound(aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
                 id: "deadbeef".to_string(),
                 url: "http://box-b/".to_string(),
                 name: "box-b".to_string(),

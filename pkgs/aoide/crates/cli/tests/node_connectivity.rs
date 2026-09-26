@@ -565,6 +565,7 @@ fn node_pair_reject_on_an_outbound_entry_aborts_before_the_approvers_callback() 
     let now_epoch = aoide_storage::time::parse_iso_utc(&now).unwrap();
     let expires = aoide_storage::pairing::expires_at_from(now_epoch);
     let entry = aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
         id: "abcd1234".to_string(),
         url: "http://b/".to_string(),
         name: "box-b".to_string(),
@@ -603,6 +604,7 @@ fn node_pair_reject_on_an_outbound_entry_aborts_after_the_approvers_callback() {
     let now_epoch = aoide_storage::time::parse_iso_utc(&now).unwrap();
     let expires = aoide_storage::pairing::expires_at_from(now_epoch);
     let entry = aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
         id: "abcd5678".to_string(),
         url: "http://b/".to_string(),
         name: "box-b".to_string(),
@@ -682,6 +684,7 @@ fn node_pair_approve_on_an_outbound_entry_still_awaiting_the_nodes_own_approval_
     let now_epoch = aoide_storage::time::parse_iso_utc(&now).unwrap();
     let expires = aoide_storage::pairing::expires_at_from(now_epoch);
     let entry = aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
         id: "efgh1234".to_string(),
         url: format!("http://127.0.0.1:{port}/"),
         name: "box-b".to_string(),
@@ -737,6 +740,7 @@ fn node_pair_approve_on_an_outbound_entry_awaiting_confirm_commits_with_the_repl
     let now_epoch = aoide_storage::time::parse_iso_utc(&now).unwrap();
     let expires = aoide_storage::pairing::expires_at_from(now_epoch);
     let entry = aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
         id: "ijkl1234".to_string(),
         url: "http://b/".to_string(),
         name: "box-b".to_string(),
@@ -798,6 +802,7 @@ fn node_pair_approve_on_an_outbound_entry_awaiting_confirm_with_yes_alone_is_the
     let now_epoch = aoide_storage::time::parse_iso_utc(&now).unwrap();
     let expires = aoide_storage::pairing::expires_at_from(now_epoch);
     let entry = aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
         id: "ijkl5678".to_string(),
         url: "http://b/".to_string(),
         name: "box-b".to_string(),
@@ -878,6 +883,7 @@ fn node_pair_approve_on_an_outbound_entry_with_no_via_leaves_a_previously_record
     let now_epoch = aoide_storage::time::parse_iso_utc(&now).unwrap();
     let expires = aoide_storage::pairing::expires_at_from(now_epoch);
     let entry = aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
         id: "mnop1234".to_string(),
         url: "http://new-b/".to_string(),
         name: "box-b".to_string(),

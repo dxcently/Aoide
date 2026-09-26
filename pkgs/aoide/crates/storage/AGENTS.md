@@ -23,8 +23,56 @@
 
 ## Invariants
 
+- **`runtime_dir::socket_dir` is a PURE resolution.** It answers a path and
+  creates nothing — `tunnel::list_records`' own tests depend on "the `aoide/`
+  subdirectory does not exist until a writer makes it", and a resolver that
+  created it would be lying to every caller about what it did. Creating the
+  directory belongs to whoever is about to write or bind there (on native
+  Windows, through `aoide_protocol::owner_only::ensure_private_dir`). The
+  `$XDG_RUNTIME_DIR` override wins on BOTH hosts: every isolating fixture sets
+  it, and an answer that ignored it on one host would read and write the
+  machine's real per-user directory instead of the fixture's.
 - Structured thread/reply IDs are signed context, not membership or delivery authority. Legacy four-field content remains valid.
 - Structured letter content is optional signed text, never a new transport header. Invalid or legacy content remains raw; decoding must not write or alter envelope identity.
+
+- **`seal` is the ONE module that touches the `age` crate, and `frame` is the
+  one encoding it is built from.** Every signed or hashed byte of the P-SEAL
+  container goes through `seal::frame(label, fields)` — a NUL-terminated label
+  then a `u32` big-endian length per field, with no field ever omitted and no
+  value ever entering as a rendering. The reserved label table is a block of
+  constants in that file and nowhere else; a new frame adds a label there.
+  Deleting `seal.rs` and the workspace `Cargo.toml`'s one `age` line removes
+  the dependency from the tree, which is the test this module has to keep
+  passing.
+- **No private key ever enters a `Serialize`/`Deserialize` type here, and
+  `seal.rs` enforces that on itself.** The age key is the stock
+  `AGE-SECRET-KEY-1…` text at `state/identity/age.key`, `0600`, beside
+  `ed25519.key`; the retired-key store is two plain files per generation for
+  the same reason. The `no_private_material_in_any_serialize_type` test reads
+  this module's own source text and fails the build if a serializable struct
+  ever grows a field that looks like key material — the same mechanical gate
+  `identity.rs` runs on itself.
+- **The filed record is the truth about filing, never a dedup gate's
+  memory.** `state/mail/containers.jsonl` only decides whether a container may
+  be OPENED, and it means **admitted AND filed**: `seal::record_admitted` is
+  called by the caller once `mail::deposit` has returned `Filed` or
+  `Duplicate`, never from inside `seal::deposit_container`. Whether a duplicate
+  was originally a letter — and so whether a lost receipt is owed — is read
+  back out of `base.jsonl` through `mail::filed_kind`/`mail::show`, never
+  remembered by the gate. Both halves of that ordering are load-bearing: record
+  any earlier and a refusal past the gate answers `duplicate` forever instead
+  of re-running, and a crash between the gate and `base.jsonl` claims a filing
+  that never happened.
+- **Housekeeping never decides a refusal word.** `seal::sweep_retired_keys`
+  runs only on the current key's own successful open — never before an
+  attempt, never on a failure. Deleting a just-expired key first would turn
+  an actionable `key-retired` into a bare `open-failed`; a refusal a caller
+  cannot act on is worse than no refusal.
+- **`outbox::poll_payloads` is a poll's only hand-over point, and it returns
+  pairs.** The container rides beside its envelope so the door can hand a
+  sealed entry over as a container and NO plaintext, while an entry spooled
+  before the destination published a binding still appears as an envelope. A
+  poll is still a pure read: nothing is marked, moved or counted.
 
 - **Enduring identity is independent of knowledge configuration.** Bind an
   explicit `valid_node_name`-shaped key in `session::bind_enduring_agent`;
@@ -309,6 +357,20 @@
   `pid > pid_t::MAX` are refused BEFORE the syscall: both name a process group.
   Live is NOT identity, so a caller about to SIGNAL a pid still checks its own
   argv/port. Callers re-export or import this probe; never fork a `/proc` copy.
+- **The two process ACTS live beside the probe and promise DIFFERENT things per
+  host** — `fs::terminate` is `SIGTERM` (a request a trapped or hung child can
+  survive) on Unix and `TerminateProcess` (uncatchable) on native Windows, and
+  `fs::wait_for_exit` is `waitpid` there and `WaitForSingleObject` here. An
+  agent editing either must keep the doc's table honest and keep callers
+  written for the WEAKER arm; the one caller, `aoide-client::tunnel`, reaches
+  `terminate` only through its argv guard, which is what makes the hard arm
+  safe. Never add a second kill/wait path: this is the seam.
+- **A node name this box gives itself is `display::local_node_name()`, never
+  `local_host_name()`** — an address grammar (`^[a-z0-9][a-z0-9-]*$`) is
+  lowercase and an OS host name need not be (native Windows' DNS name is
+  conventionally upper-case). Any new site that stamps, declares or compares
+  this box as a NODE uses the folded form; the raw name stays for display and
+  for an ssh target.
 - **`fs::atomic_write`'s temp cleanup is directory-wide, and every failing
   half unlinks its own temp.** `sweep_stale_temps` reclaims any sibling
   `<stem>.tmp.<pid>` whose pid is dead, not only temps sharing the target's
@@ -748,7 +810,7 @@
   counts as attemptable, so an unknown/absent value fails toward DIALED,
   never toward parked forever. `OutboxEntry::held` spools a held entry;
   nothing else should construct the flavor by hand.
-- **A poll is a READ, and `poll_entries` is its only entry point (P-M3).**
+- **A poll is a READ, and `poll_payloads` is its only entry point (P-M3).**
   The offer rule lives there and nowhere else: every held entry toward the
   node, plus every `now` entry with `tries > 0` whose last outcome did not
   reach the peer (parked/`refused` ones included — a poller asking for its

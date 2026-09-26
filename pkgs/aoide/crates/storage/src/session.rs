@@ -106,6 +106,7 @@ pub fn upsert_session(
             // Workspace is stamped later by the window-event listener (it needs a
             // resolved window first); a fresh record starts without one.
             workspace: None,
+            workspace_project: None,
             activity: None,
             kind: None,
             say: None,

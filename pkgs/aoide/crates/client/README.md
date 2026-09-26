@@ -165,7 +165,17 @@ never the inbound/serve half (that's `aoide-server`).
   own job; listening is this crate's outbound-facing action, the same
   "outbound only" charter every other module here holds.
 - `tunnel` (P-S3, ssh-transport lane) — the ssh child, and the only place
-  in this workspace that ever spawns one. `open_or_reuse(session_id, key,
+  in this workspace that ever spawns one. **Host-split, one seam each**: the
+  program is the bare name `ssh` through `PATH` on Unix and
+  `%SystemRoot%\System32\OpenSSH\ssh.exe` by full path on native Windows
+  (`ssh_program`, refused by name when `%SystemRoot%` is unset); the
+  recycled-pid guard reads the pid's argv as `/proc/<pid>/cmdline` there and
+  through `win_proc::command_argv` here, and knows `ssh` against `ssh.exe`; the
+  kill and the wait are `aoide_storage::fs::terminate`/`wait_for_exit`, whose
+  Unix arm is a `SIGTERM` request a child can decline and whose Windows arm is
+  an uncatchable `TerminateProcess` — so the tear-down loop is written for the
+  weaker arm (a survivor keeps its record), and the POSIX-only fixtures for
+  that survivor state are gated in-file with their reasons. `open_or_reuse(session_id, key,
   via, remote_host, remote_port) -> Result<u16, String>` loads any record
   already on file for `(session_id, key)` (`aoide_storage::tunnel::load`);
   a record whose pid is alive AND whose local port answers a bounded probe

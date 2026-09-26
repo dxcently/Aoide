@@ -177,7 +177,7 @@ pub struct ParkedAsk {
     pub secret: String,
     pub consumer: String,
     pub requested_at: u64,
-    pub peer_uid: Option<u32>,
+    pub peer_user: Option<crate::peercred::PeerUser>,
     /// Untrusted, optional, DISPLAY-ONLY context for why this ask exists —
     /// the wire's `resolve.reason` field, self-asserted exactly like
     /// `consumer` (no different honesty story than that field already
@@ -304,7 +304,7 @@ impl ParkRegistry {
         consumer: &str,
         requested_at: u64,
         cap: usize,
-        peer_uid: Option<u32>,
+        peer_user: Option<crate::peercred::PeerUser>,
         reason: Option<&str>,
         origin: AskOrigin,
     ) -> Option<(String, mpsc::Receiver<ParkOutcome>)> {
@@ -320,7 +320,7 @@ impl ParkRegistry {
                 secret: secret.to_string(),
                 consumer: consumer.to_string(),
                 requested_at,
-                peer_uid,
+                peer_user,
                 reason: reason.map(str::to_string),
                 origin,
                 tx,
@@ -338,9 +338,9 @@ impl ParkRegistry {
     /// the read `broker::handle_dismiss` (task #73) uses to check
     /// authorization BEFORE removing the ask, so a refused dismiss leaves
     /// it exactly where it was too.
-    pub fn peek(&self, id: &str) -> Option<(String, String, Option<u32>)> {
+    pub fn peek(&self, id: &str) -> Option<(String, String, Option<crate::peercred::PeerUser>)> {
         let n = self.parse_id(id)?;
-        self.lock().get(&n).map(|a| (a.secret.clone(), a.consumer.clone(), a.peer_uid))
+        self.lock().get(&n).map(|a| (a.secret.clone(), a.consumer.clone(), a.peer_user.clone()))
     }
 
     /// Remove and return the ask at `id`, if it still exists — the ONE
@@ -378,7 +378,7 @@ impl ParkRegistry {
     /// `BTreeMap`'s own iteration order — the nonce prefix is constant
     /// across every entry in one registry, so formatting it on afterward
     /// never disturbs that order.
-    pub fn list(&self) -> Vec<(String, String, String, u64, Option<u32>, Option<String>, AskOrigin)> {
+    pub fn list(&self) -> Vec<(String, String, String, u64, Option<crate::peercred::PeerUser>, Option<String>, AskOrigin)> {
         self.lock()
             .iter()
             .map(|(id, ask)| {
@@ -387,7 +387,7 @@ impl ParkRegistry {
                     ask.secret.clone(),
                     ask.consumer.clone(),
                     ask.requested_at,
-                    ask.peer_uid,
+                    ask.peer_user.clone(),
                     ask.reason.clone(),
                     ask.origin.clone(),
                 )
@@ -469,6 +469,7 @@ pub fn wait_for_outcome(registry: &ParkRegistry, id: &str, rx: mpsc::Receiver<Pa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::peercred::PeerUser;
 
     #[test]
     fn park_then_list_shows_the_ask_with_no_value_anywhere() {
@@ -555,11 +556,11 @@ mod tests {
     #[test]
     fn park_if_room_stamps_the_given_peer_uid_and_peek_returns_it() {
         let reg = ParkRegistry::new();
-        let (id, _rx) = reg.park_if_room("t", "m", 1, usize::MAX, Some(4242), None, AskOrigin::default()).unwrap();
-        assert_eq!(reg.peek(&id), Some(("t".to_string(), "m".to_string(), Some(4242))));
+        let (id, _rx) = reg.park_if_room("t", "m", 1, usize::MAX, Some(PeerUser::Uid(4242)), None, AskOrigin::default()).unwrap();
+        assert_eq!(reg.peek(&id), Some(("t".to_string(), "m".to_string(), Some(PeerUser::Uid(4242)))));
         let list = reg.list();
         assert_eq!(list.len(), 1);
-        assert_eq!(list[0].4, Some(4242));
+        assert_eq!(list[0].4, Some(PeerUser::Uid(4242)));
     }
 
     #[test]
@@ -567,7 +568,7 @@ mod tests {
         let reg = ParkRegistry::new();
         let origin =
             AskOrigin { username: Some("khoa".into()), pid: Some(4242), comm: Some("bash".into()), hostname: Some("yomi-strix".into()) };
-        let (id, _rx) = reg.park_if_room("t", "m", 1, usize::MAX, Some(4242), Some("sudo nixos-rebuild switch"), origin.clone()).unwrap();
+        let (id, _rx) = reg.park_if_room("t", "m", 1, usize::MAX, Some(PeerUser::Uid(4242)), Some("sudo nixos-rebuild switch"), origin.clone()).unwrap();
         let list = reg.list();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].0, id);

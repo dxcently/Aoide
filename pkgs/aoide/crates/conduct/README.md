@@ -36,6 +36,64 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
 
 ## Named seams (what it exposes)
 
+- **The workspace ↔ project binding (§B)**: `graph/workspace.rs` implements
+  `workspace set [<workspace>] <project> [--new]`, `workspace clear
+  <workspace>`, `workspace list [--json]` and `workspace root [<workspace>]`
+  — the last one prints the bound project's FIRST folder as a bare path on
+  stdout (one value, nothing else; a refusal prints nothing on stdout at all),
+  because a launcher substitutes it straight into an argv:
+  `kitty --directory "$(aoide workspace root 2>/dev/null || echo "$HOME")"`.
+  The rest is
+  over `Project.workspaces`
+  (`aoide-storage`'s record, `CONTRACTS.md` §4). A **workspace** is the
+  compositor's own workspace id — an integer, exactly what
+  `SessionRecord.workspace` already holds — and a **binding** is "workspace N
+  shows project X", stored ON the project. One invariant, enforced in the one
+  mutation: a workspace id appears in at most one project, so `set` MOVES it
+  off whatever project held it, while two workspaces may show the same project.
+  `set` refuses an unregistered project by name; `--new` is the explicit way to
+  mean it and creates a NAME-ONLY project (a project may have no folder) and
+  binds it in one call. `clear` unbinds; sessions already born on that
+  workspace keep the default they were stamped with, because a binding is a
+  label plus a birth default and never a live link. Both mutations are
+  DAEMON-OWNED (`manage.rs::local_daemon`, the same door gate `project
+  add/edit/remove` hold): a `Door::Cli` caller forwards to `aoided` and errors
+  when none answers. The ONE compositor-shaped half is resolving an OMITTED
+  `<workspace>`: `window::focused_workspace` reads `hyprctl activeworkspace -j`
+  through the same `HYPRLAND_INSTANCE_SIGNATURE` gate as every other adapter
+  read, in the CALLER's process — `aoided` is a service with no compositor
+  environment — and the forwarded argv carries the resolved integer, never the
+  word "focused". With no adapter the caller gets a taught refusal asking for
+  the number (exit 2). Every write republishes `graph.json` (the same
+  `restage_graph` every project mutation runs), whose TOP-LEVEL `workspaces`
+  block (§E of the core-seams design, slice S3) is the desktop's read: one row
+  per workspace a session sits on or a project is bound to — the binding
+  (`project`, absent when unbound), the effective `projects` of its live
+  sessions, `sessions`, `live`/`working`/`awaiting` and `activeAt` — plus
+  `ties` between rows sharing a project or crossing a spawned edge, so the
+  bar/dock draws "workspace N → project X" and pulses it off the document it
+  already hot-reloads (a headless host's document carries neither key at all).
+  `aoide workspace list --json` prints the SAME block, from the same builder.
+  A desktop click reaches the same two mutations through the shellbridge
+  socket's `workspaceaction` (the action list below). `list` is a READ (no
+  lock, no daemon, no write): the bindings plus every workspace a local
+  session reports, sorted by id, with `"observed": false` and a named `reason`
+  on a host where no session reports one — §A's taught-refusal shape without a
+  refusal.
+
+  A binding is a BIRTH DEFAULT, and the seam that applies it is
+  `graph/model.rs::observe_workspace`: it writes `SessionRecord.workspace`
+  (and its `workspaceProject` default) for all three compositor stamp sites in
+  `window.rs`, stamping the default exactly once — the moment a session's
+  `workspace` first goes from absent to present on a bound workspace — and
+  never again on a move (once per BIRTH: an observation that lapsed, because a
+  window's client reported no workspace, counts as a new one when it returns). So a session born on a bound workspace joins it, a
+  window dragged elsewhere keeps the project it was born with, an explicit
+  `session project` is never overridden by a default, and a host with no
+  compositor adapter resolves exactly the ladder it did before. The ladder,
+  top to bottom: explicit `project` > the owner (nearest ancestor whose own
+  claim resolves) > the workspace default > the cwd anchor.
+
 - `graph::session_bind` implements `session bind --id <session> --agent-id
   <key>` through aoided. Only local CLI/Daemon doors may bind; the CLI does
   not fall back when aoided is absent. The key uses `valid_node_name` grammar
@@ -85,6 +143,37 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   harness_session_id` (P-D7) from the raw hook payload's own `session_id`
   on every event that carries one, mapped-to-an-action or not — see
   `CONTRACTS.md`'s `sessions.json` entry for the full field contract.
+- **The hook door's two self-reported facts, and the ONE rule that resolves
+  them.** A hook process is the only process that can read what a harness
+  reports about itself, so it reads its parent claim once
+  (`HOOK_PARENT_FLAG`) and sends it along; the PID is not its to send — the door
+  stamps its own `SO_PEERCRED` peer pid (`DAEMON_PEER_PID_FLAG`, written
+  unconditionally by `aoided`, so a wire-supplied value is discarded), because a
+  caller-supplied pid plus a caller-supplied claim is one caller's word twice
+  and verifies nothing. Whichever arm runs the action — the daemon's, or the
+  local no-daemon fallback — the parent resolves by the same order: the attested
+  wrap (`real_attested_wrap(door_pid)`, kernel-verified) first, then the claim,
+  which is itself CHECKED before use (`resolve_parent_claim`) against that
+  pid's real `/proc` ancestry. A claim naming a record that carries a pid this
+  hook process does not run under is contradicted: dropped, registered
+  parentless, and reported (`data.parentClaim`, plus the outcome's own message —
+  the text the door's audit record is written from); a claim that STOOD is
+  reported there too when it crossed the hop, so every cross-process claim
+  leaves a trace. `aoided`'s own ambient `AOIDE_SESSION_ID` is never a source,
+  the same accounting `server/README.md`'s G8 line holds for `send`, and a
+  daemon that stamps no pid means NO parent claim and NO ancestry stamp — never
+  `std::process::id()`, which daemon-side is `aoided`, and systemd's tree is not
+  the agent's. `hookAncestry` is stamped from `pid_ancestry(door_pid)` for the
+  same reason.
+- **An `aoided` older than this build silently registers hook sessions
+  parentless: restart `aoided` after upgrading.** Both keys this door reads are
+  ignored by an older daemon — it never overwrites `DAEMON_PEER_PID_FLAG` and
+  never forwards `HOOK_PARENT_FLAG` — so it falls back to its own env and the
+  record keeps no parent, which reads downstream as `spawn --prompt`'s "not
+  ready" after the full budget, with no error (that was this door's original
+  defect, verbatim). There is no version handshake to refuse it: `ping` reports
+  `AOIDE_VERSION` and no client compares it, daemon restarts are user-gated
+  (house rule 2), and the wire is otherwise compatible in both directions.
 - **The check lane (task #139), wired into `session hook`'s three lifecycle
   triggers — Stop records, the next context-reaching event speaks.**
   `hook_for_profile`'s `HookAction::Start` arm reads the STORED `hooks.json`
@@ -682,8 +771,8 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
 - `shellbridge`, `herald` — files only; their CLI commands (registry lines)
   moved to `lyra` at P-A2, but both stay resident here (see charter smudge
   below). The socket answers two commands with a reply, run through the
-  same sequencer over either subject a command names by: a SESSION id
-  (`sessionaction`) or a PROJECT name (`projectaction`, zero-session — no
+  same sequencer over either subject those two commands name by: a SESSION
+  id (`sessionaction`) or a PROJECT name (`projectaction`, zero-session — no
   session id anywhere on that wire, in its plan, its reply, or its audit
   line; the reply's identity key is `name` where `sessionaction`'s is
   `sessionId`). `sessionaction` is a closed five-action whitelist
@@ -706,6 +795,27 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   with no roots for a host uses `add` instead, so a host with nothing to
   replace keeps its existing roots rather than being wiped); `removehost`
   runs `project remove <name> --host <host>` and requires exactly one host.
+  `workspaceaction` is the third replying command, a closed two-action
+  whitelist of its own (`set` / `clear`, `shellbridge.rs::WorkspaceBinding`)
+  for the bar's bind click: zero-session too, and it plans the exact argv the
+  CLI takes — `aoide workspace set <ws> <project> [--new]` /
+  `aoide workspace clear <ws>` — so no second binding exists anywhere. It is
+  the one acknowledged action that resolves a field itself: an omitted
+  `workspace` means the FOCUSED workspace, read in-process through the
+  compositor adapter (`window.rs::focused_workspace`, the same function the
+  CLI's own caller-side resolution uses) because `workspace clear` takes an
+  id and no caller can be expected to know the focused one, so the child
+  always receives an integer. A host with no adapter is ANSWERED
+  (`reason: "no-compositor"`, the CLI's own sentence) rather than dropped,
+  because a click is parked on a reply. Its one reply line is
+  `{ok, message, action, workspace, project?, data?}` — the CLI's `message`
+  and `data` verbatim, keyed by the RESOLVED workspace id, `project` riding
+  only on `set`. `workspace` is ABSENT on the `no-compositor` refusal
+  (`{ok:false, action, reason, message}` — nothing was resolved to name), and
+  both `workspace` and `action` are absent on a `bad-request` refusal
+  (nothing parsed to echo) — and a malformed line that NAMES this verb is
+  ANSWERED with that refusal rather than dropped, the same rule
+  `sessiontrace` holds: one rule for every parked caller.
   Every other socket command stays fire-and-forget.
 - `commands` — this crate's CLI commands, registered from one `register()`
   call (`conduct/src/commands/graph.rs`, still that file's name
@@ -797,7 +907,9 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   `graph` uses — longest-prefix across EVERY root of the project, not just
   its first, since a project is a set of anchor roots (`project add`
   appends to that set, `project edit` replaces it outright, `project
-  remove` drops one root or the whole project; see `Project::roots()`,
+  remove` drops one root — leaving a name-only project when that was the
+  last one — or, with no root at all, the whole project; see
+  `Project::roots()`,
   `aoide-storage`'s own docs). Selection then branches on the flags: `--all` widens to every
   anchored entry, `--id` narrows to one specific `sessionId`, and bare
   (neither flag) resumes the project's WHOLE undying set

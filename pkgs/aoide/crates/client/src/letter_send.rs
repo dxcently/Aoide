@@ -37,7 +37,13 @@ fn addresses(raw: &str, local: &str) -> Result<Vec<Address>, String> {
 }
 
 pub(crate) fn send(inv: &Invocation, mut scalar: impl FnMut(&Invocation) -> Outcome) -> Outcome {
-    let local = aoide_storage::display::local_host_name();
+    // The ADDRESS form of this box's own name — see
+    // `aoide_storage::display::local_node_name`: a recipient node must match
+    // `^[a-z0-9][a-z0-9-]*$`, and an OS host name is case-preserved (native
+    // Windows' is conventionally uppercase, e.g. `THINKCHIYO`), so the raw
+    // name is not an address on every host. `self/x` is what a caller writes;
+    // this is what the node it resolves to is called.
+    let local = aoide_storage::display::local_node_name();
     let prepare = || -> Result<LetterContent, String> {
         let to = addresses(
             inv.flags.get("to").map(String::as_str).unwrap_or(""),

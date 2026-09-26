@@ -261,8 +261,10 @@ pub(in crate::graph) fn unix_ts() -> u64 {
 
 /// The per-session conductor control socket:
 /// `$XDG_RUNTIME_DIR/aoide/session-<id>.sock` — the same user-scoped runtime-dir
-/// convention as shellbridge's socket (never networked). A missing
-/// `XDG_RUNTIME_DIR` falls back to `/run/user/1000` like [`crate::shellbridge`].
+/// convention as shellbridge's socket (never networked), resolved by the ONE
+/// seam both of them call (`aoide_storage::runtime_dir::socket_dir`): a missing
+/// `XDG_RUNTIME_DIR` falls back to `/run/user/<this process's euid>`, and on
+/// native Windows to `%LOCALAPPDATA%\aoide`.
 /// `pub`, not `pub(crate)` (pre-Phase-3b visibility): this crosses the
 /// aoide-conduct → aoide-server crate boundary too, since `aoide-server`'s
 /// `a2a` (Phase 4c) resolves a just-spawned conducted session's control-socket
@@ -270,19 +272,14 @@ pub(in crate::graph) fn unix_ts() -> u64 {
 /// longer re-exports this symbol at all (dropped in Phase 4c as dead once the
 /// only caller moved into `aoide-server`).
 pub fn conduct_socket_path(id: &str) -> PathBuf {
-    let runtime = std::env::var("XDG_RUNTIME_DIR")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "/run/user/1000".into());
-    PathBuf::from(runtime)
-        .join("aoide")
-        .join(format!("session-{id}.sock"))
+    aoide_storage::runtime_dir::socket_dir().join(format!("session-{id}.sock"))
 }
 
 /// The per-session Claude Code channel socket (P-M5c-2,
 /// `docs/architecture/CLAUDE-CHANNEL-PROOF.md`): `$XDG_RUNTIME_DIR/aoide/
 /// channel-<id>.sock`, one authority for the path shared with
-/// [`conduct_socket_path`] above (same runtime-dir convention and fallback,
+/// [`conduct_socket_path`] above (same runtime-dir seam — see its own doc for
+/// the fallback, which is `/run/user/<euid>` and not a hard-coded uid,
 /// differing only by the `channel-` prefix). `aoide-server`'s stdio MCP
 /// server binds it for the lifetime of that MCP subprocess — never
 /// `aoided`'s — so a doorbell ring can push a one-way `notifications/claude/
@@ -290,13 +287,7 @@ pub fn conduct_socket_path(id: &str) -> PathBuf {
 /// the identical reason `conduct_socket_path` is: this crosses the
 /// `aoide-conduct` → `aoide-server` boundary too.
 pub fn channel_socket_path(id: &str) -> PathBuf {
-    let runtime = std::env::var("XDG_RUNTIME_DIR")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "/run/user/1000".into());
-    PathBuf::from(runtime)
-        .join("aoide")
-        .join(format!("channel-{id}.sock"))
+    aoide_storage::runtime_dir::socket_dir().join(format!("channel-{id}.sock"))
 }
 
 // SIGWINCH latch: the handler only flips a flag (async-signal-safe); the poll

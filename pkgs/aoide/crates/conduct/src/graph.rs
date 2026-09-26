@@ -126,8 +126,16 @@ pub use self::doorbell::{mail_ring, ring, RingReport};
 // post-lock collector block — so this stays `pub(crate)`, never crossing the
 // crate boundary.
 pub(crate) use self::pingback::{pingback, pingback_pull};
+// The project ladder (`core-seams` §B): `project_for` (a session's own claim:
+// explicit > its workspace's default > cwd anchor) and `effective_project_for`
+// (what it RENDERS under: explicit > owner > workspace default > cwd anchor),
+// plus `observe_workspace` — the ONE seam `SessionRecord.workspace` and the
+// `workspaceProject` birth default are written through, called by all three
+// compositor stamp sites (`window.rs`) so a future adapter calls it too rather
+// than writing the field itself.
 pub use self::model::{
-    anchor_for, effective_project_for, lead_over, leads_project, project_for, canonical_state, merged_sessions, HookRecord, HooksFile, Project, ProjectsFile,
+    anchor_for, effective_project_for, lead_over, leads_project, observe_workspace, project_for,
+    canonical_state, merged_sessions, HookRecord, HooksFile, Project, ProjectsFile,
     SessionRecord, SessionsFile,
 };
 pub use self::pending::{pending_approve, pending_deny, pending_list};
@@ -149,6 +157,10 @@ pub use self::view::session_watch;
 // shape exists to drift from the rendered one.
 pub use self::view::{watch_frame, Frame, MailLine};
 pub use self::permit::{answer_summons, session_permit, summons_card_id};
+pub use self::send::DAEMON_PEER_PID_FLAG;
+// `session_hook`/`session_send`/`pending_path`: the hook door and the injection
+// door, both `pub` for the doors that live outside this crate (`aoide-cli`'s
+// registry, `aoide-server`'s dispatch).
 pub use self::send::{pending_path, session_hook, session_send};
 // The ONE keystroke shape a pty injection has — payload, flush, the gap, then
 // the target's own submit key ALONE (`write_delivery`), plus the profile
@@ -211,6 +223,13 @@ pub use self::spawn::{live_run_for, live_run_refusal};
 // this crate: `aoide-server`'s `a2a::spawn_inject_prompt`, whose opening turn
 // would otherwise be the one injection path with no readiness gate at all.
 pub use self::spawn::{wait_ready, Ready, READY_BUDGET};
+// `harness_session_started` — the hook arm's readiness PREDICATE itself
+// (`wait_ready`'s `Readiness::Hook` clause), `pub` for the door-policy
+// integration proof that must assert "readiness opened" without restating the
+// predicate's own clauses (`crates/cli/tests/daemon_dispatch_door.rs`, the
+// daemon-served `session hook` arm). The one-writer/one-reader pair stays one
+// implementation — never a second copy of it in a test.
+pub use self::spawn::harness_session_started;
 // `command_basename` — the agent-name default a spawned command's own
 // `argv[0]` gives (spawn.rs's copy, widened for the `pub` caller below).
 pub use self::spawn::command_basename;
@@ -251,7 +270,19 @@ pub use self::who::{glyph, session_roster};
 // (`node_list.rs`'s module doc) — `node status` (aoide-client) keeps the
 // deep per-node view.
 pub use self::node_list::node_list;
-pub use self::window::{focus_session, focus_window, run_hypr_window_listener, FocusError};
+pub use self::window::{focus_session, focus_window, focused_workspace, run_hypr_window_listener, FocusError};
+// `workspace set/clear/list` — the compositor workspace ↔ project binding
+// (`graph/workspace.rs`'s own module doc). Bindings live on the project
+// (`Project.workspaces`), so a removed project takes its own with it; the
+// one compositor-shaped fact (`focused_workspace`) is re-exported above
+// beside the other window-adapter reads.
+mod workspace;
+pub use self::workspace::{workspace_clear, workspace_list, workspace_root, workspace_set};
+// The one sentence an omitted `<workspace>` with no compositor to ask gets —
+// `pub(crate)`, because `shellbridge` (a SIBLING of this module, not a
+// descendant) resolves an omitted `workspaceaction` workspace with the very
+// `focused_workspace` above and refuses with these words.
+pub(crate) use self::workspace::NO_COMPOSITOR;
 
 // Storage/time passthroughs root's `a2a.rs` / `commands/{a2a,usage}.rs` still
 // reach at `crate::graph::{load_stage, now_iso_utc, sessions_path,

@@ -7,6 +7,24 @@
   The order is test environment lock, then broker `put_lock`; temporary
   homes do not isolate the shared timeout or deliberately hanging puts.
 
+- **On native Windows, a fixture that creates a home creates it the way the
+  crate does**: `create_dir_all` and then `home::secure_dir` (a file:
+  `home::secure_file`), which pins the owner. A bare `create_dir_all` is a
+  different object there — an elevated token's NEW directory is owned by
+  `BUILTIN\Administrators` (`S-1-5-32-544`), and every same-user check this
+  crate makes (`home::admin_identity_check`, `owner_of`) then reads a home
+  this process does not own. That is why the crate pins at creation rather
+  than tightening later.
+
+- **A `cfg(unix)` gate names the FIXTURE, never the mechanism.** The template,
+  feed and socket machinery all have native arms (`aoide_protocol::
+  host_shell`, the feed's owner-only DACL arm, `win_unix`); a test that spells
+  a POSIX command line (`cat`, `install -m`, `sleep`), an `sh` shim, a
+  `/tmp`-hardcoded socket path, a mode bit or a `geteuid`, says so in the
+  comment above it, and the same contract keeps at least one test that runs
+  natively. A test that cannot run there is gated — never deleted, never
+  rewritten to say something weaker.
+
 - **A secret's VALUE never appears on a `Serialize`/`Deserialize` type in
   this crate.** `policy::Policy` is still the only such type, and it holds
   no value. P-V2's resolve response and both audit lines are the exact
@@ -1514,9 +1532,11 @@ below for the hard rule this establishes going forward.
   onto `fetch_value`/`store_value`/`has_value` without multiplying the
   spawn logic itself, and that discipline is exactly why bounding it was a
   one-function fix. A future backend-adjacent addition (a new template
-  kind, a new per-backend probe) that spawns its own `Command::new("sh")`
-  instead of calling `run_backend_command` silently reopens the unbounded-
-  hang gap this note exists to keep closed — don't. The timeout wait
+  kind, a new per-backend probe) that spawns its own shell instead of calling
+  `run_backend_command` silently reopens the unbounded-
+  hang gap this note exists to keep closed — don't. (Its interpreter is the
+  shared `aoide_protocol::host_shell` seam: `sh -c`, or `cmd /C` on native
+  Windows, in ONE place rather than a `cfg` at each call site.) The timeout wait
   itself is wall-clock via polling `Child::try_wait`, never a per-child
   watchdog thread and never `SIGALRM` (`run_backend_command`'s own doc) —
   a future change to the wait mechanism holds the same restriction.

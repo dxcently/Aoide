@@ -50,7 +50,10 @@ use aoide_protocol::output::Outcome;
 use aoide_protocol::{Door, Invocation};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
+#[cfg(windows)]
+use aoide_protocol::win_unix::UnixStream;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -199,11 +202,16 @@ mod tests {
     use aoide_protocol::output::Status;
     use std::collections::BTreeMap;
     use std::io::Read;
+    #[cfg(unix)]
     use std::os::unix::net::UnixListener;
+    #[cfg(windows)]
+    use aoide_protocol::win_unix::UnixListener;
 
+    /// A socket path neither host has bound yet: this process's own temp
+    /// directory (the `/tmp` of each host) plus a name unique per call.
     fn short_tmp(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos();
-        PathBuf::from(format!("/tmp/av-client-daemon-{tag}-{}-{nanos}", std::process::id()))
+        std::env::temp_dir().join(format!("av-client-daemon-{tag}-{}-{nanos}", std::process::id()))
     }
 
     fn inv(path: &[&str], door: Door) -> Invocation {
@@ -338,6 +346,15 @@ mod tests {
         std::fs::remove_file(&socket_path).ok();
     }
 
+    /// POSIX-only fixture: proving "the caller did not retry" means asking the
+    /// listener for a SECOND, NON-BLOCKING accept after the reply bound
+    /// elapsed, and `aoide_protocol::win_unix`'s listener carries no
+    /// `set_nonblocking` in this slice — the capability is absent there, not
+    /// faked here. The round trip this test's own timeout sits on is covered
+    /// natively by `daemon_dispatch_round_trips_against_a_fake_daemon` and the
+    /// two `daemon_seal_pubkey_hex` tests above, which bind the native
+    /// `AF_UNIX` listener.
+    #[cfg(unix)]
     #[test]
     fn explicit_dispatch_timeout_reports_failure_without_retrying() {
         let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

@@ -5,14 +5,14 @@
 //! pure function of the registries.
 
 use super::model::{
-    graph_path, hooks_path, load_stage, merged_sessions, projects_path,
+    canonical_state, graph_path, hooks_path, load_stage, merged_sessions, projects_path,
     resolved_parent, sessions_path, sorted_projects, write_stage, HookRecord, HooksFile, Project,
     ProjectsFile, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
 use serde_json::{json, Value};
 #[cfg(test)]
 use serde_json::Map;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 
 /// Is `s` conductable RIGHT NOW, for a caller asking "can I reach this
@@ -51,6 +51,11 @@ pub fn build_graph(
     let projects = sorted_projects(projects);
     let sessions = merged_sessions(sessions, hooks);
     let ids: HashSet<&str> = sessions.iter().map(|s| s.session_id.as_str()).collect();
+    // The compositor block (§E of the core-seams design): the per-workspace
+    // rows and the ties between them, `None` when nothing is in play — that
+    // gate is what keeps every graph.json predating a workspace binding
+    // byte-identical, session `activeAt` included (below).
+    let block = workspace_block(&projects, &sessions, hooks);
 
     let mut nodes: Vec<Value> = Vec::new();
     let mut edges: Vec<Value> = Vec::new();
@@ -188,6 +193,15 @@ pub fn build_graph(
         if let Some(i) = super::model::effective_project_for(s, &sessions, &projects) {
             node["effectiveProject"] = json!(projects[i].name);
         }
+        // The PULSE timestamp (§E): the latest hook `updatedAt`, else
+        // `startedAt` — the value a tie's and a workspace's own `activeAt` is
+        // the max over, and what the song watches advance between two reads.
+        // Rides under the SAME gate as the block it feeds: with no workspace in
+        // play there is nothing to pulse, and a document that never carried
+        // this key must not grow it for no reason.
+        if block.is_some() {
+            node["activeAt"] = json!(session_active_at(s, hooks));
+        }
         // The cross-machine parent link (P-RSA S4, CONTRACTS.md §4). `node` is
         // the CURRENT `nodes.json` name for the stamped `key` — never the
         // stored label when a rename has happened — and `key` itself is
@@ -305,11 +319,255 @@ pub fn build_graph(
         nodes.push(node);
     }
 
-    json!({
+    let mut doc = json!({
         "schemaVersion": STAGE_GRAPH_VERSION,
         "nodes": nodes,
         "edges": edges,
-    })
+    });
+    // The block rides LAST, and ONLY when some session has a workspace or some
+    // project has a binding (§E): a document with neither carries no
+    // `workspaces`/`ties` key at all, so a headless host's graph.json is
+    // byte-for-byte what it was before this slice.
+    if let Some((rows, ties)) = block {
+        doc["workspaces"] = json!(rows);
+        doc["ties"] = json!(ties);
+    }
+    doc
+}
+
+// ── The compositor block: workspace rows + the ties between them (§E) ──────
+
+/// One session's pulse timestamp (§E): the latest hook `updatedAt` for it,
+/// else its own `startedAt`. Timestamps here are all `iso_utc_from_epoch`
+/// strings, so the string max IS the chronological max — the same comparison
+/// `merged_sessions` already makes when it folds the latest hook phase in.
+fn session_active_at(s: &SessionRecord, hooks: &[HookRecord]) -> String {
+    hooks
+        .iter()
+        .filter(|h| h.session_id == s.session_id && !h.updated_at.is_empty())
+        .map(|h| h.updated_at.as_str())
+        .max()
+        .unwrap_or(s.started_at.as_str())
+        .to_string()
+}
+
+/// One workspace row, while it is being accumulated.
+#[derive(Default)]
+struct WorkspaceRow {
+    project: Option<String>,
+    projects: BTreeSet<String>,
+    sessions: BTreeSet<String>,
+    live: usize,
+    working: usize,
+    awaiting: usize,
+    active_at: String,
+}
+
+impl WorkspaceRow {
+    fn to_json(&self, ws: i64) -> Value {
+        let mut row = json!({
+            "workspace": ws,
+            "projects": self.projects.iter().cloned().collect::<Vec<_>>(),
+            "sessions": self.sessions.iter().cloned().collect::<Vec<_>>(),
+            "live": self.live,
+            "working": self.working,
+            "awaiting": self.awaiting,
+            "activeAt": self.active_at,
+        });
+        // The BINDING rides only when there is one — an unbound workspace is
+        // labelled by its sessions' projects instead, never by a null.
+        if let Some(project) = &self.project {
+            row["project"] = json!(project);
+        }
+        row
+    }
+}
+
+/// The workspace a `spawned` tie leaves from: the session's nearest ancestor
+/// that REPORTS a workspace (its parent, or above it when the parent is
+/// headless) — with its session id, so the tie can name the pair. `None` when
+/// no ancestor is windowed (or a malformed cycle, which the visited set stops
+/// dead rather than spinning).
+fn windowed_ancestor<'a>(
+    s: &SessionRecord,
+    by_id: &BTreeMap<&'a str, &'a SessionRecord>,
+) -> Option<(i64, &'a str)> {
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    let mut cur = s.parent_session_id.as_deref();
+    while let Some(id) = cur {
+        if !seen.insert(id) {
+            return None;
+        }
+        let parent = by_id.get(id)?;
+        if let Some(ws) = parent.workspace {
+            return Some((ws, parent.session_id.as_str()));
+        }
+        cur = parent.parent_session_id.as_deref();
+    }
+    None
+}
+
+/// The compositor block (§E of `core-seams-design.md`): the per-workspace rows
+/// a pad draws and the ties between them, or `None` when NOTHING is in play —
+/// no session reports a workspace and no project has a binding. That one gate
+/// is what keeps a graph.json with no compositor in it byte-identical, session
+/// `activeAt` included (it feeds this block, so it rides with it).
+///
+/// Definitions, straight from §E:
+///
+/// - `sessions` lists every session whose record carries that workspace id;
+///   `live`/`working`/`awaiting` are counts over the same set. `live` is "not
+///   `done`" — a `stopped` session has ended a TURN, never died, so it is
+///   live.
+/// - `project` is the BINDING, absent when the workspace is unbound.
+///   `projects` is the binding PLUS the effective projects of that workspace's
+///   live sessions, so an unbound workspace with a project's sessions on it
+///   still labels itself (and one with neither stays an empty list).
+/// - A **project tie** is one per shared project, for every pair of workspaces
+///   whose `projects` intersect — a clique at three or more, which the song
+///   collapses itself. A **spawned tie** is the parent's (or nearest windowed
+///   ancestor's) workspace to the child's, ONLY when the two differ; a headless
+///   child has no workspace and therefore no tie of its own.
+/// - `activeAt` is the max over the sessions that contribute to a row or a tie.
+///
+/// LOCAL sessions only, by construction: `sessions` here IS the local roster,
+/// and another node's rows reach this document only nested under a fresh
+/// node's `children` — which this never reads.
+pub(crate) fn workspace_block(
+    projects: &[Project],
+    sessions: &[SessionRecord],
+    hooks: &[HookRecord],
+) -> Option<(Vec<Value>, Vec<Value>)> {
+    let mut rows: BTreeMap<i64, WorkspaceRow> = BTreeMap::new();
+    // Bindings first: a bound workspace with no session on it still gets a row.
+    for p in projects {
+        for ws in &p.workspaces {
+            let row = rows.entry(*ws).or_default();
+            row.project = Some(p.name.clone());
+            row.projects.insert(p.name.clone());
+        }
+    }
+    let mut in_play = !rows.is_empty();
+    // The parent lookup the two lineage walks share (a headless session's
+    // activity, and a spawned tie's leaving end).
+    let by_id: BTreeMap<&str, &SessionRecord> =
+        sessions.iter().map(|s| (s.session_id.as_str(), s)).collect();
+    for s in sessions {
+        let at = session_active_at(s, hooks);
+        let Some(ws) = s.workspace else {
+            // A HEADLESS session has no row of its own — §E: "its activity
+            // shows on its parent's workspace". So its pulse folds into the
+            // nearest windowed ancestor's row, as ACTIVITY ONLY: no session id
+            // joins that row's `sessions`, no count moves, and no tie is
+            // drawn. Subagents are most of this product's traffic, and without
+            // this fold their work would pulse nothing at all.
+            if let Some((ancestor_ws, _)) = windowed_ancestor(s, &by_id) {
+                let row = rows.entry(ancestor_ws).or_default();
+                if at > row.active_at {
+                    row.active_at = at;
+                }
+            }
+            continue;
+        };
+        in_play = true;
+        let state = canonical_state(&s.state);
+        let row = rows.entry(ws).or_default();
+        row.sessions.insert(s.session_id.clone());
+        if state != "done" {
+            row.live += 1;
+            if let Some(i) = super::model::effective_project_for(s, sessions, projects) {
+                row.projects.insert(projects[i].name.clone());
+            }
+        }
+        match state {
+            "working" => row.working += 1,
+            "awaiting" => row.awaiting += 1,
+            _ => {}
+        }
+        if at > row.active_at {
+            row.active_at = at;
+        }
+    }
+    if !in_play {
+        return None;
+    }
+
+    // Project ties: every pair (a < b) of workspaces claiming the same project.
+    let mut by_project: BTreeMap<&str, Vec<i64>> = BTreeMap::new();
+    for (ws, row) in &rows {
+        for name in &row.projects {
+            by_project.entry(name.as_str()).or_default().push(*ws);
+        }
+    }
+    let mut ties: Vec<(i64, i64, String, Value)> = Vec::new();
+    for (name, wss) in &by_project {
+        for (i, a) in wss.iter().enumerate() {
+            for b in &wss[i + 1..] {
+                ties.push((
+                    *a,
+                    *b,
+                    format!("project\t{name}"),
+                    json!({
+                        "kind": "project",
+                        "from": a,
+                        "to": b,
+                        "project": name,
+                        "activeAt": std::cmp::max(&rows[a].active_at, &rows[b].active_at),
+                    }),
+                ));
+            }
+        }
+    }
+    // Spawned ties: (from, to) → every pair that crossed, and the latest
+    // activity among them. `by_id` above is the same lookup this walk uses.
+    let mut spawned: BTreeMap<(i64, i64), (BTreeSet<(String, String)>, String)> = BTreeMap::new();
+    for s in sessions {
+        let Some(child_ws) = s.workspace else { continue };
+        let Some((parent_ws, parent_id)) = windowed_ancestor(s, &by_id) else {
+            continue;
+        };
+        // Same workspace: there is no lane to draw. A headless child never
+        // reaches here at all — `child_ws` is the whole reason it does not.
+        if parent_ws == child_ws {
+            continue;
+        }
+        let at = std::cmp::max(
+            session_active_at(s, hooks),
+            session_active_at(by_id[parent_id], hooks),
+        );
+        let entry = spawned.entry((parent_ws, child_ws)).or_insert_with(|| {
+            (BTreeSet::new(), String::new())
+        });
+        entry.0.insert((parent_id.to_string(), s.session_id.clone()));
+        if at > entry.1 {
+            entry.1 = at;
+        }
+    }
+    for ((from, to), (pairs, at)) in &spawned {
+        let pairs: Vec<Value> = pairs
+            .iter()
+            .map(|(p, c)| json!([p, c]))
+            .collect();
+        ties.push((
+            *from,
+            *to,
+            "spawned".to_string(),
+            json!({
+                "kind": "spawned",
+                "from": from,
+                "to": to,
+                "pairs": pairs,
+                "activeAt": at,
+            }),
+        ));
+    }
+    // Deterministic order, and the one the switchboard fixture uses: grouped
+    // by kind (every project tie, then every spawned one), then by (from, to),
+    // then by project name — `"project\t…"` sorting before `"spawned"`.
+    ties.sort_by(|a, b| (&a.2, a.0, a.1).cmp(&(&b.2, b.0, b.1)));
+
+    let rows: Vec<Value> = rows.iter().map(|(ws, row)| row.to_json(*ws)).collect();
+    Some((rows, ties.into_iter().map(|(_, _, _, v)| v).collect()))
 }
 
 // ── The Unicode tree render ─────────────────────────────────────────────────
@@ -1161,6 +1419,203 @@ mod tests {
         let node_b = nodes.iter().find(|n| n["id"] == "session:b").unwrap();
         assert_eq!(node_a["workspace"], json!(4));
         assert!(node_b.get("workspace").is_none());
+    }
+
+    // ── §E: the compositor block (graph.json `workspaces` + `ties`) ────────
+
+    /// Two workspaces bound to ONE project are a project tie between them, and
+    /// the block carries a row for a bound workspace even with no session on
+    /// it. The names are the DESIGN's own S3 gate names.
+    #[test]
+    fn project_tie_between_two_bound_workspaces() {
+        let projects = vec![Project {
+            name: "aoide".into(),
+            workspaces: vec![3, 5],
+            ..Default::default()
+        }];
+        let doc = build_graph(&projects, &[], &[]);
+        assert_eq!(
+            doc["workspaces"],
+            json!([
+                { "workspace": 3, "project": "aoide", "projects": ["aoide"], "sessions": [],
+                  "live": 0, "working": 0, "awaiting": 0, "activeAt": "" },
+                { "workspace": 5, "project": "aoide", "projects": ["aoide"], "sessions": [],
+                  "live": 0, "working": 0, "awaiting": 0, "activeAt": "" },
+            ]),
+            "{doc}"
+        );
+        assert_eq!(
+            doc["ties"],
+            json!([
+                { "kind": "project", "from": 3, "to": 5, "project": "aoide", "activeAt": "" }
+            ]),
+            "{doc}"
+        );
+    }
+
+    /// A spawned tie is drawn only when the two ends sit on DIFFERENT
+    /// workspaces, and it leaves from the nearest ancestor that has a window
+    /// at all — not merely from the parent.
+    #[test]
+    fn spawned_tie_only_across_workspaces() {
+        let mut parent = session("p", "/home/k/Aoide", "working", "2026-09-26T13:00:00Z", None);
+        parent.workspace = Some(2);
+        let mut same = session("same", "/home/k/Aoide", "working", "2026-09-26T13:01:00Z", Some("p"));
+        same.workspace = Some(2);
+        let mut across = session("across", "/home/k/Aoide", "working", "2026-09-26T13:02:00Z", Some("p"));
+        across.workspace = Some(7);
+        // A headless child of the SAME child, on another workspace: its tie
+        // must leave from the parent's window, not from the headless middle.
+        let mut middle = session("mid", "/home/k/Aoide", "working", "2026-09-26T13:03:00Z", Some("across"));
+        middle.workspace = None;
+        let mut far = session("far", "/home/k/Aoide", "working", "2026-09-26T13:04:00Z", Some("mid"));
+        far.workspace = Some(9);
+
+        let doc = build_graph(&[], &[parent, same, across, middle, far], &[]);
+        assert_eq!(
+            doc["ties"],
+            json!([
+                { "kind": "spawned", "from": 2, "to": 7, "pairs": [["p", "across"]],
+                  "activeAt": "2026-09-26T13:02:00Z" },
+                { "kind": "spawned", "from": 7, "to": 9, "pairs": [["across", "far"]],
+                  "activeAt": "2026-09-26T13:04:00Z" },
+            ]),
+            "the same-workspace child draws nothing, and the headless middle is \
+             stepped over: {doc}"
+        );
+    }
+
+    /// A child with no window has no tie of its own — its activity is its
+    /// parent's, and nothing is invented.
+    #[test]
+    fn headless_child_makes_no_tie() {
+        let mut parent = session("p", "/home/k/Aoide", "working", "2026-09-26T13:00:00Z", None);
+        parent.workspace = Some(2);
+        let headless = session("h", "/home/k/Aoide", "working", "2026-09-26T13:01:00Z", Some("p"));
+        let doc = build_graph(&[], &[parent, headless], &[]);
+        assert_eq!(doc["ties"], json!([]), "{doc}");
+        // The child is still counted on the workspace its PARENT sits on: the
+        // row lists what the roster reports, and a headless session reports no
+        // workspace of its own.
+        assert_eq!(doc["workspaces"][0]["workspace"], 2);
+        assert_eq!(doc["workspaces"][0]["sessions"], json!(["p"]));
+    }
+
+    /// `activeAt` is the latest hook `updatedAt` for that session, falling back
+    /// to `startedAt` — and a tie's is the max over its two ends.
+    #[test]
+    fn active_at_is_the_latest_hook() {
+        let mut a = session("a", "/home/k/Aoide", "working", "2026-09-26T13:00:00Z", None);
+        a.workspace = Some(2);
+        let mut b = session("b", "/home/k/Aoide", "working", "2026-09-26T13:00:00Z", Some("a"));
+        b.workspace = Some(7);
+        let hooks = vec![
+            HookRecord { session_id: "a".into(), phase: "working".into(), updated_at: "2026-09-26T13:05:00Z".into(), ..Default::default() },
+            // An OLDER hook record for the same session never wins.
+            HookRecord { session_id: "a".into(), phase: "idle".into(), updated_at: "2026-09-26T12:00:00Z".into(), ..Default::default() },
+            HookRecord { session_id: "b".into(), phase: "working".into(), updated_at: "2026-09-26T14:00:00Z".into(), ..Default::default() },
+        ];
+        let doc = build_graph(&[], &[a, b], &hooks);
+        let nodes = doc["nodes"].as_array().unwrap();
+        let node_a = nodes.iter().find(|n| n["id"] == "session:a").unwrap();
+        let node_b = nodes.iter().find(|n| n["id"] == "session:b").unwrap();
+        assert_eq!(node_a["activeAt"], "2026-09-26T13:05:00Z");
+        assert_eq!(node_b["activeAt"], "2026-09-26T14:00:00Z");
+        assert_eq!(doc["workspaces"][0]["activeAt"], "2026-09-26T13:05:00Z");
+        assert_eq!(doc["workspaces"][1]["activeAt"], "2026-09-26T14:00:00Z");
+        assert_eq!(
+            doc["ties"][0]["activeAt"], "2026-09-26T14:00:00Z",
+            "a tie pulses at the LATER of its two ends: {doc}"
+        );
+
+        // No hook at all → `startedAt` is the pulse.
+        let mut solo = session("solo", "/home/k/Aoide", "working", "2026-09-26T13:00:00Z", None);
+        solo.workspace = Some(2);
+        let doc = build_graph(&[], &[solo], &[]);
+        assert_eq!(doc["nodes"][0]["activeAt"], "2026-09-26T13:00:00Z");
+    }
+
+    /// §E: a headless child has no tie of its own and no row of its own —
+    /// "its activity shows on its parent's workspace". Subagents are most of
+    /// this product's traffic, so without this fold their work pulses nothing.
+    #[test]
+    fn headless_child_activity_pulses_its_parents_workspace() {
+        let mut parent = session("p", "/home/k/Aoide", "working", "2026-09-26T13:00:00Z", None);
+        parent.workspace = Some(2);
+        let headless = session("h", "/home/k/Aoide", "working", "2026-09-26T13:01:00Z", Some("p"));
+        // A headless grandchild, too: the fold walks to the nearest WINDOWED
+        // ancestor, not merely one rung up.
+        let grandchild = session("g", "/home/k/Aoide", "working", "2026-09-26T13:02:00Z", Some("h"));
+        let hooks = vec![
+            HookRecord { session_id: "p".into(), phase: "working".into(), updated_at: "2026-09-26T13:10:00Z".into(), ..Default::default() },
+            HookRecord { session_id: "h".into(), phase: "working".into(), updated_at: "2026-09-26T23:59:00Z".into(), ..Default::default() },
+            HookRecord { session_id: "g".into(), phase: "working".into(), updated_at: "2026-09-26T14:30:00Z".into(), ..Default::default() },
+        ];
+        let doc = build_graph(&[], &[parent, headless, grandchild], &hooks);
+        let row = &doc["workspaces"][0];
+        assert_eq!(row["workspace"], 2);
+        assert_eq!(
+            row["activeAt"], "2026-09-26T23:59:00Z",
+            "the headless child's later activity IS the row's pulse: {doc}"
+        );
+        assert_eq!(
+            row["sessions"],
+            json!(["p"]),
+            "activity only — no session id joins the row: {row}"
+        );
+        assert_eq!(row["live"], 1, "no count moves: {row}");
+        assert_eq!(doc["ties"], json!([]), "and no tie is drawn: {doc}");
+        // The children still carry their OWN pulse on their nodes, which is
+        // what a DAG watcher reads.
+        let nodes = doc["nodes"].as_array().unwrap();
+        let node_h = nodes.iter().find(|n| n["id"] == "session:h").unwrap();
+        assert_eq!(node_h["activeAt"], "2026-09-26T23:59:00Z");
+        assert!(node_h.get("workspace").is_none());
+    }
+
+    /// Nothing in play — no workspace on any session, no binding anywhere —
+    /// means no `workspaces`, no `ties`, and no session `activeAt`: the
+    /// document is byte-for-byte what it was before this slice.
+    #[test]
+    fn nothing_in_play_leaves_the_document_byte_identical() {
+        let sessions = vec![
+            session("a", "/home/k/Aoide", "working", "2026-09-26T13:00:00Z", None),
+            session("b", "/home/k/Aoide", "working", "2026-09-26T13:01:00Z", Some("a")),
+        ];
+        let hooks = vec![HookRecord {
+            session_id: "a".into(),
+            phase: "awaiting".into(),
+            updated_at: "2026-09-26T13:02:00Z".into(),
+            ..Default::default()
+        }];
+        let projects = vec![Project { name: "aoide".into(), path: "/home/k/Aoide".into(), ..Default::default() }];
+        let doc = build_graph(&projects, &sessions, &hooks);
+        assert!(doc.get("workspaces").is_none(), "{doc}");
+        assert!(doc.get("ties").is_none(), "{doc}");
+        for n in doc["nodes"].as_array().unwrap() {
+            assert!(n.get("activeAt").is_none(), "no pulse off a workspace: {n}");
+        }
+        // And the same document with NO hook phase merged in at all — the
+        // pre-slice shape — keys exactly the same.
+        let bare = build_graph(&projects, &sessions, &[]);
+        assert_eq!(
+            doc["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n["id"].clone())
+                .collect::<Vec<_>>(),
+            bare["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n["id"].clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            doc.as_object().unwrap().keys().collect::<Vec<_>>(),
+            bare.as_object().unwrap().keys().collect::<Vec<_>>()
+        );
     }
     #[test]
     fn graph_node_carries_model_only_when_known() {

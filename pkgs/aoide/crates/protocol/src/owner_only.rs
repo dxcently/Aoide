@@ -50,8 +50,8 @@ use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_FILE_EXISTS, ERROR_SUCCESS, GENERIC_WRITE, HANDLE, HLOCAL, INVALID_HANDLE_VALUE, LocalFree,
 };
 use windows_sys::Win32::Security::Authorization::{
-    EXPLICIT_ACCESS_W, GRANT_ACCESS, GetSecurityInfo, SE_FILE_OBJECT, SetEntriesInAclW, SetSecurityInfo, TRUSTEE_IS_SID,
-    TRUSTEE_IS_USER, TRUSTEE_W,
+    ConvertSidToStringSidW, EXPLICIT_ACCESS_W, GRANT_ACCESS, GetNamedSecurityInfoW, GetSecurityInfo, SE_FILE_OBJECT,
+    SetEntriesInAclW, SetSecurityInfo, TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation, DACL_SECURITY_INFORMATION,
@@ -69,7 +69,9 @@ use windows_sys::Win32::Storage::FileSystem::{
     OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE, WRITE_DAC, WRITE_OWNER,
 };
 use windows_sys::Win32::System::SystemServices::{ACCESS_ALLOWED_ACE_TYPE, SECURITY_DESCRIPTOR_REVISION, SID_REVISION};
-use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+use windows_sys::Win32::System::Threading::{
+    GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+};
 
 /// What the one owner-only ACE grants a file: every bit `GENERIC_READ` and
 /// `GENERIC_WRITE` resolve to, so the object this module creates can be
@@ -159,25 +161,55 @@ impl Drop for Handle {
     }
 }
 
-// ── the current token user, whose SID is the one trustee allowed ─────────
+// ── token users and SIDs: the one spelling of "who" ──────────────────────
 
-/// The SID of the user this process's token is for — `SID_AND_ATTRIBUTES.Sid`
-/// out of `TokenUser`. The backing buffer is an 8-byte-aligned `Vec<u64>`
+/// The SID of the user a token is for — `SID_AND_ATTRIBUTES.Sid` out of
+/// `TokenUser`. The backing buffer is an 8-byte-aligned `Vec<u64>`
 /// (`TOKEN_USER` needs pointer alignment; a `Vec<u8>` cast would be
 /// misaligned), and it is owned here because `sid` points INTO it.
-struct TokenUserSid {
+///
+/// Two readers, one implementation: this module's own ACL policy (which
+/// needs the `PSID` to build a trustee) and `crate::win_proc`'s
+/// `current_user_sid`/`process_user_sid` (which need the `S-1-5-…` string a
+/// caller can compare and print). A second copy of the `GetTokenInformation`
+/// dance would be a second answer to "whose token is this".
+pub(crate) struct TokenUserSid {
     _buffer: Vec<u64>,
     sid: PSID,
 }
 
 impl TokenUserSid {
-    fn current() -> io::Result<Self> {
+    /// This process's own token user.
+    pub(crate) fn current() -> io::Result<Self> {
         let mut raw: HANDLE = null_mut();
         if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw) } == 0 {
             return Err(io::Error::last_os_error());
         }
-        let token = Handle(raw);
+        Self::from_token(Handle(raw))
+    }
 
+    /// ANOTHER process's token user, for the peer-identity read
+    /// (`SIO_AF_UNIX_GETPEERPID` gives a pid and nothing else, so the pid is
+    /// the only handle to whose process this may be). `PROCESS_QUERY_LIMITED_INFORMATION`
+    /// is the least access that yields a token, and it is still refused for a
+    /// process this user may not query — a refusal here is an unidentified
+    /// peer, never a guessed one.
+    pub(crate) fn of_process(pid: u32) -> io::Result<Self> {
+        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if process.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        let process = Handle(process);
+        let mut raw: HANDLE = null_mut();
+        if unsafe { OpenProcessToken(process.0, TOKEN_QUERY, &mut raw) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Self::from_token(Handle(raw))
+    }
+
+    /// The two-call `GetTokenInformation(TokenUser)` read, off an already
+    /// open token whose lifetime this borrows.
+    fn from_token(token: Handle) -> io::Result<Self> {
         // The documented two-call shape: the required length first, then the
         // value. A failure at either step is propagated, never guessed past.
         let mut needed: u32 = 0;
@@ -199,6 +231,68 @@ impl TokenUserSid {
         Ok(Self { _buffer: buffer, sid: user.User.Sid })
     }
 
+    /// This SID in its canonical `S-1-5-21-…` form — the string Windows
+    /// itself prints, so two SIDs read on two hosts are comparable as text
+    /// and a human sees an identity rather than a pointer.
+    pub(crate) fn to_string_sid(&self) -> io::Result<String> {
+        sid_string(self.sid)
+    }
+}
+
+/// Convert a `PSID` to its canonical string. The string is
+/// `LocalAlloc`'d by `ConvertSidToStringSidW`, so it is freed by the guard
+/// that reads it, on the error path too.
+fn sid_string(sid: PSID) -> io::Result<String> {
+    let mut raw: *mut u16 = null_mut();
+    if unsafe { ConvertSidToStringSidW(sid, &mut raw) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if raw.is_null() {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "the SID converted to no string"));
+    }
+    let mut len = 0usize;
+    while unsafe { *raw.add(len) } != 0 {
+        len += 1;
+    }
+    let text = String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(raw, len) });
+    unsafe { LocalFree(raw as HLOCAL) };
+    Ok(text)
+}
+
+/// The SID of the user that OWNS the object at `path` — the file-ownership
+/// fact Unix answers with `MetadataExt::uid`, asked of the object itself by
+/// name (`GetNamedSecurityInfoW`, which takes files and directories alike
+/// and needs no open of its own). `None` when the path does not exist; an
+/// unreadable policy is an error, never a fabricated owner.
+pub fn owner_sid(path: &Path) -> io::Result<Option<String>> {
+    let name = wide(path)?;
+    let mut owner: PSID = null_mut();
+    let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
+    let status = unsafe {
+        GetNamedSecurityInfoW(
+            name.as_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &mut owner,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            &mut descriptor,
+        )
+    };
+    if status != ERROR_SUCCESS {
+        let err = io::Error::from_raw_os_error(status as i32);
+        return match err.kind() {
+            io::ErrorKind::NotFound => Ok(None),
+            _ => Err(err),
+        };
+    }
+    // The descriptor owns the SID this borrows, so it outlives the read.
+    let _descriptor = LocalAlloc(descriptor);
+    sid_string(owner).map(Some)
+}
+
+impl TokenUserSid {
     fn as_ptr(&self) -> PSID {
         self.sid
     }
@@ -375,12 +469,26 @@ fn create_dir(path: &Path, access: u32) -> io::Result<()> {
 /// policy that does not grant it to its current owner cannot be repaired
 /// through this module, and says so with an error rather than half a fix.
 pub fn set_dir_access(path: &Path, access: u32) -> io::Result<()> {
-    let dir = open_existing(path, WRITE_DAC | WRITE_OWNER | READ_CONTROL, true)?;
+    set_object_access(path, access, true)
+}
+
+/// The FILE half of [`set_dir_access`]: attach the owner-only policy to a file
+/// that already exists, for a caller whose file was created by something other
+/// than [`create_new`] — a plain `std::fs::write` under a default DACL. A
+/// file's policy is [`OWNER_ONLY_MASK`] (`0o600`'s bits, with none of the
+/// directory meanings), so this is the native stand-in for
+/// `set_permissions(0o600)` on an existing path.
+pub fn set_file_access(path: &Path) -> io::Result<()> {
+    set_object_access(path, OWNER_ONLY_MASK, false)
+}
+
+fn set_object_access(path: &Path, access: u32, dir: bool) -> io::Result<()> {
+    let target = open_existing(path, WRITE_DAC | WRITE_OWNER | READ_CONTROL, dir)?;
     // The same refusal the feed makes, for the same reason: the handle names
     // the LINK, so writing its policy would report a repair on a junction
     // while the directory every caller actually uses keeps the default it
     // had. Refused by name, before anything is written.
-    if let Some(reason) = reject_reparse_point(&dir)? {
+    if let Some(reason) = reject_reparse_point(&target)? {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("refusing to set the policy of {}: {reason}", path.display()),
@@ -400,7 +508,7 @@ pub fn set_dir_access(path: &Path, access: u32) -> io::Result<()> {
     }
     let status = unsafe {
         SetSecurityInfo(
-            dir.as_raw_handle() as HANDLE,
+            target.as_raw_handle() as HANDLE,
             SE_FILE_OBJECT,
             OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
             sid.as_ptr(),

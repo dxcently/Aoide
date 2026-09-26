@@ -1453,6 +1453,16 @@ pub fn run(socket_path: &Path, events_path: &Path, json_mode: bool, popup_mode: 
 mod tests {
     use super::*;
 
+    // ── the POSIX-shell fixture class (gated, with the reason) ───────────
+    //
+    // Every test below carrying `#[cfg(unix)]` drives the backend TEMPLATE
+    // mechanism with a POSIX fixture: an `sh -c` command line, or a
+    // `#!/bin/sh` shim script on `PATH`. The mechanism itself is portable and
+    // HAS a native arm — `sh -c` on Unix, `cmd /C` on native Windows
+    // (`backend::run_backend_command`'s own doc) — so these gates name the
+    // FIXTURE, never the code under test. The Windows arm of the same path is
+    // exercised natively by `backend::tests::a_native_windows_template_*`.
+
     /// The events-feed line shape (P-G4, task #77): the bare
     /// `emit_notify` payload, verbatim — no `AuditRecord` wrapper. `ts` is
     /// no longer part of the line at all (`parse_notify_line`'s own doc);
@@ -1649,6 +1659,7 @@ mod tests {
             consumer: "m".into(),
             requested_at: 42,
             peer_uid: None,
+                peer_sid: None,
             reason: None,
             origin: client::PendingOrigin::default(),
         }];
@@ -1679,6 +1690,7 @@ mod tests {
                 consumer: "m".into(),
                 requested_at: 0,
                 peer_uid: None,
+                peer_sid: None,
                 reason: None,
                 origin: client::PendingOrigin::default(),
             }];
@@ -2052,6 +2064,7 @@ mod tests {
     // test runs in parallel threads). No `env_lock` needed here for that
     // reason.
 
+    #[cfg(unix)]
     fn write_shim(tag: &str, script: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "aoide-secrets-watch-zenity-shim-{tag}-{}-{}",
@@ -2061,12 +2074,12 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let shim = dir.join("zenity-shim");
         std::fs::write(&shim, script).unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::home::set_mode(&shim, 0o755).unwrap();
         thread::sleep(Duration::from_millis(5));
         shim
     }
 
+    #[cfg(unix)]
     fn remove_shim(shim: &Path) {
         if let Some(dir) = shim.parent() {
             std::fs::remove_dir_all(dir).ok();
@@ -2100,6 +2113,7 @@ mod tests {
     /// suite (everything outside this section) still runs at full
     /// parallelism, and this is a real fix for a real kernel-timing race,
     /// never a retry loop hiding it.
+    #[cfg(unix)]
     fn shim_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: Mutex<()> = Mutex::new(());
         LOCK.lock().unwrap_or_else(|e| e.into_inner())
@@ -2108,6 +2122,9 @@ mod tests {
     // `zenity_available`'s own tests moved to `aoide_protocol::dialog`'s
     // test module (P-P5, F5) with the function itself.
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn run_zenity_entry_returns_the_typed_code_on_exit_zero() {
         let _guard = shim_lock();
@@ -2120,6 +2137,9 @@ mod tests {
         remove_shim(&shim);
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn run_zenity_entry_recognizes_the_dismiss_extra_button_by_its_label() {
         let _guard = shim_lock();
@@ -2129,6 +2149,9 @@ mod tests {
         remove_shim(&shim);
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn run_zenity_entry_treats_a_bare_cancel_as_cancelled_not_dismissed() {
         let _guard = shim_lock();
@@ -2147,12 +2170,32 @@ mod tests {
         assert!(matches!(result, ZenityResult::SpawnError(_)), "expected SpawnError, got {result:?}");
     }
 
+    /// The dialog group's contract, natively: a child this host really has,
+    /// asked a zenity-shaped question it answers with nothing but a non-zero
+    /// exit, is NEVER an approval and never a dismissal — only a clean exit-0
+    /// stdout carrying a code is (`ZenityResult`'s own variants). The shim
+    /// tests above pin that parse in detail through a `#!/bin/sh` script; this
+    /// is the same reading against `findstr`, a program every Windows host
+    /// has, which rejects this argv outright.
+    #[cfg(windows)]
+    #[test]
+    fn a_native_child_that_answers_nothing_but_an_exit_code_is_never_an_approval() {
+        let result = run_zenity_entry("findstr", "t", "x", || false);
+        assert!(
+            matches!(result, ZenityResult::Cancelled | ZenityResult::DialogFailure(_)),
+            "a non-zero exit with no code on stdout is a non-answer, got {result:?}"
+        );
+    }
+
     /// P1: the entry dialog is VISIBLE — a TOTP code is a 30-second secret,
     /// not a password, and `--hide-text` was dropped from
     /// `spawn_zenity_entry`'s own argv. Pins the exact argv a real `zenity`
     /// would receive by having the shim log its own `"$@"` before answering,
     /// rather than trusting `spawn_zenity_entry`'s source to stay in sync
     /// with this test by inspection alone.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn spawn_zenity_entry_argv_has_no_hide_text() {
         let _guard = shim_lock();
@@ -2170,6 +2213,9 @@ mod tests {
     /// `--entry` (`spawn_zenity_entry`'s own doc, confirmed live against
     /// zenity on this host). `--no-markup` must ride every zenity dialog
     /// this crate ever opens.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn spawn_zenity_entry_argv_carries_no_markup() {
         let _guard = shim_lock();
@@ -2181,6 +2227,9 @@ mod tests {
         remove_shim(&shim);
     }
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn zenity_error_dialog_argv_carries_no_markup() {
         let _guard = shim_lock();
@@ -2194,6 +2243,9 @@ mod tests {
     /// P3: `lyra secrets ask --secret <name> --consumer <who> --seconds <n>`
     /// is the exact argv `spawn_lyra_entry` sends — pinned the same way the
     /// zenity argv test above pins `--hide-text`'s absence.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn spawn_lyra_entry_argv_matches_the_documented_contract() {
         let _guard = shim_lock();
@@ -2209,6 +2261,9 @@ mod tests {
     /// actually carries them — the RAW reason text and the PRE-FORMATTED
     /// origin line respectively (`spawn_lyra_entry`'s own doc on why neither
     /// is reformatted twice).
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn spawn_lyra_entry_argv_carries_reason_and_from_only_when_present() {
         let _guard = shim_lock();
@@ -2235,6 +2290,9 @@ mod tests {
     /// zenity — proven by handing it a deliberately bogus `zenity_cmd` path
     /// alongside a real lyra shim: if the dispatch ever fell through to
     /// zenity by mistake, this would come back `SpawnError`, not `Approved`.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn run_ask_dialog_prefers_lyra_when_it_resolves() {
         let _guard = shim_lock();
@@ -2258,6 +2316,9 @@ mod tests {
 
     /// P3: with no `lyra` resolved, [`run_ask_dialog`] falls back to zenity
     /// exactly as before this phase.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn run_ask_dialog_falls_back_to_zenity_when_lyra_is_absent() {
         let _guard = shim_lock();
@@ -2280,6 +2341,9 @@ mod tests {
     /// — the functional fallback behavior pinned here is the reliable,
     /// safe-to-test half; the narration calls themselves are unconditional
     /// and reviewable directly in `run_ask_dialog`'s source.)
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn run_ask_dialog_falls_back_to_zenity_when_lyra_fails_to_spawn() {
         let _guard = shim_lock();
@@ -2306,6 +2370,9 @@ mod tests {
     /// user action — gets the SAME immediate zenity fallback as a spawn
     /// failure. Distinguishes this from a genuine cancel (exit 1, the next
     /// test): only exit 3 triggers the fallback.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn run_ask_dialog_falls_back_to_zenity_when_lyra_exits_infra_failure() {
         let _guard = shim_lock();
@@ -2332,6 +2399,9 @@ mod tests {
     /// The other half of the SAME distinction, at the `run_entry_dialog`
     /// level directly (no fallback involved) — exit 3 with no stdout must
     /// be read as `DialogFailure`, never `Cancelled`.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn run_entry_dialog_reads_exit_three_as_dialog_failure_not_cancelled() {
         let _guard = shim_lock();
@@ -2349,6 +2419,9 @@ mod tests {
     /// `Cancelled`. This is the "today's behavior for an actual user
     /// action stays exactly as it was" pin the live-incident fix must not
     /// regress.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn run_ask_dialog_genuine_lyra_cancel_is_not_retried_via_zenity() {
         let _guard = shim_lock();
@@ -2379,14 +2452,20 @@ mod tests {
     /// call `reconcile_once` makes, never the tail/events-feed path at all.
     #[test]
     fn reconcile_once_surfaces_an_ask_already_pending_at_startup() {
+        // A SHORT, deliberate path, never a descriptive tag: an `AF_UNIX` path
+        // is capped at 107 bytes (108 with the terminator) on native Windows,
+        // and `%TEMP%` alone is ~35 of them — the descriptive name this fixture
+        // used first measured 110 and was refused BY NAME by the transport
+        // (`win_unix`'s budget check) before it ever reached the code under
+        // test.
         let dir = std::env::temp_dir().join(format!(
-            "aoide-secrets-watch-reconcile-startup-{}-{}",
+            "as-reconcile-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let sock_path = dir.join("secrets.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
+        let listener = crate::test_net::UnixListener::bind(&sock_path).unwrap();
 
         let server = thread::spawn(move || {
             if let Ok((stream, _)) = listener.accept() {
@@ -2426,6 +2505,9 @@ mod tests {
     /// than this test's own timeout must still be killed and this call must
     /// still return promptly, once `should_cancel` starts returning `true`
     /// — never left waiting out the shim's own sleep.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn run_zenity_entry_kills_the_exact_child_when_the_ask_resolves_elsewhere() {
         let _guard = shim_lock();
@@ -2453,6 +2535,9 @@ mod tests {
     /// queue at all (the queue-vanished half is covered separately by
     /// `popup_kills_the_dialog_when_the_ask_vanishes_via_reconcile_not_an_event`
     /// below).
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn popup_closure_kills_an_already_open_dialog_once_it_crosses_the_kill_lockout() {
         let _guard = shim_lock();
@@ -2506,6 +2591,9 @@ mod tests {
     /// a `reconcile`-driven removal (an empty `pending` list, never an
     /// `Event::Completed`/`Dismissed`/`Expired`) exactly the same way it
     /// reacts to an explicit event.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn popup_kills_the_dialog_when_the_ask_vanishes_via_reconcile_not_an_event() {
         let _guard = shim_lock();
@@ -2558,15 +2646,21 @@ mod tests {
     /// ignores file permissions, so this skips under a root test runner —
     /// same precedent `an_unreadable_policy_json_teaches_the_chown_
     /// reference_fix_on_both_gates` (`broker.rs`) sets.
+    // cfg(unix): the fixture is a MODE, not a shim — `set_mode(path, 0o000)`
+    // makes the file unreadable to its own owner on Unix, and that is the
+    // permission error `wait_for_follower` must fail fast on. The native
+    // Windows arm of `set_mode` is a documented no-op for a LOOSENING mode
+    // (there is no world-writable policy to attach and no "unreadable by its
+    // owner" state to arrange), so this host has no such fixture to build.
+    #[cfg(unix)]
     #[test]
     fn wait_for_follower_fails_immediately_on_a_permission_error_never_waiting() {
-        if crate::home::effective_uid() == 0 {
+        if crate::home::running_as_root() {
             return;
         }
         let path = tmp_path("wait-for-log-perm-denied");
         std::fs::write(&path, b"x\n").unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        crate::home::set_mode(&path, 0o000).unwrap();
 
         let start = std::time::Instant::now();
         // A deliberately LONG poll interval: if this incorrectly treated
@@ -2576,7 +2670,7 @@ mod tests {
         let elapsed = start.elapsed();
 
         // Restore before cleanup can remove the tempfile.
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).ok();
+        let _ = crate::home::set_mode(&&path, 0o644);
 
         assert_eq!(result.err(), Some(1), "a permission error must fail immediately (Err(1)), never wait");
         assert!(elapsed < Duration::from_secs(5), "must not have waited at all, took {elapsed:?}");

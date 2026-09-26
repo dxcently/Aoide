@@ -94,8 +94,10 @@ from a terminal the call forwards to the live daemon and fails with
 except `aoide onboard`'s own clone registration, which runs the same
 locked mutation locally before any daemon exists.
 
-- **Reads:** `state/stage/projects.json`. `<path>` defaults to the current
-  working directory when omitted; give one or more — each is appended as a
+- **Reads:** `state/stage/projects.json`. With no `<path>` at all the project
+  is registered NAME-ONLY — no folder, and so nothing it can ever anchor by
+  cwd; a folder is added later with `project add <name> <root>`. Give one or
+  more paths and each is appended as a
   root. Every path is validated (absolute, an existing directory) BEFORE
   anything is written; one bad path in the list refuses the whole call
   (exit 2, `data.reason: "invalid-path"`) because anchoring is absolute-path
@@ -149,7 +151,8 @@ aoide project remove <name> [<path>] [--json]
   whole project (today's original behaviour, byte-for-byte) — an absent name
   is an ok no-op. With `<path>`: drops that one root — if it was the
   project's `path`, the next remaining root is promoted into `path`; if it
-  was the last root, the whole project is dropped; a `<path>` that is not
+  was the project's LAST root the project stays, NAME-ONLY (no folder, its
+  bindings intact — never deleted); a `<path>` that is not
   one of the project's roots is an ok no-op.
 
 ### aoide project list
@@ -160,9 +163,67 @@ aoide project list [--json]
 
 - **Reads:** `state/stage/projects.json`.
 - **Output:** text — `"N project(s) registered"` plus one `◆ <name>  <path>`
-  line each (name-sorted), followed by one indented line per extra root;
+  line each (name-sorted; a NAME-ONLY project prints its name alone, with no
+  empty path column), followed by one indented line per extra root;
   `data: {projects: [...]}`.
 - **Notes:** read-only.
+
+### aoide workspace set / clear / list
+
+```
+aoide workspace set [<workspace>] <project> [--new] [--json]
+aoide workspace clear <workspace> [--json]
+aoide workspace list [--json]
+```
+
+The binding between a compositor **workspace** (an integer id, exactly the
+value a session's `workspace` already holds) and a **project**: a workspace
+carries its project, so sessions born on a bound workspace join it.
+
+- `set` binds. `<workspace>` may be omitted, and then the FOCUSED workspace is
+  resolved through the compositor adapter (`hyprctl activeworkspace -j`) in the
+  caller's process; a host with no adapter gets a taught refusal asking for the
+  number (exit 2, `data.reason: "no-compositor"`). An unregistered project is
+  refused by name (exit 1, `data.reason: "unknown-project"`, nothing written) —
+  `--new` means it explicitly: it registers a NAME-ONLY project and binds it in
+  one call, and on a name that already exists it just binds (it never edits
+  that project).
+- ONE INVARIANT: a workspace id appears in at most one project. `set` MOVES it
+  off whatever project held it; two workspaces may show the same project; and
+  a binding is not a folder — a name-only project may carry one.
+- `clear` unbinds. Sessions already born on that workspace keep the default
+  project they were stamped with: the binding is a birth default, never a live
+  link.
+- **Where it lives:** `projects.json`'s `workspaces` array, on the project —
+  so removing a whole project takes its bindings with the record, while
+  removing a folder leaves them alone. Both mutations are DAEMON-OWNED, like
+  `project add/edit/remove` (`aoided must be running for project management`
+  when none answers).
+- `list` is a read (no lock, no daemon, no write): every binding plus every
+  workspace a local session reports, sorted by id, with `"observed": false` and
+  a named `reason` on a host where no session reports one. `--json` publishes
+  `data.workspaces[].{workspace, project}` — no `project` key on an unbound id.
+
+### aoide workspace root
+
+```
+aoide workspace root [<workspace>] [--json]
+```
+
+The FIRST folder of the project bound to a workspace (or to the FOCUSED one
+when `<workspace>` is omitted) — the one read a launcher needs:
+
+    kitty --directory "$(aoide workspace root 2>/dev/null || echo "$HOME")"
+
+- Read-only: no lock, no daemon, no stage write.
+- Text mode prints ONE BARE PATH on stdout (the command is special-cased in the
+  CLI door for exactly that, so the generic `[ok] …` envelope never lands in the
+  substitution) and NOTHING on stdout when it refuses — the exit code plus the
+  line on stderr is the whole report. Refusals: an unbound workspace
+  (`data.reason: "no-binding"`), a project with no folder (`"no-folder"`), an
+  omitted workspace with no compositor to ask (exit 2, `"no-compositor"`), and a
+  non-integer id (`"invalid-workspace"`).
+- `--json` keeps the envelope: `data: {workspace, project, root}`.
 
 ### aoide graph link
 

@@ -1242,6 +1242,7 @@ mod tests {
             title: None,
             pid: None,
             workspace: None,
+            workspace_project: None,
             activity: None,
             kind: None,
             say: None,
