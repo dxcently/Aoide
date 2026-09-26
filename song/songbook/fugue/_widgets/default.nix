@@ -14,9 +14,8 @@
 # `_widgets/` is underscore-prefixed on purpose: `lib/walk.nix` drops any path
 # containing `/_`, so this shelf never reaches the module system and
 # `checks.song-shape` never sees it. It is score, not a module.
-{ lib }:
+{ lib, song, ... }:
 let
-  song = import ../../../../lib/song.nix { inherit lib; };
   owner = "fugue";
 
   slotFiles = lib.filterAttrs (n: t: t == "regular" && lib.hasSuffix ".nix" n && n != "default.nix") (
