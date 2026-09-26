@@ -323,7 +323,15 @@ pub(crate) fn pingback(inv: &Invocation, dropped: &[DroppedEidolon]) -> Pingback
             ended: ended_of(rec),
         });
     }
+    // Two producers can name the same child on one pass — the eidolon sync's
+    // own drop set and the roster exit `reap_inner` reports (H1 of the S8/S9
+    // review) — and one child has ONE exit. The first producer to name it owns
+    // it; the second is not a second decision over the same child.
+    let mut gathered: HashSet<String> = children.iter().map(|c| c.id.clone()).collect();
     for drop in dropped {
+        if !gathered.insert(drop.session_id.clone()) {
+            continue;
+        }
         let remote = drop.remote;
         let parent = drop.parent_session_id.clone().filter(|p| !p.is_empty()).unwrap_or_default();
         // The same rule as the roster above, plus the drop's own: a child the
@@ -432,8 +440,13 @@ fn claim_locked(
         // pass — which means the exit `decide` would otherwise owe on a LATER
         // tick has to be claimed here, after the trace row the drop could
         // still produce. Local dropped children are skipped: their parent is
-        // told by the run's own report, exactly as for a live one.
-        if child.dropped_mid_turn && child.remote {
+        // told by the run's own report, exactly as for a live one. The exit is
+        // pushed only when `decide` did not already answer with one — a drop
+        // whose window holds no readable record reaches `exit_event` through
+        // `decide` itself, and pushing a second here would put TWO exits on a
+        // ring that is supposed to close with exactly one.
+        let already_exited = events.iter().any(|e| matches!(e, PingEvent::Exited { .. }));
+        if child.dropped_mid_turn && child.remote && !already_exited {
             if let Some(exit) = exit_event(child, entry.exited) {
                 events.push(exit);
             }

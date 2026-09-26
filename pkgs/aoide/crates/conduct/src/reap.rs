@@ -70,7 +70,7 @@ use crate::graph::{
     canonical_state, codex_home, drop_remote_child_rows, drop_sessions, hooks_path, hyprctl_clients,
     ledger_session_exit, lineage_of, load_stage, normalize_addr, now_iso_utc, pingback, pingback_pull,
     prune_done, refresh_subagent_says, refresh_transcript_fields, restage_graph, sessions_path,
-    stage_error,
+    stage_error, DroppedEidolon,
     sync_codex_app_threads, sync_eidolon_sessions, upsert_hook, write_stage, HookRecord, HooksFile,
     SessionRecord,
     SessionsFile, STAGE_GRAPH_VERSION,
@@ -1070,7 +1070,7 @@ pub fn reap(inv: &Invocation) -> Outcome {
         Some((addrs, owners)) => (Some(addrs), Some(owners)),
         None => (None, None),
     };
-    let (mut outcome, tunnel_candidates) =
+    let (mut outcome, tunnel_candidates, gone_remote) =
         aoide_storage::fs::with_stage_lock(move || reap_inner(inv, gathered_addrs, window_owners));
     // Finish the ssh tunnel sweep OUTSIDE the stage lock — `reap_inner` only
     // GATHERED the candidates under it (`orphan_tunnel_candidates`); this is
@@ -1121,7 +1121,13 @@ pub fn reap(inv: &Invocation) -> Outcome {
     // `changed`, the same rule the refresh below holds: telling a parent
     // something must not toast the desktop every twelve seconds. Each actual
     // delivery prints its own `[aoide/reap]` line from inside `pingback`.
-    let _pingback_report = pingback(inv, &eidolon_dropped);
+    // The two end-facts sets are one input: a child whose eidolon presence the
+    // sync dropped, and a child THIS pass took off the roster (killed, pruned,
+    // superseded). `pingback` decides over the roster it re-reads, so a record
+    // that left before that read can only be heard about through here.
+    let mut dropped_children = eidolon_dropped;
+    dropped_children.extend(gone_remote);
+    let _pingback_report = pingback(inv, &dropped_children);
     // …and the other half of the same conversation, one lane over: a child of
     // THIS node whose parent sits on another node published its events on ITS
     // node's ring, and this node — the parent's own policy and audit boundary
@@ -1372,25 +1378,52 @@ fn refresh_codex_titles() -> Vec<String> {
         changed
     })
 }
-/// Returns the sweep's `Outcome` PLUS the ssh tunnel candidates gathered
-/// under the stage lock (`orphan_tunnel_candidates`) — this function never
-/// kills or unlinks any of them itself. `reap` (the only caller) finishes
-/// that work AFTER `with_stage_lock` returns; see `sweep_orphan_tunnels`'s
-/// own doc for why the kill phase must never run in here.
+/// Returns the sweep's `Outcome`, the ssh tunnel candidates gathered under
+/// the stage lock (`orphan_tunnel_candidates`) — this function never kills or
+/// unlinks any of them itself, `reap` (the only caller) finishes that work
+/// AFTER `with_stage_lock` returns — and the END FACTS of every remote child
+/// that left the roster on this pass.
+///
+/// **Why a third return, and why it is not optional.** A remote child's exit
+/// is the one event its own node owes its far parent, and `pingback` (which
+/// runs after this function, off a re-read roster) can only decide over
+/// records it can still SEE. A child the liveness sweep kills or `prune_done`
+/// drops is gone by then — and so is a clean-ended record that an unrelated
+/// reap pruned this same pass — so the exit would never be published and the
+/// parent's row could never drain. This pass therefore reports what left, in
+/// the same [`DroppedEidolon`] shape `sync_eidolon_sessions` reports its own
+/// drops in: one end-facts input, two producers, no second mechanism.
+///
+/// The `trace` it carries is a PATH, located here (a small `meta.json` read
+/// under the lock, never the trace itself): the record's own `cwd`/`log_path`
+/// are the honest hint for it, and the 1 MiB trace READ happens in `pingback`,
+/// outside this lock, exactly as it does for a sync drop.
 fn reap_inner(
     inv: &Invocation,
     gathered_addrs: Option<HashSet<String>>,
     window_owners: Option<HashMap<String, u32>>,
-) -> (Outcome, Vec<aoide_storage::tunnel::TunnelRecord>) {
+) -> (Outcome, Vec<aoide_storage::tunnel::TunnelRecord>, Vec<DroppedEidolon>) {
     let cmd = "session.reap";
     let mut s_file: SessionsFile = match load_stage(&sessions_path()) {
         Ok(f) => f,
-        Err(e) => return (stage_error(cmd, e), Vec::new()),
+        Err(e) => return (stage_error(cmd, e), Vec::new(), Vec::new()),
     };
     let mut h_file: HooksFile = match load_stage(&hooks_path()) {
         Ok(f) => f,
-        Err(e) => return (stage_error(cmd, e), Vec::new()),
+        Err(e) => return (stage_error(cmd, e), Vec::new(), Vec::new()),
     };
+
+    // Every remote child on the roster at the START of this pass, with the end
+    // facts the record carries right now. Comparing that set against the
+    // roster that SURVIVES below is what says which of them left — one rule
+    // covering `prune_done`'s sweep, the superseded-tombstone drop and the
+    // reaped set alike, and no second copy of prune's own predicate.
+    let remote_before: Vec<SessionRecord> = s_file
+        .sessions
+        .iter()
+        .filter(|s| s.remote_parent.is_some())
+        .cloned()
+        .collect();
 
     let now_epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1657,6 +1690,7 @@ fn reap_inner(
                 "spared": spared,
             })),
             Vec::new(),
+            Vec::new(),
         );
     }
 
@@ -1762,13 +1796,13 @@ fn reap_inner(
         h_file.schema_version = STAGE_GRAPH_VERSION.to_string();
     }
     if let Err(e) = write_stage(&sessions_path(), &s_file) {
-        return (stage_error(cmd, e), Vec::new());
+        return (stage_error(cmd, e), Vec::new(), Vec::new());
     }
     // The roster is down; the ledger rows of every parent that just left it
     // follow it, never the other way round.
     drop_remote_child_rows(&gone_parents);
     if let Err(e) = write_stage(&hooks_path(), &h_file) {
-        return (stage_error(cmd, e), Vec::new());
+        return (stage_error(cmd, e), Vec::new(), Vec::new());
     }
 
     let mut changed: Vec<String> = reaped
@@ -1808,7 +1842,7 @@ fn reap_inner(
     // under.
     match restage_graph() {
         Ok(g) => changed.push(g.to_string_lossy().into_owned()),
-        Err(e) => return (stage_error(cmd, e), Vec::new()),
+        Err(e) => return (stage_error(cmd, e), Vec::new(), Vec::new()),
     }
     let mut message = format!(
         "reaped {} dead session(s); dropped {} total; decayed {} stopped → idle; cleared {} orphaned parent link(s); dropped {} orphaned hook record(s); dropped {} superseded session(s); unlinked {} orphaned socket(s)",
@@ -1840,7 +1874,26 @@ fn reap_inner(
             "hyprctlAvailable": hyprctl_available,
             "spared": spared,
         }));
-    (outcome, tunnel_candidates)
+    let gone_remote: Vec<DroppedEidolon> = remote_before
+        .iter()
+        .filter(|r| !s_file.sessions.iter().any(|s| s.session_id == r.session_id))
+        .map(|r| DroppedEidolon {
+            session_id: r.session_id.clone(),
+            petname: r.petname.clone(),
+            parent_session_id: r.parent_session_id.clone(),
+            agent: r.agent.clone(),
+            trace: agent_profile(&r.agent).and_then(|p| {
+                (p.transcript.locate)(&r.session_id, Some(&r.cwd), r.log_path.as_deref())
+            }),
+            // Every row here carries `remoteParent`: that is what put it in
+            // `remote_before`, and it is why this record's exit is owed to a
+            // parent on another node rather than to a local report.
+            remote: true,
+            exit_code: r.exit_code,
+            outcome: r.outcome.clone(),
+        })
+        .collect();
+    (outcome, tunnel_candidates, gone_remote)
 }
 
 #[cfg(test)]
@@ -2807,6 +2860,91 @@ mod tests {
         let mine: Vec<_> = lines.iter().filter(|l| l.session_id == "dead-1").collect();
         assert_eq!(mine.len(), 1, "exactly one ledger line, never two: {lines:?}");
         assert!(!mine[0].ended_at.is_empty());
+
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn a_reaped_remote_child_publishes_one_exited_on_the_kill_pass() {
+        // H1 of the S8/S9 review. The pre-boot ghost makes the reap real and
+        // deterministic (the same fixture `reap_appends_exactly_one_ledger_line
+        // _per_reaped_session` uses); the record carries `remoteParent`, so
+        // this pass KILLS it, marks it `done` and prunes it — all before
+        // `pingback` re-reads the roster. Without the end facts `reap_inner`
+        // hands over, the child's ring would never close and its parent's row
+        // could never drain.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "HYPRLAND_INSTANCE_SIGNATURE",
+        ]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        let stage = crate::graph::testutil::unique_stage("reap-remote-exit");
+        let state = stage.join("state");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        let _xdg = crate::graph::testutil::isolated_xdg_runtime("reap-remote-exit-xdg");
+
+        let mut dead = hook_only("a2a-4411-1790", "idle");
+        dead.agent = "a2a".into();
+        dead.started_at = "2000-01-01T00:00:00Z".into();
+        dead.cwd = "/nonexistent/pre-boot-ghost".into();
+        dead.remote_parent = Some(aoide_storage::records::RemoteParent {
+            node: "nodeb".into(),
+            key: "ab".repeat(32),
+            session_id: "conduct-17991-1790312541".into(),
+            extra: Default::default(),
+        });
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".into(), sessions: vec![dead] },
+        )
+        .unwrap();
+
+        // The same door the daemon's own tick runs under (`pingback` returns
+        // silently for any other one).
+        let inv = Invocation {
+            door: aoide_protocol::Door::Daemon,
+            ..crate::graph::testutil::invocation(&["session", "reap"], &[])
+        };
+        let out = reap(&inv);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let reaped: Vec<String> = out.data.as_ref().unwrap()["reaped"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        assert!(reaped.contains(&"a2a-4411-1790".to_string()), "reaped: {reaped:?}");
+        assert!(
+            aoide_storage::remote_children::load_remote_children().is_empty(),
+            "a remote CHILD keeps no caller-side ledger row — that file is the parent's"
+        );
+
+        // The ring closes on the kill pass, with the record's own end facts
+        // (both absent for a killed process: no code, no outcome — the honest
+        // reading, never a fabricated `0`).
+        let read = aoide_storage::pingback_remote::events_for("a2a-4411-1790", 0);
+        assert_eq!(read.events.len(), 1, "exactly one event, the exit: {read:?}");
+        assert_eq!(
+            read.events[0].event,
+            serde_json::json!({ "exited": { "code": null, "outcome": null } }),
+            "a killed child's exit carries no invented status"
+        );
+
+        // A second pass has nothing left to decide: the record is gone from
+        // the roster AND from this pass's own reporting, so no second exit.
+        let again = reap(&Invocation {
+            door: aoide_protocol::Door::Daemon,
+            ..crate::graph::testutil::invocation(&["session", "reap"], &[])
+        });
+        assert_eq!(again.status, aoide_protocol::output::Status::Ok, "msg: {}", again.message);
+        assert_eq!(
+            aoide_storage::pingback_remote::events_for("a2a-4411-1790", 0).events.len(),
+            1,
+            "one exit, never two"
+        );
 
         let _ = std::fs::remove_dir_all(&stage);
     }

@@ -221,7 +221,7 @@ pub(crate) use self::session_store::{
 pub(crate) use self::window::hyprctl_clients;
 pub(crate) use self::codex_app::codex_home;
 pub(crate) use self::codex_app::sync_codex_app_threads;
-pub(crate) use self::eidolon::sync_eidolon_sessions;
+pub(crate) use self::eidolon::{sync_eidolon_sessions, DroppedEidolon};
 /// Widened from `pub(crate)` to `pub` at P-A1 of the binary-split
 /// workstream: `aoide-screen` (moved out of this crate) needs the same
 /// `0x`/case-tolerant window-address comparison its own session-targeted
