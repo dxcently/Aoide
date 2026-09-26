@@ -29,11 +29,14 @@ pub fn local_host_name() -> String {
         .unwrap_or_else(|| "aoide".to_string())
 }
 
-/// The OS hostname via `libc::gethostname`, or `None` on any failure
-/// (truncated/non-UTF8/errno) — best-effort, never a panic. Ported from
-/// `aoide_server::a2a::os_hostname` (moved here so conduct/conductor
-/// renderers, which cannot depend on the server crate, can call it too; the
-/// server copy is deleted once this one is wired in).
+/// The OS hostname, or `None` on any failure (truncated/non-UTF8/errno) —
+/// best-effort, never a panic. Unix asks `gethostname(2)`; Windows asks
+/// `GetComputerNameExW` for the DNS hostname, the same name a Unix host
+/// reports for itself (and not the NetBIOS name, which is the truncated,
+/// uppercase form). Ported from `aoide_server::a2a::os_hostname` (moved here
+/// so conduct/conductor renderers, which cannot depend on the server crate,
+/// can call it too; the server copy is deleted once this one is wired in).
+#[cfg(unix)]
 fn os_hostname() -> Option<String> {
     let mut buf = vec![0u8; 256];
     let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
@@ -42,6 +45,27 @@ fn os_hostname() -> Option<String> {
     }
     let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
     let s = String::from_utf8_lossy(&buf[..end]).trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+/// The Windows arm — see the Unix arm's doc above for the shared contract.
+/// The two-call `GetComputerNameExW` shape (the required length first, then
+/// the value, with the length it wrote checked against what it was given) is
+/// what keeps a name too long for the first buffer from coming back
+/// truncated-but-plausible: a truncated name would be a DIFFERENT host.
+#[cfg(windows)]
+fn os_hostname() -> Option<String> {
+    use windows_sys::Win32::System::SystemInformation::{ComputerNameDnsHostname, GetComputerNameExW};
+    let mut buf = vec![0u16; 256];
+    let mut len = buf.len() as u32;
+    if unsafe { GetComputerNameExW(ComputerNameDnsHostname, buf.as_mut_ptr(), &mut len) } == 0 {
+        return None;
+    }
+    let len = len as usize;
+    if len == 0 || len > buf.len() {
+        return None;
+    }
+    let s = String::from_utf16_lossy(&buf[..len]).trim().to_string();
     (!s.is_empty()).then_some(s)
 }
 

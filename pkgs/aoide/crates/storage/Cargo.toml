@@ -37,3 +37,17 @@ toml_edit = { workspace = true }
 # The commands tests share the workspace rig (scratch dirs, EnvSaver,
 # `env_lock`) — dev-only edge.
 aoide-test-support = { workspace = true }
+
+# The native half of `fs` (the stage/state lock, the no-clobber rename, the
+# link-preserving copy) and of `display`'s hostname read; only Windows needs
+# these APIs. The private-file/directory policy itself is NOT here — it is
+# `aoide-protocol::owner_only`, exposed from the leaf crate rather than
+# copied (`pkgs/aoide/crates/AGENTS.md`: no cross-crate copying), so this
+# crate's own Windows surface stays the narrow set below.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_SystemInformation",
+] }

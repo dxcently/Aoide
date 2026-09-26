@@ -494,6 +494,12 @@ mod tests {
     /// (the `is_file` check follows the symlink), and the returned root is
     /// the AS-WALKED `root/link`, never a `canonicalize`d `root/real` — the
     /// walk never resolves the symlink to keep climbing from its target.
+    /// Unix-only: the fixture is a symbolic link, whose creation on native
+    /// Windows needs SeCreateSymbolicLinkPrivilege or Developer Mode — no
+    /// runner guarantees it. What `walk_up` does with a link (never resolve
+    /// it, return the as-walked path) is `symlink_metadata`-shaped and
+    /// portable; only this way of BUILDING the fixture is not.
+    #[cfg(unix)]
     #[test]
     fn walk_up_finds_a_manifest_through_a_symlinked_directory_without_resolving_it() {
         let root = temp_dir("walk-up-symlink");

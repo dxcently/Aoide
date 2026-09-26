@@ -2155,8 +2155,11 @@ mod tests {
         )
         .unwrap();
 
-        // Hold the SAME lock file with_stage_lock flocks, on our own fd.
-        use std::os::unix::io::AsRawFd;
+        // Hold the SAME lock file `with_stage_lock` takes, on our own handle
+        // — through the same primitive the mutator uses, so the test proves
+        // the cross-process lock rather than a second mechanism that happens
+        // to look like it (Windows locks belong to the handle, which is what
+        // makes a same-process second handle a genuine second holder).
         std::fs::create_dir_all(dir.join("stage")).unwrap();
         let lock = std::fs::OpenOptions::new()
             .create(true)
@@ -2164,7 +2167,7 @@ mod tests {
             .truncate(false)
             .open(dir.join("stage/.stage.lock"))
             .unwrap();
-        assert_eq!(unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) }, 0);
+        assert!(crate::fs::lock_exclusive(&lock), "the test setup must actually hold the lock");
 
         let (tx, rx) = std::sync::mpsc::channel();
         let id = entry.id.clone();
@@ -2174,16 +2177,16 @@ mod tests {
             out
         });
 
-        // While the flock is held the mutator must not complete. (A slow
+        // While the lock is held the mutator must not complete. (A slow
         // thread start can only make this assertion vacuously true, never
-        // flaky-fail — the mutator physically cannot pass the flock.)
+        // flaky-fail — the mutator physically cannot pass the lock.)
         std::thread::sleep(std::time::Duration::from_millis(150));
         assert!(
             rx.try_recv().is_err(),
-            "mark_inbound_approved completed while the stage flock was held — the mutator is not taking the cross-process lock"
+            "mark_inbound_approved completed while the stage lock was held — the mutator is not taking the cross-process lock"
         );
 
-        assert_eq!(unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_UN) }, 0);
+        crate::fs::unlock(&lock);
         let marked = t.join().unwrap().unwrap();
         assert!(marked.approved);
         assert!(list_inbound(now)[0].approved, "the release let the write land");

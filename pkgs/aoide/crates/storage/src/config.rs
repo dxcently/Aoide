@@ -1209,6 +1209,14 @@ mod tests {
         });
     }
 
+    /// The refusal a write that cannot land must produce, and the proof it
+    /// left the file exactly as it was. Unix makes the DIRECTORY unwritable
+    /// with a mode (`0o500`); Windows has no directory mode, so the same
+    /// condition is its own spelling — a protected, single-ACE DACL that
+    /// grants the owner reads and nothing that adds, writes or deletes —
+    /// applied to the same directory through the shared policy module, and
+    /// lifted afterwards the same way the Unix arm restores `0o700`.
+    #[cfg(unix)]
     #[test]
     fn set_refuses_an_unwritable_config_without_touching_it() {
         with_temp_root("unwritable", |dir| {
@@ -1220,6 +1228,28 @@ mod tests {
             std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
             let refusal = set("pairing.defaultGrant", "spawn");
             std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let err = refusal.expect_err("a read-only directory must refuse, never half-write");
+            assert!(matches!(err, SetRefusal::Unwritable { .. }), "{err}");
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap(),
+                "[pairing]\ndefaultGrant = [\"read\"]\n"
+            );
+        });
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn set_refuses_an_unwritable_config_without_touching_it() {
+        use aoide_protocol::owner_only::{OWNER_ONLY_MASK, READ_ONLY_MASK, set_dir_access};
+        with_temp_root("unwritable", |dir| {
+            let path = dir.join(CONFIG_FILE);
+            std::fs::write(&path, "[pairing]\ndefaultGrant = [\"read\"]\n").unwrap();
+            // Same mechanism as the Unix arm's `chmod`, read at the same
+            // place: the atomic write renames a temp INTO this directory, so
+            // the directory's policy is what decides writability.
+            set_dir_access(dir, READ_ONLY_MASK).unwrap();
+            let refusal = set("pairing.defaultGrant", "spawn");
+            set_dir_access(dir, OWNER_ONLY_MASK).unwrap();
             let err = refusal.expect_err("a read-only directory must refuse, never half-write");
             assert!(matches!(err, SetRefusal::Unwritable { .. }), "{err}");
             assert_eq!(

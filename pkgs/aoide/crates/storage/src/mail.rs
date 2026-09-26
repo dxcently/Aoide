@@ -1495,11 +1495,9 @@ mod tests {
         let (_env, dir) = root("held-lock");
         std::fs::create_dir_all(crate::fs::stage_dir()).unwrap();
 
-        use std::os::unix::io::AsRawFd;
         let lock_path = crate::fs::stage_dir().join(".stage.lock");
         let held = std::fs::OpenOptions::new().create(true).write(true).open(&lock_path).unwrap();
-        let rc = unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX) };
-        assert_eq!(rc, 0, "test setup must actually hold the lock");
+        assert!(crate::fs::lock_exclusive(&held), "test setup must actually hold the lock");
 
         let released = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let released_writer = released.clone();
@@ -1516,9 +1514,7 @@ mod tests {
         assert!(!handle.is_finished(), "a genuinely held lock must block the second writer, not fail it");
 
         released.store(true, std::sync::atomic::Ordering::SeqCst);
-        unsafe {
-            libc::flock(held.as_raw_fd(), libc::LOCK_UN);
-        }
+        crate::fs::unlock(&held);
         drop(held);
 
         let result = handle.join().unwrap();
