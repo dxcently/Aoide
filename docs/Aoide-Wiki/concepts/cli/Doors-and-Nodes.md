@@ -526,7 +526,10 @@ outright at task #135 P3', hard cutover, no aliases.
   request carries the requester's `selfVia` claim, the inbound commit
   also sets the node's `url` to `http://127.0.0.1:<port>/` (port parsed
   off the requester's advertised url) and `via` to the claim in the same
-  write ([[Node-Transport]]); `aoide pair reject <id|name>` removes the
+  write ([[Node-Transport]]); a request that carried NO claim — including
+  every dial that resolved to loopback, where [[Node-Transport]]'s
+  `default_self_via` claims no hop at all — leaves `via` untouched;
+  `aoide pair reject <id|name>` removes the
   parked entry locally on either queue, no wire call, no record — by
   name it matches exactly one pending request or refuses as ambiguous.
 - **Output:** starting a new request prints the derived SAS (the

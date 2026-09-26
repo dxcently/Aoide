@@ -700,7 +700,12 @@ forward is a pipe, not a party to the protocol.
   found to resolve only through the router's DHCP-DNS on this LAN —
   resolution by luck, not something a transport marker can lean on),
   falling back to the claimed hostname only if that route lookup itself
-  fails; `--self-via` overrides the whole default. Same trust class as the
+  fails AND that route itself leaves the box — a route that resolves to
+  LOOPBACK claims nothing at all (`selfVia` absent, the wire's own "no
+  claim": the two ends are the same machine, so there is no hop between
+  them to name, and the naive `ssh://<login>@127.0.0.1` was a hop to this
+  box's own sshd that the far end never asked for); `--self-via` overrides
+  the whole default. Same trust class as the
   `url` field beside it on that same wire message either way:
   self-asserted data, a transport marker only, never itself a source of
   trust (trust stays in pubkeys + the SAS comparison, "The ceremony"

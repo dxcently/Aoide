@@ -61,7 +61,9 @@ Four ways a node picks one up:
   own tunnel looking like loopback, so the approver has no observed address
   to derive anything from; the request carries an optional self-asserted
   `ssh://[user@]host` claim (`--self-via` overrides the `$USER`/ outbound-address
-  default), and `aoide pair`'s commit sets the node's `via` to the
+  default — and a dial whose route resolves to LOOPBACK carries no claim at
+  all, since two daemons on one machine have no hop between them to name,
+  D5), and `aoide pair`'s commit sets the node's `via` to the
   claim and rewrites its `url` to `http://127.0.0.1:<port>/` — `<port>`
   parsed off the requester's own advertised url — in the same write.
   Self-asserted data, a transport marker only: trust stays in the pubkeys

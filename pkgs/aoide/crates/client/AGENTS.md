@@ -207,6 +207,17 @@
   and leaves it PARKED for the requester's own poll to find — no wire call
   at all, so an unreachable or loopback-only requester never blocks this
   half.
+- **`default_self_via` refuses a LOOPBACK route before it reads a login
+  (D5) — `selfVia` is a claim about a hop BETWEEN boxes, so two daemons on
+  one machine claim nothing.** `outbound_ip_toward`'s answer is the test
+  (`ip.is_loopback()`), not the `toward` string: a loopback dial and a
+  hostname that resolves to loopback are the same "the far side is this
+  box" fact. Do NOT restore a `ssh://<login>@127.0.0.1` default, and keep
+  the check ahead of `local_login()` — a login-less box must refuse for the
+  same reason, not a different one. `--self-via` still overrides it
+  outright (an operator naming their own hop is not this function's
+  business), and `approve_inbound`'s `None`-untouched rule below is what
+  keeps an absent claim from wiping a `via` a previous pairing recorded.
 - **`approve_inbound`'s commit maps `entry.self_via` to `{url, via}` — get
   this backwards and every loopback-only requester's node record comes out
   undialable (task #131).** Present, the commit is `url:

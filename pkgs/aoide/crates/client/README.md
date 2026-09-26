@@ -594,7 +594,11 @@ never the inbound/serve half (that's `aoide-server`).
   must not be silent —
   `default_self_url`/`default_self_via` are this group's own local helpers
   (their own doc comments in `commands.rs` state what each derives and how
-  `--self-url`/`--self-via` override them). `pair_via_url`/`pair_via_hostname`
+  `--self-url`/`--self-via` override them; D5 — `default_self_via` claims NO
+  hop at all when the route itself resolves to loopback, so pairing two
+  daemons on one box can no longer stamp `via:"ssh://<login>@127.0.0.1"`, a
+  hop to this box's own sshd that the far end never asked for).
+  `pair_via_url`/`pair_via_hostname`
   (the SMART TARGET dispatch of a NEW request's two arms, P-PV2)
   both bottom out in `run_pair_request`, which sends
   the commitment and its reveal as two sequential POSTs in one invocation
@@ -788,7 +792,9 @@ never the inbound/serve half (that's `aoide-server`).
   `default_self_via(toward)` (`ssh://<local login>@<local outbound address
   routed toward `toward`>`, reusing `crate::tunnel::local_login`'s
   `$USER`/`$LOGNAME` chain for the login half, `None` when neither env var
-  is set) or an explicit `--self-via`, carried on the wire beside
+  is set — and `None` for a route that resolves to LOOPBACK, before the
+  login is even read: two daemons on one box have no hop between them to
+  claim, D5) or an explicit `--self-via`, carried on the wire beside
   `self_url` ([`crate::node::build_pair_request_body`] below) so the
   approver — which can only ever OBSERVE this request arriving over the
   tunnel, i.e. loopback — has something to record a working `via` from at

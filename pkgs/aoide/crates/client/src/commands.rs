@@ -2205,9 +2205,26 @@ pub(crate) fn default_self_url() -> String {
 /// env var is set (no guessed literal there either). `--self-via`
 /// overrides this whole function outright, mirroring `--self-url`; every
 /// caller only ever reaches this as an `Option::or_else` fallback.
+///
+/// **A route that resolves to a LOOPBACK address claims NO hop at all
+/// (D5).** `pair` between two daemons on one machine — `pair
+/// http://127.0.0.1:18712/`, and the hostname arm's own heard-source when
+/// the second daemon advertises over loopback — routed the outbound trick
+/// to `127.0.0.1`, so the record was stamped `via:"ssh://khoa@127.0.0.1"`:
+/// an ssh hop invented for a peer that IS this box, and one that would
+/// dial this box's own sshd at a port the far end never asked for. The
+/// route's own local address is the whole test (a non-loopback dial's is
+/// never loopback, and a hostname resolving to loopback is caught by the
+/// same comparison), so it is decided BEFORE the login is read: `None`
+/// here means "no claim", which is exactly what the wire's absent
+/// `selfVia` already means to the approver.
 pub(crate) fn default_self_via(toward: &str) -> Option<String> {
+    let routed = outbound_ip_toward(toward);
+    if routed.is_some_and(|ip| ip.is_loopback()) {
+        return None;
+    }
     let login = crate::tunnel::local_login().ok()?;
-    let host = outbound_ip_toward(toward)
+    let host = routed
         .map(|ip| ip.to_string())
         .unwrap_or_else(aoide_storage::display::local_host_name);
     Some(format!("ssh://{login}@{host}"))
@@ -5097,11 +5114,14 @@ mod tests {
     }
 
     /// `default_self_via`'s own claim-formatting (`ssh://<login>@<host>`),
-    /// pinned deterministically: `$USER` is stamped to a known value and
-    /// `toward` is loopback, so the HOST half resolves the same way
-    /// [`outbound_ip_toward_resolves_to_loopback_when_dialing_127_0_0_1`]
-    /// above already proved it does, with no real network involved either
-    /// way.
+    /// pinned deterministically: `$USER` is stamped to a known value and the
+    /// HOST half comes off the outbound trick, with no real network involved
+    /// either way (a UDP `connect` never sends a packet). `198.51.100.9`
+    /// (TEST-NET-2) is never a real peer, so on a routed box the local address
+    /// is this machine's own and on a route-less one the hostname fallback
+    /// answers — either way the claim is non-loopback, which is the part under
+    /// test; the exact host is deliberately not pinned, since that is the
+    /// network's answer, not this function's.
     #[test]
     fn default_self_via_formats_login_at_the_outbound_address_toward_the_node() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -5110,11 +5130,43 @@ mod tests {
         std::env::set_var("USER", "testuser");
         std::env::remove_var("LOGNAME");
 
-        assert_eq!(default_self_via("127.0.0.1").as_deref(), Some("ssh://testuser@127.0.0.1"));
+        let via = default_self_via("198.51.100.9").expect("a non-loopback dial still claims a hop");
+        assert!(via.starts_with("ssh://testuser@"), "{via}");
+        assert!(!via.ends_with("127.0.0.1"), "never a loopback host: {via}");
 
         std::env::remove_var("USER");
         std::env::remove_var("LOGNAME");
-        assert_eq!(default_self_via("127.0.0.1"), None, "no $USER/$LOGNAME at all — refuse rather than guess a login, same as resolve_login's own stance");
+        assert_eq!(default_self_via("198.51.100.9"), None, "no $USER/$LOGNAME at all — refuse rather than guess a login, same as resolve_login's own stance");
+
+        match saved_user {
+            Some(v) => std::env::set_var("USER", v),
+            None => std::env::remove_var("USER"),
+        }
+        match saved_logname {
+            Some(v) => std::env::set_var("LOGNAME", v),
+            None => std::env::remove_var("LOGNAME"),
+        }
+    }
+
+    /// D5: a dial that resolves to LOOPBACK — `pair` between two daemons on
+    /// one machine, the acceptance report's `"via":"ssh://khoa@127.0.0.1"` —
+    /// claims NO hop at all, whatever `$USER` says. The refusal is decided
+    /// before the login is read, so it holds with the env unset too: this is
+    /// not a login-shaped `None`, it is "there is no far side to reach".
+    #[test]
+    fn default_self_via_claims_no_hop_over_loopback() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_user = std::env::var("USER").ok();
+        let saved_logname = std::env::var("LOGNAME").ok();
+        std::env::set_var("USER", "testuser");
+        std::env::remove_var("LOGNAME");
+
+        assert_eq!(default_self_via("127.0.0.1"), None);
+        assert_eq!(default_self_via("127.0.0.1:18712"), None, "an explicit port never changes the route's own address");
+
+        std::env::remove_var("USER");
+        std::env::remove_var("LOGNAME");
+        assert_eq!(default_self_via("127.0.0.1"), None, "no login needed to decide this one either");
 
         match saved_user {
             Some(v) => std::env::set_var("USER", v),
