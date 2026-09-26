@@ -449,7 +449,19 @@ never the inbound/serve half (that's `aoide-server`).
   envelope's own `header.from.node`), then through `settle_deposit`:
   filing a letter spools its ack toward the letter's origin, a receipt
   retires the entry it confirms, and a re-poll before the ack files
-  nothing twice and spools nothing twice. `settle_deposit` is the ONLY
+  nothing twice and spools nothing twice. **`aoide mail poll [<node>]` is
+  the second caller of `poll_node`, and the reason it exists: an empty
+  outbox never dials, so `drain_node`'s poll-on-contact can never reach a
+  node with nothing to send — the one receive path the relay model needs
+  most.** With no argument the command walks `pollable_nodes()`
+  (registered, `verified`, `message` in this box's own `allows` — the same
+  gate `mail send` applies, so the sendable set and the pollable set stay
+  one), reporting per node and never letting one node's failure stop the
+  sweep; with a name it dials that one, refusing `unknown-node` /
+  `unpaired-node` BEFORE any dial. Hand-over is bounded by
+  `aoide_storage::outbox::POLL_BATCH_CAP` (50, the drain's own batch), which
+  is safe because the acks retire what was filed and the next poll
+  advances. `settle_deposit` is the ONLY
   implementation of that outcome-follows dispatch — `aoide-server::a2a::
   mail_deposit` reaches the same function through `aoide_conduct::
   mail_bridge` rather than keeping its own copy. **Two

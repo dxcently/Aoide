@@ -291,8 +291,30 @@ pub fn poll_node(node_name: &str) -> Result<usize, String> {
     Ok(filed)
 }
 
-/// Drain `node_name`'s outbox once: every spooled, non-refused, non-`hold`
-/// entry, oldest first, attempted in order — stopping at the first TRANSPORT
+/// Every node `aoide mail poll` asks when it is given no argument:
+/// registered, `verified`, and carrying `message` in THIS box's own `allows`
+/// for it — the same gate [`crate::commands`]'s `mail send` node branch
+/// requires before it will spool a letter toward a node, so "a node this box
+/// sends to" and "a node this box asks for mail" are one set rather than two
+/// that can drift. Sorted by name, so the command's own report is stable.
+///
+/// The `allows` half is this box's record of what IT permits that node, not
+/// the node's record of this box — which is what the far door checks when it
+/// answers. Keeping the two in step is the operator's business; a node
+/// without `message` on either side is not one this box trades mail with.
+/// P-M4's declared `down`/`hold` status narrows this set further, at the same
+/// predicate the door's own admission uses.
+pub fn pollable_nodes() -> Vec<String> {
+    let mut out: Vec<String> = aoide_storage::node_store::load_nodes()
+        .into_iter()
+        .filter(|node| node.verified && node.allows.iter().any(|a| a == "message"))
+        .map(|node| node.name)
+        .collect();
+    out.sort();
+    out
+}
+
+/// Drain `node_name`'s outbox once: every spooled, non-refused, non-`hold`/// entry, oldest first, attempted in order — stopping at the first TRANSPORT
 /// failure (the link itself is down; hammering the rest of the queue the
 /// same pass gains nothing) but continuing past a REFUSAL (that one entry
 /// is the problem, not the link — the next entry may well be fine).

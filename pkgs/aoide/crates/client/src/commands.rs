@@ -4357,6 +4357,16 @@ pub fn register_mail(r: &mut Registry) {
         handler: handle_mail_export,
         examples: ["mail export", "mail export --dir ~/Magi/aoide-mail"],
     ));
+    r.insert(cmd!(
+        path: ["mail", "poll"],
+        summary: "Ask for your mail without sending any: poll the named paired node — or, with no argument, every paired node this box holds the `message` grant for. Receives everything that node spooled for this box (all held entries, plus ones whose own delivery attempts have been failing), files each with the same origin verification a pushed deposit gets, and spools the acks. The receive trigger a node with nothing to send needs; the drain's own dial policy is untouched.",
+        args: [arg!("node", "string", false, "Poll only this node. Omit to poll every paired node holding `message` in this box's own allows for it. A node this box is not paired with is refused by name.")],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: handle_mail_poll,
+        examples: ["mail poll", "mail poll yomi-strix"],
+    ));
 }
 
 /// The sender attribution for `mail send` — mirrors `aoide-conduct`'s own
@@ -5058,6 +5068,83 @@ fn handle_mail_outbox_retry(inv: &Invocation) -> Outcome {
     }
     Outcome::error(cmd, format!("no outbox entry with msgid {msgid}"))
         .with_data(json!({ "reason": "not-found", "msgid": msgid }))
+}
+
+/// `aoide mail poll [<node>] [--json]` — the receive trigger (P-M3, MAIL.md
+/// §Wire/§Outbox). A node with nothing to send has no drain contact, so
+/// poll-on-contact alone can never deliver to it; this is the act that asks
+/// anyway. Same [`crate::mail_wire::poll_node`] the drain calls, so the wire,
+/// the filing and the acking are one implementation — never a second receive
+/// path.
+///
+/// With an argument, that ONE node is dialed, and a node this box is not
+/// paired with is refused BEFORE any dial: `unknown-node` when the name means
+/// nothing here, `unpaired-node` when it is registered but never verified —
+/// the identical two refusals `mail send`'s node branch makes, by name, for
+/// the identical reason (a poll of a stranger is not a thing this box does).
+/// With no argument, every node [`crate::mail_wire::pollable_nodes`] returns
+/// is asked in turn, oldest name first; one node's failure never stops the
+/// sweep — it is reported per node and the next one is still asked.
+///
+/// The command's own `Outcome` is `Ok` whenever the ask was MADE (that is the
+/// same write-is-the-report discipline `mail send` holds): what each node
+/// answered, how many envelopes were filed, rides in `data.nodes`.
+fn handle_mail_poll(inv: &Invocation) -> Outcome {
+    let cmd = "mail.poll";
+    const USAGE: &str = "usage: aoide mail poll [<node>]";
+    if inv.args.len() > 1 {
+        return Outcome::usage(cmd, USAGE);
+    }
+    let named = inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()).map(str::to_string);
+
+    let nodes = aoide_storage::node_store::load_nodes();
+    let targets: Vec<String> = match &named {
+        Some(name) => {
+            match nodes.iter().find(|n| n.name == *name) {
+                None => {
+                    return Outcome::error(cmd, format!("no node named `{name}`"))
+                        .with_data(json!({ "reason": "unknown-node", "name": name }));
+                }
+                Some(node) if !node.verified => {
+                    return Outcome::error(
+                        cmd,
+                        format!(
+                            "node `{name}` is registered but not paired — a poll requires a VERIFIED node; \
+                             pair first with `aoide pair {name}`"
+                        ),
+                    )
+                    .with_data(json!({ "reason": "unpaired-node", "name": name }));
+                }
+                Some(_) => vec![name.clone()],
+            }
+        }
+        None => crate::mail_wire::pollable_nodes(),
+    };
+
+    let mut rows: Vec<Value> = Vec::new();
+    let mut filed = 0usize;
+    for node in &targets {
+        match crate::mail_wire::poll_node(node) {
+            Ok(n) => {
+                filed += n;
+                rows.push(json!({ "node": node, "status": "polled", "filed": n }));
+            }
+            Err(e) => rows.push(json!({ "node": node, "status": "unreachable", "filed": 0, "reason": e })),
+        }
+    }
+    let unreachable = rows.iter().filter(|r| r["status"] == "unreachable").count();
+    let message = if targets.is_empty() {
+        "no paired node holds `message` — nothing to poll".to_string()
+    } else {
+        format!(
+            "polled {} node(s): {filed} envelope(s) filed{}",
+            targets.len(),
+            if unreachable == 0 { String::new() } else { format!(", {unreachable} unreachable") }
+        )
+    };
+    Outcome::ok(cmd, message)
+        .changed(vec![format!("state/mail/base.jsonl: +{filed} on poll")])
+        .with_data(json!({ "nodes": rows, "filed": filed }))
 }
 
 /// [`handle_mail_outbox_retry`]'s `--refused` half. `target` narrows the
@@ -8076,11 +8163,11 @@ mod tests {
     }
 
     #[test]
-    fn register_mail_wires_all_ten_commands() {
+    fn register_mail_wires_all_eleven_commands() {
         let mut r = Registry::new();
         register_mail(&mut r);
         let paths: Vec<String> = r.commands().map(|c| c.dotted()).collect();
-        for want in ["mail", "mail.send", "mail.read", "mail.show", "mail.mark", "mail.rm", "mail.outbox", "mail.outbox.rm", "mail.outbox.retry", "mail.export"] {
+        for want in ["mail", "mail.send", "mail.read", "mail.show", "mail.mark", "mail.rm", "mail.outbox", "mail.outbox.rm", "mail.outbox.retry", "mail.export", "mail.poll"] {
             assert!(paths.contains(&want.to_string()), "missing {want}");
         }
     }
@@ -8334,6 +8421,145 @@ mod tests {
         assert_eq!(out.data.unwrap()["reason"], "hold-needs-a-node");
         assert!(aoide_storage::mail::read_base().unwrap().is_empty(), "nothing was filed either way");
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A fake door that answers every POST with the same fixed JSON, counts
+    /// the requests it actually saw (a bare probe connect sends no bytes and
+    /// is not counted), and is silenced by dropping the listener. Unlike
+    /// [`spawn_fake_card_server`] this one takes an OWNED body, because a
+    /// `aoide/mailPoll` answer carries a freshly minted envelope and so
+    /// cannot be a `&'static str`.
+    fn spawn_fixed_answer_door(
+        body: String,
+    ) -> (std::net::TcpListener, u16, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = seen.clone();
+        let accepter = listener.try_clone().unwrap();
+        std::thread::spawn(move || loop {
+            let Ok((mut stream, _)) = accepter.accept() else { break };
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            if n == 0 {
+                continue;
+            }
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        });
+        (listener, port, seen)
+    }
+
+    fn poll_answer_for(envelope: &aoide_storage::mail::Envelope) -> String {
+        format!(
+            r#"{{"jsonrpc":"2.0","id":1,"result":{{"envelopes":[{}]}}}}"#,
+            serde_json::to_string(envelope).unwrap()
+        )
+    }
+
+    /// H1, as a test: **a node with NOTHING to send receives a held letter
+    /// via `mail poll`.** This is the case `poll-on-contact` cannot reach —
+    /// an empty outbox has no dial, so no contact, so no poll (the drain's
+    /// own doc says so) — and it is the relay model's only receive path. The
+    /// poll files the envelope through the same chain a pushed deposit gets
+    /// and spools the ack back toward its origin, exactly as the hand-over
+    /// would if a drain had carried it.
+    #[test]
+    fn mail_poll_receives_a_held_letter_with_nothing_to_send() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-poll-receives");
+
+        // The letter the hub hands back was minted by this process's own
+        // identity and stamped `from.node = local_host_name()`, so the
+        // ORIGIN record this box must hold is one named exactly that (the
+        // same one-process-plays-both-roles shortcut `mail_wire`'s own tests
+        // document). Its url points nowhere: the ack this poll spools has to
+        // STAY spooled for the assertion below.
+        let me = aoide_storage::display::local_host_name();
+        let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "conductor", "held for a quiet box").unwrap();
+        let letter_msgid = letter.msgid.clone();
+        let (listener, port, hits) = spawn_fixed_answer_door(poll_answer_for(&letter));
+
+        let mut origin = verified_node(&me, "http://127.0.0.1:1/");
+        origin.pubkey = Some(kp.info().pubkey_hex.clone());
+        aoide_storage::node_store::save_nodes(&[verified_node("relay", &format!("http://127.0.0.1:{port}/")), origin]).unwrap();
+
+        // The whole point: this box holds NOTHING for `relay`, so a drain
+        // would never dial it and the envelope could never arrive.
+        assert!(aoide_storage::outbox::list_entries("relay").unwrap().is_empty(), "nothing spooled toward the hub");
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0, "and nothing has dialed it yet");
+
+        let out = handle_mail_poll(&mail_inv(&["mail", "poll"], &[]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["filed"], 1, "{:?}", out.data);
+        // The sweep also asks `me` (this fixture's own stand-in for another
+        // box, registered verified + `message`): its url is dead, so it is
+        // reported `unreachable` — and the letter from `relay` still landed,
+        // which is the sweep's own promise that one node's failure never
+        // stops the next.
+        assert_eq!(out.message, "polled 2 node(s): 1 envelope(s) filed, 1 unreachable", "{}", out.message);
+        let rows = out.data.as_ref().unwrap()["nodes"].as_array().unwrap().clone();
+        assert_eq!(rows.iter().find(|r| r["node"] == "relay").unwrap()["status"], "polled");
+        assert_eq!(rows.iter().find(|r| r["node"] == me.as_str()).unwrap()["status"], "unreachable");
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1, "the hub was asked exactly once");
+
+        let base = aoide_storage::mail::read_base().unwrap();
+        assert_eq!(base.len(), 1, "the hand-over is filed: {base:?}");
+        assert_eq!(base[0].envelope.msgid, letter_msgid);
+        assert_eq!(base[0].via, "relay", "via is the node that was polled");
+
+        let acks = aoide_storage::outbox::list_entries(&me).unwrap();
+        assert_eq!(acks.len(), 1, "and its ack is spooled back toward the origin");
+        assert_eq!(acks[0].envelope.header.kind, aoide_storage::mail::ENTRY_TYPE_RECEIPT);
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A poll of a node this box is not paired with is refused BY NAME,
+    /// before any dial — the same two refusals `mail send`'s node branch
+    /// makes. And the no-argument sweep says plainly when it has nobody to
+    /// ask, rather than reporting a silent success.
+    #[test]
+    fn mail_poll_names_a_node_this_box_is_not_paired_with() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-poll-refusals");
+
+        // Registered but never paired, with a live door listening: if the
+        // refusal were not made BEFORE the dial, this door would see a hit.
+        let (listener, port, hits) = spawn_fixed_answer_door(r#"{"jsonrpc":"2.0","id":1,"result":{"envelopes":[]}}"#.to_string());
+        let mut half_paired = verified_node("half-paired", &format!("http://127.0.0.1:{port}/"));
+        half_paired.verified = false;
+        aoide_storage::node_store::save_nodes(&[half_paired]).unwrap();
+
+        let unknown = handle_mail_poll(&mail_inv(&["mail", "poll"], &["stranger"]));
+        assert_eq!(unknown.status, aoide_protocol::output::Status::Error);
+        assert_eq!(unknown.data.unwrap()["reason"], "unknown-node");
+        assert!(unknown.message.contains("stranger"), "{}", unknown.message);
+
+        let unpaired = handle_mail_poll(&mail_inv(&["mail", "poll"], &["half-paired"]));
+        assert_eq!(unpaired.status, aoide_protocol::output::Status::Error);
+        assert_eq!(unpaired.data.unwrap()["reason"], "unpaired-node");
+        assert!(unpaired.message.contains("half-paired") && unpaired.message.contains("pair"), "{}", unpaired.message);
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0, "a refused poll never dials");
+
+        // The sweep form with nobody to ask is an honest no-op, not a silent
+        // "polled 0 nodes".
+        let sweep = handle_mail_poll(&mail_inv(&["mail", "poll"], &[]));
+        assert_eq!(sweep.status, aoide_protocol::output::Status::Ok);
+        assert_eq!(sweep.data.unwrap()["filed"], 0);
+        assert!(sweep.message.contains("nothing to poll"), "{}", sweep.message);
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0, "an unpaired node is not in the sweep either");
+
+        drop(listener);
         let _ = std::fs::remove_dir_all(&root);
     }
 

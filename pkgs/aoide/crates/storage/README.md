@@ -677,7 +677,16 @@ by decision — no embedded database yet
   because the drain owns it). **It writes nothing at all** — no `tries`,
   no bookmark, no new file: that is what makes a re-poll before the ack
   hand the same envelopes over again, and why retirement stays exactly the
-  two paths it always had (a valid ack, `mail outbox rm`).
+  two paths it always had (a valid ack, `mail outbox rm`). The offer is
+  bounded at `POLL_BATCH_CAP` (50 — the drain's own batch size,
+  re-derived rather than imported, since `storage` sits below `client` in
+  the DAG), oldest first, and the cap applies AFTER the filter for the
+  drain's own reason. **Why bounding is safe here and only here:** a
+  poller acks what it files, those entries retire, and the next poll
+  answers with the next batch — so a big spool drains in bounded steps.
+  Leaving it unbounded would hand one JSON array of whole envelopes to a
+  client that refuses any response over 20 MiB (`MAX_RESPONSE_BYTES`): a
+  stall no retry could clear, since nothing at the hub would change.
 - `identity` — this instance's lazily-minted ed25519 keypair (pairing
   workstream P-P1, `docs/architecture/PAIRING.md`, CONTRACTS.md §4's
   `state/identity/` subsection): `state/identity/ed25519.key` (the raw

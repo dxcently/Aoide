@@ -759,7 +759,14 @@
   writing nothing (the same set is offered again) plus the receiver's
   `msgid` dedup; a bookmark would be a second, drifting source of truth,
   and any `tries` stamp on a poll would silently change which entries the
-  NEXT poll offers (the predicate reads exactly that field).
+  NEXT poll offers (the predicate reads exactly that field). The offer is
+  CAPPED at `POLL_BATCH_CAP` (50) — the drain's own batch size, oldest
+  first, capped after the filter, and it must stay capped: safe because the
+  poller acks what it files and those entries retire, so a large spool
+  advances a batch at a time rather than never; necessary because one
+  unbounded answer is a single JSON array of whole envelopes and walks
+  straight into the client's `MAX_RESPONSE_BYTES` refusal, which no retry
+  can clear.
 - **`write_ack_if_absent` gates on PENDING state, never a permanent
   ledger (mail register §26 outbox fix).** A duplicate letter redelivery
   mints a fresh ack via `mail::mint_ack` on every call — the gate lives

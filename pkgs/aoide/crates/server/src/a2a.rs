@@ -12369,7 +12369,7 @@ mod tests {
         let root = mail_deposit_root("dup");
         act_as(&root, "here");
 
-        // `spool_and_drain_ack`'s best-effort drain must never hang or
+        // `settle_deposit`'s best-effort drain must never hang or
         // block this test — a dead loopback port refuses instantly, unlike
         // the file's own `"http://node/"` placeholder (unresolvable
         // hostname, fine for the pure-predicate tests above that never
@@ -12433,7 +12433,7 @@ mod tests {
         // The outbox investigation's own root cause: a sender that never
         // sees its ack redelivers the SAME letter, `mail::deposit`
         // correctly classifies each redelivery as `Duplicate{filed_letter:
-        // true}`, and `spool_and_drain_ack` used to mint a BRAND-NEW ack
+        // true}`, and the old `spool_and_drain_ack` used to mint a BRAND-NEW ack
         // envelope — new msgid, new file — on every single one, with the
         // ack still sitting undelivered in the spool the whole time (never
         // removed, so this never depends on `mail_deposit`'s own

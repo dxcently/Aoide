@@ -6729,11 +6729,13 @@ A successful poll answers
 ```
 
 — every entry this box spooled toward `node` that `node` itself may take,
-oldest first: all `hold`-flavored ones, and `now` ones whose own attempts
+oldest first, **at most `aoide_storage::outbox::POLL_BATCH_CAP` (50) of
+them**: all `hold`-flavored ones, and `now` ones whose own attempts
 have been failing (`tries > 0` with a last outcome that did not reach the
 peer; parked/`refused` entries included, never-attempted ones excluded —
 the drain owns those, and offering one here would double-drive it from two
-callers). Nothing else rides the answer: no flavor, no tries, no route.
+callers). Nothing else rides the answer: no flavor, no tries, no route, and
+no marker that a batch was ever handed over.
 
 **A poll writes nothing at all.** No `tries` stamp, no `last_polled_at`,
 no "already handed over" bookmark — which is exactly why a re-poll before
@@ -6758,12 +6760,37 @@ carries the name beside `aoide/mailDeposit`'s so a poll never logs as bare
 answering one node with hundreds of letters is visible at the node that
 spooled them.
 
-`aoide/mailPoll` is driven from `aoide_client::mail_wire::poll_node`, called
-by `drain_node` at the end of any pass that actually reached the node
-(`docs/architecture/MAIL.md` §Outbox, "poll-on-contact"). There is no
-`aoide mail poll` command: the drain-on-contact is the whole of P-M3, and a
-standing poll trigger for a node with nothing to deposit is the HTTPS/`poll`
-address work's (HTTPS-MESH-API.md H1).
+`aoide/mailPoll` is driven from `aoide_client::mail_wire::poll_node`. It has
+two triggers, and they are the same call:
+
+- **`aoide mail poll [<node>]`** — the explicit ask. With a `<node>` it dials
+  that node alone; a name this box is not paired with is refused BEFORE any
+  dial (`unknown-node` for a name the registry has never seen,
+  `unpaired-node` for one registered but never verified — the same two
+  refusals `mail send`'s node branch makes). With no argument it asks every
+  node `mail_wire::pollable_nodes` returns: registered, `verified`, and
+  carrying `message` in THIS box's own `allows` for it — the same gate a
+  letter has to clear to be spooled there, so "a node this box sends to" and
+  "a node this box asks" stay one set. Per node the answer reports
+  `polled`/`filed` or `unreachable`/`reason`; one node's failure never stops
+  the sweep, and the command's own status reports that the ASK was made
+  (write-is-the-report), never the far end's outcome. This is the receive
+  trigger a node with nothing to send needs: an empty outbox never dials, so
+  poll-on-contact alone can never reach it, and an OS timer driving this
+  command is H1's own scope.
+- **poll-on-contact** — the end of any drain pass that actually reached a
+  node (see MAIL.md §Outbox). The drain's dial policy is unchanged by the
+  command above: a pass with nothing attemptable still dials nothing.
+
+The offer is bounded at `aoide_storage::outbox::POLL_BATCH_CAP` (50), the
+drain's own batch size, applied after the offer filter and handed over
+oldest-first. Bounding is safe here *because* retirement is by ack —
+the poller acks what it files, those entries retire, and the next poll
+answers with the next batch — and it is necessary because the answer is one
+JSON array of whole envelopes: a hub holding more than the client's
+`MAX_RESPONSE_BYTES` (20 MiB) of held mail for one node would otherwise
+answer with a body the poller refuses outright, a head-of-line stall no
+retry could clear.
 
 ---
 

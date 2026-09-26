@@ -410,9 +410,33 @@ pub fn list_entries(node: &str) -> Result<Vec<OutboxEntry>, String> {
 /// a policy refusal — both are failures the peer asking for its own mail can
 /// end. An entry never attempted at all is NOT offered: the drain owns it,
 /// and offering it here would double-drive one entry from two callers.
+///
+/// **Bounded at [`POLL_BATCH_CAP`] like the drain's own batch** — the same
+/// size and the same position (after the filter, so a backlog of held
+/// entries cannot be spent twice), for a different reason: a poll's answer
+/// is ONE JSON array of whole envelopes, and a hub holding more than
+/// `aoide_client`'s `MAX_RESPONSE_BYTES` (20 MiB) of held mail for one node
+/// would answer with a body the poller refuses outright — a permanent
+/// head-of-line stall that no retry could clear, since nothing at the hub
+/// changes. Capping is SAFE here precisely because retirement is by ack: the
+/// poller acks what it files, those entries retire, and the next poll gets
+/// the next batch, so a large spool drains in bounded steps instead of never.
 pub fn poll_entries(node: &str) -> Result<Vec<Envelope>, String> {
-    Ok(list_entries(node)?.into_iter().filter(pollable).map(|entry| entry.envelope).collect())
+    Ok(list_entries(node)?
+        .into_iter()
+        .filter(pollable)
+        .take(POLL_BATCH_CAP)
+        .map(|entry| entry.envelope)
+        .collect())
 }
+
+/// The most envelopes one poll answers with — the deposit direction's own
+/// batch size (`aoide_client::mail_wire::DRAIN_BATCH_CAP`, 50), re-derived
+/// here rather than imported for the reason [`DRAIN_BACKOFF_FLOOR_SECS`]'s
+/// own doc gives: `storage` sits below `client` in the crate DAG. See
+/// [`poll_entries`] for why a poll can afford to bound itself and why
+/// bounding it is what keeps a big spool draining instead of stalling.
+pub const POLL_BATCH_CAP: usize = 50;
 
 /// Is one spooled entry offered to the node's own poll? See [`poll_entries`]
 /// for the rule; held out-of-band so a test can pin each arm without a
@@ -1264,6 +1288,47 @@ mod tests {
         assert_eq!(after.iter().find(|e| e.envelope.msgid == "msg-transport").unwrap().tries, 3, "a poll records no attempt");
 
         assert!(poll_entries("nobody").unwrap().is_empty(), "a node with no spool at all is an empty poll, never an error");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// M1: the offer is BOUNDED at [`POLL_BATCH_CAP`], and that is safe
+    /// because retirement is by ack — the poller acks what it files, those
+    /// entries leave the spool, and the next poll hands over the next batch.
+    /// An unbounded answer would be one JSON array of whole envelopes, and a
+    /// hub holding more than the client's 20 MiB response cap for one node
+    /// would answer with a body the poller refuses outright: a stall no retry
+    /// could clear, since nothing at the hub ever changes.
+    #[test]
+    fn poll_entries_is_bounded_and_the_next_poll_advances() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-poll-batch-cap");
+
+        let total = POLL_BATCH_CAP + 10;
+        let mut expected: Vec<String> = Vec::new();
+        for i in 0..total {
+            let mut entry = OutboxEntry::held(envelope("here", "there", &format!("held-{i:03}")));
+            entry.envelope.header.minted_at = format!("2026-09-07T00:00:{:02}Z", i % 60);
+            expected.push(entry.envelope.msgid.clone());
+            write_entry("there", &entry).unwrap();
+        }
+
+        let first = poll_entries("there").unwrap();
+        assert_eq!(first.len(), POLL_BATCH_CAP, "one poll hands over at most the batch cap");
+        let handed: Vec<String> = first.into_iter().map(|e| e.msgid).collect();
+        assert_eq!(handed[0], expected[0], "oldest first: the batch is the head of the spool, never a random slice");
+
+        // What the poller's acks do: the handed-over entries retire. The next
+        // poll must then advance rather than handing the same batch forever.
+        for msgid in &handed {
+            assert!(remove_entry("there", msgid).unwrap());
+        }
+        let second = poll_entries("there").unwrap();
+        assert_eq!(second.len(), total - POLL_BATCH_CAP, "the next poll gets what is left");
+        assert!(
+            second.iter().all(|e| !handed.contains(&e.msgid)),
+            "and never re-offers what already retired"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

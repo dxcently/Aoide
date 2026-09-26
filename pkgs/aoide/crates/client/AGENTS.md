@@ -690,12 +690,23 @@
   `held` in `delivery_projection` without a doc amendment).
   `post_signed`/`SignedCall` is the one signed-POST implementation —
   `attempt_deposit` and `poll_node` read it, neither re-implements bearer
-  resolve/sign/POST/parse. `settle_deposit` is the ONE place an outcome
+  resolve/sign/POST/parse. **`poll_node` has exactly two callers and must
+  not gain a third shape: `drain_node`'s poll-on-contact, and the
+  `mail poll` handler (plus `pollable_nodes` for its no-argument sweep).**
+  The command exists because an empty outbox never dials — poll-on-contact
+  is a free reply for a node that HAS something to say, and useless to a
+  node that does not; a box that can only receive must ask. Nothing about
+  `drain_node`'s dial policy changes for it (a pass with nothing
+  attemptable still dials nothing), and the sweep must never let one
+  node's `Err` stop the next. `settle_deposit` is the ONE place an outcome
   turns into spool side effects (ack minted and spooled on a filed letter
   or a letter duplicate, `retire_by_ack` on a filed receipt); the door
   reaches it through `aoide_conduct::mail_bridge::settle_deposit`, so
   `aoide-server` never keeps a second copy — do not put the ack mint back
-  in `a2a.rs`. A poll may ask this same crate to drain a node whose `.bsy`
+  in `a2a.rs`. A poll's answer is bounded at
+  `aoide_storage::outbox::POLL_BATCH_CAP` (50) and must stay bounded: the
+  poller's own `MAX_RESPONSE_BYTES` is what an unbounded batch walks into.
+  A poll may ask this same crate to drain a node whose `.bsy`
   the CURRENT pass already holds (a relay handing back a letter it
   originated): `.bsy` is `LOCK_NB`, so that inner drain is skipped and the
   ack waits for the next tick — correct, not a leak; never make `.bsy`

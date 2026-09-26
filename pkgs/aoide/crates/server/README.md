@@ -521,7 +521,11 @@ the inbound half of the two-door contract (the outbound half is
   envelopes over again by construction. It self-audits UNCONDITIONALLY
   under its own `a2a.aoide/mailPoll` label, carrying the caller and the
   handed-over COUNT — the pull direction's flood signal, visible at the
-  node that spooled the letters. `down` is not part of this door's
+  node that spooled the letters. The answer is BOUNDED at
+  `aoide_storage::outbox::POLL_BATCH_CAP` (50), oldest first: the poller
+  acks what it files, so the next poll advances, and an unbounded batch
+  would be a body the client's own `MAX_RESPONSE_BYTES` refuses. `down` is
+  not part of this door's
   admission yet: it is `[mesh.<name>.status]`, a declaration the door does
   not read until P-M4 (MAIL.md §Status), so P-M3's reachable refusal is the
   `message` half (`aoide node allow <node> message off`, the per-request

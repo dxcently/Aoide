@@ -821,7 +821,14 @@
   `tries` stamp, no bookmark, no "already handed over" flag may be added
   here: the re-poll-before-ack idempotence comes from handing the SAME set
   over again, and the entry retires only through a valid ack or `mail
-  outbox rm`, exactly as a pushed deposit's would. The audit-name whitelist
+  outbox rm`, exactly as a pushed deposit's would. The answer is bounded by
+  `aoide_storage::outbox::POLL_BATCH_CAP`; that bound is what keeps a big
+  spool draining (the poller's acks retire the batch it took) and what
+  keeps the answer under the client's `MAX_RESPONSE_BYTES`. **The door has
+  two triggers, and neither may grow a second receive path:** the explicit
+  `aoide mail poll [<node>]` (which dials, then calls
+  `aoide_client::mail_wire::poll_node` — the same function the drain calls)
+  and a drain pass that actually reached this node. The audit-name whitelist
   in the connection handler gains this name beside `aoide/mailDeposit`'s,
   so no poll ever logs as bare `a2a.rpc`
   (`a2a::tests::every_poll_self_audits_under_its_own_label_with_the_count`).
