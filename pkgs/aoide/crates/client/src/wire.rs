@@ -43,12 +43,40 @@ pub fn resolve_card_url(url: &str) -> String {
 /// signed body, so the claim is bound to the key that signed it; the door
 /// ignores it on every rung but the signature one. `None` leaves `metadata`
 /// absent entirely — byte-identical to before this parameter existed.
+///
+/// `task` (P-RSA S10) is the slug the far node should run the child under
+/// ([`aoide_protocol::wire::TASK_KEY`]) — a SPAWN-only directive: it is what
+/// makes the remote child a managed run there (task mailbox, exit report,
+/// `session watch`'s task view), and its absence is the plain headless
+/// session. Both keys ride ONE `message.metadata` object when both are given
+/// (the door reads each at its own spot), and `None` for both still leaves
+/// `metadata` absent entirely.
 pub fn build_message_send_body(
     text: &str,
     message_id: &str,
     context_id: Option<&str>,
     from_session: Option<&str>,
+    task: Option<&str>,
 ) -> Value {
+    // One object, built by insertion: a second `json!` for the task would be a
+    // second metadata spelling, and last-write-wins would silently drop one
+    // key the day both are set.
+    let metadata = {
+        let mut map = serde_json::Map::new();
+        if let Some(id) = from_session {
+            map.insert(
+                aoide_protocol::wire::FROM_SESSION_KEY.to_string(),
+                Value::String(id.to_string()),
+            );
+        }
+        if let Some(slug) = task {
+            map.insert(
+                aoide_protocol::wire::TASK_KEY.to_string(),
+                Value::String(slug.to_string()),
+            );
+        }
+        (!map.is_empty()).then_some(Value::Object(map))
+    };
     let params = MessageSendParams {
         message: Message {
             role: "user".to_string(),
@@ -59,8 +87,7 @@ pub fn build_message_send_body(
             }],
             message_id: Some(message_id.to_string()),
             context_id: context_id.map(str::to_string),
-            metadata: from_session
-                .map(|id| json!({ aoide_protocol::wire::FROM_SESSION_KEY: id })),
+            metadata,
         },
     };
     let req = JsonRpcRequest {
@@ -104,7 +131,7 @@ mod tests {
 
     #[test]
     fn build_message_send_body_matches_the_jsonrpc_shape() {
-        let body = build_message_send_body("hello there", "mid-123", None, None);
+        let body = build_message_send_body("hello there", "mid-123", None, None, None);
         assert_eq!(body["jsonrpc"], "2.0");
         assert_eq!(body["id"], 1);
         assert_eq!(body["method"], "message/send");
@@ -122,8 +149,40 @@ mod tests {
     fn build_message_send_body_threads_a_context_id_when_given() {
         // P-C3: a node-targeted send carries the resolved remote sessionId
         // as `contextId` so the receiving node's Inject arm can find it.
-        let body = build_message_send_body("hello there", "mid-123", Some("sess-9"), None);
+        let body = build_message_send_body("hello there", "mid-123", Some("sess-9"), None, None);
         assert_eq!(body["params"]["message"]["contextId"], "sess-9");
+    }
+
+    #[test]
+    fn build_message_send_body_writes_the_task_slug_where_the_door_reads_it() {
+        // P-RSA S10: `aoide node spawn --task <slug>` makes the remote child a
+        // managed run. The key rides the same `message.metadata` object as the
+        // caller claim, and BOTH survive when both are given — one object, two
+        // insertions, never a second metadata spelling that drops one.
+        let tasked = build_message_send_body("hi", "mid-task-1", None, None, Some("fix-flaky"));
+        assert_eq!(
+            tasked["params"]["message"]["metadata"][aoide_protocol::wire::TASK_KEY],
+            "fix-flaky"
+        );
+        assert_eq!(
+            tasked["params"]["message"]["metadata"].as_object().unwrap().len(),
+            1,
+            "the slug is the only key when there is no claim"
+        );
+
+        let both =
+            build_message_send_body("hi", "mid-task-2", None, Some("conduct-1-2"), Some("fix-flaky"));
+        let metadata = both["params"]["message"]["metadata"].as_object().unwrap();
+        assert_eq!(metadata.len(), 2, "{metadata:?}");
+        assert_eq!(metadata[aoide_protocol::wire::FROM_SESSION_KEY], "conduct-1-2");
+        assert_eq!(metadata[aoide_protocol::wire::TASK_KEY], "fix-flaky");
+
+        assert!(
+            build_message_send_body("hi", "mid-task-3", None, None, None)["params"]["message"]
+                .get("metadata")
+                .is_none(),
+            "naming no task leaves metadata absent, exactly as before the key existed"
+        );
     }
 
     #[test]
@@ -131,7 +190,7 @@ mod tests {
         // P-RSA S2: the caller's own session id rides INSIDE the body, so the
         // receiving door's stamp is bound to the signature that covers it. No
         // claim at all leaves `metadata` absent — not an empty object.
-        let claiming = build_message_send_body("hi", "mid-1", None, Some("conduct-17991-2"));
+        let claiming = build_message_send_body("hi", "mid-1", None, Some("conduct-17991-2"), None);
         assert_eq!(
             claiming["params"]["message"]["metadata"][aoide_protocol::wire::FROM_SESSION_KEY],
             "conduct-17991-2"
@@ -139,9 +198,9 @@ mod tests {
         assert_eq!(
             claiming["params"]["message"]["metadata"].as_object().unwrap().len(),
             1,
-            "the claim is the ONLY metadata key this builder writes"
+            "the claim is the only metadata key this builder writes when no task is named"
         );
-        let silent = build_message_send_body("hi", "mid-1", None, None);
+        let silent = build_message_send_body("hi", "mid-1", None, None, None);
         assert!(
             silent["params"]["message"].get("metadata").is_none(),
             "no claim stays absent, not null-present"
@@ -157,7 +216,7 @@ mod tests {
         // own verifier uses. `mint_ephemeral` — no disk, no live identity.
         let kp = aoide_storage::identity::mint_ephemeral().unwrap();
         let pubkey_hex = kp.info().pubkey_hex;
-        let signed = build_message_send_body("hi", "mid-7", None, Some("conduct-parent-1"));
+        let signed = build_message_send_body("hi", "mid-7", None, Some("conduct-parent-1"), None);
         let signed_bytes = serde_json::to_vec(&signed).unwrap();
         let timestamp = aoide_storage::time::iso_utc_from_epoch(1_800_000_000);
         let canonical = aoide_storage::wire_auth::canonical_string(

@@ -930,7 +930,12 @@ never the inbound/serve half (that's `aoide-server`).
   `aoide_storage::remote_children` (`remote_child_row`, keyed on the node's
   pubkey and the child's session id — and it holds the ack's own id to that
   same predicate, so a paired-but-hostile node cannot plant a ledger row on a
-  shape no session can occupy). **`aoide-conduct`'s manifest
+  shape no session can occupy). `--task <slug>` (P-RSA S10) rides the same
+  body as `metadata["aoide/task"]` and is held to the same
+  `valid_node_name` shape locally, so a bad slug costs no round trip either;
+  with it the far node runs the child as a MANAGED task run (task mailbox,
+  exit report, `session watch`'s task view, and that run's name in its
+  roster). **`aoide-conduct`'s manifest
   remote-summon path** (U4, command-defrag lane U — `graph::resurrect::
   summon_remote`, the `conduct` → `client` edge documented in `conduct`'s
   own `Cargo.toml`) calls `spawn_on_node` directly, no confirm: a manifest

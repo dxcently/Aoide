@@ -75,7 +75,10 @@
   (spawn-shaped) body via `sign_headers_for_node`. `handle_node_spawn`
   (P-P5b, `node spawn`) gates LOCALLY on exactly one question before
   calling it — is the named node a registered, `verified` entry at all —
-  and NOTHING else; `summon_remote` gates on the SAME question (plus
+  and NOTHING else beyond the two SHAPE checks that cost no round trip: an
+  unruly `--parent` claim (`valid_claimed_session_id`) and, since P-RSA S10, an
+  unruly `--task` slug (`node_store::valid_node_name`, the predicate the door
+  applies inbound as well). `summon_remote` gates on the SAME question (plus
   "is there anything to summon with" — its own concern, no wire involved)
   before calling it too. Every refusal shape beyond "unknown/unpaired node"
   (`allows` lacking `spawn`, an unsigned-but-paired caller, clock skew, an

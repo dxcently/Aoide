@@ -1169,7 +1169,7 @@ pub fn send_message_to_node(
     from_session: Option<&str>,
 ) -> Result<Value, String> {
     let message_id = gen_message_id();
-    let body = crate::wire::build_message_send_body(text, &message_id, Some(context_id), from_session);
+    let body = crate::wire::build_message_send_body(text, &message_id, Some(context_id), from_session, None);
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let bearer = resolve_node_bearer(node)?;
     let extra_headers = sign_headers_for_node(node, &body_str)?;
@@ -1381,7 +1381,7 @@ pub fn spawn_on_node(
     node: &aoide_storage::node_store::Node,
     text: &str,
 ) -> Result<Value, SpawnNodeError> {
-    spawn_on_node_via(node, text, None, None)
+    spawn_on_node_via(node, text, None, None, None)
 }
 
 /// [`spawn_on_node`]'s own body, PLUS an optional `--via` OVERRIDE
@@ -1400,14 +1400,21 @@ pub fn spawn_on_node(
 /// else `--parent`; never `AOIDE_SESSION_ID`); `spawn_on_node` above passes
 /// `None`, so a manifest remote-summon claims no parent — a `--task`-less,
 /// unattended summon has no calling session to name.
+///
+/// `task` (P-RSA S10) is the slug the FAR node should run the child under,
+/// already validated here (`handle_node_spawn`'s own `--task` check) and
+/// signed into the same body. `None` — every caller but `handle_node_spawn` —
+/// sends no `aoide/task` key at all, so the child is a plain headless
+/// conducted session: byte-identical to the pre-S10 body.
 pub fn spawn_on_node_via(
     node: &aoide_storage::node_store::Node,
     text: &str,
     via_override: Option<&aoide_storage::tunnel::Via>,
     from_session: Option<&str>,
+    task: Option<&str>,
 ) -> Result<Value, SpawnNodeError> {
     let message_id = gen_message_id();
-    let body = crate::wire::build_message_send_body(text, &message_id, None, from_session);
+    let body = crate::wire::build_message_send_body(text, &message_id, None, from_session, task);
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let bearer =
         resolve_node_bearer(node).map_err(|e| SpawnNodeError::new("bearer-resolve-failed", e))?;
@@ -1605,7 +1612,7 @@ fn remote_child_row(
 
 fn handle_node_spawn(inv: &Invocation) -> Outcome {
     let cmd = "node.spawn";
-    const USAGE: &str = "usage: aoide node spawn <name> [--yes] [--via ssh://[user@]host[:port]] [--parent <id>] -- <text…>";
+    const USAGE: &str = "usage: aoide node spawn <name> [--yes] [--via ssh://[user@]host[:port]] [--parent <id>] [--task <slug>] -- <text…>";
     let name = match inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         Some(n) => n.to_string(),
         None => return Outcome::usage(cmd, USAGE),
@@ -1629,6 +1636,30 @@ fn handle_node_spawn(inv: &Invocation) -> Outcome {
         Ok(p) => p,
         Err(e) => return Outcome::usage(cmd, format!("{USAGE} — {e}")),
     };
+    // The managed-run request (P-RSA S10). Held to the SAME predicate the far
+    // door applies — `aoide_storage::node_store::valid_node_name`, the one
+    // task-slug/mailbox-name check in the tree — so a typo is refused HERE,
+    // before anything is signed or sent, with the local wording; the door
+    // refuses it again on its own side (its own `-32602`), which is the
+    // authority. An empty --task is absent, the same read the other two flags
+    // get.
+    let task = inv.flags.get("task").map(|s| s.trim()).filter(|s| !s.is_empty());
+    if let Some(slug) = task {
+        if !aoide_storage::node_store::valid_node_name(slug) {
+            // Echoed as TYPED: this string goes to the operator's own terminal,
+            // and a local command line is not a peer's bytes (the door, which
+            // does print those, cleans its own echo — `spawn_task_slug`). The
+            // client cannot reach the shared sanitizer regardless: `conduct`
+            // depends on THIS crate, so the edge does not exist.
+            return Outcome::usage(
+                cmd,
+                format!(
+                    "{USAGE} — --task `{slug}` is not a legal task slug (^[a-z0-9][a-z0-9-]*$, the \
+                     same name a mailbox takes); it names the remote run's task mailbox there"
+                ),
+            );
+        }
+    }
 
     let nodes = aoide_storage::node_store::load_nodes();
     let node = match nodes.iter().find(|p| p.name == name) {
@@ -1667,7 +1698,7 @@ fn handle_node_spawn(inv: &Invocation) -> Outcome {
         }
     }
 
-    match spawn_on_node_via(&node, &text, via_override.as_ref(), parent.as_deref()) {
+    match spawn_on_node_via(&node, &text, via_override.as_ref(), parent.as_deref(), task) {
         Ok(parsed) => {
             let session_id = parsed
                 .get("result")
@@ -1873,6 +1904,7 @@ pub fn register_nodes(r: &mut Registry) {
             flag!("yes", "bool", "Skip the local y/N confirmation (scripted use) — a LOCAL UX gate only; the remote door's own gate is unaffected."),
             flag!("via", "string", "An ssh://[user@]host[:port] transport marker for THIS call, overriding any via recorded on the node. Absent = the node's own recorded via, if any (today's behavior when neither is set)."),
             flag!("parent", "string", "The LOCAL session id to record as this child's parent, riding the signed body so the far door stamps it as the child's `remoteParent`. The kernel-attested caller wins when the daemon can prove one (this flag is then unused), and `AOIDE_SESSION_ID` is never read for it; a name that is not a live local session is refused rather than adopted as a stale parent. Absent = claim no parent (a top-level remote spawn)."),
+            flag!("task", "string", "The task slug the FAR node runs this child under (^[a-z0-9][a-z0-9-]*$, the same shape a mailbox name takes), riding the signed body as metadata['aoide/task']. It makes the remote child a managed task run on its own node — task mailbox, exit report, `session watch`'s task view — and its slug becomes that run's session name there. Refused locally on a bad shape, and again by the far door, which also refuses a slug a live run already holds. Absent = a plain headless conducted session with no mailbox and no report."),
         ],
         gated: false,
         implemented: true,
@@ -5304,6 +5336,36 @@ mod tests {
     // ── module (a dev-dependency on this crate exists specifically for that
     // ── round trip — see this crate's `Cargo.toml`). ─────────────────────────
 
+    /// P-RSA S10: `--task <slug>` is held to the predicate the far door
+    /// applies, LOCALLY and before anything is signed or sent — so a typo
+    /// costs no round trip and no signature (the same posture `--parent`
+    /// already has). It fires before the node is even looked up, which is why
+    /// this test needs no registered node.
+    #[test]
+    fn node_spawn_refuses_an_unruly_task_slug_before_anything_is_sent() {
+        with_node_state("spawn-task-slug", || {
+            let mut inv = spawn_inv(&["yomi-strix", "hello"], true);
+            inv.flags.insert("task".to_string(), "Build Reports".to_string());
+            let out = handle_node_spawn(&inv);
+            assert_eq!(out.status, aoide_protocol::output::Status::Usage, "{out:?}");
+            assert!(
+                out.message.contains("Build Reports") && out.message.contains("--task"),
+                "quotes the value and the flag: {}",
+                out.message
+            );
+            assert!(
+                out.message.contains("^[a-z0-9][a-z0-9-]*$"),
+                "states the predicate so the operator can fix it: {}",
+                out.message
+            );
+            assert!(
+                out.message.contains("node spawn <name>"),
+                "and repeats the usage line: {}",
+                out.message
+            );
+        });
+    }
+
     fn spawn_inv(args: &[&str], yes: bool) -> Invocation {
         let mut flags = std::collections::BTreeMap::new();
         if yes {
@@ -5369,7 +5431,7 @@ mod tests {
         with_node_state("spawn-signs", || {
             let mut node = fixture_node(None);
             node.verified = true;
-            let body = crate::wire::build_message_send_body("do the thing", &gen_message_id(), None, None);
+            let body = crate::wire::build_message_send_body("do the thing", &gen_message_id(), None, None, None);
             assert!(body["params"]["message"].get("contextId").is_none(), "spawn-shaped body carries no contextId");
             let body_str = serde_json::to_string(&body).unwrap();
             let headers = sign_headers_for_node(&node, &body_str).unwrap();
@@ -6296,7 +6358,7 @@ mod tests {
         // `-w "\n%{http_code}"` status line.
         let script = format!("cat <<'JSONBODY'\n{body}\nJSONBODY\nprintf '200'\n");
         let node = fixture_node(None);
-        let result = with_fake_curl("spawn-refused", &script, || spawn_on_node_via(&node, "hello", None, None));
+        let result = with_fake_curl("spawn-refused", &script, || spawn_on_node_via(&node, "hello", None, None, None));
         let err = result.expect_err("a JSON-RPC error ack must surface as an Err, never as Ok");
         assert_eq!(err.reason, "node-refused");
         assert!(

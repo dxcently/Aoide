@@ -5228,7 +5228,7 @@ mod tests {
 
         let kp = setup_signed_node_with_allows("yomi-strix", &["read", "spawn"]);
         let body =
-            aoide_client::wire::build_message_send_body("status check please", "mid-rp-1", None, Some("conduct-1-2"));
+            aoide_client::wire::build_message_send_body("status check please", "mid-rp-1", None, Some("conduct-1-2"), None);
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
         // The header names a node this box has never paired with; the
@@ -5275,12 +5275,33 @@ mod tests {
         }
     }
 
+    /// P-RSA S10: `aoide node spawn --task <slug>` and the server's own
+    /// `metadata["aoide/task"]` reader are ONE wire key, proven end to end
+    /// through the real body builder — the same discipline
+    /// `the_clients_from_claim_round_trips_through_the_inbound_parser` holds
+    /// for `aoide/from`. `None` stays byte-identical to the pre-S10 body.
+    #[test]
+    fn the_clients_task_slug_round_trips_through_the_inbound_parser() {
+        let body = aoide_client::wire::build_message_send_body(
+            "do the thing",
+            "mid-task-1",
+            None,
+            None,
+            Some("fix-flaky"),
+        );
+        let (_, _, _, _, task) = parse_message_send_params(&body["params"]);
+        assert_eq!(task.as_deref(), Some("fix-flaky"), "{body}");
+
+        let plain = aoide_client::wire::build_message_send_body("hi", "mid-task-2", None, None, None);
+        assert_eq!(parse_message_send_params(&plain["params"]).4, None);
+    }
+
     /// The outbound builder (`aoide-client`) round-tripped through the
     /// inbound parser here — a dev-dependency-only edge (see `Cargo.toml`):
     /// production code never lets `aoide-server` reach `aoide-client`.
     #[test]
     fn build_message_send_body_round_trips_through_the_inbound_parser() {
-        let body = aoide_client::wire::build_message_send_body("hello there", "mid-123", None, None);
+        let body = aoide_client::wire::build_message_send_body("hello there", "mid-123", None, None, None);
         let (prompt, ctx, spawn, claimed_from, task) = parse_message_send_params(&body["params"]);
         assert_eq!(prompt, "hello there");
         assert_eq!(ctx, None);
@@ -5296,14 +5317,14 @@ mod tests {
     /// to end rather than assumed.
     #[test]
     fn the_clients_from_claim_round_trips_through_the_inbound_parser() {
-        let body = aoide_client::wire::build_message_send_body("hello there", "mid-789", None, Some("conduct-1-2"));
+        let body = aoide_client::wire::build_message_send_body("hello there", "mid-789", None, Some("conduct-1-2"), None);
         let (_, _, _, claimed_from, _) = parse_message_send_params(&body["params"]);
         assert_eq!(claimed_from.as_deref(), Some("conduct-1-2"));
     }
 
     /// P-P5b (`node spawn`): the exact body `handle_node_spawn`
     /// (`aoide-client::commands`) posts is
-    /// `aoide_client::wire::build_message_send_body(text, id, None, None)` — this
+    /// `aoide_client::wire::build_message_send_body(text, id, None, None, None)` — this
     /// proves that shape routes all the way to `SendAction::Spawn`, carrying
     /// the client's prompt text verbatim as the argument `do_spawn` would
     /// type as the newly spawned session's first turn, against the SERVER's
@@ -5311,7 +5332,7 @@ mod tests {
     /// shape.
     #[test]
     fn build_message_send_body_routes_to_the_spawn_arm_exactly_as_do_spawn_expects() {
-        let body = aoide_client::wire::build_message_send_body("status check please", "mid-456", None, None);
+        let body = aoide_client::wire::build_message_send_body("status check please", "mid-456", None, None, None);
         let (prompt, ctx, spawn_asked, _, _) = parse_message_send_params(&body["params"]);
         assert_eq!(prompt, "status check please");
         assert_eq!(ctx, None, "no contextId — the Spawn signal `decide_send_action` reads");
@@ -7348,7 +7369,7 @@ mod tests {
         std::env::set_var("AOIDE_STATE_DIR", &root);
 
         let kp = setup_signed_node_with_allows("yomi-strix", &["read", "spawn"]);
-        let body = aoide_client::wire::build_message_send_body("status check please", "mid-spawn-1", None, None);
+        let body = aoide_client::wire::build_message_send_body("status check please", "mid-spawn-1", None, None, None);
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("admit"));
@@ -7401,7 +7422,7 @@ mod tests {
 
         // Paired, verified, spawn REVOKED — `allows` carries only "read".
         let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
-        let body = aoide_client::wire::build_message_send_body("status check please", "mid-spawn-2", None, None);
+        let body = aoide_client::wire::build_message_send_body("status check please", "mid-spawn-2", None, None, None);
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("revoked"));
@@ -7461,7 +7482,7 @@ mod tests {
         // wrong, so the -32602 below is the claim's own doing.
         let kp = setup_signed_node_with_allows("yomi-strix", &["read", "spawn"]);
         let body =
-            aoide_client::wire::build_message_send_body("status check please", "mid-bad-1", None, Some("not/a/session"));
+            aoide_client::wire::build_message_send_body("status check please", "mid-bad-1", None, Some("not/a/session"), None);
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("bad-from"));
@@ -7570,6 +7591,7 @@ mod tests {
             "mid-inject-bad",
             Some(id),
             Some("not/a/session"),
+            None,
         );
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
@@ -7657,6 +7679,7 @@ mod tests {
             "mid-twin",
             None,
             Some("conduct-1-2"),
+            None,
         );
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
