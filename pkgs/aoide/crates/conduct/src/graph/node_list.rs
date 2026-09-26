@@ -400,8 +400,8 @@ pub(super) fn node_list_with(inv: &Invocation, pull: PullFn, sweep: SweepFn) -> 
     let mesh = inv.flag_present("mesh");
     let sweep_handle = if mesh { None } else { Some(std::thread::spawn(sweep)) };
 
-    let local = build_local_node(&s.sessions, &h.hooks, &p.projects, &host);
     let nodes = aoide_storage::node_store::load_nodes();
+    let local = build_local_node(&s.sessions, &h.hooks, &p.projects, &nodes, &host);
     let probed = probe_nodes(&nodes, pull);
     let mesh_nodes: Vec<(Node, NodeView)> = probed
         .into_iter()
@@ -525,6 +525,8 @@ mod tests {
             kind: None,
             parent: None,
             native_role: None,
+            remote_parent: None,
+            remote_children: Vec::new(),
         }
     }
 
@@ -535,6 +537,7 @@ mod tests {
             presence: "online",
             fetched_at: None,
             error: None,
+            stale: false,
             sessions,
         }
     }

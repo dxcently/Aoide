@@ -323,7 +323,7 @@ fn restore_delivery(door: aoide_protocol::Door, new_id: &str, restore: &RestoreS
 /// phase): a same-uid process can append a line claiming `origin:"node:X"`
 /// and then run this ungated LOCAL `aoide resurrect`, which has no door and
 /// no seal behind it. `node:*` is door-authenticated identity — only
-/// `a2a::do_spawn`'s `stamp_spawn_origin` may mint it (`stamp_origin`'s own
+/// `a2a::do_spawn`'s `stamp_spawn_provenance` may mint it (`stamp_origin`'s own
 /// doc names the two legitimate STAMP callers) — so a local resurrect
 /// re-minting that authority off an unsealed file would be exactly the
 /// forgery this lane closes, not a fix for it. Pure and directly
@@ -410,7 +410,7 @@ fn resurrect_one(
     // — a same-uid process can append a line claiming `origin:"node:X"` and
     // then run this ungated LOCAL `aoide resurrect`, which has no door and
     // no seal behind it. `node:*` is door-authenticated identity (only
-    // `a2a::do_spawn`'s `stamp_spawn_origin` may mint it, per `stamp_origin`'s
+    // `a2a::do_spawn`'s `stamp_spawn_provenance` may mint it, per `stamp_origin`'s
     // own doc); a local resurrect re-minting that authority off an unsealed
     // file would be exactly the forgery this lane closes, not a fix for it.
     // Change-only/no-op-safe exactly like `stamp_resumed_from` above for the

@@ -255,6 +255,7 @@ carries whatever the journal carries; that fix is harnox's.
   [eidolon <petname>] wrapping up · <n> calls left      (or · <s> s left)
   [eidolon <petname>] failing · <k> tool errors in a row · last: <tool label>
   [eidolon <petname>] silent <M> min · last: <tool label or say>
+  [eidolon <petname>] exited               (or · exit <code>, or · <outcome>)
   ```
 
   `<N> calls` counts `tool_use` blocks since the turn's opening
@@ -263,8 +264,11 @@ carries whatever the journal carries; that fix is harnox's.
   last assistant `text` block; a `ToolResult{is_error:true}` among the new
   records rides a priority-1..3 line as ` · <k> tool errors`. Every
   child-authored fragment — quoted or the bare `<tool label>` — is untrusted
-  model output: one line, control characters stripped, clipped to 80
-  characters with `…`; the quoted ones never able to start with `/` or `!`.
+  model output: one line, every unsafe character stripped (control, and the
+  Unicode `Cf` marks — bidi overrides, zero-width joiners — that would
+  otherwise reorder or hide the line; one `is_unsafe` set, shared with the
+  door's own `clean_line`), clipped to 80 characters with `…`; the quoted ones
+  never able to start with `/` or `!`.
 
   **It is the daemon's own line, not a send.** The send door attests the
   sender from the running process's `/proc` ancestry, so inside the daemon
@@ -276,8 +280,11 @@ carries whatever the journal carries; that fix is harnox's.
   entry, no provenance prefix, no title rename, one audit line with gate
   label `autogate-child`. It runs in `reap()`'s post-lock collector block
   after `sync_eidolon_sessions()`, only under `Door::Daemon`, and its result
-  never joins `outcome.changed`. A parent that is a bare shell is skipped —
-  a line typed into a shell runs — as is one whose record is gone, not
+  never joins `outcome.changed`. A parent that is a shell is skipped — a line
+  typed into a shell runs — and the WRAP is what decides it: the record's
+  `agent` label (`""`/`"shell"`/no registered profile) or its P-C5 capture
+  (`wrapped_program_is_a_shell`), so `--agent <harness> -- bash` is refused
+  like any other shell. As is one whose record is gone, not
   conductable, or already `done`.
 
   **At-most-once by a claimed cursor.** `state/stage/pingback.json`
@@ -295,3 +302,84 @@ carries whatever the journal carries; that fix is harnox's.
   (`Vec<DroppedEidolon>`) as an ADDITIVE second half — the boolean means
   what it always did — and that is the `died mid-turn` row's only evidence;
   no second liveness probe exists (`reap` is the only sweep).
+
+  **The decision and the line are two things, and a remote parent gets the
+  decision.** `choose_event` decides WHICH event a child's new records amount
+  to — a closed `PingEvent`, one variant per row of the table above plus
+  `exited` below — and `render_line(tag, &event)` renders the line from it,
+  taking the tag from whoever renders. Every string in an event is already
+  cleaned at the sender (unsafe characters stripped, clipped to 80 with `…`,
+  a payload number left a number), because the renderer may be another node's
+  code. Local lines are the same bytes they always were.
+
+  **A child whose parent is elsewhere spools instead of delivering.**
+  `remoteParent` on the record (the A2A door's stamp, whatever the child's
+  harness) sends each event to `state/stage/pingback-remote.json`
+  (CONTRACTS.md §4) instead of to `deliver`: at most 16 events per child,
+  `seq` monotonic from 1, the oldest dropped past the cap, and a read that
+  lost any event says `gap` with `last` to resync from. The entry is stamped
+  with the child's own `remoteParent.key` — the key the far parent's door
+  gates its read on, and the reason a ring can still be read once the record
+  is gone — and with the tick's `at`, which is the ring's whole retention
+  clock. The far parent pulls them off this node's own door (`tasks/get` with
+  `aoide/linesAfter`, CONTRACTS.md §6) — nothing here pushes, mails or opens
+  a route. The claim is written first and the event lands after, the same
+  at-most-once direction the cursor itself holds. A ring whose child's record
+  has left the roster is kept for a week and then dropped by this same pass
+  (`RING_GRACE_SECS`): a ring is rewritten whole on every spool, so carrying
+  the dead forever would be paid for by every live event.
+
+  **`exited` is the one row that comes from the record, and the one that
+  closes a ring.** A record whose state folds to `done` gives a remote child's
+  parent an `exited` event carrying its `outcome`/`exitCode` — no trace needed,
+  so a non-eidolon harness gets it too — and it is claimed ONCE per child by
+  the cursor's own `exited` latch (a child that keeps no trace has no `seen` to
+  advance past its end). It is last among the trace rows and takes the silence
+  row's place, so the last word before a child's exit is the child's own. Only
+  a remote child ever publishes one: a local parent hears the run's report
+  (Q5's ruling). A child the sync DROPPED is never decided again, so a dropped
+  remote child claims its trace row and this exit on that one pass.
+
+  **The parent pulls, and only the parent's own node delivers.** The other end
+  is `pingback_pull`, one lane over in the same post-lock block: for every row
+  in `state/stage/remote-children.json` (CONTRACTS.md §4) whose parent is
+  still a live, conductable session on THIS node, it asks that child's node
+  `tasks/get` with `aoide/linesAfter` = the row's cursor and renders what comes
+  back HERE. The tunnel key is the PARENT's own session id, so the ssh forward
+  is the one the parent already owns and closes with the session; the daemon
+  holds no forward of its own. The events are a peer's bytes: each is
+  re-validated against the closed event set (a kind this version does not know
+  is dropped, never guessed at), every string re-cleaned (unsafe characters
+  stripped, clipped to 80) and rendered by the SAME `render_line` the local
+  lane uses — under a tag naming the box and the child, `[<node>/<child id>]`,
+  built from the row because the far node supplies no tag at all. Then
+  `deliver()`, as always, with the audit label `autogate-child remote`.
+
+  **The claim is atomic with the read.** The cursor moves through
+  `remote_children::claim_lines_after` — one `with_stage_lock` section that
+  reads the stored value and advances it, returning the cursor this pass may
+  deliver from — and only events past that cursor are delivered, so two
+  overlapping passes (the daemon's own loop and a `session reap` re-entering
+  through a connection thread) cannot each hand over the same line. A claim
+  that cannot be written delivers nothing: a lost line is the safe direction,
+  a duplicated one is not. `last` is trusted only under a `gap`, where it is
+  the resync the ring documents — without one, an honest ring cannot report a
+  `last` beyond the events it sent, and believing a peer's number there would
+  drive the cursor past every `seq` the child can ever push. A `gap` costs the
+  parent exactly one extra line, built here from that same arithmetic (`· <n>
+  events lost before this point`) and never a fabricated event.
+
+  **The pass is bounded and rotated.** `PULL_BUDGET` (six seconds) caps the
+  whole loop — the rows are pulled one after another inside the daemon's tick,
+  and a node that is merely off burns its request's full timeout — and rows
+  the budget cuts off are named (`budget-spent`) so the next pass, which
+  starts one row further along, covers them. Once an `exited` has been drained
+  the row is latched (`drained`), and so is a row whose child the far node no
+  longer holds at all (`-32001`: no record and no ring, the child is gone for
+  good). A refusal or a transport failure is retryable instead: no line, one
+  audit record, and the next tick asks again from the same cursor — one pull
+  per child per tick, with no backoff. A target that can never receive a line
+  — no record, a shell (by label OR by its wrapped program, the same read the
+  delivery itself makes), not conductable, already `done` — is judged
+  before the far node is asked anything, so it neither spends a request nor
+  consumes events it would not have shown.

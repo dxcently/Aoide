@@ -38,12 +38,13 @@
 //! since the receiving node's own `message_send` Inject arm is where that
 //! gate actually lives — see `deliver_remote`'s doc comment.
 
-use super::common::{require_flag, stage_error};
+use super::common::{self, require_flag, stage_error};
 use super::doc::restage_graph;
 use super::model::{
     load_stage, resolved_parent, sessions_path, write_stage, SessionRecord, SessionsFile,
     STAGE_GRAPH_VERSION,
 };
+use super::remote::{node_record, resolve_on_node};
 use super::session_store::{
     clear_stale_parent, do_session_end, do_session_phase, do_session_phase_if, do_session_start,
     do_subagent_end, do_subagent_rekey, do_subagent_spawn, ensure_session_ceiling, now_iso_utc,
@@ -989,15 +990,13 @@ fn session_send_to(inv: &Invocation, target: &str) -> Outcome {
 
     match addr::resolve_with_hub(target, &host, &candidates, &node_names, hub) {
         Resolution::Local(id) => deliver_local(inv, &id),
-        Resolution::Remote { node, query } => match nodes.iter().find(|p| p.name == node) {
-            Some(p) => deliver_remote(inv, p, &query),
+        Resolution::Remote { node, query } => match node_record(cmd, &nodes, &node) {
+            Ok(p) => deliver_remote(inv, p, &query),
             // `addr::resolve` only ever names a node it was HANDED in
             // `node_names` above (built from this SAME `nodes` slice), so a
             // miss here is unreachable in practice — a defensive clean error
             // rather than an unwrap/panic.
-            None => {
-                let out = Outcome::error(cmd, format!("node `{node}` vanished mid-resolution"))
-                    .with_data(json!({ "reason": "node-not-found", "node": node }));
+            Err(out) => {
                 audit_send(inv, "error", &out.message, &text);
                 out
             }
@@ -1036,67 +1035,6 @@ fn session_send_to(inv: &Invocation, target: &str) -> Outcome {
     }
 }
 
-/// Extract every `kind:"session"` node from a node's CACHED graph document
-/// as (sessionId, petname, role) triples — role derived from the SAME
-/// document's own `spawned` edges. A `send`-local twin of
-/// `who.rs::sessions_from_graph`'s extraction: not reused directly, since
-/// that function returns `who`'s own display-only `SessionView`, a shape
-/// this door has no use for — this needs only what [`LocalCandidate`] and an
-/// error-message label need.
-fn node_cached_sessions(graph: &Value) -> Vec<(String, Option<String>, &'static str)> {
-    let empty: Vec<Value> = Vec::new();
-    let nodes = graph.get("nodes").and_then(Value::as_array).unwrap_or(&empty);
-    let edges = graph.get("edges").and_then(Value::as_array).unwrap_or(&empty);
-    nodes
-        .iter()
-        .filter(|n| n["kind"] == "session")
-        .map(|n| {
-            let full_id = n["id"].as_str().unwrap_or("");
-            let session_id = full_id.strip_prefix("session:").unwrap_or(full_id).to_string();
-            let role = if edges.iter().any(|e| e["kind"] == "spawned" && e["to"] == full_id) {
-                "child"
-            } else {
-                "root"
-            };
-            let petname = n["petname"].as_str().map(String::from);
-            (session_id, petname, role)
-        })
-        .collect()
-}
-
-/// Resolve `query` (the remainder after `node/` — see `aoide_storage::addr`'s
-/// tier-5 doc) against `node`'s cached session set. Tries `query` AS TYPED
-/// first — this covers the common, DOCUMENTED case (`addr.rs`'s own module
-/// doc example: `Remote { node: "yomi-strix", query: "brave-otter" }`, a
-/// bare petname) via tiers 1–3 (exact remote id, id tail4, bare petname) —
-/// and only on a miss retries the RECONSTRUCTED `<node>/<query>` form, so a
-/// `role/petname` remainder (what tier 5 stripped the host segment OFF of —
-/// `addr.rs`'s "multi-segment rest… passes it through verbatim" test case)
-/// still resolves via tier 4 against the node's own name standing in as
-/// `host`. `nodes: &[]` on BOTH attempts: a remote-of-remote is not a shape
-/// this phase resolves, so tier 5 can never fire here — see
-/// [`deliver_remote`]'s `Resolution::Remote` arm.
-fn resolve_remote_query(node: &str, query: &str, candidates: &[LocalCandidate<'_>]) -> Resolution {
-    match addr::resolve(query, node, candidates, &[]) {
-        Resolution::NotFound => addr::resolve(&format!("{node}/{query}"), node, candidates, &[]),
-        other => other,
-    }
-}
-
-/// A node session's display label for an error message — mirrors
-/// `who.rs::sessions_from_graph`'s label construction
-/// (`display::session_label` with the node's own name standing in as
-/// `host`), so an ambiguous/not-found `--to` error names candidates the same
-/// way `aoide session --hosts` would already be showing them.
-fn node_session_label(node: &str, session_id: &str, petname: Option<&str>, role: &str) -> String {
-    let rec = aoide_storage::records::SessionRecord {
-        session_id: session_id.to_string(),
-        petname: petname.map(String::from),
-        ..Default::default()
-    };
-    aoide_storage::display::session_label(&rec, node, role)
-}
-
 /// Which of `--submit`/`--yes` the caller actually passed on THIS
 /// invocation — both are accepted-but-unused for a `--to` remote send (see
 /// [`deliver_remote`]'s doc), so this is purely for surfacing that fact back
@@ -1127,6 +1065,10 @@ fn ignored_remote_flags(inv: &Invocation) -> Vec<&'static str> {
 /// LOCAL-SOCKET concept: they decide whether THIS process writes to a
 /// socket it owns. A remote send is always ATTEMPTED over the network,
 /// exactly like `node pull` already does unconditionally.
+/// It does resolve one identity — the `aoide/from` claim
+/// ([`remote_parent_claim`], P-RSA S5) — but that is a CLAIM the far door
+/// judges, not a gate here: this side only refuses to sign a value the far
+/// door would reject outright.
 /// The RECEIVING node's own `message_send` Inject arm
 /// (`aoide-server::a2a::message_send` → `do_inject`) is where the real gate
 /// lives: it decides deliver-now vs. hold-pending off ITS OWN node-trust
@@ -1145,6 +1087,44 @@ fn ignored_remote_flags(inv: &Invocation) -> Vec<&'static str> {
 /// for the same reason). Authenticated cross-host provenance is #51's
 /// scope, not this phase's (messaging plan, "Verified facts").
 fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, query: &str) -> Outcome {
+    deliver_remote_with(inv, node, query, remote_parent_claim)
+}
+
+/// The `aoide/from` claim a remote send carries (P-RSA S5) — the
+/// KERNEL-ATTESTED sender, i.e. `node spawn`'s own resolution with no
+/// `--parent` (`aoide_client::commands::resolve_remote_parent`), because `send`
+/// has no `--parent` flag and the parent steering a child it spawned is exactly
+/// the caller the spawn path stamped into that child's `remoteParent`. The
+/// receiving door reads the claim as `remote_parent_match`: a match delivers
+/// without pending (`autogate-remote-parent`), a mismatch changes nothing. The
+/// env is never read (an ambient `AOIDE_SESSION_ID` is the Osaka failure §4.1
+/// closes), so no daemon and no sealed ancestry simply means no claim.
+///
+/// `Err` is the resolver's own "this node would sign a claim the far door
+/// refuses" case, and the two callers answer it differently because they were
+/// asked for different things. `node spawn` REFUSES the call (a caller who named
+/// a parentage gets one or hears why). A `send` DROPS the claim and delivers
+/// anyway, naming the reason on one warning line: it was never asked for a
+/// parentage — the claim is an autogate shortcut, not the request — and the
+/// door's Inject arm reads a malformed claim as a non-match, never as a refusal
+/// (`a2a.rs`'s own `remote_parent_match`), so an unruly id costs this send the
+/// autogate and nothing else. Neither path lets one reach the wire: the one that
+/// refuses never signs, the other signs nothing.
+fn remote_parent_claim() -> Result<Option<String>, String> {
+    aoide_client::commands::resolve_remote_parent(None)
+}
+
+/// [`deliver_remote`]'s body, parameterized over the claim resolver for the
+/// same reason [`deliver_local_with`] is parameterized over the sender-identity
+/// resolver: the whole remote path stays testable with no daemon and no seal
+/// key in the picture. Production wires [`remote_parent_claim`]; the test
+/// injects a fixed one and reads the bytes the fake transport received.
+fn deliver_remote_with(
+    inv: &Invocation,
+    node: &aoide_storage::node_store::Node,
+    query: &str,
+    resolve_claim: impl Fn() -> Result<Option<String>, String>,
+) -> Outcome {
     let cmd = "send";
     let text = inv.args.join(" ");
     // `--submit`/`--yes` are accepted-but-unused for a remote send (see this
@@ -1163,33 +1143,28 @@ fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, quer
         )
     };
 
-    let cache = aoide_storage::node_store::load_node_cache(&node.name);
-    let Some(graph) = cache.and_then(|c| c.graph) else {
-        let out = Outcome::error(
-            cmd,
-            format!(
-                "node `{}` has no cached graph — run `aoide node pull {}` first",
-                node.name, node.name
-            ),
-        )
-        .with_data(json!({ "reason": "node-never-pulled", "node": node.name }));
-        audit_send(inv, "error", &out.message, &text);
-        return out;
-    };
-
-    let sess = node_cached_sessions(&graph);
-    let candidates: Vec<LocalCandidate<'_>> = sess
-        .iter()
-        .map(|(id, pet, role)| LocalCandidate { session_id: id, petname: pet.as_deref(), role })
-        .collect();
-
-    match resolve_remote_query(&node.name, query, &candidates) {
-        Resolution::Local(remote_id) => {
-            match aoide_client::commands::send_message_to_node(node, &text, &remote_id) {
+    let resolved = resolve_on_node(cmd, &node.name, query);
+    match resolved {
+        Ok(remote_id) => {
+            // The `aoide/from` claim (P-RSA S5): who this node PROVES it is,
+            // resolved before the body is built because the claim rides inside
+            // the signed body digest. An unruly claim never stops the send (see
+            // [`remote_parent_claim`]) — it is dropped here and reported on its
+            // own warning line in BOTH arms below, since the claim was equally
+            // absent whichever way the delivery went.
+            let (from, claim_note) = match resolve_claim() {
+                Ok(from) => (from, String::new()),
+                Err(e) => (None, format!("\nnot claiming parent: {e}")),
+            };
+            match aoide_client::commands::send_message_to_node(node, &text, &remote_id, from.as_deref())
+            {
                 Ok(response) => {
                     let out = Outcome::ok(
                         cmd,
-                        format!("delivered to `{remote_id}` on node `{}`{ignored_note}", node.name),
+                        format!(
+                            "delivered to `{remote_id}` on node `{}`{ignored_note}{claim_note}",
+                            node.name
+                        ),
                     )
                     .changed(vec![format!("sent to {}/{remote_id}", node.name)])
                     .with_data(json!({
@@ -1203,9 +1178,14 @@ fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, quer
                     out
                 }
                 Err(e) => {
+                    // The far node's own words — a peer's bytes, so cleaned
+                    // before they reach a terminal (`common::clean_line`: no
+                    // control character, no `Cf` mark, one clipped line). Same
+                    // rule, same helper, as the watch's `read_refused`.
+                    let peer = common::clean_line(&e);
                     let out = Outcome::error(
                         cmd,
-                        format!("delivering to `{remote_id}` on node `{}`: {e}{ignored_note}", node.name),
+                        format!("delivering to `{remote_id}` on node `{}`: {peer}{ignored_note}{claim_note}", node.name),
                     )
                     .with_data(json!({
                         "reason": "node-send-failed", "node": node.name, "remoteSessionId": remote_id,
@@ -1216,56 +1196,11 @@ fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, quer
                 }
             }
         }
-        Resolution::Ambiguous(ids) => {
-            let labels: Vec<String> = ids
-                .iter()
-                .filter_map(|id| {
-                    sess.iter().find(|(sid, _, _)| sid == id).map(|(sid, pet, role)| {
-                        node_session_label(&node.name, sid, pet.as_deref(), role)
-                    })
-                })
-                .collect();
-            let out = Outcome::error(
-                cmd,
-                format!(
-                    "`{query}` is ambiguous on node `{}` — {} session(s) match: {}",
-                    node.name,
-                    ids.len(),
-                    labels.join(", ")
-                ),
-            )
-            .with_data(json!({ "reason": "ambiguous", "node": node.name, "query": query, "candidates": ids }));
-            audit_send(inv, "error", &out.message, &text);
-            out
-        }
-        Resolution::NotFound => {
-            let labels: Vec<String> = sess
-                .iter()
-                .map(|(id, pet, role)| node_session_label(&node.name, id, pet.as_deref(), role))
-                .collect();
-            let hint = if labels.is_empty() {
-                format!(" (node `{}` has no cached sessions)", node.name)
-            } else {
-                format!(" — available on `{}`: {}", node.name, labels.join(", "))
-            };
-            let out = Outcome::error(
-                cmd,
-                format!("no session on node `{}` matches `{query}`{hint}", node.name),
-            )
-            .with_data(json!({ "reason": "not-found", "node": node.name, "query": query }));
-            audit_send(inv, "error", &out.message, &text);
-            out
-        }
-        Resolution::Remote { .. } => {
-            // Unreachable: `resolve_remote_query` always passes `nodes: &[]`
-            // to `addr::resolve`, so tier 5 (the only source of `Remote`)
-            // never fires. A clean error, not a panic/unwrap, in case that
-            // invariant ever drifts.
-            let out = Outcome::error(
-                cmd,
-                format!("`{query}` resolved to a nested node reference, which is not supported"),
-            )
-            .with_data(json!({ "reason": "nested-remote-unsupported", "node": node.name, "query": query }));
+        Err(out) => {
+            // Every refusal `resolve_on_node` can build — an unpulled node,
+            // and the two query outcomes that name no single session — with
+            // this door's own audit line. One arm, because there is one
+            // definition of what each of them says (`remote::unresolved_remote`).
             audit_send(inv, "error", &out.message, &text);
             out
         }
@@ -4389,73 +4324,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_remote_query_table() {
-        // Pure, no I/O — mirrors `aoide_storage::addr`'s own table-driven
-        // style, scoped to what this function adds on top of `addr::resolve`
-        // itself: trying `query` exactly as typed first (tiers 1-3), and
-        // only on a miss retrying the reconstructed `<node>/<query>` form
-        // (tier 4, the `role/petname` remainder tier 5 stripped the host off
-        // of).
-        struct Case {
-            name: &'static str,
-            query: &'static str,
-            candidates: Vec<(&'static str, Option<&'static str>, &'static str)>,
-            expected: Resolution,
-        }
-        let node = "yomi-strix";
-        let cases = vec![
-            Case {
-                name: "exact remote id, tried as typed",
-                query: "sess-aaaa-1111",
-                candidates: vec![("sess-aaaa-1111", Some("brave-otter"), "root")],
-                expected: Resolution::Local("sess-aaaa-1111".into()),
-            },
-            Case {
-                name: "id tail4, tried as typed",
-                query: "1111",
-                candidates: vec![("sess-aaaa-1111", Some("brave-otter"), "root")],
-                expected: Resolution::Local("sess-aaaa-1111".into()),
-            },
-            Case {
-                name: "bare petname, tried as typed (the documented common case)",
-                query: "brave-otter",
-                candidates: vec![("sess-aaaa-1111", Some("brave-otter"), "root")],
-                expected: Resolution::Local("sess-aaaa-1111".into()),
-            },
-            Case {
-                name: "role/petname compound falls back to the reconstructed <node>/<query> form",
-                query: "root/brave-otter",
-                candidates: vec![("sess-aaaa-1111", Some("brave-otter"), "root")],
-                expected: Resolution::Local("sess-aaaa-1111".into()),
-            },
-            Case {
-                name: "petname collision on the node's own cache is ambiguous",
-                query: "brave-otter",
-                candidates: vec![
-                    ("sess-aaaa-1111", Some("brave-otter"), "root"),
-                    ("sess-bbbb-2222", Some("brave-otter"), "child"),
-                ],
-                expected: Resolution::Ambiguous(vec!["sess-aaaa-1111".into(), "sess-bbbb-2222".into()]),
-            },
-            Case {
-                name: "no match in either attempt",
-                query: "ghost-name",
-                candidates: vec![("sess-aaaa-1111", Some("brave-otter"), "root")],
-                expected: Resolution::NotFound,
-            },
-        ];
-        for c in cases {
-            let candidates: Vec<LocalCandidate<'_>> = c
-                .candidates
-                .iter()
-                .map(|(id, pet, role)| LocalCandidate { session_id: id, petname: *pet, role })
-                .collect();
-            let got = resolve_remote_query(node, c.query, &candidates);
-            assert_eq!(got, c.expected, "case failed: {}", c.name);
-        }
-    }
-
-    #[test]
     fn to_and_id_together_is_a_usage_error() {
         let out = session_send(&send_invocation(&["hi"], &[("id", "x"), ("to", "y"), ("yes", "true")]));
         assert_eq!(out.status, aoide_protocol::output::Status::Usage);
@@ -4758,6 +4626,176 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // ── P-RSA S5: the `aoide/from` claim a remote send carries ────────────
+
+    /// A fake `curl` at the front of `PATH` that CAPTURES the body handed to
+    /// it on stdin and answers like a door (`{response}` + curl's
+    /// `-w "\n%{http_code}"` trailer, `run_curl_with_timeout`'s own protocol).
+    /// The two claim tests below are the only readers: this is where the bytes
+    /// `deliver_remote_with` would put on the wire are actually inspectable,
+    /// with no network, no daemon and no real `curl` process. Same shim
+    /// technique `aoide-client`'s transport tests use; kept local because a
+    /// remote send's BODY is built in this crate and the conduct suite should
+    /// not reach into that crate's test-only helpers.
+    ///
+    /// The stdin redirect is load-bearing twice: `post_json` always writes the
+    /// body to curl's stdin (`--data-binary @-`), so a shim that exits without
+    /// reading turns a descheduled caller's write into an EPIPE
+    /// (`crates/AGENTS.md`) — and the captured copy IS the assertion.
+    fn install_capturing_curl(
+        tag: &str,
+        capture: &Path,
+        response: &str,
+    ) -> (PathBuf, Option<String>) {
+        let shim_dir = std::env::temp_dir().join(format!(
+            "aoide-conduct-curlshim-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&shim_dir).unwrap();
+        let shim = shim_dir.join("curl");
+        std::fs::write(
+            &shim,
+            format!(
+                "#!/bin/sh\ncat > '{capture}'\ncat <<'JSONBODY'\n{response}\nJSONBODY\nprintf '200'\n",
+                capture = capture.display(),
+            ),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let saved_path = std::env::var("PATH").ok();
+        std::env::set_var(
+            "PATH",
+            format!("{}:{}", shim_dir.display(), saved_path.clone().unwrap_or_default()),
+        );
+        (shim_dir, saved_path)
+    }
+
+    fn uninstall_capturing_curl(shim_dir: &Path, saved_path: Option<String>) {
+        match saved_path {
+            Some(p) => std::env::set_var("PATH", p),
+            None => std::env::remove_var("PATH"),
+        }
+        let _ = std::fs::remove_dir_all(shim_dir);
+    }
+
+    /// The fixture both claim tests share: isolated stage/state, a VERIFIED
+    /// node record and that node's cached graph naming one session. Isolation
+    /// is what makes the verified node signable with no daemon anywhere —
+    /// `sign_headers_for_node` mints its identity under `AOIDE_STATE_DIR`,
+    /// which is this temp dir. Straight at `deliver_remote_with`, so no node
+    /// registry is involved (the record is passed in) and `--to` resolution
+    /// reads only the cache written here.
+    fn remote_claim_fixture(tag: &str) -> (PathBuf, aoide_storage::node_store::Node) {
+        let root = unique_stage(tag);
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::create_dir_all(&state).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+
+        let mut node = test_node("yomi-strix", "http://127.0.0.1:9/");
+        node.verified = true;
+        node.pubkey = Some("aa11".to_string());
+        aoide_storage::node_store::save_node_cache(&test_cache(
+            "yomi-strix",
+            node_graph_json(&[("sess-remote-1", Some("misty-comet"), "child")]),
+        ))
+        .unwrap();
+        (root, node)
+    }
+
+    /// The client half of S5: `send --to <node>/<query>` carries the
+    /// KERNEL-ATTESTED parent as its `aoide/from` claim, inside the body it
+    /// signs. That is the same resolution `node spawn` stamps into a child's
+    /// `remoteParent`, which is the whole point — the door's Inject arm can
+    /// only recognise the parent steering the child it spawned if the two
+    /// sides read ONE resolution. The injected claim resolver is the seam (no
+    /// daemon, no seal key in the picture); the captured stdin is the proof
+    /// the value actually rides the wire, on an ordinary inject to the
+    /// resolved remote session.
+    #[test]
+    fn send_to_carries_the_attested_parent_as_its_from_claim() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "AOIDE_AUDIT_LOG"]);
+        let (root, node) = remote_claim_fixture("to-remote-claim");
+
+        let capture = root.join("captured.json");
+        let (shim_dir, saved_path) = install_capturing_curl("claim", &capture, "{}");
+        let out = deliver_remote_with(
+            &send_invocation(&["hi", "there"], &[]),
+            &node,
+            "misty-comet",
+            || Ok(Some("parent-1".to_string())),
+        );
+        uninstall_capturing_curl(&shim_dir, saved_path);
+
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+        assert!(!out.message.contains("not claiming parent"), "msg: {}", out.message);
+
+        let sent: Value = serde_json::from_str(&std::fs::read_to_string(&capture).unwrap()).unwrap();
+        assert_eq!(
+            sent["params"]["message"]["metadata"][aoide_protocol::wire::FROM_SESSION_KEY],
+            "parent-1",
+            "the attested parent is the claim the door reads: {sent}",
+        );
+        assert_eq!(sent["params"]["message"]["contextId"], "sess-remote-1");
+        assert_eq!(sent["params"]["message"]["parts"][0]["text"], "hi there");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The ruling on S5's client half: an UNRULY attested id does not refuse
+    /// the send. `node spawn` would — its caller named a parentage — but a
+    /// `send --to` was never asked for one: the claim is an autogate shortcut,
+    /// and the door's Inject arm reads a malformed claim as a non-match
+    /// (`remote_parent_match`), never as a refusal. So the send goes out with
+    /// NO claim (the same delivery it gets today with no daemon to attest
+    /// against) and names the reason on one warning line, rather than failing
+    /// a send that works.
+    #[test]
+    fn an_unruly_claim_still_sends_without_claiming_a_parent() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "AOIDE_AUDIT_LOG"]);
+        let (root, node) = remote_claim_fixture("to-remote-unruly");
+
+        let capture = root.join("captured.json");
+        let (shim_dir, saved_path) = install_capturing_curl("unruly", &capture, "{}");
+        let out = deliver_remote_with(
+            &send_invocation(&["hi"], &[]),
+            &node,
+            "misty-comet",
+            || Err("`bogus/1` is not a legal claim".to_string()),
+        );
+        uninstall_capturing_curl(&shim_dir, saved_path);
+
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+        assert!(
+            out.message.contains("not claiming parent: `bogus/1` is not a legal claim"),
+            "one warning line naming the reason: {}",
+            out.message
+        );
+        assert!(
+            out.message.contains("delivered to `sess-remote-1`"),
+            "the send itself still succeeded: {}",
+            out.message
+        );
+
+        let sent: Value = serde_json::from_str(&std::fs::read_to_string(&capture).unwrap()).unwrap();
+        assert!(
+            sent["params"]["message"].get("metadata").is_none(),
+            "no claim reaches the wire at all: {sent}",
+        );
+        assert_eq!(sent["params"]["message"]["contextId"], "sess-remote-1");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn to_remote_ambiguous_in_the_cache_lists_node_session_labels() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -4823,6 +4861,50 @@ mod tests {
         assert_eq!(out.data.as_ref().unwrap()["reason"], "not-found");
         assert!(out.message.contains("misty-comet"), "msg: {}", out.message);
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// HIGH-1's `send` twin: what a peer answers with is its OWN bytes, so a
+    /// hostile error message (an OSC-52 clipboard write) must be cleaned
+    /// before this door prints it — one sanitizer, both doors. Driven against a
+    /// REAL curl POST to a fake door (never a mocked transport), because the
+    /// point is the text that actually arrives from the wire.
+    #[test]
+    fn a_remote_send_failure_cleans_the_far_node_s_own_error_text() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "AOIDE_AUDIT_LOG"]);
+
+        let root = unique_stage("to-remote-hostile-error");
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::create_dir_all(&state).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+
+        let hostile = format!("\u{1b}]52;c;{}\u{7}\u{202e}gniddec\r", "QkFTRTY0".repeat(20));
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": -32000, "message": hostile } })
+            .to_string();
+        let (listener, url) = crate::graph::testutil::fake_door(body);
+
+        aoide_storage::node_store::save_nodes(&[test_node("yomi-strix", &url)]).unwrap();
+        aoide_storage::node_store::save_node_cache(&test_cache(
+            "yomi-strix",
+            node_graph_json(&[("sess-remote-1", Some("misty-comet"), "root")]),
+        ))
+        .unwrap();
+
+        let out = session_send(&send_invocation(&["hi"], &[("to", "yomi-strix/misty-comet")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "node-send-failed");
+        assert!(out.message.contains("node returned an error:"), "{}", out.message);
+        for forbidden in ['\u{1b}', '\u{7}', '\r', '\u{202e}'] {
+            assert!(!out.message.contains(forbidden), "{forbidden:?} reached the message: {}", out.message);
+        }
+        assert!(out.message.contains("QkFTRTY0"), "the peer's text is shown as text: {}", out.message);
+
+        drop(listener);
         let _ = std::fs::remove_dir_all(&root);
     }
 

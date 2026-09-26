@@ -280,11 +280,38 @@ through.
     stripped, clipped to 80 characters; the quoted ones never allowed to
     start with `/` or `!`. Per-child at-most-once is the
     `state/stage/pingback.json` cursor, claimed before the write. A parent
-    that is a bare shell is skipped outright — a line typed into a shell RUNS
-    — as is a parent whose record is gone, not conductable, or already
+    that is a shell is skipped outright — a line typed into a shell RUNS —
+    and it is the WRAPPED program that answers it (a record labelled from a
+    harness profile can be conducting `bash`), never the label alone. As is a
+    parent whose record is gone, not conductable, or already
     `done`. Nothing wider than the children it spawned: a stranger's send
     still holds pending. The full statement is `docs/architecture/
     EIDOLON-TRACE.md`'s "Second slice".
+  - **Remote-parent — the same relation across machines.** The A2A door's
+    rule, not the local socket's, listed here because it answers the same
+    question — is the sender this target's parent? — for the one send that
+    cannot be asked at the session's own socket: a parent on another box.
+    `aoide send --to <node>/<session>` carries its KERNEL-ATTESTED caller as
+    the `metadata["aoide/from"]` claim (the same resolution `node spawn`
+    stamps into a child's `remoteParent`), and the receiving door delivers
+    WITHOUT pending only when all three agree: the request signed with a
+    paired node's key this door verified, that key is the target record's
+    stored `remoteParent.key`, and the claim equals its stored
+    `remoteParent.sessionId`. A claim alone proves nothing — the signature
+    rung is what makes it a claim rather than a wish — so an unsigned or
+    bearer-only caller with a claim gets one audit line and its send holds
+    pending like any stranger's. The hit rides gate label
+    `autogate-remote-parent` and does NOT exempt the door-wide bearer, which
+    is still checked first. It has no off switch either: neither the node's own
+    `autogate` flag nor the box-wide `AOIDE_CONDUCT_AUTOGATE` gates it, so the
+    levers against a node that already spawned a child are unpairing it
+    (`node remove`) or the child ending — `node allow <n> spawn off` stops only
+    NEW children. An unruly claim (an id the far door could never
+    have stamped) is dropped by the sender — one warning line, `not claiming
+    parent: <reason>` — and the send goes out unclaimed rather than failing.
+    One thing overrides every rail of it: a TARGET conducting a shell, whose
+    line is held pending whoever asks (`shell-wrapped`, N1) — a submitted
+    line in a shell's input runs. `CONTRACTS.md` §6 carries the full rule.
 - **Sender provenance.** A delivered payload that NAMES the node (carries a
   letter — a real message, not a bare keystroke answer) is prefixed on its
   first line with `from <sender>: `, where `<sender>` resolves from

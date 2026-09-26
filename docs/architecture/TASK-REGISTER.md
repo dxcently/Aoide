@@ -1103,7 +1103,10 @@ project/parent inheritance across local/remote/app/subagents;
   tree edits are not placed; designer asked for the rule + the working
   animation (fixed footprint, parent and nested children) proven on the
   synthetic fixture; daemon deploy + placement are the User's gates) → S-D remote owner
-  qualification (design + `link` refusal) → E3. Brief DONE (Opus,
+  qualification (design + `link` refusal; the DESIGN half is ruled and
+  landed in the remote sub-agents lane, §32: `remoteParent` is a second
+  field beside a local-only `parentSessionId`, so no foreign owner is ever
+  written into it; the `link` refusal half stays open there) → E3. Brief DONE (Opus,
   scratch `p-ownership-brief.md`): R1 accepted as ruled (rung 2 above rung
   3; `session project` pins a mis-grouped row), Q2 `effectiveProject` on
   graph.json NOT published yet, Q3 `node spawn --project` deferred (A2A
@@ -2111,3 +2114,586 @@ project/parent inheritance across local/remote/app/subagents;
   point to be read from the SSH transport path; stale or mislabelled keys
   removed on the User's word. The same audit runs on every host.
 - Status: not started. Owner: unassigned. Keys are the User's to change.
+
+## 32. Remote sub-agents (parent link, ping-back, watch across nodes)
+
+- Requirement (User, 2026-09-25): any harness agent run through Aoide is a
+  watched process whose output is visible and steerable, with no harness
+  integrated into Aoide. Agents spawned this way are detected as the spawning
+  session's sub-agents, including across machines through its a2a channel.
+- Rulings (User, 2026-09-25): Q1, Q3, Q4, Q5, Q6 at the brief's defaults; Q2
+  WIDENED — a signed, `verified` node whose grant includes `read` may read
+  `ANY` session's watch frame on the far node, so the remote-parent key match
+  is not required to READ. It is still required to steer without pending and
+  for ping-back history, and unsigned/bearer/address rungs are refused.
+  Both machines show the link: the child's node shows `remoteParent` and
+  `↑ <node>/<parent>`, the parent's node shows the remote child and that
+  child's own local descendants as a nested subtree.
+- Shape, as ruled: `remoteParent {node,key,sessionId}` on the child's record —
+  a SECOND field, `parentSessionId` stays local-only (§13's rule, never a
+  foreign owner in it); `state/stage/remote-children.json` as the caller-side
+  ledger; `metadata["aoide/from"]` as the signed caller claim; and the
+  ping-back PULLED over the A2A door (never mail, never a child-side push),
+  so only the direction the spawn already proved is used.
+- Status: S1 LANDED on `eidolon/remote-sub` (`remoteParent` +
+  `records::RemoteParent`, `aoide-storage::remote_children`,
+  `valid_claimed_session_id`); S2 LANDED (the signed `aoide/from` claim on
+  spawn and inject, `node spawn --parent`, the caller-side ledger write on
+  the ack; a live `--parent` beats the attestation, the env is never read);
+  S3 LANDED — the door honours the claim on the SIGNATURE rung only
+  (`claimed_remote_parent`, pure; a weaker rung ignores it and writes one
+  `ignored-unsigned-from` audit line; a signed caller's malformed claim is
+  `-32602`) and stamps `remoteParent` from the RESOLVED node's name and
+  pubkey through `do_spawn` → `stamp_spawn_provenance` →
+  `conduct::graph::stamp_remote_parent` (one registration retry loop, two
+  change-once stamps; `parentSessionId` stays `None`; no env var exists for
+  it, and `resurrect` carries none); S4 LANDED — both sides show the link.
+  The child's node publishes `remoteParent {node, sessionId}` on its
+  `graph.json` session node and its `session --json` row, resolved to the
+  CURRENT `nodes.json` name for the stored key (the stamped label only as a
+  fallback), with the roster line tagged `↑ <node>/<sessionId>`; the parent's
+  node publishes `remoteChildren [{node, sessionId}]` off its own
+  `state/stage/remote-children.json` ledger plus the `↓ <n> remote` roster
+  tag, and the ledger's rows leave with the parent that leaves the roster —
+  both exit paths call `drop_remote_child_rows` once their own `sessions.json`
+  write has landed. No `spawned` edge is minted either way —
+  a local id equal to a remote `sessionId` does not become a local parent in
+  the projection, though that is pinned by test at the DOCUMENT level only (no
+  test drives the autogate, sibling rule, reaper or mailbox against a remote
+  child, and `graph link` can still mint one by hand) — and the remote child's
+  own local descendants need no new
+  wire: the far document already nests under its `node:<name>` root with its
+  own `spawned` edges, so `par1 → nodeb/C → nodeb/G` is rendered on `aoide
+  session` as an indented chain under the parent's own row, with `--json`
+  carrying the same join (`fold`/`subtree` on the `remoteChildren` entry; the
+  HIGH finding of the S4 review was that nothing walked the data). The
+  conductor TUI's DAG (`graphview.rs`) still reads neither key — a follow-up,
+  named and open. One code fact the brief could not know:
+  `with_stage_lock` was documented non-re-entrant, and both real
+  `prune_done` callers hold it (`reap_inner`, `do_session_start_inner`), so
+  the ledger retain (then inside `prune_done_scoped`) deadlocked until
+  `aoide_storage::fs::with_stage_lock` was made re-entrant for the holding
+  thread (`STAGE_LOCK_HELD`; other threads and other processes still wait,
+  and this now covers every prune pass, automatic included); S5 LANDED — the
+  door's Inject arm consumes the claim the spawn path already stamps:
+  `remote_parent_match(caller, claim, target)` (Signature rung, the target
+  record's stored `remoteParent.key` equal to the caller's verified key, and
+  its stored `sessionId` equal to the claim — all three or no match) delivers
+  without pending, audited `autogate-remote-parent`, riding BOTH rails the
+  `sig_autogate` restoration rides, each carrying one transport — the EXEMPTION
+  from `origin_for_inject`'s downgrade is what carries the loopback/ssh `-L`
+  shape (`should_deliver_now`'s `Loopback` arm delivers unconditionally, so the
+  exemption alone is enough there, and without it a tunneled parent coerces to
+  `Unknown`, which delivers nothing), and the FOLD into `autogate_match` is what
+  carries `ConnOrigin::Remote`'s shape (that arm consults `autogate_match` and
+  nothing else; the exemption is inert where the origin was never loopback).
+  It overrides neither earlier question — the door-wide
+  bearer is still checked FIRST (a door with a token set admits a remote parent
+  only if it presents the bearer) and the node's own `autogate` flag need not be
+  on, the same independence `send_gate`'s local parent rule has, which is also
+  why the rule has no off switch: the levers are unpairing the node (`node
+  remove`) or the child ending, and `node allow <n> spawn off` stops only NEW
+  children. The `-32602` stays spawn-side: an inject reads a malformed claim as a non-match, exactly as
+  an absent one. On the client side `resolve_remote_parent` is now shared by
+  both callers, and `send --to` carries that KERNEL-ATTESTED caller as its
+  claim but DROPS an unruly one — it sends unclaimed and names the reason on one
+  warning line (`not claiming parent: <reason>`) instead of refusing, the S5
+  ruling on the previous executor's Q3 (`node spawn` still refuses the call
+  outright); S6 LANDED — `tasks/get` with `params.metadata["aoide/frame"]`
+  answers with the session's watch frame as one `data` artifact, gated by
+  `output_read_admitted` = `read_ok` ∧ signature-rung ∧ the record `verified`
+  with `allows∋read` (`node_may_read`, `node_may_spawn`'s twin), so a signed
+  reader holding `read` reads ANY session's frame while the remote-parent key
+  match stays required for steering (S5) and for S8's history; the refusal is
+  `-32011` — this arm's OWN code, minted like Spawn's `-32006` and
+  `mailDeposit`'s `-32010` (an orchestrator ruling: `-32007` stays
+  `verify_signed_request`'s, decided before this arm runs, so the code alone
+  names the arm) — with ONE message whether the session
+  exists or not, and the read audits under its own label
+  `a2a.tasks/get.frame`. `Task.artifacts`/`Task.history` are optional and
+  omitted when absent (a status read stays byte-identical); `watch_frame` is
+  `gather` with `raw = false`, `Frame` is now pub with `Deserialize` and
+  `for_wire` (nulling `logPath`/`socket`/`instructionsPath`/`suggested`), the
+  door clamps tail to `1..=200`, a letter body to 40 lines and the frame to
+  256 KiB (oldest letter first, then the oldest output line, `truncated: true`),
+  and the `Cf` strip — every format character, not just the bidi marks, now
+  including the zero-width set — moved into the shared `clean_line`/
+  `clean_block`, so it applies to the local view too (one spec gap found: the
+  brief's §10 test list asks for a `linesAfter` refusal case that belongs to
+  S8's history ring, which does not exist yet; S6 keeps the Do's own table).
+  Tests: aoide-protocol 174, aoide-conduct 881, aoide-server 240 — all pass,
+  `cargo test --workspace --no-run` clean. S7 LANDED — `session watch
+  <node>/<query>` reads the far frame: `graph::remote` is the hoisted home of
+  `node_cached_sessions`/`resolve_remote_query`/`node_session_label` (moved
+  out of `send.rs`, which now shares them plus `node_record`,
+  `node_cached_graph` and `unresolved_remote`, so `send --to` and the watch
+  refuse an unresolvable query with ONE text and ONE `data` shape; the
+  "vanished mid-resolution" wording of the unreachable node arm came back with
+  the move, and `node_record` now reads the `nodes` slice the caller already
+  loaded instead of re-reading `nodes.json`), and the
+  `Resolution::Remote` arm of `view.rs` watches instead of refusing. The read
+  is `aoide_client::commands::task_get_on_node(node, id, frame_tail)` — signed
+  exactly as `send_message_to_node`, over
+  `post_json_to_node_with_tunnel_key`/`post_json_capped`/`run_curl_capped`
+  (the first call site with its own response cap, `--max-filesize 524288`, and
+  the only one to go through the helper that takes the tunnel key explicitly;
+  the cap is ~1.6× the honest frame ceiling, not 2× — the door's 256 KiB bounds
+  shed content only, so the exempt instruction block's own worst case
+  (`BLOCK_LINES_MAX` 400 × `LINE_MAX` 200 × 4 B ≈ 320 KB) is what a real frame
+  can reach), parsing
+  the `frame` artifact into the ONE `Frame` type both sides share.
+  `Frame::clamp_untrusted(node, tail)` re-cleans every string through the
+  shared `clean_line`/`clean_block`, re-clamps every count (output to the
+  requested tail, mail to `MAIL_RAIL`, a body/instruction block to
+  `BLOCK_LINES_MAX`), STRIKES `logPath`/`socket`/`instructionsPath` (the paths
+  and control socket of the box that wrote the frame — the renderer gained the
+  arm that still shows the instruction TEXT with its path gone), rebuilds
+  `suggested` locally as `aoide send --to <node>/<id> --submit -- …`, and
+  leaves raw PTY bytes with no path at all on the remote side; the header
+  carries `<node>/`. `--snapshot` reads once, live polls every 2 s until the
+  far `presence != running` (or Ctrl-C, which the
+  local view's own handler serves), and a FAILED poll ends the watch with the
+  structured refusal (`Status::Error`, its own `reason`/`code`,
+  `followed: true`) rather than an `ok` that hides the diagnosis — with no
+  prose printed on a `--json` stream. `-32011` renders as a taught error naming
+  the grant and the box it runs on. Review pass over S6+S7 (same branch): a far
+  node's own error text is now cleaned at the seam with `common::clean_line`
+  for BOTH doors (the watch's `read_refused`, `send`'s remote-delivery failure)
+  and for the petname/session id `remote::node_session_label` renders out of a
+  peer's cached document — an OSC-52 escape or bidi override in a peer's
+  message reached the operator's terminal uncleaned before this, and the tests
+  drive a real curl POST at a fake door to prove the cleaned text end to end;
+  `-32011` is spelled ONCE (protocol `OUTPUT_READ_REFUSED_CODE`, read by the
+  door and by both readers), and the live remote loop is finally tested (the
+  `presence` exit with changed-only emits, and the failed poll keeping its
+  reason). Two places the brief disagreed with the
+  code, both recorded as code facts: `Frame` has no `raw` field at all
+  (S6 landed `gather`'s `raw` parameter, not a field, and the wire frame is
+  built with it false) — so "force `raw` = false" lands as "there is no
+  terminal gate on the remote path", pinned by test; and the brief's §4.3
+  signature carries a `lines_after` the Do's own list drops — S7 sends only
+  the frame key, and `aoide/linesAfter` stays S8's. Tests: aoide-conduct 892,
+  aoide-client 316, aoide-protocol 174, aoide-server 240 — all pass,
+  `cargo test --workspace --no-run` clean. S8 LANDED — the ping-back decision
+  and the line are two things and a remote parent gets the DECISION:
+  `choose_event` answers `Option<PingEvent>` (closed enum, snake_case on the
+  wire, every string already `clean`ed at the SENDER so no receiver sanitizes
+  for the far node) and `render_line(tag, &event)` renders the one line from
+  it, the tag belonging to whoever renders; the local lines are the same bytes
+  they were, pinned by the module's own unchanged fixtures. A child whose
+  record carries `remoteParent` spools each event to
+  `state/stage/pingback-remote.json` through the new
+  `aoide-storage::pingback_remote` (CONTRACTS §4) instead of calling
+  `deliver`, and NEVER calls it: per-child `seq` from 1, 16 retained, the
+  oldest dropped past the cap, `gap` when the ring rolled past the caller's
+  cursor and `last` to resync from — the cap is also the wire bound, one
+  number. The events are opaque `Value` at that layer on purpose: the closed
+  vocabulary is conduct's, and a queue that parsed its own payload would be a
+  second definition of the event. `PingEvent::Exited` is the one row that
+  comes from the RECORD (`state` folds to `done`, plus its
+  `outcome`/`exitCode`) rather than the trace, fired once per child by a new
+  `exited` latch in the cursor (serialised only when true, so every existing
+  cursor file is byte-identical — `skip_serializing_if is_false`), remote
+  children only (Q5's ruled default) and last among the trace rows so it takes
+  the silence row's place; a row of the brief's table that had to move, since
+  a ring's last event before the exit must be the child's own last word. The
+  gather's filter had to widen with it: `tracks(rec) = agent == "eidolon" ||
+  remoteParent.is_some()`, because a remote child has NO local
+  `parentSessionId` and the old "nobody to tell" gate dropped it before any
+  event could be decided. The door serves the ring as `tasks/get` +
+  `params.metadata["aoide/linesAfter"]` → `Task.history` (one `data` message,
+  `messageId: "pingback"`, the `RingRead{events, gap, last}` under the part's
+  `data`), gated by `output_read_admitted` AND
+  `history_admitted` = the child's stamped `remoteParent.key` equal to the key
+  the caller's signature verified against — the key, never the stored `node`
+  label, never a wildcard, an empty stored key matching nobody. §4.4 names no
+  code for that refusal, so it reuses `-32011` (`OUTPUT_READ_REFUSED_CODE`)
+  with its OWN text: "not this child's parent" is not the same reason as "no
+  `read`", and an operator must be able to read which one refused. A request
+  carrying BOTH output keys is judged by the STRICTER of the two — asking for
+  the history is asking for the history, and the alternative is a frame handed
+  out around a silently missing ring — while the same caller's frame-only
+  request is still admitted, which is the ruling Q2 widened. `lines_after` is
+  `params.metadata` only and reads a non-number as 0 (the tolerant reading
+  `frame_tail` already takes). Review pass over the gap the S8 brief left
+  open, and closed here: a remote EIDOLON child whose presence the sync
+  DROPPED mid-turn published nothing at all (it has no local parent, and
+  `DroppedEidolon` carried no `remoteParent`), so its ring could never close —
+  `DroppedEidolon` now carries `remote`/`exit_code`/`outcome` off the record
+  it was built from, the dropped child is gathered on the same rule as a live
+  one, and because a dropped child is never decided again (its cursor entry
+  leaves that same pass) it claims its trace row AND its exit in ONE pass.
+  One bound named and left as-is: nothing prunes a ring, so its size is 16
+  events per child this node ever ran — the same "never reconciled" shape the
+  remote-children ledger holds. Tests: aoide-storage 438 (6 new),
+  aoide-conduct 896 (4 new), aoide-protocol 174, aoide-server 245 (5 new), all
+  pass, `cargo test --workspace --no-run` clean. S9 LANDED — the parent's own
+  node pulls what its child published: `conduct`'s `pingback_pull`, in
+  `reap()`'s post-lock block one lane over from `pingback`, walks
+  `remote-children.json` and — only under `Door::Daemon`, only for a row that
+  is not `drained` and whose `parentSessionId` is a live record `deliver`
+  could reach — asks that child's node `tasks/get` +
+  `aoide/linesAfter` = the row's cursor and renders what comes back HERE.
+  `aoide-client` gained `task_history_on_node` (the signed POST shared with
+  `task_get_on_node`, a new `commands::HISTORY_PULL_TIMEOUT_SECS` = 5 rather
+  than the interactive reads' 15, because this runs inside a ~12 s tick, and
+  the existing `FRAME_MAX_RESPONSE_BYTES` for the cap) plus its pure
+  builder/parser pair in `client/node.rs`; the tunnel key is the PARENT's
+  session id, so the ssh forward is the one `close_all_for_session` already
+  closes and the daemon holds no forward of its own. The events are a peer's
+  BYTES, so each is re-validated against the closed event set (an unknown kind
+  is dropped, never guessed at), every string re-cleaned (control AND Unicode
+  `Cf`, clipped to 80) and rendered by the LOCAL `render_line` under a tag
+  built from the row — `[<node>/<child id>]`, since the far node supplies no
+  tag at all — and `deliver` still applies every skip it always did, now with
+  the gate label `autogate-child remote` (the label became a `deliver`
+  parameter; the local call site keeps `autogate-child`, and the four target
+  predicates moved into one `unreceptive` the pull and the delivery BOTH call,
+  so the candidate filter and the writer cannot disagree). The row's cursor
+  advances BEFORE the line, to whatever the answer carried — the newest event,
+  or `last` for a `gap` with no event to move past — so this lane is
+  at-most-once: a failed write loses a line rather than repeating one, which
+  the tests pin directly. A `gap` costs one line built from arithmetic
+  (`· <n> events lost before this point`), never a fabricated event. `Exited`
+  drained ⇒ `remote_children::mark_drained` latches the row (additive,
+  omitted while false) and the pull stops for it forever, because a ring is
+  never pruned and a departed child never speaks again. A pull failure is
+  quiet — one `clean_line`d audit record, `report.skipped`, no retry storm,
+  the next tick from the same cursor; the brief names no backoff, so there is
+  none, one pull per child per tick. Two judgments beyond the row, both stated
+  here: the tag the brief writes as `<node>/<petname|id>` is
+  `<node>/<sessionId>` because the ledger stores no petname, and the far node
+  is resolved by the row's `key` alone (never the display `node`, so a rename
+  cannot break a pull and a re-pair cannot dial a wrong box). Review of the
+  lane's own sender found the hole S7's `clean_line` had closed only on the
+  READ path: `pingback`'s `clean` filtered `char::is_control`, which does NOT
+  cover Unicode `Cf`, so a bidi override or zero-width mark in a child's say,
+  prompt, stop reason or tool label still reached a LOCAL parent's line. Fixed
+  on the shared sanitizer — `common::strip_unsafe` is now the one filter
+  `clean_line` and the ping-back's 80-clipped `clean` both use, no copied
+  `is_format` table — and the existing fixtures are byte-identical because
+  none of them carries a `Cf`. Tests: aoide-conduct 907 (11 new: the pull's
+  line/tag/audit, an unknown kind dropped, a `/`-leading quoted field
+  neutralized, a hostile escape+bidi+zero-width string re-cleaned on BOTH
+  lanes, a shell parent skipped before any request, the cursor advancing on a
+  failed write, the retry from an unchanged cursor beside a healthy child, the
+  gap marker with and without an event in the answer, the drain latch, no pull
+  for a done/absent parent or an unresolved node, and the `Door::Daemon`
+  gate), aoide-storage 439 (1 new), aoide-client 318 (2 new), all pass,
+  `cargo test --workspace --no-run` clean. S10 pending.
+- Review pass over S8+S9 (`ca73a2a..5275a8a`), every finding fixed on the
+  branch. **H1** — `Exited` never fired for a remote child the reaper KILLED:
+  the record is stamped `done` and `prune_done` drops it in the same pass,
+  before `pingback` re-reads the roster, so neither of its two end-facts
+  inputs could see it. `reap_inner` now returns a third value — the end facts
+  of every REMOTE child that left the roster this pass, whatever drop path
+  took it — and `reap` chains that into the same `dropped` slice. Its test
+  drives the REAL path (a pre-boot-ghost remote record through `reap()` under
+  `Door::Daemon`), which is precisely what the hand-written fixtures could not
+  see; that test also exposed a latent S8 double-`exited` (a dropped remote
+  child with NO readable trace got one from `decide` and a second from the
+  claim's own extra push — now pushed only when `decide` did not already
+  answer with one, plus a per-id dedupe of the two producers). **H2** — the
+  ring was designed to outlive the record and the door made it unreadable the
+  moment it did (the gate read `remoteParent` off a pruned record, and
+  `build_task` answered `-32001` before `history` was set), so a child that
+  ended while its parent's daemon was down left a row that could only retry
+  forever. The ring entry now carries the key it was stamped with
+  (`ChildRing.key`, written with the first event, never replaced) and the
+  history arm gates on the RING first, the record second — serving a
+  `ring_task` envelope (status from the ring's own tail: an `exited` last
+  event is `completed`) when the record is gone. The pull keeps the door's
+  CODE (`FrameReadError`, never a `String`) so it can tell a permanent answer
+  from a transient one, and latches the row on `TASK_NOT_FOUND_CODE`
+  (`-32001`, newly named in `protocol::wire::a2a`) — which the door now
+  answers, in place of the history refusal, for an id with NEITHER a record
+  NOR a ring: gone-for-good is not "not your child". **M1/M2/L2** — `last` was
+  believed outside a `gap` (a peer could drive the cursor to `u64::MAX` and
+  silence the child forever), and the remote lane's read-decide-advance was
+  not atomic, so the daemon's loop and a `session reap` re-entering through a
+  connection thread could both deliver the same window. The pull now claims
+  through `remote_children::claim_lines_after` — read the stored cursor and
+  advance it in ONE locked section, deliver only `seq` past what it returned —
+  and a claim that cannot be written delivers nothing. **M3** — no pass
+  budget: N unreachable children cost N curl timeouts inside every tick.
+  `PULL_BUDGET` (6 s) bounds the whole loop, rows it cuts off are named
+  (`budget-spent`) and audited once, and a process-global rotation starts each
+  pass one row along so none starves. **L1** — a re-rendered event's numbers
+  are clamped (`COUNT_MAX`, `MINS_MAX`; an exit code outside `0..=255` is
+  DROPPED, never clamped into a fabricated `exit 0`). **L3** — rings grew
+  unbounded across children while every spool rewrote the whole file: the
+  entry gains `at`, and the child-side pass drops a ring whose record is gone
+  and whose `at` is past `RING_GRACE_SECS` (a week) — CONTRACTS §4 now states
+  that bound where it used to say "nothing prunes a ring". **L4** —
+  `is_unsafe` gains `is_invisible`: the variation selectors
+  (`U+FE00..FE0F`, `U+E0100..E01EF`) and the Hangul/braille fillers
+  (`U+115F`, `U+1160`, `U+2800`, `U+3164`, `U+FFA0`), which are not `Cf` and
+  so slipped every sanitizer. **L5** — `remote.rs`'s unused `node_graph_json`
+  test helper deleted. Tests after the pass: aoide-conduct 914,
+  aoide-storage 442, aoide-server 246, aoide-client 318, `cargo test
+  --workspace --no-run` clean. S10 LANDED — an A2A spawn is a HEADLESS
+  MANAGED RUN (`a2a`), the last row of the brief and the lane's own
+  code-complete point. `do_spawn` no longer hand-rolls its argv: it composes
+  through `aoide_conduct::graph::build_conduct_args` (widened to `pub`, one
+  definition, never a second argv kept in step by hand — `graph.rs`
+  re-exports it) with `headless = true` ALWAYS, because this door has no
+  terminal to hand a child, plus `--task <slug>` when the caller sent
+  `metadata["aoide/task"]` (the protocol crate gains `wire::TASK_KEY`, read
+  on the same two spots `aoide/spawn` is — the message object first, then
+  top-level `params` — because this is a directive about what to do, so
+  `aoide/from`'s message-only discipline does not apply). Three things the
+  brief could not know, decided in this row: (1) the brief's "existing
+  task-slug validator" does not exist as its own function — the validator IS
+  `aoide_storage::node_store::valid_node_name` (`^[a-z0-9][a-z0-9-]*$`), the
+  predicate `spawn --task` applies to its own flag and `mail send` applies to
+  a name, because the slug IS the mailbox name; the door reuses it rather than
+  adding a second predicate one hyphen stricter; (2) an illegal slug is
+  refused `-32602` with a taught message (quoting the value, stating the
+  shape, naming the way out) BEFORE `spawn_session_id` mints an id or
+  `current_exe()` resolves, so it costs one RPC and no process — the same
+  spawn-side-only discipline S3's malformed `aoide/from` claim holds, and an
+  Inject carrying the key is answered exactly as before; (3) `--timeout`,
+  `--report-to`, `--instructions-path` and `--parent` have no source at this
+  door and stay absent — the door has no deadline to impose (inventing one
+  would kill long remote runs mid-flight), the run is reported WITHOUT a letter and nothing is mailed cross-node, a remote caller names no sidecar, and
+  `parentSessionId` stays a LOCAL field (§4: the remote parent is the
+  `remoteParent` RECORD field S3 stamps). What S10 changes for the earlier
+  slices, stated rather than implied: NOTHING for S3 — the door's env for the
+  child is byte-identical (three entries: `AOIDE_AUDIT_LOG` set,
+  `AOIDE_SESSION_ORIGIN`/`AOIDE_SESSION_ID` removed), because both new flags
+  are ARGV facts, and the `origin`+`remoteParent` stamp still lands on a
+  record that already carries the child's own task slug, both stamps being
+  stage-lock sections that cannot clobber one another. S8/S9 are unchanged
+  too: `tracks()` keys on `agent == "eidolon" || remote_parent.is_some()`,
+  which the managed shape does not touch, and the `exited` latch lives in the
+  per-child cursor entry, which the record's longer life only keeps around.
+  What CHANGES is retention, and the review BOUNDED it (H1 of the S10 review):
+  a door summon (`origin` `node:*`) used to join the local history rule and so
+  stay forever — one permanent, revocation-proof record per request, which no
+  unpairing would ever collect. It is now retained only while its report is
+  owed: `prune_done_scoped` keeps a task-carrying record when it is NOT a door
+  summon OR its report is not yet filed, so a FILED door run is swept by the
+  automatic sweep and by `session prune` alike, exactly like an untasked
+  session, while a local task run keeps the retention it always had (the
+  durable history — ledger line, transcript, sidecar, letters, cursor entry —
+  is untouched either way; the record alone goes). Two things the S10
+  paragraph above got WRONG, corrected here rather than left for the next
+  reader: (1) the child-reader enrolment was never missing — `session_conduct`'s
+  `--task` registration calls `mail::enrol_reader` for the child on EVERY path,
+  a direct `conduct --task` included, and `spawn`'s own enrol is the
+  redundancy (M3); and (2) the ONE-LIVE-RUN-PER-SLUG check now runs on BOTH
+  paths — `live_run_for`/`live_run_refusal` are `pub` and shared by
+  `spawn --task` and the door, which refuses a live-held slug `-32602`, so a
+  peer cannot squat the operator's task name (M2). Also corrected: a
+  door-summoned run is reported WITHOUT a letter (`no_mailbox`: no parent, no
+  `--report-to`, and the door clears `AOIDE_SESSION_ID`), its outcome riding
+  the report cursor entry, the record's own end facts and the audit line on
+  the child's node — nothing is mailed cross-node (M4). Tests
+  (aoide-server 246 → 251): the argv via `Command::get_args()` for no task and
+  a valid task (an illegal one has no argv at all — it is refused before one
+  exists); the env unchanged by `--headless`/`--task`; the S3 stamp landing on
+  a managed run and leaving its task slug alone. aoide-server 251,
+  aoide-conduct 914, aoide-client 318, aoide-storage 442, aoide-protocol 174,
+  all pass; `cargo test --workspace --no-run` clean. **The lane is
+  code-complete; acceptance runs 7a/7b remain the operator's, on two real
+  nodes.**
+- Review pass over S1–S3 (same branch, `8236675` onward): the caller now
+  holds its own winning claim to `valid_claimed_session_id` and refuses
+  locally before signing (the "one predicate, both sides" line was
+  document-only until then), and its ledger row rejects an ack id outside
+  that same shape; `spawn_session_id` mints `a2a-<pid>-<secs>-<n>` (pid +
+  whole second collided for two spawns inside one second, leaving one
+  record's `remoteParent` to whichever of the two stamps landed last); the
+  `-32602` for a malformed claim is applied on the SPAWN side only, so the
+  Inject arm ignores it exactly as an absent one; both ledger shapes and
+  `records::RemoteParent` flatten unknown keys into `extra`, so a field this
+  version does not know survives a rewrite; and the stamped `key` is the key
+  `verify_signed_request` actually verified (threaded down as `SignedCaller`
+  with the name), not a second lookup of the resolved name.
+- Review pass over S4 (same branch, `42218f2` onward): the HIGH finding — the
+  link was true as DATA and rendered nowhere, and the subtree was TTL-gated —
+  is closed by `who.rs::attach_subtrees`, one join of every `remoteChildren`
+  row to the probed fold by `(node name, sessionId)`, run in `collect_roster`
+  before any filter, marking each row `Fresh`/`Stale`/`Absent` and filling its
+  `subtree` from that fold's own `spawned` edges; both renderings draw the
+  chain indented under the parent's own row and `session_view_json` carries the
+  same join as `fold`/`subtree`, so a row with no fold behind it is visible as
+  `(not pulled)` while a TTL-expired one is `(stale)` rather than dressed up as
+  current. The conductor TUI's `graphview.rs` still reads neither key: a named,
+  open follow-up. The MED — a pulled document's own text neither sanitized nor
+  bounded in the roster — is closed by moving `clean_line` to
+  `graph/common.rs` (one definition, `LINE_MAX` shared with `view.rs`'s mail
+  fragments) and running every string `who.rs` prints off a pulled document
+  through it, in the renderings and the JSON alike; `remote_link` now drops a
+  link naming no `node` as well as one with no `sessionId`. The second MED —
+  "a ledger row leaves with its parent" was true for one of three exit paths,
+  and the retain committed before the caller did — is closed by
+  `doc.rs::drop_remote_child_rows`, called by both roster-exit paths AFTER
+  their own `sessions.json` write lands. The LOWs: the `fs.rs` normal-path
+  comment, the re-entrancy test now asserting `held` from inside both closures,
+  the six stale "not re-entrant" statements (`song`'s `take.rs` module doc and
+  its two inline notes, plus the two CLI wiki pages), and `current_node_name`
+  now taking the caller's already-loaded `nodes.json` (one read per document,
+  not one per link).
+- Tests (S4 review fixups, `aoide-conduct`):
+  `the_remote_chain_renders_under_its_parent_from_b_graph_and_the_json_agrees`
+  (fresh/stale/not-pulled, from B's own `build_graph` document),
+  `a_hostile_documents_own_text_is_stripped_and_bounded_on_every_rendered_path`,
+  `dropping_a_parents_ledger_rows_leaves_a_surviving_parents_alone`,
+  `local_only_commands_ignore_node_ids` (extended: the explicit prune's row
+  leaves, the survivor's stays), `reap_drops_superseded_done_siblings_on_an_
+  otherwise_quiet_pass` (extended: same for the superseded-tombstone path), and
+  `common`'s four `clean_line` cases (ANSI, bidi, newline, 1 MB). The ordering
+  itself — retain after the write — is code position, not pinned by an
+  independent failing-write test.
+- Tests (`aoide-storage`, S1):
+  `session_record_remote_parent_round_trips_and_stays_absent_when_unset`,
+  `remote_parent_round_trips_unknown_fields_beside_it`,
+  `append_is_idempotent_on_the_verified_child_identity`,
+  `a_missing_or_corrupt_ledger_reads_as_empty`,
+  `retain_drops_exactly_the_rejected_rows`,
+  `advance_lines_after_is_forward_only_and_ignores_an_unknown_child`,
+  `valid_claimed_session_id_admits_exactly_the_contract_shape`.
+- Tests (`aoide-client`, S2): `node_spawn_parent_must_name_a_live_local_
+  session`, `node_spawn_refuses_a_parent_that_is_not_a_live_local_session`,
+  `node_spawn_explicit_parent_beats_the_attestation_and_never_reads_the_
+  ambient_env`, `the_ledger_row_is_keyed_on_the_child_identity_and_needs_a_
+  parent`, `node_spawn_writes_the_ledger_row_for_its_parent_on_the_ack`,
+  `node_spawn_writes_no_ledger_row_without_a_parent` (`commands.rs`);
+  `build_message_send_body_writes_the_caller_claim_under_one_key`,
+  `the_signed_body_digest_covers_the_caller_claim` (`wire.rs`).
+- Tests (S1–S3 review pass, same branch): `aoide-storage` —
+  `remote_parent_round_trips_unknown_fields_beside_and_beneath_it`,
+  `remote_parent_extra_round_trips_through_the_struct_alone`,
+  `unknown_fields_survive_a_ledger_rewrite`; `aoide-client` —
+  `an_unruly_claim_is_refused_locally_rather_than_signed_and_shipped`
+  (plus unruly ids folded into the existing
+  `the_ledger_row_is_keyed_on_the_child_identity_and_needs_a_parent`);
+  `aoide-server` —
+  `the_remote_parent_keys_on_the_verifying_key_not_a_second_name_lookup`,
+  `a_malformed_claim_on_an_inject_shaped_request_is_ignored_not_refused`,
+  `spawn_ids_never_collide_within_a_second_and_stay_legal_session_ids`,
+  `message_send_resolves_via_signed_caller_producing_signature_rung_
+  attribution`,
+  `message_send_signed_caller_never_falls_through_to_the_addr_token_ladder`.
+- Tests (`aoide-server`, S3): `claimed_remote_parent_is_honoured_on_the_
+  signature_rung_only`, `the_remote_parent_is_built_from_the_resolved_node_
+  not_the_header_name`, `a_signed_callers_malformed_from_claim_is_refused_
+  with_minus_32602` (which also pins the unsigned ignore + its audit line),
+  `the_from_claim_is_read_only_off_message_metadata`,
+  `the_clients_from_claim_round_trips_through_the_inbound_parser`,
+  `parse_message_send_params_extracts_all_four_fields_together`,
+  `stamp_spawn_provenance_lands_the_origin_and_the_remote_parent_on_a_
+  registered_record`; the pre-existing
+  `a2a_spawn_clears_the_daemons_own_session_id_from_the_child` still pins
+  the child's env. `aoide-conduct`'s S3 test:
+  `stamp_remote_parent_is_change_only_and_leaves_parent_session_id_none`.
+- Tests (`aoide-server`, S5): `remote_parent_match_needs_a_signed_caller_its_
+  key_and_its_session` (the predicate's whole table),
+  `a_remote_parent_steers_its_child_without_pending_with_autogate_off`,
+  `..._with_autogate_on`, and
+  `a_genuinely_signed_remote_parent_steers_its_child_without_pending` (a
+  non-loopback origin, so the `autogate_match` rail is what carries it), with
+  `a_remote_parent_mismatch_leaves_todays_result_byte_for_byte` as the miss.
+  The S5 review's coverage gap (`f764f82`'s four rows all drove
+  `ConnOrigin::Remote`) is closed on the OTHER transport:
+  `a_tunneled_remote_parent_steers_its_child_without_pending` (the ssh `-L`
+  shape at `ConnOrigin::Loopback`, where only the `origin_for_inject` exemption
+  can deliver it — its pending check runs before the byte join, so deleting
+  the exemption fails it instead of hanging) and
+  `a_door_token_refuses_a_remote_parents_delivery_uniformly` (a door token
+  with no bearer presented gets #50's uniform `submitted` Task, nothing
+  delivered, nothing queued, and no `autogate-remote-parent` label — the
+  three docs that claim the bearer runs first, pinned).
+  Tests (`aoide-conduct`, S5):
+  `send_to_carries_the_attested_parent_as_its_from_claim` (a fake `curl`
+  capturing the body it is handed on stdin proves the claim rides the wire) and
+  `an_unruly_claim_still_sends_without_claiming_a_parent` (the ruling above,
+  asserted against those same captured bytes).
+- Review pass over S5 and S6 (`f764f82`, `94a1151`; code fixed in `060e6e8`):
+  the S6 refusal gets its OWN code, `-32011` (orchestrator ruling — it had
+  borrowed `-32007`, `verify_signed_request`'s, which the register itself notes
+  is decided before the frame arm runs), so every capability-gated arm now
+  mints the code it refuses with. The S5 rationale was INVERTED in three
+  places (CONTRACTS §6, `server/AGENTS.md`, here): the two rails are not one
+  load-bearing and one belt — the exemption is what carries the loopback/ssh
+  `-L` shape and the fold is what carries `ConnOrigin::Remote`'s, and each is
+  load-bearing for its own transport. MED-2: CONTRACTS §4 said no security
+  decision keys on `remoteParent` read off disk, which the deliver-now
+  decision does — §4 now states the truth (same-uid is already
+  loopback-trusted; the key comparison against the verified signer is what
+  binds the read). MED-3: `client/AGENTS.md` still claimed an unruly claim is
+  refused flat; it is refused on the SPAWN path only, `send --to` drops it and
+  warns. MED-4: `server/README.md` still called the Inject arm's
+  `resolved_node` attribution, never a gate; its Signature-rung
+  `claimed_identity` is exactly what authorizes the deliver-now. LOW-5: the
+  remote-parent source is added to the auto-deliver enumerations in
+  A2A-Door.md, Node-Transport.md and PAIRING.md. LOW-7: the warning line now
+  prints the unruly id escaped (`{id:?}`) rather than verbatim. LOW-8: the
+  rule's missing off switch is documented in CONTRACTS §6 and
+  Conductor-Channel.md — `node remove` or the child ending are the levers, and
+  `node allow <n> spawn off` stops only NEW children.
+- Owner: Eidolon executor. Depends on: §13's S-D design half, ruled here.
+- Review pass over S10 (`b814107`, `9021e71`; code and docs fixed in
+  `0928061`..): the lane's own HIGH finding, and its four smaller ones, all
+  fixed on the branch. **H1** — the door could mint permanent roster records
+  without bound (a paired `allows∋spawn` peer looping one `metadata["aoide/task"]`
+  spawn per request, each ending `done`, each retained forever; unpairing it
+  sweeps nothing), now bounded by PROVENANCE: `prune_done_scoped` keeps a
+  task-carrying `done` record when it is NOT a door summon OR its report is not
+  yet filed, so a filed door run leaves the roster exactly like an untasked
+  session while a local task run keeps its retention, and an owed report is
+  still the lane's own trigger either way. Tested through the REAL prune path
+  (`a_finished_door_summon_is_pruned_once_reported_while_a_local_task_run_is_kept`:
+  a filed door record ages out, an unreported one stays, a local run stays
+  filed or not). **M2** — the door was the one spawn path with no
+  one-live-run-per-slug admission, so a peer's child holding a slug denied the
+  OPERATOR that name for as long as the peer chose (the door imposes no
+  deadline by design): `live_run_for` + its refusal text are now `pub` and
+  shared (`graph::live_run_for`/`live_run_refusal`), the door refuses a
+  live-held slug `-32602` before an id or argv exists, and a local `spawn
+  --task` on a door-held slug is refused through the same predicate
+  (`a_local_spawn_is_refused_a_slug_a_door_child_holds_live`). **M3** — the
+  register's own "the child reads its queue as an unenrolled reader" was FALSE
+  (`session_conduct` enrols the child on every `--task` path; `spawn`'s enrol
+  is the redundancy) — corrected above, and it had hidden M2 in the same
+  sentence. **M4** — CONTRACTS §6 and this register promised a report LETTER
+  for a door-summoned run that does not exist (`report_destination` has no
+  parent and no `--report-to` to use, and the door clears `AOIDE_SESSION_ID`):
+  both now say what happens instead — reported WITHOUT a letter, `no_mailbox`,
+  the outcome on the cursor entry, the end facts and the audit line, nothing
+  mailed cross-node — which is still Q5 exactly. **L5** — `--spawned`/
+  `--headless` change more than the docs admitted: a SHELL `spawnAgent` is
+  reachable by the abandoned-shell arm (idle + stale + `spawned` + a captured
+  `restore`), and `--headless` is what makes the child a keystroke TARGET
+  (ping-back lines and mail-side doorbell writes land in a headless wrap where
+  a non-headless one with no channel is skipped as `interactive-composer`);
+  A2A-Door.md and the `spawn_argv` comment now say both, and the comment hedges
+  to "a non-shell child". **L6** — the refusal echoed a caller's raw slug:
+  it is now cleaned and capped by the ONE sanitizer
+  (`common::clean_line`, widened to `pub` and re-exported as
+  `graph::clean_line` — the client's own doc had claimed that reachability
+  since S7, so this makes an existing claim true), with the pinning test
+  asserting the sanitizer's own output and a bounded echo. **L7** — the slug
+  namespace is FLAT and the caller picks a roster label (the slug becomes the
+  run's session name): stated in CONTRACTS §6 and A2A-Door.md rather than
+  reserved away, since a reserved list would be a second undocumented rule and
+  a local `spawn --task` always had the same power. **L8** — nothing in the
+  tree could SEND the key: `aoide node spawn` gains `--task <slug>`
+  (`build_message_send_body` gains the one `task` parameter; the client holds
+  it to `valid_node_name` before signing, the door re-checks), so acceptance
+  7a/7b can exercise the managed spawn with aoide's own commands instead of a
+  hand-rolled signed POST. **L9** — house rule 8 IN LETTER: `b814107` changed
+  the `server/src/a2a.rs` and `conduct/src/graph/spawn.rs` seams and their
+  `AGENTS.md` updates landed in the follow-up `9021e71`; history is not
+  rewritten, so it is recorded here as a process defect of that lane (this pass
+  carries its docs in each commit). **L10** — the "slug check stays FIRST"
+  invariant had a false justification and no test:
+  `do_spawn_refuses_an_illegal_and_a_live_held_slug_through_its_own_boundary`
+  now drives `do_spawn` itself (safe precisely because both refusals return
+  before any process) and `server/AGENTS.md` says why that test is the one
+  that must not be "simplified" into a pure-function test. Final counts after
+  the pass: aoide-server 253, aoide-conduct 916, aoide-client 320,
+  aoide-storage 442, aoide-protocol 174, `cargo test --workspace --no-run`
+  clean. The lane remains code-complete; acceptance runs 7a/7b are still the
+  operator's, on two real nodes.

@@ -811,10 +811,17 @@ pub fn secure_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
 /// read-modify-writes would otherwise silently drop each other's fields).
 ///
 /// The lock is a `.stage.lock` file in the stage dir, `flock`ed `LOCK_EX` for
-/// the closure's duration. **Not re-entrant** (each call opens its own fd), so a
-/// caller must never nest it — wrap a whole mutator once at its top, never an
-/// inner helper it calls. Best-effort: if the lock file can't be created or
-/// locked we run `f` unlocked rather than block the desktop on a lock hiccup.
+/// the closure's duration. **Re-entrant for the SAME thread, and only for it**:
+/// a nested call on a thread that already holds the lock runs its closure
+/// directly ([`STAGE_LOCK_HELD`]), because `flock` is per open-file-description
+/// — a second fd in this same process would block on a lock this very thread
+/// already owns, which is a deadlock, not a wait (the caller that needs this:
+/// `aoide-conduct`'s `prune_done_scoped`, reached from inside `reap_inner`'s
+/// and `do_session_start_inner`'s own holds, and itself a mutator of the
+/// remote-children stage file). Every OTHER thread still waits, and two
+/// processes still serialize. Best-effort: if the lock file can't be created or
+/// locked we run `f` unlocked rather than block the desktop on a lock hiccup —
+/// and in that case nothing is recorded as held, since nothing is.
 ///
 /// **Still locks `stage_dir()`'s own lock file, even for [`conducting_stage_dir`]
 /// callers (command-defrag S1).** `sessions.json`/`hooks.json`/`projects.json`/
@@ -830,6 +837,13 @@ pub fn secure_private_dir(dir: &std::path::Path) -> std::io::Result<()> {
 /// this same lock today — no new hazard exists to close, so none was added.
 pub fn with_stage_lock<T>(f: impl FnOnce() -> T) -> T {
     use std::os::unix::io::AsRawFd;
+    // Already held by THIS thread (see the doc above): run the closure
+    // directly. The flag is true only between a successful `flock` and its
+    // unlock, so a genuinely unlocked (best-effort) outer pass does not silence
+    // the lock for a nested one.
+    if STAGE_LOCK_HELD.with(std::cell::Cell::get) {
+        return f();
+    }
     let dir = stage_dir();
     let _ = std::fs::create_dir_all(&dir);
     let lock = std::fs::OpenOptions::new()
@@ -842,6 +856,25 @@ pub fn with_stage_lock<T>(f: impl FnOnce() -> T) -> T {
         .as_ref()
         .map(|f| unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } == 0)
         .unwrap_or(false);
+    // RAII so an unwind inside `f` clears the flag with the fd, never after it:
+    // declared AFTER `lock`, so it drops BEFORE it. On an unwind that is the
+    // whole story — the flag is cleared while the flock is still held, then the
+    // close releases the lock itself. The normal path returns through the
+    // explicit `LOCK_UN` below, which releases the lock first and clears the
+    // flag as `_stamp` drops; nothing of this thread runs between the two.
+    struct StampedByThisThread;
+    impl StampedByThisThread {
+        fn take() -> Self {
+            STAGE_LOCK_HELD.with(|h| h.set(true));
+            StampedByThisThread
+        }
+    }
+    impl Drop for StampedByThisThread {
+        fn drop(&mut self) {
+            STAGE_LOCK_HELD.with(|h| h.set(false));
+        }
+    }
+    let _stamp = held.then(StampedByThisThread::take);
     let out = f();
     if held {
         if let Some(f) = &lock {
@@ -851,6 +884,11 @@ pub fn with_stage_lock<T>(f: impl FnOnce() -> T) -> T {
         }
     }
     out
+}
+
+thread_local! {
+    /// Non-zero while THIS thread holds [`with_stage_lock`]'s `.stage.lock`.
+    static STAGE_LOCK_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Fail-closed sibling of [`with_stage_lock`]: mail's base-log append (MAIL.md,
@@ -1112,6 +1150,49 @@ mod tests {
                 None => std::env::remove_var("AOIDE_ROOT"),
             }
         }
+    }
+
+    #[test]
+    fn with_stage_lock_nests_for_one_thread_and_still_releases_on_unwind() {
+        // A nested call on the thread that already holds `.stage.lock` runs its
+        // closure directly — asserted from INSIDE both closures, so the test
+        // tells re-entrancy apart from "the lock was never taken" (`held` false
+        // would lock on its own and the outer asserts would still pass).
+        // `aoide-conduct`'s prunes are the callers that need it. `flock` is per
+        // open-file-description, so without the flag that second fd would block
+        // on a lock this same thread owns — a deadlock rather than a wait.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let stage = std::env::temp_dir().join(format!("aoide-stage-lock-nest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&stage);
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        assert_eq!(
+            with_stage_lock(|| {
+                assert!(STAGE_LOCK_HELD.with(std::cell::Cell::get), "the outer call holds it");
+                with_stage_lock(|| {
+                    assert!(
+                        STAGE_LOCK_HELD.with(std::cell::Cell::get),
+                        "a nested call runs INSIDE the outer hold, not past it"
+                    );
+                    7
+                })
+            }),
+            7
+        );
+        assert!(!STAGE_LOCK_HELD.with(std::cell::Cell::get), "released on the way out");
+
+        // An unwind inside the outer closure clears the flag with the fd: a
+        // later call still locks (rather than silently running unlocked).
+        let panicked = std::panic::catch_unwind(|| with_stage_lock(|| panic!("boom")));
+        assert!(panicked.is_err());
+        assert!(!STAGE_LOCK_HELD.with(std::cell::Cell::get));
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
     }
 
     #[test]

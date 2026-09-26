@@ -289,13 +289,17 @@
   wire-authentication section, CONTRACTS.md §6).** `handle_connection`
   calls `verify_signed_request` exactly once per connection, strictly
   before either dispatch path, and threads its result down as
-  `signed_node_name: Option<&str>` through `route`/`stream_task`/
-  `RequestCtx` into `message_send`. The name it threads is the
+  `signed_caller: Option<SignedCaller>` through `route`/`stream_task`/
+  `RequestCtx` into `message_send`. The identity it threads is the
   KEY-RESOLVED one (#63 P-ID5): `verify_signed_request` finds the record
   BY the stored pubkey that verifies the signature — never by the
   `X-Aoide-Node` header, which is attribution only (a claimed-vs-resolved
   mismatch audits as `attribution-drift` via `attribution_drift_detail`,
-  and the resolved name wins everywhere downstream). Don't reintroduce a
+  and the resolved name wins everywhere downstream). The `key` rides out of
+  the verifier with the `name` for the same reason: a consumer that re-found
+  the record by name could pair this request's name with a key that never
+  verified anything, so the ONE thing that may stamp, gate, or attribute by
+  key reads both off the verifier's own outcome. Don't reintroduce a
   name-based lookup into the verifier, and keep the no-match refusal a
   single code path with a single message — unknown key, unverified node,
   keyless record, and bad signature must stay indistinguishable (no
@@ -351,6 +355,91 @@
   process spawn this precedent exists to avoid inside a `cargo test`
   binary (`std::env::current_exe()` there is the TEST binary, not a real
   `aoide`).
+- **A spawn's wrapper argv comes from `aoide_conduct::graph::build_conduct_args`,
+  never a second copy in this crate (P-RSA S10, CONTRACTS.md §6).** The door
+  passes `headless = true` ALWAYS (it has no terminal to hand a child; stdio is
+  nulled and the child is `setsid`'d) and `--task <slug>` exactly when the
+  request named one under `metadata["aoide/task"]`
+  (`aoide_protocol::wire::TASK_KEY`, read on the same two spots `aoide/spawn`
+  is — `requested_task`). `spawn_argv`/`spawn_task_slug` are `do_spawn`'s own
+  two pure halves, split out for the same reason `spawn_child_command` was
+  (a `cargo test` binary's `current_exe()` is the harness): the argv is asserted
+  with `Command::get_args()` and the env with `get_envs()`, never by driving a
+  real spawn. Three invariants to hold while editing:
+  (a) **the slug check and the live-slug check stay FIRST in `do_spawn`** —
+  before `spawn_session_id` mints an id and before `current_exe()` resolves — so
+  both refusals cost one RPC and no process.
+  `do_spawn_refuses_an_illegal_and_a_live_held_slug_through_its_own_boundary`
+  drives `do_spawn` ITSELF to hold that: it is safe only because both checks
+  return before any spawn, and it will fail loudly (the test binary trying to
+  conduct itself) if either is moved below `cmd.spawn()`. Do not "simplify" it
+  into a pure-function test.
+  (b) **the live-slug check is SHARED, not rewritten**:
+  `aoide_conduct::graph::live_run_for` + `live_run_refusal` are the wrapper's own
+  admission step and its own sentence (M2 of the S10 review — the door composed
+  `conduct` directly and so bypassed them, letting a peer squat the operator's
+  task name). Never add a second copy of the message here.
+  (c) **the slug refusal is `-32602` and spawn-side only** — the same discipline
+  S3's malformed `aoide/from` claim holds; an Inject request carrying the key is
+  answered exactly as before, because it builds no value from it. A live-held
+  slug is `-32602` too (state this node holds, not a capability the caller
+  lacks), NOT one of the capability codes `-32004`/`-32006`.
+  The predicate is `aoide_storage::node_store::valid_node_name`
+  (there is no separate task-slug validator to call: the slug IS the mailbox
+  name), and the echoed value goes through
+  `aoide_conduct::graph::clean_line` first — a caller's illegal slug may carry
+  control or `Cf` bytes and this string reaches an RPC body (L6). Do NOT add
+  `--timeout`/`--report-to`/`--instructions-path`/`--parent`
+  here without a source for each — a default deadline would kill long remote
+  runs, the report stays on the child's node as the `no_mailbox` rail (never a
+  letter, Q5), and `parentSessionId` is a LOCAL field (§4).
+- **The `metadata["aoide/from"]` parent claim is honoured on the Signature
+  rung ONLY, and the value is built from the RESOLVED record, never from wire
+  bytes (P-RSA S3, CONTRACTS.md §4/§6).** `parse_message_send_params`' fourth
+  field reads `message.metadata[aoide_protocol::wire::FROM_SESSION_KEY]` and
+  nothing else — never the top-level `params.metadata` fallback `aoide/spawn`
+  also accepts, because this is a claim about WHO is calling and the client's
+  outbound builder writes it in that one place; an empty or non-string value is
+  "no claim", not a third state. `claimable_caller` is the rung table and
+  `claimed_remote_parent` is the whole decision, pure over exactly two inputs:
+  the VERIFIED caller (`SignedCaller` — resolved `name` + the stored `key`
+  that verified, straight out of `verify_signed_request`) and the claim
+  string. `claimable_caller` passes that caller on for the
+  `NodeRung::Signature` resolution and yields `None` for every other rung;
+  never fold a second question into it (the ignore-audit stays where it was,
+  ahead of the uniform-response guard). Four invariants live across the two and
+  none may be relaxed: (1) a weaker rung — no resolution, `NodeRung::Token`,
+  `NodeRung::Addr` — IGNORES the claim and yields nothing, because a spawn
+  already requires the Signature rung and a claim from an unauthenticated
+  caller has nobody to attribute it to; the ignore is audited once
+  (`a2a.message/send`/`status:"ignored-unsigned-from"`) and must NOT become a
+  refusal — a distinct error there would be a new oracle where today there is
+  silence. (2) A signed caller's malformed claim is an error the CALLER
+  applies: `valid_claimed_session_id` is the SAME predicate the client refuses
+  its own claim with (never a second spelling), and the `-32602` is applied on
+  the SPAWN side only — the value rode inside the body the caller signed, so a
+  bad one is a client bug worth surfacing, but the Inject arm consumes the
+  claim as a COMPARISON (the S5 bullet below) and a malformed one there is
+  matched by nothing, exactly as an absent one is. `claimed_remote_parent`
+  itself stays a pure `Result` so both halves are unit-testable without a
+  spawn.
+  (3) `node`/`key` come off the `SignedCaller` — the key that actually
+  verified this request — with the claim supplying `sessionId` alone; a name
+  read off `X-Aoide-Node` or the body would be exactly the forgery the key
+  check exists to stop, so never thread a wire string into this value.
+  (4) `spawn_session_id` mints `a2a-<pid>-<secs>-<n>` — the monotonic counter
+  is load-bearing: pid+second alone collides for two spawns inside one second,
+  and two children sharing one id share one `sessions.json` record, so the
+  last `stamp_spawn_provenance` would decide whose run it is. The
+  stamp is `do_spawn`'s `remote_parent` argument → `stamp_spawn_provenance`,
+  which spends the ONE registration retry loop on both its stamps
+  (`stamp_origin`, then `stamp_remote_parent`) — never a second poll, never a
+  second thread — and the child gets NO env var for it (`spawn_child_command`
+  clears `AOIDE_SESSION_ID`/`AOIDE_SESSION_ORIGIN` and adds nothing back),
+  the same reason `node:*` origin stopped riding env at P-ID0. This door never
+  writes `parentSessionId`: every reader of that field treats it as a LOCAL id,
+  so a foreign value there would dangle or grant local autogate
+  (CONTRACTS.md §4).
   `verify_signed_request`'s canonical string now reads `&req.method` (the
   request's own OBSERVED method), not a hardcoded `"POST"` literal (P-P5b,
   closing a P-P4 review finding) — a genuine behavior no-op today (every
@@ -365,7 +454,7 @@
   loopback-terminating proxy) delivers a tunneled node's packets from its
   own end's sshd, so `classify_origin` sees loopback for a tunneled request
   exactly like a genuinely local caller — `origin_for_inject(origin,
-  signed_node_name.is_some() && !sig_autogate)` closes that gap by coercing
+  signed_caller.is_some() && !sig_autogate)` closes that gap by coercing
   the origin fed to `should_deliver_now` to `ConnOrigin::Unknown` for a
   signed, NON-autogate node (reusing that variant's existing fail-safe arm,
   the same move `effective_origin` already makes for an invalid door-wide
@@ -389,13 +478,78 @@
   `autogate_match`) instead of the coercion. Don't gate this on
   `token_configured`/`TokenState` — that's `effective_origin`'s own,
   separate question (an invalid DOOR-WIDE bearer); this narrowing fires on
-  `signed_node_name`/`sig_autogate` alone, unconditionally. Tests:
+  `signed_caller`/`sig_autogate` alone, unconditionally. Tests:
   `signed_inject_from_a_non_autogate_node_on_a_loopback_connection_is_held_pending`
   is the actual regression pin (the exact hole a tunnel would otherwise
   open); `signed_inject_from_an_autogate_node_on_a_loopback_connection_still_auto_delivers`
   is the restoration; `origin_for_inject_is_the_identity_function_when_unsigned`
   and `origin_for_inject_downgrades_loopback_once_the_request_is_signed`
   pin the pure predicate directly.
+- **A REMOTE PARENT steers the child it spawned without pending — the
+  claim's second consumer, riding exactly those two rails (P-RSA S5,
+  CONTRACTS.md §6).** `remote_parent_match(caller, claim, target)` is the whole
+  predicate, true only for all three at once: the caller
+  `verify_signed_request` proved (Signature rung, so every weaker rung's `None`
+  can never match), the target record's `remoteParent.key` equal to that
+  caller's verified key, and its `remoteParent.sessionId` equal to the claim.
+  Both equalities are load-bearing — the key is what this door's own spawn
+  stamped from the key that verified THAT request, so a caller can only ever
+  match the child of the node it actually is. The target side is
+  `session_remote_parent`, a stage read behind
+  `claimed_from.as_deref().is_some_and(...)`: paid ONLY by a request that both
+  carried a claim and proved a signature, so an ordinary inject and every spawn
+  read exactly what they read before. The hit needs BOTH rails `sig_autogate`
+  rides, and each rail carries one transport — neither is redundancy. The
+  EXEMPTION from `origin_for_inject`'s downgrade carries the loopback/ssh `-L`
+  shape: `should_deliver_now(ConnOrigin::Loopback, _)` delivers
+  unconditionally, so the exemption alone is enough there, while without it a
+  tunneled parent is coerced to `Unknown` — whose arm delivers nothing at all.
+  The FOLD into `autogate_match` carries `ConnOrigin::Remote`'s shape: that arm
+  consults `autogate_match` and nothing else, so a directly-addressed parent
+  pends without the fold (the exemption is inert there — the origin was never
+  loopback to begin with). It overrides neither earlier question: the door-wide
+  bearer still runs FIRST — a door with `aoide.a2a.tokenFile`/`bearerSecret` set
+  admits a remote parent only if it presents the bearer, and `effective_origin`
+  still coerces a bearer that does not classify `Valid` — and a node's own
+  `autogate` flag need not be on for a parent to steer its child (the same
+  independence `send_gate`'s local parent rule has), so pass
+  `autogate_match || remote_parent_hit`, never `remote_parent_hit` folded INTO
+  `autogate_match`. A hit audits
+  `a2a.message/send`/`status:"autogate-remote-parent"`; a MISS adds nothing at
+  all — no new error, no new pending wording, the same bytes the same request
+  got before. A malformed claim needs no arm here: this door never stamped a
+  value outside `valid_claimed_session_id` as any record's `sessionId`, so
+  equality is false exactly as for an absent claim, and the `-32602` stays
+  spawn-side where the value is actually built. That is also why the client
+  stops refusing one on the send path: `send --to` drops an unruly claim, sends
+  unclaimed, and names the reason on one warning line
+  (`not claiming parent: <reason>`) — the door answers the same send the same
+  way either way — while `node spawn` still refuses the call outright. Tests:
+  `remote_parent_match_needs_a_signed_caller_its_key_and_its_session` is the
+  predicate's whole table; `a_remote_parent_steers_its_child_without_pending_
+  with_autogate_off`/`_on` are the hit; `a_genuinely_signed_remote_parent_
+  steers_its_child_without_pending` is the non-loopback origin;
+  `a_tunneled_remote_parent_steers_its_child_without_pending` is the
+  loopback/ssh `-L` origin the exemption exists for (its pending check runs
+  before the byte join, so its regression fails instead of hanging);
+  `a_door_token_refuses_a_remote_parents_delivery_uniformly` is the bearer
+  running first; `a_remote_parent_mismatch_leaves_todays_result_byte_for_byte`
+  is the miss.
+- **A shell target takes no auto-delivered inject from ANY rung — loopback
+  and remote-parent autogate alike (N1, house rule 4).** The Inject arm
+  reads the TARGET's own record
+  (`session_wrapped_is_a_shell` → `aoide_conduct::graph::
+  wrapped_program_is_a_shell`, the record-side half of
+  `program_is_a_shell`) before it folds `deliver_now`, and holds the line
+  PENDING when it comes back true — a shell's input is a command line, and
+  `--agent <harness> -- bash` names a harness over a pty running a shell, so
+  the `agent` label is not the question. Paid only where it can change the
+  outcome (a decision that was going to pend anyway reads nothing), audited
+  `a2a.message/send`/`status:"shell-wrapped"`. An unreadable stage answers
+  TRUE (this is a refusal's input: "cannot tell" takes the safe arm), unlike
+  `session_remote_parent`'s `None`. Pinned by
+  `a_shell_wrapped_target_takes_no_auto_delivered_inject`, whose two arms
+  differ only by the target's P-C5 capture.
 - **`do_inject`'s `from` attribution (P-P3 decision 7) is scoped to the
   QUEUED path only — never an immediately-delivered payload's bytes.**
   `session_send`'s own `from` mechanism also prefixes DELIVERED text
@@ -451,7 +605,7 @@
   calls `verify_signed_request` exactly ONCE per connection, strictly
   before both the streaming and the plain-JSON-RPC dispatch branches —
   don't duplicate that call inside `route`/`stream_task`/`handle_jsonrpc`;
-  they only ever receive the already-computed `signed_node_name`.
+  they only ever receive the already-computed `signed_caller`.
 - **`a2a::self_url(bind, port)` is the ONE formula the AgentCard's `url`
   field and `route`'s own `aoide/graphSummary` handling call — never a
   second inline `format!("http://{bind}:{port}/")` (P-P6).** Before this
@@ -521,12 +675,76 @@
   check into `decide_send_action` or `SessionRef` "for locality" — both
   types' own doc comments state the point of staying stage-file-free and
   unit-testable with a bare closure, no socket or tempdir required.
+- **`tasks/get` carries the session's watch frame, and the read that admits
+  it is `output_read_admitted` (P-RSA S6, CONTRACTS.md §6).** The request
+  signal is `params.metadata["aoide/frame"]` — `params` only, never
+  `message.metadata`, the `message/send` fallback `aoide/spawn` also accepts,
+  because this is a request about a session rather than a message — and the
+  answer is the SAME status read plus the frame as one `data` artifact, so a
+  request without the key stays byte-identical. The gate is three clauses at
+  once: `read_ok` (the door-wide bearer rule every read arm carries —
+  `token_authorized`), a caller resolved through the SIGNATURE rung, and that
+  record `verified` with `read` in its `allows` (`node_may_read`,
+  `node_may_spawn`'s twin one capability over). Resolution goes through
+  `resolved_caller`, which takes the rung from the PROOF rather than a second
+  lookup: no `SignedCaller` (unsigned, bearer, address) is `None` whatever the
+  registry holds. The remote-parent key match is deliberately NOT required to
+  READ — reading is wider than writing, and `send`'s remote-parent delivery
+  (S5) and the ping-back history still need the key. The refusal is this arm's
+  OWN code, `-32011` — minted like Spawn's `-32006` and `mailDeposit`'s
+  `-32010`, and never `-32007`, which stays `verify_signed_request`'s
+  incomplete-headers/signature-mismatch family decided BEFORE this arm runs —
+  with ONE text for every refusal and the same text whether the named session
+  exists or not, so the gate is no existence oracle beyond the status read it
+  shares the method with. The gate runs FIRST, so a refusal never depends on
+  whether the id exists; a session with no frame to read (unknown id, a `sub:`
+  card, a record keeping no conduct-owned PTY) answers `session watch`'s own
+  taught refusal under `-32001`, after the gate. A frame read audits under its
+  own label, `a2a.tasks/get.frame`; the frame leaves through `Frame::for_wire`
+  (this box's paths and the suggested command struck) inside the tail (1..=200),
+  letter-body (40 lines) and 256 KiB frame caps. Tests:
+  `output_read_admitted_is_a_signed_verified_node_with_read` is the gate's
+  whole table and `resolved_caller_needs_a_proof_and_finds_its_own_record` the
+  rung rule;
+  `an_unsigned_frame_read_is_refused_and_is_no_existence_oracle` pins the one
+  text and the `-32011` code, `a_signed_node_without_read_is_refused` the
+  revocation shape, and `a_signed_reader_reads_any_sessions_frame` the ruling
+  that reading needs no `remoteParent`.
+- **`tasks/get` also serves the ping-back history, and THAT read keeps the key
+  match (P-RSA S8, CONTRACTS.md §6).** `params.metadata["aoide/linesAfter"]`
+  — read by `lines_after`, `params` only and tolerant of a non-numeric value
+  (it reads as `0`: a wrong cursor costs duplicates, never a parent its
+  child's history) — answers with the same status read plus the ring after
+  that cursor as ONE `data` message under `Task.history` (found by
+  `messageId: "pingback"`, its part's `data` the whole
+  `RingRead{events, gap, last}`). The gate is `output_read_admitted` AND
+  `history_admitted`, which is the output gate plus the child's own stamped
+  `remoteParent.key` equal to the key the caller's signature verified against:
+  the key, never the stored `node` label, never a wildcard, and an empty
+  stored key matches nobody. This is the ONE output read the 2026-09-25 ruling
+  does NOT widen — a `read`-holding node may watch any frame, but what a child
+  published for its parent belongs to that parent. The refusal reuses
+  `OUTPUT_READ_REFUSED_CODE` (`-32011`; §4.4 of the lane brief names no code of
+  its own for this arm) with its OWN text, because "you are not this child's
+  parent" is not the same reason as "you hold no `read`", and the gate still
+  runs before the status read so neither is an existence oracle. **A request
+  carrying BOTH output keys is judged by the stricter one**: asking for the
+  history is asking for the history, so a foreign key is refused for the whole
+  request rather than handed a frame around a silently missing ring — while
+  the same caller's frame-only request is still admitted. The label is
+  `a2a.tasks/get.history` (it wins the tie). Tests:
+  `history_is_admitted_only_for_the_key_this_door_stamped` is the table,
+  `a_signed_parent_reads_its_childs_ping_back_history` the admitted read and
+  its cursor, `a_foreign_key_is_refused_for_history_while_its_frame_is_admitted`
+  the refusal, the both-keys rule and the no-existence-oracle pin,
+  `an_unsigned_history_read_is_refused` the unsigned shape, and
+  `lines_after_reads_only_params_metadata_and_tolerates_any_value` the reader.
 - **`aoide/mailDeposit` (P-M2) is the SECOND capability-gated A2A arm,
   after Spawn, and the first not gated on `spawn` — `deposit_admitted`
   mirrors `spawn_admitted` one capability over, but signature-only from
   the start, with no Addr/Token fallback rung to migrate off of the way
   Spawn once had.** `node_may_message` is `verified && allows.contains
-  ("message")`, checked only against `ctx.signed_node_name`'s KEY-resolved
+  ("message")`, checked only against `ctx.signed_caller`'s KEY-resolved
   node (`resolved: Option<&Node>`, `None` whenever the request carried no
   verified signature at all). `deposit_refusal` returns `-32010` for
   BOTH its shapes (paired-but-not-`message`-allowed, told the exact `node

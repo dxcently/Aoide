@@ -31,13 +31,14 @@
 //! content-hashing trivially safe, because "the file on disk" and "the take
 //! as minted" are never allowed to diverge.
 //!
-//! **Every function here is UNLOCKED.** `crate::fs::with_stage_lock` is
-//! documented not re-entrant (`fs.rs`), so this module never calls it
-//! itself — take-number allocation (read max, write max+1) is exactly the
-//! read-modify-write race the lock exists for, but wrapping it in HERE would
-//! deadlock the very first caller (a later revert/snapshot mutator) that
-//! wraps its own multi-step body in one `with_stage_lock` and calls these
-//! cores inside it. Locking is entirely the caller's job, once, around the
+//! **Every function here is UNLOCKED.** `crate::fs::with_stage_lock` nests for
+//! the thread that already holds it (`fs.rs`), so this module still never
+//! calls it itself — one acquire belongs around the WHOLE multi-step body a
+//! caller owns (take-number allocation is read max, write max+1; wrapping only
+//! the cores would make each step atomic and the operation not), and a caller
+//! that wraps its own body in one `with_stage_lock` and calls these cores
+//! inside it must find them lock-free rather than nesting a no-op per call.
+//! Locking is entirely the caller's job, once, around the
 //! whole mutation — these are the pure primitives it composes.
 //!
 //! Pure fs + serde only: no `Outcome`, no CLI, no domain validation (song/

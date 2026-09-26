@@ -39,7 +39,10 @@
 //! submit keystroke, nothing else on the wire. A PTY ring (headless, no
 //! live channel) writes directly with [`super::send::write_delivery`] — no
 //! gate, no pending queue, no provenance prefix, no title rename — and that
-//! one is followed by the target's own submit keystroke.
+//! one is followed by the target's own submit keystroke. A PTY ring is
+//! therefore refused outright for a wrap whose WRAPPED program is a shell
+//! (`shell-parent`, [`wrapped_program_is_a_shell`]): the line is submitted,
+//! and a shell would RUN it. The channel arm is not that — nothing is typed.
 //!
 //! **Every other door forwards, never rings.** `aoide-client`'s `mail send`
 //! (self branch) already forwarded `mail ring` through
@@ -52,6 +55,7 @@
 //! deliberately deferred out of this slice.
 
 use super::conduct::channel_socket_path;
+use super::conduct::wrapped_program_is_a_shell;
 use super::doc::is_conductable_now;
 use super::model::{load_stage, sessions_path, SessionRecord, SessionsFile};
 use super::permit::profile_for_agent;
@@ -78,7 +82,9 @@ pub struct RingReport {
     pub deferred: Vec<(String, String)>,
     /// (wrap id, reason) — `unknown` (armed but no session record),
     /// `not-conductable` (`is_conductable_now` false, including a socket
-    /// file that no longer exists), `interactive-composer` (interactive
+    /// file that no longer exists), `shell-parent` (the wrap's own WRAPPED
+    /// program is a shell and no channel socket answered: the PTY line would
+    /// be RUN as a command), `interactive-composer` (interactive
     /// AND no live channel socket), `no-readiness-signal` (no hook-fed
     /// agent child), or `write-failed` (the chosen transport's connect/
     /// write itself failed — channel or PTY alike). The latch is untouched
@@ -279,6 +285,19 @@ fn ring_locked(name: &str, exclude: Option<&str>) -> RingReport {
 
         let wrote = match channel_write {
             Some(result) => result,
+            // Never a submitted line into a shell (house rule 4) — `<name>` is
+            // one line and a shell would RUN it. Only the PTY arms below need
+            // this: the channel arm above is a one-way push into the
+            // harness's own MCP subprocess and types nothing into any pty, so
+            // a shell wrap with a live channel is still rung. The read is the
+            // same one ping-back's `unreceptive` makes
+            // (`conduct::wrapped_program_is_a_shell`): the WRAPPED program,
+            // never the `agent` label — a wrap labelled from a harness profile
+            // can still be conducting `bash`.
+            None if wrapped_program_is_a_shell(wrap) => {
+                report.skipped.push((wrap_id.clone(), "shell-parent".to_string()));
+                continue;
+            }
             None if wrap.headless => {
                 // `is_conductable_now` already proved `wrap.socket` is
                 // `Some`, non-empty, and exists on disk.
@@ -1226,6 +1245,89 @@ mod tests {
 
         assert_eq!(report.rung, vec![wrap_id.to_string()]);
         assert!(String::from_utf8_lossy(&bytes).starts_with(&nudge_line(name)));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// N1's doorbell half: a wrap that is CONDUCTING a shell is never typed
+    /// into, however its record is labelled — and this wrapper's label
+    /// (`claude`, [`headless_wrap`]'s own) is a registered harness profile, so
+    /// the pre-fix lane rang it and submitted the line into the shell, which
+    /// RAN it. `--agent claude -- bash` is the live shape the acceptance run
+    /// hit one lane over with `--agent pi -- bash`.
+    #[test]
+    fn a_shell_wrapped_wrap_is_skipped_and_never_typed_into() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = setup("ring-shell-wrap-pty");
+        let name = "claude-mail";
+        let wrap_id = "wrap-1";
+        let child_id = "wrap-1-child";
+        let listener = headless_wrap(wrap_id);
+        hook_child(child_id, wrap_id, "claude");
+        do_session_phase(child_id, "stopped");
+        // The wrap's wrapped program is a shell (its P-C5 capture is on the
+        // record) even though the label says `claude` — no channel bound, so
+        // the only transport left is the one that would submit into a shell.
+        stamp_shell_capture(wrap_id);
+
+        aoide_storage::mail::enrol_reader(name, wrap_id).unwrap();
+        aoide_storage::mail::file_letter("someone", name, "hello").unwrap();
+
+        let report = ring(name, None).unwrap();
+        assert_eq!(report.skipped, vec![(wrap_id.to_string(), "shell-parent".to_string())], "{report:?}");
+        assert!(report.rung.is_empty());
+        assert_nothing_arrives(&listener);
+        // Untouched latch, the same as every other skip: the next trigger
+        // tries again, and the reader is told nothing it did not get.
+        assert_eq!(aoide_storage::mail::ring_targets(name).unwrap().armed.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The other side of that rule, pinned so a later "shell wrap" reading of
+    /// it cannot silently kill the doorbell for a terminal hosting a harness:
+    /// the CHANNEL arm types nothing into the pty, so a shell-wrapped wrap with
+    /// a live channel socket is still rung — over the channel, with no submit
+    /// keystroke.
+    #[test]
+    fn a_shell_wrapped_wrap_with_a_live_channel_is_still_rung_over_the_channel() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_AUTOGATE",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = setup("ring-shell-wrap-channel");
+        let name = "claude-mail";
+        let wrap_id = "wrap-1";
+        let child_id = "wrap-1-child";
+        let pty_listener = headless_wrap(wrap_id);
+        hook_child(child_id, wrap_id, "claude");
+        do_session_phase(child_id, "stopped");
+        stamp_shell_capture(wrap_id);
+        let channel = channel_listener(wrap_id);
+
+        aoide_storage::mail::enrol_reader(name, wrap_id).unwrap();
+        aoide_storage::mail::file_letter("someone", name, "hello").unwrap();
+
+        let acc = std::thread::spawn(move || read_all(channel));
+        let report = ring(name, None).unwrap();
+        let bytes = acc.join().unwrap();
+
+        assert_eq!(report.rung, vec![wrap_id.to_string()], "{report:?}");
+        assert_eq!(bytes, format!("{}\n", nudge_line(name)).into_bytes(), "the channel gets the line and nothing else");
+        assert_nothing_arrives(&pty_listener);
 
         let _ = std::fs::remove_dir_all(&root);
     }

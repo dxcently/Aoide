@@ -48,6 +48,12 @@ pub(crate) mod identity;
 mod model;
 mod node_list;
 mod pending;
+// Addressing a session on ANOTHER node (P-RSA): the cached-graph resolution
+// `send --to <node>/<query>` and `session watch <node>/<query>` both stand on,
+// moved out of `send.rs` when the watch became the second caller — one
+// definition, so the two doors cannot disagree about what a `<node>/<query>`
+// means or how an unresolvable one is refused.
+mod remote;
 // The ping-back (P-EIDOLON slice E5b, EIDOLON-TRACE.md's "Second slice"):
 // the reaper tick's own reader of an eidolon child's trace, delivering ONE
 // line about the child to the parent that spawned it — the doorbell's path
@@ -101,6 +107,15 @@ pub use self::conduct::conduct_socket_path;
 // the socket the doorbell will eventually write a nudge line onto — the
 // same way `conduct_socket_path` already crosses this boundary above.
 pub use self::conduct::channel_socket_path;
+// N1 (house rule 4): `aoide-server`'s A2A door reads the target record's own
+// WRAPPED-program shape before an inject — the same read the ping-back and
+// doorbell lanes make, re-exported for the same reason
+// `conduct_socket_path` above is. One predicate, three lanes, no copy.
+pub use self::conduct::wrapped_program_is_a_shell;
+// The same predicate, for the doors that hold an ARGV rather than a record:
+// `aoide-server`'s spawn arm refuses a `spawnAgent` that is a shell, and that
+// decision happens before any record exists.
+pub use self::conduct::program_is_a_shell;
 pub use self::doc::{build_graph, render, resolve_graph_document};
 // `mail ring` (P-M5a-2, MAIL.md "Delivery and the doorbell"): the ring
 // itself, callable in-process by any door that has this crate (the daemon
@@ -110,7 +125,7 @@ pub use self::doorbell::{mail_ring, ring, RingReport};
 // `reap.rs` (a SIBLING of this module) is its one caller, from the sweep's
 // post-lock collector block — so this stays `pub(crate)`, never crossing the
 // crate boundary.
-pub(crate) use self::pingback::pingback;
+pub(crate) use self::pingback::{pingback, pingback_pull};
 pub use self::model::{
     anchor_for, effective_project_for, lead_over, leads_project, project_for, canonical_state, merged_sessions, HookRecord, HooksFile, Project, ProjectsFile,
     SessionRecord, SessionsFile,
@@ -126,6 +141,13 @@ pub use self::trace::session_trace;
 // like `session trace` above.
 mod view;
 pub use self::view::session_watch;
+// The remote sub-agents lane (P-RSA S6): `aoide-server`'s `tasks/get` frame
+// arm asks for the SAME frame `session watch --snapshot` prints, one gather
+// with raw off — `watch_frame`. `Frame`/`MailLine` cross the boundary with it
+// because the door holds that frame, strikes its host-local fields
+// (`Frame::for_wire`) and clamps it to the wire's own caps; no second wire
+// shape exists to drift from the rendered one.
+pub use self::view::{watch_frame, Frame, MailLine};
 pub use self::permit::{answer_summons, session_permit, summons_card_id};
 pub use self::send::{pending_path, session_hook, session_send};
 pub use self::session_store::{session_bind, session_end, session_phase, session_start};
@@ -135,6 +157,12 @@ pub use self::session_store::{session_bind, session_end, session_phase, session_
 // child's own (forgeable) env. `stamp_origin`'s own doc comment names both
 // legitimate callers.
 pub use self::session_store::stamp_origin;
+// The remote sub-agents lane (P-RSA S3): the SAME writer posture one field
+// over — `aoide-server`'s `a2a::do_spawn` stamps the child's `remoteParent`
+// from the resolved node record (never a header or body name), and no other
+// crate/flag/env path may write it. `stamp_remote_parent`'s own doc has the
+// full argument.
+pub use self::session_store::stamp_remote_parent;
 // LANE IDENTITY P-ID1: `aoide-server`'s daemon `dispatch` handler is the one
 // legitimate caller — it stamps a just-minted sealed credential directly
 // onto the record it just registered a pid for, the same "stamp from the
@@ -145,6 +173,21 @@ pub use self::session_store::stamp_seal;
 // `conduct` that re-execs `conduct --headless` and returns without
 // waiting on the agent's own lifetime — see `graph/spawn.rs`'s module doc.
 pub use self::spawn::session_spawn;
+// `build_conduct_args` — the ONE `conduct` argv shape (P2's own builder),
+// used by `aoide-server`'s A2A door so a remote spawn's child is a wrapper of
+// the same shape a local `spawn` produces, never a second spelling of it
+// (P-RSA S10).
+pub use self::spawn::build_conduct_args;
+// `live_run_for`/`live_run_refusal` — the ONE one-live-run-per-slug admission
+// step and its ONE refusal text (P-RSA S10 review, M2). The door composed
+// `conduct` directly and so bypassed the wrapper's own admission; sharing the
+// predicate (rather than writing a second copy of the message in the server)
+// is what closes that, and is why both are `pub`.
+pub use self::spawn::{live_run_for, live_run_refusal};
+// `clean_line` — the ONE sanitizer every surface that prints a peer's own
+// bytes uses, now including `aoide-server`'s A2A door (a slug echoed in a
+// refusal, P-RSA S10 review, L6). Never a second table of "unsafe" down there.
+pub use self::common::clean_line;
 // `graph resurrect` (P-D8, `docs/architecture/AOIDED.md`'s "L5"): revives a
 // project's undying set (or `--all`/`--id`) off the durable ledger, via the
 // windowed spawn path, resolving each candidate through a harness or a
@@ -193,7 +236,7 @@ pub use self::session_store::now_iso_utc;
 // `use crate::graph::{...}`" section) — never reached from root, so they stay
 // `pub(crate)`.
 pub(crate) use self::common::stage_error;
-pub(crate) use self::doc::{drop_sessions, ledger_session_exit, prune_done};
+pub(crate) use self::doc::{drop_remote_child_rows, drop_sessions, ledger_session_exit, prune_done};
 pub use self::doc::restage_graph;
 pub(crate) use self::model::{hooks_path, STAGE_GRAPH_VERSION};
 pub(crate) use self::session_store::{
@@ -202,7 +245,7 @@ pub(crate) use self::session_store::{
 pub(crate) use self::window::hyprctl_clients;
 pub(crate) use self::codex_app::codex_home;
 pub(crate) use self::codex_app::sync_codex_app_threads;
-pub(crate) use self::eidolon::sync_eidolon_sessions;
+pub(crate) use self::eidolon::{sync_eidolon_sessions, DroppedEidolon};
 /// Widened from `pub(crate)` to `pub` at P-A1 of the binary-split
 /// workstream: `aoide-screen` (moved out of this crate) needs the same
 /// `0x`/case-tolerant window-address comparison its own session-targeted

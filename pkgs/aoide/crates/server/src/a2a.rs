@@ -55,10 +55,12 @@ use aoide_conduct::graph::{
 use aoide_protocol::output::Status;
 use aoide_protocol::registry::{Command, Registry};
 use aoide_protocol::wire::{
-    AgentCapabilities, AgentCard, AgentSkill, JsonRpcResponse, Task, TaskStatus,
-    TaskStatusUpdateEvent,
+    AgentCapabilities, AgentCard, AgentSkill, Artifact, JsonRpcResponse, Message, Part, Task,
+    TaskStatus, TaskStatusUpdateEvent, FRAME_ARTIFACT_ID, FRAME_KEY, HISTORY_MESSAGE_ID,
+    LINES_AFTER_KEY, OUTPUT_READ_REFUSED_CODE, TASK_NOT_FOUND_CODE,
 };
 use aoide_protocol::{audit, Door, EventClass, Invocation};
+use aoide_storage::records::RemoteParent;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -458,7 +460,7 @@ fn effective_origin(origin: ConnOrigin, token_configured: bool, token_state: Tok
 /// `signed_non_autogate` is `true` only when the caller both ran the request
 /// through [`verify_signed_request`] AND resolved it to a node the operator
 /// has NOT marked auto-deliver (`message_send` computes exactly
-/// `signed_node_name.is_some() && !sig_autogate`). Such a caller is a remote
+/// `signed_caller.is_some() && !sig_autogate`). Such a caller is a remote
 /// node by construction, so it loses `ConnOrigin::Loopback`'s free pass:
 /// coerced to [`ConnOrigin::Unknown`], reusing that variant's existing
 /// fail-safe arm rather than inventing a fourth origin kind — exactly the
@@ -623,6 +625,14 @@ pub fn a2a_task_state_checked(dead: bool, canonical: &str, needs_sudo: bool) -> 
 /// work — `message/send` (Phase B2) landed the inject/spawn execution
 /// semantics but kept this MVP id-collapse.
 fn task_from_sessions(sessions: &[SessionRecord], id: &str) -> Result<Value, (i64, String)> {
+    Ok(serde_json::to_value(&build_task(sessions, id)?).expect("Task always serializes"))
+}
+
+/// The envelope itself, before serialization — [`task_from_sessions`]'s body,
+/// split out so the watch-frame arm (`tasks/get` with `aoide/frame`) can set
+/// `artifacts` on the SAME status read rather than build a second shape that
+/// could drift from it.
+fn build_task(sessions: &[SessionRecord], id: &str) -> Result<Task, (i64, String)> {
     let rec = sessions
         .iter()
         .find(|s| s.session_id == id)
@@ -653,15 +663,16 @@ fn task_from_sessions(sessions: &[SessionRecord], id: &str) -> Result<Value, (i6
         |_| None,
     );
     let state = a2a_task_state_checked(dead, canonical, needs_sudo);
-    let task = Task {
+    Ok(Task {
         id: rec.session_id.clone(),
         // MVP simplification: task id == sessionId, contextId == sessionId —
         // see the doc comment above.
         context_id: rec.session_id.clone(),
         status: TaskStatus { state: state.to_string(), timestamp: now_iso_utc() },
         kind: "task".to_string(),
-    };
-    Ok(serde_json::to_value(&task).expect("Task always serializes"))
+        artifacts: None,
+        history: None,
+    })
 }
 
 /// Load `sessions.json` off the stage and resolve one task by id.
@@ -670,6 +681,341 @@ fn task_get(task_id: &str) -> Result<Value, (i64, String)> {
     let sf: SessionsFile =
         load_stage(&path).map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
     task_from_sessions(&sf.sessions, task_id)
+}
+
+// ── `tasks/get` + `metadata["aoide/frame"]`: the watch frame ────────────────
+//
+// CONTRACTS.md §6 (P-RSA S6). The A2A extension that puts a session's watch
+// frame — the same frame `aoide session watch --snapshot` prints — on the
+// wire as ONE `data` artifact, behind [`output_read_admitted`]. Nothing else
+// about `tasks/get` moves: a request that does not ask for a frame is
+// answered by [`task_get`] exactly as before, and the two optional fields the
+// envelope grew (`artifacts`/`history`) are omitted when absent.
+
+/// The most output lines a frame request may ask for. The floor is 1 (a
+/// request for none still gets the last line — a frame with no output at all
+/// says nothing), the ceiling is this: a wire bound, not a UI preference.
+const FRAME_TAIL_MAX: u64 = 200;
+/// `session watch`'s own default window, for a request that names no `tail`.
+const FRAME_TAIL_DEFAULT: u64 = 50;
+/// How many lines of ONE letter's body a frame may carry — `clean_block`
+/// keeps up to `BLOCK_LINES_MAX` (400), which is a LOCAL render bound; the
+/// wire's own is this.
+const LETTER_BODY_LINES_MAX: usize = 40;
+/// The serialized frame's own bound, in bytes.
+const FRAME_MAX_BYTES: usize = 256 * 1024;
+/// What a refused output read says — ONE text for every refusal, and it says
+/// NOTHING about the session asked for: the same message whether the id
+/// exists or not, so the read gate is not an existence oracle beyond the
+/// status `tasks/get` already reveals. The CODE it answers with is
+/// `OUTPUT_READ_REFUSED_CODE`, spelled once in `aoide_protocol::wire::a2a`
+/// for the door AND its readers: this arm's own number, never `-32007`, which
+/// stays [`verify_signed_request`]'s incomplete-headers/signature-mismatch
+/// family — decided BEFORE this arm runs at all — so the code alone tells a
+/// refused read from a refused signature without matching prose.
+const OUTPUT_READ_REFUSED: &str = "output read refused: reading a session's output needs a signed, \
+     verified node whose allows include `read` on this host";
+
+/// What a refused ping-back HISTORY read says (CONTRACTS.md §6, P-RSA S8).
+/// The same code as [`OUTPUT_READ_REFUSED`] — §4.4 of the lane brief names no
+/// code of its own for this arm, and both refusals are the same family: an
+/// output read this caller is not admitted to. The TEXT is its own, because
+/// the reason is not the same and an operator deserves to read which one it
+/// was: this caller may well hold `read`, and still not be the parent this
+/// child was spawned for. Like every refusal here it says NOTHING about the
+/// session asked for — the same words whether the id exists or not — so the
+/// gate stays no existence oracle.
+const HISTORY_READ_REFUSED: &str = "output read refused: a session's ping-back history is readable \
+     only with `read` on this host AND the key this node stamped for the parent that spawned the \
+     child — on its record, or on the ring entry that outlives it";
+/// The output-read gate (CONTRACTS.md §6, P-RSA S6). True only when all three
+/// hold:
+/// - `read_ok` — the door's own bearer gate ([`token_authorized`]), the same
+///   one every other read arm carries. With no token configured it is true
+///   for everyone; that is exactly why this predicate exists;
+/// - the caller resolved through the SIGNATURE rung, i.e. a signature this
+///   door verified against some node record's stored pubkey;
+/// - that record is `verified` with `read` in its `allows` ([`node_may_read`]).
+///
+/// **Wider than the Inject arm on purpose** (User ruling, 2026-09-25): a
+/// signed, verified node holding `read` may read ANY session's frame on this
+/// host. The remote-parent key match is NOT required to read — reading is
+/// wider than writing, and steering a child without pending (S5) or pulling
+/// its ping-back history still needs the key. Pure, so the whole table is
+/// provable without a socket, a stage file or a live registry entry.
+fn output_read_admitted(
+    read_ok: bool,
+    caller: Option<(&aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)>,
+) -> bool {
+    read_ok
+        && matches!(
+            caller,
+            Some((node, aoide_storage::node_store::NodeRung::Signature)) if node_may_read(node)
+        )
+}
+
+/// The node-side half of the output-read gate — [`node_may_spawn`]'s twin,
+/// one capability over: a paired node whose `allows` contains `"read"`.
+/// Pure.
+fn node_may_read(node: &aoide_storage::node_store::Node) -> bool {
+    node.verified && node.allows.iter().any(|a| a == "read")
+}
+
+/// The ping-back HISTORY gate (CONTRACTS.md §6, P-RSA S8/S9): the output gate
+/// AND the child's own stamped parent key equal to the key that verified the
+/// caller's signature.
+///
+/// History is the one read the 2026-09-25 ruling does NOT widen, because these
+/// events belong to a parent: a signed, `read`-holding node may watch any
+/// session's FRAME (above), but only the node that spawned this child — the
+/// one whose key this door stamped when it admitted the spawn — may read what
+/// the child published for it. The comparison is the key, never the stored
+/// `node` label, for [`remote_parent_match`]'s own reason: a name follows a
+/// rename, a key is the identity.
+///
+/// **The key is read off the RING first, the record second** ([`stamped_key`]):
+/// the ring outlives the record by design — that is the whole reason it exists
+/// — so a gate that could only consult `sessions.json` would refuse the parent
+/// its own child's last events the moment the record was pruned.
+///
+/// A `None` on either side is `false`, never a wildcard: an unsigned caller
+/// (or a weaker rung, which has no proof and so no key) matches nothing, an
+/// unknown id has no key on either side, and a session with no `remoteParent`
+/// and no ring — a local session — has nothing to match. Pure, so the whole
+/// table is provable without a socket or a stage file.
+fn history_admitted(
+    read_ok: bool,
+    signed: Option<SignedCaller<'_>>,
+    nodes: &[aoide_storage::node_store::Node],
+    target_key: Option<&str>,
+) -> bool {
+    let Some(caller) = signed else {
+        return false;
+    };
+    output_read_admitted(read_ok, resolved_caller(nodes, signed))
+        && target_key.is_some_and(|k| !k.is_empty() && k == caller.key)
+}
+
+/// The key this node stamped for one child: the RING's own entry first (it is
+/// the one that survives the record), the roster record's `remoteParent`
+/// second. `None` when neither knows the id — which is exactly the id this
+/// node does not hold.
+fn stamped_key(id: &str) -> Option<String> {
+    aoide_storage::pingback_remote::ring_key(id)
+        .or_else(|| session_remote_parent(id).map(|rp| rp.key).filter(|k| !k.is_empty()))
+}
+
+/// The caller as the frame gate judges it: the CURRENT record for the name
+/// [`verify_signed_request`] resolved, carrying the rung that proof IS. The
+/// rung is not a second lookup — a [`SignedCaller`] exists for the signature
+/// rung and for nothing else (`claimable_caller`'s own statement), and
+/// `signed?` is that fact: an unsigned, bearer or address caller has no
+/// proof, so this is `None` and [`output_read_admitted`] refuses it.
+fn resolved_caller<'a>(
+    nodes: &'a [aoide_storage::node_store::Node],
+    signed: Option<SignedCaller<'_>>,
+) -> Option<(&'a aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)> {
+    let caller = signed?;
+    nodes
+        .iter()
+        .find(|p| p.name == caller.name)
+        .map(|p| (p, aoide_storage::node_store::NodeRung::Signature))
+}
+
+/// The frame a `tasks/get` request asks for: `Some(tail)` when
+/// `params.metadata["aoide/frame"]` is present at all, `None` for a plain
+/// status read. Only `params.metadata` counts — never `message.metadata`, the
+/// `message/send` fallback `aoide/spawn` also accepts — because this is a
+/// request about a session, not a message.
+///
+/// The value's own `tail` is read if present and is CLAMPED here, at the
+/// edge, to `1..=FRAME_TAIL_MAX`: nothing downstream ever sees a window
+/// outside the bound. A missing, non-numeric or absent `tail` takes
+/// [`FRAME_TAIL_DEFAULT`]; the key's VALUE shape is otherwise not policed
+/// (`{"aoide/frame": true}` asks for the default window, which is the
+/// tolerant reading of "I want the frame").
+fn frame_tail(params: &Value) -> Option<u64> {
+    let asked = params.get("metadata")?.get(FRAME_KEY)?;
+    let tail = asked.get("tail").and_then(Value::as_u64).unwrap_or(FRAME_TAIL_DEFAULT);
+    Some(tail.min(FRAME_TAIL_MAX).max(1))
+}
+
+/// The ping-back cursor a `tasks/get` request carries: `Some(seq)` when
+/// `params.metadata["aoide/linesAfter"]` is present at all, `None` for a
+/// request that asks for no history. Same two rules as [`frame_tail`], for the
+/// same reasons: `params.metadata` only, and a value whose shape is not what
+/// the writer sends (a missing, null or non-numeric one) reads as the START of
+/// the ring — `0` — rather than a refusal. A wrong cursor costs the caller
+/// duplicate lines it can recognize by `seq`; refusing it would cost a parent
+/// its child's history over one bad integer type.
+fn lines_after(params: &Value) -> Option<u64> {
+    Some(params.get("metadata")?.get(LINES_AFTER_KEY)?.as_u64().unwrap_or(0))
+}
+
+/// The watch frame as the wire artifact, inside the door's own caps.
+///
+/// Order of shedding, fixed and never mixed: the OLDEST mail letter first,
+/// then the OLDEST output line — the newest of each is what a watcher is
+/// looking at, and a letter is a whole run's worth of context against one
+/// line of output. `truncated: true` is set whenever anything went.
+///
+/// Two bounds are NOT this function's: the caller's `tail` (applied by
+/// [`aoide_conduct::graph::watch_frame`], which never returns more output
+/// lines than asked for) and each line's own length (`clean_line`'s
+/// `LINE_MAX`, character-counted). The instruction block is bound by that
+/// same per-line clip plus the block's line cap and is never dropped: it is
+/// the text the frame exists to show, so a frame can exceed
+/// [`FRAME_MAX_BYTES`] by at most that block — the door's bound is on what it
+/// may DISCARD, not a promise about the sidecar an operator wrote.
+fn frame_artifact(frame: aoide_conduct::graph::Frame) -> Artifact {
+    let mut frame = frame.for_wire();
+    for letter in frame.mail.iter_mut() {
+        letter.body.truncate(LETTER_BODY_LINES_MAX);
+    }
+    let over = |f: &aoide_conduct::graph::Frame| {
+        serde_json::to_vec(f).map(|bytes| bytes.len()).unwrap_or(0) > FRAME_MAX_BYTES
+    };
+    while over(&frame) && (!frame.mail.is_empty() || !frame.output.is_empty()) {
+        if !frame.mail.is_empty() {
+            frame.mail.remove(0);
+        } else {
+            frame.output.remove(0);
+        }
+        frame.truncated = true;
+    }
+    let mut part = Part { kind: "data".to_string(), text: None, extra: Default::default() };
+    part.extra.insert(
+        "data".to_string(),
+        serde_json::to_value(&frame).expect("a Frame always serializes"),
+    );
+    Artifact {
+        artifact_id: FRAME_ARTIFACT_ID.to_string(),
+        name: Some("session watch frame".to_string()),
+        parts: vec![part],
+    }
+}
+
+/// The ping-back history as the wire `message`: the ring read after the
+/// caller's cursor, under the part's `data` — `{events, gap, last}`, the ONE
+/// shape `aoide_storage::pingback_remote::RingRead` serialises, so the door
+/// and the puller that reads it back cannot drift. `history[0]` and nothing
+/// else: the A2A envelope's own list carries ONE message here, because one
+/// request is one cursor.
+fn history_message(task_id: &str, after: u64) -> Message {
+    let read = aoide_storage::pingback_remote::events_for(task_id, after);
+    let mut part = Part { kind: "data".to_string(), text: None, extra: Default::default() };
+    part.extra.insert(
+        "data".to_string(),
+        serde_json::to_value(&read).expect("a RingRead always serializes"),
+    );
+    Message {
+        role: "agent".to_string(),
+        parts: vec![part],
+        message_id: Some(HISTORY_MESSAGE_ID.to_string()),
+        context_id: None,
+        metadata: None,
+    }
+}
+
+/// `tasks/get` with output asked for: the gate FIRST (so a refusal never
+/// depends on whether the id exists), then the SAME status read
+/// [`task_get`] answers, plus whichever of the two optional fields the request
+/// asked for — the watch frame (`aoide/frame`) and the ping-back history
+/// (`aoide/linesAfter`).
+///
+/// **Two gates, one request.** The frame needs [`output_read_admitted`]; the
+/// history needs that AND [`history_admitted`]'s key match. A request that
+/// asks for history is judged by the stricter of the two — asking for both is
+/// asking for the history, and answering such a request with a frame and a
+/// SILENTLY missing ring would be the one thing this door never does. A
+/// caller carrying `read` but a foreign key still gets the FRAME it asks for
+/// on its own, which is what the 2026-09-25 ruling admits it to.
+///
+/// A session with no frame to read — an unknown id, a `sub:` card that keeps
+/// no PTY of its own, a record that keeps no conduct-owned PTY — answers with
+/// the watch's own taught refusal under `-32001`, the same code the unknown-id
+/// status read already uses; the message names the reason.
+fn task_get_outputs(
+    task_id: &str,
+    frame: Option<u64>,
+    history: Option<u64>,
+    read_ok: bool,
+    signed_caller: Option<SignedCaller<'_>>,
+) -> Result<Value, (i64, String)> {
+    let nodes = aoide_storage::node_store::load_nodes();
+    if !output_read_admitted(read_ok, resolved_caller(&nodes, signed_caller)) {
+        return Err((OUTPUT_READ_REFUSED_CODE, OUTPUT_READ_REFUSED.to_string()));
+    }
+    // The ring's own stamped key is the gate input for history, and the record
+    // is the fallback — never the other way round: the ring outlives the
+    // record, so a record-first gate would refuse a parent the events the ring
+    // was kept for.
+    let key = stamped_key(task_id);
+    if history.is_some() {
+        // An id with NEITHER a ring NOR a record is not a refusal at all: it is
+        // the same "task not found" every other `tasks/get` arm answers an
+        // unknown id with, and the pull reads it as the permanent answer it is
+        // (the child is gone for good). Answering the history-specific refusal
+        // here would tell a caller only that the id is not ITS child, and leave
+        // the puller retrying an id that can never come back.
+        if key.is_none() {
+            return Err((TASK_NOT_FOUND_CODE, "task not found".to_string()));
+        }
+        if !history_admitted(read_ok, signed_caller, &nodes, key.as_deref()) {
+            return Err((OUTPUT_READ_REFUSED_CODE, HISTORY_READ_REFUSED.to_string()));
+        }
+    }
+    let path = sessions_path();
+    let sf: SessionsFile =
+        load_stage(&path).map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
+    let mut task = match build_task(&sf.sessions, task_id) {
+        Ok(task) => task,
+        // A ring whose child's record is gone: the history read is served from
+        // the ring itself (`ring_task`), because that is the read this child's
+        // parent is owed and the ring is the only thing that still has it. Any
+        // other request for the id keeps the plain not-found answer — a frame
+        // needs a record, and there is none.
+        Err(not_found) => match (history, key.as_deref()) {
+            (Some(_), Some(_)) => ring_task(task_id),
+            _ => return Err(not_found),
+        },
+    };
+    if let Some(tail) = frame {
+        let frame = aoide_conduct::graph::watch_frame(task_id, tail as usize)
+            .map_err(|o| (TASK_NOT_FOUND_CODE, o.message))?;
+        task.artifacts = Some(vec![frame_artifact(frame)]);
+    }
+    if let Some(after) = history {
+        task.history = Some(vec![history_message(task_id, after)]);
+    }
+    Ok(serde_json::to_value(&task).expect("Task always serializes"))
+}
+
+/// The envelope a history read gets for a child whose roster record is GONE —
+/// the ring's own tail, and nothing invented about the child itself.
+///
+/// The status is the one thing that must be derived rather than read: a
+/// `Task` has one, and there is no record left to fold a state from. It comes
+/// from the ring's LAST event, which is the honest answer and the only one
+/// this node still holds: an `exited` tail means the child ended (the state
+/// A2A calls terminal, `completed`), anything else means no exit was ever
+/// published and the child is not known to have stopped. The timestamp is the
+/// observation instant, which is what `TaskStatus.timestamp` means on every
+/// other arm of this door (`build_task` sets it the same way).
+fn ring_task(task_id: &str) -> Task {
+    let read = aoide_storage::pingback_remote::events_for(task_id, 0);
+    let ended = read.events.last().is_some_and(|e| e.event.get("exited").is_some());
+    Task {
+        id: task_id.to_string(),
+        context_id: task_id.to_string(),
+        status: TaskStatus {
+            state: if ended { "completed" } else { "working" }.to_string(),
+            timestamp: now_iso_utc(),
+        },
+        kind: "task".to_string(),
+        artifacts: None,
+        history: None,
+    }
 }
 
 // ── `message/send`: the inject-or-spawn execution door (Phase B2) ───────────
@@ -796,15 +1142,252 @@ fn spawn_requested(message: &Value, params: &Value) -> bool {
     flagged(message) || flagged(params)
 }
 
+/// The task slug a spawning request names: `metadata["aoide/task"]`, read on
+/// the SAME two spots [`spawn_requested`] accepts (`message` first, then
+/// top-level `params`) — the two keys ride one request shape, and a caller
+/// that put `aoide/spawn` at the params level has its slug read there too,
+/// rather than quietly getting an unmanaged run. A blank value reads as
+/// "names no task", the same non-third state `aoide/from` gives an empty
+/// string and the one `spawn --task` gives an empty flag value: the door
+/// creates a managed run only for a slug somebody actually wrote. Pure; the
+/// slug's own legality is [`spawn_task_slug`]'s question, one layer down,
+/// where the refusal text and its audit line live.
+fn requested_task(message: &Value, params: &Value) -> Option<String> {
+    let named = |v: &Value| {
+        v.get("metadata")
+            .and_then(|m| m.get(aoide_protocol::wire::TASK_KEY))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    named(message).or_else(|| named(params))
+}
+
+/// Hold a caller's task slug to the ONE predicate every task slug and mailbox
+/// name takes — `^[a-z0-9][a-z0-9-]*$`
+/// (`aoide_storage::node_store::valid_node_name`, the same validator
+/// `spawn --task` applies to its flag and [`resolve_bounded_spawn_cwd`]'s
+/// sibling `--report-to` applies to a mail role; there is no separate
+/// task-slug predicate to reuse, because the slug IS the mailbox name and that
+/// one check is what guards the path join). `None` stays `None` — a spawn that
+/// named no task is not a malformed one.
+///
+/// The refusal is the door's `-32602` (invalid params), the same code S3 gives
+/// a malformed `aoide/from` claim and for the same reason: the value rode
+/// inside the body the caller signed, so a bad one is a client bug worth
+/// surfacing rather than a silent downgrade to an unmanaged run. It is applied
+/// on the SPAWN side only (`do_spawn`, after `spawn_admitted`) — an Inject
+/// request carrying the key builds nothing out of it and is answered exactly
+/// as before.
+///
+/// **The echoed value is cleaned first** (L6 of the S10 review): an illegal slug
+/// is illegal precisely because it may hold anything — newlines, ANSI, a bidi
+/// override — and this string reaches an RPC error body and whatever local UI
+/// prints it, so it goes through `aoide_conduct::graph::clean_line`, the ONE
+/// sanitizer every surface that shows a peer's bytes uses (control, Unicode
+/// `Cf`, the invisible fillers, whitespace flattened, clipped). Trimmed and
+/// capped by that same call: a caller cannot buy a longer echo than a line.
+fn spawn_task_slug(task: Option<&str>) -> Result<Option<&str>, String> {
+    match task {
+        Some(slug) if !aoide_storage::node_store::valid_node_name(slug) => Err(format!(
+            "metadata[\"{}\"] `{}` is not a legal task slug (^[a-z0-9][a-z0-9-]*$ — the \
+             same name a mailbox and `spawn --task`'s own slug take); send a legal slug, or \
+             omit the key for an unmanaged spawn",
+            aoide_protocol::wire::TASK_KEY,
+            aoide_conduct::graph::clean_line(slug),
+        )),
+        other => Ok(other),
+    }
+}
+
 /// Parse one `message/send` `params` object into (prompt text, contextId,
-/// spawn_asked) — pure, so the parsing itself is unit-testable independent of
-/// [`decide_send_action`] and the I/O that follows it.
-fn parse_message_send_params(params: &Value) -> (String, Option<String>, bool) {
+/// spawn_asked, claimed parent session id, named task slug) — pure, so the
+/// parsing itself is unit-testable independent of [`decide_send_action`] and
+/// the I/O that follows it.
+///
+/// The fourth field is the caller's own session id, off
+/// `message.metadata["aoide/from"]`
+/// (`aoide_protocol::wire::FROM_SESSION_KEY`) — ONLY there, never the
+/// top-level `params.metadata` fallback [`spawn_requested`] also accepts, as
+/// CONTRACTS.md §6 states: this is a claim about WHO is calling, and the
+/// client's outbound builder writes it in that one place. An empty or
+/// non-string value is not a third state — it reads as "no claim". WHETHER a
+/// claim may be honoured is [`claimed_remote_parent`]'s question, one layer
+/// down, never this parser's.
+///
+/// The fifth is the task slug the request names, off `metadata["aoide/task"]`
+/// on BOTH the spots [`spawn_requested`] reads ([`requested_task`]) — a
+/// directive about what to DO, not an identity claim, so it takes that key's
+/// two-spot reading rather than `aoide/from`'s one-spot one. Whether the slug
+/// is legal is [`spawn_task_slug`]'s question, and only the Spawn arm consumes
+/// it.
+fn parse_message_send_params(
+    params: &Value,
+) -> (String, Option<String>, bool, Option<String>, Option<String>) {
     let message = params.get("message").cloned().unwrap_or(Value::Null);
     let prompt = extract_prompt_text(&message);
     let context_id = extract_context_id(&message, params);
     let spawn_asked = spawn_requested(&message, params);
-    (prompt, context_id, spawn_asked)
+    let claimed_from = message
+        .get("metadata")
+        .and_then(|m| m.get(aoide_protocol::wire::FROM_SESSION_KEY))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let task = requested_task(&message, params);
+    (prompt, context_id, spawn_asked, claimed_from, task)
+}
+
+/// The caller the `aoide/from` claim may be honoured for: the SIGNATURE rung's
+/// identity, and nothing else. `resolved` is `message_send`'s own resolution
+/// (which also feeds autogate/allows off the CURRENT registry) and `signed` the
+/// identity [`verify_signed_request`] proved — they agree by construction, the
+/// rung literally IS "a signature verified", and this match states that
+/// agreement instead of assuming it. A weaker rung (no resolution at all,
+/// `NodeRung::Token`, `NodeRung::Addr`) has a `signed` of `None` to pass by
+/// then, so nothing to stamp.
+fn claimable_caller<'a>(
+    resolved: Option<(&aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)>,
+    signed: Option<SignedCaller<'a>>,
+) -> Option<SignedCaller<'a>> {
+    match resolved {
+        Some((_, aoide_storage::node_store::NodeRung::Signature)) => signed,
+        _ => None,
+    }
+}
+
+/// The remote parent to stamp on a spawn, or `Ok(None)` when there is nothing
+/// the door may stamp (P-RSA S3, CONTRACTS.md §4/§6).
+///
+/// Two inputs only — the caller this request PROVED itself to be and the wire
+/// claim — because the value must be built from what this door AUTHENTICATED,
+/// never from wire bytes: `node` and `key` come off the verified
+/// [`SignedCaller`] (the resolved record's name and the stored pubkey that
+/// verified), `sessionId` off the claim. A name taken from `X-Aoide-Node` or
+/// from the body would be exactly the forgery the key check exists to stop.
+///
+/// **Honoured on the SIGNATURE rung only** — [`claimable_caller`] is the whole
+/// rung table, and it hands over a [`SignedCaller`] only for that rung.
+/// Every weaker shape has nothing to pass, so it ignores the claim entirely
+/// and returns `Ok(None)`: it can never reach the stamp, and the caller audits
+/// the ignore rather than refusing, since an unsigned caller has no claim to
+/// make. Pure, so that table is provable without a real spawn.
+///
+/// A claim that IS honoured is validated
+/// ([`aoide_storage::remote_children::valid_claimed_session_id`], the same
+/// predicate the client refuses its own unruly claim with) and a bad value is
+/// `-32602` — never silently dropped, per CONTRACTS.md §6. Refusing is the
+/// CALLER's decision, not this function's: `message_send` applies that error
+/// on the spawn side only, since the Inject arm consumes the claim as
+/// [`remote_parent_match`]'s comparison against a target record — where a
+/// malformed value is false rather than refused, exactly as an absent one is
+/// (S5).
+fn claimed_remote_parent(
+    caller: Option<SignedCaller<'_>>,
+    claim: Option<&str>,
+) -> Result<Option<RemoteParent>, (i64, String)> {
+    let Some(claim) = claim else {
+        return Ok(None);
+    };
+    let Some(caller) = caller else {
+        return Ok(None);
+    };
+    if !aoide_storage::remote_children::valid_claimed_session_id(claim) {
+        return Err((
+            -32602,
+            format!(
+                "invalid params: metadata[\"{}\"] must be 1..={} characters of [A-Za-z0-9._:-] \
+                 (a session id) with no `/`",
+                aoide_protocol::wire::FROM_SESSION_KEY,
+                aoide_storage::remote_children::CLAIMED_SESSION_ID_MAX,
+            ),
+        ));
+    }
+    Ok(Some(RemoteParent {
+        node: caller.name.to_string(),
+        key: caller.key.to_string(),
+        session_id: claim.to_string(),
+        extra: Default::default(),
+    }))
+}
+
+/// Does THIS door's target prove the caller is its remote parent (P-RSA S5,
+/// CONTRACTS.md §6)? Pure over exactly three values, all of them facts the door
+/// already holds: the caller [`verify_signed_request`] proved (or `None` on
+/// every weaker rung), the caller's own `aoide/from` claim, and the TARGET
+/// record's stored `remoteParent` ([`session_remote_parent`]).
+///
+/// True only for all three at once, and the two equalities are each load-bearing:
+///
+/// - **`key` equality** is the whole security argument. The stored key was
+///   written by this door's own spawn path from the key that verified THAT
+///   request ([`claimed_remote_parent`]), so a caller can only ever match a
+///   child stamped with its own key — no node can steer another node's
+///   children, and no header, body field or registry rename changes that. The
+///   stored `node` NAME is deliberately not consulted: it is a label that
+///   follows a rename (the reader resolves the current name from the key, §4),
+///   while the key is the identity.
+/// - **`sessionId` equality** pins it to the ONE session the caller claims to
+///   have spawned. Without it, any holder of the key — i.e. the node itself,
+///   on any request — could autogate into every child it ever stamped, not
+///   just the one it is naming.
+///
+/// A `None` on either side is `false`, never a wildcard: an unsigned caller has
+/// no verified key to compare ([`claimable_caller`] hands one over for the
+/// signature rung only), a request with no claim asks for nothing, and a target
+/// with no `remoteParent` — a local session, or one spawned by anyone else —
+/// has nothing to match. Pure, so the whole table is provable without a socket,
+/// a stage file or a live registry entry.
+fn remote_parent_match(
+    caller: Option<&SignedCaller<'_>>,
+    claim: Option<&str>,
+    target: Option<&RemoteParent>,
+) -> bool {
+    match (caller, claim, target) {
+        (Some(caller), Some(claim), Some(target)) => {
+            target.key == caller.key && target.session_id == claim
+        }
+        _ => false,
+    }
+}
+
+/// The `remoteParent` a session record carries, by id — the target-side input
+/// of [`remote_parent_match`], read off `sessions.json` exactly as
+/// [`session_ref_lookup`] reads its own fields (same stage file, same one-file
+/// read per resolved id). `None` covers an unknown id, a record with no such
+/// field, and an unreadable stage: all three are "this door can prove no remote
+/// parent for that target", i.e. the same non-match, never a refusal.
+///
+/// One extra read, paid ONLY where it can change an outcome — inside the Inject
+/// arm, and only for a request that both carried a claim and proved a
+/// signature. Every other inject (and every spawn) reads exactly what it read
+/// before this phase.
+fn session_remote_parent(id: &str) -> Option<RemoteParent> {
+    let sf: SessionsFile = load_stage(&sessions_path()).ok()?;
+    sf.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.remote_parent.clone())
+}
+
+/// Whether `id`'s record is conducting a SHELL — the same read the ping-back
+/// and doorbell lanes make (`aoide_conduct::graph::wrapped_program_is_a_shell`,
+/// the record-side half of `program_is_a_shell`), so the whole box agrees
+/// on which sessions a submitted line must never reach.
+///
+/// Unlike [`session_remote_parent`], an unreadable stage answers **true**:
+/// this is a refusal's input, so "cannot tell" takes the safe arm — the same
+/// fail-safe direction `should_deliver_now(ConnOrigin::Unknown, _)` already
+/// takes one screen up. An unknown id (no record) answers `false` and is
+/// unreachable anyway: `decide_send_action` resolves through
+/// [`session_ref_lookup`] first, and a missing record is its own `Error` arm.
+fn session_wrapped_is_a_shell(id: &str) -> bool {
+    match load_stage::<SessionsFile>(&sessions_path()) {
+        Ok(sf) => sf
+            .sessions
+            .iter()
+            .find(|s| s.session_id == id)
+            .is_some_and(aoide_conduct::graph::wrapped_program_is_a_shell),
+        Err(_) => true,
+    }
 }
 
 fn unix_ts_now() -> u64 {
@@ -812,6 +1395,25 @@ fn unix_ts_now() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// The session id a spawn mints for its child (`a2a-<pid>-<secs>-<n>`) — the
+/// `--id` the wrapper's own `aoide conduct` registers under, and therefore the
+/// `contextId`/`sessionId` a later request addresses that child by.
+///
+/// The trailing counter is NOT decoration: pid + second alone collides for two
+/// spawns inside one second (`unix_ts_now` is whole seconds), and two children
+/// sharing one id share one `sessions.json` record — `upsert_session`'s update
+/// arm keeps a single row, so the two `stamp_spawn_provenance` stamps race on
+/// it and the LAST one decides the record's `remoteParent`. That is a parent
+/// stamping a run it did not ask for (and losing the one it did), plus one
+/// caller-side ledger row for two children. Process-local and monotonic, so
+/// back-to-back spawns can never mint the same id; the pid keeps it unique
+/// against another `aoided` on the same box, the second keeps it readable.
+fn spawn_session_id() -> String {
+    static SPAWN_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SPAWN_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("a2a-{}-{}-{}", std::process::id(), unix_ts_now(), seq)
 }
 
 /// `session_lookup` for [`decide_send_action`]: read `sessions.json` off the
@@ -861,6 +1463,8 @@ fn submitted_task(session_id: &str) -> Value {
         context_id: session_id.to_string(),
         status: TaskStatus { state: "submitted".to_string(), timestamp: now_iso_utc() },
         kind: "task".to_string(),
+        artifacts: None,
+        history: None,
     };
     serde_json::to_value(&task).expect("Task always serializes")
 }
@@ -976,8 +1580,21 @@ fn do_inject(
 /// Best-effort, same tolerance as the rest of this function — a write error
 /// above is already swallowed (the retry loop only confirms a bound socket,
 /// never delivery), so a failed mailbase write is no less tolerated.
-fn spawn_inject_prompt(id: &str, prompt: &str) {
+fn spawn_inject_prompt(id: &str, agent_cmd: &str, prompt: &str) {
     if prompt.is_empty() {
+        return;
+    }
+    // Belt and braces on H1: `decide_send_action` already refuses a shell
+    // `spawnAgent` before anything starts, and this is the last gate before a
+    // REMOTE prompt becomes a line on a pty — so the write asks the same
+    // question itself instead of trusting its caller to have asked it (the
+    // same `program_is_a_shell` walk `-32004` above and the ping-back,
+    // doorbell and inject lanes all read). Silent by construction: this
+    // function's contract is best-effort, and a refusal that cannot be
+    // reported here would only be noise — the caller's own refusal is the
+    // taught one.
+    let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
+    if aoide_conduct::graph::program_is_a_shell(&configured) {
         return;
     }
     let socket = aoide_conduct::graph::conduct_socket_path(id);
@@ -1017,13 +1634,21 @@ fn spawn_inject_prompt(id: &str, prompt: &str) {
 /// name, so a dropped stamp shows up rather than vanishing quietly. No
 /// unbounded retry: a spawn that never registers at all (a failed exec, a
 /// missing agent binary) must not spin this thread forever.
-fn stamp_spawn_origin(id: &str, origin: &str) {
+///
+/// `remote_parent` (P-RSA S3) rides the SAME retry loop — one registration
+/// wait, two change-once stamps (`aoide_conduct::graph::stamp_origin` and
+/// `stamp_remote_parent`), never a second poll. `None` (no claim, or a claim
+/// this door may not honour) stamps nothing, which is the whole pre-S3 shape.
+fn stamp_spawn_provenance(id: &str, origin: &str, remote_parent: Option<RemoteParent>) {
     for _ in 0..300 {
         let registered = load_stage(&sessions_path())
             .map(|f: SessionsFile| f.sessions.iter().any(|s| s.session_id == id))
             .unwrap_or(false);
         if registered {
             aoide_conduct::graph::stamp_origin(id, origin);
+            if let Some(parent) = &remote_parent {
+                aoide_conduct::graph::stamp_remote_parent(id, parent);
+            }
             return;
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -1082,6 +1707,48 @@ fn spawn_died_immediately_message(agent_cmd: &str, status: std::process::ExitSta
     )
 }
 
+/// The door's own argv for one spawn (P-RSA S10): the SAME `conduct` wrapper
+/// a local `aoide spawn` builds, through the one builder that shape has
+/// (`aoide_conduct::graph::build_conduct_args` — never a second copy of it,
+/// which is what the pre-S10 hand-rolled argv was).
+///
+/// Two of that builder's flags are the door's own decision:
+/// `headless = true` always — this door has no terminal to hand a child, its
+/// stdio is nulled and it is `setsid`'d, so `--headless` is the honest mode
+/// (the log is the child's sink, the pty gets the conventional 80×24 fallback
+/// geometry, and `conduct` reads no stdin); and `--task <slug>` exactly when
+/// the caller named one, which is what makes the child a MANAGED run (task
+/// mailbox, `session watch`'s task view, the exit report, and a record the
+/// automatic prune retains). `--spawned` rides unconditionally, as it does for
+/// every spawn: it is the registration fact the reaper's abandoned-shell arm
+/// reads, and that arm's own shape test (`spawned && restore.is_some() &&
+/// idle`) cannot match a non-shell child at all — `restore` is stamped only for
+/// a session whose wrapped program captures like a shell, so an ordinary agent
+/// `spawnAgent` is never collected by it. A `spawnAgent` that IS a shell never
+/// reaches this point at all: `do_spawn` refuses it (`-32004`, audited
+/// `shell-spawn-agent`) before any process starts, because that child's first
+/// turn is a line typed into a pty and a shell would RUN it (H1).
+/// And `--headless` is what makes the child REACHABLE with a keystroke, not
+/// just watchable: a headless wrap accepts the ping-back line and a mail-side
+/// doorbell write, where a non-headless one with no channel is skipped as
+/// `interactive-composer`.
+///
+/// The other four flags have no source at this door and stay absent, each for
+/// a stated reason: `--parent` because `parentSessionId` is a LOCAL id and this
+/// door never writes one (CONTRACTS.md §4 — the remote parent is the RECORD
+/// field `stamp_spawn_provenance` stamps, not an argv fact); `--instructions-path`
+/// because a remote caller names no sidecar and the prompt is injected as the
+/// first turn instead; `--timeout` because the door has no deadline to impose
+/// and inventing one would kill a long remote run mid-flight; and
+/// `--report-to` because the run's own report stays on the child's node,
+/// addressed to its own slug (Q5's ruling). Pure — the split of the configured
+/// agent command is the same `split_whitespace` the pre-S10 argv did, so what
+/// runs is byte-identical.
+fn spawn_argv(id: &str, agent_cmd: &str, task: Option<&str>) -> Vec<String> {
+    let command: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
+    aoide_conduct::graph::build_conduct_args(true, "a2a", id, None, task, None, None, None, &command)
+}
+
 /// Build the spawned child's `Command`, env-sanitized, cwd-bound (when
 /// `spawn_cwd` resolves), and detached — everything up to but NOT including
 /// `.spawn()`. Split out of [`do_spawn`] so the env-clearing shape here is
@@ -1103,7 +1770,7 @@ fn spawn_child_command(
         // G16/G5 — reversed from the pre-P-ID0 shape): threading a `node:*`
         // origin through inherited env was unauthenticated, since any
         // same-uid process can set that same var on itself before invoking
-        // `aoide conduct` directly. `stamp_spawn_origin` below stamps the
+        // `aoide conduct` directly. `stamp_spawn_provenance` below stamps the
         // record from THIS door instead, once the child registers. Cleared
         // explicitly in case `a2a serve`'s own env ever carried one.
         .env_remove("AOIDE_SESSION_ORIGIN")
@@ -1120,6 +1787,11 @@ fn spawn_child_command(
         // only this door, the one place a daemon's ambient env reaches an
         // unrelated freshly-spawned session, clears it.
         .env_remove("AOIDE_SESSION_ID")
+        // No `remoteParent` var either, and none to add: the child's remote
+        // parent is stamped onto the RECORD by `stamp_spawn_provenance` below,
+        // from the resolution this door authenticated — a value the child
+        // could read out of its own env is exactly the forgeable shape
+        // `AOIDE_SESSION_ORIGIN` above stopped being (P-RSA S3).
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -1197,11 +1869,28 @@ fn resolve_bounded_spawn_cwd(
 /// gate already proved before calling this (P-P3, PAIRING.md decision 6) —
 /// never optional at this call site, since the gate refuses outright
 /// otherwise. Stamped directly onto the spawned record as `origin =
-/// "node:<name>"` by [`stamp_spawn_origin`] below (LANE IDENTITY P-ID0,
+/// "node:<name>"` by [`stamp_spawn_provenance`] below (LANE IDENTITY P-ID0,
 /// G16/G5 — this door is the authenticated writer, not the child's env; see
 /// that function's doc) and folded into this call's own audit line, so the
 /// spawned session's provenance is visible both in the audit log and on the
 /// record itself, end to end.
+///
+/// `remote_parent` (P-RSA S3) is the caller's own claim, already validated and
+/// built from THIS resolution by [`claimed_remote_parent`] — `None` for a
+/// spawn with no claim. It rides the same stamp, landing as the child's
+/// `remoteParent`; `parentSessionId` is never touched by this door, since every
+/// reader of that field treats it as a LOCAL id (CONTRACTS.md §4).
+///
+/// `task` (P-RSA S10) is the slug the caller named under
+/// `metadata["aoide/task"]`, already trimmed to "absent or non-empty" by
+/// [`requested_task`] and validated HERE by [`spawn_task_slug`] — before
+/// `spawn_session_id()` mints an id, before `current_exe()` resolves, before
+/// any argv exists, so an illegal slug costs an RPC and nothing else. It is
+/// what makes the child a MANAGED run: the argv carries `--task <slug>`
+/// through [`spawn_argv`] and the CHILD stamps the fact on its own record at
+/// registration, exactly as a local `spawn --task` does. `None` is the whole
+/// pre-S10 shape: a plain conducted session, watchable through the log, with
+/// no mailbox and no exit report.
 ///
 /// **Bounded liveness check (task #103).** `cmd.spawn()` below only proves
 /// the wrapper process itself launched — a caller was previously handed a
@@ -1219,20 +1908,84 @@ fn do_spawn(
     audit_log: &Path,
     node_name: &str,
     spawn_cwd: &str,
+    remote_parent: Option<RemoteParent>,
+    task: Option<&str>,
 ) -> Result<Value, (i64, String)> {
-    let id = format!("a2a-{}-{}", std::process::id(), unix_ts_now());
+    // Refused FIRST and for free, the slug refusal's own shape below: a
+    // `spawnAgent` that IS a shell must cost one RPC, never a process and
+    // never a line typed into a shell (H1, house rule 4). The spawn arm's
+    // first turn is written straight into the child's pty by
+    // `spawn_inject_prompt`, and a shell's stdin is a COMMAND LINE: a remote
+    // peer's prompt would RUN. The `agent` label is not the question — the
+    // configured argv is (`program_is_a_shell`, the same walk the ping-back,
+    // doorbell and inject lanes read), so `bash -lc <harness>` is the shell on
+    // its face and a launcher (`env bash`) is resolved rather than skipped.
+    // `-32004` is this door's own "spawn cannot be used as configured" family
+    // (the empty-`spawnAgent` arm one layer up): nothing about the CALLER's
+    // authority is wrong, so `-32005`/`-32006` would blame the wrong party.
+    let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
+    if aoide_conduct::graph::program_is_a_shell(&configured) {
+        let msg = format!(
+            "A2A spawn not configured: `aoide.a2a.spawnAgent` is `{agent_cmd}`, which is a SHELL — \
+             a remote prompt typed into it would run as a command. Set it to the harness to \
+             conduct (e.g. `claude`), not to a shell that launches one."
+        );
+        let _ = audit(
+            audit_log,
+            Door::A2a,
+            EventClass::Audit,
+            "a2a.message/send",
+            "shell-spawn-agent",
+            &msg,
+        );
+        return Err((-32004, msg));
+    }
+    // Refused FIRST and for free: an unusable slug must cost one RPC, never a
+    // process — nothing below these lines has run when either fires.
+    let task = match spawn_task_slug(task) {        Ok(task) => task,
+        Err(msg) => {
+            let _ = audit(
+                audit_log,
+                Door::A2a,
+                EventClass::Audit,
+                "a2a.message/send",
+                "error",
+                &msg,
+            );
+            return Err((-32602, msg));
+        }
+    };
+    // The wrapper's own admission step, shared rather than copied (M2 of the
+    // S10 review): a slug a live run already holds is refused HERE, for the
+    // same reason `spawn --task` refuses it — two live runs must never share
+    // one mailbox, and without this the door is the one spawn path with no
+    // admission step at all, so a peer's child could deny the operator their
+    // own task name for as long as the peer chooses (this door imposes no
+    // deadline by design). `-32602` and not one of the capability codes
+    // (`-32004`/`-32006`): nothing is wrong with the CALLER's authority here,
+    // the request collides with state this node already holds — the same
+    // invalid-params family the malformed-slug refusal above uses, whose key
+    // this is. The text is `aoide-conduct`'s ONE refusal sentence, so the
+    // peer reads exactly what a local operator would.
+    if let Some(slug) = task {
+        if let Some((held_by, started_at)) = aoide_conduct::graph::live_run_for(slug) {
+            let msg = aoide_conduct::graph::live_run_refusal(slug, &held_by, &started_at);
+            let _ = audit(
+                audit_log,
+                Door::A2a,
+                EventClass::Audit,
+                "a2a.message/send",
+                "error",
+                &msg,
+            );
+            return Err((-32602, msg));
+        }
+    }
+    let id = spawn_session_id();
     let aoide_bin = std::env::current_exe()
         .map_err(|e| (-32603_i64, format!("resolving the aoide binary: {e}")))?;
 
-    let mut argv: Vec<String> = vec![
-        "conduct".to_string(),
-        "--agent".to_string(),
-        "a2a".to_string(),
-        "--id".to_string(),
-        id.clone(),
-        "--".to_string(),
-    ];
-    argv.extend(agent_cmd.split_whitespace().map(str::to_string));
+    let argv = spawn_argv(&id, agent_cmd, task);
 
     let origin = format!("node:{node_name}");
     // Project roots are already loaded the same way `session_ref_lookup`
@@ -1285,23 +2038,29 @@ fn do_spawn(
             std::thread::spawn(move || {
                 let _ = child.wait();
             });
-            // Stamp the record's origin from THIS door, off the handler
+            // Stamp the record's provenance from THIS door, off the handler
             // thread so a slow-to-register child never adds latency to the
-            // RPC response — see `stamp_spawn_origin`'s doc comment.
+            // RPC response — see `stamp_spawn_provenance`'s doc comment.
             {
                 let id = id.clone();
                 let origin = origin.clone();
-                std::thread::spawn(move || stamp_spawn_origin(&id, &origin));
+                std::thread::spawn(move || stamp_spawn_provenance(&id, &origin, remote_parent));
             }
             // Best-effort first-turn injection — see the doc comment above.
-            spawn_inject_prompt(&id, prompt);
+            spawn_inject_prompt(&id, agent_cmd, prompt);
             let _ = audit(
                 audit_log,
                 Door::A2a,
                 EventClass::Audit,
                 "a2a.message/send",
                 "ok",
-                &format!("spawned conducted session `{id}` (configured agent, {origin})"),
+                &format!(
+                    "spawned conducted session `{id}` (configured agent, {origin}{})",
+                    match task {
+                        Some(slug) => format!(", managed run on task `{slug}`"),
+                        None => String::new(),
+                    }
+                ),
             );
             let task = Task {
                 id: id.clone(),
@@ -1311,6 +2070,8 @@ fn do_spawn(
                     timestamp: now_iso_utc(),
                 },
                 kind: "task".to_string(),
+                artifacts: None,
+                history: None,
             };
             Ok(serde_json::to_value(&task).expect("Task always serializes"))
         }
@@ -1439,9 +2200,9 @@ fn message_send(
     origin: ConnOrigin,
     expected_token: &str,
     presented_token: Option<&str>,
-    signed_node_name: Option<&str>,
+    signed_caller: Option<SignedCaller<'_>>,
 ) -> Result<Value, (i64, String)> {
-    let (prompt, context_id, spawn_asked) = parse_message_send_params(params);
+    let (prompt, context_id, spawn_asked, claimed_from, task) = parse_message_send_params(params);
     let token_configured = !expected_token.is_empty();
     let token_state = classify_token(expected_token, presented_token);
 
@@ -1472,26 +2233,62 @@ fn message_send(
         ConnOrigin::Loopback | ConnOrigin::Unknown => None,
     };
     // P-P4 (`docs/architecture/PAIRING.md` "Wire authentication"):
-    // `signed_node_name` arrives ALREADY VERIFIED — the caller
+    // `signed_caller` arrives ALREADY VERIFIED — the caller
     // (`handle_connection`, via `verify_signed_request`) checked the
     // ed25519 signature, the replay window, and the nonce cache BEFORE this
-    // function ever ran, and only threads a name through on success. The
-    // name it threads is the RESOLVED one (#63 P-ID5): the node record
-    // whose stored pubkey verified the signature, never the wire-claimed
+    // function ever ran, and only threads an identity through on success. The
+    // name it carries is the RESOLVED one (#63 P-ID5): the node record whose
+    // stored pubkey verified the signature, never the wire-claimed
     // `X-Aoide-Node` label — so the find-by-name below is a lookup of an
-    // already-key-authenticated record, not a trust decision. When
-    // present, it is the SOLE resolution: no fallthrough to the
-    // addr/token ladder for a request that presented signature headers
-    // (fail-closed discipline, #84's own "sentinel on resolve failure, no
-    // fallthrough to a weaker rung" precedent). `None` (no signature
-    // headers on this request at all) is the untouched, existing path.
-    let resolved_node = match signed_node_name {
-        Some(name) => nodes
+    // already-key-authenticated record, not a trust decision, and it exists
+    // only for the CURRENT registry's autogate/allows flags. When present, it
+    // is the SOLE resolution: no fallthrough to the addr/token ladder for a
+    // request that presented signature headers (fail-closed discipline, #84's
+    // own "sentinel on resolve failure, no fallthrough to a weaker rung"
+    // precedent). `None` (no signature headers on this request at all) is the
+    // untouched, existing path.
+    let resolved_node = match signed_caller {
+        Some(caller) => nodes
             .iter()
-            .find(|p| p.name == name)
+            .find(|p| p.name == caller.name)
             .map(|p| (p, aoide_storage::node_store::NodeRung::Signature)),
         None => aoide_storage::node_store::resolve_node(&nodes, addr, presented_token),
     };
+
+    // The caller's `aoide/from` claim (P-RSA S3): the spawned child's
+    // `remoteParent`. Two questions, asked separately. FIRST, may this request
+    // claim at all — `claimable_caller`'s rung table: the SIGNATURE rung's
+    // identity, or nothing; every weaker rung ignores the claim and gets one
+    // audit line, because an unsigned caller has no claim to make and a
+    // refusal there would be a new oracle where today there is only silence.
+    // SECOND, is the claim well formed — `claimed_remote_parent`'s `-32602` for
+    // a signed caller's malformed one, never a silent drop, since the value
+    // rode inside the signature's own body digest and a caller that signed it
+    // meant it. That refusal is applied on the SPAWN side only (below, after
+    // the uniform-response guard), because the spawn is the arm that BUILDS a
+    // value out of it; the Inject arm consumes the claim as a COMPARISON
+    // instead (S5, in the Inject arm below), where a malformed one simply
+    // never matches — never a refusal, and never a new failure for a request
+    // that used to be answered. The client lets no unruly claim reach this door
+    // either way — `node spawn` refuses the call, `send` drops the claim and
+    // says so on one warning line (`resolve_remote_parent_from`, P-RSA S5) — so
+    // silence here hides no bug.
+    let claimed_identity = claimable_caller(resolved_node, signed_caller);
+    if claimed_identity.is_none() && claimed_from.is_some() {
+        let _ = audit(
+            audit_log,
+            Door::A2a,
+            EventClass::Audit,
+            "a2a.message/send",
+            "ignored-unsigned-from",
+            &format!(
+                "ignored metadata[\"{}\"] — a remote parent may only be claimed by a \
+                 request this door verified by a node's key (no signature rung on this request)",
+                aoide_protocol::wire::FROM_SESSION_KEY,
+            ),
+        );
+    }
+    let claim_build = claimed_remote_parent(claimed_identity, claimed_from.as_deref());
 
     // Autogate signals — computed AFTER `resolved_node` (P-S6) so the new
     // signature rung can join `ip_autogate`/`token_autogate` in the same
@@ -1531,8 +2328,71 @@ fn message_send(
         return Ok(submitted_task(id));
     }
 
+    // The SPAWN side of that same split, and the only place a malformed claim
+    // refuses: `decide_send_action`'s own spawn condition (`spawn_asked ||
+    // context_id.is_none()`, the exact negation of the guard's inject one), so
+    // a request can never classify "inject" for the guard and "spawn" here. An
+    // inject-shaped request that carried a malformed claim proceeds exactly as
+    // one that carried none: it reaches the Inject arm, whose
+    // `remote_parent_match` (S5) is false for either shape, so neither takes
+    // the remote-parent delivery.
+    let spawn_side = spawn_asked || context_id.is_none();
+    let remote_parent = match claim_build {
+        Ok(parent) => parent,
+        Err((code, msg)) if spawn_side => {
+            let _ = audit(
+                audit_log,
+                Door::A2a,
+                EventClass::Audit,
+                "a2a.message/send",
+                "error",
+                &msg,
+            );
+            return Err((code, msg));
+        }
+        Err(_) => None,
+    };
+
     match decide_send_action(context_id.as_deref(), spawn_asked, spawn_agent, session_ref_lookup) {
         SendAction::Inject { session_id } => {
+            // P-RSA S5: the `aoide/from` claim, CONSUMED here. The Spawn arm
+            // stamps it onto the child it creates; THIS arm asks the mirror
+            // question of the record it is about to write into — is this
+            // caller the remote parent of that one? `remote_parent_match` is
+            // the whole predicate (signature rung + stored `remoteParent.key`
+            // == the caller's verified key + stored `sessionId` == the claim),
+            // and the `is_some_and` around it is the third of those: with no
+            // claim there is nothing to match, and the stage read
+            // (`session_remote_parent`) is skipped entirely, so an ordinary
+            // inject pays nothing for this phase.
+            //
+            // A MALFORMED claim needs no separate handling: a value outside
+            // `valid_claimed_session_id` was never stamped as any record's
+            // `sessionId` by this door, so equality is false — the claim fails
+            // to match exactly as an absent one does, which is the Inject
+            // arm's one-and-only reading of a bad claim (§6: the `-32602`
+            // stays spawn-side, where the value is actually consumed).
+            let remote_parent_hit = claimed_from.as_deref().is_some_and(|claim| {
+                remote_parent_match(
+                    claimed_identity.as_ref(),
+                    Some(claim),
+                    session_remote_parent(&session_id).as_ref(),
+                )
+            });
+            if remote_parent_hit {
+                let _ = audit(
+                    audit_log,
+                    Door::A2a,
+                    EventClass::Audit,
+                    "a2a.message/send",
+                    "autogate-remote-parent",
+                    &format!(
+                        "delivering to `{session_id}` without pending — the caller proved the \
+                         remote parent of that session (remoteParent.sessionId `{}`)",
+                        claimed_from.as_deref().unwrap_or_default(),
+                    ),
+                );
+            }
             // `should_deliver_now(ConnOrigin::Unknown, _)` is unconditionally
             // `false` — it ignores `autogate_match` entirely (the SAME
             // fail-safe arm `effective_origin`'s own token coercion already
@@ -1545,11 +2405,54 @@ fn message_send(
             // like-for-like restoration `sig_autogate` exists for. A signed,
             // non-autogate node has no such exemption: it gets the downgrade
             // unconditionally, which is the narrowing itself.
+            //
+            // A REMOTE-PARENT MATCH (P-RSA S5) rides exactly the same two
+            // rails as `sig_autogate`, and needs BOTH of them: it exempts the
+            // downgrade here (otherwise the ssh `-L` shape — which classifies
+            // as Loopback, see `origin_for_inject` — would coerce to
+            // `Unknown`, where `autogate_match` is ignored outright and the
+            // match would count for nothing) and it joins `autogate_match`
+            // below (otherwise a genuinely non-loopback origin would take
+            // `ConnOrigin::Remote`'s `autogate_match` arm and pend). It
+            // overrides neither question: a door-wide bearer that does not
+            // classify `Valid` still coerces through `effective_origin`, and
+            // the node's own `autogate` flag never had to be on for a parent
+            // to steer the child it spawned — the same independence `send_gate`
+            // gives the LOCAL parent rule (`--yes` ▸ global switch ▸
+            // parent-of-target), which delivers without pending whether the
+            // box-wide autogate switch is on or off.
             let eff_origin = origin_for_inject(
                 effective_origin(origin, token_configured, token_state),
-                signed_node_name.is_some() && !sig_autogate,
+                signed_caller.is_some() && !sig_autogate && !remote_parent_hit,
             );
-            let deliver_now = should_deliver_now(eff_origin, autogate_match);
+            // Every OTHER rung of this decision is about the CALLER (its
+            // origin, its signature, its token). This one is about the
+            // TARGET: a session conducting a SHELL takes no line that was not
+            // held pending and approved by a human, whoever asked for it and
+            // however well they proved who they are. A shell's input is a
+            // command line, and `--agent <harness> -- bash` is a record that
+            // names a harness while running a shell — the door therefore reads
+            // the WRAP (house rule 4, `wrapped_program_is_a_shell`), exactly
+            // as the ping-back and doorbell lanes do, rather than the `agent`
+            // label it was handed. Paid only where it can matter: a decision
+            // that was going to pend anyway is left alone, and its audit line
+            // is not written.
+            let door_delivers = should_deliver_now(eff_origin, autogate_match || remote_parent_hit);
+            let shell_target = door_delivers && session_wrapped_is_a_shell(&session_id);
+            if shell_target {
+                let _ = audit(
+                    audit_log,
+                    Door::A2a,
+                    EventClass::Audit,
+                    "a2a.message/send",
+                    "shell-wrapped",
+                    &format!(
+                        "holding for a human: `{session_id}` is conducting a shell — a submitted \
+                         line would RUN in it as a command"
+                    ),
+                );
+            }
+            let deliver_now = door_delivers && !shell_target;
             // The `from` attribution rides ONLY the QUEUED path (P-P3
             // decision 7: "pending-queue entries a node's send creates").
             // `session_send`'s own `from` mechanism ALSO prefixes an
@@ -1566,7 +2469,7 @@ fn message_send(
         SendAction::Spawn { agent_cmd } => {
             if spawn_admitted(resolved_node) {
                 let node = resolved_node.expect("spawn_admitted only returns true when resolved_node is Some").0;
-                do_spawn(&agent_cmd, &prompt, audit_log, &node.name, spawn_cwd)
+                do_spawn(&agent_cmd, &prompt, audit_log, &node.name, spawn_cwd, remote_parent, task.as_deref())
             } else {
                 let (code, msg) = spawn_refusal(resolved_node);
                 let _ = audit(
@@ -1800,13 +2703,16 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
         };
 
     let nodes = aoide_storage::node_store::load_nodes();
-    let resolved = ctx.signed_node_name.and_then(|name| nodes.iter().find(|p| p.name == name));
+    let resolved = ctx.signed_caller.and_then(|c| nodes.iter().find(|p| p.name == c.name));
     if !deposit_admitted(resolved) {
         let (code, msg) = deposit_refusal(resolved);
         let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "unauthorized", &msg);
         return Err((code, msg));
     }
-    let hop_name = ctx.signed_node_name.expect("deposit_admitted only returns true when signed_node_name is Some");
+    let hop_name = ctx
+        .signed_caller
+        .map(|c| c.name)
+        .expect("deposit_admitted only returns true when a signed caller resolved");
 
     let outcome = aoide_storage::mail::deposit(envelope.clone(), hop_name).map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
 
@@ -2368,12 +3274,12 @@ struct RequestCtx<'a> {
     expected_token: &'a str,
     /// This request's `Authorization: Bearer <token>`, if any.
     presented_token: Option<&'a str>,
-    /// P-P4: `Some(name)` when [`verify_signed_request`] already verified
+    /// P-P4: `Some(caller)` when [`verify_signed_request`] already verified
     /// this request's signature headers against a paired node — computed
     /// exactly once, in `handle_connection`, before either dispatch path,
     /// never re-verified here. `None` covers both "no signature headers at
     /// all" and "this ctx predates P-P4 in a test fixture."
-    signed_node_name: Option<&'a str>,
+    signed_caller: Option<SignedCaller<'a>>,
 }
 
 /// Handle one parsed JSON-RPC 2.0 request `Value`, returning the response
@@ -2398,7 +3304,12 @@ fn handle_jsonrpc(req: &Value, ctx: &RequestCtx) -> Value {
         "tasks/get" if !read_ok => Err(unauthorized()),
         "tasks/get" => {
             let task_id = params.get("id").and_then(Value::as_str).unwrap_or("");
-            task_get(task_id)
+            // `metadata["aoide/frame"]` asks for the watch frame (CONTRACTS.md
+            // §6, P-RSA S6); a request without it is the untouched status read.
+            match (frame_tail(&params), lines_after(&params)) {
+                (None, None) => task_get(task_id),
+                (frame, history) => task_get_outputs(task_id, frame, history, read_ok, ctx.signed_caller),
+            }
         }
         "message/send" => message_send(
             &params,
@@ -2408,7 +3319,7 @@ fn handle_jsonrpc(req: &Value, ctx: &RequestCtx) -> Value {
             ctx.origin,
             ctx.expected_token,
             ctx.presented_token,
-            ctx.signed_node_name,
+            ctx.signed_caller,
         ),
         "aoide/graphSummary" if !read_ok => Err(unauthorized()),
         "aoide/graphSummary" => graph_summary(ctx.node_name, ctx.self_url),
@@ -2537,7 +3448,7 @@ fn stream_task<W: Write>(
     origin: ConnOrigin,
     expected_token: &str,
     presented_token: Option<&str>,
-    signed_node_name: Option<&str>,
+    signed_caller: Option<SignedCaller<'_>>,
 ) -> std::io::Result<()> {
     let rpc: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
     let rpc_id = rpc.get("id").cloned().unwrap_or(Value::Null);
@@ -2564,7 +3475,7 @@ fn stream_task<W: Write>(
     } else {
         match method {
             "message/stream" => {
-                message_send(&params, audit_log, spawn_agent, spawn_cwd, origin, expected_token, presented_token, signed_node_name)
+                message_send(&params, audit_log, spawn_agent, spawn_cwd, origin, expected_token, presented_token, signed_caller)
             }
             _ /* tasks/resubscribe */ => {
                 match params.get("id").and_then(Value::as_str).filter(|s| !s.is_empty()) {
@@ -2971,25 +3882,46 @@ fn nonce_is_replay(key: &str, nonce: &str) -> bool {
     false
 }
 
+/// The caller identity [`verify_signed_request`] PROVED for one request: the
+/// RESOLVED record's name (#63 P-ID5 — the record whose stored pubkey verified,
+/// never the `X-Aoide-Node` label) plus the stored key that did the verifying.
+/// ONE value, because they are one fact: `message_send` loads the registry
+/// again for its own autogate/allows questions, and a consumer that took the
+/// name from this outcome and the key from that second read could pair this
+/// request's name with a key that never verified anything (a hand-edited
+/// registry with two records sharing a name, or a same-uid edit of
+/// `nodes.json` between the two loads). The claim's `remoteParent.key` is
+/// built from `key` here, so the stamped key always IS the key that verified.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SignedCaller<'a> {
+    /// The resolved record's name — what every downstream consumer addresses
+    /// the caller by (allows lookup, `node:<name>` origin stamp, autogate).
+    name: &'a str,
+    /// The resolved record's stored public key, the one the signature was
+    /// verified against. Never empty: `verify_signed_request` resolves only a
+    /// record whose non-empty stored key verified.
+    key: &'a str,
+}
+
 /// [`verify_signed_request`]'s result — three shapes, not a `Result`,
 /// because "no signature headers at all" is a THIRD outcome distinct from
 /// both success and refusal (the untouched, pre-P-P4 path), and collapsing
 /// it into `Ok(None)`/`Err(())` would blur that distinction at every call
 /// site.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum SignedRequestOutcome {
     /// None of the four `HEADER_*` values were present — the existing
     /// addr/token resolution ladder applies exactly as before this phase.
     Unsigned,
     /// All four headers were present and verification succeeded. `resolved`
     /// is the name of the node RECORD whose stored pubkey verified the
-    /// signature (#63 P-ID5: identity is the key) — the name every
-    /// downstream consumer (allows lookup, `node:<name>` origin stamp,
-    /// autogate) uses. `claimed` is what the `X-Aoide-Node` header said —
+    /// signature (#63 P-ID5: identity is the key) and `key` the stored pubkey
+    /// that verified — together the [`SignedCaller`] the door threads
+    /// downstream. `claimed` is what the `X-Aoide-Node` header said —
     /// display/attribution only, carried so the caller can audit a
     /// claimed-vs-resolved mismatch as attribution drift; it is never
     /// trusted and never wins over `resolved` anywhere.
-    Verified { resolved: String, claimed: String },
+    Verified { resolved: String, key: String, claimed: String },
     /// Signature headers were present but verification failed somewhere —
     /// the JSON-RPC `(code, message)` the WHOLE request refuses with, no
     /// matter which method it named.
@@ -3138,6 +4070,12 @@ fn verify_signed_request(req: &HttpRequest, now_epoch: i64) -> SignedRequestOutc
 
     SignedRequestOutcome::Verified {
         resolved: resolved.name.clone(),
+        // The stored key that verified, verbatim from the SAME record
+        // `resolved` names — threaded out so the claim's `remoteParent.key` is
+        // this value and never a re-read of the registry (`SignedCaller`'s own
+        // doc says why). Non-empty by construction: the trial set above admits
+        // only records with a non-empty stored pubkey.
+        key: resolved.pubkey.clone().unwrap_or_default(),
         claimed: node_name.to_string(),
     }
 }
@@ -3173,12 +4111,13 @@ fn attribution_drift_detail(claimed: &str, resolved: &str) -> Option<String> {
 /// `url` when a token is configured and the bearer doesn't classify `Valid` —
 /// every other route is pure I/O-free routing over what's already in `req`,
 /// so it still unit-tests without a real socket, spawn, or audit-log write.
-/// `signed_node_name` is P-P4's own addition: `Some(name)` when
+/// `signed_caller` is P-P4's own addition: `Some(caller)` when
 /// [`verify_signed_request`] already verified this request's signature
-/// headers against a paired node — the KEY-resolved record's name
-/// (#63 P-ID5), never the wire-claimed label (never re-verified here — `handle_connection`
-/// runs that check exactly once, before EITHER dispatch path), threaded
-/// straight into [`RequestCtx`] for `message/send` to consume.
+/// headers against a paired node — the KEY-resolved record's name and the
+/// stored key that verified (#63 P-ID5), never the wire-claimed label (never
+/// re-verified here — `handle_connection` runs that check exactly once, before
+/// EITHER dispatch path), threaded straight into [`RequestCtx`] for
+/// `message/send` to consume.
 fn route(
     req: &HttpRequest,
     bind: &str,
@@ -3190,7 +4129,7 @@ fn route(
     origin: ConnOrigin,
     expected_token: &str,
     registry: &Registry,
-    signed_node_name: Option<&str>,
+    signed_caller: Option<SignedCaller<'_>>,
 ) -> (u16, Vec<u8>, String) {
     match req.path.as_str() {
         "/.well-known/agent-card.json" => {
@@ -3227,10 +4166,23 @@ fn route(
                 // interpolating it verbatim, so a hostile body can't bloat
                 // the audit log or plant a misleading label (e.g.
                 // `a2a.graph.session delete`, or a multi-KB string).
-                let parsed_method = serde_json::from_slice::<Value>(&req.body)
-                    .ok()
+                let parsed = serde_json::from_slice::<Value>(&req.body).ok();
+                let parsed_method = parsed
+                    .as_ref()
                     .and_then(|v| v.get("method").and_then(Value::as_str).map(str::to_string));
+                // A frame read gets its OWN label, off the same already-parsed
+                // body: an operator scanning the audit log sees which
+                // `tasks/get` calls read a session's output, and which were
+                // only status polls (CONTRACTS.md §6, P-RSA S6). A history
+                // read gets its own too (S8), and it wins the tie when a
+                // request asks for both — the stricter read is the one worth
+                // naming.
+                let parsed_params = parsed.as_ref().and_then(|v| v.get("params"));
+                let history_asked = parsed_params.and_then(lines_after).is_some();
+                let frame_asked = parsed_params.and_then(frame_tail).is_some();
                 let label = match parsed_method.as_deref() {
+                    Some("tasks/get") if history_asked => "tasks/get.history",
+                    Some("tasks/get") if frame_asked => "tasks/get.frame",
                     Some("tasks/get") => "tasks/get",
                     Some("message/send") => "message/send",
                     Some("aoide/graphSummary") => "aoide/graphSummary",
@@ -3250,7 +4202,7 @@ fn route(
                     self_url: &self_url,
                     expected_token,
                     presented_token: req.bearer.as_deref(),
-                    signed_node_name,
+                    signed_caller,
                 };
                 let resp = handle_jsonrpc_bytes(&req.body, &ctx);
                 let body = serde_json::to_vec(&resp).unwrap_or_default();
@@ -3611,23 +4563,29 @@ fn handle_connection(
     // which JSON-RPC method it named, never reaching `stream_task` OR
     // `route`/`handle_jsonrpc_bytes`. A request carrying no signature
     // headers at all (`SignedRequestOutcome::Unsigned`) is completely
-    // untouched by this — `signed_node_name` stays `None`, and everything
+    // untouched by this — `signed_caller` stays `None`, and everything
     // below behaves exactly as it did before this phase.
     let now_epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let signed_node_name = match verify_signed_request(&req, now_epoch) {
+    // `resolved` AND `key` are threaded together (`SignedCaller`), both taken
+    // off the ONE record this verification produced: the name is what flows
+    // downstream as the caller's identity (allows lookup, `node:<name>` origin
+    // stamp, autogate), and the key is what the claim's `remoteParent.key` is
+    // built from — never a re-read of the registry, which `message_send` loads
+    // again for its own purposes. The claimed header name is attribution only;
+    // when it disagrees, the drift is audited and the resolved name still wins.
+    // Owned here, borrowed below: the outcome owns its two strings, and the
+    // borrowed `SignedCaller` is what this door threads through `route` and
+    // `stream_task`.
+    let verified: Option<(String, String)> = match verify_signed_request(&req, now_epoch) {
         SignedRequestOutcome::Unsigned => None,
-        // The RESOLVED name (the record whose key verified — #63 P-ID5) is
-        // what flows downstream: allows lookup, `node:<name>` origin stamp,
-        // autogate. The claimed header name is attribution only; when it
-        // disagrees, the drift is audited and the resolved name still wins.
-        SignedRequestOutcome::Verified { resolved, claimed } => {
+        SignedRequestOutcome::Verified { resolved, key, claimed } => {
             if let Some(detail) = attribution_drift_detail(&claimed, &resolved) {
                 let _ = audit(audit_log, Door::A2a, EventClass::Audit, "a2a.signed-request", "attribution-drift", &detail);
             }
-            Some(resolved)
+            Some((resolved, key))
         }
         SignedRequestOutcome::Refused(code, message) => {
             let body_val = jsonrpc_error_value(code, message.clone());
@@ -3643,6 +4601,9 @@ fn handle_connection(
             return write_http_response(&mut writer, 200, &body);
         }
     };
+    let signed_caller = verified
+        .as_ref()
+        .map(|(name, key)| SignedCaller { name: name.as_str(), key: key.as_str() });
 
     // Phase C: a `message/stream` / `tasks/resubscribe` POST takes over the
     // socket — headers-once + an SSE event loop in `stream_task` — instead of
@@ -3670,7 +4631,7 @@ fn handle_connection(
             origin,
             &expected_token,
             req.bearer.as_deref(),
-            signed_node_name.as_deref(),
+            signed_caller,
         );
     }
 
@@ -3685,7 +4646,7 @@ fn handle_connection(
         origin,
         &expected_token,
         registry,
-        signed_node_name.as_deref(),
+        signed_caller,
     );
 
     // Security/audit (CONTRACTS.md §6): every handled request routes through
@@ -3738,8 +4699,17 @@ mod tests {
             self_url: "http://127.0.0.1:8710/",
             expected_token: "",
             presented_token: None,
-            signed_node_name: None,
+            signed_caller: None,
         }
+    }
+
+    /// The caller identity a `message_send` test threads when it only cares
+    /// WHICH record resolved: those tests reach no stamp (no claim on their
+    /// bodies), so the key is never read off it. The tests that DO check the
+    /// stamped key take it from `verify_signed_request`'s own outcome — the
+    /// only thing that can produce a real one.
+    fn caller(name: &str) -> SignedCaller<'_> {
+        SignedCaller { name, key: "" }
     }
 
     /// A minimal `Node` fixture (P-P3) — unpaired/unautogated/no-token by
@@ -3908,6 +4878,56 @@ mod tests {
             panic!("session_lookup must not be consulted with no contextId")
         });
         assert_eq!(action, SendAction::Spawn { agent_cmd: "claude".to_string() });
+    }
+
+    /// H1: a `spawnAgent` that IS a shell is refused at the ACT boundary, in
+    /// `do_spawn`'s own prologue — the shape the illegal-slug refusal beside it
+    /// already holds — so the refusal is audited by name and no process, no
+    /// session and no first-turn keystroke ever happens. The exact shell, a
+    /// shell reached through a launcher, and the `bash -lc <harness>` form the
+    /// door's own comment used to call legitimate are all refused; a harness
+    /// (wrapped or not) still spawns.
+    #[test]
+    fn do_spawn_refuses_a_shell_spawn_agent_before_anything_starts() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-shell-spawn-agent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        let audit_log = root.join("log");
+
+        for configured in ["bash", "bash -lc claude", "env bash", "dash", "nix develop -c bash"] {
+            let err = do_spawn(configured, "remote prompt", &audit_log, "nodeb", "", None, None)
+                .expect_err("a shell spawnAgent must be refused, not run");
+            assert_eq!(err.0, -32004, "`{configured}`: this door's own config code");
+            assert!(err.1.contains("aoide.a2a.spawnAgent"), "the refusal names the option: {}", err.1);
+            assert!(err.1.contains(configured), "and the value it saw: {}", err.1);
+            let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+            assert!(log.contains("shell-spawn-agent"), "the refusal is audited by name: {log}");
+            assert!(log.contains(configured), "{log}");
+        }
+        // Nothing was spawned: no record, no log, no session file.
+        let sessions: Vec<aoide_storage::records::SessionRecord> =
+            load_stage::<SessionsFile>(&sessions_path())
+                .map(|f| f.sessions)
+                .unwrap_or_default();
+        assert!(sessions.is_empty(), "no session may exist after a refused spawn: {sessions:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
     }
 
     #[test]
@@ -4083,25 +5103,338 @@ mod tests {
     }
 
     #[test]
-    fn parse_message_send_params_extracts_all_three_fields_together() {
+    fn parse_message_send_params_extracts_all_five_fields_together() {
         let params = json!({
             "message": {
                 "role": "user",
                 "parts": [{ "kind": "text", "text": "do the thing" }],
                 "contextId": "sess-9",
-                "metadata": { "aoide/spawn": true },
+                "metadata": {
+                    "aoide/spawn": true,
+                    "aoide/from": "conduct-1-2",
+                    "aoide/task": "fix-flaky"
+                },
             }
         });
-        let (prompt, context_id, spawn_asked) = parse_message_send_params(&params);
+        let (prompt, context_id, spawn_asked, claimed_from, task) =
+            parse_message_send_params(&params);
         assert_eq!(prompt, "do the thing");
         assert_eq!(context_id.as_deref(), Some("sess-9"));
         assert!(spawn_asked);
+        assert_eq!(claimed_from.as_deref(), Some("conduct-1-2"));
+        assert_eq!(task.as_deref(), Some("fix-flaky"));
 
         // A minimal params with no `message` at all is tolerated, not a panic.
-        let (prompt2, context_id2, spawn_asked2) = parse_message_send_params(&json!({}));
+        let (prompt2, context_id2, spawn_asked2, claimed_from2, task2) =
+            parse_message_send_params(&json!({}));
         assert_eq!(prompt2, "");
         assert_eq!(context_id2, None);
         assert!(!spawn_asked2);
+        assert_eq!(claimed_from2, None);
+        assert_eq!(task2, None);
+    }
+
+    /// `aoide/task` takes the SAME two-spot reading `aoide/spawn` does (a
+    /// directive about what to do, unlike `aoide/from`'s identity claim), and a
+    /// blank or non-string value names no task at all — the non-third state
+    /// `spawn --task`'s own empty-flag read takes.
+    #[test]
+    fn requested_task_reads_the_aoide_task_key_where_spawn_is_read() {
+        assert_eq!(
+            requested_task(
+                &json!({ "metadata": { "aoide/task": "fix-flaky" } }),
+                &json!({}),
+            )
+            .as_deref(),
+            Some("fix-flaky")
+        );
+        assert_eq!(
+            requested_task(&json!({}), &json!({ "metadata": { "aoide/task": "from-params" } }))
+                .as_deref(),
+            Some("from-params")
+        );
+        // The message object wins when both carry one, the same precedence
+        // `extract_context_id` gives.
+        assert_eq!(
+            requested_task(
+                &json!({ "metadata": { "aoide/task": "from-message" } }),
+                &json!({ "metadata": { "aoide/task": "from-params" } }),
+            )
+            .as_deref(),
+            Some("from-message")
+        );
+        assert_eq!(
+            requested_task(&json!({ "metadata": { "aoide/task": "  fix-flaky  " } }), &json!({}))
+                .as_deref(),
+            Some("fix-flaky"),
+            "the same trim `spawn --task` applies to its flag value"
+        );
+        for empty_or_not_a_string in [json!(""), json!("   "), json!(null), json!(7)] {
+            let message = json!({ "metadata": { "aoide/task": empty_or_not_a_string } });
+            assert_eq!(requested_task(&message, &json!({})), None, "{empty_or_not_a_string}");
+        }
+    }
+
+    /// The slug is held to the ONE predicate every mailbox name takes, and the
+    /// refusal is taught: it quotes the value, states the shape and names the
+    /// way out (`-32602`, applied by `do_spawn` — the same spawn-side-only
+    /// discipline S3's malformed `aoide/from` claim holds). The quoted value is
+    /// the CLEANED one (L6 of the S10 review): a slug may be illegal precisely
+    /// because it carries a newline, an escape or a bidi override, and this
+    /// string is printed by a caller's UI.
+    #[test]
+    fn a_task_slug_off_the_shape_is_refused_with_a_taught_message() {
+        assert_eq!(spawn_task_slug(None), Ok(None), "naming no task is not a malformed one");
+        assert_eq!(spawn_task_slug(Some("fix-flaky")), Ok(Some("fix-flaky")));
+        assert_eq!(spawn_task_slug(Some("a1-b2")), Ok(Some("a1-b2")));
+
+        for bad in ["Upper", "-leading", "under_score", "a/b", "../evil", "a b"] {
+            let refusal = spawn_task_slug(Some(bad))
+                .expect_err(&format!("`{bad}` must not be accepted as a task slug"));
+            assert!(refusal.contains(bad), "quotes the offending value: {refusal}");
+            assert!(
+                refusal.contains("^[a-z0-9][a-z0-9-]*$"),
+                "states the predicate, so the caller can fix it: {refusal}"
+            );
+            assert!(
+                refusal.contains(aoide_protocol::wire::TASK_KEY),
+                "names the key it read: {refusal}"
+            );
+        }
+
+        // The hostile shapes: what reaches the error body is the SANITIZED
+        // value, and the raw bytes never do. The expectation is the shared
+        // sanitizer's OWN output (never a hand-guessed literal: `strip_unsafe`
+        // drops a whole ESC sequence, not just the `\u{1b}`).
+        for hostile in ["evil\nslug", "evil\u{1b}[31mslug", "evil\u{202e}slug", "evil\u{200b}slug"] {
+            let refusal = spawn_task_slug(Some(hostile))
+                .expect_err(&format!("`{hostile}` must not be accepted as a task slug"));
+            assert!(
+                !refusal.contains('\n') && !refusal.contains('\u{1b}') && !refusal.contains('\u{202e}'),
+                "no raw control/format byte survives into the refusal: {refusal:?}"
+            );
+            assert!(
+                refusal.contains(&aoide_conduct::graph::clean_line(hostile)),
+                "the cleaned value is what is taught: {refusal:?}"
+            );
+            assert!(refusal.contains("evil"), "and the useful part is still legible: {refusal:?}");
+        }
+        // And the echo is bounded: a long ILLEGAL value comes back as one
+        // clipped line (the sanitizer's own 200-character cap), never whole.
+        let refusal = spawn_task_slug(Some(&"X".repeat(4096))).unwrap_err();
+        assert!(
+            refusal.chars().count() < 1024,
+            "the echo is capped, not echoed whole: {} chars",
+            refusal.chars().count()
+        );
+    }
+
+    /// The claim is read off `message.metadata` ONLY (CONTRACTS.md §6): a
+    /// top-level `params.metadata` copy — which `aoide/spawn` does accept —
+    /// is not a second spelling for WHO is calling, and an empty or
+    /// non-string value is not a third state.
+    #[test]
+    fn the_from_claim_is_read_only_off_message_metadata() {
+        let top_level_only = json!({ "metadata": { "aoide/from": "conduct-1-2" } });
+        assert_eq!(parse_message_send_params(&top_level_only).3, None);
+
+        let on_message = json!({ "message": { "metadata": { "aoide/from": "conduct-1-2" } } });
+        assert_eq!(parse_message_send_params(&on_message).3.as_deref(), Some("conduct-1-2"));
+
+        // Both present: the message's own value wins, the params copy is
+        // never read.
+        let both = json!({
+            "message": { "metadata": { "aoide/from": "from-message" } },
+            "metadata": { "aoide/from": "from-params" },
+        });
+        assert_eq!(parse_message_send_params(&both).3.as_deref(), Some("from-message"));
+
+        for empty_or_not_a_string in [json!(""), json!(7), json!(null), json!(true)] {
+            let params = json!({ "message": { "metadata": { "aoide/from": empty_or_not_a_string } } });
+            assert_eq!(parse_message_send_params(&params).3, None, "no third state: {empty_or_not_a_string}");
+        }
+    }
+
+    /// P-RSA S3: the claim is honoured on the SIGNATURE rung ONLY.
+    /// [`claimable_caller`] is the entire rung table — it hands a caller over
+    /// for that rung and for no other — and [`claimed_remote_parent`] is
+    /// provable on top of it on fixtures alone: no disk, no wire, no spawn.
+    #[test]
+    fn claimed_remote_parent_is_honoured_on_the_signature_rung_only() {
+        let node = fixture_node("yomi-strix", "http://10.0.0.9:8710/", false);
+        let key = "ab".repeat(32);
+        let signed = SignedCaller { name: "yomi-strix", key: &key };
+
+        for rung in [
+            aoide_storage::node_store::NodeRung::Token,
+            aoide_storage::node_store::NodeRung::Addr,
+        ] {
+            assert_eq!(
+                claimable_caller(Some((&node, rung)), Some(signed)),
+                None,
+                "a weaker rung hands over nothing — it can never reach a stamp"
+            );
+        }
+        assert_eq!(
+            claimable_caller(None, Some(signed)),
+            None,
+            "no resolution at all: nothing to attribute the claim to"
+        );
+        assert_eq!(
+            claimable_caller(Some((&node, aoide_storage::node_store::NodeRung::Signature)), None),
+            None,
+            "the rung alone is nothing: the identity comes off the verified signature or not at all"
+        );
+
+        // The one honoured shape: the rung that verified, the name and key it
+        // verified, the claim for the session id, nothing else. The node
+        // fixture carries no key of its own — the stamp takes its key from the
+        // caller, which is the whole of LOW-1.
+        assert_eq!(
+            claimable_caller(Some((&node, aoide_storage::node_store::NodeRung::Signature)), Some(signed)),
+            Some(signed)
+        );
+        assert_eq!(
+            claimed_remote_parent(Some(signed), Some("conduct-1-2")),
+            Ok(Some(RemoteParent {
+                node: "yomi-strix".to_string(),
+                key: key.clone(),
+                session_id: "conduct-1-2".to_string(),
+                extra: Default::default(),
+            }))
+        );
+        assert_eq!(
+            claimed_remote_parent(Some(signed), None),
+            Ok(None),
+            "no claim on the wire: nothing stamped, the whole pre-S3 shape"
+        );
+
+        // A malformed claim from a signed caller is an error for the CALLER to
+        // apply, never a silent drop (CONTRACTS.md §6) — and the caller applies
+        // it on the spawn side only, so this table stops at the refusal value.
+        for bad in ["", "a/b", "spaces not allowed", "😀"] {
+            let err = claimed_remote_parent(Some(signed), Some(bad)).unwrap_err();
+            assert_eq!(err.0, -32602, "malformed claim `{bad}`");
+            assert!(err.1.contains("aoide/from"), "the refusal names the key: {}", err.1);
+        }
+
+        // ...but a weaker rung never gets that far: it has no caller to
+        // validate the claim against, so the same bad claim is silence there,
+        // not -32602.
+        assert_eq!(
+            claimed_remote_parent(
+                claimable_caller(Some((&node, aoide_storage::node_store::NodeRung::Token)), Some(signed)),
+                Some("a/b")
+            ),
+            Ok(None),
+            "an unsigned caller's bad claim is silence, not -32602 — there is no claim to validate"
+        );
+    }
+
+    /// P-RSA S3 (MED-2): pid + second alone collides for two spawns inside one
+    /// second (`unix_ts_now` is whole seconds), and two children sharing one id
+    /// share one `sessions.json` record — so the LAST `stamp_spawn_provenance`
+    /// decides whose run it is, and one caller's ledger holds one row for two
+    /// children. Two ids in a tight loop IS that collision, made deterministic.
+    #[test]
+    fn spawn_ids_never_collide_within_a_second_and_stay_legal_session_ids() {
+        let a = spawn_session_id();
+        let b = spawn_session_id();
+        assert_ne!(a, b, "two spawns inside one second must not mint one id");
+        for id in [&a, &b] {
+            assert!(id.starts_with(&format!("a2a-{}-", std::process::id())), "{id}");
+            assert_eq!(id.split('-').count(), 4, "a2a-<pid>-<secs>-<n>: {id}");
+            assert!(
+                aoide_storage::remote_children::valid_claimed_session_id(id),
+                "a spawned child's id is what a later claim addresses it by: {id}"
+            );
+        }
+    }
+
+    /// P-RSA S3: the value stamped is the RESOLVED record's, key-authenticated
+    /// by `verify_signed_request` — never the `X-Aoide-Node` label the request
+    /// carried. Same real-crypto round trip as the P-P4/P-P5b tests, driven
+    /// with a header naming a node that does not exist while the signature
+    /// belongs to `yomi-strix`'s key.
+    #[test]
+    fn the_remote_parent_is_built_from_the_resolved_node_not_the_header_name() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-remote-parent-resolved-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::env::set_var("AOIDE_STATE_DIR", &root);
+
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read", "spawn"]);
+        let body =
+            aoide_client::wire::build_message_send_body("status check please", "mid-rp-1", None, Some("conduct-1-2"), None);
+        let body_bytes = serde_json::to_vec(&body).unwrap();
+        let now = 1_800_000_000_i64;
+        // The header names a node this box has never paired with; the
+        // signature is the one registered key's.
+        let req = signed_request(&kp, "sakaki-impostor", "/", &body_bytes, now, &unique_nonce("rp-resolved"));
+
+        let (signed_caller, signed_key) = match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
+            other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
+        };
+        assert_eq!(
+            signed_caller, "yomi-strix",
+            "the KEY selects the record; the header label is a tie-break among records sharing a key, never a name"
+        );
+        assert_eq!(
+            signed_key,
+            kp.info().pubkey_hex,
+            "the outcome carries the key that verified, not just the name"
+        );
+
+        // `message_send`'s own resolution + claim, verbatim: find by the
+        // verified identity's NAME (current registry, for autogate/allows),
+        // gate on the rung, stamp from the verified identity.
+        let nodes = aoide_storage::node_store::load_nodes();
+        let resolved = nodes
+            .iter()
+            .find(|p| p.name == signed_caller)
+            .map(|p| (p, aoide_storage::node_store::NodeRung::Signature));
+        let caller = claimable_caller(
+            resolved,
+            Some(SignedCaller { name: &signed_caller, key: &signed_key }),
+        );
+        let stamped = claimed_remote_parent(caller, parse_message_send_params(&body["params"]).3.as_deref())
+            .unwrap()
+            .expect("a verified signature plus a valid claim stamps a parent");
+        assert_eq!(stamped.node, "yomi-strix", "never the header's `sakaki-impostor`");
+        assert_eq!(stamped.key, kp.info().pubkey_hex, "the verifying key, not a wire string");
+        assert_eq!(stamped.session_id, "conduct-1-2");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
+    /// P-RSA S10: `aoide node spawn --task <slug>` and the server's own
+    /// `metadata["aoide/task"]` reader are ONE wire key, proven end to end
+    /// through the real body builder — the same discipline
+    /// `the_clients_from_claim_round_trips_through_the_inbound_parser` holds
+    /// for `aoide/from`. `None` stays byte-identical to the pre-S10 body.
+    #[test]
+    fn the_clients_task_slug_round_trips_through_the_inbound_parser() {
+        let body = aoide_client::wire::build_message_send_body(
+            "do the thing",
+            "mid-task-1",
+            None,
+            None,
+            Some("fix-flaky"),
+        );
+        let (_, _, _, _, task) = parse_message_send_params(&body["params"]);
+        assert_eq!(task.as_deref(), Some("fix-flaky"), "{body}");
+
+        let plain = aoide_client::wire::build_message_send_body("hi", "mid-task-2", None, None, None);
+        assert_eq!(parse_message_send_params(&plain["params"]).4, None);
     }
 
     /// The outbound builder (`aoide-client`) round-tripped through the
@@ -4109,16 +5442,30 @@ mod tests {
     /// production code never lets `aoide-server` reach `aoide-client`.
     #[test]
     fn build_message_send_body_round_trips_through_the_inbound_parser() {
-        let body = aoide_client::wire::build_message_send_body("hello there", "mid-123", None);
-        let (prompt, ctx, spawn) = parse_message_send_params(&body["params"]);
+        let body = aoide_client::wire::build_message_send_body("hello there", "mid-123", None, None, None);
+        let (prompt, ctx, spawn, claimed_from, task) = parse_message_send_params(&body["params"]);
         assert_eq!(prompt, "hello there");
         assert_eq!(ctx, None);
         assert!(!spawn);
+        assert_eq!(claimed_from, None, "no `--parent` claim on this body");
+        assert_eq!(task, None, "no `aoide/task` on a body the client builds today");
+    }
+
+    /// P-RSA S3: the claim the CLIENT signs (`aoide/from`) is the one the
+    /// server's parser reads, through the same real body builder —
+    /// `aoide_client::wire::build_message_send_body`'s fourth parameter and
+    /// `parse_message_send_params`' fourth field are one wire key, proven end
+    /// to end rather than assumed.
+    #[test]
+    fn the_clients_from_claim_round_trips_through_the_inbound_parser() {
+        let body = aoide_client::wire::build_message_send_body("hello there", "mid-789", None, Some("conduct-1-2"), None);
+        let (_, _, _, claimed_from, _) = parse_message_send_params(&body["params"]);
+        assert_eq!(claimed_from.as_deref(), Some("conduct-1-2"));
     }
 
     /// P-P5b (`node spawn`): the exact body `handle_node_spawn`
     /// (`aoide-client::commands`) posts is
-    /// `aoide_client::wire::build_message_send_body(text, id, None)` — this
+    /// `aoide_client::wire::build_message_send_body(text, id, None, None, None)` — this
     /// proves that shape routes all the way to `SendAction::Spawn`, carrying
     /// the client's prompt text verbatim as the argument `do_spawn` would
     /// type as the newly spawned session's first turn, against the SERVER's
@@ -4126,8 +5473,8 @@ mod tests {
     /// shape.
     #[test]
     fn build_message_send_body_routes_to_the_spawn_arm_exactly_as_do_spawn_expects() {
-        let body = aoide_client::wire::build_message_send_body("status check please", "mid-456", None);
-        let (prompt, ctx, spawn_asked) = parse_message_send_params(&body["params"]);
+        let body = aoide_client::wire::build_message_send_body("status check please", "mid-456", None, None, None);
+        let (prompt, ctx, spawn_asked, _, _) = parse_message_send_params(&body["params"]);
         assert_eq!(prompt, "status check please");
         assert_eq!(ctx, None, "no contextId — the Spawn signal `decide_send_action` reads");
         assert!(!spawn_asked, "spawn is signaled by the ABSENT contextId, not the metadata flag — `node spawn` never sets it");
@@ -4138,6 +5485,223 @@ mod tests {
             SendAction::Spawn { agent_cmd: "claude".to_string() },
             "routes to Spawn with `do_spawn`'s prompt arg equal to `prompt` above (\"status check please\")"
         );
+    }
+
+    /// P-RSA S10 review, L10 + M2's door half: the two refusals that must fire
+    /// BEFORE an id is minted, before an argv exists and before `current_exe()`
+    /// is consulted — driven through `do_spawn` ITSELF, which is safe here for
+    /// exactly that reason: both return early, so this never reaches the real
+    /// process spawn the rest of this suite deliberately stops short of. That
+    /// early-return is the invariant; if either check ever moves below
+    /// `cmd.spawn()`, this test will try to spawn the test binary and fail
+    /// loudly rather than quietly.
+    #[test]
+    fn do_spawn_refuses_an_illegal_and_a_live_held_slug_through_its_own_boundary() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = std::env::temp_dir().join(format!(
+            "aoide-a2a-dospawn-refusal-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let audit_log = stage.join("audit.log");
+
+        // (1) An illegal slug: `-32602`, taught, audited — and NOTHING spawned
+        // (no record exists, so no child ever registered).
+        let (code, msg) = do_spawn("claude", "hi", &audit_log, "peer", "", None, Some("Upper"))
+            .expect_err("an illegal slug must be refused");
+        assert_eq!(code, -32602);
+        assert!(msg.contains("Upper") && msg.contains("^[a-z0-9][a-z0-9-]*$"), "{msg}");
+        assert!(!sessions_path().exists(), "a refused spawn writes no record");
+        let audited = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(audited.contains("not a legal task slug"), "audited: {audited}");
+
+        // (2) A slug a live run already holds — the shape a peer's door child
+        // leaves behind — refused with `aoide-conduct`'s OWN sentence.
+        let mut held = fixture_session("a2a-held", "working", None);
+        held.task = Some("build-reports".to_string());
+        held.origin = Some("node:peer".to_string());
+        let sf = SessionsFile { schema_version: "0".to_string(), sessions: vec![held] };
+        write_stage(&sessions_path(), &sf).unwrap();
+        let (held_by, started_at) = aoide_conduct::graph::live_run_for("build-reports")
+            .expect("the held run is visible to the door");
+
+        let (code, msg) =
+            do_spawn("claude", "hi", &audit_log, "peer", "", None, Some("build-reports"))
+                .expect_err("a live-held slug must be refused");
+        assert_eq!(code, -32602, "state this node holds, not a capability the caller lacks");
+        assert_eq!(
+            msg,
+            aoide_conduct::graph::live_run_refusal("build-reports", &held_by, &started_at),
+            "the shared refusal text, byte for byte"
+        );
+        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert_eq!(after.sessions.len(), 1, "nothing was spawned, nothing was written");
+        assert!(std::fs::read_to_string(&audit_log).unwrap().contains("already has a live run"));
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    // ── P-RSA S10: a remote spawn is a headless managed run ──────────────
+    //
+    // `spawn_argv` is `do_spawn`'s own argv half, factored out for exactly the
+    // reason `spawn_child_command` was: a `cargo test` binary's `current_exe()`
+    // is the harness, so no test here drives the real spawn — the SHAPE is what
+    // is provable, off a real `Command`'s `get_args()`/`get_envs()`.
+
+    /// S10: the door's argv IS the wrapper a local `spawn` builds —
+    /// `--spawned --headless` always (this door has no terminal to hand a
+    /// child), `--task <slug>` exactly when the caller named one — and an
+    /// ILLEGAL slug never reaches an argv at all, because `do_spawn` refuses it
+    /// before the id is minted or `current_exe()` is resolved (the refusal's
+    /// own test is `a_task_slug_off_the_shape_is_refused_with_a_taught_message`).
+    #[test]
+    fn a2a_spawn_argv_is_a_headless_managed_run_with_the_task_only_when_named() {
+        let audit = Path::new("/tmp/aoide-a2a-test-audit-does-not-need-to-exist.log");
+        let args_of = |argv: &[String]| -> Vec<String> {
+            spawn_child_command(Path::new("/bin/true"), argv, audit, None)
+                .get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect()
+        };
+
+        assert_eq!(
+            args_of(&spawn_argv("a2a-11-1790", "claude --dangerously-skip-permissions", None)),
+            vec![
+                "conduct",
+                "--spawned",
+                "--headless",
+                "--agent",
+                "a2a",
+                "--id",
+                "a2a-11-1790",
+                "--",
+                "claude",
+                "--dangerously-skip-permissions",
+            ],
+            "a no-task spawn is the plain headless wrapper, the configured agent's own argv \
+             untouched (still `split_whitespace`, never a shell)"
+        );
+        assert_eq!(
+            args_of(&spawn_argv("a2a-11-1791", "claude", Some("fix-flaky"))),
+            vec![
+                "conduct",
+                "--spawned",
+                "--headless",
+                "--agent",
+                "a2a",
+                "--id",
+                "a2a-11-1791",
+                "--task",
+                "fix-flaky",
+                "--",
+                "claude",
+            ],
+            "a named task rides the SAME argv a local `spawn --task` builds, before the `--` \
+             that ends the wrapper's own flags"
+        );
+
+        assert!(spawn_task_slug(Some("Upper")).is_err(), "and the illegal slug has no argv to read");
+    }
+
+    /// S10's no-regression pin: `--headless` and `--task` are ARGV facts, not
+    /// new environment. The child's `Command` carries exactly the three entries
+    /// the pre-S10 spawn carried — `AOIDE_AUDIT_LOG` set, `AOIDE_SESSION_ORIGIN`
+    /// and `AOIDE_SESSION_ID` explicitly REMOVED — with a task named or not.
+    /// Nothing else appears: `AOIDE_TASK`/`AOIDE_TASK_INSTRUCTIONS` are exported
+    /// by the child's own `conduct` to the AGENT it wraps (`spawn_on_pty`),
+    /// never by this door to the wrapper.
+    #[test]
+    fn a2a_spawn_env_is_unchanged_by_headless_and_task() {
+        let audit = Path::new("/tmp/aoide-a2a-test-audit-does-not-need-to-exist.log");
+        let env_of = |argv: &[String]| -> std::collections::BTreeMap<String, Option<String>> {
+            spawn_child_command(Path::new("/bin/true"), argv, audit, None)
+                .get_envs()
+                .map(|(k, v)| {
+                    (
+                        k.to_string_lossy().into_owned(),
+                        v.map(|v| v.to_string_lossy().into_owned()),
+                    )
+                })
+                .collect()
+        };
+        let expected: std::collections::BTreeMap<String, Option<String>> = [
+            (
+                "AOIDE_AUDIT_LOG".to_string(),
+                Some(audit.to_string_lossy().into_owned()),
+            ),
+            ("AOIDE_SESSION_ORIGIN".to_string(), None),
+            ("AOIDE_SESSION_ID".to_string(), None),
+        ]
+        .into_iter()
+        .collect();
+
+        assert_eq!(env_of(&spawn_argv("a2a-11-1", "claude", None)), expected);
+        assert_eq!(
+            env_of(&spawn_argv("a2a-11-2", "claude", Some("fix-flaky"))),
+            expected,
+            "S10 adds an argv flag and no environment at all"
+        );
+    }
+
+    /// S10 on the S3 side: a MANAGED remote child — a record that already
+    /// carries the task slug its own `conduct` stamped at registration — takes
+    /// the door's `origin`+`remoteParent` stamp exactly as a plain one does, and
+    /// keeps the slug. Two writers, two stage-lock sections, so the second
+    /// never clobbers the first's field.
+    #[test]
+    fn the_stamp_lands_on_a_managed_run_and_leaves_its_task_slug_alone() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = std::env::temp_dir().join(format!(
+            "aoide-server-a2a-stamp-task-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let mut rec = fixture_session("a2a-spawned-task", "working", None);
+        rec.task = Some("fix-flaky".to_string());
+        let sf = SessionsFile { schema_version: "0".to_string(), sessions: vec![rec] };
+        write_stage(&sessions_path(), &sf).unwrap();
+
+        stamp_spawn_provenance(
+            "a2a-spawned-task",
+            "node:yomi-strix",
+            Some(RemoteParent {
+                node: "yomi-strix".to_string(),
+                key: "cd".repeat(32),
+                session_id: "conduct-17991-1790312541".to_string(),
+                extra: Default::default(),
+            }),
+        );
+
+        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = after.sessions.iter().find(|s| s.session_id == "a2a-spawned-task").unwrap();
+        assert_eq!(rec.origin.as_deref(), Some("node:yomi-strix"), "the origin still lands");
+        let rp = rec.remote_parent.as_ref().expect("the remoteParent stamp still lands");
+        assert_eq!(rp.node, "yomi-strix");
+        assert_eq!(rp.session_id, "conduct-17991-1790312541");
+        assert_eq!(
+            rec.task.as_deref(),
+            Some("fix-flaky"),
+            "the child's own task slug survives both stamps — the managed shape changes nothing \
+             about S3's two register-wait stamps"
+        );
+        assert_eq!(rec.parent_session_id, None, "still no foreign id in the LOCAL parent edge");
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
     }
 
     // ── `message/send` end-to-end via `handle_jsonrpc` — ERROR branches only.
@@ -4211,7 +5775,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&stage);
     }
 
-    /// LANE IDENTITY P-ID0 (G16/G5): `stamp_spawn_origin` is the record-layer
+    /// LANE IDENTITY P-ID0 (G16/G5): `stamp_spawn_provenance` is the record-layer
     /// authority `do_spawn` now calls directly, rather than threading a
     /// `node:*` value through the child's own env — proven up to, but never
     /// through, `do_spawn`'s real process spawn, same documented boundary
@@ -4219,8 +5783,13 @@ mod tests {
     /// boundary` draws above: the record here is written directly (as
     /// `session_conduct`'s own registration would, once the child comes up),
     /// so the retry loop finds it on its very first poll.
+    ///
+    /// P-RSA S3 extends it to the second of the two stamps the one retry loop
+    /// carries: `None` leaves the record's `remoteParent` absent (the whole
+    /// pre-S3 shape), and `Some` lands it on the SAME pass as the origin —
+    /// never a second poll, never a second thread.
     #[test]
-    fn stamp_spawn_origin_lands_a_node_origin_on_an_already_registered_record() {
+    fn stamp_spawn_provenance_lands_the_origin_and_the_remote_parent_on_a_registered_record() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
         let stage = std::env::temp_dir().join(format!(
@@ -4233,15 +5802,40 @@ mod tests {
 
         let sf = SessionsFile {
             schema_version: "0".to_string(),
-            sessions: vec![fixture_session("a2a-spawned-1", "working", None)],
+            sessions: vec![
+                fixture_session("a2a-spawned-1", "working", None),
+                fixture_session("a2a-spawned-2", "working", None),
+            ],
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        stamp_spawn_origin("a2a-spawned-1", "node:yomi-strix");
+        stamp_spawn_provenance("a2a-spawned-1", "node:yomi-strix", None);
+        stamp_spawn_provenance(
+            "a2a-spawned-2",
+            "node:yomi-strix",
+            Some(RemoteParent {
+                node: "yomi-strix".to_string(),
+                key: "ab".repeat(32),
+                session_id: "conduct-17991-1790312541".to_string(),
+                extra: Default::default(),
+            }),
+        );
 
         let after: SessionsFile = load_stage(&sessions_path()).unwrap();
         let rec = after.sessions.iter().find(|s| s.session_id == "a2a-spawned-1").unwrap();
         assert_eq!(rec.origin.as_deref(), Some("node:yomi-strix"));
+        assert!(rec.remote_parent.is_none(), "no claim → nothing stamped, byte-identical to the pre-S3 shape");
+
+        let rec2 = after.sessions.iter().find(|s| s.session_id == "a2a-spawned-2").unwrap();
+        assert_eq!(rec2.origin.as_deref(), Some("node:yomi-strix"));
+        let rp = rec2.remote_parent.as_ref().expect("the claim landed on the same registration pass");
+        assert_eq!(rp.node, "yomi-strix");
+        assert_eq!(rp.key, "ab".repeat(32));
+        assert_eq!(rp.session_id, "conduct-17991-1790312541");
+        assert_eq!(
+            rec2.parent_session_id, None,
+            "the door never writes a foreign id into the LOCAL parentSessionId (CONTRACTS.md §4)"
+        );
 
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
@@ -4397,7 +5991,7 @@ mod tests {
             self_url: "http://127.0.0.1:8710/",
             expected_token: "s3cr3t",
             presented_token: presented,
-            signed_node_name: None,
+            signed_caller: None,
         };
         let get = json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": "s1" } });
         let sum = json!({ "jsonrpc": "2.0", "id": 2, "method": "aoide/graphSummary" });
@@ -5470,6 +7064,7 @@ mod tests {
             verify_signed_request(&req, now),
             SignedRequestOutcome::Verified {
                 resolved: "box-b".to_string(),
+                key: kp.info().pubkey_hex.clone(),
                 claimed: "box-b".to_string()
             }
         );
@@ -5645,6 +7240,7 @@ mod tests {
             verify_signed_request(&req, now),
             SignedRequestOutcome::Verified {
                 resolved: "box-b".to_string(),
+                key: kp.info().pubkey_hex.clone(),
                 claimed: "box-b".to_string()
             },
             "the FIRST use of this nonce must verify"
@@ -5696,7 +7292,7 @@ mod tests {
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "box-b", "/", b"{}", now, &unique_nonce("by-key"));
         match verify_signed_request(&req, now) {
-            SignedRequestOutcome::Verified { resolved, claimed } => {
+            SignedRequestOutcome::Verified { resolved, claimed, .. } => {
                 assert_eq!(resolved, "box-a", "the record whose stored key verifies IS the caller");
                 assert_eq!(claimed, "box-b", "the wire's claim rides along for attribution");
                 let detail = attribution_drift_detail(&claimed, &resolved).expect("a claimed-vs-resolved mismatch must produce a drift audit line");
@@ -5733,7 +7329,7 @@ mod tests {
         // registered nowhere.
         let req = signed_request(&kp, "old-name", "/", b"{}", now, &unique_nonce("renamed"));
         match verify_signed_request(&req, now) {
-            SignedRequestOutcome::Verified { resolved, claimed } => {
+            SignedRequestOutcome::Verified { resolved, claimed, .. } => {
                 assert_eq!(resolved, "renamed-node");
                 assert_eq!(claimed, "old-name");
             }
@@ -5778,7 +7374,7 @@ mod tests {
         // Claimed name matches one twin exactly — that one wins.
         let req = signed_request(&kp, "twin-b", "/", b"{}", now, &unique_nonce("twin-exact"));
         match verify_signed_request(&req, now) {
-            SignedRequestOutcome::Verified { resolved, claimed } => {
+            SignedRequestOutcome::Verified { resolved, claimed, .. } => {
                 assert_eq!(resolved, "twin-b");
                 assert_eq!(claimed, "twin-b");
             }
@@ -5878,7 +7474,7 @@ mod tests {
     // ── P-P5b (`node spawn`) — the real signed wire round trip ──────────────
     //
     // Both tests below build the SPAWN-SHAPED body via `aoide_client::wire::
-    // build_message_send_body(text, id, None)` — the exact function
+    // build_message_send_body(text, id, None, None)` — the exact function
     // `aoide-client::commands::handle_node_spawn` calls — and a REAL ed25519
     // signature over it (`signed_request`, the same helper the P-P4 tests
     // above use), so this is a genuine client-body + real-crypto round trip,
@@ -5888,7 +7484,7 @@ mod tests {
     /// wording) — proven up to, but never through, `do_spawn`'s real
     /// OS-level process spawn: `verify_signed_request` really verifies the
     /// signature, and `spawn_admitted` — fed the EXACT resolution
-    /// `message_send` itself performs when `signed_node_name` is `Some`
+    /// `message_send` itself performs when `signed_caller` is `Some`
     /// (the two-line `nodes.iter().find(name).map(|p| (p,
     /// NodeRung::Signature))`) — really admits it. This file's own
     /// established discipline (see the doc comment atop the "Spawn gate
@@ -5914,23 +7510,23 @@ mod tests {
         std::env::set_var("AOIDE_STATE_DIR", &root);
 
         let kp = setup_signed_node_with_allows("yomi-strix", &["read", "spawn"]);
-        let body = aoide_client::wire::build_message_send_body("status check please", "mid-spawn-1", None);
+        let body = aoide_client::wire::build_message_send_body("status check please", "mid-spawn-1", None, None, None);
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("admit"));
 
-        let signed_node_name = match verify_signed_request(&req, now) {
+        let signed_caller = match verify_signed_request(&req, now) {
             SignedRequestOutcome::Verified { resolved, .. } => resolved,
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
-        assert_eq!(signed_node_name, "yomi-strix");
+        assert_eq!(signed_caller, "yomi-strix");
 
-        // The exact resolution `message_send` performs when `signed_node_name`
+        // The exact resolution `message_send` performs when `signed_caller`
         // is `Some` — the SOLE resolution, no fallthrough to addr/token (P-P4).
         let nodes = aoide_storage::node_store::load_nodes();
         let resolved = nodes
             .iter()
-            .find(|p| p.name == signed_node_name)
+            .find(|p| p.name == signed_caller)
             .map(|p| (p, aoide_storage::node_store::NodeRung::Signature));
         assert!(spawn_admitted(resolved), "a genuinely signed, paired, spawn-allowed node must be ADMITTED");
         // The exact name that would flow into `do_spawn`'s `node_name` arg,
@@ -5967,14 +7563,15 @@ mod tests {
 
         // Paired, verified, spawn REVOKED — `allows` carries only "read".
         let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
-        let body = aoide_client::wire::build_message_send_body("status check please", "mid-spawn-2", None);
+        let body = aoide_client::wire::build_message_send_body("status check please", "mid-spawn-2", None, None, None);
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("revoked"));
-        let signed_node_name = match verify_signed_request(&req, now) {
-            SignedRequestOutcome::Verified { resolved, .. } => resolved,
+        let (signed_name, signed_key) = match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
+        let caller = SignedCaller { name: &signed_name, key: &signed_key };
 
         let err = message_send(
             &body["params"],
@@ -5984,7 +7581,7 @@ mod tests {
             ConnOrigin::Loopback,
             "",
             None,
-            Some(signed_node_name.as_str()),
+            Some(caller),
         )
         .unwrap_err();
         assert_eq!(err.0, -32006, "genuinely signed and paired, but `spawn` was revoked from allows");
@@ -5998,6 +7595,271 @@ mod tests {
         match saved_stage {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
             None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
+    /// P-RSA S3: a signed caller's MALFORMED claim is `-32602`, refused before
+    /// any spawn admission is even consulted — the claim is inside the body
+    /// digest, so a caller that signed it meant it, and a silent drop would
+    /// hide a client bug. Driven through the REAL `message_send` on a refusal
+    /// branch only (this file's documented discipline: no test here may reach
+    /// `do_spawn`'s real process spawn, which on the admitted path would
+    /// exec the TEST binary as an agent).
+    #[test]
+    fn a_signed_callers_malformed_from_claim_is_refused_with_minus_32602() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-from-claim-bad-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+
+        // Genuinely signed, verified, spawn-allowed: nothing but the claim is
+        // wrong, so the -32602 below is the claim's own doing.
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read", "spawn"]);
+        let body =
+            aoide_client::wire::build_message_send_body("status check please", "mid-bad-1", None, Some("not/a/session"), None);
+        let body_bytes = serde_json::to_vec(&body).unwrap();
+        let now = 1_800_000_000_i64;
+        let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("bad-from"));
+        let (signed_name, signed_key) = match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
+            other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
+        };
+
+        let audit_log = root.join("log");
+        let err = message_send(
+            &body["params"],
+            &audit_log,
+            "claude",
+            "",
+            ConnOrigin::Loopback,
+            "",
+            None,
+            Some(SignedCaller { name: &signed_name, key: &signed_key }),
+        )
+        .unwrap_err();
+        assert_eq!(err.0, -32602, "a signed caller's malformed claim is invalid params, never a silent drop");
+        assert!(err.1.contains("aoide/from"), "the refusal names the key: {}", err.1);
+        // ...and the same malformed value UNSIGNED is not an error at all —
+        // there is no claim to validate off a weaker rung. Loopback with no
+        // token resolves no node, so the spawn arm refuses: the refusal is
+        // -32006, provably not -32602.
+        let unsigned = message_send(
+            &body["params"],
+            &audit_log,
+            "claude",
+            "",
+            ConnOrigin::Loopback,
+            "",
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(unsigned.0, -32006, "an unsigned caller's bad claim is ignored, not validated: {}", unsigned.1);
+
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(
+            log.contains("\"status\":\"ignored-unsigned-from\""),
+            "the ignore is audited, one line, by name: {log}"
+        );
+        assert!(
+            !log.contains("\"status\":\"ok\""),
+            "neither call ever spawned: {log}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
+    /// P-RSA S3 / MED-3: the claim belongs to the SPAWN side. The Inject arm
+    /// consumes it nowhere — S5 is what threads an attested sender into an
+    /// inject — so a malformed claim on an inject-shaped request must take
+    /// exactly the path an ABSENT claim takes (the send is queued and answered
+    /// with a `submitted` Task), never the door's `-32602`. Driven through the
+    /// REAL `message_send` with a genuinely signed caller and a session that is
+    /// conductable right now, because that is where the ordering bug lived: the
+    /// refusal used to fire between node resolution and the uniform-response
+    /// guard, ahead of the arm that never reads the value.
+    #[test]
+    fn a_malformed_claim_on_an_inject_shaped_request_is_ignored_not_refused() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-inject-bad-from-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
+
+        // A session that IS conductable NOW (registered + its socket on disk),
+        // so `decide_send_action` classifies this request Inject (contextId
+        // present, spawn not asked) instead of Spawn or Error.
+        let id = "inject-tgt";
+        let socket = aoide_conduct::graph::conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let sf = SessionsFile {
+            schema_version: "0".to_string(),
+            sessions: vec![conductable_session(id, &socket)],
+        };
+        write_stage(&sessions_path(), &sf).unwrap();
+
+        let body = aoide_client::wire::build_message_send_body(
+            "status check please",
+            "mid-inject-bad",
+            Some(id),
+            Some("not/a/session"),
+            None,
+        );
+        let body_bytes = serde_json::to_vec(&body).unwrap();
+        let now = 1_800_000_000_i64;
+        let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("inject-bad-from"));
+        let (signed_name, signed_key) = match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
+            other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
+        };
+
+        let audit_log = root.join("log");
+        let result = message_send(
+            &body["params"],
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Loopback,
+            "",
+            None,
+            Some(SignedCaller { name: &signed_name, key: &signed_key }),
+        );
+        let task = result.unwrap_or_else(|e| {
+            panic!("a malformed claim on the Inject arm must not be refused: {e:?}")
+        });
+        assert_eq!(task["id"], id, "the Inject arm's Task for the session it targeted");
+
+        // The send took the queued path — a signed, non-autogate caller is not
+        // delivered straight through — attributed to the NODE that verified,
+        // never to the malformed claim, which nothing on this arm read.
+        let pending: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
+        let entries = pending["pending"].as_array().unwrap();
+        assert_eq!(entries.len(), 1, "{pending}");
+        assert_eq!(entries[0]["from"], "node:yomi-strix");
+
+        // The weaker-rung ignore line did not fire: this request DID verify by
+        // a node's key, so the claim was not ignored for its rung — it simply
+        // is not consumed on this arm yet.
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(
+            !log.contains("ignored-unsigned-from"),
+            "a signed caller is not an unsigned ignore: {log}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
+    /// P-RSA S3 / LOW-1: the stamp's `key` is the key that VERIFIED, not a
+    /// second read of the registry by name. Hand-written `nodes.json` only —
+    /// `insert_node` refuses duplicate names — but the decoupling is real: two
+    /// records sharing a name, the IMPOSTOR listed FIRST with a different
+    /// stored key. `verify_signed_request` resolves the signer by KEY, so it
+    /// returns the second record; a stamp that re-found the record by name
+    /// would take the first record's pubkey and stamp a `remoteParent.key`
+    /// that never verified anything.
+    #[test]
+    fn the_remote_parent_keys_on_the_verifying_key_not_a_second_name_lookup() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-remote-parent-twin-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::env::set_var("AOIDE_STATE_DIR", &root);
+
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read", "spawn"]);
+        let real = aoide_storage::node_store::load_nodes().remove(0);
+        // The twin: same name, a different (never-verifying) stored key, placed
+        // FIRST in the file so a find-by-name lands on it.
+        let mut impostor = real.clone();
+        impostor.url = "http://impostor/".to_string();
+        impostor.pubkey = Some("cd".repeat(32));
+        aoide_storage::node_store::save_nodes(&[impostor, real]).unwrap();
+
+        let body = aoide_client::wire::build_message_send_body(
+            "status check please",
+            "mid-twin",
+            None,
+            Some("conduct-1-2"),
+            None,
+        );
+        let body_bytes = serde_json::to_vec(&body).unwrap();
+        let now = 1_800_000_000_i64;
+        let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("rp-twin"));
+        let (signed_name, signed_key) = match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
+            other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
+        };
+        assert_eq!(signed_key, kp.info().pubkey_hex, "the key trial resolved the REAL twin");
+
+        // `message_send`'s own resolution + claim, verbatim: the name lookup
+        // (which DOES land on the impostor, since names are not identity) and
+        // the rung gate, then the stamp — off the verified identity.
+        let nodes = aoide_storage::node_store::load_nodes();
+        let resolved = nodes
+            .iter()
+            .find(|p| p.name == signed_name)
+            .map(|p| (p, aoide_storage::node_store::NodeRung::Signature));
+        assert_eq!(
+            resolved.expect("the name exists").0.pubkey.as_deref(),
+            Some("cd".repeat(32).as_str()),
+            "the find-by-name really does land on the impostor — the point of this test",
+        );
+        let stamped = claimed_remote_parent(
+            claimable_caller(resolved, Some(SignedCaller { name: &signed_name, key: &signed_key })),
+            Some("conduct-1-2"),
+        )
+        .unwrap()
+        .expect("a verified signature plus a valid claim stamps a parent");
+        assert_eq!(
+            stamped.key,
+            kp.info().pubkey_hex,
+            "the stamped key is the one that verified, never the name-twin's stored key"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
         }
     }
 
@@ -6278,8 +8140,8 @@ mod tests {
     }
 
     #[test]
-    fn message_send_resolves_via_signed_node_name_producing_signature_rung_attribution() {
-        // P-P4: `message_send`'s `signed_node_name` param (already verified
+    fn message_send_resolves_via_signed_caller_producing_signature_rung_attribution() {
+        // P-P4: `message_send`'s `signed_caller` param (already verified
         // by `verify_signed_request`, one layer up) is the SOLE resolution
         // when present — this test drives that resolution directly (the
         // signature verification itself is `verify_signed_request`'s own
@@ -6325,7 +8187,7 @@ mod tests {
         // A REMOTE, non-autogated origin with NO token presented at all —
         // under the pre-P-P4 ladder this would resolve to nothing
         // (`resolve_node` needs a token or a matching address); it resolves
-        // here purely because `signed_node_name` is `Some`.
+        // here purely because `signed_caller` is `Some`.
         let remote_origin = ConnOrigin::Remote("203.0.113.1".parse().unwrap());
         let result = message_send(
             &params,
@@ -6335,7 +8197,7 @@ mod tests {
             remote_origin,
             "",
             None,
-            Some("signed-node"),
+            Some(caller("signed-node")),
         );
         assert!(result.is_ok());
 
@@ -6343,7 +8205,7 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
         let entries = pending["pending"].as_array().unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0]["from"], "node:signed-node", "resolution via signed_node_name attributes correctly");
+        assert_eq!(entries[0]["from"], "node:signed-node", "resolution via signed_caller attributes correctly");
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -6357,9 +8219,9 @@ mod tests {
     }
 
     #[test]
-    fn message_send_signed_node_name_never_falls_through_to_the_addr_token_ladder() {
+    fn message_send_signed_caller_never_falls_through_to_the_addr_token_ladder() {
         // Fail-closed discipline (#84 precedent, brief point 2): a
-        // `signed_node_name` that names a node NOT actually present in the
+        // `signed_caller` that names a node NOT actually present in the
         // (freshly reloaded) registry — an edge case `verify_signed_request`
         // itself already prevents in practice, since it only ever hands
         // back a name it just confirmed is registered+verified — must
@@ -6416,7 +8278,7 @@ mod tests {
             remote_origin,
             "",
             Some("real-secret"),
-            Some("ghost"),
+            Some(caller("ghost")),
         );
         assert!(result.is_ok());
 
@@ -6426,7 +8288,7 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert!(
             entries[0].get("from").is_none() || entries[0]["from"].is_null(),
-            "a signed_node_name resolving to nothing must NOT fall back to the token-resolved `real-node` — got {:?}",
+            "a signed_caller resolving to nothing must NOT fall back to the token-resolved `real-node` — got {:?}",
             entries[0].get("from")
         );
 
@@ -6442,7 +8304,7 @@ mod tests {
     }
 
     /// LANE IDENTITY P-ID3 (G9): the exact `from: None` shape the test above
-    /// already produces (an unresolvable `signed_node_name`), but with
+    /// already produces (an unresolvable `signed_caller`), but with
     /// `AOIDE_SESSION_ID` set in THIS PROCESS's own env first — standing in
     /// for whatever `aoide a2a serve` might have inherited at launch. Before
     /// the fix, `do_inject`'s bare `if let Some(f) = from` left `--from`
@@ -6497,7 +8359,7 @@ mod tests {
             "message": { "parts": [{ "kind": "text", "text": "hi" }], "contextId": id }
         });
         let remote_origin = ConnOrigin::Remote("10.0.0.9".parse().unwrap());
-        // An unresolvable `signed_node_name` ("ghost") — `do_inject` sees
+        // An unresolvable `signed_caller` ("ghost") — `do_inject` sees
         // `from: None`, exactly the shape that used to fall through to the
         // env.
         let result = message_send(
@@ -6508,7 +8370,7 @@ mod tests {
             remote_origin,
             "",
             Some("real-secret"),
-            Some("ghost"),
+            Some(caller("ghost")),
         );
         assert!(result.is_ok(), "{:?}", result.err());
         assert!(listener.accept().is_err(), "unattributed + non-autogate must never touch the socket");
@@ -6712,6 +8574,103 @@ mod tests {
         }
     }
 
+    /// A shell child takes no auto-delivered steer from ANY rung of this door
+    /// (house rule 4): loopback included, remote-parent autogate included. The
+    /// line is held PENDING instead — a human's own approval, and nothing else,
+    /// is what lets it reach a shell. Both arms run on the same fixture, so the
+    /// difference is exactly the target record's own P-C5 capture, never the
+    /// caller's standing.
+    #[test]
+    fn a_shell_wrapped_target_takes_no_auto_delivered_inject() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-shell-target-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        let mut records = Vec::new();
+        let mut listeners = Vec::new();
+        for id in ["plain-target", "shell-target"] {
+            let socket = aoide_conduct::graph::conduct_socket_path(id);
+            std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+            listeners.push((id, UnixListener::bind(&socket).unwrap()));
+            let mut rec = conductable_session(id, &socket);
+            // The shell arm is the SAME record with the P-C5 capture on it —
+            // a `--agent <harness> -- bash` session a moment after it started.
+            if id == "shell-target" {
+                rec.restore = Some(aoide_storage::records::RestoreSnapshot::default());
+            }
+            records.push(rec);
+        }
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".to_string(), sessions: records }).unwrap();
+        let audit_log = root.join("log");
+
+        // Arm 1 — an ordinary target on the door's own trusted loopback rung:
+        // delivered, exactly as before this rule existed.
+        let plain = listeners.iter().find(|(id, _)| *id == "plain-target").unwrap().1.try_clone().unwrap();
+        let acc = std::thread::spawn(move || {
+            let (mut conn, _) = plain.accept().unwrap();
+            use std::io::Read as _;
+            let mut buf = Vec::new();
+            let _ = conn.read_to_end(&mut buf);
+            buf
+        });
+        let result = message_send(
+            &json!({ "message": { "parts": [{ "kind": "text", "text": "plain hello" }], "contextId": "plain-target" } }),
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Loopback,
+            "",
+            None,
+            None,
+        );
+        assert_eq!(String::from_utf8(acc.join().unwrap()).unwrap(), "plain hello\r");
+        assert_eq!(result.unwrap()["id"], "plain-target");
+
+        // Arm 2 — the same call, the same loopback origin, into the shell:
+        // held, nothing on the wire, the synchronous answer the door's own
+        // held-pending shape (`submitted_task`).
+        let shell = listeners.iter().find(|(id, _)| *id == "shell-target").unwrap().1.try_clone().unwrap();
+        shell.set_nonblocking(true).unwrap();
+        let held = message_send(
+            &json!({ "message": { "parts": [{ "kind": "text", "text": "would run" }], "contextId": "shell-target" } }),
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Loopback,
+            "",
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(held["status"]["state"], "submitted", "{held}");
+        assert!(shell.accept().is_err(), "a shell target is never written to");
+        let log = std::fs::read_to_string(&audit_log).unwrap();
+        assert!(log.contains("shell-wrapped"), "the refusal is named, never silent: {log}");
+        assert!(log.contains("is conducting a shell"), "{log}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
     #[test]
     fn a_successfully_delivered_message_send_files_into_the_mailbase() {
         // Messaging plan P-M1: `do_inject` files no entry of its own (see its
@@ -6838,7 +8797,7 @@ mod tests {
             buf
         });
 
-        spawn_inject_prompt(id, "hello new session");
+        spawn_inject_prompt(id, "claude", "hello new session");
         let got = acc.join().unwrap();
         assert_eq!(String::from_utf8(got).unwrap(), "hello new session\n", "--submit's newline, same as do_spawn's payload");
 
@@ -6874,7 +8833,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
 
-        spawn_inject_prompt("whatever-id", "");
+        spawn_inject_prompt("whatever-id", "claude", "");
         assert!(aoide_storage::mail::read_base().unwrap().is_empty());
 
         let _ = std::fs::remove_dir_all(&root);
@@ -7296,7 +9255,7 @@ mod tests {
             ConnOrigin::Loopback,
             "",
             None,
-            Some("tunneled-node"),
+            Some(caller("tunneled-node")),
         );
         assert!(result.is_ok(), "{:?}", result.err());
         assert!(listener.accept().is_err(), "a signed, non-autogate node's send must never touch the socket, loopback or not");
@@ -7374,7 +9333,7 @@ mod tests {
             ConnOrigin::Loopback,
             "",
             None,
-            Some("trusted-tunneled-node"),
+            Some(caller("trusted-tunneled-node")),
         );
         let got = acc.join().unwrap();
         assert_eq!(
@@ -7400,6 +9359,470 @@ mod tests {
             Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
             None => std::env::remove_var("AOIDE_STATE_DIR"),
         }
+    }
+
+    // ── P-RSA S5: a remote parent steers its own child without pending ───────
+    //
+    // The claim `node spawn` stamped on the child (S3) is read BACK on the
+    // Inject arm: a caller whose verified key and claimed session id both equal
+    // the target record's `remoteParent` delivers WITHOUT pending — audited
+    // `autogate-remote-parent` — and every other shape is byte-for-byte today's
+    // result. The table below is the whole predicate: signed and unsigned, key
+    // match and mismatch, session match and mismatch, and the node's own
+    // `autogate` flag on and off.
+
+    const PARENT_KEY: &str = "aa11cc22dd33ff44";
+    const PARENT_SESSION: &str = "par-1";
+    const REMOTE_CHILD: &str = "remote-child-1";
+
+    /// Write the S5 fixture into an ALREADY-prepared `root`: one registered,
+    /// verified node (`node_name`, whose stored key is `key`), and one
+    /// conductable session ([`REMOTE_CHILD`]) whose `remoteParent` names that
+    /// node's key and `parent_session` — the exact shape S3's
+    /// `stamp_remote_parent` leaves behind. Points `AOIDE_STAGE_DIR`/
+    /// `AOIDE_STATE_DIR`/`XDG_RUNTIME_DIR` at the box and clears the ambient
+    /// autogate/session vars, so the caller must already hold `env_lock`.
+    ///
+    /// Returns `(stage, audit_log, listener)`: the listener sits at the child's
+    /// own control socket, so a delivery is observable as bytes arriving and a
+    /// held-pending send as nothing arriving (bound NONBLOCKING by the callers
+    /// that expect silence, like every other pending-path test here).
+    fn write_remote_parent_box(
+        root: &std::path::Path,
+        node_name: &str,
+        key: &str,
+        parent_session: &str,
+        autogate: bool,
+    ) -> (std::path::PathBuf, std::path::PathBuf, UnixListener) {
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", root);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        let mut node = fixture_node(node_name, "http://192.0.2.51:8710/", autogate);
+        node.verified = true;
+        node.pubkey = Some(key.to_string());
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        let socket = aoide_conduct::graph::conduct_socket_path(REMOTE_CHILD);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        let mut child = conductable_session(REMOTE_CHILD, &socket);
+        child.remote_parent = Some(RemoteParent {
+            node: node_name.to_string(),
+            key: key.to_string(),
+            session_id: parent_session.to_string(),
+            extra: Default::default(),
+        });
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".to_string(), sessions: vec![child] },
+        )
+        .unwrap();
+        (stage, root.join("log"), listener)
+    }
+
+    /// One inject-shaped `message/send` body for the S5 table, naming
+    /// [`REMOTE_CHILD`] and carrying `claim` as `metadata["aoide/from"]` when
+    /// given — the one place `parse_message_send_params` reads it.
+    fn remote_parent_body(claim: Option<&str>) -> Value {
+        let mut message = json!({
+            "parts": [{ "kind": "text", "text": "steer it" }],
+            "contextId": REMOTE_CHILD,
+        });
+        if let Some(claim) = claim {
+            message["metadata"] = json!({ aoide_protocol::wire::FROM_SESSION_KEY: claim });
+        }
+        json!({ "message": message })
+    }
+
+    fn remote_parent_box_root(tag: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    /// Restore the two stage/state env vars an S5 test saved on entry.
+    fn restore_stage_state(saved_stage: Option<String>, saved_state: Option<String>) {
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
+    /// The whole predicate, table-tested against plain values (no stage file,
+    /// no socket, no registry): every `None` is `false`, and of the two
+    /// equalities the KEY is the security argument while the session id pins it
+    /// to one child.
+    #[test]
+    fn remote_parent_match_needs_a_signed_caller_its_key_and_its_session() {
+        let target = RemoteParent {
+            node: "nodeb".to_string(),
+            key: PARENT_KEY.to_string(),
+            session_id: PARENT_SESSION.to_string(),
+            extra: Default::default(),
+        };
+        let key = PARENT_KEY.to_string();
+        let caller = SignedCaller { name: "nodeb", key: &key };
+
+        assert!(
+            remote_parent_match(Some(&caller), Some(PARENT_SESSION), Some(&target)),
+            "signed + key match + session match is the one true row"
+        );
+        assert!(!remote_parent_match(None, Some(PARENT_SESSION), Some(&target)), "unsigned: no verified key to compare");
+        assert!(
+            !remote_parent_match(Some(&SignedCaller { name: "nodeb", key: "ff99" }), Some(PARENT_SESSION), Some(&target)),
+            "another node's key never matches — a node steers only children stamped with its OWN key"
+        );
+        assert!(
+            !remote_parent_match(Some(&caller), Some("par-2"), Some(&target)),
+            "a claim naming some OTHER session of the same node is not this child"
+        );
+        assert!(
+            !remote_parent_match(Some(&caller), Some("not/a/session"), Some(&target)),
+            "a malformed claim matches nothing — no separate refusal on this arm (§6)"
+        );
+        assert!(!remote_parent_match(Some(&caller), None, Some(&target)), "no claim, nothing asked for");
+        assert!(!remote_parent_match(Some(&caller), Some(PARENT_SESSION), None), "a target with no remoteParent");
+        assert!(
+            remote_parent_match(Some(&SignedCaller { name: "renamed-nodeb", key: &key }), Some(PARENT_SESSION), Some(&target)),
+            "the stored NAME is a label, not the identity: a renamed record still matches on the key"
+        );
+    }
+
+    /// The slice's headline, with the node's own `autogate` flag OFF — the
+    /// shape a real pair is in. The origin is a genuine non-loopback address, so
+    /// nothing but the remote-parent match can deliver this: the caller is a
+    /// signed, NON-autogate node, which [`origin_for_inject`] would otherwise
+    /// coerce to `Unknown` (where `autogate_match` is ignored outright) and
+    /// which would pend even on `Remote`'s own arm.
+    #[test]
+    fn a_remote_parent_steers_its_child_without_pending_with_autogate_off() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = remote_parent_box_root("s5-parent-off");
+        let (stage, audit_log, listener) =
+            write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, false);
+
+        let acc = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            use std::io::Read as _;
+            let mut buf = Vec::new();
+            let _ = conn.read_to_end(&mut buf);
+            buf
+        });
+
+        let key = PARENT_KEY.to_string();
+        let result = message_send(
+            &remote_parent_body(Some(PARENT_SESSION)),
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Remote("192.0.2.51".parse().unwrap()),
+            "",
+            None,
+            Some(SignedCaller { name: "parent-node", key: &key }),
+        );
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert_eq!(
+            String::from_utf8(acc.join().unwrap()).unwrap(),
+            "steer it\r",
+            "the parent's steer is DELIVERED, not held pending"
+        );
+
+        let log = std::fs::read_to_string(&audit_log).unwrap();
+        assert!(log.contains("autogate-remote-parent"), "its own audit label: {log}");
+        assert!(
+            !stage.join("pending.json").exists(),
+            "a delivered send never queues"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    /// The same match with the node marked `autogate: true`: the setting the
+    /// existing door already honours must neither be required nor defeated —
+    /// a parent steers its child either way, exactly as the LOCAL parent rule
+    /// delivers regardless of the box-wide switch.
+    #[test]
+    fn a_remote_parent_steers_its_child_without_pending_with_autogate_on() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = remote_parent_box_root("s5-parent-on");
+        let (stage, audit_log, listener) =
+            write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, true);
+
+        let acc = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            use std::io::Read as _;
+            let mut buf = Vec::new();
+            let _ = conn.read_to_end(&mut buf);
+            buf
+        });
+
+        let key = PARENT_KEY.to_string();
+        let result = message_send(
+            &remote_parent_body(Some(PARENT_SESSION)),
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Remote("192.0.2.51".parse().unwrap()),
+            "",
+            None,
+            Some(SignedCaller { name: "parent-node", key: &key }),
+        );
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert_eq!(String::from_utf8(acc.join().unwrap()).unwrap(), "steer it\r");
+        assert!(std::fs::read_to_string(&audit_log).unwrap().contains("autogate-remote-parent"));
+        assert!(!stage.join("pending.json").exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    /// End to end through the REAL signature (not the [`caller`] shorthand): the
+    /// key the match reads is the one `verify_signed_request` PROVED, so a
+    /// genuinely signed node whose own key is the child's `remoteParent.key`
+    /// delivers — the same round trip S3's spawn-side tests drive, on the arm
+    /// that reads the claim back.
+    #[test]
+    fn a_genuinely_signed_remote_parent_steers_its_child_without_pending() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = remote_parent_box_root("s5-signed");
+        // The record's `remoteParent.key` must be the key that will VERIFY —
+        // `verify_signed_request` resolves by pubkey, so the fixture node takes
+        // the minted identity's own key before the request is built.
+        let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
+        let pubkey = kp.info().pubkey_hex.clone();
+        let (stage, audit_log, listener) =
+            write_remote_parent_box(&root, "yomi-strix", &pubkey, PARENT_SESSION, false);
+
+        let body = remote_parent_body(Some(PARENT_SESSION));
+        let body_bytes = serde_json::to_vec(&body).unwrap();
+        let now = 1_800_000_000_i64;
+        let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("s5-signed"));
+        let (signed_name, signed_key) = match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
+            other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
+        };
+
+        let acc = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            use std::io::Read as _;
+            let mut buf = Vec::new();
+            let _ = conn.read_to_end(&mut buf);
+            buf
+        });
+        let result = message_send(
+            &body,
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Remote("192.0.2.51".parse().unwrap()),
+            "",
+            None,
+            Some(SignedCaller { name: &signed_name, key: &signed_key }),
+        );
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert_eq!(
+            String::from_utf8(acc.join().unwrap()).unwrap(),
+            "steer it\r",
+            "the key that VERIFIED the signature matched the child's remoteParent.key"
+        );
+        assert!(std::fs::read_to_string(&audit_log).unwrap().contains("autogate-remote-parent"));
+        assert!(!stage.join("pending.json").exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    /// Every non-match is today's result, byte for byte: the same response a
+    /// request with NO claim gets (only the wall-clock stamp can differ between
+    /// any two calls), the same held-pending decision, and no
+    /// `autogate-remote-parent` line. One baseline and four non-matches: a
+    /// session mismatch, a key mismatch, a malformed claim (the §6 rule: a bad
+    /// value on this arm matches nothing and is never a refusal), and an
+    /// unsigned caller carrying a perfectly matching claim.
+    #[test]
+    fn a_remote_parent_mismatch_leaves_todays_result_byte_for_byte() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = remote_parent_box_root("s5-mismatch");
+        let (stage, audit_log, listener) =
+            write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, false);
+        listener.set_nonblocking(true).unwrap();
+
+        let origin = ConnOrigin::Remote("192.0.2.51".parse().unwrap());
+        let key = PARENT_KEY.to_string();
+        let send = |claim: Option<&str>, caller_key: Option<&str>| {
+            let caller = caller_key.map(|k| SignedCaller { name: "parent-node", key: k });
+            message_send(&remote_parent_body(claim), &audit_log, "", "", origin, "", None, caller)
+                .expect("every non-match is answered exactly as before this phase")
+        };
+        // The baseline IS today's shape: no claim at all.
+        let baseline = send(None, Some(&key));
+        // Only the seconds-resolution stamp can differ between two calls.
+        let undated = |v: &Value| {
+            let mut v = v.clone();
+            v["status"].as_object_mut().unwrap().remove("timestamp");
+            v
+        };
+
+        for (label, claim, caller_key) in [
+            ("a session mismatch", Some("par-2"), Some(&key)),
+            // Same node name, a DIFFERENT key: the record was stamped by
+            // another node's spawn, and only the key equality can tell.
+            ("a key mismatch", Some(PARENT_SESSION), Some(&"ff99".to_string())),
+            ("a malformed claim", Some("not/a/session"), Some(&key)),
+        ] {
+            let got = send(claim, caller_key.map(String::as_str));
+            assert_eq!(undated(&got), undated(&baseline), "{label}: response changed");
+        }
+        // The unsigned row needs its claim to MATCH the record, or the test
+        // would pass for the wrong reason: same key, same session id, no
+        // signature rung — and still nothing but the ignore audit.
+        let unsigned = send(Some(PARENT_SESSION), None);
+        assert_eq!(undated(&unsigned), undated(&baseline), "an unsigned caller's matching claim changes nothing");
+
+        assert!(listener.accept().is_err(), "every non-match is held pending, never delivered");
+        let pending: Value =
+            serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
+        let entries = pending["pending"].as_array().unwrap();
+        assert_eq!(entries.len(), 5, "the baseline and all four non-matches reached the queue, none was dropped");
+        for entry in entries {
+            assert_eq!(entry["sessionId"], REMOTE_CHILD);
+        }
+
+        let log = std::fs::read_to_string(&audit_log).unwrap();
+        assert!(
+            !log.contains("autogate-remote-parent"),
+            "no non-match may claim the remote-parent label: {log}"
+        );
+        assert!(
+            log.contains("ignored-unsigned-from"),
+            "the unsigned caller's claim is ignored, and said so: {log}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    /// The ssh `-L` shape — the transport every real pair rides (PAIRING.md):
+    /// the request arrives at the far door's socket classified `Loopback`,
+    /// exactly as an unsigned local caller's does. This row pins the EXEMPTION,
+    /// one half of what carries the rule: without it the signed parent is
+    /// coerced to `Unknown` (where `should_deliver_now` ignores `autogate_match`
+    /// outright) and a genuinely tunneled parent would silently pend — the
+    /// production shape S5 exists to serve. Its twin, the FOLD into
+    /// `autogate_match`, is what the two `Remote` rows above pin; both are
+    /// load-bearing.
+    #[test]
+    fn a_tunneled_remote_parent_steers_its_child_without_pending() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = remote_parent_box_root("s5-parent-tunneled");
+        let (stage, audit_log, listener) =
+            write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, false);
+
+        let acc = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            use std::io::Read as _;
+            let mut buf = Vec::new();
+            let _ = conn.read_to_end(&mut buf);
+            buf
+        });
+
+        let key = PARENT_KEY.to_string();
+        let result = message_send(
+            &remote_parent_body(Some(PARENT_SESSION)),
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Loopback,
+            "",
+            None,
+            Some(SignedCaller { name: "parent-node", key: &key }),
+        );
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(
+            !stage.join("pending.json").exists(),
+            "a tunneled parent that PENDED would be the regression — assert before joining, so \
+             the failure is clean rather than a test that hangs on bytes that never arrive"
+        );
+        assert_eq!(
+            String::from_utf8(acc.join().unwrap()).unwrap(),
+            "steer it\r",
+            "the tunneled parent's steer is DELIVERED — the exemption keeps it off the Unknown arm"
+        );
+        assert!(std::fs::read_to_string(&audit_log).unwrap().contains("autogate-remote-parent"));
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    /// The door-wide bearer runs FIRST, and the remote-parent rule exempts
+    /// nothing from it: with a door token configured and no bearer presented, a
+    /// signed caller holding a genuinely matching parentage gets exactly the
+    /// uniform `submitted` Task every unauthenticated inject gets (#50's guard,
+    /// decided before the match is even computed). Nothing is delivered and
+    /// nothing queues, so this refusal is indistinguishable from an unknown
+    /// context.
+    #[test]
+    fn a_door_token_refuses_a_remote_parents_delivery_uniformly() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = remote_parent_box_root("s5-parent-token");
+        let (stage, audit_log, listener) =
+            write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, false);
+        listener.set_nonblocking(true).unwrap();
+
+        let key = PARENT_KEY.to_string();
+        let task = message_send(
+            &remote_parent_body(Some(PARENT_SESSION)),
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Loopback,
+            "door-secret",
+            None,
+            Some(SignedCaller { name: "parent-node", key: &key }),
+        )
+        .expect("the uniform response is an ANSWER, not a refusal");
+
+        assert_eq!(task["status"]["state"], "submitted", "the uniform Task, verbatim: {task}");
+        assert_eq!(task["id"], REMOTE_CHILD);
+        assert!(task.get("artifacts").is_none(), "{task}");
+        assert!(listener.accept().is_err(), "a tokenless caller's send is never delivered");
+        assert!(!stage.join("pending.json").exists(), "the uniform path never queues either");
+
+        let log = std::fs::read_to_string(&audit_log).unwrap();
+        assert!(log.contains("no valid token, no autogate match"), "the guard's own audit: {log}");
+        assert!(
+            !log.contains("autogate-remote-parent"),
+            "the bearer is checked BEFORE the match, so the parent rule never even speaks: {log}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
     }
 
     // ── Uniform-response guard, #50 (CONTRACTS.md §6 amendment, 2026-08-20) ──
@@ -9640,7 +12063,11 @@ mod tests {
         }
     }
 
-    fn mail_deposit_ctx<'a>(audit_log: &'a std::path::Path, signed_node_name: Option<&'a str>) -> RequestCtx<'a> {
+    /// A [`RequestCtx`] for the mail-deposit tests: the caller identity they
+    /// need is a NAME (`deposit_admitted` reads `allows`, and `hop_name` is
+    /// the name), so the key here is a fixture literal — no deposit path reads
+    /// it, and the stamp that does is `message/send`'s.
+    fn mail_deposit_ctx<'a>(audit_log: &'a std::path::Path, name: Option<&'a str>) -> RequestCtx<'a> {
         RequestCtx {
             audit_log,
             spawn_agent: "",
@@ -9650,7 +12077,7 @@ mod tests {
             self_url: "",
             expected_token: "",
             presented_token: None,
-            signed_node_name,
+            signed_caller: name.map(|name| SignedCaller { name, key: "aa11" }),
         }
     }
 
@@ -9677,7 +12104,7 @@ mod tests {
         // no now-superseded Token-rung history to migrate off of
         // (`node_may_message`'s own doc: "signature-only from the start"),
         // so there is no THIRD rung to construct a case from. `resolved` is
-        // populated ONLY by `mail_deposit`'s own `ctx.signed_node_name.
+        // populated ONLY by `mail_deposit`'s own `ctx.signed_caller.
         // and_then(...)` line, so `Some` here already MEANS "resolved via a
         // verified per-request signature" — this test pins that a
         // paired+allowed node still refuses the instant resolution drops to
@@ -10107,5 +12534,677 @@ mod tests {
         assert!(aoide_storage::mail::read_base().unwrap().is_empty(), "a bad msgid is never filed");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    // ── P-RSA S6: the watch frame on `tasks/get` (CONTRACTS.md §6) ───────────
+
+    /// A stage holding ONE session with a real transcript, under temp
+    /// `AOIDE_STAGE_DIR`/`AOIDE_STATE_DIR` roots — BOTH, because the frame
+    /// path reads `sessions.json` off the stage and the mailbase and the
+    /// report cursor off the state root, and no test here may read the
+    /// operator's own tree. The returned guard restores both on drop, so a
+    /// temp root never leaks into the next test in this binary (the same
+    /// save/restore the file's older tests spell out inline).
+    struct Roots {
+        stage: Option<String>,
+        state: Option<String>,
+    }
+
+    impl Drop for Roots {
+        fn drop(&mut self) {
+            match &self.stage {
+                Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+                None => std::env::remove_var("AOIDE_STAGE_DIR"),
+            }
+            match &self.state {
+                Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+                None => std::env::remove_var("AOIDE_STATE_DIR"),
+            }
+        }
+    }
+
+    fn frame_stage(tag: &str, id: &str, state: &str) -> Roots {
+        let roots = Roots {
+            stage: std::env::var("AOIDE_STAGE_DIR").ok(),
+            state: std::env::var("AOIDE_STATE_DIR").ok(),
+        };
+        let root = std::env::temp_dir().join(format!(
+            "aoide-server-a2a-frame-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::create_dir_all(root.join("state/mail")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        let log = stage.join(format!("{id}.log"));
+        std::fs::write(&log, "line one\nline two\n").unwrap();
+        let mut rec = fixture_session(id, state, None);
+        rec.log_path = Some(log.to_string_lossy().into_owned());
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".to_string(), sessions: vec![rec] },
+        )
+        .unwrap();
+        roots
+    }
+
+    /// A `tasks/get` body asking for the frame, `tail` included when given.
+    fn frame_request(id: &str, tail: Option<u64>) -> Value {
+        let mut params = json!({ "id": id });
+        // The wire key is spelled out here, never taken from the const: a
+        // renamed const must fail this test, not silently move the wire.
+        params["metadata"] = match tail {
+            Some(t) => json!({ "aoide/frame": { "tail": t } }),
+            None => json!({ "aoide/frame": {} }),
+        };
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": params })
+    }
+
+    /// The `(resolved name, verified key)` `handle_connection` threads into
+    /// [`SignedCaller`] after [`verify_signed_request`] verified a real
+    /// signature — the same round trip, so the gate sees exactly what
+    /// production sees.
+    fn verified_caller(kp: &aoide_storage::identity::Keypair, body: &[u8]) -> (String, String) {
+        let now = 1_800_000_000_i64;
+        let req = signed_request(kp, "yomi-strix", "/", body, now, &unique_nonce("frame"));
+        match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
+            other => panic!("expected a real signature to verify, got {other:?}"),
+        }
+    }
+
+    /// The whole output-read table at the predicate (P-RSA S6, with the
+    /// 2026-09-25 ruling folded in): unsigned and the bearer/address rungs are
+    /// refused, a signature-rung node is admitted on `verified` + `read` and
+    /// on nothing else — the target's own `remoteParent` never enters into it.
+    #[test]
+    fn output_read_admitted_is_a_signed_verified_node_with_read() {
+        let mut reader = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        reader.verified = true;
+        reader.allows = vec!["read".to_string()];
+        fn sig(
+            node: &aoide_storage::node_store::Node,
+        ) -> Option<(&aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)> {
+            Some((node, aoide_storage::node_store::NodeRung::Signature))
+        }
+
+        assert!(output_read_admitted(true, sig(&reader)), "signed, verified, `read`: admitted");
+        assert!(!output_read_admitted(true, None), "unsigned with no door token (read_ok true): refused");
+        assert!(!output_read_admitted(false, sig(&reader)), "the bearer gate still runs first");
+        assert!(
+            !output_read_admitted(true, Some((&reader, aoide_storage::node_store::NodeRung::Token))),
+            "bearer rung: refused"
+        );
+        assert!(
+            !output_read_admitted(true, Some((&reader, aoide_storage::node_store::NodeRung::Addr))),
+            "address rung: refused"
+        );
+
+        let mut no_read = reader.clone();
+        no_read.allows = vec!["spawn".to_string()];
+        assert!(!output_read_admitted(true, sig(&no_read)), "signed but `read` was never granted");
+        let mut unverified = reader.clone();
+        unverified.verified = false;
+        assert!(!output_read_admitted(true, sig(&unverified)), "an allows set without a pairing grants nothing");
+    }
+
+    /// The rung comes from the PROOF, not from a second lookup: no
+    /// `SignedCaller` (unsigned, bearer, address) is `None` whatever the
+    /// registry holds, and a proof only names the record its KEY resolved to.
+    #[test]
+    fn resolved_caller_needs_a_proof_and_finds_its_own_record() {
+        let mut reader = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        reader.verified = true;
+        reader.allows = vec!["read".to_string()];
+        let nodes = vec![reader.clone()];
+
+        assert!(resolved_caller(&nodes, None).is_none(), "no signature headers, no rung");
+        let found = resolved_caller(&nodes, Some(caller("box-b"))).expect("the proved name resolves");
+        assert_eq!(found.0.name, "box-b");
+        assert_eq!(
+            found.1,
+            aoide_storage::node_store::NodeRung::Signature,
+            "a proof IS the signature rung"
+        );
+        assert!(
+            resolved_caller(&nodes, Some(caller("box-z"))).is_none(),
+            "a name this registry does not hold resolves to nothing"
+        );
+    }
+
+    /// `tail` is read off `params.metadata` only, clamped to `1..=200`, and
+    /// its absence is a plain status read.
+    #[test]
+    fn frame_tail_clamps_and_reads_only_params_metadata() {
+        assert_eq!(frame_tail(&json!({})), None, "no params at all");
+        assert_eq!(frame_tail(&json!({ "metadata": {} })), None, "no frame key: a status read");
+        assert_eq!(frame_tail(&frame_request("s", None)["params"]), Some(50), "absent tail takes the watch default");
+        assert_eq!(frame_tail(&frame_request("s", Some(5))["params"]), Some(5));
+        assert_eq!(frame_tail(&frame_request("s", Some(0))["params"]), Some(1), "the floor is one line");
+        assert_eq!(frame_tail(&frame_request("s", Some(10_000))["params"]), Some(200), "the ceiling is 200");
+        assert_eq!(frame_tail(&json!({ "metadata": { "aoide/frame": { "tail": "many" } } })), Some(50));
+        assert_eq!(frame_tail(&json!({ "metadata": { "aoide/frame": true } })), Some(50));
+        assert_eq!(
+            frame_tail(&json!({ "message": { "metadata": { "aoide/frame": { "tail": 5 } } } })),
+            None,
+            "`message.metadata` is message/send's own fallback, never tasks/get's"
+        );
+    }
+
+    /// A frame read with no signature at all — and no door token configured,
+    /// which is the shape that matters (`read_ok` is true for everyone) — is
+    /// refused, and the refusal says the SAME thing whether the session
+    /// exists or not.
+    #[test]
+    fn an_unsigned_frame_read_is_refused_and_is_no_existence_oracle() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _roots = frame_stage("unsigned", "sess-1", "working");
+        let ctx = test_ctx(Path::new("/dev/null"), "");
+
+        let known = handle_jsonrpc(&frame_request("sess-1", Some(5)), &ctx);
+        let unknown = handle_jsonrpc(&frame_request("ghost", Some(5)), &ctx);
+        assert_eq!(known["error"]["code"], OUTPUT_READ_REFUSED_CODE);
+        assert_eq!(unknown["error"]["code"], OUTPUT_READ_REFUSED_CODE);
+        assert_eq!(
+            OUTPUT_READ_REFUSED_CODE, -32011,
+            "the read refusal has its own code, never verify_signed_request's -32007"
+        );
+        assert_eq!(
+            known["error"]["message"], unknown["error"]["message"],
+            "one text for every refusal, or the gate is an existence oracle"
+        );
+        assert_eq!(known["error"]["message"], OUTPUT_READ_REFUSED);
+
+        // The SAME request without the frame key is the untouched status read
+        // — answered, ungated, and carrying neither optional field.
+        let status = handle_jsonrpc(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": "sess-1" } }), &ctx);
+        assert_eq!(status["result"]["status"]["state"], "working");
+        assert_eq!(status["result"]["kind"], "task");
+        assert!(status["result"].get("artifacts").is_none(), "{status}");
+        assert!(status["result"].get("history").is_none(), "{status}");
+
+        // And an unknown id on the STATUS path is still the same -32001 it
+        // always was.
+        let missing = handle_jsonrpc(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": "ghost" } }), &ctx);
+        assert_eq!(missing["error"]["code"], -32001);
+        assert_eq!(missing["error"]["message"], "task not found");
+
+    }
+
+    /// A genuinely signed caller whose node was never granted `read` is
+    /// refused with the same `-32011`.
+    #[test]
+    fn a_signed_node_without_read_is_refused() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _roots = frame_stage("no-read", "sess-1", "working");
+        let kp = setup_signed_node_with_allows("yomi-strix", &["spawn"]);
+        let body = serde_json::to_vec(&frame_request("sess-1", Some(5))).unwrap();
+        let (name, key) = verified_caller(&kp, &body);
+        let ctx = RequestCtx { signed_caller: Some(SignedCaller { name: &name, key: &key }), ..test_ctx(Path::new("/dev/null"), "") };
+        let parsed = serde_json::from_slice::<Value>(&body).unwrap();
+
+        let resp = handle_jsonrpc(&parsed, &ctx);
+        assert_eq!(resp["error"]["code"], OUTPUT_READ_REFUSED_CODE);
+        assert_eq!(resp["error"]["message"], OUTPUT_READ_REFUSED);
+
+    }
+
+    /// A signed, verified node holding `read` reads ANY session's frame on
+    /// this host — including one whose record carries no `remoteParent` at
+    /// all, which is the whole point of the 2026-09-25 ruling (reading is
+    /// wider than writing). The frame is the local one, minus the fields that
+    /// name this box.
+    #[test]
+    fn a_signed_reader_reads_any_sessions_frame() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _roots = frame_stage("admitted", "sess-1", "working");
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
+        let body = serde_json::to_vec(&frame_request("sess-1", Some(5))).unwrap();
+        let (name, key) = verified_caller(&kp, &body);
+        let ctx = RequestCtx { signed_caller: Some(SignedCaller { name: &name, key: &key }), ..test_ctx(Path::new("/dev/null"), "") };
+        let parsed = serde_json::from_slice::<Value>(&body).unwrap();
+
+        let resp = handle_jsonrpc(&parsed, &ctx);
+        assert!(resp.get("error").is_none(), "admitted: {resp}");
+        let task = &resp["result"];
+        assert_eq!(task["id"], "sess-1");
+        assert_eq!(task["status"]["state"], "working", "the status read is the same one");
+        assert_eq!(task["artifacts"][0]["artifactId"], "frame");
+        assert_eq!(task["artifacts"][0]["parts"][0]["kind"], "data");
+        let frame = &task["artifacts"][0]["parts"][0]["data"];
+        assert_eq!(frame["sessionId"], "sess-1");
+        assert_eq!(frame["output"], json!(["line one", "line two"]));
+        assert_eq!(frame["truncated"], Value::Null, "nothing was cut: the flag is absent");
+        assert!(frame["logPath"].is_null(), "a path on this box never rides the wire: {frame}");
+        assert!(frame["instructionsPath"].is_null(), "{frame}");
+        assert!(frame["socket"].is_null(), "{frame}");
+        assert!(task.get("history").is_none(), "{task}");
+
+    }
+
+    /// A signed reader asking for a session that keeps no frame gets the
+    /// watch's own taught refusal, under the unknown-id code — the gate came
+    /// first, so this is a per-session answer, not a refusal of the caller.
+    #[test]
+    fn a_frame_read_of_an_unknown_session_is_taught_after_the_gate() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _roots = frame_stage("unknown-after-gate", "sess-1", "working");
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
+        let body = serde_json::to_vec(&frame_request("ghost", Some(5))).unwrap();
+        let (name, key) = verified_caller(&kp, &body);
+        let ctx = RequestCtx { signed_caller: Some(SignedCaller { name: &name, key: &key }), ..test_ctx(Path::new("/dev/null"), "") };
+        let parsed = serde_json::from_slice::<Value>(&body).unwrap();
+
+        let resp = handle_jsonrpc(&parsed, &ctx);
+        assert_eq!(resp["error"]["code"], -32001);
+        assert_eq!(resp["error"]["message"], "task not found", "{resp}");
+
+    }
+
+    /// A frame whose letters alone blow the byte cap sheds the OLDEST letters
+    /// first — the newest is what a watcher is looking at — keeps the output
+    /// lines (they come second), and says `truncated`.
+    #[test]
+    fn the_frame_byte_cap_sheds_the_oldest_letters_first() {
+        let line = "x".repeat(600);
+        let letter = |seq: u64| aoide_conduct::graph::MailLine {
+            seq,
+            received_at: "2026-01-01T00:00:00Z".to_string(),
+            from: "child".to_string(),
+            subject: "s".to_string(),
+            run: "this run".to_string(),
+            body: vec![line.clone(); 40],
+        };
+        let frame = aoide_conduct::graph::Frame {
+            session_id: "sess-1".to_string(),
+            label: "run".to_string(),
+            agent: "claude".to_string(),
+            task: Some("fix-flaky".to_string()),
+            parent: None,
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            state: "running".to_string(),
+            presence: "running".to_string(),
+            status: "running".to_string(),
+            exit_code: None,
+            ended_at: None,
+            outcome: None,
+            socket: Some("/run/sess-1.sock".to_string()),
+            conductable: true,
+            log_path: Some("/state/sess-1.log".to_string()),
+            instructions_path: Some("/state/sess-1.md".to_string()),
+            instructions: None,
+            output: (0..200).map(|i| format!("{i:03}{}", "y".repeat(100))).collect(),
+            mail: (0..20).map(letter).collect(),
+            report: "not filed yet".to_string(),
+            wake: None,
+            suggested: Some("aoide send --id sess-1 --submit -- \"<text>\"".to_string()),
+            truncated: false,
+        };
+        let before = serde_json::to_vec(&frame).unwrap().len();
+        assert!(before > FRAME_MAX_BYTES, "the fixture must really be over the cap: {before}");
+
+        let artifact = frame_artifact(frame);
+        let data = &artifact.parts[0].extra["data"];
+        assert_eq!(data["truncated"], true, "the cap says so: {data}");
+        assert!(
+            serde_json::to_vec(data).unwrap().len() <= FRAME_MAX_BYTES,
+            "the frame is inside the cap once sheddable content went"
+        );
+        let mail = data["mail"].as_array().unwrap();
+        assert!(!mail.is_empty(), "the NEWEST letters survive");
+        assert_eq!(mail.last().unwrap()["seq"], 19, "the newest letter is the one kept");
+        assert!(mail[0]["seq"].as_u64().unwrap() > 0, "and the oldest are the ones gone: {mail:?}");
+        assert_eq!(
+            mail[0]["body"].as_array().unwrap().len(),
+            LETTER_BODY_LINES_MAX,
+            "every surviving letter's body is still clamped to 40 lines"
+        );
+        assert_eq!(data["output"].as_array().unwrap().len(), 200, "output is shed SECOND, so it is intact here");
+        assert!(data["logPath"].is_null(), "and the wire strike still happened: {data}");
+    }
+
+    /// A letter body over the per-letter cap is cut to 40 lines — a
+    /// per-letter bound, not the byte cap, so it does NOT set `truncated`.
+    #[test]
+    fn a_letter_body_is_capped_at_forty_lines_without_flagging_the_frame() {
+        let frame = aoide_conduct::graph::Frame {
+            session_id: "sess-1".to_string(),
+            label: "run".to_string(),
+            agent: "claude".to_string(),
+            task: Some("fix-flaky".to_string()),
+            parent: None,
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            state: "running".to_string(),
+            presence: "running".to_string(),
+            status: "running".to_string(),
+            exit_code: None,
+            ended_at: None,
+            outcome: None,
+            socket: None,
+            conductable: false,
+            log_path: Some("/state/sess-1.log".to_string()),
+            instructions_path: None,
+            instructions: None,
+            output: vec!["one line".to_string()],
+            mail: vec![aoide_conduct::graph::MailLine {
+                seq: 3,
+                received_at: "2026-01-01T00:00:00Z".to_string(),
+                from: "child".to_string(),
+                subject: "s".to_string(),
+                run: "this run".to_string(),
+                body: (0..100).map(|i| format!("line {i}")).collect(),
+            }],
+            report: "not filed yet".to_string(),
+            wake: None,
+            suggested: None,
+            truncated: false,
+        };
+        let artifact = frame_artifact(frame);
+        let data = &artifact.parts[0].extra["data"];
+        assert_eq!(data["mail"][0]["body"].as_array().unwrap().len(), 40);
+        assert_eq!(data["mail"][0]["body"][39], "line 39", "the FIRST 40 lines are the ones kept");
+        assert!(data.get("truncated").is_none(), "the byte cap is what raises the flag: {data}");
+    }
+
+    // ── P-RSA S8: the ping-back history on `tasks/get` (CONTRACTS.md §6) ─────
+
+    /// The frame's own stage, plus the two things history adds: a
+    /// `remoteParent` stamp naming `key` as the parent's verifying key, and a
+    /// ring holding `n` events for that child. Called AFTER the signed node is
+    /// set up: `setup_signed_node_with_allows` writes `nodes.json` into
+    /// whatever state root is current, and the door resolves the caller there.
+    fn stamp_history_parent(id: &str, key: &str, n: u64) {
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        file.sessions.iter_mut().find(|s| s.session_id == id).unwrap().remote_parent =
+            Some(RemoteParent {
+                node: "sakaki".to_string(),
+                key: key.to_string(),
+                session_id: "parent-1".to_string(),
+                extra: Default::default(),
+            });
+        write_stage(&sessions_path(), &file).unwrap();
+        for i in 0..n {
+            aoide_storage::pingback_remote::spool_event(id, key, 1_790_313_000, json!({ "exited": { "code": i } }));
+        }
+    }
+
+    /// A `tasks/get` body asking for ping-back history. The wire key is
+    /// spelled out here, never taken from the const: a renamed const must fail
+    /// this test, not silently move the wire (the same rule [`frame_request`]
+    /// holds).
+    fn history_request(id: &str, after: u64) -> Value {
+        json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tasks/get",
+            "params": { "id": id, "metadata": { "aoide/linesAfter": after } },
+        })
+    }
+
+    /// Both output keys in ONE request — the shape that has to fail closed.
+    fn both_request(id: &str) -> Value {
+        json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tasks/get",
+            "params": { "id": id, "metadata": { "aoide/frame": { "tail": 5 }, "aoide/linesAfter": 0 } },
+        })
+    }
+
+    /// A signed caller's context, from a body signed by `kp`.
+    fn signed_ctx(kp: &aoide_storage::identity::Keypair, body: &[u8]) -> (String, String) {
+        verified_caller(kp, body)
+    }
+
+    /// `linesAfter` is read off `params.metadata` only, and a value that is not
+    /// a number reads as the start of the ring — a wrong cursor costs
+    /// duplicates, never a refusal.
+    #[test]
+    fn lines_after_reads_only_params_metadata_and_tolerates_any_value() {
+        assert_eq!(lines_after(&json!({})), None, "no params at all");
+        assert_eq!(lines_after(&json!({ "metadata": {} })), None, "no linesAfter key: a status read");
+        assert_eq!(lines_after(&history_request("s", 0)["params"]), Some(0));
+        assert_eq!(lines_after(&history_request("s", 7)["params"]), Some(7));
+        assert_eq!(
+            lines_after(&json!({ "metadata": { "aoide/linesAfter": null } })),
+            Some(0),
+            "a cursor nobody wrote a number for starts at the beginning"
+        );
+        assert_eq!(lines_after(&json!({ "metadata": { "aoide/linesAfter": "many" } })), Some(0));
+        assert_eq!(
+            lines_after(&json!({ "message": { "metadata": { "aoide/linesAfter": 5 } } })),
+            None,
+            "`message.metadata` is message/send's own fallback, never tasks/get's"
+        );
+    }
+
+    /// The history gate's whole table at the predicate (P-RSA S8): the output
+    /// gate AND the target's stamped key equal to the caller's verifying key.
+    /// Nothing else — not the stored `node` label, and never a wildcard.
+    #[test]
+    fn history_is_admitted_only_for_the_key_this_door_stamped() {
+        let mut reader = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        reader.verified = true;
+        reader.allows = vec!["read".to_string()];
+        let nodes = vec![reader.clone()];
+        let sig = |key: &'static str| Some(SignedCaller { name: "box-b", key });
+        let stamp = |key: &str| RemoteParent {
+            node: "sakaki".to_string(),
+            key: key.to_string(),
+            session_id: "parent-1".to_string(),
+            extra: Default::default(),
+        };
+
+        let _mine = stamp("key-of-mine");
+        assert!(
+            history_admitted(true, sig("key-of-mine"), &nodes, Some("key-of-mine")),
+            "the key this door stamped for the child reads it"
+        );
+        assert!(
+            !history_admitted(true, sig("key-of-someone-else"), &nodes, Some("key-of-mine")),
+            "a foreign key does not"
+        );
+        assert!(
+            !history_admitted(true, sig("key-of-mine"), &nodes, None),
+            "an id with neither a record nor a ring has no key to match"
+        );
+
+        // Not a wildcard in either direction: an EMPTY stamped key (a
+        // hand-written record) matches nobody, and an empty caller key is not
+        // a `SignedCaller` at all (the door resolves one only from a key that
+        // verified).
+        assert!(!history_admitted(true, sig("key-of-mine"), &nodes, Some("")));
+
+        // Unsigned, a weaker rung, no `read`, unverified: all refused, and all
+        // by the output gate that runs first.
+        assert!(!history_admitted(true, None, &nodes, Some("key-of-mine")), "no proof, no key to match");
+        assert!(
+            !history_admitted(false, sig("key-of-mine"), &nodes, Some("key-of-mine")),
+            "the bearer gate still runs first"
+        );
+        let mut no_read = reader.clone();
+        no_read.allows = vec!["spawn".to_string()];
+        assert!(!history_admitted(true, sig("key-of-mine"), &[no_read], Some("key-of-mine")), "`read` is still required");
+        let mut unverified = reader.clone();
+        unverified.verified = false;
+        assert!(!history_admitted(true, sig("key-of-mine"), &[unverified], Some("key-of-mine")), "a pairing is still required");
+    }
+
+    /// The matching key reads the ring: the events after the cursor, the
+    /// newest `seq`, and no gap — as ONE `data` message under `history`,
+    /// leaving the status read and the frame artifact exactly as they were.
+    #[test]
+    fn a_signed_parent_reads_its_childs_ping_back_history() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _roots = frame_stage("history-admitted", "sess-1", "working");
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
+        stamp_history_parent("sess-1", &kp.info().pubkey_hex, 3);
+        let body = serde_json::to_vec(&history_request("sess-1", 0)).unwrap();
+        let (name, key_used) = signed_ctx(&kp, &body);
+        let ctx = RequestCtx {
+            signed_caller: Some(SignedCaller { name: &name, key: &key_used }),
+            ..test_ctx(Path::new("/dev/null"), "")
+        };
+        let parsed = serde_json::from_slice::<Value>(&body).unwrap();
+
+        let resp = handle_jsonrpc(&parsed, &ctx);
+        assert!(resp.get("error").is_none(), "admitted: {resp}");
+        let task = &resp["result"];
+        assert_eq!(task["id"], "sess-1");
+        assert_eq!(task["status"]["state"], "working", "the status read is the same one");
+        assert!(task.get("artifacts").is_none(), "history is not a frame: {task}");
+
+        let message = &task["history"][0];
+        assert_eq!(message["messageId"], "pingback", "found by identity, not by position");
+        assert_eq!(message["parts"][0]["kind"], "data");
+        let ring = &message["parts"][0]["data"];
+        assert_eq!(ring["events"].as_array().unwrap().len(), 3, "{ring}");
+        assert_eq!(ring["events"][0]["seq"], 1);
+        assert_eq!(ring["events"][0]["event"], json!({ "exited": { "code": 0 } }));
+        assert_eq!(ring["gap"], false);
+        assert_eq!(ring["last"], 3);
+
+        // The cursor is the request's own input, and the ring's own seq is what
+        // a parent advances to.
+        let body = serde_json::to_vec(&history_request("sess-1", 2)).unwrap();
+        let (name, key_used) = signed_ctx(&kp, &body);
+        let ctx = RequestCtx {
+            signed_caller: Some(SignedCaller { name: &name, key: &key_used }),
+            ..test_ctx(Path::new("/dev/null"), "")
+        };
+        let resp = handle_jsonrpc(&serde_json::from_slice::<Value>(&body).unwrap(), &ctx);
+        let ring = &resp["result"]["history"][0]["parts"][0]["data"];
+        assert_eq!(ring["events"].as_array().unwrap().len(), 1, "only what is past the cursor: {ring}");
+        assert_eq!(ring["events"][0]["seq"], 3);
+        assert_eq!(ring["last"], 3);
+    }
+
+    /// A caller holding `read` but NOT this child's stamped key: refused for
+    /// history with `-32011` and the history's own text — while the frame it
+    /// asks for on its own is still admitted (the 2026-09-25 ruling: reading
+    /// is wider than reading a child's ping-back), and a request carrying BOTH
+    /// keys fails closed.
+    #[test]
+    fn a_foreign_key_is_refused_for_history_while_its_frame_is_admitted() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _roots = frame_stage("history-foreign", "sess-1", "working");
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
+        stamp_history_parent("sess-1", &"cc".repeat(32), 2);
+
+        let refused = |request: Value| -> Value {
+            let body = serde_json::to_vec(&request).unwrap();
+            let (name, key) = signed_ctx(&kp, &body);
+            let ctx = RequestCtx {
+                signed_caller: Some(SignedCaller { name: &name, key: &key }),
+                ..test_ctx(Path::new("/dev/null"), "")
+            };
+            handle_jsonrpc(&serde_json::from_slice::<Value>(&body).unwrap(), &ctx)
+        };
+
+        let resp = refused(history_request("sess-1", 0));
+        assert_eq!(resp["error"]["code"], OUTPUT_READ_REFUSED_CODE);
+        assert_eq!(resp["error"]["message"], HISTORY_READ_REFUSED);
+        assert_ne!(
+            HISTORY_READ_REFUSED, OUTPUT_READ_REFUSED,
+            "the reason a caller reads must be the reason it was refused"
+        );
+
+        // The same caller, the same session, asked for as a FRAME: admitted.
+        let resp = refused(frame_request("sess-1", Some(5)));
+        assert!(resp.get("error").is_none(), "a reader may still watch the frame: {resp}");
+        assert_eq!(resp["result"]["artifacts"][0]["artifactId"], "frame");
+        assert!(resp["result"].get("history").is_none(), "{resp}");
+
+        // BOTH keys in one request: asking for the history is asking for the
+        // history, so the stricter gate decides the whole request — the
+        // alternative is a frame answered around a silently missing ring.
+        let resp = refused(both_request("sess-1"));
+        assert_eq!(resp["error"]["code"], OUTPUT_READ_REFUSED_CODE);
+        assert_eq!(resp["error"]["message"], HISTORY_READ_REFUSED);
+
+        // And an id this node holds NEITHER a record NOR a ring for is the
+        // plain not-found every other `tasks/get` arm answers an unknown id
+        // with — never the history-specific refusal, which would tell the
+        // caller only "not your child" about an id that will never come back
+        // (the pull latches a row on exactly this code, H2 of the S8/S9
+        // review). It stays no oracle about a RING: an id that has one answers
+        // only its own parent's key, as above.
+        let resp = refused(history_request("ghost", 0));
+        assert_eq!(resp["error"]["code"], TASK_NOT_FOUND_CODE);
+        assert_eq!(resp["error"]["message"], "task not found");
+    }
+
+    /// H2 of the S8/S9 review: the ring is DESIGNED to outlive the child's
+    /// roster record, and the read the whole lane exists for is the one a
+    /// pruned child's parent still owes itself — so the door serves the ring
+    /// without the record, gated on the key the RING was stamped with.
+    #[test]
+    fn a_pruned_childs_ring_is_still_readable_by_its_own_parent_key() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _roots = frame_stage("history-ring-outlives", "sess-1", "working");
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
+        let key = kp.info().pubkey_hex;
+        stamp_history_parent("sess-1", &key, 2);
+
+        // An unrelated reap prunes the child: the record is gone, the ring is
+        // not (nothing prunes a ring while its parent may still read it).
+        let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        file.sessions.retain(|s| s.session_id != "sess-1");
+        write_stage(&sessions_path(), &file).unwrap();
+
+        let ask = |request: Value, caller_key: &str| -> Value {
+            let body = serde_json::to_vec(&request).unwrap();
+            let ctx = RequestCtx {
+                signed_caller: Some(SignedCaller { name: "yomi-strix", key: caller_key }),
+                ..test_ctx(Path::new("/dev/null"), "")
+            };
+            handle_jsonrpc(&serde_json::from_slice::<Value>(&body).unwrap(), &ctx)
+        };
+
+        // The parent that was stamped reads it, and the envelope is the ring's
+        // own tail: the last event is the child's exit, so the child is
+        // `completed` — the one state this node can still honestly derive.
+        let resp = ask(history_request("sess-1", 0), &key);
+        assert!(resp.get("error").is_none(), "the ring outlives the record: {resp}");
+        assert_eq!(resp["result"]["id"], "sess-1");
+        assert_eq!(resp["result"]["contextId"], "sess-1");
+        assert_eq!(resp["result"]["status"]["state"], "completed", "{resp}");
+        assert!(resp["result"].get("artifacts").is_none(), "a ring is not a frame: {resp}");
+        let ring = &resp["result"]["history"][0]["parts"][0]["data"];
+        assert_eq!(ring["events"].as_array().unwrap().len(), 2, "{ring}");
+        assert_eq!(ring["last"], 2);
+
+        // Any other key is refused, with the history's own words — a ring does
+        // not become public just because its record is gone.
+        let resp = ask(history_request("sess-1", 0), &"dd".repeat(32));
+        assert_eq!(resp["error"]["code"], OUTPUT_READ_REFUSED_CODE);
+        assert_eq!(resp["error"]["message"], HISTORY_READ_REFUSED);
+
+        // A FRAME for the same pruned child is still the not-found it always
+        // was: a frame needs a record, and there is none.
+        let resp = ask(frame_request("sess-1", Some(5)), &key);
+        assert_eq!(resp["error"]["code"], TASK_NOT_FOUND_CODE);
+        assert_eq!(resp["error"]["message"], "task not found");
+    }
+
+    /// No signature at all, and no door token configured (`read_ok` true for
+    /// everyone — the shape that matters): the output gate refuses first, so
+    /// the caller reads the grant it is missing and not the parent it is not.
+    #[test]
+    fn an_unsigned_history_read_is_refused() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _roots = frame_stage("history-unsigned", "sess-1", "working");
+        stamp_history_parent("sess-1", &"cc".repeat(32), 2);
+        let ctx = test_ctx(Path::new("/dev/null"), "");
+
+        let resp = handle_jsonrpc(&history_request("sess-1", 0), &ctx);
+        assert_eq!(resp["error"]["code"], OUTPUT_READ_REFUSED_CODE);
+        assert_eq!(resp["error"]["message"], OUTPUT_READ_REFUSED, "{resp}");
+
+        // The same request without the key is the untouched status read.
+        let status = handle_jsonrpc(
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": "sess-1" } }),
+            &ctx,
+        );
+        assert_eq!(status["result"]["status"]["state"], "working");
+        assert!(status["result"].get("history").is_none(), "{status}");
     }
 }

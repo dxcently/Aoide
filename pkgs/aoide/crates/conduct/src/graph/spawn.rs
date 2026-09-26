@@ -28,7 +28,7 @@
 //! nix anywhere in this path — a terminal emulator is a shell concern, never
 //! `lyra`'s.
 
-use super::conduct::{captures_like_a_shell, conduct_socket_path, unix_ts};
+use super::conduct::{conduct_socket_path, program_is_a_shell, unix_ts};
 use super::model::{canonical_state, load_stage, sessions_path, SessionsFile};
 use super::send::session_send;
 use super::undying::nothing_to_restore_warning;
@@ -92,7 +92,17 @@ fn spawn_exe() -> std::io::Result<PathBuf> {
 /// do NOT fork a second builder for the windowed path, or for the managed
 /// task mode: `--task` rides the SAME argv, so a windowed wrapper run and a
 /// headless one register identically.
-fn build_conduct_args(
+///
+/// `pub` for ONE caller outside this crate (P-RSA S10): `aoide-server`'s
+/// `a2a::do_spawn`, which used to hand-roll `["conduct", "--agent", "a2a",
+/// "--id", id, "--", <agent cmd>]` and so made every A2A child a session
+/// `spawn` had never seen the shape of — not headless, no task mode. The door
+/// now composes through HERE (`--spawned --headless` always, `--task` when its
+/// caller named one), so the remote child and the local one are the same
+/// wrapper by construction rather than by a second argv kept in step by hand.
+/// Everything a caller passes is its own decision — this function is the
+/// SHAPE, never the policy about which flags a door may set.
+pub fn build_conduct_args(
     headless: bool,
     agent: &str,
     id: &str,
@@ -218,7 +228,15 @@ fn write_instructions_sidecar(id: &str, text: &str) -> Result<String, String> {
 /// holds two runs' letters, and each letter's `from` session id keeps them
 /// apart (which is the whole run-attribution story). The check is a courtesy
 /// against the ordinary mistake, not a lock.
-fn live_run_for(slug: &str) -> Option<(String, String)> {
+///
+/// `pub` for TWO callers, which is the whole point of it living here: the
+/// local `spawn --task` and `aoide-server`'s A2A door (P-RSA S10 review, M2).
+/// The door composes `conduct` directly, so without this it is the one spawn
+/// path with no admission step at all — and a slug a peer's child holds live
+/// would deny the operator their own task name for as long as the PEER chooses
+/// (the door imposes no deadline by design). The refusal text is
+/// [`live_run_refusal`], beside it, so the two callers cannot drift.
+pub fn live_run_for(slug: &str) -> Option<(String, String)> {
     load_stage::<SessionsFile>(&sessions_path())
         .ok()
         .and_then(|f| {
@@ -227,6 +245,21 @@ fn live_run_for(slug: &str) -> Option<(String, String)> {
                 .find(|r| r.task.as_deref() == Some(slug) && canonical_state(&r.state) != "done")
         })
         .map(|r| (r.session_id, r.started_at))
+}
+
+/// The ONE refusal text for a slug [`live_run_for`] found held: read by the
+/// local `spawn --task` (whose terminal prints it) and by the A2A door (whose
+/// caller gets it as a JSON-RPC error), so neither can teach a different story
+/// about who holds the name or what to do next. Names the holding session and
+/// its start instant — the two facts an operator needs to find the run — and
+/// never the caller's own bytes: `held_by`/`started_at` come off the roster,
+/// and the slug is already a legal mailbox name by the time either caller asks
+/// (`live_run_for` is only consulted after that check).
+pub fn live_run_refusal(slug: &str, held_by: &str, started_at: &str) -> String {
+    format!(
+        "task `{slug}` already has a live run — session `{held_by}` (started {started_at}); \
+         end it, or spawn under a different task name"
+    )
 }
 
 /// Spawn `argv0` with `args`, detached into its own session (`setsid`) with
@@ -551,21 +584,17 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
         // One live run per slug: two live runs must never share one mailbox,
         // and the refusal names BOTH the holding session and its start
         // instant so the operator can find it. Nothing is written, nothing
-        // is spawned.
+        // is spawned. The text comes from [`live_run_refusal`], the same one
+        // the A2A door prints to its caller (M2).
         if let Some((held_by, started_at)) = live_run_for(slug) {
-            return Outcome::error(
-                cmd,
-                format!(
-                    "task `{slug}` already has a live run — session `{held_by}` (started {started_at}); \
-                     end it, or spawn under a different task name"
-                ),
-            )
-            .with_data(json!({
-                "reason": "task-live",
-                "sessionId": id,
-                "task": slug,
-                "liveSessionId": held_by,
-            }));
+            return Outcome::error(cmd, live_run_refusal(slug, &held_by, &started_at)).with_data(
+                json!({
+                    "reason": "task-live",
+                    "sessionId": id,
+                    "task": slug,
+                    "liveSessionId": held_by,
+                }),
+            );
         }
     }
     // The sidecar is written BEFORE the re-exec, once, 0600: the child then
@@ -722,10 +751,10 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
     // Same nothing-to-restore warning `session grant undying on` carries
     // (`undying.rs::nothing_to_restore_warning`, task #100): `program` (this
     // function's own, not a roster read-back) is the WRAPPED command
-    // `captures_like_a_shell` decides on directly, no race against the
+    // `program_is_a_shell` decides on directly, no race against the
     // conducted child's own first refresh tick.
     let undying_warning = undying
-        .then(|| nothing_to_restore_warning(&agent, captures_like_a_shell(&program)))
+        .then(|| nothing_to_restore_warning(&agent, program_is_a_shell(&inv.args)))
         .flatten();
 
     // `--prompt`: only after registration succeeded, through the one gated
@@ -813,7 +842,7 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::model::SessionsFile;
+    use crate::graph::model::{write_stage, SessionsFile};
     use crate::graph::testutil::*;
 
     // `built_aoide_bin` moved to `testutil.rs` (P-D8) — `resurrect.rs`'s own
@@ -1053,8 +1082,59 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // ── `--windowed`: terminal template parsing (pure, no spawn) ───────────
+    /// P-RSA S10 review, M2: the A2A door's child HOLDS a slug like any other
+    /// live run, so a LOCAL `spawn --task` for that name is refused — through
+    /// the same `live_run_for` + `live_run_refusal` the door itself consults,
+    /// never a second copy of the rule. This is the half of the fix a peer
+    /// cannot see: the door's own refusal is tested in `aoide-server`.
+    #[test]
+    fn a_local_spawn_is_refused_a_slug_a_door_child_holds_live() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "XDG_RUNTIME_DIR"]);
+        let root = unique_stage("spawn-door-held-slug");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
 
+        let mut held = session("a2a-9-1790312541", "/x", "working", "2026-09-25T04:00:00Z", None);
+        held.task = Some("build-reports".to_string());
+        held.origin = Some("node:peer".to_string());
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { sessions: vec![held], ..Default::default() },
+        )
+        .unwrap();
+
+        assert_eq!(
+            live_run_for("build-reports"),
+            Some(("a2a-9-1790312541".to_string(), "2026-09-25T04:00:00Z".to_string())),
+            "a door child's live run is a live run"
+        );
+
+        let out = session_spawn(&spawn_invocation(
+            &["claude"],
+            &[("id", "spawn-after-door"), ("task", "build-reports")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{out:?}");
+        let data = out.data.as_ref().expect("a refusal carries its structured reason");
+        assert_eq!(data["reason"], "task-live");
+        assert_eq!(data["liveSessionId"], "a2a-9-1790312541");
+        assert_eq!(
+            out.message,
+            live_run_refusal("build-reports", "a2a-9-1790312541", "2026-09-25T04:00:00Z"),
+            "the ONE refusal text, not a second copy of it"
+        );
+        assert!(
+            load_stage::<SessionsFile>(&sessions_path()).unwrap().sessions.len() == 1,
+            "nothing was written and nothing was spawned"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ── `--windowed`: terminal template parsing (pure, no spawn) ───────────
     #[test]
     fn terminal_argv_splices_a_bare_placeholder_token_as_separate_args() {
         // `kitty -e {cmd}` execs its own argv directly — the conducted

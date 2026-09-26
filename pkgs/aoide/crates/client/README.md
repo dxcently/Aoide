@@ -118,7 +118,15 @@ never the inbound/serve half (that's `aoide-server`).
   dialing back) — pure JSON-RPC envelope builders/parsers only, same split
   as the graphSummary pair above them; the server-side handlers
   (`pair_request`/`pair_reveal`/`pair_poll`) live in `aoide-server::a2a`,
-  never duplicated here.
+  never duplicated here. The watch frame's own pair (P-RSA S7) joins the
+  same module: `build_task_get_frame_request` (the `tasks/get` body that
+  asks for ONE session's frame — `params.metadata["aoide/frame"]`, the key
+  `aoide_protocol::wire::a2a::FRAME_KEY` spells once for both sides) and
+  `parse_frame_response`, which hands back the frame JSON out of the
+  `frame` artifact unread and keeps the door's own JSON-RPC code in
+  `FrameReadError.code` (`-32011` is the output-read refusal; a transport
+  or shape failure is `None`) — so a caller can tell a REFUSED read from
+  an unreachable node without matching prose.
 - `discover` — the discovery advertisement's LISTEN half (P-P6 + task
   #120, `docs/architecture/PAIRING.md`'s "Discovery
   (advertise-but-locked)" section): `run_sweep(secs)` binds
@@ -246,7 +254,15 @@ never the inbound/serve half (that's `aoide-server`).
   in the read loop itself, killing the child the moment the running total
   crosses the limit rather than waiting for it to finish. An over-cap
   response refuses with a taught error naming the cap; every existing
-  caller's own node/url context still wraps it, unchanged.
+  caller's own node/url context still wraps it, unchanged. `run_curl_capped`
+  / `post_json_capped` are the same transport with the cap STATED by the
+  caller, and the watch frame is their one caller today
+  (`FRAME_MAX_RESPONSE_BYTES`, 512 KiB): the far door bounds a frame to
+  256 KiB of shed content PLUS an instruction block it never sheds, whose own
+  worst case is 400 lines × 200 chars × 4 B ≈ 320 KB — so an honest frame tops
+  out near 321 KB and 512 KiB is ~1.6× that, not 2×. (Stated as arithmetic
+  rather than derived: those two bounds live in `aoide-conduct` and
+  `aoide-server`.)
 - **Dial resolution (P-S4, ssh-transport lane)** — the tunnel seam every
   outbound POST resolves through BEFORE it ever reaches `commands::
   post_json` (`aoide-client`'s one HTTP transport, unchanged by this
@@ -264,11 +280,13 @@ never the inbound/serve half (that's `aoide-server`).
   (`aoide/pairRequest`/`pairReveal` in `run_pair_request`,
   `aoide/pairPoll` in `approve_outbound` — Design A, task #119, keyed off
   `entry.via` when the outbound entry recorded one) — keyed by the
-  ceremony's own local nickname. `spawn_on_node_via(node, text, via_override)` is
-  `spawn_on_node`'s own body plus an explicit override that beats
-  `node.via` (`node spawn --via`); `spawn_on_node` itself stays a thin
-  `via_override: None` wrapper so `aoide-conduct`'s existing call site
-  needs no change. `--via` (`ssh://[user@]host[:port]`,
+  ceremony's own local nickname. `spawn_on_node_via(node, text, via_override,
+  from_session)` is `spawn_on_node`'s own body plus an explicit override that
+  beats `node.via` (`node spawn --via`) and the caller's OWN session id as the
+  remote-parent claim (P-RSA S2, `metadata["aoide/from"]`); `spawn_on_node`
+  itself stays a thin `via_override: None, from_session: None` wrapper so
+  `aoide-conduct`'s existing call site needs no change and a manifest-summoned
+  spawn claims no parent. `--via` (`ssh://[user@]host[:port]`,
   `aoide_storage::tunnel::parse_via`) is a FLAG on `node.add`/
   `pair`/`node.spawn` — never a new command
   path — parsed by the shared `parse_via_flag` (absent is `None`,
@@ -576,7 +594,14 @@ never the inbound/serve half (that's `aoide-server`).
   must not be silent —
   `default_self_url`/`default_self_via` are this group's own local helpers
   (their own doc comments in `commands.rs` state what each derives and how
-  `--self-url`/`--self-via` override them). `pair_via_url`/`pair_via_hostname`
+  `--self-url`/`--self-via` override them; D5/M3 — `default_self_via` claims
+  NO hop at all when the target itself resolves to loopback in either family
+  (`127.0.0.1`, `[::1]`, `::1`, `::ffff:127.0.0.1`, `localhost`, the
+  unspecified `0.0.0.0`), decided on the resolved address and before any route
+  probe, so pairing two daemons on one box can no longer stamp
+  `via:"ssh://<login>@127.0.0.1"` — a hop to this box's own sshd that the far
+  end never asked for).
+  `pair_via_url`/`pair_via_hostname`
   (the SMART TARGET dispatch of a NEW request's two arms, P-PV2)
   both bottom out in `run_pair_request`, which sends
   the commitment and its reveal as two sequential POSTs in one invocation
@@ -770,7 +795,10 @@ never the inbound/serve half (that's `aoide-server`).
   `default_self_via(toward)` (`ssh://<local login>@<local outbound address
   routed toward `toward`>`, reusing `crate::tunnel::local_login`'s
   `$USER`/`$LOGNAME` chain for the login half, `None` when neither env var
-  is set) or an explicit `--self-via`, carried on the wire beside
+  is set — and `None` for a target that resolves to LOOPBACK in either
+  family, decided on the resolved address before any route probe and before
+  the login is even read: two daemons on one box have no hop between them to
+  claim, D5/M3) or an explicit `--self-via`, carried on the wire beside
   `self_url` ([`crate::node::build_pair_request_body`] below) so the
   approver — which can only ever OBSERVE this request arriving over the
   tunnel, i.e. loopback — has something to record a working `via` from at
@@ -834,7 +862,14 @@ never the inbound/serve half (that's `aoide-server`).
   via bare `session`/`--hosts` — read-only) and
   `send_message_to_node` (`send --to <node>/<query>`'s delivery,
   workstream C3 — POSTs `message/send` with an explicit `contextId` naming
-  the resolved remote session). **Outbound bearer presentation (task
+  the resolved remote session), and `task_get_on_node` (P-RSA S7 —
+  `session watch <node>/<query>`'s READ: a signed `tasks/get` with the frame
+  attached, bounded at `FRAME_MAX_RESPONSE_BYTES` (512 KiB) rather than the
+  general `MAX_RESPONSE_BYTES`, and dialed through
+  `post_json_to_node_with_tunnel_key` — the one helper that takes the tunnel
+  key EXPLICITLY instead of reading it off `node.name` — with `node.name` as
+  the key this call site passes, the documented `(session id, node name)` pair
+  every other node action shares). **Outbound bearer presentation (task
   #84)**: `node add --bearer-secret <name>` records a per-node
   `Node.bearerSecret` (`aoide-storage`'s `node_store`); every outbound
   node POST (`pull_one_node`, `pull_node_live`, `send_message_to_node`)
@@ -895,7 +930,22 @@ never the inbound/serve half (that's `aoide-server`).
   -only requirement regardless), refusing with a taught error naming `node
   pair`, then confirms (`--yes` skips only this LOCAL `y`/`N`
   prompt, `confirm_spawn`, mirroring `confirm_invite`'s idiom) before calling
-  `spawn_on_node` and shaping the `Outcome`. **`aoide-conduct`'s manifest
+  `spawn_on_node_via` and shaping the `Outcome`. It resolves the caller-side
+  remote parent first (`resolve_remote_parent`: a live `--parent`, else the
+  daemon-attested caller, never `AOIDE_SESSION_ID`), holds whichever id won to
+  `valid_claimed_session_id` and refuses locally — before anything is signed or
+  sent — when it is not a legal claim (the same predicate the door applies
+  inbound, so the refusal costs no round trip and no signature), sends it as
+  `metadata["aoide/from"]`, and on the ack appends the child to
+  `aoide_storage::remote_children` (`remote_child_row`, keyed on the node's
+  pubkey and the child's session id — and it holds the ack's own id to that
+  same predicate, so a paired-but-hostile node cannot plant a ledger row on a
+  shape no session can occupy). `--task <slug>` (P-RSA S10) rides the same
+  body as `metadata["aoide/task"]` and is held to the same
+  `valid_node_name` shape locally, so a bad slug costs no round trip either;
+  with it the far node runs the child as a MANAGED task run (task mailbox,
+  exit report, `session watch`'s task view, and that run's name in its
+  roster). **`aoide-conduct`'s manifest
   remote-summon path** (U4, command-defrag lane U — `graph::resurrect::
   summon_remote`, the `conduct` → `client` edge documented in `conduct`'s
   own `Cargo.toml`) calls `spawn_on_node` directly, no confirm: a manifest

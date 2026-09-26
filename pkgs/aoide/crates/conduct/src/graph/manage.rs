@@ -3,7 +3,7 @@
 //! [`super::doc::restage_graph`] so the read path never drifts.
 
 use super::common::{load_inputs, require_args, stage_error};
-use super::doc::{build_graph, prune_done_scoped, render, restage_graph, would_cycle};
+use super::doc::{build_graph, drop_remote_child_rows, prune_done_scoped, render, restage_graph, would_cycle};
 use super::model::{
     hooks_path, load_stage, projects_path, sessions_path, sorted_projects,
     write_stage, HooksFile, Project, ProjectHost, ProjectsFile, SessionsFile, STAGE_GRAPH_VERSION,
@@ -1049,6 +1049,9 @@ pub fn prune(_inv: &Invocation) -> Outcome {
     if let Err(e) = write_stage(&sessions_path(), &s_file) {
         return stage_error("session.prune", e);
     }
+    // Only now — the roster is on disk, so the ledger rows of the parents that
+    // just left it are dropped WITH it, never ahead of it.
+    drop_remote_child_rows(&removed);
     if let Err(e) = write_stage(&hooks_path(), &h_file) {
         return stage_error("session.prune", e);
     }
@@ -1133,6 +1136,25 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
+        // A caller-side ledger row for each of the two: `s2` is about to be
+        // pruned, `s1` is not. The pruned parent's row leaves with it, once the
+        // roster write has landed — never ahead of it.
+        for (parent, child) in [("s1", "K"), ("s2", "C")] {
+            aoide_storage::remote_children::append_remote_child(
+                &aoide_storage::remote_children::RemoteChild {
+                    parent_session_id: parent.into(),
+                    node: "nodeb".into(),
+                    key: "ab".repeat(32),
+                    session_id: child.into(),
+                    spawned_at: "2026-09-25T00:00:00Z".into(),
+                    lines_after: 0,
+                    drained: false,
+                    extra: Default::default(),
+                },
+            )
+            .unwrap();
+        }
+
         // `link` never resolves `node:yomi-strix` as a valid child (it isn't
         // a session id) — this is the SAME rejection an unknown local id gets.
         let out = link(&invocation(&["graph", "link"], &["node:yomi-strix", "s1"]));
@@ -1145,6 +1167,12 @@ mod tests {
         let out = prune(&invocation(&["session", "prune"], &[]));
         assert_eq!(out.status, aoide_protocol::output::Status::Ok);
         assert_eq!(out.data.as_ref().unwrap()["removed"], json!(["s2"]));
+        let rows = aoide_storage::remote_children::load_remote_children();
+        assert_eq!(
+            rows.iter().map(|r| r.parent_session_id.as_str()).collect::<Vec<_>>(),
+            vec!["s1"],
+            "the pruned parent's ledger row left with it; the survivor's stayed: {rows:?}"
+        );
 
         // The node registry itself is untouched by either command.
         assert_eq!(aoide_storage::node_store::load_nodes().len(), 1);

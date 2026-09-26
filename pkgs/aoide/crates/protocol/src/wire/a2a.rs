@@ -92,6 +92,28 @@ pub struct Task {
     pub status: TaskStatus,
     /// Always `"task"` — the A2A discriminant for this result shape.
     pub kind: String,
+    /// A2A's `Task.artifacts` — absent on a plain status read, and BOTH
+    /// optional fields are skipped when `None` so every response that carries
+    /// no output stays byte-identical to the pre-P-RSA shape. The aoide
+    /// extension rides here: `tasks/get` with `metadata["aoide/frame"]` asks
+    /// for the session's watch frame as ONE `data` artifact (CONTRACTS.md §6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifacts: Option<Vec<Artifact>>,
+    /// A2A's `Task.history` — the same optional discipline as `artifacts`.
+    /// aoide's use is the ping-back ring a remote parent pulls (CONTRACTS.md
+    /// §6, `aoide/linesAfter`); a status-only read carries neither field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<Vec<Message>>,
+}
+
+/// One A2A `Artifact` — a named bag of [`Part`]s attached to a [`Task`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Artifact {
+    #[serde(rename = "artifactId")]
+    pub artifact_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub parts: Vec<Part>,
 }
 
 /// `Task.status` — the mapped `TaskState` (see `a2a.rs::a2a_task_state`) plus
@@ -130,6 +152,73 @@ pub struct MessageSendParams {
     pub message: Message,
 }
 
+/// The `message.metadata` key carrying the caller's OWN session id on the
+/// node that signs the request (CONTRACTS.md §6; P-RSA). One const, read by
+/// the door that honours the claim and written by the client that makes it —
+/// the receiver qualifies the value with the KEY that verified the signature,
+/// never with a name taken from the body.
+pub const FROM_SESSION_KEY: &str = "aoide/from";
+
+/// The `message/send` `message.metadata` key that names the task slug a
+/// SPAWNING request wants its child run under (CONTRACTS.md §6; P-RSA S10).
+/// Its presence is what makes the remote child a MANAGED run — the door turns
+/// it into the wrapper's own `--task <slug>` (the same flag a local `aoide
+/// spawn --task` passes), so the child gets the task mailbox, the exit report
+/// and `session watch`'s task view, while its absence leaves the spawn exactly
+/// the plain conducted session it was before. Read on the same two spots
+/// `aoide/spawn` is (`message` first, then top-level `params`), and held to the
+/// same slug predicate `spawn --task` and every mailbox name take
+/// (`^[a-z0-9][a-z0-9-]*$`), since the slug IS the mailbox name. Named here for
+/// the reason [`FROM_SESSION_KEY`] is: the key is a wire fact, and a second
+/// spelling on the reading side is how a writer and a reader silently stop
+/// agreeing.
+pub const TASK_KEY: &str = "aoide/task";
+
+/// The `tasks/get` `params.metadata` key that asks for a session's watch
+/// frame (CONTRACTS.md §6; P-RSA S6). Its value is an object whose optional
+/// `tail` is the output-line window; the whole key being present is what
+/// makes the response carry [`Artifact`]s at all. Read by the door that
+/// serves the frame and written by the client that asks for it — one const,
+/// both sides, the same discipline [`FROM_SESSION_KEY`] already sets.
+pub const FRAME_KEY: &str = "aoide/frame";
+
+/// The `artifactId` the watch frame rides under. Named once so the reader
+/// finds the frame by identity rather than by position.
+pub const FRAME_ARTIFACT_ID: &str = "frame";
+
+/// The `tasks/get` `params.metadata` key that asks for a session's ping-back
+/// history (CONTRACTS.md §6; P-RSA S8). Its value is the `seq` the caller has
+/// already seen — a number, the child's own monotonic event counter — and the
+/// answer is the events after it. Read by the door that serves the ring and
+/// written by the parent's node that pulls it, one const on both sides, the
+/// same discipline [`FRAME_KEY`] sets.
+pub const LINES_AFTER_KEY: &str = "aoide/linesAfter";
+
+/// The `messageId` the ping-back history rides under, inside
+/// [`Task::history`] — named once so the reader finds the events by identity
+/// rather than by position, exactly as [`FRAME_ARTIFACT_ID`] does for the
+/// frame.
+pub const HISTORY_MESSAGE_ID: &str = "pingback";
+
+/// The code a REFUSED output read answers with — the `tasks/get` frame arm's
+/// own, minted by the door that serves the frame and read by the far box that
+/// asked for it (CONTRACTS.md §6; P-RSA S6/S7). Its own number rather than
+/// `-32007`: that one stays `verify_signed_request`'s incomplete-headers/
+/// signature-mismatch family, decided before this arm runs at all, so the CODE
+/// alone names which refusal an operator is reading. Spelled here for the same
+/// reason [`FRAME_KEY`] is: the door and its readers are two ends of one wire
+/// fact, and a second copy of the number on the reading side is how the
+/// teaching text silently stops firing when the minting side renumbers.
+pub const OUTPUT_READ_REFUSED_CODE: i64 = -32011;
+
+/// The code an id this node holds **no** record and **no** ring for answers
+/// with, on any `tasks/get` arm — `build_task`'s own "task not found", named
+/// here because the pull reads it as a PERMANENT answer (the child is gone and
+/// always will be), while a refusal is not. It is also the code the plain
+/// status read has always used for an unknown id, so naming it changes no
+/// behaviour: one number, one spelling, both ends of the wire.
+pub const TASK_NOT_FOUND_CODE: i64 = -32001;
+
 /// One A2A `Message` (`message/send`'s `params.message`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Message {
@@ -145,8 +234,10 @@ pub struct Message {
 
 /// One A2A message `Part` — the `text`/`file`/`data` union. aoide's own
 /// outbound builder only ever emits `kind: "text"` with `text` populated;
-/// `extra` round-trips whatever else a `file`/`data` part carries so this
-/// type stays usable for a future richer part without losing fields.
+/// the door's own watch-frame artifact is the other shape in use
+/// (`kind: "data"`, the frame under `data`), and `extra` round-trips
+/// whatever either carries so this one type stays usable for both without
+/// losing fields.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Part {
     pub kind: String,
@@ -218,6 +309,58 @@ mod tests {
         assert_eq!(task.status.state, "working");
         assert_eq!(task.kind, "task");
         assert_eq!(serde_json::to_value(&task).unwrap(), raw);
+    }
+
+    /// The status-only response is the shape every pre-P-RSA caller reads:
+    /// `artifacts`/`history` are absent, never `null`.
+    #[test]
+    fn task_status_only_carries_no_artifacts_or_history() {
+        let task = Task {
+            id: "sess-1".to_string(),
+            context_id: "sess-1".to_string(),
+            status: TaskStatus { state: "working".to_string(), timestamp: "2026-01-01T00:00:00Z".to_string() },
+            kind: "task".to_string(),
+            artifacts: None,
+            history: None,
+        };
+        let v = serde_json::to_value(&task).unwrap();
+        assert_eq!(
+            v,
+            json!({
+                "id": "sess-1",
+                "contextId": "sess-1",
+                "status": { "state": "working", "timestamp": "2026-01-01T00:00:00Z" },
+                "kind": "task",
+            }),
+            "a status read must not grow a field"
+        );
+    }
+
+    #[test]
+    fn task_with_a_frame_artifact_round_trips() {
+        let mut data = Part { kind: "data".to_string(), text: None, extra: Default::default() };
+        data.extra.insert("data".to_string(), json!({ "sessionId": "sess-1", "output": ["one line"] }));
+        let task = Task {
+            id: "sess-1".to_string(),
+            context_id: "sess-1".to_string(),
+            status: TaskStatus { state: "working".to_string(), timestamp: "2026-01-01T00:00:00Z".to_string() },
+            kind: "task".to_string(),
+            artifacts: Some(vec![Artifact {
+                artifact_id: FRAME_ARTIFACT_ID.to_string(),
+                name: Some("session watch frame".to_string()),
+                parts: vec![data],
+            }]),
+            history: None,
+        };
+        let v = serde_json::to_value(&task).unwrap();
+        assert_eq!(v["artifacts"][0]["artifactId"], "frame");
+        assert_eq!(v["artifacts"][0]["name"], "session watch frame");
+        assert_eq!(v["artifacts"][0]["parts"][0]["kind"], "data");
+        assert_eq!(v["artifacts"][0]["parts"][0]["data"]["output"][0], "one line");
+        assert!(v.get("history").is_none(), "serialized: {v}");
+
+        let back: Task = serde_json::from_value(v).unwrap();
+        assert_eq!(back, task);
     }
 
     #[test]

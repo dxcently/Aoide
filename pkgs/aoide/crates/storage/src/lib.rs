@@ -114,6 +114,13 @@
 //! split as `tunnel` above: the actual dial+POST lives in
 //! `aoide-client::mail_wire`, a thin bridge in `aoide-conduct::mail_bridge`.
 //! See its own module doc for the two-lock model.
+//!
+//! `remote_children` (remote sub-agents lane, P-RSA) holds
+//! `state/stage/remote-children.json`, the ledger of children THIS node
+//! spawned on other nodes over their A2A door — the caller-side mirror of
+//! the `remoteParent` field on `records::SessionRecord`, with the
+//! `aoide/from` claim predicate (`valid_claimed_session_id`) the client and
+//! the door both apply. Pure CRUD under the stage lock, same as `undying`.
 
 pub mod addr;
 pub mod advertise;
@@ -134,7 +141,9 @@ pub mod outbox;
 pub mod pairing;
 pub mod node_store;
 pub mod petname;
+pub mod pingback_remote;
 pub mod records;
+pub mod remote_children;
 pub mod sealed_id;
 pub mod session;
 pub mod stage;

@@ -81,7 +81,7 @@
 //! Two independent lookups (P-M2 spec item 3), on purpose: the HOP (the
 //! caller of `aoide/mailDeposit`) is whichever node record's stored pubkey
 //! verified the *connection* signature (`a2a::verify_signed_request`,
-//! threaded through as `ctx.signed_node_name`) — this module never
+//! threaded through as `ctx.signed_caller`) — this module never
 //! consults it directly, only receives it as `via`. The ORIGIN is
 //! `header.from.node`, checked in [`verify_origin_signature`] against the
 //! ONE key `nodes.json` has on record under that exact name — never the
@@ -363,8 +363,9 @@ fn seal(header: &Header, text: &str, kp: &identity::Keypair) -> (String, String)
 /// ([`crate::fs::try_stage_lock`]), runs [`migrate_if_needed`], then `f`.
 /// **Never call this from inside a function that is itself only ever
 /// reached through `with_lock`** — `try_stage_lock` opens a fresh fd per
-/// call and is not re-entrant (same contract `with_stage_lock` documents),
-/// so nesting it deadlocks a real second acquisition and merely
+/// call and never nests, unlike `with_stage_lock`, which runs a nested call
+/// on the thread that already holds it (`fs.rs`): nesting this one deadlocks
+/// a real second acquisition and merely
 /// double-locks/unlocks in the best case. Every raw helper below
 /// (`read_entries_unlocked`, `append_base_line`, `next_seq`, …) is written
 /// assuming its caller already holds this lock.
@@ -680,7 +681,7 @@ fn file_entry(kind: &str, from: Address, to: Address, text: &str, via: &str) -> 
 /// `aoide/mailDeposit`) — the received-mail counterpart to [`file_entry`]:
 /// no minting, no signing, the envelope's own `sig`/`msgid` are filed
 /// verbatim exactly as the origin produced them. `via` is the HOP's
-/// resolved name (`ctx.signed_node_name`, never a name read out of the
+/// resolved name (`ctx.signed_caller`, never a name read out of the
 /// envelope itself — the door already resolved this by key before calling
 /// here). Raw — called only from inside [`with_lock`]'s closure
 /// ([`deposit`]'s own).
@@ -835,7 +836,7 @@ pub enum DepositOutcome {
 /// verify, dedup, and file are all local-disk checks, never network I/O, so
 /// holding the lock across all four costs nothing a caller need avoid
 /// (contrast the OUTBOX drain, which must never hold this lock across an
-/// ssh dial). `via` is the hop's resolved name (`ctx.signed_node_name`).
+/// ssh dial). `via` is the hop's resolved name (`ctx.signed_caller`).
 pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> {
     with_lock(move || {
         let Some(recomputed) = compute_msgid(&envelope.header, &envelope.text, &envelope.sig) else {

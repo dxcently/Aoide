@@ -558,7 +558,11 @@ canonical_state`). Three ways a target is never written to, in order:
 no session record at all for the recorded reader id; recorded but not
 conductable right now (including a control socket file that has since
 vanished); conductable but with no hook-fed child at all, so there is
-no readiness signal to read (`no-readiness-signal`). A hook-fed child
+no readiness signal to read (`no-readiness-signal`). A target whose
+WRAPPED program is a shell (`shell-parent`) is never written to by the
+PTY arm either — the line is submitted, so a shell would RUN it — but
+that is a transport-level refusal, not a gate: the channel arm below is
+not a keystroke and is still taken for such a wrap. A hook-fed child
 that IS there but mid-turn (`working`, `awaiting`, or its own `done`
 not yet settled) **defers**: the latch stays armed, untouched, and the
 next trigger — another letter, or this same reader's own Stop hook
@@ -578,7 +582,12 @@ died without unlinking it refuses the connect and falls straight
 through, never a stat-only check that would wrongly trust a dead file.
 Only once the channel is absent does headlessness matter at all: a
 headless wrap with no channel falls back to the PTY exactly as before
-P-M5c-3; an interactive wrap with no channel has no transport left and
+P-M5c-3, unless its WRAPPED program is a shell — then it is **skipped**
+`shell-parent`, the one refusal that is not about the wrap's own
+readiness but about what the line would DO there
+(`conduct.rs::wrapped_program_is_a_shell`, the record's own P-C5
+capture, never the `agent` label: `--agent <harness> -- bash` is
+caught); an interactive wrap with no channel has no transport left and
 is **skipped** `interactive-composer` — the same string as before, now
 meaning "interactive and no live channel" rather than simply
 "interactive". A raw keystroke still auto-submitted into someone's own

@@ -55,6 +55,62 @@
   turn this into a periodic or unconditional re-sync; a second boot with
   both a old-path leftover and a populated new path should leave the new
   path exactly as it is.
+- **`remoteParent` and `parentSessionId` are two edges, never one field
+  (remote sub-agents lane, P-RSA).** `SessionRecord.parent_session_id` is a
+  LOCAL id and every reader treats it as one (autogate grant, sibling rule,
+  project grouping, `graph link`'s cycle check, `taskreport`'s mailbox) —
+  never put a qualified or foreign value in it, and never "unify" the two by
+  making `remoteParent` a string inside it: a foreign value would dangle at
+  best and match a same-named local session at worst. `remoteParent` has
+  exactly one writer (the A2A door) and is stamped on the CHILD's own
+  record, so registration (`session::upsert_session`, and thus
+  `session_conduct`) must keep writing `remote_parent: None`, never reading
+  it from env or argv. `records::RemoteParent` deliberately carries no
+  `extra` map: the door is its only writer, so there is no foreign writer to
+  round-trip for (unlike `SessionRecord`, whose writer is shellbridge).
+- **A `state/stage/` ledger with a cursor moves the cursor FORWARD ONLY, and
+  writes both inside one `with_stage_lock` section.** `remote_children::
+  claim_lines_after` and `retain_remote_children` are the shape (P-RSA S9):
+  mutate in-memory, write once, return whether anything changed; a no-op result
+  never rewrites the file (so an idle tick does not churn the tree), and a
+  replayed pull can never rewind a cursor and re-deliver a line. Where a
+  caller reads the cursor, acts on it over a NETWORK (the remote ping-back
+  pull), and only then advances it, the read and the advance must be ONE
+  operation — `claim_lines_after` returns the cursor the caller may act on, so
+  two overlapping passes cannot each hand over the same events. Its failure
+  mode is deliberate: a claim that cannot be written delivers NOTHING, because
+  with the cursor where it was the same events would come back and the line
+  would land twice.
+- **A one-way latch is a field that is only ever set, and it is never
+  written while it is false.** `remote_children::mark_drained` is the shape
+  (P-RSA S9): the remote-children ledger's `drained` latch stops the parent's
+  every later tick from asking a far node about a child that has nothing left
+  to say, and nothing ever clears it — the row leaves when its parent leaves
+  the roster, which is `retain_remote_children`'s job. `#[serde(default,
+  skip_serializing_if = "is_false")]` is what keeps it additive: a row
+  written before the field existed, and an unlatched row today, serialize
+  byte-identically.
+- **A bounded ring carries its own `seq`, never an index, and says when it
+  dropped something.** `pingback_remote::push_event`/`events_after` are the
+  shape (P-RSA S8): the cursor a reader hands back is a `seq` that only
+  climbs, the cap drops the OLDEST, and a read that missed any event between
+  the cursor and the oldest retained one sets `gap` rather than handing over a
+  non-contiguous run as if it were whole. A reader that needs to resync with
+  no event to advance past uses `last` — and only there: a reader that
+  believes `last` outside a `gap` is taking a peer's word for a cursor no
+  honest ring could report. The payload is `Value`, opaque on
+  purpose: the event vocabulary belongs to the crate that produces it, and
+  this layer is a queue.
+- **A ring that outlives its record carries its own way in and its own clock.**
+  `pingback_remote::ChildRing`'s `key` and `at` are that pair (P-RSA S9): the
+  key is the parent's node key, stamped with the child's FIRST event and never
+  replaced, so the door that serves the ring can admit the parent after the
+  child's `sessions.json` record is pruned; `at` is the last spool's unix
+  second, which is what `retain_rings` measures. Pruning is the CALLER's
+  decision (`retain_rings` takes the predicate) because only the caller knows
+  the roster — this layer refuses nothing on its own, and a rejected-nothing
+  call is not a write, the same change-only discipline every other mutator
+  here holds.
 - **`fs::migrate_root_once` is `pub` and deliberately NOT wired into any
   path getter (L-C2, lyra-carrier lane, task #107) — don't "fix" this by
   hanging it off `fs::root`'s no-override fallback the way
@@ -403,7 +459,14 @@
   concurrent CLI invocation can never silently drop each other's
   `approved` flag or `tries` increment (#119 review finding 4). A new
   mutator here wraps its whole load-modify-write in `with_stage_lock` the
-  same way, never a bare `load → save`. `PARK_LOCK`
+  same way, never a bare `load → save`. **`with_stage_lock` is re-entrant for
+  the thread that already holds it** (`fs.rs`'s own doc, P-RSA S4): a nested
+  call on that thread runs its closure directly instead of opening a second
+  fd and blocking on the lock it already owns — which is what let
+  `aoide-conduct`'s `prune_done_scoped` retain `remote-children.json` from
+  inside `reap_inner`'s and `do_session_start_inner`'s existing holds. Other
+  threads and other processes still wait; `try_stage_lock`/`lock_path` are
+  untouched and still nest nowhere. `PARK_LOCK`
   (process-local `static Mutex<()>`, poison-recovering) stays alongside as
   the cap's in-process guarantee: `with_stage_lock` is best-effort by
   contract (a lock hiccup runs the closure unlocked), the mutex is not.

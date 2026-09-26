@@ -99,6 +99,16 @@ by decision — no embedded database yet
   invocation ever touched round-trips byte-identical. `Project::roots()`
   never reads it: local anchoring and host membership are two disjoint
   facts about a project.
+- `records::SessionRecord.shell` — the durable half of
+  `aoide_conduct::graph::program_is_a_shell`'s verdict (wire name `shell`,
+  `skip_serializing_if` false, so every record written before it stays
+  byte-identical): whether this session's wrapped command IS a shell, written
+  by the conducting process at registration from its own argv. It exists so a
+  lane that refuses to type a line into a shell — the ping-back, the
+  doorbell's PTY arm, the A2A door's injects and spawn arm — can read that
+  answer off a record instead of trusting the `agent` label, which a caller
+  chooses freely (`--agent pi -- bash`). Re-registration re-stamps it, so an
+  id re-conducted as a harness stops claiming to be one.
 - `records::SessionRecord.sources` — an optional, additive
   `field name -> "<absolute path>#<record ordinal>"` provenance map (wire
   name `sources`, serialised only when `Some`, CONTRACTS.md §4), for a
@@ -421,6 +431,48 @@ by decision — no embedded database yet
   the pre-rename `state/carry.json`, idempotent by construction (a cheap
   `exists()` check, no process-wide `Once` needed for a single file) —
   narrated, never a clobber of a fresher `undying.json`.
+- `pingback_remote` — the remote ping-back ring (remote sub-agents lane,
+  P-RSA S8): `state/stage/pingback-remote.json` (CONTRACTS.md §4), per child,
+  the events a child whose parent sits on ANOTHER node published for that
+  parent to pull — the child-side sibling of `remote_children`'s
+  `linesAfter` cursor. `push_event`/`events_after` are the pure ring algebra
+  (per-child `seq` from 1, cap 16, the OLDEST dropped, `gap` when the ring
+  rolled past the cursor, `last` as the newest `seq`); `spool_event` appends
+  under one `fs::with_stage_lock` section, stamping the entry's `key` (the
+  parent's node key, written once, and the door's own gate input once the
+  record is gone) and its `at` (the retention clock); `events_for` reads
+  without a lock and `ring_key` answers one child's stamped key;
+  `retain_rings` is the prune the child-side pass drives — a ring whose record
+  is gone and whose `at` is older than the caller's grace leaves, and a
+  rejected-nothing call is not a write. The events are OPAQUE
+  `serde_json::Value`: the closed vocabulary is
+  `aoide-conduct`'s `PingEvent`, and a queue that parsed its own payload would
+  be a second definition of the event it carries.
+- `remote_children` — the remote-children ledger (remote sub-agents lane,
+  P-RSA): `state/stage/remote-children.json` (CONTRACTS.md §4), one row per
+  child THIS node spawned on another node over its A2A door — the
+  caller-side mirror of `records::RemoteParent`, keyed by the child's
+  verified identity `(key, sessionId)`. `append_remote_child` is idempotent
+  on that identity; `retain_remote_children` is how a roster exit drops them;
+  `advance_lines_after` moves one child's ping-back pull cursor forward only
+  (a replayed pull never rewinds it) and `claim_lines_after` is what the pull
+  actually uses — the same advance, in the same locked section that READS the
+  stored cursor and hands it back, so the read and the write cannot be split
+  by a second pass; `mark_drained` latches the row once
+  the parent has drained the child's `Exited` — a ring is never pruned and a
+  child that has left the roster never speaks again, so that latch is what
+  stops the parent's every later tick from asking about it. All of them run
+  inside one short `fs::with_stage_lock` section, `load_remote_children`
+  tolerates a missing/corrupt file as empty, and the write is atomic — the
+  same discipline `undying` holds. `valid_claimed_session_id` is the ONE
+  predicate
+  for an `aoide/from` claim (1..=128 bytes of `[A-Za-z0-9._:-]`, no `/`),
+  shared by both sides of it: the caller holds its own winning id to it and
+  refuses locally BEFORE signing, and the door holds an incoming claim to it
+  on the way in. Both ledger shapes flatten unknown keys into an `extra` map
+  (`RemoteChild`, `RemoteChildrenFile` — and `records::RemoteParent` beside
+  them), so a key this version does not know survives a rewrite by the
+  version that wrote it.
 - `manifest` — a project's own `.aoide/project.json` (v0, command-defrag
   lane U1): host-local SESSION SPECS (`{host, dir, agent, command?}`, `dir`
   always PROJECT-RELATIVE, never a session id or timestamp), so `resurrect`
@@ -519,7 +571,7 @@ by decision — no embedded database yet
   `mint_ack` seal a fresh envelope with THIS instance's own identity key
   (`from.node` always `display::local_host_name()` — `self` never crosses
   the wire); `verify_origin_signature` is the OTHER lookup a P-P4 caller
-  doesn't need — not the connection's signer (`ctx.signed_node_name`, a
+  doesn't need — not the connection's signer (`ctx.signed_caller`, a
   door concern) but `header.from.node`'s own key, tried against the ONE
   entry `node_store` has on record under that exact name, never every
   verified node's key (a paired node signing as another paired node's
