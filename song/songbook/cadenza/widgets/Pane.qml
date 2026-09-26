@@ -30,6 +30,18 @@
 // drops the fill together, 120ms. A pane created open skips the animation
 // unless `animateOnCreate` — a list delegate must never animate.
 //
+// ── INNER GLOW ────────────────────────────────────────────────────────────
+// `kit.title` phosphor bleeds 12px inward from all four edges, fading to
+// transparent: the phosphor lit just inside the tube's frame (intent §2
+// "Inner glow"). Four static gradient Rectangles between the fill and the
+// rules, behind the content. The top strip is cut into the same three runs
+// as the top rule, so no light hangs under the title or the stat — the
+// light comes FROM the rule. Always `title`, whatever the rule's colour, so
+// a pane at rest is lit too. Start alpha 0.14 at rest, 0.26 focused (150ms
+// ease); it arrives with the fill on reveal and leaves with
+// it on close. No shader, no blur; nothing animates at rest. It is the only
+// gradient in the song. `innerGlow: false` opts a pane out.
+//
 // ── SIZE ──────────────────────────────────────────────────────────────────
 // Whole cells: `cols`/`rows` are the INNER content size; the pane reports
 // implicitWidth = cols+2 cells, implicitHeight = rows+1.5 lines (the top rule
@@ -50,6 +62,7 @@ Item {
     property bool open: true
     property bool animateOnCreate: false
     property string glow: "outline"      // title glow: "off" | "outline" | "bloom"
+    property bool innerGlow: true        // title phosphor bleeding inward (INNER GLOW)
     property Component content: null
 
     property int cols: 20
@@ -66,6 +79,8 @@ Item {
     property real fillA: 0
     property color ruleColor: focused ? kit.title : kit.dim
     Behavior on ruleColor { ColorAnimation { duration: 150 } }
+    property real _glowA: focused ? 0.26 : 0.14
+    Behavior on _glowA { NumberAnimation { duration: 150 } }
 
     Component.onCompleted: {
         if (!open) return
@@ -108,6 +123,59 @@ Item {
     Rectangle {
         x: 0; y: pane._ruleY; width: pane._w; height: pane._side
         color: pane.kit.withA(pane.kit.ground, pane.fillA)
+    }
+
+    // ── inner glow: title → transparent, 12px in from each edge ────────────
+    readonly property int _glowDepth: 12
+    readonly property color _glowOn: kit.withA(kit.title, _glowA)
+    readonly property color _glowOff: kit.withA(kit.title, 0)
+    Item {
+        id: glowLayer
+        visible: pane.innerGlow && pane.fillA > 0
+        opacity: pane.fillA / pane.kit.paneAlpha
+        readonly property real d: Math.max(0, Math.min(pane._glowDepth,
+            Math.floor((pane._side - 2) / 2), Math.floor((pane._w - 2) / 2)))
+        readonly property real y0: pane._ruleY + 1
+        readonly property real y1: pane._h - 1
+        // top: three runs under the three rule runs (never under title/stat)
+        Repeater {
+            model: [[0, pane._lead],
+                    [pane._titleEnd, pane._statStart - pane._titleEnd],
+                    [pane._tailX, pane.stat.length ? pane._w - pane._tailX : 0]]
+            Rectangle {
+                required property var modelData
+                x: modelData[0]; y: glowLayer.y0
+                width: Math.max(0, modelData[1]); height: glowLayer.d
+                gradient: Gradient {
+                    GradientStop { position: 0; color: pane._glowOn }
+                    GradientStop { position: 1; color: pane._glowOff }
+                }
+            }
+        }
+        Rectangle {   // bottom
+            x: 0; y: glowLayer.y1 - glowLayer.d; width: pane._w; height: glowLayer.d
+            gradient: Gradient {
+                GradientStop { position: 0; color: pane._glowOff }
+                GradientStop { position: 1; color: pane._glowOn }
+            }
+        }
+        Rectangle {   // left
+            x: 1; y: glowLayer.y0; width: glowLayer.d; height: glowLayer.y1 - glowLayer.y0
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0; color: pane._glowOn }
+                GradientStop { position: 1; color: pane._glowOff }
+            }
+        }
+        Rectangle {   // right
+            x: pane._w - 1 - glowLayer.d; y: glowLayer.y0; width: glowLayer.d
+            height: glowLayer.y1 - glowLayer.y0
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0; color: pane._glowOff }
+                GradientStop { position: 1; color: pane._glowOn }
+            }
+        }
     }
 
     // ── rules ──────────────────────────────────────────────────────────────

@@ -79,10 +79,11 @@ Conductor Channel).
 - A **borderless block** (termui's magenta one) holds a single message that
   is not a pane — a herald toast, one board item.
 - Panes are opaque `base00` at 0.94. Black glass, not frost.
-- **Inner glow:** the rule's own colour bleeds ~12px inward from all four
-  edges, fading to nothing — the phosphor lit just inside the tube's frame
-  (`refs/ref-inner-glow.png`). At rest it starts at 0.10 alpha; a focused
-  pane's starts at 0.22. Four static gradient `Rectangle`s drawn once by
+- **Inner glow:** the phosphor green (`title`) bleeds ~12px inward from all
+  four edges, fading to nothing — the phosphor lit just inside the tube's
+  frame (`refs/ref-inner-glow.png`). It is `title` whatever the rule's
+  colour, so a box at rest is lit too: it starts at 0.14 alpha at rest and
+  at 0.26 on a focused pane. Four static gradient `Rectangle`s drawn once by
   the kit's Pane, behind the content: no shader, no blur, nothing redrawn
   at rest, so it costs what tier-0 text glow costs. It is the only
   gradient in the song.

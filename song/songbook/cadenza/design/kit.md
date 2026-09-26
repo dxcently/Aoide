@@ -7,7 +7,7 @@ instruments. It lives in `widgets/` next to the slots that use it:
 | file | kind | job |
 |---|---|---|
 | `Kit.js` | JS library | colour roles, the cell, the icon set, glyph builders, helper URLs |
-| `Pane.qml` | helper | the termui pane: hairline rules, title and stat in the top rule, reveal/close |
+| `Pane.qml` | helper | the termui pane: hairline rules, title and stat in the top rule, inner glow, reveal/close |
 | `Block.qml` | helper | the borderless block: one message that is not a pane |
 | `GlowText.qml` | helper | text with glow tier 0 (outline) or tier 0+1 (baked bloom) |
 | `Gauge.qml` | helper | eighth-block gauge on a `░` track, % right-aligned |
@@ -233,6 +233,7 @@ Every helper takes `required property var kit`. All text is
 | `open` | true | false→true: reveal; true→false: close |
 | `animateOnCreate` | false | a pane created open skips the reveal unless set. A list delegate must never animate |
 | `glow` | `"outline"` | title glow: `off` / `outline` / `bloom` (§5) |
+| `innerGlow` | true | `title` phosphor bleeding inward from all four edges (below); `false` opts out |
 | `content` | null | a `Component`, instantiated inset one cell and one line, clipped |
 | `cols`, `rows` | 20, 3 | INNER size in cells |
 | *out* `innerCols`, `innerRows`, `contentItem` | | the inner size when sized from outside; the live body |
@@ -247,6 +248,17 @@ Reveal draws the pen clockwise from the top-left corner at constant speed
 over **160ms**, linear: each edge gets its share of the perimeter. Then the
 fill and content arrive over **60ms**. Close runs pen and fill back
 together over **120ms**, InQuad. The fill is `ground` at 0.94. Radius 0.
+
+The inner glow is `title` phosphor bleeding **12px** inward from all four
+edges (clamped to half the pane on a small one), fading to transparent
+(intent §2 "Inner glow"). It is four static gradient `Rectangle`s drawn
+between the fill and the rules, behind the content, and the only gradient
+in the song. The top strip is cut into the same three runs as the top rule,
+so no light sits under the title or the stat: the light comes from the
+rule. The colour is always `title`, whatever the rule's colour, so a pane
+at rest is lit too. It starts at **0.14** alpha at rest and **0.26**
+focused, with a 150ms ease. It fades in with the fill on reveal and out with
+it on close. Nothing animates at rest. Block has no rules and no glow.
 
 ### Block
 `label`, `stamp` (right-aligned time), `tone` (the label colour, default
