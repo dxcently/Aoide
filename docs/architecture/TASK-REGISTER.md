@@ -2105,9 +2105,9 @@ project/parent inheritance across local/remote/app/subagents;
   relay (native Windows `poll` node in its acceptance, §28) → P-M4 transit
   with the `next` hop chain → P-BOARD boards. Then H2 state/events, H3
   direct HTTPS edges, H4 typed control, each after its own review.
-- Status: design amended to the rulings; encryption-library profile
-  (`age` crate, `ctx` and charter-signature encodings) and a follow-up
-  review remain before P-SEAL. HTTPS has no plaintext fallback. Existing
+- Status: design amended to the rulings; the encryption-library profile
+  (`age` 0.12.1, no features) and the encodings are fixed; P-SEAL
+  implementation remains. HTTPS has no plaintext fallback. Existing
   SSH delivery remains in service until parity and recovery are
   demonstrated.
 - Open (the docs' "Open design decisions"): where the relay runs (an

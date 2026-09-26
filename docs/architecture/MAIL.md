@@ -206,15 +206,24 @@ msgid   = hex sha256 over        sig ‖ header ‖ 0x00 ‖ text
   never make two hops disagree, and no hop can change the case of a
   name without breaking the signature. (The session seal's rule, not
   `wire_auth::canonical_string`, which folds.)
-- Each transit hop appends a **chained** hop signature with its own key,
-  over length-prefixed `msgid ‖ prev ‖ node ‖ next ‖ at ‖ mesh`: `prev`
-  is the hash of the entry before it (`msgid` for the first), `next` is
-  the node this hop hands the letter to, and the `mesh` it is carrying the
-  letter in is inside, which is what makes a gate's rewrite verifiable.
-  The destination walks the whole chain and requires each entry's `next`
-  to be the following entry's `node`, and the last `next` to be itself,
-  so no hop can cut the chain and re-append itself
-  (HTTPS-MESH-API.md, "Hop-signature chain").
+- Each machine that hands the letter on appends a **chained** hop signature
+  with its own key, over length-prefixed
+  `msgid ‖ prev ‖ node ‖ next ‖ at ‖ mesh`: `prev` is the hash of the entry
+  before it (`msgid` for the first), `next` is the node this hop hands the
+  letter to, and the `mesh` it is carrying the letter in is inside, which is
+  what makes a gate's rewrite verifiable. **The origin signs entry 1**: its
+  `node` is the origin itself and its `next` is the node it hands the letter
+  to, so the chain starts at the machine that wrote the letter and the
+  origin cannot be erased from the record of who handed it to whom. On the
+  direct lane the chain is exactly one entry. The destination walks the
+  whole chain, requires entry 1 to name `header.from.node` and verify under
+  that node's key, and requires each entry's `next` to be the following
+  entry's `node` and the last `next` to be itself, so no hop can cut the
+  chain and re-append itself (HTTPS-MESH-API.md, "Hop-signature chain").
+- **`prev` is never carried**, always recomputed from the entry before it.
+  Each entry's `mesh` **is** carried: the container's `mesh` is the value
+  after every rewrite, so a pre-gate hop's zone exists nowhere else. A hop
+  that drops the origin's entry 1 and re-appends itself is `broken-chain`.
 - **Outside the signature and the hash:** `flavor` (a sender-side spool
   fact, never on the wire), `mesh` (the routing zone this hop is
   carrying the letter in — rewritten only by a gate), and `transit` (the
@@ -231,12 +240,13 @@ msgid   = hex sha256 over        sig ‖ header ‖ 0x00 ‖ text
   the declared name for the same key.
 
 Wire form is JSON around those bytes: `{ header: {…fields}, text, sig,
-msgid, mesh, transit: [ {node, next, at, sig} ] }` — the receiver
+msgid, mesh, transit: [ {node, next, at, mesh, sig} ] }` — the receiver
 re-derives the canonical header from the fields and rejects if `msgid`
-does not recompute. From P-SEAL on, this envelope is the sealed inner
-plaintext of HTTPS-MESH-API.md's container: `header`, `text`, `sig` and
-`msgid` travel inside `ct`, byte-identical to the rules above, while
-`mesh` and `transit` ride outside it on the container.
+does not recompute, and re-derives each entry's `prev` rather than reading
+it. From P-SEAL on, this envelope is the sealed inner plaintext of
+HTTPS-MESH-API.md's container: `header`, `text`, `sig` and `msgid` travel
+inside `ct`, byte-identical to the rules above, while `mesh` and `transit`
+ride outside it on the container.
 
 ## Store
 
@@ -823,8 +833,9 @@ board, the mesh, the epoch, the epoch key's public recipient and the
 member nodes — what a relay needs to admit and route posts. Its sealed
 part, sealed to that epoch, names the member mailboxes, the kind, the
 title and the `history` setting. The owner sends each member node a
-**wrap**: a letter sealed to that node's own age key whose payload is
-the epoch key. Nothing else ever carries an epoch key.
+**wrap**: a letter whose `purpose` is `wrap`, sealed to that node's own
+age key and carrying the epoch key as its payload
+(HTTPS-MESH-API.md, "Encodings"). Nothing else ever carries an epoch key.
 
 - **Create.** `aoide board create` mints epoch 0 and wraps it to every
   member node.
@@ -1346,7 +1357,10 @@ path.
   policy outcome; a paired key for a node the charter lists is inert.
   Hop chain: a removed middle entry fails `broken-chain`; swapped entries
   fail; **truncating the chain to entry `j` and re-appending the
-  truncating hop fails**, on the `prev` or the `next` link; a chain whose
+  truncating hop fails**, on the `prev` or the `next` link; **entry 1
+  naming any node but `header.from.node`, and entry 1 failing to verify
+  under that node's key, both fail** — so a hop that drops the origin's
+  entry 1 and re-appends itself is refused; a chain whose
   last `next` is not the destination fails; a chain truncated by dropping
   the tail verifies but yields no ack, and the outbox reports the letter
   undelivered. Plus HTTPS-MESH-API.md's P-M4 list.

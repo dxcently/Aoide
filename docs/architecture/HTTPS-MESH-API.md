@@ -1,12 +1,13 @@
 # Aoide HTTPS mesh API
 
-Status: proposed design. No sealing, charter, per-mesh grant, HTTPS listener,
-credential or cutover exists or is authorized. The library-profile gate is reduced
-to confirming the `age` crate profile and pinning the canonical `ctx` and charter
-signature encodings; a follow-up review remains before implementation. MAIL.md
-carries the same design for the mail workstream and owns the slice order. Where
-this document and PAIRING.md or CONTRACTS.md conflict, those describe what is built
-and win until the amendments listed below land.
+Status: proposed design. No charter, per-mesh grant, HTTPS listener, credential or
+cutover exists or is authorized. **The library profile and the canonical
+encodings are fixed**: the cipher is the `age` crate at 0.12.1 with no features
+("Cryptographic selection"), and every signed or hashed byte in this design is
+one of the labelled frames in "Encodings". MAIL.md carries the same design for
+the mail workstream and owns the slice order. Where this document and PAIRING.md
+or CONTRACTS.md conflict, those describe what is built and win until the
+amendments listed below land.
 
 **Sealing is mandatory.** From P-SEAL on, every letter that leaves its node is
 sealed at mint, on every transport. No plaintext profile and no per-node toggle
@@ -155,7 +156,14 @@ machines. It is shaped like agenix: public keys in one file, one signer.
    ```
 
    The line carries the identity public key and the self-signed age binding. The
-   fingerprint is for the operator's eye. Nothing private is printed.
+   fingerprint is for the operator's eye, and it is `sha256` over the raw 32-byte
+   **identity** public key, lowercase hex — the key a charter line and a paired record
+   are keyed by, and the key the binding's own signature is checked against. It is not
+   the age key's fingerprint and it is not the short colon-separated label `aoide
+   identity` prints locally; Keys, below, separates the two. **Nothing computes or
+   prints this today** — `aoide identity` prints the short label above, and the durable
+   `SHA256:<hex>` node-line fingerprint is P-CHARTER's to build (Keys, below). Nothing
+   private is printed.
 2. **The operator roots the mesh once.** `aoide mesh charter init <mesh>` mints the
    mesh's operator key on the operator's machine, writes an empty charter source,
    and prints the **operator line**, `operator = "ed25519:<hex>"`, with its
@@ -202,8 +210,16 @@ lines), writes the next `version` into the file, and writes the detached signatu
 `<mesh>.toml.sig`:
 
 ```text
-charter_sig = operator Ed25519 over canonical("aoide/charter", mesh, version, sha256(file bytes))
+charter_sig = operator Ed25519 over frame("aoide/charter", [mesh, version, sha256(file bytes)])
+<mesh>.toml.sig = frame("aoide/charter-sig", [sig, sha256(file bytes)])
 ```
+
+The signature covers the digest of the file's bytes, so **`sign` is the last write to
+a charter file**. Any rewrite after it — a formatter, an editor's trailing newline, a
+checkout that changes line endings — invalidates the `.sig`, and the answer is to sign
+again, never to normalize on read. The `.sig` carries the digest beside the signature
+so that a touched file is diagnosable (`charter-tampered`) rather than merely
+rejected.
 
 It then spools the signed pair to every node on the charter. The operator key signs
 charters and board takeover records (MAIL.md §Boards, "Takeover") and nothing else;
@@ -216,9 +232,11 @@ it is never a node's identity key, even on the machine that is both.
 1. Verifies the signature under the operator key it trusts for that mesh, before
    parsing anything. No trusted key for that mesh is `unknown-operator`.
 2. Requires the parsed `mesh` and `version` to equal the signed ones.
-3. Refuses a version not above the high-water mark (`stale-charter`), so a replayed
+3. Requires the digest in the `.sig` to equal `sha256` of the charter bytes, so a
+   touched source is `charter-tampered` rather than misreported as a bad key.
+4. Refuses a version not above the high-water mark (`stale-charter`), so a replayed
    older charter never returns.
-4. Refuses every charter for a mesh whose config operator line and state record
+5. Refuses every charter for a mesh whose config operator line and state record
    disagree (`operator-mismatch`) until the User resolves it.
 
 A version that changes an existing node's identity `key` is applied, and `aoide mesh`
@@ -328,7 +346,9 @@ Then it branches once:
 
 **Hop branch: spool, never open.** Append this hop's chained hop signature and
 re-spool toward the destination. A hub never opens a letter and never needs a
-recipient key. It cannot read, edit or forge.
+recipient key. It cannot read, edit or forge. The origin is the first hop: it signs
+entry 1 of the chain (Hop-signature chain) before the letter ever leaves, so the
+record of who handed the letter to whom starts at the machine that wrote it.
 
 **Destination branch: open, match, file.** This branch runs only when self is the
 destination. Steps, in order:
@@ -392,8 +412,9 @@ refuses.
 
 ## Container
 
-The outer object is new, and the inner envelope is untouched. This is design notation,
-not a frozen wire format. The library-profile gate fixes the encoding.
+The outer object is new, and the inner envelope is untouched. This is design
+notation for the outer object; the byte encoding of every value named here is
+fixed in "Encodings" below.
 
 ```text
 outer = { v, purpose, msgid, generation, origin { node, key },
@@ -401,7 +422,7 @@ outer = { v, purpose, msgid, generation, origin { node, key },
           sig, transit [...] }
 ctx   = canonical(v, purpose, msgid, origin.node, origin.key, to.node,
                   to.age, originMesh, suite, generation)
-pt    = canonical(ctx, inner envelope bytes)
+pt    = canonical(ctx, payload)                  -- the payload is labelled by purpose
 ct    = age-encrypt(pt, recipient = to.age)      -- the whole age file, header included
 sig   = origin Ed25519 over canonical("aoide/mail-outer", ctx, ct)
 ```
@@ -411,12 +432,11 @@ sig   = origin Ed25519 over canonical("aoide/mail-outer", ctx, ct)
   and `ctx` also carries the board id and the epoch number, so a post cannot be
   replayed onto another board or epoch. One post is sealed once. Each member node's
   copy differs only in `to.node`, which `ctx` covers.
-- **`ctx` is carried twice and must agree** (NEEDS REVIEW before implementation).
-  age has no associated-data input, so nothing in `ct` itself binds the ciphertext to
-  its context. The sender puts `ctx` inside the sealed plaintext and signs
-  `ctx ‖ ct` outside. The ordering is fixed:
+- **`ctx` is carried twice and must agree.** age has no associated-data input, so
+  nothing in `ct` itself binds the ciphertext to its context. The sender puts `ctx`
+  inside the sealed plaintext and signs `ctx ‖ ct` outside. The ordering is fixed:
   1. The sender computes `ctx` from the outer fields.
-  2. The sender seals `pt = canonical(ctx, envelope)` to `to.age`.
+  2. The sender seals `pt = canonical(ctx, payload)` to `to.age`.
   3. The sender signs `(ctx, ct)`.
   4. Every verifier recomputes `ctx` from the outer fields and never takes it from the
      wire.
@@ -430,17 +450,17 @@ sig   = origin Ed25519 over canonical("aoide/mail-outer", ctx, ct)
   the plaintext meant the same context. So a relay that re-signs someone else's `ct`
   under its own key and context is caught when the letter opens. This check replaces
   what an AEAD's AAD would have given.
-- The `ctx` encoding is a **domain-separated, length-delimited canonical string**: a
-  purpose label plus length-prefixed fields, following the MAIL.md canonical
-  discipline. Naive concatenation is refused as ambiguous. The encoding is pinned at
-  the library-profile gate before any P-SEAL test. `suite` is one registered
-  identifier that names the age format version and recipient type (for example, age
-  v1 with X25519), so a downgrade cannot be expressed by mixing components.
+- `suite` is one registered identifier that names the age format version and
+  recipient type (age v1 with X25519), so a downgrade cannot be expressed by mixing
+  components ("Encodings").
 - **`originMesh` is immutable inside `ctx`. `mesh` is hop-mutable outside it.** Only a
   declared gate rewrites `mesh`, and the rewrite is verifiable **only** through that
   gate's hop signature, which is MAIL.md's rule.
-- `purpose` and the method are bound into `ctx`, so a mail container cannot be
-  replayed as another operation.
+- `purpose` is bound into `ctx`, so a container cannot be replayed as another
+  operation. The **door method** is not in `ctx` and needs no field there: it is bound
+  by the signed request's own canonical string (`wire_auth::canonical_string`), which
+  every door verifies before dispatch. A container's `purpose` and the method it
+  arrived on are two independent bindings, and neither stands in for the other.
 - **Immutable fields:** content, subject, from, to, destination, envelope version and
   key bindings are fixed inside `ct` and `ctx`. A changed byte breaks the age payload
   tag, `sig`, the inner `ctx` equality or the recomputed `msgid`. The equality checks
@@ -450,6 +470,259 @@ sig   = origin Ed25519 over canonical("aoide/mail-outer", ctx, ct)
   with different content, or a forward is a NEW signed container with a new `msgid`.
   An accepted letter is never revised in place.
 
+### Encodings
+
+Every byte this design signs, hashes or length-checks is built from one primitive.
+
+```text
+frame(label, fields) = label ‖ 0x00 ‖ for each f in fields: (len(f) as u32 BE) ‖ f
+```
+
+- A **label** is a fixed lowercase-ASCII literal, listed in "Reserved labels" below,
+  and never contains `0x00`.
+- **No field is ever omitted.** A field with no value is a field of length zero, so a
+  label's arity never changes and no two field tuples can be re-bracketed into each
+  other.
+- **Values enter as typed values, never as renderings.** A string is its UTF-8 bytes.
+  A fixed-width binary value is its raw bytes, never hex or base64. An integer is
+  `u64` big-endian. No JSON escaping, no hex, no case folding and no trimming ever
+  reaches a frame.
+- **Nothing is normalized.** No trim, no case fold — the envelope's own rule
+  (MAIL.md, "The envelope"), and the opposite of `wire_auth::canonical_string`, which
+  folds case because the fields it covers are already lowercase HTTP request parts.
+- **Frames nest.** A list is a frame whose fields are its elements. A sub-frame is an
+  ordinary field: it is length-prefixed, so it needs no escaping.
+
+**Why it is unambiguous.** The parse is total and deterministic: read to the first
+`0x00` for the label, then repeat `{ read 4 bytes big-endian as n; read exactly n
+bytes }` until the input is exhausted, rejecting when fewer than `n` bytes remain. So
+the map from `(label, fields)` to bytes is injective — the parse is unique and
+re-encoding what was parsed reproduces the input byte for byte. A `u32` big-endian
+length prefix is a prefix-free code over byte strings, which kills the classic
+`("ab","c")` versus `("a","bc")` collision at every nesting depth. The NUL terminator
+makes labels prefix-free as well (`aoide/mail-hop\0` is not a prefix of
+`aoide/mail-hop-entry\0`). A fixed arity per label is asserted by the code that builds
+each frame; it is a check on top of injectivity, not the reason for it.
+
+**Precondition on the unlabelled space.** The inner envelope's own signature space,
+`header ‖ 0x00 ‖ text` (MAIL.md), is deliberately unlabelled and stays that way. A
+collision with a frame would need a header whose canonical bytes began with a frame
+label, which the field grammar already excludes: node names match
+`^[a-z0-9][a-z0-9-]*$` (no `/`, no NUL) and must resolve to a record under that exact
+name, and the envelope `version` is a closed literal. Read that as a rule, not an
+accident: **any future field that can hold free text and enter a frame must be
+NUL-free and must not be able to begin with a reserved label.**
+
+Existing canonical helpers, and why this design does not reuse them:
+
+| Helper | Shape | Why not |
+|---|---|---|
+| `mail::canonical_header_bytes` | 8 fields NUL-joined, verbatim bytes | Right discipline, fixed arity over the envelope `Header`; the envelope frame reuses its **output** as one field |
+| `wire_auth::canonical_string` | 5 fields, each trimmed and lowercased, NUL after each, body folded to its digest | Folds case: it would let `ThinkChiyo` and `thinkchiyo` sign the same bytes |
+| `sealed_id::canonical_seal_string` | 5 fields, NUL after each, verbatim | The nearest precedent for a non-HTTP signed input, and no label and no length prefix; fixed arity over `SealedIdentity` |
+| `pairing::transcript_digest` / `derive_sas` / `derive_commit` | field hashing, trailing separator | Reduces a transcript to a short code or a commitment, not an input to a signer |
+
+None of the three signed inputs is length-prefixed, and this design needs that at
+every level, so the frame is a new primitive rather than a widening of any of them.
+
+**Field kinds.**
+
+| Kind | Encoding |
+|---|---|
+| length prefix | `u32` big-endian, before every field |
+| integer | `u64` big-endian, exactly 8 bytes — `1` and `0001` are not two encodings |
+| string | raw UTF-8 bytes, no trim, no fold, no escaping |
+| bytes | raw, never hex or base64 |
+| list | a frame whose fields are the elements |
+| absent value | a zero-length field, never an omitted field |
+| signature | 64 raw bytes in a frame, lowercase hex on the wire |
+| digest | 32 raw bytes in a frame, lowercase hex on the wire |
+| ciphertext | the whole age file in a frame, lowercase hex on the wire — the same rendering the other binary fields use, so no second encoding enters the wire form |
+| time | an ISO-8601 UTC string, verbatim, the shape `mintedAt` already uses |
+
+**`ctx`.** Twelve fields, always twelve, in this order:
+
+| # | field | kind | meaning |
+|---|---|---|---|
+| 1 | `v` | integer | container frame version, `1`. Separate from `suite`: `v` versions this encoding, `suite` versions the cipher |
+| 2 | `purpose` | string | `mail` \| `post` \| `wrap` \| `charter` |
+| 3 | `msgid` | bytes | 32 raw bytes, not the hex the wire renders |
+| 4 | `origin.node` | string | the mesh-declared node name, verbatim |
+| 5 | `origin.key` | bytes | 32 raw bytes, the origin's Ed25519 public key |
+| 6 | `to.node` | string | verbatim |
+| 7 | `to.age` | string | the bech32 `age1…` recipient, verbatim lowercase |
+| 8 | `originMesh` | string | verbatim |
+| 9 | `suite` | string | a registered suite identifier |
+| 10 | `generation` | integer | the verified binding's generation, never a wire-supplied number |
+| 11 | `board` | bytes | 32 raw bytes, or a zero-length field |
+| 12 | `epoch` | integer | a board epoch, or `0` |
+
+`mesh` and `transit` are absent from `ctx`: they are hop-mutable, and only `ctx`'s
+fields are inside the digest that dedup compares.
+
+**`board` and `epoch` are carried by `purpose` alone.** The two purposes that name a
+board are `post` (a board post) and `wrap` (an epoch key wrapped to a member node);
+`mail` and `charter` carry a zero-length `board` and an `epoch` of `0`. `epoch = 0` is
+both "no board" and a board's first epoch, so `board` — not `epoch` — is what
+disambiguates, and the rule is enforced rather than assumed: a container whose
+`purpose` and whose `board`/`epoch` fields disagree is refused **`purpose-mismatch`**.
+Without that check the frame is still injective, but its meaning would be ambiguous,
+which is a different defect and a worse one.
+
+**The payload.** `pt = frame("aoide/mail-pt", [ctx, payload])`, where the second field
+is itself a labelled frame chosen by `purpose`:
+
+| `purpose` | payload label | fields |
+|---|---|---|
+| `mail` | `aoide/mail-envelope` | `header`, `text`, `sig`, `msgid` |
+| `post` | `aoide/mail-envelope` | the same four |
+| `wrap` | `aoide/mail-wrap` | `board`, `epoch`, the epoch X25519 private key |
+| `charter` | `aoide/charter-payload` | the charter file bytes, its `.sig` bytes |
+
+The envelope payload's four values are the envelope's own, unchanged: `header` is
+`mail::canonical_header_bytes`'s output byte for byte, `sig` is 64 raw bytes and
+`msgid` is 32 raw bytes (not their hex renderings). The envelope's three field
+equations are untouched — this only fixes the order the four values are framed in, so
+that two nodes can never disagree over a serialization. Sealing the wire's JSON object
+verbatim is refused: its key order, whitespace and escaping are not pinned, which is
+exactly what the envelope's canonical discipline exists to avoid.
+
+**The outer signature.** `sig = origin Ed25519 over frame("aoide/mail-outer", [ctx,
+ct])`, where `ct` is the whole age file, header and stanzas included, raw binary. A
+relay that re-signs someone else's `ct` under its own key and context therefore fails
+at the destination.
+
+**The binding.** `binding_sig = identity Ed25519 over frame("aoide/mail-binding", [v,
+purpose, age_pubkey, age_fingerprint, suites, generation, rotated_at, not_before,
+not_after, identity_key])`:
+
+| field | kind | meaning |
+|---|---|---|
+| `v` | integer | binding frame version, `1` |
+| `purpose` | string | `mail-sealing` |
+| `age_pubkey` | bytes | 32 raw bytes, the X25519 public key |
+| `age_fingerprint` | bytes | 32 raw bytes, `sha256` of the recipient's **canonical bech32 string** — `Recipient`'s own `Display` output, lowercase and re-encoded from the key, so it is injective in the raw key. The `age` crate exposes an X25519 recipient only as that string; reaching the raw bytes would mean a second direct cryptography dependency or a hand-rolled bech32 decoder, and both are refused |
+| `suites` | frame | `frame("aoide/mail-suites", [suite, …])`, ordered |
+| `generation` | integer | strictly increasing per identity key |
+| `rotated_at` | time | when this binding's age key was minted or last rotated |
+| `not_before`, `not_after` | time | the validity window |
+| `identity_key` | bytes | 32 raw bytes, the signer's Ed25519 public key |
+
+`identity_key` is redundant with the signature and is carried anyway, so a binding
+arriving through the pairing ceremony or a charter can be checked as "is the signer
+the exact key this binding names" without a side table, and so a cache keyed by
+identity fingerprint cannot be fed a binding that names a different key. No node name
+appears anywhere in it: a node in two meshes has two names and one key.
+
+Two fingerprints exist in this design and they are different values:
+
+- **`SHA256:<hex>`** is the durable fingerprint: lowercase hex `sha256` over the raw
+  32-byte public key. The node line prints it over the **identity** public key — that
+  is the key a charter line and a paired record are keyed by, and the key the
+  binding's own signature is checked against. The binding's `age_fingerprint` field is
+  the same construction over the **age** X25519 key, through the one encoding that key
+  is exposed in (its canonical bech32 string — see the field table above). These are
+  the values an operator compares out of band and the ones storage keys by.
+- The short colon-separated display label `aoide identity` prints
+  (`aa:bb:cc:dd:ee:ff:00:11`) is a local convenience only. It is never compared across
+  machines and never a trust input.
+
+**The charter.** `charter_sig = operator Ed25519 over frame("aoide/charter", [mesh,
+version, sha256(file bytes)])`. The signature covers the **digest of the operator's
+file bytes**, not a canonical re-serialization of their value:
+
+- `sign` writes the next `version` into the file and hashes that exact artifact;
+  `accept` hashes the exact bytes it received. Nothing re-serializes between the two,
+  so no serializer version, key order or comment-preservation rule can drift across
+  them.
+- A canonical form would let two byte-different files that parse to the same value
+  both verify, so a carrier could substitute a file and nothing would notice. The
+  operator's artifact is the thing being authorized.
+- The cost is real and is a rule, not a caveat: **`sign` is the last write to a charter
+  file.** Any later rewrite — a formatter, an editor's trailing newline, a checkout
+  that changes line endings — invalidates the `.sig`, and the fix is to re-sign, never
+  to normalize on read.
+
+The detached signature `<mesh>.toml.sig` is `frame("aoide/charter-sig", [sig,
+digest])`: the 64 signature bytes and the 32 digest bytes they were computed over.
+Carrying the digest beside the signature is what makes a touched source diagnosable
+rather than merely rejected: a mismatch between the two is refused **`charter-tampered`**,
+distinct from `unknown-operator` (a signature that does not verify under the key the
+node trusts) and from `stale-charter` (a version not above the high-water mark).
+
+**Suite identifiers.** Lowercase ASCII matching `[a-z0-9-]+`, no `/` and no `aoide/`
+prefix, so a suite name can never be read as a frame label. The registered set for `v
+= 1` is exactly one identifier:
+
+```text
+age-v1-x25519
+```
+
+It names the format version and the recipient type in one atom, so a downgrade cannot
+be expressed by mixing a suite version with a recipient type. The binding's `suites`
+list is the accepted set; a container whose `suite` is not in the verified binding's
+list is refused with a taught error and an audit line.
+
+**The dedup digest.** `sha256(frame("aoide/mail-dedup", [ctx, ct, sig]))`: everything
+`ctx` covers, plus the ciphertext and the origin signature, and nothing hop-mutable.
+`mesh` and `transit` are excluded, so the same letter retried over a different route
+is a duplicate rather than a collision, and a `msgid` that reappears with different
+immutable bytes is a collision and refuses.
+
+**Reserved labels.** One table, so two frames can never share a label by accident:
+
+```text
+aoide/mail-ctx           container context                        P-SEAL
+aoide/mail-pt            the sealed plaintext frame               P-SEAL
+aoide/mail-envelope      the inner envelope's four values          P-SEAL
+aoide/mail-wrap          an epoch key wrapped to a member node    P-BOARD
+aoide/charter-payload    a charter file and its signature          P-CHARTER
+aoide/mail-outer         the outer origin signature input         P-SEAL
+aoide/mail-binding       the self-signed age binding              P-SEAL
+aoide/mail-suites        a list of accepted suite identifiers     P-SEAL
+aoide/mail-dedup         the immutable-field digest               P-SEAL
+aoide/mail-hop           a hop's signed body                      P-SEAL
+aoide/mail-hop-entry     a hop's entry, sig included              P-SEAL
+aoide/charter            the operator's charter signature input   P-CHARTER
+aoide/charter-sig        a charter's detached signature           P-CHARTER
+```
+
+A new label is added here and nowhere else. Adding one is a documentation change, not
+an encoding change, which is why `purpose` and `suite` are strings rather than
+fixed-width codes.
+
+**A worked `ctx`.** A letter, `purpose = "mail"`, no board:
+
+```text
+v           = 1
+msgid       = 5f3c9a1d0e7b24c8a6f1d3b5097e42ca18b6d0f3a2c75e9184b0d6f2a3c8e14b
+origin.node = "thinkchiyo"
+origin.key  = 9d2f81c4a70be35610f48d2c7b19ea50c3d6f8024a9e1b73c85d0f2a6e4b9c17
+to.node     = "relay"
+to.age      = age1hgvpn9afcg7dwa3pmh3atmw2gkf3hzhy8cfvcx88qkr4y0mt8flqqn079j
+originMesh  = "home"
+suite       = "age-v1-x25519"
+generation  = 1
+board       = (absent)
+epoch       = 0
+```
+
+```
+616f6964652f6d61696c2d63747800000000080000000000000001000000046d
+61696c000000205f3c9a1d0e7b24c8a6f1d3b5097e42ca18b6d0f3a2c75e9184
+b0d6f2a3c8e14b0000000a7468696e6b636869796f000000209d2f81c4a70be3
+5610f48d2c7b19ea50c3d6f8024a9e1b73c85d0f2a6e4b9c170000000572656c
+61790000003e61676531686776706e39616663673764776133706d683361746d
+7732676b6633687a68793863667663783838716b723479306d7438666c71716e
+3037396a00000004686f6d650000000d6167652d76312d783235353139000000
+08000000000000000100000000000000080000000000000000
+```
+
+249 bytes: the label `aoide/mail-ctx` and its NUL, then twelve length-prefixed fields
+(8, 4, 32, 10, 32, 5, 62, 4, 13, 8, 0, 8 bytes). The `board` field's `00000000` is a
+present field of length zero, never an omitted field, and that is what keeps a letter's
+`ctx` and a post's `ctx` from ever re-bracketing into each other.
+
 ### Hop-signature chain
 
 A relay may append its own signature. It may never alter the letter or remove earlier
@@ -458,20 +731,36 @@ list outside every signature, would let a later hop delete or reorder earlier
 entries. Each hop instead signs its place in a chain and whom it hands the letter to:
 
 ```text
-hop_sig_n = sign_n(canonical(msgid, prev_n, node_n, next_n, at_n, mesh_n))
+hop_sig_n = sign_n(frame("aoide/mail-hop", [msgid, prev_n, node_n, next_n, at_n, mesh_n]))
 prev_1    = msgid
-prev_n    = sha256(canonical bytes of entry n-1, its sig included)
+prev_n    = sha256(frame("aoide/mail-hop-entry",
+                         [msgid, prev_{n-1}, node_{n-1}, next_{n-1},
+                          at_{n-1}, mesh_{n-1}, sig_{n-1}]))
 ```
 
-- Fields are length-prefixed, not joined with `0x00`.
+- Fields are length-prefixed, never joined with `0x00` ("Encodings"). `sig` and
+  `msgid` are raw bytes in those frames.
+- **The origin signs entry 1.** Every machine that hands the letter on signs whom it
+  hands it to, and the origin is the first such machine: entry 1's `node` is
+  `origin.node`, its `prev` is `msgid`, and its signature verifies under `origin.key`.
+  On the SSH direct lane the chain is exactly one entry, origin to destination.
 - `next` is the node this hop hands the letter to.
-- The destination walks the chain from `msgid`. It verifies each signature under that
-  hop's key in the mesh the hop carried the letter in, and requires
-  `entry[j].next == entry[j+1].node`. It also requires the last entry's `next` to be
-  self.
-- The chain defeats **cut-and-reappend**: a hop that truncated the chain to entry `j`
-  and re-appended itself would verify under a flat per-hop rule. Here it breaks the
-  `prev` or `next` link.
+- **`prev` and entry `mesh` are recomputed and carried, respectively, never the other
+  way round.** `prev` is always recomputed from the entry before it and is never read
+  from the wire. Each entry's `mesh` **is** carried in the entry, because it cannot be
+  reconstructed: the container's `mesh` is the value after every rewrite, so a
+  pre-gate hop's zone exists nowhere else.
+- The destination walks the chain from `msgid`. Entry 1 must name `origin.node` and
+  verify under `origin.key`; each later entry verifies under its node's key in the
+  mesh that entry carried the letter in. It requires `entry[j].next ==
+  entry[j+1].node`, and the last entry's `next` to be self.
+- The chain defeats **cut-and-reappend**. Truncating at an interior entry `j ≥ 1` and
+  re-appending breaks the recomputed `prev` or the `next` link. Truncating at `j = 0`
+  and re-appending is the case the origin's own entry 1 closes: a hop signing itself
+  as entry 1 has to sign `node = itself`, the destination requires entry 1 to name
+  `origin.node`, and it cannot forge the origin's signature. A relay that dropped the
+  origin's entry is refused **`broken-chain`** — the origin is not erasable from the
+  record of who handed the letter to whom.
 - A hop can still drop the tail, which drops the letter. No destination-signed ack
   then reaches the origin, and the outbox reports the letter as undelivered.
 - The destination verifies the full chain. Per-hop zone checks at each door are
@@ -512,11 +801,19 @@ open decision. Without padding, the ciphertext length approximates the letter le
 ## Cryptographic selection
 
 - **Chosen: age** (the age-encryption.org/v1 format, C2SP spec) through the maintained
-  Rust `age` crate. It uses X25519 recipients and a ChaCha20-Poly1305 STREAM payload
-  in 64 KiB chunks. Chunking suits large attachments, and it needs no session state
-  for store-and-forward. Given the key, a letter can be opened by hand with the stock
-  age tooling, which helps recovery and debugging. One ciphertext can carry several
-  recipients.
+  Rust `age` crate, **0.12.1 with no features** (`default-features = false`: no ssh, no
+  plugin, no cli-common, no async; `armor` is off and costs nothing if a wire form ever
+  needs it). It is a dependency of `aoide-storage` alone and every use of it lives in
+  one module, so deleting that module and one manifest line removes it. It uses X25519
+  recipients and a ChaCha20-Poly1305 STREAM payload in 64 KiB chunks. Chunking suits
+  large attachments, and it needs no session state for store-and-forward. Given the
+  key, a letter can be opened by hand with the stock age tooling, which helps recovery
+  and debugging; the crate at 0.12.1 and the stock CLI decrypt each other's output, and
+  that is tested. One ciphertext can carry several recipients. The weight this accepts
+  is real and unavoidable by any feature choice: the crate's i18n embedding, its HPKE
+  and P-256 paths and its post-quantum KEM are unconditional, and it pins one older
+  RustCrypto generation (`sha2` 0.10 beside the tree's 0.11) that no version or feature
+  selection collapses.
 - **Sender authentication is Aoide's job.** age has no sender authentication: anyone
   who knows a recipient key can encrypt to it. Two Ed25519 layers cover this. The
   inner MAIL.md envelope signature proves who wrote the text. The outer origin
@@ -557,10 +854,30 @@ open decision. Without padding, the ciphertext length approximates the letter le
 **Each host generates its own keys:** an Ed25519 identity key and an age X25519 key.
 Private keys never leave the host. They are stored 0600, never printed, and never put
 in an Outcome. They live in runtime state (`~/.aoide/state/identity/ed25519.key`,
-`~/.aoide/state/identity/age.key`), never in the Nix store or the repo. Charters and
-config hold only public keys, so no secret-management layer (agenix, sops) is
-involved. The operator key (Charters) and board epoch identities (MAIL.md §Boards) are
-the only other private keys, with the same storage rules.
+`~/.aoide/state/identity/age.key`), never in the Nix store or the repo. The age key is
+minted independently and is never derived from the identity seed, in either direction.
+Charters and config hold only public keys, so no secret-management layer (agenix, sops)
+is involved. The operator key (Charters) and board epoch identities (MAIL.md §Boards)
+are the only other private keys, with the same storage rules.
+
+**Two fingerprints, and only one of them is built.** The one this design's code
+uses is `age_fingerprint`: lowercase hex `sha256` over the age recipient's
+**canonical bech32 string** — `Recipient`'s own `Display` output, lowercase and
+re-encoded from the key, so it is injective in the raw key. (The raw 32 bytes are
+not reachable through the `age` crate's API; see the Encodings table for why the
+string is the preimage.) That is the value a binding carries and the value storage
+keys by.
+
+The other is **P-CHARTER's, and not yet built**: a durable `SHA256:<hex>` node
+fingerprint over the raw 32-byte **identity** public key, printed on the node line
+so two operators have something to compare out of band. Nothing in this tree
+computes or prints it today — the node line in "Charters" describes the shape that
+seam will produce, not one that exists. When it lands it is a second, distinct
+value from `age_fingerprint`, over a different key.
+
+The short colon-separated label `aoide identity` prints today
+(`aa:bb:cc:dd:ee:ff:00:11`, the key's first eight bytes) is a local display
+convenience: it is never compared across machines and never a trust input.
 
 **Trust entry: two ways a peer's keys become trusted.**
 
@@ -586,7 +903,12 @@ the only other private keys, with the same storage rules.
   by hand or run `aoide mesh join`.
 - **Rotation.** A new age key needs no re-pairing and no charter re-sign, only a new
   signed binding. A new identity key needs a new pairing, or a new node line and a
-  re-sign.
+  re-sign. **The operator seam for rotating an age key is P-CHARTER's**, not this
+  slice's: `aoide mesh` is where a node's keys are managed, and P-SEAL lands the
+  mechanism (`seal::rotate_age_key`, which mints the new key, writes the retired
+  key's tombstone and publishes the next-generation binding) without a command to
+  reach it. Nothing in P-SEAL retires an age key in the field, and this document does
+  not claim otherwise.
 
 **The binding** is self-signed and keyed by the identity-key fingerprint, never by a
 name, because a node in two meshes may have two names and one key. It carries:
@@ -760,7 +1082,15 @@ just another transport for sealed letters.
 - **Mixed transports interoperate through a hub.** A `poll` node on HTTPS and an
   `ssh://` node exchange letters through a hub that speaks both. A node that cannot
   seal cannot receive through transit.
-- **No plaintext fallback exists** for a sealed destination, in either direction.
+- **No plaintext fallback exists for a sealed destination, and the SENDER is what
+  enforces it.** Once a node holds a destination's binding it never sends that
+  destination plaintext again — not the entry it spooled before the binding arrived
+  (it re-seals that entry before dialing it), not on the push direction and not on
+  the pull one. The **receiver** keeps accepting a plaintext envelope from an
+  admitted peer, deliberately: a peer running an older aoide has no binding to
+  publish and must still be able to deliver, and refusing its plaintext would break
+  the per-peer upgrade in the direction that actually matters. So "no plaintext
+  fallback" is a property of what a sealed-aware node *sends*, never a door rule.
 - **Grants move into meshes** as Trust per mesh describes: every existing paired
   record moves into the home mesh with its grant unchanged.
 
@@ -786,8 +1116,8 @@ governs (house rule 8):
 | Where | Amendment |
 |---|---|
 | CONTRACTS.md §4 `config.toml` | `[mesh.<name>] operator`; a charter mesh's section carries only `operator` and `pins`; `[pairing] homeMesh`; `sameOperator` retires; the rule that one node name may not appear in two meshes is dropped, so a node may be declared in several meshes (its key the same in each). |
-| CONTRACTS.md §4 state files | `state/identity/age.key`, `state/operator/<mesh>.key`, `state/mesh/<mesh>/` (charter in force, its signature, the high-water mark), `state/boards/`. |
-| CONTRACTS.md §6 | Signed requests carry the mesh they act in. `mailDeposit`/`mailPoll` take the sealed container; admission reads the caller's grant in that mesh. `aoide/binding`. The refusal reasons above. |
+| CONTRACTS.md §4 state files | `state/identity/age.key`, the age binding store beside the identity key (the current binding, the generation high-water mark, and any retired key inside its grace window), `state/operator/<mesh>.key`, `state/mesh/<mesh>/` (charter in force, its signature, the high-water mark), `state/boards/`. |
+| CONTRACTS.md §6 | Signed requests carry the mesh they act in. `mailDeposit`/`mailPoll` take the sealed container; admission reads the caller's grant in that mesh. `aoide/binding`. The refusal words are named, not "reasons above": `context-mismatch`, `addressing-mismatch`, `broken-chain`, `purpose-mismatch` (a container whose `purpose` and whose `board`/`epoch` fields disagree), `unsupported-suite`, `unsupported-container-version`, `open-failed` (the ciphertext opens under no identity this node holds — a wrong recipient, or a tampered `ct`), `key-retired`, `stale-binding`, `binding-mismatch`, `unknown-operator`, `stale-charter`, `charter-tampered`, `operator-mismatch`. |
 | CONTRACTS.md §7 `nodes.json` | `allows` becomes a grant per mesh, and existing records migrate into the home mesh. |
 | CONTRACTS.md mesh address grammar | Node addresses accept `https://host` and `poll` beside `ssh://`. |
 | PAIRING.md | The charter is the second trust entry beside the ceremony, for one operator's machines. The kill-list's "no mesh-level object" names the charter as its one exception: a signed object, never a transitive relay of pairwise trust. A pairing names its mesh. The ceremony carries the signed age binding and gains the local-network guard. `aoide mesh join <mesh> <operator-node>` rides the ceremony. The HTTPS adapter serves no pairing method. The "Mesh declaration" section describes a pair mesh, and `sameOperator` leaves it. |
@@ -844,9 +1174,13 @@ scheduler (`aoide mail poll`).
   in any field refuses before any inner field is used.
 - **Addressing mismatch:** a legitimately trusted node whose inner header is addressed
   elsewhere is refused and never filed.
-- **Wrong recipient:** a container for B opened with C's age key fails.
+- **Wrong recipient:** a container for B opened with C's age key fails
+  (`open-failed`), and a container addressed to B's retired key, past its grace window,
+  reports `key-retired` instead.
 - **Tamper:** a flipped byte in `ct`, an outer `ctx` field, `to.age` or `msgid` is
   refused and audited.
+- **Purpose and board:** a `post` whose `board` is empty, and a `mail` that carries a
+  board or a non-zero `epoch`, are both refused (`purpose-mismatch`).
 - **Replay and retry:**
   - A resent capture, and a retry after a lost response, yield `duplicate` with no
     second filing.
@@ -878,7 +1212,8 @@ scheduler (`aoide mail poll`).
   - A charter signed by a key the node does not trust for that mesh is refused
     (`unknown-operator`).
   - An older or equal version is refused (`stale-charter`).
-  - A flipped byte in a charter carried through a relay is refused.
+  - A flipped byte in a charter carried through a relay is refused
+    (`charter-tampered`).
   - A config operator line and a state record that disagree refuse every charter for
     that mesh (`operator-mismatch`).
   - A version that re-keys an existing node is applied and reported by `aoide mesh`.
@@ -928,6 +1263,9 @@ scheduler (`aoide mail poll`).
   sealed container and routing metadata only.
 - **Tamper through a relay:** a flipped byte in `mesh` or any hop signature, from an
   authorized or an unauthorized relay, is refused and audited.
+- **Prefix erasure:** a relay that drops the origin's entry 1 and re-appends itself as
+  entry 1 is refused (`broken-chain`) — its own entry names itself, not `origin.node`,
+  and it cannot sign as the origin.
 - **Context binding at a relay:** a relay that re-signs another origin's `ct` under its
   own key and `ctx` is refused at the destination (`context-mismatch`).
 - **Retry over another route:** the same immutable container over a different route
