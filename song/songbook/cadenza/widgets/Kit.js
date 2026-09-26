@@ -1,5 +1,6 @@
 // Kit.js — cadenza's shared kit: colour roles, the character cell, the
-// glyph builders, and the URLs of the helper files.
+// icon set (`glyph`), the glyph builders, and the URLs of the
+// helper files.
 //
 // Sharing mechanism (design/kit.md §1): NOTHING in cadenza is resolved by
 // type name across files. A sibling `Pane { }` needs a per-song qmldir, which
@@ -67,7 +68,8 @@ function make(livery, fm) {
         withA: withA, helper: helper,
         gaugeText: gaugeText, sparkText: sparkText, brailleLines: brailleLines,
         barColumn: barColumn, padL: padL, padR: padR, lampGlyph: lampGlyph,
-        rep: rep, clamp01: clamp01
+        rep: rep, clamp01: clamp01,
+        glyph: glyph, cellLen: cellLen
     }
     k.cells = function(n) { return Math.round(n * k.cellW) }
     k.lines = function(n) { return Math.round(n * k.cellH) }
@@ -90,6 +92,58 @@ function make(livery, fm) {
 // an unknown state is a dim `·`, never a guess
 var lamps = { "working": "●", "awaiting": "◐", "idle": "○", "stopped": "■", "failed": "✕" }
 function lampGlyph(state) { return lamps[state] || "·" }
+
+// ══ THE ICON SET — Nerd Font glyphs, one table (intent §2 "Glyphs") ═══════
+// The bar's status, board and RICE cells draw their icon from HERE; no
+// surface hard-codes a codepoint. An icon is text from the one face, one cell
+// wide, coloured by what it labels. Everything else (the clock, `$`, the
+// tray, `⏻`, every list row) stays bare text. Codepoints above U+FFFF (the
+// Material range) are surrogate PAIRS in a JS string: `.length` counts 2 for
+// them, so measure with `cellLen(s)`.
+function cp(n) {
+    if (n < 0x10000) return String.fromCharCode(n)
+    n -= 0x10000
+    return String.fromCharCode(0xD800 + (n >> 10), 0xDC00 + (n & 0x3FF))
+}
+// cells a string occupies on the grid: code points, not UTF-16 units
+function cellLen(s) {
+    s = String(s); var n = 0
+    for (var i = 0; i < s.length; i++) {
+        var c = s.charCodeAt(i)
+        if (c < 0xDC00 || c > 0xDFFF) n++
+    }
+    return n
+}
+
+// battery: the nf-md level glyph (battery_outline, battery_10 … battery_90,
+// battery) for a level 0..1 rounded to the tenth; `charging` (optional) →
+// battery_charging
+var batteryLevels = [0xF008E, 0xF007A, 0xF007B, 0xF007C, 0xF007D, 0xF007E,
+                     0xF007F, 0xF0080, 0xF0081, 0xF0082, 0xF0079]
+function batteryGlyph(level, charging) {
+    if (charging) return cp(0xF0084)
+    return cp(batteryLevels[Math.round(clamp01(level) * 10)])
+}
+
+// one entry per cell; dropping a cell's icon is deleting its line here and
+// its `glyph:` line in bar.qml
+var glyph = {
+    // board cells
+    agents:   cp(0xF06A9),   // nf-md-robot          AGT
+    cpu:      cp(0xF035B),   // nf-md-memory         CPU
+    notif:    cp(0xF009A),   // nf-md-bell           herald count
+    // status cells
+    vol:      cp(0xF057E),   // nf-md-volume_high
+    volMuted: cp(0xF0581),   // nf-md-volume_off
+    bt:       cp(0xF00AF),   // nf-md-bluetooth
+    btOff:    cp(0xF00B2),   // nf-md-bluetooth_off
+    wired:    cp(0xF0200),   // nf-md-ethernet
+    wifi:     cp(0xF05A9),   // nf-md-wifi
+    netNone:  cp(0xF05AA),   // nf-md-wifi_off
+    battery:  batteryGlyph,  // function (level 0..1, charging?) → one glyph
+    // the rice-mode toggle
+    rice:     cp(0xF03D8)    // nf-md-palette        RICE
+}
 
 // ══ GLYPH BUILDERS — numbers in, strings out ═══════════════════════════════
 var eighthsH = " ▏▎▍▌▋▊▉█"   // 0..8, left-anchored

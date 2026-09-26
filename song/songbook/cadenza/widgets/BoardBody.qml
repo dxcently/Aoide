@@ -431,9 +431,14 @@ Item {
     }
 
     // ══ THE PANE ══════════════════════════════════════════════════════════
+    // half a line of air above the pane: the title and stat ride the top
+    // rule's line at y 0, and the window's top edge (under the bar) cut them
+    // in half live (calendar.qml's topInset precedent)
+    readonly property int topInset: Math.round(kit.cellH / 2)
     Use {
         id: frame
         anchors.fill: parent
+        anchors.topMargin: board.topInset
         kit: board.kit; helper: "Pane"
         props: ({
             title: "board", glow: "bloom",

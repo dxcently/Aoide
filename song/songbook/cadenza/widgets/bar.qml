@@ -1,6 +1,7 @@
 // bar.qml — cadenza's "bar" slot: the switchboard line (intent §3.1, §3.2).
 //
-//   [⏻] [1] [2]aoide [3]aoide [5] [7]melete [9]mneme   title…   AGT 6/10 CPU 23% $ 4.20 !3 │ VOL 62% BT off NET wifi │ TRAY 2 RICE stg │ 14:02:31
+//   [⏻] [1] [2]aoide [3]aoide [5] [7]melete [9]mneme   title…   <agents> 6/10 <cpu> 23% $ 4.20 <notif> 3 │ <vol> 62% <bt> <net> │ TRAY 2 <rice> stg │ 14:02:31
+//   (<name> = the kit icon kit.glyph.<name>, intent §2 Glyphs; $, TRAY, the clock and ⏻ stay bare)
 //         ○──●─○──────○        ○                    (pads, a bus, a junction)
 //            ┆╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┆                    (a spawned wire on lane 0)
 //   ─────────────────────────────────────────────────────────────────────────── the trunk
@@ -18,16 +19,16 @@
 //                           today, so no label, no tie, no lamp is drawn
 //   state/usage/now.json    `by:"workspace"` rows → the jack insight pane —
 //                           core-seams §C; absent today → "no usage data"
-//   state/stage/herald.json `!n`
+//   state/stage/herald.json the NOTIF cell count
 //   livery.usagePath        `$` (state/usage.json local.today.costUsd)
-//   livery.riceMode         `RICE`
+//   livery.riceMode         the RICE cell
 //   /proc/stat, /proc/meminfo, /proc/net/route   CPU, mem total, NET kind
 //                           (kernel files, sonata meters/bar precedent)
 //   Pipewire · Bluetooth · Networking · UPower · SystemTray  (sonata's services)
 //
 // ── What it does ───────────────────────────────────────────────────────────
 //   [⏻] → powermenu.toggle()          jack click → workspace.activate()
-//   AGT / CPU / $ / !n → dock.openTab("overview"|"sys"|"sys"|"notif"),
+//   AGT / CPU / $ / NOTIF → dock.openTab("overview"|"sys"|"sys"|"notif"),
 //        falling back to dock.toggle() when the dock has no openTab
 //   RICE → bridge.toggleRiceMode()     session row → bridge.focusSession(id)
 //   VOL/BT/NET/BAT/TRAY/clock → their own pane (one open at a time, click
@@ -1041,30 +1042,36 @@ Item {
     // ════════════════════════════════════════════════════════════════════════
     // PAINT — the line
     // ════════════════════════════════════════════════════════════════════════
-    // one cell: `LABEL value`, label dim (accent while its pane is open)
+    // one cell: `glyph value` (intent §2 Glyphs). The glyph takes its value's
+    // colour (accent while its pane is open or hovered). A cell with a word
+    // label instead (`$`, TRAY) keeps that label dim; the clock is bare.
+    // Widths use kit.cellLen: a Material glyph is one cell, two UTF-16 units.
     component Cell: Item {
         id: cell
         required property var kit
         property string label: ""
+        property string glyph: ""
         property string value: ""
         property color valueColor: kit.ink
+        readonly property string head: glyph.length > 0 ? glyph : label
         property bool lit: false
         signal activated()
         signal wheeled(int delta)
-        readonly property int gap: (label.length > 0 && value.length > 0) ? 1 : 0
-        implicitWidth: kit.cells(label.length + gap + value.length)
+        readonly property int gap: (head.length > 0 && value.length > 0) ? 1 : 0
+        implicitWidth: kit.cells(kit.cellLen(head) + gap + kit.cellLen(value))
         width: implicitWidth
         height: parent ? parent.height : 0
         Text {
-            text: cell.label
-            color: (cell.lit || cellMa.containsMouse) ? cell.kit.title : cell.kit.dim
+            text: cell.head
+            color: (cell.lit || cellMa.containsMouse) ? cell.kit.title
+                   : (cell.glyph.length > 0 ? cell.valueColor : cell.kit.dim)
             font: cell.kit.font
             textFormat: Text.PlainText
             style: Text.Outline
             styleColor: cell.kit.withA(color, 0.18)
         }
         Text {
-            x: cell.kit.cells(cell.label.length + cell.gap)
+            x: cell.kit.cells(cell.kit.cellLen(cell.head) + cell.gap)
             text: cell.value
             color: cell.valueColor
             font: cell.kit.font
@@ -1274,14 +1281,14 @@ Item {
 
         Cell {
             kit: root.kit
-            label: "AGT"
+            glyph: root.kit.glyph.agents
             value: root.agentStats.working + "/" + root.agentStats.total
             valueColor: root.agentStats.awaiting > 0 ? root.kit.urgent : root.kit.number
             onActivated: root.openBoard("overview")
         }
         Cell {
             kit: root.kit
-            label: "CPU"
+            glyph: root.kit.glyph.cpu
             value: root.cpuPct < 0 ? "—" : Math.round(root.cpuPct) + "%"
             valueColor: root.cpuPct < 0 ? root.kit.dim : (root.cpuPct >= 80 ? root.kit.warn : root.kit.number)
             onActivated: root.openBoard("sys")
@@ -1295,7 +1302,8 @@ Item {
         }
         Cell {
             kit: root.kit
-            value: "!" + root.heraldStats.count
+            glyph: root.kit.glyph.notif
+            value: "" + root.heraldStats.count
             valueColor: root.heraldStats.summons ? root.kit.urgent
                         : (root.heraldStats.count > 0 ? root.kit.number : root.kit.dim)
             onActivated: root.openBoard("notif")
@@ -1304,8 +1312,8 @@ Item {
         Cell {
             id: volCell
             kit: root.kit
-            label: "VOL"
-            value: !root.sinkAudio ? "—" : (root.volMuted ? "mute" : root.volPct + "%")
+            glyph: root.volMuted ? root.kit.glyph.volMuted : root.kit.glyph.vol
+            value: !root.sinkAudio ? "—" : root.volPct + "%"
             valueColor: (!root.sinkAudio || root.volMuted) ? root.kit.dim : root.kit.number
             lit: root.openPane === "vol"
             onActivated: root.togglePane("vol", volCell, true)
@@ -1314,10 +1322,9 @@ Item {
         Cell {
             id: btCell
             kit: root.kit
-            label: "BT"
-            value: !root.btAdapter ? "—"
-                   : (root.btDev ? Kit.padR("" + (root.btDev.name || root.btDev.deviceName || "dev"), 8).trim()
-                                 : (root.btOn ? "on" : "off"))
+            // glyph only (intent §3.1): lit ink with a device on, dim otherwise;
+            // the device name lives in the pane
+            glyph: root.btOn ? root.kit.glyph.bt : root.kit.glyph.btOff
             valueColor: root.btDev ? root.kit.ink : root.kit.dim
             lit: root.openPane === "bt"
             onActivated: root.togglePane("bt", btCell, true)
@@ -1325,8 +1332,7 @@ Item {
         Cell {
             id: netCell
             kit: root.kit
-            label: "NET"
-            value: root.netKind === "down" ? "off" : root.netKind
+            glyph: root.netKind === "wifi" ? root.kit.glyph.wifi : (root.netKind === "eth" ? root.kit.glyph.wired : root.kit.glyph.netNone)
             valueColor: root.netKind === "down" ? root.kit.warn : root.kit.ink
             lit: root.openPane === "net"
             onActivated: root.togglePane("net", netCell, true)
@@ -1335,8 +1341,8 @@ Item {
             id: batCell
             visible: root.battAvail
             kit: root.kit
-            label: "BAT"
-            value: root.battPct + "%" + (root.battCharging ? "+" : "")
+            glyph: root.kit.glyph.battery(root.battPct / 100, root.battCharging)
+            value: root.battPct + "%"
             valueColor: root.battCharging ? root.kit.number
                         : (root.battPct <= 10 ? root.kit.urgent : (root.battPct <= 20 ? root.kit.warn : root.kit.number))
             lit: root.openPane === "bat"
@@ -1355,7 +1361,7 @@ Item {
         }
         Cell {
             kit: root.kit
-            label: "RICE"
+            glyph: root.kit.glyph.rice
             value: root.modeWord(root.livery.riceMode)
             valueColor: root.modeColor(root.livery.riceMode)
             onActivated: root.bridge.toggleRiceMode()

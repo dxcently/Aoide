@@ -6,7 +6,7 @@ instruments. It lives in `widgets/` next to the slots that use it:
 
 | file | kind | job |
 |---|---|---|
-| `Kit.js` | JS library | colour roles, the cell, glyph builders, helper URLs |
+| `Kit.js` | JS library | colour roles, the cell, the icon set, glyph builders, helper URLs |
 | `Pane.qml` | helper | the termui pane: hairline rules, title and stat in the top rule, reveal/close |
 | `Block.qml` | helper | the borderless block: one message that is not a pane |
 | `GlowText.qml` | helper | text with glow tier 0 (outline) or tier 0+1 (baked bloom) |
@@ -136,6 +136,8 @@ Module-level exports (for use before a kit exists):
 | `barColumn(frac, rows)` | `rows` strings, top first: `█`, an eighth cap, blanks |
 | `padL(s, n)` / `padR(s, n)` | exactly `n` cells: right-aligned and clipped / left-aligned and clipped with `…` |
 | `rep`, `clamp01` | small utilities |
+| `glyph` | the icon set (below): named Nerd Font icons for the bar cells |
+| `cp(n)` / `cellLen(s)` | a code point as a JS string (a surrogate pair above U+FFFF) / the cells a string takes (code points, not UTF-16 units) |
 
 ### The kit object — `Kit.make(livery, fm)`
 
@@ -177,8 +179,44 @@ The kit object also carries:
   anything else→`dim`. Awaiting is red because it is "a summons waiting on
   you", and amber stays reserved for the ONE hot element. A widget sets
   `hot` on at most one lamp.
-- **Functions:** every glyph builder above, plus `withA` and `helper`, so a
-  helper needs only the object.
+- **Functions:** every glyph builder above, plus `withA`, `helper` and
+  `cellLen`, so a helper needs only the object.
+- **Icons:** `glyph`, the icon table below.
+
+### The icon set — `kit.glyph`
+
+Icons are Nerd Font glyphs from the one face (intent §2 "Glyphs"): text,
+one cell wide, never an image. `Kit.js` holds the only table, so no surface
+hard-codes a codepoint. It covers exactly the bar cells that carry an icon;
+the clock, `$`, the tray, `⏻` and every list row stay bare text.
+
+| name | codepoint | Nerd Font name | bar cell |
+|---|---|---|---|
+| `agents` | U+F06A9 | nf-md-robot | AGT (opens OVERVIEW) |
+| `cpu` | U+F035B | nf-md-memory | CPU (opens SYS) |
+| `notif` | U+F009A | nf-md-bell | the herald count (opens NOTIF) |
+| `vol` / `volMuted` | U+F057E / U+F0581 | nf-md-volume_high / volume_off | volume |
+| `bt` / `btOff` | U+F00AF / U+F00B2 | nf-md-bluetooth / bluetooth_off | Bluetooth (icon only) |
+| `wired` / `wifi` / `netNone` | U+F0200 / U+F05A9 / U+F05AA | nf-md-ethernet / wifi / wifi_off | network (icon only) |
+| `battery(level, charging?)` | U+F008E, U+F007A–F0082, U+F0079; U+F0084 | nf-md-battery_outline, battery_10…90, battery; battery_charging | battery: `level` 0..1 picks the tenth |
+| `rice` | U+F03D8 | nf-md-palette | RICE (the rice-mode toggle) |
+
+- **Colour.** An icon has no colour job of its own: it takes its value's
+  colour (`number`, `warn`, `urgent`, `ink`, or `dim` when the value is
+  dim), and `title` while the cell's pane is open or hovered.
+- **Width.** The Material glyphs sit above U+FFFF, so a JS string holds each
+  as a surrogate pair and `.length` counts 2. Measure mixed text with
+  `kit.cellLen(s)`, never `.length`. `padL`/`padR` count UTF-16 units, so
+  do not pad a string that holds an icon.
+- **Naming.** The kit had no `glyph` member before (`lampGlyph` is a function
+  and "glyph builders" is a section of Kit.js), so the table takes the plain
+  name and nothing is renamed.
+- **One line per cell.** A cell's icon is one `glyph:` line in `bar.qml` plus
+  its entry here. Removing an icon means deleting those two lines, and the
+  cell then shows its value alone. Bluetooth and network are icon-only, so
+  they need a value word back when their icon goes.
+- The face carries every codepoint above (fontconfig charset of
+  `JetBrainsMonoNerdFontMono-Regular.ttf`: `f0001-f1af0`, `23fb`).
 
 ## 3. Helpers
 
