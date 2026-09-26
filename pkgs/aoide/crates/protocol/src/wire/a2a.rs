@@ -171,6 +171,17 @@ pub const FRAME_KEY: &str = "aoide/frame";
 /// finds the frame by identity rather than by position.
 pub const FRAME_ARTIFACT_ID: &str = "frame";
 
+/// The code a REFUSED output read answers with — the `tasks/get` frame arm's
+/// own, minted by the door that serves the frame and read by the far box that
+/// asked for it (CONTRACTS.md §6; P-RSA S6/S7). Its own number rather than
+/// `-32007`: that one stays `verify_signed_request`'s incomplete-headers/
+/// signature-mismatch family, decided before this arm runs at all, so the CODE
+/// alone names which refusal an operator is reading. Spelled here for the same
+/// reason [`FRAME_KEY`] is: the door and its readers are two ends of one wire
+/// fact, and a second copy of the number on the reading side is how the
+/// teaching text silently stops firing when the minting side renumbers.
+pub const OUTPUT_READ_REFUSED_CODE: i64 = -32011;
+
 /// One A2A `Message` (`message/send`'s `params.message`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Message {

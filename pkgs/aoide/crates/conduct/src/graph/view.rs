@@ -41,6 +41,11 @@ use super::model::{
     canonical_state, load_stage, resolved_parent, sessions_path, SessionRecord, SessionsFile,
 };
 use aoide_protocol::output::Outcome;
+// The output-read refusal's code, spelled once in `aoide_protocol::wire::a2a`
+// for the door that mints it AND the readers that teach the fix from it (P-RSA
+// S6/S7): a second copy on this side is how the teaching text silently stops
+// firing when the minting side renumbers.
+use aoide_protocol::wire::a2a::OUTPUT_READ_REFUSED_CODE;
 use aoide_protocol::Door;
 use aoide_protocol::Invocation;
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
@@ -59,12 +64,6 @@ const WATCH_POLL: Duration = Duration::from_millis(500);
 /// asks for is a TAIL, not a delta — polling as fast as the local file tail
 /// (500 ms) would re-read the same window five times a second and buy nothing.
 const REMOTE_WATCH_POLL: Duration = Duration::from_secs(2);
-/// The output-read refusal's code — `aoide-server::a2a`'s own
-/// `OUTPUT_READ_REFUSED_CODE`, on the wire (CONTRACTS.md §6). Named here
-/// because THIS side is what turns it into a taught error; the door that mints
-/// it and this reader are the two ends of one wire fact, and the number is the
-/// only thing that crosses.
-const OUTPUT_READ_REFUSED: i64 = -32011;
 /// Default `--tail` window, in output lines.
 const DEFAULT_TAIL: usize = 50;
 /// How many letters of the task mailbox the rail shows (the newest ones).
@@ -199,19 +198,24 @@ impl Frame {
         self
     }
 
-    /// [`for_wire`](Self::for_wire)'s INVERSE duty, for a frame this box did
-    /// not write: the far node is a peer, not this process, so every string it
-    /// sent is untrusted DATA and is put through the SAME
-    /// [`common::clean_line`]/[`clean_block`] pair the local view sanitizes
-    /// its own files with — control characters, `\r` and every Unicode `Cf`
-    /// mark (bidi/zero-width) stripped, each line clipped, a block bounded —
-    /// and every count re-clamped to the bound the LOCAL view holds:
+    /// The frame this box may trust, coming off a WIRE. The far node is a
+    /// peer, not this process, so every string it sent is untrusted DATA and is
+    /// put through the SAME [`common::clean_line`]/[`clean_block`] pair the
+    /// local view sanitizes its own files with — control characters, `\r` and
+    /// every Unicode `Cf` mark (bidi/zero-width) stripped, each line clipped, a
+    /// block bounded — and every count re-clamped to the bound the LOCAL view
+    /// holds:
     ///
     /// * `output` to the LAST `tail` lines (the window that was asked for,
     ///   whatever the far side chose to send);
     /// * `mail` to the last [`MAIL_RAIL`] letters, each body re-bounded to
     ///   [`BLOCK_LINES_MAX`] lines, `run`/`from`/`subject` cleaned;
-    /// * `instructions` re-cleaned as one block.
+    /// * `instructions` re-cleaned as one block;
+    /// * `log_path`, `socket` and `instructions_path` **struck** (`None`), the
+    ///   same set [`Frame::for_wire`] strikes on the sending side: they name
+    ///   paths and a control socket on the box that wrote the frame, so a
+    ///   reader here has nothing to do with them, and printing a peer's
+    ///   invented `/etc/shadow` as `log …` reads as a fact about this run.
     ///
     /// **`suggested` is rebuilt, never trusted.** `for_wire` nulls it on the
     /// sending side because the `aoide send --id …` line names a session in
@@ -238,9 +242,9 @@ impl Frame {
         self.status = common::clean_line(&self.status);
         self.ended_at = clean_opt(&self.ended_at);
         self.outcome = clean_opt(&self.outcome);
-        self.socket = clean_opt(&self.socket);
-        self.log_path = clean_opt(&self.log_path);
-        self.instructions_path = clean_opt(&self.instructions_path);
+        self.socket = None;
+        self.log_path = None;
+        self.instructions_path = None;
         self.report = common::clean_line(&self.report);
         self.wake = clean_opt(&self.wake);
         if let Some(lines) = &self.instructions {
@@ -331,7 +335,7 @@ pub fn session_watch(inv: &Invocation) -> Outcome {
     let id = match addr::resolve(&target, &host, &candidates, &node_names) {
         Resolution::Local(id) => id,
         Resolution::Remote { node, query } => {
-            return watch_remote(&node, &query, tail, snapshot, json_mode)
+            return watch_remote(&nodes, &node, &query, tail, snapshot, json_mode)
         }
         Resolution::Ambiguous(found) => {
             return Outcome::error(
@@ -768,6 +772,15 @@ fn render_from(frame: &Frame, node: Option<&str>) -> Vec<String> {
             out.push(format!("── instructions ({path}) ──"));
             out.extend(lines.iter().cloned());
         }
+        (Some(lines), None) => {
+            // A frame whose `instructionsPath` was struck — `for_wire` on the
+            // box that wrote it, `clamp_untrusted` on the box reading it —
+            // still shows the TEXT: the sidecar's own words are what the frame
+            // is FOR, and the path only said where they were read from.
+            out.push(String::new());
+            out.push("── instructions ──".to_string());
+            out.extend(lines.iter().cloned());
+        }
         (None, Some(path)) => {
             out.push(String::new());
             out.push(format!(
@@ -841,9 +854,16 @@ type FrameReadError = aoide_client::node::FrameReadError;
 /// string and re-clamps every count before a byte of it is rendered, and there
 /// is no raw-bytes path on this side at all: a local watch may print its own
 /// PTY verbatim onto a terminal, a remote one never may.
-fn watch_remote(node: &str, query: &str, tail: usize, snapshot: bool, json_mode: bool) -> Outcome {
+fn watch_remote(
+    nodes: &[aoide_storage::node_store::Node],
+    node: &str,
+    query: &str,
+    tail: usize,
+    snapshot: bool,
+    json_mode: bool,
+) -> Outcome {
     let cmd = "session.watch";
-    let node = match super::remote::node_record(cmd, node) {
+    let node = match super::remote::node_record(cmd, nodes, node) {
         Ok(n) => n,
         Err(o) => return o,
     };
@@ -851,7 +871,7 @@ fn watch_remote(node: &str, query: &str, tail: usize, snapshot: bool, json_mode:
         Ok(id) => id,
         Err(o) => return o,
     };
-    watch_remote_with(cmd, &node, &remote_id, tail, snapshot, json_mode, fetch_frame)
+    watch_remote_with(cmd, node, &remote_id, tail, snapshot, json_mode, fetch_frame)
 }
 
 /// [`watch_remote`]'s body, parameterized over its one effect — the frame
@@ -901,7 +921,7 @@ fn fetch_frame(
     id: &str,
     tail: usize,
 ) -> Result<Frame, FrameReadError> {
-    let value = aoide_client::commands::task_get_on_node(node, id, tail as u64, &node.name)?;
+    let value = aoide_client::commands::task_get_on_node(node, id, tail as u64)?;
     serde_json::from_value::<Frame>(value).map_err(|e| FrameReadError {
         code: None,
         message: format!("the far node's frame did not parse: {e}"),
@@ -909,32 +929,41 @@ fn fetch_frame(
 }
 
 /// A failed remote read, as the operator reads it. A refusal by the door's
-/// output gate ([`OUTPUT_READ_REFUSED`]) is TAUGHT: the fix is a grant ON THE
-/// FAR NODE, and the grant names THIS box the way that node knows it, so the
-/// message says where to run it and what it is for. Every other failure — a
+/// output gate ([`OUTPUT_READ_REFUSED_CODE`]) is TAUGHT: the fix is a grant ON
+/// THE FAR NODE, and the grant names THIS box the way that node knows it, so
+/// the message says where to run it and what it is for. Every other failure — a
 /// dead door, a response over the cap, a frame that did not parse — keeps the
 /// transport's own words, because there is nothing to teach there.
+///
+/// **The peer's text is cleaned first.** Everything in `e` but this box's own
+/// framing came from a node that may be compromised, merely `node add`ed, or
+/// impersonated on the path (node urls are plain `http://`): an OSC-52 escape,
+/// a title spoof or a bidi override in an error message would otherwise reach
+/// the operator's terminal as an instruction. `common::clean_line` is the ONE
+/// sanitizer every other untrusted fragment on this path already goes
+/// through — control characters and `Cf` marks out, whitespace flattened, one
+/// clipped line — and `send.rs`'s remote failure uses the same call.
 fn read_refused(
     cmd: &'static str,
     node: &str,
     remote_id: &str,
     e: &FrameReadError,
 ) -> Outcome {
-    if e.code == Some(OUTPUT_READ_REFUSED) {
+    let peer = common::clean_line(&e.message);
+    if e.code == Some(OUTPUT_READ_REFUSED_CODE) {
         return Outcome::error(
             cmd,
             format!(
-                "node `{node}` refused the read of `{remote_id}`: {} — on `{node}` run \
+                "node `{node}` refused the read of `{remote_id}`: {peer} — on `{node}` run \
                  `aoide node allow <this box> read on` (the grant lives on the node that would \
-                 serve the frame, and it names THIS box the way that node knows it)",
-                e.message
+                 serve the frame, and it names THIS box the way that node knows it)"
             ),
         )
         .with_data(json!({
             "reason": "output-read-refused", "node": node, "sessionId": remote_id, "code": e.code,
         }));
     }
-    Outcome::error(cmd, format!("reading `{remote_id}` on node `{node}`: {e}"))
+    Outcome::error(cmd, format!("reading `{remote_id}` on node `{node}`: {peer}"))
         .with_data(json!({ "reason": "remote-read-failed", "node": node, "sessionId": remote_id }))
 }
 
@@ -983,16 +1012,21 @@ fn follow_remote(
         let mut frame = match fetch(node, remote_id, tail) {
             Ok(f) => f,
             Err(e) => {
-                // A poll that fails mid-watch ends the watch with the reason,
-                // rather than looping on a door that is gone or a frame this
-                // version cannot read.
-                let out = read_refused(cmd, &node.name, remote_id, &e);
-                println!("{}", out.message);
-                let _ = std::io::stdout().flush();
-                return Outcome::ok(cmd, format!("stopped watching {label}")).with_data(json!({
-                    "sessionId": remote_id, "node": node.name, "followed": true,
-                    "printed": printed_lines,
-                }));
+                // A poll that fails ENDS the watch, and ends it with the
+                // failure: the structured refusal `read_refused` just built is
+                // the result (Status::Error, its own `reason`/`code`, plus the
+                // follow counters), never a cheerful `ok` whose diagnosis is
+                // thrown away — a dead tunnel and a finished run must not read
+                // the same. Nothing is printed here: the door prints the
+                // Outcome's message, exactly once, and a `--json` stream stays
+                // JSON.
+                let refused = read_refused(cmd, &node.name, remote_id, &e);
+                let mut data = refused.data.unwrap_or_else(|| json!({}));
+                if let Some(obj) = data.as_object_mut() {
+                    obj.insert("followed".to_string(), json!(true));
+                    obj.insert("printed".to_string(), json!(printed_lines));
+                }
+                return Outcome::error(cmd, refused.message).with_data(data);
             }
         };
         frame.clamp_untrusted(&node.name, tail);
@@ -1011,8 +1045,12 @@ fn follow_remote(
 
     // Ctrl-C: report where the far run stood, and change nothing — the run
     // keeps going without this viewer, on a box this process never wrote to.
-    println!("{}", last.status);
-    println!("report: {}", last.report);
+    // `--json` gets no prose: its stream is JSON lines and the envelope, and a
+    // bare `status` line in the middle of it is not a frame.
+    if !json_mode {
+        println!("{}", last.status);
+        println!("report: {}", last.report);
+    }
     let _ = std::io::stdout().flush();
     Outcome::ok(cmd, format!("stopped watching {label}")).with_data(json!({
         "sessionId": remote_id, "node": node.name, "followed": true, "printed": printed_lines,
@@ -1975,11 +2013,15 @@ mod tests {
         for forbidden in ['\u{1b}', '\r', '\u{202e}', '\u{200b}', '\u{00ad}'] {
             assert!(!rendered.contains(forbidden), "{forbidden:?} reached the render");
         }
-        // A path the far side names is DATA: cleaned and printed, never
-        // opened (this side reads no file off that string — the wire's honest
-        // sender already struck its own `logPath`, and a hostile one's is
-        // inert text on a line the reader can see through).
-        assert!(rendered.contains("log /etc/shadow"), "a claimed path is shown as data: {rendered}");
+        // LOW-6 (ruling): the three fields that name something on the BOX THAT
+        // WROTE the frame are struck, not merely cleaned — a peer's invented
+        // `/etc/shadow` never renders as `log …`, and the instruction TEXT
+        // still does.
+        assert_eq!(frame.log_path, None);
+        assert_eq!(frame.socket, None);
+        assert_eq!(frame.instructions_path, None);
+        assert!(!rendered.contains("/etc/shadow"), "a struck path is not rendered: {rendered}");
+        assert!(rendered.contains("── instructions ──"), "the block itself still shows: {rendered}");
         // Every string is bounded at the field level (`clean_line`'s own
         // `LINE_MAX`) — a rendered header line may still be long, because it is
         // several bounded fields in a row, which is exactly what the local
@@ -2038,7 +2080,7 @@ mod tests {
         let (root, _env) = isolated("view-remote-refused");
         let node = remote_node();
         let refusal = FrameReadError {
-            code: Some(OUTPUT_READ_REFUSED),
+            code: Some(OUTPUT_READ_REFUSED_CODE),
             message: "output read refused: reading a session's output needs a signed, verified node \
                       whose allows include `read` on this host"
                 .to_string(),
@@ -2156,5 +2198,138 @@ mod tests {
         assert_eq!(out.data.as_ref().unwrap()["reason"], "not-found", "{}", out.message);
         assert!(out.message.contains("brave-otter"), "{}", out.message);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// What a PEER can put in an error message: an OSC-52 clipboard write, a
+    /// bell, a bidi override, a zero-width space and a carriage return, past
+    /// `LINE_MAX` on top. Every one of them is a terminal instruction rather
+    /// than text, which is the whole reason this text is cleaned before it is
+    /// printed (HIGH-1).
+    fn hostile_peer_message() -> String {
+        format!(
+            "\u{1b}]52;c;{};{}\u{7}\u{202e}gniddec\r{}\u{200b}",
+            "QkFTRTY0".repeat(20),
+            "x".repeat(400),
+            "y".repeat(400),
+        )
+    }
+
+    /// Nothing a peer writes may be an instruction on this terminal: the same
+    /// hostile message, through the SNAPSHOT path.
+    #[test]
+    fn a_peer_s_error_text_is_cleaned_before_it_is_printed() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = isolated("view-remote-hostile-error");
+        let out = watch_remote_with(
+            "session.watch",
+            &remote_node(),
+            "sess-remote-1",
+            50,
+            true,
+            false,
+            move |_, _, _| {
+                Err(FrameReadError { code: Some(OUTPUT_READ_REFUSED_CODE), message: hostile_peer_message() })
+            },
+        );
+        for forbidden in ['\u{1b}', '\u{7}', '\r', '\u{202e}', '\u{200b}'] {
+            assert!(!out.message.contains(forbidden), "{forbidden:?} reached the message: {}", out.message);
+        }
+        // Cleaned, not merely survived: the payload is inert text now, and the
+        // whole message is bounded (one clipped peer line inside this box's own
+        // framing) rather than the 800-plus characters the peer sent.
+        assert!(out.message.contains("QkFTRTY0"), "…and shown as text: {}", out.message);
+        assert!(out.message.len() < 700, "bounded: {}", out.message.len());
+        assert!(out.message.contains("on `yomi`"), "the teaching survives cleaning: {}", out.message);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// MED-5: the live loop itself. A far run that ENDS stops the watch, and a
+    /// poll that returns the SAME window prints nothing — counted through the
+    /// fetch calls and the `printed` lines the Outcome reports (the opening
+    /// frame, then one emit per CHANGED frame).
+    #[test]
+    fn a_remote_live_watch_ends_on_the_far_records_presence_and_emits_only_changes() {
+        let node = remote_node();
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let ended = || {
+            let mut f = wire_frame();
+            f.presence = "exited".to_string();
+            f.status = "exited 0 at 2026-09-21T05:01:00Z".to_string();
+            f
+        };
+        // The opening frame arrives CLAMPED, exactly as `watch_remote_with`
+        // hands it over (the loop's own contract: what it is given is what it
+        // prints).
+        let mut opening = wire_frame();
+        opening.clamp_untrusted("yomi", 50);
+        let opening_lines = render_from(&opening, Some("yomi")).len();
+        let out = follow_remote(
+            "session.watch",
+            &node,
+            "sess-remote-1",
+            opening,
+            50,
+            false,
+            |_, _, _| {
+                let n = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                match n {
+                    0 => Ok(wire_frame()),
+                    _ => Ok(ended()),
+                }
+            },
+        );
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "one poll sees no change, the next sees the end — never a third"
+        );
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        assert!(out.message.contains("watched yomi/sess-remote-1 to its end"), "{}", out.message);
+
+        let mut ending = ended();
+        ending.clamp_untrusted("yomi", 50);
+        let ending_lines = render_from(&ending, Some("yomi")).len();
+        assert_eq!(
+            out.data.as_ref().unwrap()["printed"].as_u64(),
+            Some((opening_lines + ending_lines) as u64),
+            "the unchanged poll emitted nothing: {opening_lines} + {ending_lines} lines, not three renders"
+        );
+    }
+
+    /// MED-2 + HIGH-1: a poll that FAILS ends the watch with the STRUCTURED
+    /// refusal — `Error`, its own `reason`/`code`, `followed: true` — never a
+    /// cheerful `ok` that throws the diagnosis away, and never with the peer's
+    /// own escapes in the text.
+    #[test]
+    fn a_failed_remote_poll_ends_the_watch_with_its_reason() {
+        let node = remote_node();
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let out = follow_remote(
+            "session.watch",
+            &node,
+            "sess-remote-1",
+            wire_frame(),
+            50,
+            false,
+            |_, _, _| {
+                if calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                    Ok(wire_frame())
+                } else {
+                    Err(FrameReadError {
+                        code: Some(OUTPUT_READ_REFUSED_CODE),
+                        message: hostile_peer_message(),
+                    })
+                }
+            },
+        );
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{}", out.message);
+        assert!(out.message.contains("node allow"), "{}", out.message);
+        assert!(out.message.contains("on `yomi`"), "{}", out.message);
+        assert!(!out.message.contains('\u{1b}'), "cleaned here too: {}", out.message);
+        let data = out.data.clone().unwrap();
+        assert_eq!(data["reason"], "output-read-refused");
+        assert_eq!(data["code"], OUTPUT_READ_REFUSED_CODE);
+        assert_eq!(data["sessionId"], "sess-remote-1");
+        assert_eq!(data["followed"], true, "a failed poll is still a followed watch: {data}");
     }
 }

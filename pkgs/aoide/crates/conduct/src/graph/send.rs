@@ -38,7 +38,7 @@
 //! since the receiving node's own `message_send` Inject arm is where that
 //! gate actually lives — see `deliver_remote`'s doc comment.
 
-use super::common::{require_flag, stage_error};
+use super::common::{self, require_flag, stage_error};
 use super::doc::restage_graph;
 use super::model::{
     load_stage, resolved_parent, sessions_path, write_stage, SessionRecord, SessionsFile,
@@ -990,8 +990,8 @@ fn session_send_to(inv: &Invocation, target: &str) -> Outcome {
 
     match addr::resolve_with_hub(target, &host, &candidates, &node_names, hub) {
         Resolution::Local(id) => deliver_local(inv, &id),
-        Resolution::Remote { node, query } => match node_record(cmd, &node) {
-            Ok(p) => deliver_remote(inv, &p, &query),
+        Resolution::Remote { node, query } => match node_record(cmd, &nodes, &node) {
+            Ok(p) => deliver_remote(inv, p, &query),
             // `addr::resolve` only ever names a node it was HANDED in
             // `node_names` above (built from this SAME `nodes` slice), so a
             // miss here is unreachable in practice — a defensive clean error
@@ -1178,9 +1178,14 @@ fn deliver_remote_with(
                     out
                 }
                 Err(e) => {
+                    // The far node's own words — a peer's bytes, so cleaned
+                    // before they reach a terminal (`common::clean_line`: no
+                    // control character, no `Cf` mark, one clipped line). Same
+                    // rule, same helper, as the watch's `read_refused`.
+                    let peer = common::clean_line(&e);
                     let out = Outcome::error(
                         cmd,
-                        format!("delivering to `{remote_id}` on node `{}`: {e}{ignored_note}{claim_note}", node.name),
+                        format!("delivering to `{remote_id}` on node `{}`: {peer}{ignored_note}{claim_note}", node.name),
                     )
                     .with_data(json!({
                         "reason": "node-send-failed", "node": node.name, "remoteSessionId": remote_id,
@@ -4856,6 +4861,50 @@ mod tests {
         assert_eq!(out.data.as_ref().unwrap()["reason"], "not-found");
         assert!(out.message.contains("misty-comet"), "msg: {}", out.message);
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// HIGH-1's `send` twin: what a peer answers with is its OWN bytes, so a
+    /// hostile error message (an OSC-52 clipboard write) must be cleaned
+    /// before this door prints it — one sanitizer, both doors. Driven against a
+    /// REAL curl POST to a fake door (never a mocked transport), because the
+    /// point is the text that actually arrives from the wire.
+    #[test]
+    fn a_remote_send_failure_cleans_the_far_node_s_own_error_text() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "AOIDE_AUDIT_LOG"]);
+
+        let root = unique_stage("to-remote-hostile-error");
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::create_dir_all(&state).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+
+        let hostile = format!("\u{1b}]52;c;{}\u{7}\u{202e}gniddec\r", "QkFTRTY0".repeat(20));
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": -32000, "message": hostile } })
+            .to_string();
+        let (listener, url) = crate::graph::testutil::fake_door(body);
+
+        aoide_storage::node_store::save_nodes(&[test_node("yomi-strix", &url)]).unwrap();
+        aoide_storage::node_store::save_node_cache(&test_cache(
+            "yomi-strix",
+            node_graph_json(&[("sess-remote-1", Some("misty-comet"), "root")]),
+        ))
+        .unwrap();
+
+        let out = session_send(&send_invocation(&["hi"], &[("to", "yomi-strix/misty-comet")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "node-send-failed");
+        assert!(out.message.contains("node returned an error:"), "{}", out.message);
+        for forbidden in ['\u{1b}', '\u{7}', '\r', '\u{202e}'] {
+            assert!(!out.message.contains(forbidden), "{forbidden:?} reached the message: {}", out.message);
+        }
+        assert!(out.message.contains("QkFTRTY0"), "the peer's text is shown as text: {}", out.message);
+
+        drop(listener);
         let _ = std::fs::remove_dir_all(&root);
     }
 

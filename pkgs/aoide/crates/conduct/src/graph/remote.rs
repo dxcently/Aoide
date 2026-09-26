@@ -23,6 +23,7 @@
 //! is a named refusal, kept so the invariant is a stated fact rather than a
 //! `unwrap` that would hold it by accident.
 
+use super::common;
 use aoide_protocol::output::Outcome;
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
 use aoide_storage::node_store::Node;
@@ -83,10 +84,18 @@ pub(super) fn resolve_remote_query(
 /// (`display::session_label` with the node's own name standing in as
 /// `host`), so an ambiguous/not-found `<node>/<query>` error names candidates
 /// the same way `aoide session --hosts` would already be showing them.
+///
+/// Everything BUT the node name comes off a document another box wrote — a
+/// petname and a session id are a peer's bytes, and `session_label` renders
+/// them as they are — so both are cleaned first (`common::clean_line`:
+/// control characters and `Cf` marks out, one clipped line), the same
+/// sanitizer every other pulled-node field reaches a terminal through
+/// (`who.rs`'s own display seam). A label that arrives hostile prints as
+/// inert text or not at all, never as a terminal instruction.
 pub(super) fn node_session_label(node: &str, session_id: &str, petname: Option<&str>, role: &str) -> String {
     let rec = aoide_storage::records::SessionRecord {
-        session_id: session_id.to_string(),
-        petname: petname.map(String::from),
+        session_id: common::clean_line(session_id),
+        petname: petname.map(common::clean_line),
         ..Default::default()
     };
     aoide_storage::display::session_label(&rec, node, role)
@@ -109,18 +118,21 @@ pub(super) fn node_cached_graph(cmd: &'static str, node: &str) -> Result<Value, 
     }
 }
 
-/// The registered [`Node`] record for a name `addr::resolve` returned, or the
-/// taught error. The cache and the node list are two files that can disagree
-/// (a node removed after its cache was written); a resolution naming no
-/// record is that disagreement, said plainly instead of dereferenced.
-pub(super) fn node_record(cmd: &'static str, node: &str) -> Result<Node, Outcome> {
-    aoide_storage::node_store::load_nodes()
-        .into_iter()
-        .find(|p| p.name == node)
-        .ok_or_else(|| {
-            Outcome::error(cmd, format!("no registered node named `{node}`"))
-                .with_data(json!({ "reason": "node-not-found", "node": node }))
-        })
+/// The registered [`Node`] record for a name `addr::resolve` returned, out of
+/// the slice the CALLER already loaded (the same slice whose names seeded the
+/// resolution) — no second read of `nodes.json`, and no chance of judging the
+/// resolution against a list that moved under it. A miss is the resolution
+/// naming a node the list just held: unreachable in practice, said plainly
+/// ("vanished mid-resolution") instead of dereferenced.
+pub(super) fn node_record<'a>(
+    cmd: &'static str,
+    nodes: &'a [Node],
+    node: &str,
+) -> Result<&'a Node, Outcome> {
+    nodes.iter().find(|p| p.name == node).ok_or_else(|| {
+        Outcome::error(cmd, format!("node `{node}` vanished mid-resolution"))
+            .with_data(json!({ "reason": "node-not-found", "node": node }))
+    })
 }
 
 /// The refusal for a remote query that did not resolve to exactly ONE
@@ -307,5 +319,33 @@ mod tests {
             .map(|(id, _, _)| json!({ "from": "session:parent", "to": format!("session:{id}"), "kind": "spawned" }))
             .collect();
         json!({ "schemaVersion": "0", "nodes": nodes, "edges": edges })
+    }
+
+    /// A peer's own petname and session id reach an error message through
+    /// [`node_session_label`], which renders them as they arrived — so they are
+    /// cleaned first (`common::clean_line`, the same sanitizer every other
+    /// pulled-node field reaches a terminal through): a hostile cached petname
+    /// prints as inert text, never as a terminal instruction, however this door
+    /// refuses the query.
+    #[test]
+    fn a_hostile_cached_petname_is_cleaned_out_of_every_refusal() {
+        let hostile = "\u{1b}[2J\u{202e}moc.elpmaxe\u{200b}";
+        let sess = vec![
+            (hostile.to_string(), Some(hostile.to_string()), "root"),
+            ("sess-remote-2".to_string(), Some(hostile.to_string()), "child"),
+        ];
+        // The QUERY is the operator's own typing (never cleaned — it is what
+        // they asked for, echoed back); the CANDIDATES come from the far node's
+        // cached document, so those are the bytes under test.
+        for (query, resolved) in [
+            ("collides", Resolution::Ambiguous(vec![hostile.to_string(), "sess-remote-2".to_string()])),
+            ("ghost", Resolution::NotFound),
+        ] {
+            let out = unresolved_remote("send", "yomi", query, &sess, resolved);
+            for forbidden in ['\u{1b}', '\u{202e}', '\u{200b}'] {
+                assert!(!out.message.contains(forbidden), "{forbidden:?} survived: {}", out.message);
+            }
+            assert!(out.message.contains("moc.elpmaxe"), "the text itself still shows: {}", out.message);
+        }
     }
 }

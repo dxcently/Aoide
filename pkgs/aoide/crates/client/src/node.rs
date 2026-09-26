@@ -351,12 +351,17 @@ mod tests {
 
         // The output-read refusal: the code rides back with the message, which
         // is what lets the caller teach the fix instead of printing "refused".
+        // The number comes from the wire's own const, so this test cannot agree
+        // with a door that renumbered and still pass.
         let refused = json!({
             "jsonrpc": "2.0", "id": 1,
-            "error": { "code": -32011, "message": "output read refused" }
+            "error": {
+                "code": aoide_protocol::wire::a2a::OUTPUT_READ_REFUSED_CODE,
+                "message": "output read refused",
+            }
         });
         let e = parse_frame_response(&refused).unwrap_err();
-        assert_eq!(e.code, Some(-32011));
+        assert_eq!(e.code, Some(aoide_protocol::wire::a2a::OUTPUT_READ_REFUSED_CODE));
         assert_eq!(e.message, "output read refused");
         assert!(e.to_string().contains("-32011"), "the code rides the Display too: {e}");
 

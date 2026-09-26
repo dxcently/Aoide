@@ -60,12 +60,24 @@ fn run_curl(extra: &[&str], stdin_body: Option<&str>) -> Result<(u16, String), S
 const MAX_RESPONSE_BYTES: usize = 20 * 1024 * 1024; // 20 MiB
 
 /// The ceiling ONE read gets instead of [`MAX_RESPONSE_BYTES`]: the watch
-/// frame (`tasks/get` + `metadata["aoide/frame"]`, P-RSA S7). 512 KiB — the
-/// far door bounds a frame to 256 KiB (the wire cap on
-/// `aoide_conduct::graph::Frame` in `aoide-server`), so this is double the
-/// largest frame any honest node can send and still orders of magnitude below
-/// the general cap. A refusal here is a node sending something other than a
-/// frame.
+/// frame (`tasks/get` + `metadata["aoide/frame"]`, P-RSA S7).
+///
+/// **The arithmetic, honestly.** The far door bounds a frame's SHEDDABLE
+/// content to 256 KiB, but the instruction block is exempt from that cap by
+/// design (`aoide-server::a2a::frame_artifact`, CONTRACTS.md §6) — it is the
+/// text the frame exists to show. Its own worst case is
+/// `BLOCK_LINES_MAX` (400 lines) × `LINE_MAX` (200 chars) × 4 bytes ≈ 320 KB,
+/// and when that block alone is over the 256 KiB cap the door sheds every
+/// output line and letter and still sends the block. So the largest frame an
+/// HONEST node can produce is ~321 KB, not 256 KiB: this cap is 512 KiB —
+/// roughly 1.6× that ceiling, comfortably above it while still refusing a node
+/// that answers a frame request with something else entirely.
+///
+/// (Two crates hold those two constants — `aoide_conduct::graph`'s
+/// `BLOCK_LINES_MAX`/`LINE_MAX` and `aoide-server`'s `FRAME_MAX_BYTES` — so
+/// this number cannot be derived from them here without reaching across both;
+/// it is stated as arithmetic instead. Widening either bound is what this
+/// comment is for.)
 const FRAME_MAX_RESPONSE_BYTES: usize = 512 * 1024;
 
 /// `run_curl`'s parameterised core: same transport, an explicit `--max-time`
@@ -1186,21 +1198,24 @@ pub fn send_message_to_node(
 /// into a taught error, and it can, because the refusal code rides back in
 /// [`crate::node::FrameReadError::code`].
 ///
-/// `tunnel_key` is the key this call opens/reuses its `via` forward under —
-/// `node.name` at every call site that is not `conduct`'s watch, stated
-/// explicitly here because that caller passes the key it chose. `frame_tail`
-/// is the output-line window asked for; the door clamps it to its own
-/// `1..=200` regardless, so a larger number is not an error, just narrowed.
+/// `frame_tail` is the output-line window asked for; the door clamps it to
+/// its own `1..=200` regardless, so a larger number is not an error, just
+/// narrowed. The tunnel key is `node.name` — the documented
+/// `(session id, node name)` pair every other node action keys its forward
+/// under, passed EXPLICITLY to [`post_json_to_node_with_tunnel_key`] (the one
+/// helper that takes it) rather than through the override-free wrapper, so
+/// this call site reads as the deliberate choice it is.
 ///
 /// Returns the frame JSON itself (the `frame` artifact's `data`, unread by
-/// this side — `aoide_conduct::graph::Frame` owns that shape). 512 KiB
-/// response cap: this reads bytes another box wrote and only DISPLAYS them,
-/// so it is bounded tighter than every other call in this file.
+/// this side — `aoide_conduct::graph::Frame` owns that shape), bounded by
+/// [`FRAME_MAX_RESPONSE_BYTES`]. The failure text is the peer's OWN bytes,
+/// verbatim: this is a transport, and the door that PRINTS it is the one that
+/// sanitizes it (`aoide_conduct::graph::common::clean_line`, one definition,
+/// both doors) — a second sanitizer down here is how the two would drift.
 pub fn task_get_on_node(
     node: &aoide_storage::node_store::Node,
     id: &str,
     frame_tail: u64,
-    tunnel_key: &str,
 ) -> Result<Value, crate::node::FrameReadError> {
     let wire = crate::node::build_task_get_frame_request(id, frame_tail);
     let body_str = serde_json::to_string(&wire).unwrap_or_default();
@@ -1213,7 +1228,7 @@ pub fn task_get_on_node(
         bearer.as_deref(),
         &extra_headers,
         15,
-        tunnel_key,
+        &node.name,
         FRAME_MAX_RESPONSE_BYTES,
     )
     .map_err(plain)?;

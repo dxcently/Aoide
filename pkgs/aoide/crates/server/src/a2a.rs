@@ -56,7 +56,7 @@ use aoide_protocol::output::Status;
 use aoide_protocol::registry::{Command, Registry};
 use aoide_protocol::wire::{
     AgentCapabilities, AgentCard, AgentSkill, Artifact, JsonRpcResponse, Part, Task, TaskStatus,
-    TaskStatusUpdateEvent, FRAME_ARTIFACT_ID, FRAME_KEY,
+    TaskStatusUpdateEvent, FRAME_ARTIFACT_ID, FRAME_KEY, OUTPUT_READ_REFUSED_CODE,
 };
 use aoide_protocol::{audit, Door, EventClass, Invocation};
 use aoide_storage::records::RemoteParent;
@@ -703,18 +703,15 @@ const FRAME_TAIL_DEFAULT: u64 = 50;
 const LETTER_BODY_LINES_MAX: usize = 40;
 /// The serialized frame's own bound, in bytes.
 const FRAME_MAX_BYTES: usize = 256 * 1024;
-/// The output-read refusal's code — its OWN, `-32011` (CONTRACTS.md §6).
-/// Every capability-gated arm mints the code it refuses with, and this is
-/// the third after Spawn's `-32006` and `mailDeposit`'s `-32010`:
-/// `-32007` stays [`verify_signed_request`]'s own incomplete-headers/
-/// signature-mismatch family, which is decided BEFORE this arm runs at
-/// all, so an operator reading a code off the wire can tell a refused read
-/// from a refused signature without matching prose.
-const OUTPUT_READ_REFUSED_CODE: i64 = -32011;
-/// What a refused output read says. ONE text for every refusal, and it says
-/// NOTHING about the session asked for — the same message whether the id
+/// What a refused output read says — ONE text for every refusal, and it says
+/// NOTHING about the session asked for: the same message whether the id
 /// exists or not, so the read gate is not an existence oracle beyond the
-/// status `tasks/get` already reveals.
+/// status `tasks/get` already reveals. The CODE it answers with is
+/// `OUTPUT_READ_REFUSED_CODE`, spelled once in `aoide_protocol::wire::a2a`
+/// for the door AND its readers: this arm's own number, never `-32007`, which
+/// stays [`verify_signed_request`]'s incomplete-headers/signature-mismatch
+/// family — decided BEFORE this arm runs at all — so the code alone tells a
+/// refused read from a refused signature without matching prose.
 const OUTPUT_READ_REFUSED: &str = "output read refused: reading a session's output needs a signed, \
      verified node whose allows include `read` on this host";
 

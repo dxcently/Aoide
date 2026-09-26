@@ -124,6 +124,37 @@ pub(crate) fn unique_stage(tag: &str) -> PathBuf {
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
+/// A fake A2A door for a REAL curl POST: binds a loopback port, answers EVERY
+/// request with `body` until the listener is dropped, and hands back the
+/// listener (hold it — dropping it frees the port) plus the `Node.url` to
+/// register. Mirrors `aoide-client`'s own `spawn_fake_pair_poll_server`: the
+/// established real-curl-real-listener pattern this workspace proves a wire
+/// path with, never a mocked transport. What it is FOR here is the far side of
+/// an error: a peer's own bytes, hostile ones included, arriving as the
+/// `aoide-client` function under test would really receive them.
+pub(crate) fn fake_door(body: String) -> (std::net::TcpListener, String) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let accepter = listener.try_clone().unwrap();
+    std::thread::spawn(move || {
+        use std::io::{Read, Write};
+        loop {
+            let Ok((mut stream, _)) = accepter.accept() else { break };
+            let mut buf = [0u8; 4096];
+            if stream.read(&mut buf).unwrap_or(0) == 0 {
+                continue;
+            }
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+    (listener, format!("http://127.0.0.1:{port}/"))
+}
+
 pub(crate) fn invocation(path: &[&str], args: &[&str]) -> Invocation {
     Invocation {
         path: path.iter().map(|s| s.to_string()).collect(),
