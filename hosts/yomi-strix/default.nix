@@ -155,6 +155,7 @@
 
   # Shipped dendrites (off unless wanted; aoide.mcp.enable stays false — house policy).
   aoide.obsidian.enable = true;
+  aoide.qbittorrent.enable = true;
   aoide.firefox.enable = true;
   aoide.claude-code.enable = true;
   aoide.kimi-code.enable = true;

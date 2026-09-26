@@ -31,6 +31,7 @@
     ./obsidian.nix
     ./openai.nix
     ./pi-coding-agent.nix
+    ./qbittorrent.nix
     ./screenshot.nix
     ./starship.nix
     ./vision.nix
