@@ -77,7 +77,7 @@ defaults `false`; `aoide.quickshell.config` defaults `null`:
 | `aoide.lyra.enable` | the paint/rice binary is installed (`pkgs.aoide.rice`) | the lane that paints (`dendrites/lyra`) |
 | `aoide.stylix.enable` | the theme is baked at build time, painted by nix | the stylix lane (`dendrites/stylix.nix`) |
 | `aoide.compositor.enable` | a Wayland compositor is started here | the compositor lane (`dendrites/compositor`) |
-| `aoide.greeter.enable` | a display-manager greeter comes up on this host's tty | the compositor lane (`dendrites/compositor`) |
+| `aoide.greeter.enable` | a display-manager greeter comes up on this host's tty | the greeter lane (`dendrites/greeter.nix`) |
 
 The lane that owns a fact sets it `mkDefault true` while it is on, so a host
 that flips it back off still wins. Every reader then reads the FACT — never the
@@ -354,8 +354,9 @@ A paint dendrite is a lane record like any other, and its `nixos` half is what
 sets its fact `mkDefault true`. Its guard is the FACT `modules/nucleus`
 declares (`aoide.<name>.enable`), not an option it declares itself: the
 cross-lane seam exists so that a consumer can ask "is there a shell here?"
-without reading the lane that made one. It MAY read `aoide.livery` and MAY
-declare `aoide.surfaces.<name>.owner` — and it reads no other module.
+without reading the lane that made one. What it may read is exactly what root
+`AGENTS.md` house rule 5 enumerates — by reference, never restated here, so the
+two cannot drift.
 
 ### Repo shape (the root is closed)
 

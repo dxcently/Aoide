@@ -66,11 +66,10 @@ shelve without deleting.
 
 ## The closed read whitelist
 
-No module reads another module. Facets read exactly `aoide.livery`,
-`aoide.arrangement`, and `aoide.surfaces` (root `AGENTS.md` house rule 5) —
-an enumerated, closed set, never `aoide.*` wholesale. `lib/checks.nix` is
-where a future automated coupling check would live; today this is a
-code-review discipline, not a build failure.
+Root `AGENTS.md` house rule 5 owns the list — read it there, by reference,
+never restated here: one list, one place to amend, or the two drift.
+`lib/checks.nix` is where a future automated coupling check would live; today
+this is a code-review discipline, not a build failure.
 
 ## What needs a docs update in the same commit
 

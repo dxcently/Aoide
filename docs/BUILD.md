@@ -21,15 +21,16 @@ nix eval .#nixosConfigurations.yomi-strix.config.system.build.toplevel.drvPath
 
 `modules/default.nix` is the catalogue: plain data, never a module, naming
 every dendrite once by the name a host selects it with. `modules/dendrites/
-default.nix` derives its imports from those names, `modules/facets/default.nix`
-and `modules/nucleus/default.nix` name their own files, one line per file, in
-`LC_ALL=C` order. To add a capability, drop a file in the right layer and add
-its one line — the catalogue for a dendrite, that layer's own `default.nix` for
-a facet or a nucleus module:
+default.nix` derives its imports from those names (and contributes every
+alternative a provider registry names); `modules/nucleus/default.nix` names its
+own files, one line per file, in `LC_ALL=C` order. To add a capability, drop a
+file in the right layer and add its one line — the catalogue for a dendrite, that
+layer's own `default.nix` for a nucleus module:
 
 - `modules/nucleus/` — core, applies unconditionally (no `mkIf`).
 - `modules/dendrites/` — opt-in features, guarded on a flag.
-- `modules/facets/` — render surfaces, read `aoide.livery` only.
+- a paint lane is a dendrite like any other (`compositor`, `greeter`, `stylix`,
+  `lyra`) — see **Authoring a paint lane** below.
 
 **Shelving opt-out:** a `_`-prefixed file or directory is never catalogued and
 never listed in a `default.nix`. Prefix a work-in-progress file (`_wip.nix`) or
@@ -41,12 +42,12 @@ checked-in template.
 ## The option contract (what you read)
 
 Declared in `modules/nucleus/options.nix`, evaluated per host. Read these; write
-none of them except your own dendrite/facet flags.
+none of them except your own dendrite flags (a paint lane sets its own fact).
 
 | Option                         | Type                         | Notes |
 | ------------------------------ | ---------------------------- | ----- |
 | `aoide.enable`                 | bool                         | framework master switch |
-| `aoide.song`                   | nullOr str (default `null`)  | the song this host performs; names a `song/songbook/<name>/`. Null — no song named — means a paint facet deploys nothing: no song, no service |
+| `aoide.song`                   | nullOr str (default `null`)  | the song this host performs; names a `song/songbook/<name>/`. Null — no song named — means a paint lane deploys nothing: no song, no service |
 | `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` clone |
 | `aoide.root`                   | str (default `"~/.aoide"`)   | the RUNTIME root — `song/stage/`, `song/declared/`, `state/`, `run/qml/`, composed `songbook/`; exported as `AOIDE_ROOT`. Core code default, nix-independent (L-C2, task #107) |
 | `aoide.checkout`               | str (default `"~/Aoide"`)    | the dev git checkout — `rice declare`'s commit-in target, `soundcheck`'s scan root, the songbook `nix eval` registry regen; exported as `AOIDE_FLAKE_ROOT` |
@@ -99,30 +100,48 @@ hosts.
 
 ---
 
-## Authoring a facet (Wave 1 — render surfaces)
+## Authoring a paint lane
 
-A facet renders appearance. It reads **only** `aoide.livery`, and if it owns a
-surface it declares that in `aoide.surfaces`. Apply component fallbacks yourself.
+A paint lane renders appearance: it reads the dress (`aoide.livery`), the
+structure (`aoide.arrangement`), the surface registry (`aoide.surfaces`), the
+identity scalars and its own fact — root `AGENTS.md` house rule 5, and nothing
+else. If it owns a surface it declares that in `aoide.surfaces`. Apply component
+fallbacks yourself.
 
 ```nix
-# modules/facets/quickshell/default.nix
-{ config, lib, ... }:
+# modules/dendrites/lyra/default.nix — a paint lane is a lane record: `body`
+# declares and guards, `nixos` imports `body` and sets the fact.
 let
-  t = config.aoide.livery;
-  # component-tier fallback: null → palette (see CONTRACTS.md §1)
-  barBg = if t.bar.bg != null then t.bar.bg else t.palette.bg;
+  body =
+    { config, lib, ... }:
+    let
+      t = config.aoide.livery;
+      # component-tier fallback: null → palette (see CONTRACTS.md §1)
+      barBg = if t.bar.bg != null then t.bar.bg else t.palette.bg;
+    in
+    {
+      config = lib.mkIf config.aoide.lyra.enable {
+        # Declare surface ownership — the stylix lane reads this and stands
+        # down for `bar`.
+        aoide.surfaces.bar.owner = "quickshell";
+        # … render the bar using barBg / t.palette.* …
+      };
+    };
 in
 {
-  config = lib.mkIf config.aoide.enable {
-    # Declare surface ownership — Stylix reads this and stands down for `bar`.
-    aoide.surfaces.bar.owner = "quickshell";
-    # … render the bar using barBg / t.palette.* …
-  };
+  inherit body;
+
+  nixos =
+    { lib, ... }:
+    {
+      imports = [ body ];
+      config.aoide.lyra.enable = lib.mkDefault true;
+    };
 }
 ```
 
 The `checks.surface-ownership` assertion fails eval if a declared surface has no
-owner; the Stylix facet must read `config.aoide.surfaces` and disable its own
+owner; the stylix lane must read `config.aoide.surfaces` and disable its own
 derivation for any surface already owned (overlap resolution,
 `concepts/Notes`).
 
@@ -136,7 +155,7 @@ state, never load-bearing for the nix build.
 
 A **song** is a committed, host-agnostic rice. Any host in the fleet performs it
 by naming it — the score adapts to that host's specifics and its enabled
-facet/dendrite set. **The venue (host) decides its instruments; the song
+dendrite set. **The venue (host) decides its instruments; the song
 carries only the notes.**
 
 Drop a folder under `song/songbook/<name>/` — `lib/mkHost.nix` walks it in
@@ -156,7 +175,7 @@ self-gates on `aoide.song`:
 
 Replay it on any host with **one line** in `hosts/<host>/default.nix`:
 `aoide.song = "moonlight";`. `aoide.song` defaults to null — naming no song
-performs no song: a host with the quickshell facet enabled but no song named
+performs no song: a host with the lyra lane enabled but no song named
 gets no deployed QML and no shell service, not an empty surface (options.nix).
 Every committed song's `rice.nix` self-gates on an equality check against
 `aoide.song`, so a null host leaves every song's `config` inert. Name a song
@@ -165,7 +184,7 @@ standard (`song/songbook/sonata/rice.nix`).
 
 **Host-agnostic rules (CONTRACTS.md §5):** a song sets ONLY `aoide.livery` (and,
 later, cover/chime refs inside `song/`). It NEVER sets host options (monitors,
-hardware, services) and NEVER enables facets/dendrites — those are the venue's.
+hardware, services) and NEVER enables paint lanes or dendrites — those are the
 Note values are literal nix; a song never reads `song/` runtime paths. The
 `song/songbook/**` tree is versioned score (not a runtime dir), so walking it
 does not violate `checks.no-song-read`. `checks.song-shape` asserts each walked
@@ -233,9 +252,9 @@ Provide:
   nix store, exposed as `packages.<system>.aoide-static`, never as
   `packages.default`.
 
-### Wave-1 facet/module agents (C, D)
+### Wave-1 module agents (C, D)
 
-- Add files only under `modules/facets/` and `modules/dendrites/`.
+- Add files only under `modules/dendrites/` — a paint lane included.
 - Flip flags in `hosts/yomi-strix/default.nix` (one line each).
 - Never edit `flake.nix` or `lib/`. If you need a new flake input, that is a
   Wave-0 change — request it; do not add it yourself.
