@@ -51,6 +51,7 @@ pub(crate) fn session(
         title: None,
         pid: None,
         workspace: None,
+        workspace_project: None,
         activity: None,
         kind: None,
         say: None,
@@ -98,6 +99,42 @@ pub(crate) fn fixture_projects() -> Vec<Project> {
         },
     ]
 }
+/// Install a FAKE `hyprctl` on `PATH` (the established shim technique — this
+/// crate's own `crates/AGENTS.md` note on replacing a real binary) so the
+/// compositor-facing half can be driven end-to-end with no compositor at all.
+/// Both `clients -j` and `activeworkspace -j` answer: `clients` prints ONE
+/// client whose `pid` is the TEST process's own (`$PPID` — where the pid
+/// ancestry walk starts) and whose workspace id comes from `$AOIDE_TEST_WS`,
+/// and `activeworkspace` prints that same id in the focused-workspace shape.
+/// Returns the env guard (restores `PATH`/`HYPRLAND_INSTANCE_SIGNATURE`/
+/// `AOIDE_TEST_WS` on drop) and the shim directory, for the caller to remove.
+pub(crate) fn fake_hyprctl(tag: &str) -> (EnvVars, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("aoide-fake-hypr-{tag}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let shim = dir.join("hyprctl");
+    std::fs::write(
+        &shim,
+        r#"#!/bin/sh
+ws=${AOIDE_TEST_WS:-3}
+client="{\"address\":\"0xAA\",\"class\":\"kitty\",\"title\":\"t\",\"pid\":$PPID,\"workspace\":{\"id\":$ws,\"name\":\"ws\"},\"mapped\":true,\"at\":[0,0],\"size\":[1,1]}"
+if [ "$1" = "activeworkspace" ]; then
+  echo "{\"id\":$ws,\"name\":\"ws\"}"
+else
+  echo "[$client]"
+fi
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let env = EnvVars::save(&["PATH", "HYPRLAND_INSTANCE_SIGNATURE", "AOIDE_TEST_WS"]);
+    let path = std::env::var("PATH").unwrap_or_default();
+    std::env::set_var("PATH", format!("{}:{path}", dir.display()));
+    std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "test");
+    std::env::set_var("AOIDE_TEST_WS", "3");
+    (env, dir)
+}
+
 pub(crate) fn argv(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|s| s.to_string()).collect()
 }

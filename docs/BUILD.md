@@ -253,7 +253,7 @@ atomic writes only); missing stage files read as empty registries.
 | Command                            | Does |
 | ---------------------------------- | ---- |
 | `aoide graph [--focus <id>]`       | Unicode tree render (`◆` projects, `●` sessions, `▶` marks the focused node); `--json` emits the graph document |
-| `aoide project add <name> [<path>…]` | register a project, or ADD one or more anchor roots to an existing one, in `song/stage/projects.json` (idempotent per root); `path` defaults to the cwd, so a session started there anchors to it; `--new` refuses an existing name instead of adding to it |
+| `aoide project add <name> [<path>…]` | register a project, or ADD one or more anchor roots to an existing one, in `song/stage/projects.json` (idempotent per root); with no `<path>` at all the project is registered NAME-ONLY — no folder, nothing it anchors by cwd — and a folder is added later with `project add <name> <root>`, so a session anchors to it by cwd prefix once it has one; `--new` refuses an existing name instead of adding to it |
 | `aoide project edit <name> <path>…` | REPLACE a project's whole root list outright (first path becomes its primary root); the name stays immutable and `autoResume` is untouched |
 | `aoide project remove <name> [<path>]` | unregister one root (promoting the next into the primary root), or the whole project with no `<path>` (ok + no-op if absent) |
 | `aoide project list`               | list the registered anchor roots, with every root |

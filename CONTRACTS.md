@@ -1002,8 +1002,12 @@ automatic anchoring without changing cwd. The exit ledger retains the value
 as `project` (null when absent), and resurrection restores it when registered.
 That stored project is distinct from the *effective* project a session
 renders under: `aoide-conduct::graph::effective_project_for` derives the
-latter (own explicit project, else the nearest owning ancestor's own explicit
-project or cwd anchor, else the session's own cwd anchor) and never writes it.
+latter (own explicit project, else the nearest owning ancestor's own claim,
+else the session's own workspace default, else its own cwd anchor) and never
+writes it. Ledger-driven views do NOT run that ladder: `resurrect --project
+<name>` and the conductor's history label match a ledger entry by its explicit
+`project` or its cwd only, so live membership can name a project those views
+will not offer for that session.
 `SessionRecord.project` and the graph node's `project` keep publishing the
 stored value only; `aoide session`'s bucket names and the conductor's
 per-project counts read the derived view. An additive `effectiveProject`
@@ -1017,6 +1021,34 @@ rows do not carry it either. The same rows carry `nativeRole` under the
 record rule above (present only when the record carries one); a row built
 from a remote node's graph document relays that node's own published
 `nativeRole` and never synthesizes one.
+
+**`workspaceProject` — the workspace's default project, stamped at birth.**
+A session record MAY carry an optional `workspaceProject` (string), naming
+the project its compositor workspace was BOUND to when the session's
+`workspace` first went from absent to present. It is a DEFAULT, never a
+choice: `SessionRecord.project` stays the explicit member and always outranks
+it, the owner rung sits between them (a child an agent spawns belongs to the
+agent's work wherever its window lands, and the owner's own default is visible
+to that walk), and the workspace default outranks the cwd anchor because
+binding a workspace is an act an operator performed while a cwd is incidental.
+`workspaceProject` is written ONLY by
+`aoide-conduct::graph::observe_workspace` — the one seam `workspace` itself is
+written through, called by all three compositor stamp sites (the hook-time
+window backfill, the event-driven sweep, and the synthetic bare-terminal
+publisher) — and only when the record has no explicit `project`, no
+`workspaceProject` yet, and its workspace carries a binding. It is therefore
+STAMPED ONCE: never re-stamped when a window moves, never cleared by movement,
+never adopted retroactively (binding a workspace affects new births, not the
+sessions already sitting on it). An observation that LAPSED counts as a NEW
+BIRTH: a record whose `workspace` was cleared — a window whose client reported
+no workspace — and later re-observed on a now-bound workspace IS stamped. The
+seam's rule is that state transition, not a permanent ever-stamped flag. A
+session whose default names a project that has since been removed falls
+THROUGH to the next rung — a default naming nothing is not a choice, and the
+stored field is left as it is; re-registering that name later RE-FORMS every
+membership the field still spells. Additive/v0-safe: absent on every record predating it and on every record whose host
+has no compositor adapter, `skip_serializing_if` keeping a record without it
+byte-identical on the wire.
 `session kill --id ID` is a local daemon-only SIGTERM request for an exclusively
 owned, conducted process verified against the daemon seal and pinned by Linux
 pidfd. Its successful response confirms signaling, never process exit.
@@ -2340,10 +2372,43 @@ outright, first path becoming `path`, the rest folded into the same
 `roots` list — the name stays immutable and `autoResume` is untouched.
 `project remove NAME [PATH]` drops one root (promoting the next into
 `path` when `path` itself was removed) or, with no `PATH`, the whole
-project. Every reader enumerates roots through `Project::roots()`
+project — and a deleted project's workspace bindings go with its record.
+Removing a project's LAST root does NOT delete it: the project is left
+standing with no folder, a NAME-ONLY project ("A project with no folder"
+below). Every reader enumerates roots through `Project::roots()`
 (`path` first, then `roots`, deduplicated) rather than the raw fields —
 a hand-edited record whose `path` does not match `roots[0]` is read, not
 silently rewritten.
+
+**A project with no folder.** A project entry MAY carry neither `path` nor
+`roots` (`{"name":"cadenza","path":"","roots":[]}`): `aoide project add NAME`with no path at all registers a NAME-ONLY project — a name a workspace can be
+bound to and a session can name explicitly, but that can never anchor a
+session by cwd, because `Project::roots()` is empty and the anchoring rung
+matches by root prefix. The cwd is NEVER a default root: registering the
+directory you happen to stand in is how a project anchors sessions nobody
+meant it to. A folder is added later with `project add NAME ROOT` and removed
+again with `project remove NAME ROOT`, which leaves the project name-only
+once more. Nothing else about the record changes — it keeps its
+`autoResume`/`hosts`/`lead` state and its workspace bindings.
+
+**Also additive in v0: `workspaces` — the workspaces that SHOW this project.**
+A project entry MAY carry an optional `workspaces` array of INTEGER compositor
+workspace ids (`"workspaces":[3,5]`), the same integer
+`SessionRecord.workspace` already holds (Hyprland's named and special
+workspaces carry negative ids; a future virtual-desktop adapter maps to the
+same integers). `#[serde(default, skip_serializing_if = "Vec::is_empty")]`
+keeps it off the wire for a project no binding has touched — the
+`hosts`/`autoResume` discipline, so every `projects.json` written before this
+field stays byte-identical. Written by `workspace set` (under the same stage
+lock local roots go through; daemon-owned, like every other `projects.json`
+mutation) and by `workspace clear`. ONE INVARIANT: a workspace id appears in AT
+MOST ONE project — `workspace set` MOVES it off whatever project held it —
+while two workspaces may show the same project. A binding is not a root: it
+anchors nothing by cwd, a rootless project may carry one, and `project remove
+NAME ROOT` leaves bindings alone; the bare `project remove NAME` takes them
+with the record. Read with `aoide workspace list [--json]`, which merges the
+bindings with every workspace a local session reports (`observed` is `false`
+by name on a host where no session reports one).
 
 **Additive in v0 (P-D8, `docs/architecture/AOIDED.md`'s "L5"/"Open
 knobs"):** a project entry MAY also carry an optional `autoResume` (bool,
@@ -2384,8 +2449,9 @@ skip_serializing_if = "Vec::is_empty")]` keeps `hosts` off the wire for a
 project no `--host` invocation has touched, the discipline `autoResume`
 set. Set through the SAME three commands as local roots, scoped by a
 `--host <node>` flag: `project add NAME [PATH…] --host NODE` adds `NODE` as
-a member (membership-only when no path follows — `--host` never defaults
-to the cwd the way a bare `project add` does) and appends any given paths
+a member (membership-only when no path follows — a path is explicit for
+every command now, and a bare `project add NAME` registers a name-only
+project) and appends any given paths
 to that host's own root list, idempotently; `project edit NAME PATH… --host
 NODE` REPLACES that host's root list exactly (local roots and every other
 host untouched); `project remove NAME --host NODE` drops the whole

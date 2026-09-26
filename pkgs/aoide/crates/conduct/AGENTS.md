@@ -24,6 +24,29 @@
 
 ## Invariants
 
+- **The workspace default is stamped ONCE, through ONE seam, at THREE
+  sites.** `SessionRecord.workspaceProject` (additive, `skip_serializing_if`)
+  is written only by `graph/model.rs::observe_workspace` — the same seam
+  `SessionRecord.workspace` is written through — and every site that observes
+  a workspace calls it: `window.rs::ensure_session_window` (the lazy
+  hook-time backfill), the event-driven `resolve_pending_session_windows`
+  sweep (both its pending-resolution and its move branches) and
+  `reconcile_untracked_terminals` (the synthetic `win:` record a bare tty
+  gets — a terminal on a bound workspace joins the project exactly as an
+  agent's session does, so that publisher builds its record with
+  `workspace: None` and lets the seam do the observation). A NEW adapter
+  calls the seam; it never writes either field itself. The seam's rules are
+  load-bearing: the default is stamped only when `workspace` goes from absent
+  to present, only when the record has no explicit `project` and no default
+  yet, and only when the workspace is BOUND — so a move never re-stamps,
+  movement never clears it, an explicit choice is never stamped over, and
+  binding a workspace adopts no session already sitting on it. An observed
+  `None` DOES clear `workspace` (a window whose client reports no workspace
+  has none) and never touches the default. The ladder itself —
+  `project_for` = explicit > default > cwd, `effective_project_for` =
+  explicit > owner > default > cwd — lives in the same file, with
+  `workspace_default` the ONE reader of the stored name (a name that no
+  longer resolves falls through; it is a default, not a choice).
 - **Every grouping surface that can see a non-root session calls
   `graph::effective_project_for`, never bare `project_for`, for that
   session (ownership-graph lane, P-OWN S-A).** `project_for` stays the
@@ -1436,10 +1459,38 @@
   touches the name or `autoResume` — `add`/`remove` stay the only ways a
   project appears or disappears. `project remove NAME [PATH]` drops one
   root, promoting the next remaining one into `path` so `path` always
-  equals the first root, or with no `PATH` drops the whole project.
+  equals the first root, or with no `PATH` drops the whole project — as do
+  the project's workspace bindings, which live on the record. Removing a
+  project's LAST root is the one root removal that does NOT delete the
+  project: it is left standing with no folder (a NAME-ONLY project).
   `project add` and `project edit` both validate EVERY given path
   (absolute, an existing directory) BEFORE mutating anything — one bad
   path in a multi-path call writes nothing.
+- **A project may have NO folder — `project add NAME` with no path
+  registers a name-only project, never the cwd.** The cwd is not a
+  default root: registering the directory you happen to stand in is how a
+  project anchors sessions nobody meant it to. A rootless project has an
+  empty `Project::roots()`, so `anchor_for` skips it structurally — its
+  per-project root scan finds nothing to match, with no special case and
+  no `cfg`; it is reached by a workspace
+  binding or an explicit `session project NAME` alone, and a folder is
+  added later with `project add NAME ROOT`. `project list` prints its name
+  with no path column.
+- **A binding is stored on the project, and only one project may hold a
+  workspace.** `Project.workspaces` (`aoide-storage::records`, additive,
+  `skip_serializing_if` keeps it off the wire when empty — every
+  `projects.json` predating it stays byte-identical) is the whole store.
+  `workspace set` is the ONLY writer that adds: it MOVES the id off whatever
+  project held it, in the SAME `with_stage_lock` hold as the `--new`
+  existence check, so two racing calls can never both register a name and no
+  path can leave one id in two projects. `binding_for` (`graph/model.rs`) is
+  the ONE lookup — the binder, the lister and the resolver's workspace rung
+  all read it, so they cannot disagree about what "bound" means. A binding is
+  NOT a root: it anchors nothing by cwd (a rootless project may carry one),
+  `project remove NAME ROOT` leaves it alone, and only the bare `project
+  remove NAME` takes it — with the record it lives on, because that is where
+  it lives. `workspace list` merges bindings with the workspaces local
+  sessions report and never writes.
 - **`project add`/`project edit`/`project remove` are daemon-owned atomic
   mutations (`manage.rs`'s `local_daemon`)** — the same door-gated shape
   as `actions.rs`'s `assign_project`/`session_kill`: a `Door::Cli` caller

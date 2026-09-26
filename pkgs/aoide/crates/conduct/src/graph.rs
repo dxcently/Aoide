@@ -126,8 +126,16 @@ pub use self::doorbell::{mail_ring, ring, RingReport};
 // post-lock collector block — so this stays `pub(crate)`, never crossing the
 // crate boundary.
 pub(crate) use self::pingback::{pingback, pingback_pull};
+// The project ladder (`core-seams` §B): `project_for` (a session's own claim:
+// explicit > its workspace's default > cwd anchor) and `effective_project_for`
+// (what it RENDERS under: explicit > owner > workspace default > cwd anchor),
+// plus `observe_workspace` — the ONE seam `SessionRecord.workspace` and the
+// `workspaceProject` birth default are written through, called by all three
+// compositor stamp sites (`window.rs`) so a future adapter calls it too rather
+// than writing the field itself.
 pub use self::model::{
-    anchor_for, effective_project_for, lead_over, leads_project, project_for, canonical_state, merged_sessions, HookRecord, HooksFile, Project, ProjectsFile,
+    anchor_for, effective_project_for, lead_over, leads_project, observe_workspace, project_for,
+    canonical_state, merged_sessions, HookRecord, HooksFile, Project, ProjectsFile,
     SessionRecord, SessionsFile,
 };
 pub use self::pending::{pending_approve, pending_deny, pending_list};
@@ -262,7 +270,14 @@ pub use self::who::{glyph, session_roster};
 // (`node_list.rs`'s module doc) — `node status` (aoide-client) keeps the
 // deep per-node view.
 pub use self::node_list::node_list;
-pub use self::window::{focus_session, focus_window, run_hypr_window_listener, FocusError};
+pub use self::window::{focus_session, focus_window, focused_workspace, run_hypr_window_listener, FocusError};
+// `workspace set/clear/list` — the compositor workspace ↔ project binding
+// (`graph/workspace.rs`'s own module doc). Bindings live on the project
+// (`Project.workspaces`), so a removed project takes its own with it; the
+// one compositor-shaped fact (`focused_workspace`) is re-exported above
+// beside the other window-adapter reads.
+mod workspace;
+pub use self::workspace::{workspace_clear, workspace_list, workspace_root, workspace_set};
 
 // Storage/time passthroughs root's `a2a.rs` / `commands/{a2a,usage}.rs` still
 // reach at `crate::graph::{load_stage, now_iso_utc, sessions_path,

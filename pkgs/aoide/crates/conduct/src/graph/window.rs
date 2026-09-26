@@ -8,8 +8,8 @@ use super::codex_app::sync_codex_app_threads;
 use super::conduct::proc_cwd;
 use super::doc::restage_graph;
 use super::model::{
-    canonical_state, load_stage, sessions_path, write_stage, SessionRecord, SessionsFile,
-    STAGE_GRAPH_VERSION,
+    canonical_state, load_stage, observe_workspace, projects_path, sessions_path, write_stage,
+    Project, ProjectsFile, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
 use aoide_storage::fs::with_stage_lock;
 use serde_json::Value;
@@ -92,6 +92,41 @@ pub(crate) fn hyprctl_clients() -> Option<Vec<Value>> {
         Ok(Value::Array(a)) => Some(a),
         _ => None,
     }
+}
+
+/// The registered projects, for [`observe_workspace`] — read INSIDE the same
+/// stage-lock hold the observation is written under, so a binding can never be
+/// read half-written, and an unreadable/absent `projects.json` degrades to "no
+/// bindings" (no stamp) rather than failing the window write.
+fn projects_now() -> Vec<Project> {
+    load_stage::<ProjectsFile>(&projects_path())
+        .map(|f| f.projects)
+        .unwrap_or_default()
+}
+
+/// The compositor's currently FOCUSED workspace id — the one fact an omitted
+/// `<workspace>` needs (`aoide workspace set <project>`, `aoide workspace root`).
+/// `hyprctl activeworkspace -j`'s `id`, read through the same
+/// `HYPRLAND_INSTANCE_SIGNATURE` gate as [`hyprctl_clients`]. `None` whenever
+/// the compositor cannot be consulted authoritatively — no signature, a
+/// missing/failed `hyprctl`, or JSON with no integer `id` — which the caller
+/// turns into a taught error asking for the number, never a guess. Note it is
+/// the CALLER's process that can answer this: `aoided` runs as a service with
+/// no compositor environment, so a forwarded invocation always carries a
+/// resolved integer.
+pub fn focused_workspace() -> Option<i64> {
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
+        return None;
+    }
+    let out = std::process::Command::new("hyprctl")
+        .args(["activeworkspace", "-j"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let v: Value = serde_json::from_slice(&out.stdout).ok()?;
+    v.get("id").and_then(Value::as_i64)
 }
 
 /// A structured failure from [`focus_window`]. `reason` is a stable machine
@@ -551,11 +586,10 @@ pub(in crate::graph) fn ensure_session_window(id: &str) {
         if s.pid.is_none() {
             s.pid = Some(pid);
         }
-        // Stamp the workspace too when known (absent → left None, degrades
-        // gracefully); the listener keeps it fresh on later moves.
-        if workspace.is_some() {
-            s.workspace = workspace;
-        }
+        // The workspace observation goes through the ONE seam (which also
+        // stamps the workspace's default project, once, at birth); the
+        // listener keeps the id fresh on later moves.
+        observe_workspace(s, workspace, &projects_now());
         if file.schema_version.is_empty() {
             file.schema_version = STAGE_GRAPH_VERSION.to_string();
         }
@@ -654,10 +688,14 @@ pub fn parse_hypr_window_event(line: &str) -> Option<HyprWindowEvent> {
 /// walks each session's RECORDED pid (a conduct session's own pid — the window
 /// client is one of its ancestors), never its own. Cheap-guarded: zero `hyprctl`
 /// work when no session has either a pending window OR a resolved one. It only
-/// ever FILLS an empty address (never overwrites a good one) and only ever
-/// updates `workspace` to a PRESENT id (a window momentarily absent from the
-/// clients list leaves its stored workspace be — never cleared); it never
-/// touches `pid` or `state`. Returns true iff `sessions.json` changed.
+/// ever FILLS an empty address (never overwrites a good one), and every
+/// `workspace` write goes through the ONE seam (`observe_workspace`): an
+/// observation of a PRESENT id updates it, and an observation that resolves to
+/// NO id CLEARS it — a window whose client reports no workspace has none
+/// (`clear_closed_window` clears only the address, so a record can sit at
+/// address-empty + `workspace: Some` and be cleared exactly here). The seam
+/// never touches `pid`, `state`, or a session's birth default. Returns true iff
+/// `sessions.json` changed.
 pub fn resolve_pending_session_windows() -> bool {
     // Cheap, unlocked pre-check (see `ensure_session_window`'s identical
     // reasoning above): skip the `hyprctl` round trip entirely when there's
@@ -708,13 +746,16 @@ pub fn resolve_pending_session_windows() -> bool {
             .map(|s| s.session_id.clone())
             .collect();
         let mut changed = false;
+        let projects = projects_now();
         for s in file.sessions.iter_mut() {
             if s.window_address.is_empty() {
                 if windowless.contains(&s.session_id) {
                     continue;
                 }
-                // Pending window: resolve it via pid-ancestry, stamping workspace off
-                // the same snapshot (None → left absent, degrades gracefully).
+                // Pending window: resolve it via pid-ancestry, observing the
+                // workspace off the same snapshot through the ONE seam (a
+                // workspace the client does not report clears the stored id,
+                // and the default project is stamped only at birth).
                 let Some(pid) = s.pid else {
                     continue;
                 };
@@ -722,19 +763,15 @@ pub fn resolve_pending_session_windows() -> bool {
                 if let Some((addr, _)) = match_window_and_pid(&ancestry, &clients) {
                     let ws = client_workspace_for_address(&clients, &addr);
                     s.window_address = addr;
-                    if s.workspace != ws {
-                        s.workspace = ws;
-                    }
+                    observe_workspace(s, ws, &projects);
                     changed = true;
                 }
             } else if let Some(ws) = client_workspace_for_address(&clients, &s.window_address) {
                 // Resolved window still live: keep its workspace current (the
-                // drag-between-workspaces re-stamp). Only a present, changed id is
-                // written; a vanished window leaves the stored workspace intact.
-                if s.workspace != Some(ws) {
-                    s.workspace = Some(ws);
-                    changed = true;
-                }
+                // drag-between-workspaces re-stamp). A move updates the id and
+                // NEVER re-stamps the birth default; a vanished window leaves
+                // the stored workspace intact.
+                changed |= observe_workspace(s, Some(ws), &projects);
             }
         }
         if !changed {
@@ -869,6 +906,7 @@ pub(crate) struct TermWindow {
 pub(crate) fn reconcile_untracked_terminals(
     mut sessions: Vec<SessionRecord>,
     windows: &[TermWindow],
+    projects: &[Project],
 ) -> (Vec<SessionRecord>, bool) {
     // Addresses owned by a TRACKED (non-synthetic) session — a real agent/shell
     // record already represents that window, so it is never re-published.
@@ -928,10 +966,11 @@ pub(crate) fn reconcile_untracked_terminals(
                 rec.title = want_title;
                 changed = true;
             }
-            if rec.workspace != w.workspace {
-                rec.workspace = w.workspace;
-                changed = true;
-            }
+            // A bare terminal BORN on a bound workspace joins its project,
+            // exactly as an agent's session does — the observation seam is the
+            // same one, so the win: record's birth default and the id it keeps
+            // across a drag cannot drift from a tracked record's.
+            changed |= observe_workspace(rec, w.workspace, projects);
             if rec.pid != want_pid {
                 rec.pid = want_pid;
                 changed = true;
@@ -951,7 +990,7 @@ pub(crate) fn reconcile_untracked_terminals(
             }
         } else {
             let petname = aoide_storage::petname::mint_for(&sessions);
-            sessions.push(SessionRecord {
+            let mut rec = SessionRecord {
                 session_id: sid,
                 agent: "shell".to_string(),
                 window_address: w.address.clone(),
@@ -960,10 +999,15 @@ pub(crate) fn reconcile_untracked_terminals(
                 kind: Some("shell".to_string()),
                 title: want_title,
                 pid: want_pid,
-                workspace: w.workspace,
+                // Born with no workspace, then observed through the ONE seam
+                // below: constructing it WITH the id would make the seam read
+                // this as a move and skip the birth default entirely.
+                workspace: None,
                 petname: Some(petname),
                 ..Default::default()
-            });
+            };
+            observe_workspace(&mut rec, w.workspace, projects);
+            sessions.push(rec);
             changed = true;
         }
     }
@@ -1038,8 +1082,11 @@ pub fn sync_untracked_terminal_windows() -> bool {
             Ok(f) => f,
             Err(_) => return false,
         };
-        let (sessions, changed) =
-            reconcile_untracked_terminals(std::mem::take(&mut file.sessions), &windows);
+        let (sessions, changed) = reconcile_untracked_terminals(
+            std::mem::take(&mut file.sessions),
+            &windows,
+            &projects_now(),
+        );
         file.sessions = sessions;
         if !changed {
             return false;
@@ -1208,7 +1255,7 @@ mod tests {
     #[test]
     fn untracked_terminal_synthesizes_a_win_record() {
         let (out, changed) =
-            reconcile_untracked_terminals(vec![], &[term_win("0xAABB", "kitty", "/home/khoa")]);
+            reconcile_untracked_terminals(vec![], &[term_win("0xAABB", "kitty", "/home/khoa")], &[]);
         assert!(changed);
         assert_eq!(out.len(), 1);
         let r = &out[0];
@@ -1230,6 +1277,7 @@ mod tests {
         let (out, changed) = reconcile_untracked_terminals(
             vec![tracked],
             &[term_win("0xAABB", "kitty", "/home/khoa")],
+            &[],
         );
         assert!(!changed);
         assert_eq!(out.len(), 1);
@@ -1249,7 +1297,7 @@ mod tests {
             ..Default::default()
         };
         let (out, changed) =
-            reconcile_untracked_terminals(vec![stale], &[term_win("0xLIVE", "foot", "/tmp")]);
+            reconcile_untracked_terminals(vec![stale], &[term_win("0xLIVE", "foot", "/tmp")], &[]);
         assert!(changed);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].session_id, "win:live");
@@ -1258,7 +1306,7 @@ mod tests {
     #[test]
     fn non_terminal_class_window_is_ignored() {
         let (out, changed) =
-            reconcile_untracked_terminals(vec![], &[term_win("0xAABB", "firefox", "/home/khoa")]);
+            reconcile_untracked_terminals(vec![], &[term_win("0xAABB", "firefox", "/home/khoa")], &[]);
         assert!(!changed);
         assert!(out.is_empty());
     }
@@ -1266,22 +1314,22 @@ mod tests {
     fn unmapped_terminal_window_is_ignored() {
         let mut w = term_win("0xAABB", "kitty", "/home/khoa");
         w.mapped = false;
-        let (out, changed) = reconcile_untracked_terminals(vec![], &[w]);
+        let (out, changed) = reconcile_untracked_terminals(vec![], &[w], &[]);
         assert!(!changed);
         assert!(out.is_empty());
     }
     #[test]
     fn rescan_is_idempotent_and_upserts_in_place() {
         let (first, _) =
-            reconcile_untracked_terminals(vec![], &[term_win("0xAABB", "kitty", "/home/khoa")]);
+            reconcile_untracked_terminals(vec![], &[term_win("0xAABB", "kitty", "/home/khoa")], &[]);
         // A second reconcile with the same window makes no change and no duplicate.
         let (second, changed) =
-            reconcile_untracked_terminals(first, &[term_win("0xAABB", "kitty", "/home/khoa")]);
+            reconcile_untracked_terminals(first, &[term_win("0xAABB", "kitty", "/home/khoa")], &[]);
         assert!(!changed);
         assert_eq!(second.len(), 1);
         // A cwd change upserts the existing record in place (still one record).
         let (third, changed3) =
-            reconcile_untracked_terminals(second, &[term_win("0xAABB", "kitty", "/other")]);
+            reconcile_untracked_terminals(second, &[term_win("0xAABB", "kitty", "/other")], &[]);
         assert!(changed3);
         assert_eq!(third.len(), 1);
         assert_eq!(third[0].cwd, "/other");
@@ -1290,14 +1338,14 @@ mod tests {
     fn reconcile_untracked_terminals_mints_petname_and_never_rewrites_a_named_record() {
         // A NEW synthetic terminal gets a minted petname on creation…
         let (first, changed1) =
-            reconcile_untracked_terminals(vec![], &[term_win("0xAABB", "kitty", "/home/khoa")]);
+            reconcile_untracked_terminals(vec![], &[term_win("0xAABB", "kitty", "/home/khoa")], &[]);
         assert!(changed1);
         assert!(first[0].petname.is_some(), "a freshly synthesized win: record must mint a petname");
 
         // …and a re-scan of the SAME window (already named) must not touch it:
         // no re-mint, and the changed flag stays false (no rewrite churn).
         let (second, changed2) =
-            reconcile_untracked_terminals(first.clone(), &[term_win("0xAABB", "kitty", "/home/khoa")]);
+            reconcile_untracked_terminals(first.clone(), &[term_win("0xAABB", "kitty", "/home/khoa")], &[]);
         assert!(!changed2, "re-scanning an already-named record must not flip changed");
         assert_eq!(second[0].petname, first[0].petname, "an existing petname must never be re-minted");
     }
@@ -1677,6 +1725,140 @@ mod tests {
     /// one thing that IS honestly testable without a compositor: the
     /// function is a safe, total no-op — never a panic, never a change —
     /// on a roster that includes a headless wrap when Hyprland is absent.
+    #[test]
+    fn a_bare_terminal_born_on_a_bound_workspace_joins_its_project() {
+        // The THIRD stamp site: the synthetic `win:` record for a bare tty has
+        // no agent, no project and no birth of its own — but it is a session on
+        // the workspace, so a bound workspace carries it exactly as it carries
+        // an agent's.
+        let projects = vec![
+            Project { name: "aoide".into(), workspaces: vec![3], ..Default::default() },
+            Project { name: "cadenza".into(), workspaces: vec![7], ..Default::default() },
+        ];
+        let mut w = term_win("0xAABB", "kitty", "/home/khoa");
+        w.workspace = Some(3);
+        let (out, changed) = reconcile_untracked_terminals(vec![], &[w.clone()], &projects);
+        assert!(changed);
+        assert_eq!(out[0].session_id, "win:aabb");
+        assert_eq!(out[0].workspace, Some(3));
+        assert_eq!(
+            out[0].workspace_project.as_deref(),
+            Some("aoide"),
+            "a bare terminal on a bound workspace joins its project"
+        );
+
+        // A re-scan after the window is DRAGGED: the id follows, the birth
+        // default does not.
+        let mut moved = w.clone();
+        moved.workspace = Some(7);
+        let (out, changed) = reconcile_untracked_terminals(out, &[moved], &projects);
+        assert!(changed);
+        assert_eq!(out[0].workspace, Some(7));
+        assert_eq!(out[0].workspace_project.as_deref(), Some("aoide"));
+
+        // Unbound, and with no projects at all: observed and unstamped.
+        let mut unbound = w.clone();
+        unbound.workspace = Some(99);
+        let (out, _) = reconcile_untracked_terminals(
+            vec![SessionRecord {
+                session_id: "win:aabb".into(),
+                workspace: None,
+                ..Default::default()
+            }],
+            &[unbound],
+            &[],
+        );
+        assert_eq!(out[0].workspace, Some(99));
+        assert_eq!(out[0].workspace_project, None);
+    }
+
+    #[test]
+    fn the_sweep_stamps_the_default_at_birth_and_never_on_a_move() {
+        // The compositor stamp site, end to end: the sweep resolves our own
+        // pid to the shim's client, observes its workspace through the ONE
+        // seam, and the birth default lands — once, and only once.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("sweep-stamps-default");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        write_stage(
+            &projects_path(),
+            &ProjectsFile {
+                schema_version: "0".into(),
+                projects: vec![
+                    Project { name: "aoide".into(), workspaces: vec![3], ..Default::default() },
+                    Project { name: "cadenza".into(), workspaces: vec![7], ..Default::default() },
+                ],
+            },
+        )
+        .unwrap();
+        let mut rec = session("s1", "/w", "working", "t", None);
+        rec.window_address = String::new();
+        rec.pid = Some(std::process::id());
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".into(), sessions: vec![rec] },
+        )
+        .unwrap();
+
+        let (env, dir) = fake_hyprctl("sweep-stamp");
+        assert!(
+            resolve_pending_session_windows(),
+            "the pending window resolves against the shim"
+        );
+        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert_eq!(after.sessions[0].window_address, "0xAA");
+        assert_eq!(after.sessions[0].workspace, Some(3));
+        assert_eq!(
+            after.sessions[0].workspace_project.as_deref(),
+            Some("aoide"),
+            "born on workspace 3 → the bound project"
+        );
+
+        // Dragged to another BOUND workspace: the id follows, the default holds.
+        std::env::set_var("AOIDE_TEST_WS", "7");
+        assert!(resolve_pending_session_windows());
+        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert_eq!(after.sessions[0].workspace, Some(7));
+        assert_eq!(after.sessions[0].workspace_project.as_deref(), Some("aoide"));
+
+        // Nothing left to write once the observation is already current.
+        assert!(!resolve_pending_session_windows(), "idempotent once settled");
+
+        drop(env);
+        let _ = std::fs::remove_dir_all(&dir);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn focused_workspace_reads_the_compositor_and_refuses_a_host_without_one() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_sig = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok();
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        assert_eq!(focused_workspace(), None, "off-Hyprland: no guess, ever");
+
+        let (env, dir) = fake_hyprctl("focused");
+        std::env::set_var("AOIDE_TEST_WS", "5");
+        assert_eq!(focused_workspace(), Some(5), "the shim reports workspace 5");
+        std::env::set_var("AOIDE_TEST_WS", "-99");
+        assert_eq!(
+            focused_workspace(),
+            Some(-99),
+            "a special workspace's negative id is surfaced verbatim"
+        );
+
+        drop(env);
+        let _ = std::fs::remove_dir_all(&dir);
+        match saved_sig {
+            Some(v) => std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", v),
+            None => std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"),
+        }
+    }
+
     #[test]
     fn resolve_pending_session_windows_is_a_safe_noop_off_hyprland() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

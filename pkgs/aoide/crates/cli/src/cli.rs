@@ -264,7 +264,7 @@ mod tests {
             err.message
         );
         assert!(
-            err.message.contains("Register a project anchor root"),
+            err.message.contains("Register a project in state/stage/projects.json"),
             "the summary rides along: {}",
             err.message
         );
