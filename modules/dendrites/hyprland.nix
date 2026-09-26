@@ -248,10 +248,15 @@ in
         # are global (Hyprland has no per-monitor bind), so they simply do
         # nothing where scrolling is not in play. `+conf`/`-conf` cycle the
         # widths in `scrolling:explicit_column_widths` (0.333/0.5/0.667/1.0).
+        # SUPER+J/K scroll the tape (next/previous column) and SUPER+period/comma
+        # take the plain down/up focus move they displace; without a scrolling
+        # monitor J/K stay the vim focus keys below.
         # SUPER+C is the clipboard, so `center` takes SUPER+slash.
         ${lib.optionalString (cfg.scrollingMonitor != null) ''
-          bind = SUPER, period, layoutmsg, move +col
-          bind = SUPER, comma, layoutmsg, move -col
+          bind = SUPER, J, layoutmsg, move +col
+          bind = SUPER, K, layoutmsg, move -col
+          bind = SUPER, period, movefocus, d
+          bind = SUPER, comma, movefocus, u
           bind = SUPER, equal, layoutmsg, colresize +conf
           bind = SUPER, minus, layoutmsg, colresize -conf
           bind = SUPER, slash, layoutmsg, center
@@ -271,13 +276,17 @@ in
         # complete the vim set (left/down/up/right). dxflake's SUPER+L was
         # blocked here by the Aoide lock bind, so the lock moved to SUPER+ESCAPE
         # above, freeing L — the full hjkl set is now live, matching arrows.
+        # With a scrolling monitor J/K scroll the tape instead (see the
+        # scrolling-layout controls above).
         bind = SUPER, left, movefocus, l
         bind = SUPER, down, movefocus, d
         bind = SUPER, up, movefocus, u
         bind = SUPER, right, movefocus, r
         bind = SUPER, H, movefocus, l
-        bind = SUPER, J, movefocus, d
-        bind = SUPER, K, movefocus, u
+        ${lib.optionalString (cfg.scrollingMonitor == null) ''
+          bind = SUPER, J, movefocus, d
+          bind = SUPER, K, movefocus, u
+        ''}
         bind = SUPER, L, movefocus, r
 
         # Move window (same directional scheme)
