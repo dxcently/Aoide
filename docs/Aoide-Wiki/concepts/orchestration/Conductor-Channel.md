@@ -143,9 +143,14 @@ sitting at a terminal — or be a terminal at all — to launch `conduct`.
   forked. A failed exec inside the re-exec'd `conduct` registers no ghost
   session (spawn-first, same as `wrap`/`conduct`): the socket simply never
   appears and `spawn` reports `registered: false` honestly. An optional
-  `--prompt` is injected only AFTER registration succeeds, through the one
-  gated injection door (`send --yes --submit`, in-process) — never a
-  direct socket write — the same re-drive shape `session pending approve`
+  `--prompt` is injected only AFTER the target is READY to take a turn —
+  registration is the wrapper being steerable, readiness is the harness
+  having started (its own `SessionStart` hook for claude/kimi/pi, its PTY
+  settling for a hookless target; `AgentProfile::readiness`) — through the
+  one gated injection door (`send --yes --submit`, in-process) — never a
+  direct socket write, and never an early one: a target that never becomes
+  ready within the budget reports `prompt: not-ready` and is typed at by
+  nothing — the same re-drive shape `session pending approve`
   uses to replay a held entry.
 
 Proven across all three registered agent profiles ([[Agent-Hooking]]): a

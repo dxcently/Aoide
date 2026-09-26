@@ -130,6 +130,27 @@ pub struct SettingsSpec {
     pub format: SettingsFormat,
 }
 
+/// How a launched process of a harness announces that it is READY to take a
+/// turn — the fact a first-turn injection waits on before typing anything
+/// (`aoide spawn --prompt`, `resurrect`'s post-spawn restore delivery, the A2A
+/// door's opening turn). Registration alone is NOT readiness: a conducted child
+/// binds its control socket before its harness has even read a keystroke, so a
+/// prompt typed at that instant lands in a composer that is not there yet and
+/// the submit keystroke is swallowed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Readiness {
+    /// The harness runs a hook system, so the hook door says so itself: a
+    /// `HookClass::SessionStart` payload for its own session id records a
+    /// session whose parent is the wrapper — the harness's own statement that
+    /// it has started. The strongest signal available, and per-harness by
+    /// construction (the payload vocabulary stays in `hook_event_map`).
+    Hook,
+    /// A harness with no hook file to fire: PTY output appeared and then went
+    /// quiet, the documented fallback proxy for "the child has drawn its
+    /// prompt and is waiting".
+    OutputQuiescence,
+}
+
 /// One agent harness's whole profile — the seam every agent-aware consumer
 /// dispatches through.
 pub struct AgentProfile {
@@ -205,6 +226,24 @@ pub struct AgentProfile {
     ///   delivered), never that the recipient has processed or even seen
     ///   it — there is no synchronous "consumed" signal on this transport.
     pub native_send: Option<fn(to: &str) -> Vec<String>>,
+    /// What must be true before anything is typed into a process of this
+    /// harness ([`Readiness`]).
+    pub readiness: Readiness,
+    /// The variables THIS harness injects into the processes it launches, each
+    /// one meaning "you are running inside a `<harness>` session" — the parent
+    /// session's own identity, token, socket or pid, never a setting of the
+    /// user's. A launch path drops every name listed by ANY profile before exec
+    /// ([`session_env_markers`]): a child harness that inherits them believes
+    /// it is nested inside the session that spawned it (claude, per its own
+    /// TUI: "Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION
+    /// marker"; `TASK-REGISTER.md` §3 records that same marker silently
+    /// disabling project `.mcp.json` servers, which is the doorbell channel).
+    ///
+    /// Names, never prefixes: a prefix match would take a user's own
+    /// `CLAUDE_CONFIG_DIR` or API keys with it. An empty slice is the honest
+    /// value for a harness whose marker set has not been established from its
+    /// own material — never a guessed name.
+    pub session_env_markers: &'static [&'static str],
 }
 
 // ── claude ──────────────────────────────────────────────────────────────────
@@ -734,6 +773,44 @@ pub static CLAUDE_PROFILE: AgentProfile = AgentProfile {
     // Claude Code's only input surface is the pty composer every existing
     // keystroke path already reaches — no separate native transport.
     native_send: None,
+    readiness: Readiness::Hook,
+    // Claude Code's own session markers, ground-truthed against a live
+    // claude-managed environment and the installed 2.1.280 bundle (each is
+    // present in a claude session's own environment here, and the harness's
+    // own TUI names CLAUDE_CODE_CHILD_SESSION as the reason its transcript
+    // saving is off):
+    // - `CLAUDECODE` — claude's canonical "this process is inside a Claude
+    //   Code session" flag.
+    // - `CLAUDE_CODE_CHILD_SESSION` — "this is a session claude itself
+    //   launched" (the §3 marker: transcript saving off, project `.mcp.json`
+    //   servers silently disabled).
+    // - `CLAUDE_CODE_SESSION_ID` — the parent session's own id.
+    // - `CLAUDE_CODE_BRIDGE_SESSION_ID` — the parent's bridge session
+    //   identity.
+    // - `CLAUDE_CODE_MESSAGING_TOKEN` / `..._MESSAGING_SOCKET` — the parent's
+    //   inter-session messaging credential and its socket: a child holding
+    //   them can talk on the PARENT's channel.
+    // - `CLAUDE_PID` — the parent claude process's pid.
+    // - `CLAUDE_CODE_ENTRYPOINT` — how the parent session was entered
+    //   (`cli`/`sdk`; the bundle propagates it to subprocesses alongside the
+    //   agent-SDK identity vars).
+    // Deliberately NOT here, because they are the USER's and not the
+    // session's: `CLAUDE_CONFIG_DIR`, the `ANTHROPIC_*` credentials,
+    // `CLAUDE_EFFORT`, `CLAUDE_CODE_SKIP_PROMPT_HISTORY` and
+    // `CLAUDE_CODE_FORCE_SESSION_PERSISTENCE` (the bundle names the last two
+    // as user-set toggles, the latter literally the advised escape from the
+    // child-session marker), and `CLAUDE_CODE_SESSION_ATTENDED` (named beside
+    // this build's other feature toggles — unverified as a session fact).
+    session_env_markers: &[
+        "CLAUDECODE",
+        "CLAUDE_CODE_CHILD_SESSION",
+        "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_CODE_BRIDGE_SESSION_ID",
+        "CLAUDE_CODE_MESSAGING_TOKEN",
+        "CLAUDE_CODE_MESSAGING_SOCKET",
+        "CLAUDE_PID",
+        "CLAUDE_CODE_ENTRYPOINT",
+    ],
 };
 
 /// `claude --resume <harness_session_id>` — resume a prior claude session by
@@ -1148,6 +1225,11 @@ pub static KIMI_PROFILE: AgentProfile = AgentProfile {
     // Kimi's only input surface is the pty composer every existing
     // keystroke path already reaches — no separate native transport.
     native_send: None,
+    readiness: Readiness::Hook,
+    // Kimi Code's own session markers have not been established from its own
+    // material — an empty list, never a guessed name (a wrong name here would
+    // strip a user's variable from every spawned child).
+    session_env_markers: &[],
 };
 
 /// `kimi --session <harness_session_id>` — resume a prior kimi session by
@@ -1488,6 +1570,11 @@ pub static PI_PROFILE: AgentProfile = AgentProfile {
     // composer every existing keystroke path already reaches — no separate
     // native transport.
     native_send: None,
+    readiness: Readiness::Hook,
+    // pi's own session markers have not been established from its own
+    // material — an empty list, never a guessed name (a wrong name here would
+    // strip a user's variable from every spawned child).
+    session_env_markers: &[],
 };
 
 /// `pi --session-id <harness_session_id>` — resume a prior pi session by its
@@ -2873,6 +2960,16 @@ pub static EIDOLON_PROFILE: AgentProfile = AgentProfile {
     // `eidolon_native_send`'s own doc for the two contract halves a caller
     // must honour (stdin payload, accepted-not-consumed exit code).
     native_send: Some(eidolon_native_send),
+    // No hook file at all (this profile's own doc), so there is no
+    // `SessionStart` for the hook door to record: readiness is the pty
+    // telling us output arrived and then stopped.
+    readiness: Readiness::OutputQuiescence,
+    // eidolon's own session markers have not been established from its own
+    // material — an empty list, never a guessed name (the harness's own
+    // launch env here carries none of the claude-shaped names this list
+    // exists to catch, and `AOIDE_SESSION_ID` is deliberately never scrubbed:
+    // it is the aoide parent edge, not a harness marker).
+    session_env_markers: &[],
 };
 
 /// The profile table. New harnesses land here as another entry.
@@ -2888,6 +2985,18 @@ pub fn agent_profile(name: &str) -> Option<&'static AgentProfile> {
 /// Every agent name with a registered profile.
 pub fn known_agents() -> &'static [&'static str] {
     &["claude", "kimi", "pi", "eidolon"]
+}
+
+/// Every registered profile's own [`AgentProfile::session_env_markers`],
+/// flattened — the one list a launch path drops from a child's environment
+/// before exec, whatever harness the child will be and whatever harness
+/// launched it. The union, not a per-target lookup, precisely because the
+/// markers name the PARENT: a `kimi` child spawned from inside a claude
+/// session still must not inherit `CLAUDECODE`, and a name no profile claims
+/// is never touched. Two profiles naming one variable cost one extra
+/// `env_remove` of a name already being removed — a no-op, not a conflict.
+pub fn session_env_markers() -> impl Iterator<Item = &'static str> {
+    PROFILES.iter().flat_map(|p| p.session_env_markers.iter().copied())
 }
 
 /// Is this profile's launch program discoverable on `PATH`? Onboard's own
@@ -3058,6 +3167,93 @@ mod tests {
         assert_eq!(CLAUDE_PROFILE.hook_settings.relative_path, ".claude/settings.json");
         assert_eq!(CLAUDE_PROFILE.hook_settings.format, SettingsFormat::Json);
         assert_eq!(CLAUDE_PROFILE.skills_dir, Some(".claude/skills"));
+    }
+
+    // ── the two launch-time seams: readiness and the marker list ───────────
+
+    /// Readiness is a per-harness fact, never a hardcoded claude check: the
+    /// three harnesses that fire `SessionStart` hook their own readiness, and
+    /// the one with no hook file says so.
+    #[test]
+    fn readiness_is_pinned_per_profile() {
+        assert_eq!(CLAUDE_PROFILE.readiness, Readiness::Hook);
+        assert_eq!(KIMI_PROFILE.readiness, Readiness::Hook);
+        assert_eq!(PI_PROFILE.readiness, Readiness::Hook);
+        assert_eq!(EIDOLON_PROFILE.readiness, Readiness::OutputQuiescence);
+        // Readiness only means anything for a harness whose `SessionStart`
+        // actually maps — a `Hook` profile whose map dropped that event would
+        // wait forever.
+        for p in [&CLAUDE_PROFILE, &KIMI_PROFILE, &PI_PROFILE] {
+            assert_eq!(
+                (p.hook_event_map)("SessionStart"),
+                HookClass::SessionStart,
+                "profile: {}",
+                p.name
+            );
+        }
+    }
+
+    /// The marker list is what one child's environment is scrubbed by, so its
+    /// exact contents are pinned here — both the names that MUST go (each a
+    /// session fact of the parent: its identity, its messaging credentials,
+    /// its pid) and the user's own variables that must survive.
+    #[test]
+    fn claude_profile_lists_claude_codes_session_markers_and_no_user_config() {
+        let markers = CLAUDE_PROFILE.session_env_markers;
+        for name in [
+            "CLAUDECODE",
+            "CLAUDE_CODE_CHILD_SESSION",
+            "CLAUDE_CODE_SESSION_ID",
+            "CLAUDE_CODE_BRIDGE_SESSION_ID",
+            "CLAUDE_CODE_MESSAGING_TOKEN",
+            "CLAUDE_CODE_MESSAGING_SOCKET",
+            "CLAUDE_PID",
+            "CLAUDE_CODE_ENTRYPOINT",
+        ] {
+            assert!(markers.contains(&name), "missing session marker: {name}");
+        }
+        for name in [
+            // The user's own config, credentials and toggles — scrubbing any
+            // of these would deny the operator their own environment.
+            "CLAUDE_CONFIG_DIR",
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "CLAUDE_EFFORT",
+            "CLAUDE_CODE_SKIP_PROMPT_HISTORY",
+            "CLAUDE_CODE_FORCE_SESSION_PERSISTENCE",
+            "CLAUDE_CODE_SESSION_ATTENDED",
+            // The aoide parent edge is NOT a harness marker and is never
+            // scrubbed: `conduct` re-exports it into the child itself.
+            "AOIDE_SESSION_ID",
+        ] {
+            assert!(!markers.contains(&name), "user variable listed for scrubbing: {name}");
+        }
+        // Names, never prefixes: a shared prefix with a user's variable must
+        // not be enough to match, so the list carries literal names only.
+        for name in markers {
+            assert!(
+                !name.ends_with('*') && !name.contains("_*"),
+                "a wildcard in a marker list is a prefix match in disguise: {name}"
+            );
+        }
+    }
+
+    /// The union every launch path scrubs by: every profile's own names, each
+    /// once, and nothing else.
+    #[test]
+    fn session_env_markers_is_the_profiles_union() {
+        let union: Vec<&str> = session_env_markers().collect();
+        assert_eq!(union, CLAUDE_PROFILE.session_env_markers.to_vec());
+        let mut sorted = union.clone();
+        sorted.sort_unstable();
+        let before = sorted.len();
+        sorted.dedup();
+        assert_eq!(sorted.len(), before, "a name listed twice: {union:?}");
+        // A harness with no established markers contributes nothing — never a
+        // guessed name of its own.
+        assert!(KIMI_PROFILE.session_env_markers.is_empty());
+        assert!(PI_PROFILE.session_env_markers.is_empty());
+        assert!(EIDOLON_PROFILE.session_env_markers.is_empty());
     }
 
     // ── the kimi profile ───────────────────────────────────────────────────

@@ -9,7 +9,10 @@
 //! and returns immediately either way. An optional `--prompt` is then
 //! injected through the ONE gated injection door (`send`, re-driven the
 //! same way `graph/pending.rs::pending_approve` re-drives an approved entry)
-//! — never a direct socket write.
+//! — never a direct socket write, and never before the target is READY to
+//! take a turn ([`wait_ready`], a per-harness fact:
+//! `AgentProfile::readiness`). A target that never becomes ready is reported
+//! as `prompt: not-ready` and typed at by nothing.
 //!
 //! `--parent`, when given, passes straight through as `conduct`'s own
 //! `--parent` flag (`session_conduct` already reads `inv.flags.get("parent")`
@@ -50,11 +53,42 @@ use std::time::{Duration, Instant};
 const REGISTRATION_BUDGET: Duration = Duration::from_millis(3000);
 const REGISTRATION_POLL: Duration = Duration::from_millis(25);
 
+/// How long a first-turn injection waits for its target to become READY to
+/// take a turn before reporting honestly that it never did. Registration is
+/// not readiness: a conducted child binds its control socket long before its
+/// harness has drawn a composer, so a prompt typed at registration time lands
+/// in nothing and its submit keystroke is swallowed (the live 2026-09-26
+/// defect). ONE constant for every first-turn path — `spawn --prompt`,
+/// `resurrect`'s post-spawn restore delivery and the A2A door's opening turn —
+/// so "how long is long enough" has one answer, not three.
+///
+/// Shortened under `cfg(test)` for [`SUBMIT_KEYSTROKE_DELAY`]'s reason: the
+/// unit suite must not pay a real-world budget to observe a timeout, and only
+/// a real harness can be slow. (A crate that CONSUMES this constant in its own
+/// tests — `aoide-server` — passes its own explicit duration instead; `cfg`
+/// only ever applies to the crate being compiled.)
+#[cfg(not(test))]
+pub const READY_BUDGET: Duration = Duration::from_secs(20);
+#[cfg(test)]
+pub const READY_BUDGET: Duration = Duration::from_millis(500);
+
+/// The quiet window [`Readiness::OutputQuiescence`] requires: a hookless
+/// target is ready when its PTY log has produced output and then stopped
+/// growing for this long. Shortened under `cfg(test)` beside [`READY_BUDGET`]
+/// — a test budget smaller than the window could never see it elapse.
+#[cfg(not(test))]
+const READY_QUIET: Duration = Duration::from_millis(2000);
+#[cfg(test)]
+const READY_QUIET: Duration = Duration::from_millis(100);
+
 /// The command's basename — the agent-name default. Mirrors
 /// `conduct.rs::command_basename`'s own copy: each `graph` command that
 /// spawns a labelled agent keeps its own small copy of this one-liner rather
-/// than sharing it across modules.
-fn command_basename(program: &str) -> String {
+/// than sharing it across modules. `pub` for ONE caller in another crate —
+/// `aoide-server`'s A2A door reads the harness its configured `spawnAgent`
+/// command names off this, to look up that harness's readiness fact instead of
+/// guessing one (`a2a::spawn_inject_prompt`).
+pub fn command_basename(program: &str) -> String {
     std::path::Path::new(program)
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
@@ -468,13 +502,99 @@ fn wait_for(path: &std::path::Path, budget: Duration) -> bool {
     }
 }
 
+/// Has the harness's OWN `SessionStart` hook been recorded for the session
+/// wrapping `id`? The hook door keys a harness's session by the id the harness
+/// itself reports and parents it to the wrapper's `AOIDE_SESSION_ID`, so a
+/// record whose parent is `id` IS the harness saying "I have started" — the
+/// readiness fact [`Readiness::Hook`] names. A record already `done`
+/// (`SessionEnd`) is not readiness: the harness started and left.
+fn harness_hook_recorded(id: &str) -> bool {
+    load_stage::<SessionsFile>(&sessions_path())
+        .ok()
+        .is_some_and(|f| {
+            f.sessions
+                .iter()
+                .any(|s| s.parent_session_id.as_deref() == Some(id) && canonical_state(&s.state) != "done")
+        })
+}
+
+/// Has the wrapper's own PTY log produced output and then stood still for
+/// [`READY_QUIET`]? [`Readiness::OutputQuiescence`]'s fact, for a harness with
+/// no hook file to fire. The log path is re-read beside the size because it is
+/// stamped by the conduct child at log open, i.e. possibly after this wait
+/// begins — and a target that never produces a byte is honestly not ready.
+fn output_has_settled(id: &str, budget: Duration) -> bool {
+    let deadline = Instant::now() + budget;
+    let mut last = 0u64;
+    let mut quiet_since: Option<Instant> = None;
+    loop {
+        let size = load_stage::<SessionsFile>(&sessions_path())
+            .ok()
+            .and_then(|f| f.sessions.into_iter().find(|s| s.session_id == id))
+            .and_then(|s| s.log_path)
+            .and_then(|p| std::fs::metadata(p).ok())
+            .map(|m| m.len())
+            .unwrap_or(0);
+        if size > 0 {
+            if size != last {
+                last = size;
+                quiet_since = Some(Instant::now());
+            } else if quiet_since.is_some_and(|t| t.elapsed() >= READY_QUIET) {
+                return true;
+            }
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(REGISTRATION_POLL);
+    }
+}
+
+/// Wait, up to `budget`, for the just-launched session `id` to become READY to
+/// take a turn — the gate every first-turn injection passes before typing
+/// anything. WHICH fact that is belongs to the harness
+/// ([`aoide_protocol::agents::AgentProfile::readiness`]); an unregistered
+/// agent name has no profile and takes the hookless answer, the same
+/// unregistered-agent fallback every other profile lookup in the tree takes.
+///
+/// `pub` for the three first-turn callers outside this module: `session_spawn`
+/// itself, `resurrect`'s restore delivery, and `aoide-server`'s
+/// `a2a::spawn_inject_prompt`. A `false` return is the caller's instruction to
+/// type NOTHING and report that it did not — never to inject anyway "just in
+/// case".
+pub fn wait_ready(agent: &str, id: &str, budget: Duration) -> bool {
+    match aoide_protocol::agents::agent_profile(agent).map(|p| p.readiness) {
+        Some(aoide_protocol::agents::Readiness::Hook) => {
+            let deadline = Instant::now() + budget;
+            loop {
+                if harness_hook_recorded(id) {
+                    return true;
+                }
+                if Instant::now() >= deadline {
+                    return false;
+                }
+                std::thread::sleep(REGISTRATION_POLL);
+            }
+        }
+        _ => output_has_settled(id, budget),
+    }
+}
+
 /// `aoide spawn [--agent <name>] [--parent <sessionId>] [--id <id>]
 /// [--prompt <text>] [--task <slug>] [--instructions <text|@file|->]
 /// [--windowed] [--undying] -- <command …>` — spawn `<command>` as a
 /// conducted session that OUTLIVES this call (headless by default, or in a
 /// real terminal with `--windowed`), wait briefly for it to register, and
 /// return `{ sessionId, agent, socket, logPath, registered, prompt,
-/// windowed, undying, task, instructionsPath, parentReader }`.
+/// windowed, undying, task, instructionsPath, childReader }`.
+///
+/// `--prompt` is typed as the target's first turn, and only once it is READY
+/// to take one: registration is the wrapper being steerable, readiness is the
+/// harness having started ([`wait_ready`] — claude/kimi/pi say so with their
+/// own `SessionStart` hook, any other target is read off its PTY settling).
+/// `prompt` in the result is `none` (no flag), `skipped-unregistered`,
+/// `not-ready` (the flag, no readiness within [`READY_BUDGET`], nothing typed),
+/// `delivered`, or `failed: …`.
 ///
 /// `--task <slug>` turns the run into a MANAGED TASK WRAPPER run
 /// (`docs/Aoide-Wiki/concepts/orchestration/Managed-Task-Wrapper.md`): the
@@ -757,14 +877,19 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
         .then(|| nothing_to_restore_warning(&agent, program_is_a_shell(&inv.args)))
         .flatten();
 
-    // `--prompt`: only after registration succeeded, through the one gated
-    // injection door (`session_send`, `--yes --submit`, in-process) — the
-    // exact re-drive shape `graph/pending.rs::pending_approve` uses to replay
-    // an approved held entry. Never a direct write to the socket.
+    // `--prompt`: only once registration succeeded AND the target is actually
+    // READY to take a turn (`wait_ready`) — through the one gated injection
+    // door (`session_send`, `--yes --submit`, in-process), the exact re-drive
+    // shape `graph/pending.rs::pending_approve` uses to replay an approved
+    // held entry. Never a direct write to the socket, and never an early one:
+    // registration only says the wrapper is steerable, which is long before
+    // the harness has a composer to type into. A target that never becomes
+    // ready is reported (`prompt: not-ready`), never silently typed at.
     let prompt_flag = inv.flags.get("prompt").cloned();
     let prompt_result = match &prompt_flag {
         None => "none".to_string(),
         Some(_) if !registered => "skipped-unregistered".to_string(),
+        Some(_) if !wait_ready(&agent, &id, READY_BUDGET) => "not-ready".to_string(),
         Some(text) => {
             let mut flags = BTreeMap::new();
             flags.insert("id".to_string(), id.clone());
@@ -791,6 +916,9 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
     )];
     if prompt_result == "delivered" {
         changed.push(format!("session {id}: prompt injected"));
+    }
+    if prompt_result == "not-ready" {
+        changed.push(format!("session {id}: prompt not injected — {agent} was not ready"));
     }
     if undying {
         changed.push(format!("session {id}: undying"));
@@ -824,6 +952,14 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
     );
     if let Some(warning) = &undying_warning {
         message = format!("{message} — {warning}");
+    }
+    if prompt_result == "not-ready" {
+        message = format!(
+            "{message} — `--prompt` not injected: `{agent}` was not ready to take a turn within \
+             {}s (its readiness signal never arrived — a hook harness needs its hooks installed; \
+             watch `{id}` and send the turn when it is up)",
+            READY_BUDGET.as_secs_f64()
+        );
     }
     if let Some(slug) = &task {
         message = format!(
@@ -1049,6 +1185,199 @@ mod tests {
     fn spawn_without_a_command_is_a_usage_error() {
         let out = session_spawn(&spawn_invocation(&[], &[]));
         assert_eq!(out.status, aoide_protocol::output::Status::Usage);
+    }
+
+    /// The live 2026-09-26 defect, as a test: a harness that IS ready takes the
+    /// prompt, and the bytes really cross the control socket into its pty.
+    /// `ready` here is the hook arm's fact — the harness's own `SessionStart`
+    /// recorded under the wrapper — fired through the REAL hook door
+    /// (`session hook`) from a process whose `AOIDE_SESSION_ID` is the
+    /// wrapper's, exactly as a harness's own hook subprocess runs.
+    #[test]
+    fn prompt_is_injected_once_the_harness_reports_itself_ready() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_SPAWN_EXE",
+        ]);
+
+        let root = unique_stage("spawn-prompt-ready");
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("AOIDE_CONDUCT_SPAWN_EXE", built_aoide_bin());
+
+        let id = "spawn-prompt-ready";
+        // The harness's own SessionStart, as its hook subprocess runs it: the
+        // real door, the real payload, the wrapper's id in the ambient
+        // AOIDE_SESSION_ID (what `conduct` exports into its child). `XDG_
+        // RUNTIME_DIR` is this test's own root, so the door's daemon probe
+        // finds no daemon socket and writes the record locally.
+        let bin = built_aoide_bin();
+        let hook = std::thread::spawn({
+            let id = id.to_string();
+            move || {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let mut child = std::process::Command::new(bin)
+                    .args(["session", "hook", "--agent", "claude"])
+                    .env("AOIDE_SESSION_ID", &id)
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .expect("the built aoide binary runs");
+                use std::io::Write as _;
+                child
+                    .stdin
+                    .as_mut()
+                    .unwrap()
+                    .write_all(
+                        br#"{"session_id":"claude-uuid-ready","hook_event_name":"SessionStart","cwd":"/w","source":"startup"}"#,
+                    )
+                    .unwrap();
+                let _ = child.wait();
+            }
+        });
+
+        // The wrapped child echoes whatever it is handed, then leaves on its
+        // own — a pty reader for the injected bytes, and no lingering process.
+        let out = session_spawn(&spawn_invocation(
+            &["sh", "-c", "timeout 5 cat"],
+            &[("id", id), ("agent", "claude"), ("prompt", "say pong")],
+        ));
+        hook.join().unwrap();
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["prompt"], "delivered", "data: {data}");
+        assert_eq!(data["registered"], true);
+        let log_path = data["logPath"].as_str().expect("logPath once registered");
+
+        // The prompt text reached the child's own pty.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(4000);
+        let mut logged = String::new();
+        while std::time::Instant::now() < deadline {
+            logged = std::fs::read_to_string(log_path).unwrap_or_default();
+            if logged.contains("say pong") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(logged.contains("say pong"), "log contents: {logged:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The other half: the target's readiness signal never arrives, so NOTHING
+    /// is typed into it and the result says so. The shim echoes whatever it is
+    /// handed, so a prompt typed anyway would be visible in its log — this test
+    /// fails on an early inject, not merely on a missing status string.
+    #[test]
+    fn prompt_is_reported_not_ready_and_nothing_is_typed_when_the_harness_never_starts() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_CONDUCT_SPAWN_EXE",
+        ]);
+
+        let root = unique_stage("spawn-prompt-notready");
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("AOIDE_CONDUCT_SPAWN_EXE", built_aoide_bin());
+
+        let id = "spawn-prompt-notready";
+        // A claude target that never hooks itself: no `SessionStart` record
+        // will ever appear under this wrapper id.
+        let out = session_spawn(&spawn_invocation(
+            &["sh", "-c", "timeout 5 cat"],
+            &[("id", id), ("agent", "claude"), ("prompt", "say pong")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let data = out.data.as_ref().unwrap();
+        assert_eq!(data["prompt"], "not-ready", "data: {data}");
+        assert!(
+            out.message.contains("not injected"),
+            "the message says what it did not do: {}",
+            out.message
+        );
+        let log_path = data["logPath"].as_str().expect("logPath once registered");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let logged = std::fs::read_to_string(log_path).unwrap_or_default();
+        assert!(!logged.contains("say pong"), "an unready target was typed at: {logged:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The readiness wait's own facts, both arms, against a staged roster —
+    /// no process, no pty. The hook arm reads the harness's own session under
+    /// the wrapper; the quiescence arm reads the wrapper's PTY log.
+    #[test]
+    fn wait_ready_reads_the_profiles_own_signal() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR"]);
+        let root = unique_stage("spawn-wait-ready");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let id = "ready-wrapper";
+        let probe = std::time::Duration::from_millis(500);
+
+        // Nothing staged at all: neither arm is ready, and neither claims to be.
+        write_stage(&sessions_path(), &SessionsFile::default()).unwrap();
+        assert!(!wait_ready("claude", id, probe), "no hook session yet");
+        assert!(!wait_ready("bash", id, probe), "no output at all");
+
+        // The hook arm: the harness's own `SessionStart` lands as a record
+        // parented to the wrapper.
+        let child = session("claude-uuid", "/w", "idle", "2026-09-26T00:00:00Z", Some(id));
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: String::new(), sessions: vec![child] },
+        )
+        .unwrap();
+        assert!(wait_ready("claude", id, probe), "the harness said it started");
+
+        // A harness that started and already ENDED is not ready to take a turn.
+        let gone = session("claude-uuid", "/w", "done", "2026-09-26T00:00:00Z", Some(id));
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: String::new(), sessions: vec![gone] },
+        )
+        .unwrap();
+        assert!(!wait_ready("claude", id, probe));
+
+        // The quiescence arm, for a harness with no hook file: the wrapper's
+        // own log appeared and then stood still.
+        let log = root.join("wrapper.log");
+        std::fs::write(&log, "shell$ ").unwrap();
+        let mut wrapper = session(id, "/w", "idle", "2026-09-26T00:00:00Z", None);
+        wrapper.log_path = Some(log.to_string_lossy().into_owned());
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: String::new(), sessions: vec![wrapper] },
+        )
+        .unwrap();
+        assert!(wait_ready("bash", id, probe), "the target settled after output");
+        // A target that never printed a byte is honestly not ready.
+        std::fs::write(&log, "").unwrap();
+        assert!(!wait_ready("bash", id, probe), "silence is not a prompt");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

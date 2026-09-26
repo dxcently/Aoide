@@ -419,6 +419,27 @@ pub(in crate::graph) struct TaskContext {
 const CHILD_TASK_ENV: &str = "AOIDE_TASK";
 const CHILD_TASK_INSTRUCTIONS_ENV: &str = "AOIDE_TASK_INSTRUCTIONS";
 
+/// Drop every harness session marker from `cmd`'s environment before exec
+/// ([`aoide_protocol::agents::session_env_markers`]): the variables that say
+/// "this process runs inside a `<harness>` session" belong to the session that
+/// spawned the child, never to the child. Inheriting them is not cosmetic —
+/// claude reads its own `CLAUDE_CODE_CHILD_SESSION` and turns transcript
+/// saving off (its TUI says so) and silently disables the project `.mcp.json`
+/// servers carried by that marker, which is the doorbell channel
+/// (`TASK-REGISTER.md` §3).
+///
+/// ONE place, because there is ONE place an agent child is exec'd
+/// ([`spawn_on_pty`]): `spawn`'s headless and windowed arms, plain `conduct`,
+/// `resurrect`'s reopen and the A2A door's remote child all reach an agent
+/// through it. The aoide parent edge is untouched by construction —
+/// `AOIDE_SESSION_ID` is not a harness marker, and `spawn_on_pty` exports the
+/// child's own value a line above this call.
+fn scrub_session_markers(cmd: &mut std::process::Command) {
+    for name in aoide_protocol::agents::session_env_markers() {
+        cmd.env_remove(name);
+    }
+}
+
 fn spawn_on_pty(
     program: &str,
     args: &[String],
@@ -453,6 +474,7 @@ fn spawn_on_pty(
     let master_fd = master;
     let mut cmd = std::process::Command::new(program);
     cmd.args(args).env("AOIDE_SESSION_ID", session_id);
+    scrub_session_markers(&mut cmd);
     if let Some(task) = task {
         cmd.env(CHILD_TASK_ENV, &task.slug);
         if let Some(path) = &task.instructions_path {
@@ -1876,6 +1898,59 @@ mod tests {
     use super::*;
     use crate::graph::session_store::upsert_session;
     use crate::graph::testutil::*;
+
+    /// `spawn_on_pty`'s env shaping, pinned without spawning anything: the
+    /// PARENT harness's session markers are removed, the aoide parent edge and
+    /// the operator's own variables are not. The command under test is built
+    /// exactly as [`spawn_on_pty`] builds its own, so a marker that slipped
+    /// back into that function would have to slip past this assertion too.
+    #[test]
+    fn spawn_on_pty_drops_the_parent_harnesss_session_markers_and_keeps_the_rest() {
+        let id = "scrub-target";
+        let mut cmd = std::process::Command::new("/bin/true");
+        cmd.args(["--flag"])
+            .env("AOIDE_SESSION_ID", id)
+            // The operator's own environment: a config home, a credential, a
+            // preference — none of them a session fact of the parent.
+            .env("CLAUDE_CONFIG_DIR", "/home/someone/.claude")
+            .env("ANTHROPIC_API_KEY", "sk-not-a-real-key")
+            .env("CLAUDE_EFFORT", "high")
+            // The parent's session facts, each of which the child must not see.
+            .env("CLAUDECODE", "1")
+            .env("CLAUDE_CODE_CHILD_SESSION", "1")
+            .env("CLAUDE_CODE_SESSION_ID", "parent-uuid")
+            .env("CLAUDE_PID", "12345");
+        scrub_session_markers(&mut cmd);
+
+        let envs: std::collections::HashMap<_, _> = cmd.get_envs().collect();
+        assert_eq!(
+            envs.get(std::ffi::OsStr::new("AOIDE_SESSION_ID")),
+            Some(&Some(std::ffi::OsStr::new(id))),
+            "the child's own aoide id is exported, never scrubbed"
+        );
+        for name in [
+            "CLAUDE_CONFIG_DIR",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_EFFORT",
+        ] {
+            assert!(
+                matches!(envs.get(std::ffi::OsStr::new(name)), Some(Some(_))),
+                "the operator's own variable was scrubbed: {name}"
+            );
+        }
+        for name in aoide_protocol::agents::session_env_markers() {
+            if name == "AOIDE_SESSION_ID" {
+                continue;
+            }
+            assert!(
+                matches!(envs.get(std::ffi::OsStr::new(name)), Some(None)),
+                "session marker not removed from the child: {name}"
+            );
+        }
+        // An unlisted name is never touched — the list is names, not a policy
+        // about anything that looks like a harness variable.
+        assert!(!envs.contains_key(std::ffi::OsStr::new("PATH")));
+    }
 
     #[test]
     fn channel_socket_path_shares_conduct_socket_paths_parent_and_differs_only_by_prefix() {

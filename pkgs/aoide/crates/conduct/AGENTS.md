@@ -1572,7 +1572,13 @@
   function too, so a call there would double-file every A2A message
   delivered into an existing session. The OTHER of these two lives OUTSIDE
   this crate, in `aoide-server`'s `spawn_inject_prompt` (`a2a.rs`) — a
-  brand-new A2A-spawned session's first turn is typed before that session
+  brand-new A2A-spawned session's first turn is typed only once that session
+  is READY (`aoide_conduct::graph::wait_ready`, the same gate `spawn
+  --prompt` and `resurrect`'s restore delivery pass), never at the instant its
+  socket appears: a bound socket is a wrapper that registered, not a harness
+  that started — and with no readiness within the budget it is typed at by
+  nothing and files no receipt, so the sender's letter stays unacknowledged
+  rather than acknowledged by a turn that never ran. It is typed before that session
   has a `SessionRecord` at all, so it can never reach
   `deliver_local`/`session_send` and has to file itself (see
   `aoide_storage::mail`'s module doc for the full two-writer reasoning).

@@ -148,6 +148,25 @@ Everything the bridge knows about a specific agent harness lives on an
   `${KIMI_CODE_HOME:-~/.kimi-code}/config.toml`, TOML; pi: a generated
   extension script, `~/.pi/agent/extensions/aoide-pi-session.ts`,
   declarative).
+- `readiness` (`Readiness`) — WHICH signal says a just-launched process of this
+  harness is ready to take a turn, the fact every first-turn injection waits on
+  before typing anything (`spawn --prompt`, `resurrect`'s restore delivery, the
+  A2A door's opening turn): `Hook` for the three harnesses that fire
+  `SessionStart` (the hook door records it as the harness's own session under
+  the wrapper), `OutputQuiescence` for a harness with no hook file at all
+  (`eidolon`) — output arrived, then stopped.
+- `session_env_markers` — the variables this harness injects into the processes
+  it launches that mean "you are running inside a `<harness>` session" (claude:
+  `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, the
+  messaging token/socket, the bridge session id, `CLAUDE_PID`, the
+  entrypoint). Names, never prefixes, so a user's own `CLAUDE_CONFIG_DIR` or
+  credentials are never in scope; a harness whose markers have not been
+  established from its own material lists none. `session_env_markers()` is the
+  union across the table — the one list a launch path drops from a child's
+  environment before exec, because the markers name the PARENT session, and an
+  inherited `CLAUDE_CODE_CHILD_SESSION` is what makes a child claude turn
+  transcript saving off and silently disable the project `.mcp.json` doorbell
+  channel (`TASK-REGISTER.md` §3).
 
 Every agent-aware consumer dispatches through the profile rather than
 hardcoding a harness: the hook door (`--agent` → `map_hook` and the

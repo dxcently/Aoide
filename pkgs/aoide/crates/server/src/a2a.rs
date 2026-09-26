@@ -1550,15 +1550,28 @@ fn do_inject(
     }
 }
 
-/// Best-effort: connect to a just-spawned conducted session's control socket
-/// and type `prompt` as its first turn, retrying while the child hasn't
-/// bound it yet — the same connect-and-retry shape
+/// Best-effort: wait for a just-spawned conducted session to be READY to take
+/// a turn, then connect to its control socket and type `prompt` as its first
+/// turn — the same connect-and-retry shape
 /// `aoide_conduct::graph::conduct`'s own PTY-injection test uses (there,
 /// proving the production socket-write path; here, actually driving it). A
 /// missed connect after the retry budget is tolerated: the session still
 /// exists and is `conductable`, just without its opening turn typed in — a
 /// client can always follow up with a plain `send`/another
 /// `message/send`.
+///
+/// **Readiness comes FIRST** ([`aoide_conduct::graph::wait_ready`], whose fact
+/// is the target harness's own `AgentProfile::readiness`), because a bound
+/// socket is not a started agent: this door used to type at the socket the
+/// instant it appeared, which for a harness still drawing its TUI put the
+/// opening turn into a composer that was not there yet and dropped its submit
+/// keystroke — the live 2026-09-26 defect `spawn --prompt` fixed. A target
+/// that never becomes ready within `ready_budget` is typed at by NOTHING and
+/// files NO receipt: an unacknowledged letter that the sender can retry, never
+/// a receipt for a turn that never started. `ready_budget` is a parameter, not
+/// a hardcoded read of the constant, so a test can pass an observable one
+/// directly — [`do_spawn`] always passes
+/// [`aoide_conduct::graph::READY_BUDGET`].
 ///
 /// **Deliberately a RAW socket write, not `session_send`/`deliver_local`.**
 /// `session_send` requires a `SessionRecord` already present in
@@ -1580,7 +1593,7 @@ fn do_inject(
 /// Best-effort, same tolerance as the rest of this function — a write error
 /// above is already swallowed (the retry loop only confirms a bound socket,
 /// never delivery), so a failed mailbase write is no less tolerated.
-fn spawn_inject_prompt(id: &str, agent_cmd: &str, prompt: &str) {
+fn spawn_inject_prompt(id: &str, agent_cmd: &str, prompt: &str, ready_budget: Duration) {
     if prompt.is_empty() {
         return;
     }
@@ -1595,6 +1608,16 @@ fn spawn_inject_prompt(id: &str, agent_cmd: &str, prompt: &str) {
     // taught one.
     let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
     if aoide_conduct::graph::program_is_a_shell(&configured) {
+        return;
+    }
+    // WHICH harness the configured command IS decides what readiness means;
+    // an unconfigured/unknown program has no profile and takes the hookless
+    // answer, the same fallback every other profile lookup in the tree takes.
+    let agent = configured
+        .first()
+        .map(|program| aoide_conduct::graph::command_basename(program))
+        .unwrap_or_default();
+    if !aoide_conduct::graph::wait_ready(&agent, id, ready_budget) {
         return;
     }
     let socket = aoide_conduct::graph::conduct_socket_path(id);
@@ -2047,7 +2070,7 @@ fn do_spawn(
                 std::thread::spawn(move || stamp_spawn_provenance(&id, &origin, remote_parent));
             }
             // Best-effort first-turn injection — see the doc comment above.
-            spawn_inject_prompt(&id, agent_cmd, prompt);
+            spawn_inject_prompt(&id, agent_cmd, prompt, aoide_conduct::graph::READY_BUDGET);
             let _ = audit(
                 audit_log,
                 Door::A2a,
@@ -8785,6 +8808,28 @@ mod tests {
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
 
         let id = "spawn-inject-target";
+        // READINESS comes before the write, so this test stages the fact the
+        // hook door would have written: the target harness's own session,
+        // parented to the wrapper. Without it the gate refuses and nothing is
+        // typed — the same staged-roster shape `wait_ready` reads live.
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".to_string(),
+                sessions: vec![SessionRecord {
+                    session_id: "claude-child".to_string(),
+                    state: "idle".to_string(),
+                    parent_session_id: Some(id.to_string()),
+                    agent: "claude".to_string(),
+                    ..Default::default()
+                }],
+            },
+        )
+        .unwrap();
         let socket = aoide_conduct::graph::conduct_socket_path(id);
         std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
         let listener = UnixListener::bind(&socket).unwrap();
@@ -8797,7 +8842,7 @@ mod tests {
             buf
         });
 
-        spawn_inject_prompt(id, "claude", "hello new session");
+        spawn_inject_prompt(id, "claude", "hello new session", Duration::from_millis(500));
         let got = acc.join().unwrap();
         assert_eq!(String::from_utf8(got).unwrap(), "hello new session\n", "--submit's newline, same as do_spawn's payload");
 
@@ -8808,6 +8853,10 @@ mod tests {
         assert_eq!(entries[0].envelope.header.from.name, "", "no caller identity to offer — #51's scope");
 
         let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
         match saved_state {
             Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
             None => std::env::remove_var("AOIDE_STATE_DIR"),
@@ -8833,7 +8882,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
 
-        spawn_inject_prompt("whatever-id", "claude", "");
+        spawn_inject_prompt("whatever-id", "claude", "", Duration::from_millis(50));
         assert!(aoide_storage::mail::read_base().unwrap().is_empty());
 
         let _ = std::fs::remove_dir_all(&root);

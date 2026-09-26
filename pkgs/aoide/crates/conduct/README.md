@@ -69,7 +69,12 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   `foot sh -c '{cmd}'`) — pure, unit-tested, never a real terminal spawned in
   a test. Taught errors, no process ever touched: no `$AOIDE_TERMINAL` set,
   or neither `$WAYLAND_DISPLAY` nor `$DISPLAY` present (a headless host,
-  steered back to plain `spawn`). `--undying` (P-C3, durable-sessions
+  steered back to plain `spawn`). `--prompt` is typed only once the target is
+  READY to take a turn (`wait_ready`: the harness's own `SessionStart` for
+  claude/kimi/pi, PTY-output quiescence for a hookless target — the same gate
+  `resurrect`'s restore delivery and `aoide-server`'s
+  `a2a::spawn_inject_prompt` pass; a target that never becomes ready reports
+  `prompt: not-ready` and is typed at by nothing). `--undying` (P-C3, durable-sessions
   plan) marks the spawned id in `state/undying.json` once — and only once —
   the registration wait actually succeeds; an id that never registers has no
   live session behind it, so nothing is marked.

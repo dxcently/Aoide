@@ -184,6 +184,15 @@ pub use self::spawn::build_conduct_args;
 // predicate (rather than writing a second copy of the message in the server)
 // is what closes that, and is why both are `pub`.
 pub use self::spawn::{live_run_for, live_run_refusal};
+// `wait_ready`/`READY_BUDGET` — WHEN a just-launched target may be typed at,
+// and for how long the tree waits for it (the per-harness fact is
+// `AgentProfile::readiness`). `pub` for the third first-turn caller outside
+// this crate: `aoide-server`'s `a2a::spawn_inject_prompt`, whose opening turn
+// would otherwise be the one injection path with no readiness gate at all.
+pub use self::spawn::{wait_ready, READY_BUDGET};
+// `command_basename` — the agent-name default a spawned command's own
+// `argv[0]` gives (spawn.rs's copy, widened for the `pub` caller below).
+pub use self::spawn::command_basename;
 // `clean_line` — the ONE sanitizer every surface that prints a peer's own
 // bytes uses, now including `aoide-server`'s A2A door (a slug echoed in a
 // refusal, P-RSA S10 review, L6). Never a second table of "unsafe" down there.
