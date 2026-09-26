@@ -130,6 +130,19 @@ fn ack_marker_path(node: &str, acked_msgid: &str) -> PathBuf {
 #[serde(rename_all = "camelCase")]
 pub struct OutboxEntry {
     pub envelope: Envelope,
+    /// The **sealed container** this entry goes out as (P-SEAL,
+    /// `docs/architecture/HTTPS-MESH-API.md`), or absent for an entry
+    /// spooled before the destination published a binding — the per-peer
+    /// upgrade path, which sends the plaintext v1 envelope over the direct
+    /// SSH lane and nothing else. Stored VERBATIM beside the envelope so a
+    /// retry resends the **container** byte-identical, never re-sealing
+    /// (a re-seal would mint a fresh ephemeral key and a different `ct`).
+    /// The envelope stays on the entry regardless: it is what the local
+    /// ack/retire lookups key on (`remove_entry` by `msgid`, `retire_by_ack`
+    /// by `from.node`), and for a sealed entry it is REDACTED — a redacted
+    /// envelope is never sent anywhere, the container is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<crate::seal::Container>,
     /// This entry's own delivery flavor (MAIL.md "Outbox"): [`FLAVOR_NOW`]
     /// is attempted on every drain, [`FLAVOR_HOLD`] is never attempted by a
     /// drain at all — it leaves only through the destination's own
@@ -163,7 +176,15 @@ impl OutboxEntry {
     /// A fresh entry for a just-minted envelope — zero tries, no recorded
     /// outcome yet, [`FLAVOR_NOW`]: the drain attempts it.
     pub fn fresh(envelope: Envelope) -> Self {
-        Self { envelope, flavor: FLAVOR_NOW.to_string(), tries: 0, last_try_at: String::new(), last_outcome: String::new(), refused: false }
+        Self {
+            envelope,
+            container: None,
+            flavor: FLAVOR_NOW.to_string(),
+            tries: 0,
+            last_try_at: String::new(),
+            last_outcome: String::new(),
+            refused: false,
+        }
     }
 
     /// The same thing, held: [`FLAVOR_HOLD`] — a drain never attempts it, so
@@ -173,6 +194,42 @@ impl OutboxEntry {
         Self { flavor: FLAVOR_HOLD.to_string(), ..Self::fresh(envelope) }
     }
 
+    /// A fresh entry carrying the sealed container it goes out as. The
+    /// caller builds the container at MINT ([`crate::seal::seal_envelope`]),
+    /// never at dial time, so what is spooled is what is sent.
+    ///
+    /// **The spooled envelope is redacted.** `HTTPS-MESH-API.md`'s P-SEAL
+    /// test list requires the sender's outbox to hold "no letter bytes,
+    /// subject, body or mailbox names for a destination that holds a
+    /// binding", and the plaintext envelope is exactly where a body, a
+    /// subject (inside `text`, as the `AOIDE-LETTER/1` content) and two
+    /// mailbox names live. So a sealed entry keeps only what the LOCAL
+    /// bookkeeping reads — `msgid`, the envelope `kind`, `from.node`,
+    /// `to.node`, `mintedAt` and the origin signature — and empties `text`
+    /// and both mailbox names. What the letter actually said is inside `ct`
+    /// and nowhere else on this disk.
+    pub fn sealed(envelope: Envelope, container: crate::seal::Container) -> Self {
+        Self {
+            envelope: redacted_for_seal(envelope),
+            container: Some(container),
+            flavor: FLAVOR_NOW.to_string(),
+            tries: 0,
+            last_try_at: String::new(),
+            last_outcome: String::new(),
+            refused: false,
+        }
+    }
+
+    /// [`Self::sealed`], held: the relay-first flavor for a sealed letter.
+    pub fn sealed_held(envelope: Envelope, container: crate::seal::Container) -> Self {
+        Self { flavor: FLAVOR_HOLD.to_string(), ..Self::sealed(envelope, container) }
+    }
+
+    /// What this entry hands the far end on a deposit: the container when
+    /// there is one, the plaintext envelope otherwise.
+    pub fn is_sealed(&self) -> bool {
+        self.container.is_some()
+    }
     /// This entry is [`FLAVOR_HOLD`] — the one flavor a drain must skip.
     /// Compared as an exact match against `hold` rather than to `now`, so any
     /// other value (absent, empty, or a future flavor) counts as attemptable.
@@ -190,6 +247,27 @@ impl OutboxEntry {
     }
 }
 
+/// Strip everything from an envelope that a sealed spool must not hold.
+///
+/// `text` is emptied — it carries the body and, under `AOIDE-LETTER/1`, the
+/// subject too — and both mailbox names go with it. `msgid`, the envelope
+/// `kind`, `from.node`, `to.node`, `minted_at`, `origin_mesh`, the version
+/// and the signature all stay, because that is exactly what the local
+/// bookkeeping reads: `remove_entry` and the entry's own file name key on
+/// `msgid`, `retire_by_ack` on `from.node`, `list_entries` sorts on
+/// `minted_at`, the receipt arm reads `kind`, and `mail outbox` renders
+/// `to.node`/`type`/`mintedAt`.
+///
+/// A redacted envelope no longer verifies, and nothing ever asks it to: it
+/// is not sent anywhere. The container is, and it carries the whole letter
+/// inside `ct`.
+fn redacted_for_seal(mut envelope: Envelope) -> Envelope {
+    envelope.text.clear();
+    envelope.header.from.name.clear();
+    envelope.header.to.name.clear();
+    envelope
+}
+
 /// One node's own outbound-link backoff state — present ONLY while a
 /// backoff is active; ABSENT means "not held off," the ordinary state for
 /// a link that has never failed, or has just succeeded (spec: "clears on
@@ -205,6 +283,134 @@ pub struct LinkState {
     /// ([`is_held_off`]).
     pub next_attempt_at: String,
     pub last_outcome: String,
+}
+
+/// What a hand-over decision came to. **Four states, not two** (H2, the
+/// re-review): `reseal_entry` used to answer `Ok(None)` for BOTH "this
+/// destination has published no binding" and "a binding is held and is not
+/// usable right now", and both callers then sent the entry as plaintext —
+/// so an expired binding, or a peer whose clock runs ahead of ours, put a
+/// letter in the clear to a destination that HAS a binding. That is the same
+/// class H1 was fixed for, one condition narrower.
+pub enum Reseal {
+    /// The destination has published **no binding at all**. This is the
+    /// per-peer upgrade path — the one legitimate plaintext send any node
+    /// still makes.
+    NoBinding,
+    /// The entry is already sealed. `None` means nothing needs writing.
+    Sealed(Option<Box<OutboxEntry>>),
+    /// The entry was sealed just now; the caller persists this entry before
+    /// it hands it over.
+    FreshlySealed(Box<OutboxEntry>),
+    /// A binding is held and is **not usable now** (expired, inside its
+    /// `not_before`, or naming a suite this build does not accept). `Some`
+    /// means the caller persists this (parked) entry; either way the entry is
+    /// **skipped, never sent in the clear**.
+    NotUsable(Option<Box<OutboxEntry>>),
+}
+
+/// Re-seal one spooled entry, now that its destination's binding has
+/// arrived (P-SEAL's per-peer upgrade, `HTTPS-MESH-API.md` "Migration and
+/// coexistence": "a node seals every letter to a destination whose signed
+/// binding it holds, and never sends that destination plaintext again").
+///
+/// **Deciding at mint is not enough.** A letter spooled before the
+/// destination published a binding sits in the spool as a plaintext entry,
+/// and without this it would be delivered as one — in the very same drain
+/// pass that learned the binding. So every pass that is about to hand an
+/// entry over asks this first.
+///
+/// The upgraded entry keeps the original's delivery bookkeeping (`flavor`,
+/// `tries`, `last_try_at`, `last_outcome`) — an upgrade is not an attempt —
+/// and **un-parks** an entry the unusable-binding arm had parked, because a
+/// binding that has become usable is exactly what that parking waited for.
+/// The parked `last_outcome` is left in place: it records what the last
+/// attempt found, which is still true.
+pub fn reseal_entry(node: &str, entry: &OutboxEntry, now: &str) -> Result<Reseal, String> {
+    if entry.container.is_some() {
+        return Ok(Reseal::Sealed(None));
+    }
+    if crate::seal::binding_for(node).is_none() {
+        return Ok(Reseal::NoBinding);
+    }
+    let Some(binding) = crate::seal::usable_binding_for(node, now) else {
+        // A binding IS on record and is not usable now. Park, never plaintext
+        // — this is the arm H2 was about. An already-parked entry needs no
+        // rewrite (its reason is still true); a live one is parked here so it
+        // stops being dialed and the operator sees why.
+        if entry.refused {
+            return Ok(Reseal::NotUsable(None));
+        }
+        let mut parked = entry.clone();
+        parked.refused = true;
+        parked.last_try_at = now.to_string();
+        parked.last_outcome =
+            "parked: the destination holds a binding that is not usable now".to_string();
+        return Ok(Reseal::NotUsable(Some(Box::new(parked))));
+    };
+    let container = crate::seal::seal_envelope(
+        &entry.envelope,
+        &binding,
+        &entry.envelope.header.origin_mesh,
+        &entry.envelope.header.origin_mesh,
+        node,
+        now,
+    )?;
+    let mut upgraded = OutboxEntry::sealed(entry.envelope.clone(), container);
+    upgraded.flavor = entry.flavor.clone();
+    upgraded.tries = entry.tries;
+    upgraded.last_try_at = entry.last_try_at.clone();
+    upgraded.last_outcome = entry.last_outcome.clone();
+    upgraded.refused = false;
+    Ok(Reseal::FreshlySealed(Box::new(upgraded)))
+}
+
+/// What one entry hands over on a **poll**, decided against the spool as it
+/// is NOW rather than against the snapshot `poll_payloads` offered.
+///
+/// The snapshot is a decision about *which* entries may be offered; it is not
+/// a payload. Between the two a drain can retire the entry (an ack arrived),
+/// or seal it concurrently — and handing over the snapshot's envelope either
+/// way would put a stale plaintext on the wire for a destination that holds a
+/// binding. So the poll re-reads by `msgid` and this is the answer.
+pub enum HandOver {
+    Container(Box<crate::seal::Container>),
+    Envelope(Box<crate::mail::Envelope>),
+    /// Hand over nothing: the entry is gone, or a binding is held and is not
+    /// usable now.
+    Nothing,
+}
+
+/// Decide one entry's hand-over against the live spool (H2's poll half).
+pub fn hand_over(node: &str, msgid: &str) -> Result<HandOver, String> {
+    let now = crate::time::now_iso_utc();
+    let Some(current) = list_entries(node)?.into_iter().find(|e| e.envelope.msgid == msgid) else {
+        return Ok(HandOver::Nothing);
+    };
+    match reseal_entry(node, &current, &now)? {
+        Reseal::NoBinding => Ok(HandOver::Envelope(Box::new(current.envelope))),
+        Reseal::Sealed(None) => match current.container {
+            Some(container) => Ok(HandOver::Container(Box::new(container))),
+            // Unreachable by construction — `Sealed(None)` means the entry
+            // has one — and if it ever were, handing over nothing is the safe
+            // direction.
+            None => Ok(HandOver::Nothing),
+        },
+        Reseal::Sealed(Some(entry)) | Reseal::FreshlySealed(entry) => {
+            let container = entry.container.clone();
+            write_entry(node, &entry)?;
+            match container {
+                Some(container) => Ok(HandOver::Container(Box::new(container))),
+                None => Ok(HandOver::Nothing),
+            }
+        }
+        Reseal::NotUsable(parked) => {
+            if let Some(entry) = parked {
+                write_entry(node, &entry)?;
+            }
+            Ok(HandOver::Nothing)
+        }
+    }
 }
 
 /// This module's own fail-closed lock wrapper — see the module doc's "two
@@ -421,12 +627,24 @@ pub fn list_entries(node: &str) -> Result<Vec<OutboxEntry>, String> {
 /// changes. Capping is SAFE here precisely because retirement is by ack: the
 /// poller acks what it files, those entries retire, and the next poll gets
 /// the next batch, so a large spool drains in bounded steps instead of never.
-pub fn poll_entries(node: &str) -> Result<Vec<Envelope>, String> {
+/// The hand-over a poll answers with: every entry the node may take, its
+/// sealed container (when it has one) beside its envelope.
+///
+/// The same shape and the same position (after the filter, so a backlog of
+/// held entries cannot be spent twice), for a different reason: a poll's
+/// answer is ONE JSON array of whole envelopes, and a hub holding more than
+/// `aoide_client`'s `MAX_RESPONSE_BYTES` (20 MiB) of held mail for one node
+/// would answer with a body the poller refuses outright — a permanent
+/// head-of-line stall that no retry could clear, since nothing at the hub
+/// changes. Capping is SAFE here precisely because retirement is by ack: the
+/// poller acks what it files, those entries retire, and the next poll gets
+/// the next batch, so a large spool drains in bounded steps instead of never.
+pub fn poll_payloads(node: &str) -> Result<Vec<(Option<crate::seal::Container>, Envelope)>, String> {
     Ok(list_entries(node)?
         .into_iter()
         .filter(pollable)
         .take(POLL_BATCH_CAP)
-        .map(|entry| entry.envelope)
+        .map(|entry| (entry.container, entry.envelope))
         .collect())
 }
 
@@ -434,11 +652,11 @@ pub fn poll_entries(node: &str) -> Result<Vec<Envelope>, String> {
 /// batch size (`aoide_client::mail_wire::DRAIN_BATCH_CAP`, 50), re-derived
 /// here rather than imported for the reason [`DRAIN_BACKOFF_FLOOR_SECS`]'s
 /// own doc gives: `storage` sits below `client` in the crate DAG. See
-/// [`poll_entries`] for why a poll can afford to bound itself and why
+/// [`poll_payloads`] for why a poll can afford to bound itself and why
 /// bounding it is what keeps a big spool draining instead of stalling.
 pub const POLL_BATCH_CAP: usize = 50;
 
-/// Is one spooled entry offered to the node's own poll? See [`poll_entries`]
+/// Is one spooled entry offered to the node's own poll? See [`poll_payloads`]
 /// for the rule; held out-of-band so a test can pin each arm without a
 /// filesystem.
 fn pollable(entry: &OutboxEntry) -> bool {
@@ -1240,7 +1458,7 @@ mod tests {
     /// drain owns it), and an entry whose last attempt reached the peer never
     /// (it already landed; a re-offer is the drain's business, not a poll's).
     #[test]
-    fn poll_entries_offers_held_entries_and_failing_now_entries_only() {
+    fn poll_payloads_offers_held_entries_and_failing_now_entries_only() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("outbox-poll-entries");
 
@@ -1275,7 +1493,7 @@ mod tests {
         assert!(pollable(&refused), "a parked entry's own attempts are failing too — the poller asking for its mail is a new fact");
         assert!(!pollable(&accepted), "an entry whose last attempt reached the peer is not failing");
 
-        let offered: Vec<String> = poll_entries("there").unwrap().into_iter().map(|e| e.msgid).collect();
+        let offered: Vec<String> = poll_payloads("there").unwrap().into_iter().map(|(_, e)| e.msgid).collect();
         assert_eq!(
             offered,
             vec!["msg-held".to_string(), "msg-transport".to_string(), "msg-refused".to_string()],
@@ -1287,7 +1505,7 @@ mod tests {
         assert_eq!(after.len(), 5, "polling retires nothing");
         assert_eq!(after.iter().find(|e| e.envelope.msgid == "msg-transport").unwrap().tries, 3, "a poll records no attempt");
 
-        assert!(poll_entries("nobody").unwrap().is_empty(), "a node with no spool at all is an empty poll, never an error");
+        assert!(poll_payloads("nobody").unwrap().is_empty(), "a node with no spool at all is an empty poll, never an error");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1300,7 +1518,7 @@ mod tests {
     /// would answer with a body the poller refuses outright: a stall no retry
     /// could clear, since nothing at the hub ever changes.
     #[test]
-    fn poll_entries_is_bounded_and_the_next_poll_advances() {
+    fn poll_payloads_is_bounded_and_the_next_poll_advances() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("outbox-poll-batch-cap");
 
@@ -1313,9 +1531,9 @@ mod tests {
             write_entry("there", &entry).unwrap();
         }
 
-        let first = poll_entries("there").unwrap();
+        let first = poll_payloads("there").unwrap();
         assert_eq!(first.len(), POLL_BATCH_CAP, "one poll hands over at most the batch cap");
-        let handed: Vec<String> = first.into_iter().map(|e| e.msgid).collect();
+        let handed: Vec<String> = first.into_iter().map(|(_, e)| e.msgid).collect();
         assert_eq!(handed[0], expected[0], "oldest first: the batch is the head of the spool, never a random slice");
 
         // What the poller's acks do: the handed-over entries retire. The next
@@ -1323,13 +1541,144 @@ mod tests {
         for msgid in &handed {
             assert!(remove_entry("there", msgid).unwrap());
         }
-        let second = poll_entries("there").unwrap();
+        let second = poll_payloads("there").unwrap();
         assert_eq!(second.len(), total - POLL_BATCH_CAP, "the next poll gets what is left");
         assert!(
-            second.iter().all(|e| !handed.contains(&e.msgid)),
+            second.iter().all(|(_, e)| !handed.contains(&e.msgid)),
             "and never re-offers what already retired"
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// P-SEAL: a sealed entry's spool holds no letter bytes, and every reader of
+/// the entry still works from the container alone.
+#[cfg(test)]
+mod sealed_spool_tests {
+    use super::*;
+    use aoide_test_support::EnvSaver;
+
+    fn env(dir: &std::path::Path) {
+        std::env::set_var("AOIDE_STATE_DIR", dir);
+        std::env::set_var("AOIDE_ROOT", dir);
+    }
+
+    /// A sealed entry for a real container: this node sealed to itself, so
+    /// the container is a genuine one rather than a hand-built stub.
+    fn sealed_entry(body: &str) -> OutboxEntry {
+        let me = crate::display::local_host_name();
+        let kp = crate::identity::load_or_mint().unwrap().0;
+        let mut nodes = crate::node_store::load_nodes();
+        crate::node_store::upsert_paired_node(
+            &mut nodes,
+            &me,
+            "ssh://self",
+            &kp.info().pubkey_hex,
+            &crate::time::now_iso_utc(),
+            &["message".to_string()],
+        );
+        crate::node_store::save_nodes(&nodes).unwrap();
+        let binding = crate::seal::publish_binding().unwrap();
+        let mut envelope = crate::mail::mint_outbound_letter("alice", &me, "bob", body).unwrap();
+        envelope.header.from.name = "alice".to_string();
+        let container = crate::seal::seal_envelope(
+            &envelope,
+            &binding,
+            "",
+            "",
+            &me,
+            &crate::time::now_iso_utc(),
+        )
+        .unwrap();
+        OutboxEntry::sealed(envelope, container)
+    }
+
+    #[test]
+    fn a_sealed_spool_file_holds_no_subject_body_or_mailbox_name() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        env(&aoide_test_support::unique_tmp("outbox-sealed-redaction"));
+
+        let body = "CANARY-BODY-PLUGH-1234567890";
+        let entry = sealed_entry(body);
+        let msgid = entry.envelope.msgid.clone();
+        write_entry("elsewhere", &entry).unwrap();
+
+        let raw = std::fs::read_to_string(node_dir("elsewhere").join(format!("{msgid}.json"))).unwrap();
+        assert!(!raw.contains(body), "no body in the spool: {raw}");
+        assert!(!raw.contains("alice"), "no sender mailbox name: {raw}");
+        assert!(!raw.contains("bob"), "no recipient mailbox name: {raw}");
+        // And the container — the thing that DOES go on the wire — is there.
+        assert!(raw.contains("\"container\""), "the sealed container is what the spool holds: {raw}");
+        // The body is recoverable only through the container, which is the
+        // point: read it back and open it.
+        let reread = list_entries("elsewhere").unwrap();
+        assert_eq!(reread.len(), 1);
+        let container = reread[0].container.clone().expect("still sealed");
+        match crate::seal::deposit_container(&container).unwrap() {
+            crate::seal::ContainerOutcome::Opened { envelope: opened, .. } => {
+                assert_eq!(opened.text, body, "the body survived, inside ct");
+            }
+            other => panic!("the stored container opens: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn every_reader_of_a_redacted_entry_still_works_from_the_container_alone() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        env(&aoide_test_support::unique_tmp("outbox-sealed-readers"));
+
+        let entry = sealed_entry("CANARY-BODY-READERS-0001");
+        let msgid = entry.envelope.msgid.clone();
+        assert_eq!(entry.envelope.header.kind, crate::mail::ENTRY_TYPE_LETTER);
+        assert!(entry.is_sealed());
+        write_entry("elsewhere", &entry).unwrap();
+
+        // list: msgid + kind + mintedAt are all still there, so the drain's
+        // ordering, the receipt arm and `mail outbox` keep working.
+        let listed = list_entries("elsewhere").unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].envelope.msgid, msgid);
+        assert_eq!(listed[0].envelope.header.kind, crate::mail::ENTRY_TYPE_LETTER);
+        assert!(!listed[0].envelope.header.minted_at.is_empty(), "mintedAt still sorts the spool");
+        assert!(listed[0].container.is_some(), "and the container rides beside it");
+
+        // poll: the hand-over keeps the pair, and the door can still tell a
+        // sealed entry from a plaintext one.
+        // A fresh `now` entry is not offered by a poll at all (the offer rule
+        // is held-or-failing); a HELD sealed one is, and it is offered as a
+        // container rather than as an envelope.
+        let held = sealed_entry("CANARY-BODY-READERS-HELD");
+        let mut held = held;
+        held.flavor = FLAVOR_HOLD.to_string();
+        write_entry("elsewhere", &held).unwrap();
+        let payloads = poll_payloads("elsewhere").unwrap();
+        let sealed_offer = payloads.iter().find(|(c, e)| c.is_some() && e.msgid == held.envelope.msgid);
+        assert!(sealed_offer.is_some(), "a held sealed entry is offered as a container");
+        remove_entry("elsewhere", &held.envelope.msgid).unwrap();
+        assert_eq!(poll_payloads("elsewhere").unwrap().len(), 0, "a `now` entry that has never failed is not offered");
+
+        // retire: `retire_by_ack` reads the ACK (which never crosses this
+        // spool) for `from.node` and `text`, then looks the entry up by that
+        // msgid through `remove_entry`. Both of the fields it needs from the
+        // SPOOLED side — the msgid and `from.node` — survive redaction, which
+        // is what this asserts; the ack side is covered by its own tests.
+        let spooled = &listed[0];
+        assert_eq!(spooled.envelope.msgid, msgid, "the msgid a retire keys on");
+        assert_eq!(spooled.envelope.header.from.node, crate::display::local_host_name(), "the from.node a retire keys on");
+        assert!(
+            spooled.envelope.header.from.name.is_empty(),
+            "and the mailbox name is gone from the spool"
+        );
+
+        // remove: the one remaining reader, by msgid.
+        let second = sealed_entry("CANARY-BODY-READERS-0002");
+        let second_msgid = second.envelope.msgid.clone();
+        write_entry("elsewhere", &second).unwrap();
+        assert!(remove_entry("elsewhere", &second_msgid).unwrap());
+        let left: Vec<String> = list_entries("elsewhere").unwrap().into_iter().map(|e| e.envelope.msgid).collect();
+        assert_eq!(left, vec![msgid.clone()], "only the first entry is left, by its msgid");
     }
 }

@@ -458,6 +458,19 @@ pub struct InboundPairingRequest {
     /// discipline every other field in this struct already holds.
     #[serde(default)]
     pub approved: bool,
+    /// The requester's self-signed age key binding (P-SEAL), when it sent
+    /// one. The ceremony is one of the two carriages `HTTPS-MESH-API.md`
+    /// gives the binding (the other is `aoide/binding`), and it is the one
+    /// that reaches a pair that has not yet exchanged a single letter.
+    ///
+    /// `Option`, and `#[serde(default)]`, because a requester running an
+    /// older aoide sends no such field at all: it is absent from the params,
+    /// absent here, and the pairing still completes exactly as before — the
+    /// two nodes simply seal nothing to each other until one of them
+    /// publishes a binding over the door. That is the per-peer upgrade path,
+    /// and a ceremony that refused a bindingless request would break it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<crate::seal::Binding>,
     /// Typed-code approval (task #120 P3): how many WRONG pairing codes have
     /// been entered against this entry so far — interactive prompt
     /// mismatches and scripted `--code` mismatches both count, cumulatively,
@@ -607,10 +620,47 @@ pub fn park_inbound(
             approved: false,
             tries: 0,
             self_via: self_via.map(|s| s.to_string()),
+            binding: None,
         };
         requests.push(entry.clone());
         save_inbound(&requests)?;
         Ok((entry, evicted_id))
+    })
+}
+
+/// Attach the requester's self-signed age binding to an already-parked
+/// inbound request (P-SEAL).
+///
+/// A separate writer, not a `park_inbound` argument, for the reason
+/// [`set_outbound_binding`] is separate from [`mark_outbound_awaiting_confirm`]:
+/// the binding is optional enrichment that must never be able to fail a
+/// ceremony, and threading it through parking would make every caller that
+/// has none — which is every caller older than P-SEAL, and every test —
+/// pay for it. An unknown or expired id is a no-op, not an error.
+///
+/// **A stored binding is never replaced by an older or equal-generation
+/// one.** That rule lives in [`crate::seal::learn_binding`], which is what
+/// reads this field at commit time; this function only records what
+/// arrived.
+pub fn set_inbound_binding(id: &str, binding: &crate::seal::Binding) -> Result<(), String> {
+    with_stage_lock(|| {
+        let now_epoch = crate::time::parse_iso_utc(&crate::time::now_iso_utc()).unwrap_or(0);
+        let (mut requests, _expired) = sweep(load_inbound_raw(), now_epoch);
+        let Some(entry) = requests.iter_mut().find(|r| r.id == id) else {
+            return Ok(());
+        };
+        // **Never backwards.** A binding that is not NEWER than what this
+        // entry already carries is dropped here, so a replay cannot talk
+        // the parked record back to a superseded generation while it waits
+        // for approval. `learn_binding` applies the same rule again at
+        // commit time — this is the carriage's half of it, and having both
+        // means neither the wait nor the commit is the single place the
+        // rule lives.
+        if entry.binding.as_ref().map(|b| b.generation >= binding.generation).unwrap_or(false) {
+            return Ok(());
+        }
+        entry.binding = Some(binding.clone());
+        save_inbound(&requests)
     })
 }
 
@@ -869,6 +919,14 @@ pub struct OutboundPairingRequest {
     /// discipline [`InboundPairingRequest::tries`] holds.
     #[serde(default)]
     pub tries: u32,
+    /// The approver's self-signed age key binding (P-SEAL), as released by
+    /// its `aoide/pairPoll` answer — the requester's half of the ceremony's
+    /// binding carriage. `#[serde(default)]` + `None` for a request against
+    /// an approver running an older aoide, which releases no such field;
+    /// the pairing completes and neither side seals anything to the other
+    /// until one publishes a binding over `aoide/binding`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<crate::seal::Binding>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -907,8 +965,7 @@ fn save_outbound(requests: &[OutboundPairingRequest]) -> Result<(), String> {
 /// one live outbound entry per far identity, so a re-request retires this
 /// instance's own stale entry in the same write); operator-created, no cap
 /// needed either way.
-pub fn park_outbound(entry: OutboundPairingRequest) -> Result<(), String> {
-    with_stage_lock(move || {
+pub fn park_outbound(entry: OutboundPairingRequest) -> Result<(), String> {    with_stage_lock(move || {
         let mut requests = load_outbound_raw();
         requests.retain(|r| r.id != entry.id && !same_pubkey(&r.pubkey_hex, &entry.pubkey_hex));
         requests.push(entry);
@@ -994,6 +1051,41 @@ pub fn mark_outbound_awaiting_confirm(id: &str, pubkey_hex: &str, now_epoch: i64
             return Err(ConfirmMarkError::Io(e));
         }
         Ok(out)
+    })
+}
+
+/// Record the age binding the approver released alongside its own pubkey
+/// (P-SEAL). A separate writer from [`mark_outbound_awaiting_confirm`], for
+/// the reason [`crate::node_store::set_node_via`] is separate from
+/// `upsert_paired_node`: the binding is optional enrichment that must never
+/// be able to fail a ceremony. An unknown or already-resolved id is a
+/// no-op, not an error, and so is a binding this instance chooses not to
+/// store — the pairing itself is already done by then.
+///
+/// **A stored binding is never replaced by an older or equal-generation
+/// one.** `learn_binding` owns that rule (it refuses `stale-binding`), and
+/// its refusal is ignored here on purpose: a peer that releases a
+/// superseded binding must not thereby undo a newer one this instance
+/// already holds, and it must not fail the pairing either.
+pub fn set_outbound_binding(id: &str, binding: &crate::seal::Binding) -> Result<(), String> {
+    with_stage_lock(|| {
+        let now_epoch = crate::time::parse_iso_utc(&crate::time::now_iso_utc()).unwrap_or(0);
+        let mut kept = load_outbound_raw();
+        let (kept_entries, _expired) = sweep_outbound(kept.clone(), now_epoch);
+        kept = kept_entries;
+        if let Some(entry) = kept.iter_mut().find(|e| e.id == id) {
+            // Never backwards, for the same reason `set_inbound_binding` is
+            // not: a released binding that is not NEWER than what this entry
+            // already holds cannot walk the record back to a superseded
+            // generation.
+            if entry.binding.as_ref().map(|b| b.generation >= binding.generation).unwrap_or(false) {
+                return Ok(());
+            }
+            entry.binding = Some(binding.clone());
+        } else {
+            return Ok(());
+        }
+        save_outbound(&kept)
     })
 }
 
@@ -1778,6 +1870,7 @@ mod tests {
     fn sample_outbound(id: &str, state: OutboundState) -> OutboundPairingRequest {
         let now = 1_700_000_000_i64;
         OutboundPairingRequest {
+            binding: None,
             id: id.to_string(),
             url: "http://box-b/".to_string(),
             name: "box-b".to_string(),
@@ -2276,5 +2369,151 @@ mod tests {
             Some(v) => std::env::set_var(PAIRING_TIMEOUT_ENV, v),
             None => std::env::remove_var(PAIRING_TIMEOUT_ENV),
         }
+    }
+}
+
+
+/// P-SEAL: the ceremony's binding carriage — the two properties the design
+/// requires of it, kept together so neither can regress alone.
+#[cfg(test)]
+mod binding_carriage_tests {
+    use super::*;
+    use aoide_test_support::EnvSaver;
+
+    fn env(dir: &std::path::Path) {
+        std::env::set_var("AOIDE_STATE_DIR", dir);
+        std::env::set_var("AOIDE_ROOT", dir);
+    }
+
+    fn keypair() -> crate::identity::Keypair {
+        crate::identity::load_or_mint().unwrap().0
+    }
+
+    fn binding(generation: u64) -> crate::seal::Binding {
+        let kp = keypair();
+        let (id, _) = crate::seal::load_or_mint_age_identity().unwrap();
+        let now = crate::time::now_iso_utc();
+        let end = crate::time::shift_iso_utc(&now, 3600);
+        crate::seal::mint_binding(&kp, &crate::seal::recipient_of(&id), generation, &now, &end).unwrap()
+    }
+
+    /// Park one inbound request for THIS instance's own key (so a binding
+    /// signed by it verifies), returning its id.
+    fn park(name: &str) -> String {
+        let pk = keypair().info().pubkey_hex;
+        let now_epoch = crate::time::parse_iso_utc(&crate::time::now_iso_utc()).unwrap();
+        let (entry, _) = park_inbound(
+            &pk,
+            name,
+            "10.0.0.5",
+            "http://box-a:8710/",
+            &derive_commit(&pk, "n1"),
+            &crate::time::iso_utc_from_epoch(now_epoch),
+            &expires_at_from(now_epoch),
+            None,
+        )
+        .unwrap();
+        entry.id
+    }
+
+    fn parked(id: &str) -> InboundPairingRequest {
+        let now_epoch = crate::time::parse_iso_utc(&crate::time::now_iso_utc()).unwrap();
+        list_inbound(now_epoch).into_iter().find(|e| e.id == id).expect("still parked")
+    }
+
+    #[test]
+    fn a_request_with_no_binding_parks_and_pairs_exactly_as_before() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        env(&aoide_test_support::unique_tmp("pairing-no-binding"));
+
+        let id = park("box-a");
+        assert!(parked(&id).binding.is_none(), "an older peer's request carries none");
+
+        // The parked FILE is the old shape too: no `binding` key at all, so
+        // a record written before P-SEAL reads back identically and an older
+        // binary reading ours sees nothing new.
+        let raw = std::fs::read_to_string(inbound_path()).unwrap();
+        assert!(!raw.contains("\"binding\""), "absent, never null: {raw}");
+
+        // And the ceremony goes on. A peer that sends no binding still
+        // reveals, still gets approved, and still pairs — the per-peer
+        // upgrade path is that it seals nothing until one side publishes a
+        // binding over `aoide/binding`.
+        let now_epoch = crate::time::parse_iso_utc(&crate::time::now_iso_utc()).unwrap();
+        let revealed = reveal_inbound(&id, "n1", now_epoch).unwrap_or_else(|_| panic!("a bindingless request reveals"));
+        assert!(revealed.requester_nonce_hex.is_some(), "and it carries a verified nonce");
+        assert!(mark_inbound_approved(&id, now_epoch).is_ok());
+        let released = parked(&id);
+        assert!(released.approved, "approved, with no binding anywhere in the flow");
+        assert!(released.binding.is_none());
+    }
+
+    #[test]
+    fn an_older_binding_arriving_over_the_ceremony_never_walks_the_record_back() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        env(&aoide_test_support::unique_tmp("pairing-no-downgrade"));
+
+        let id = park("box-a");
+        let (newer, older) = (binding(5), binding(4));
+
+        set_inbound_binding(&id, &newer).unwrap();
+        assert_eq!(parked(&id).binding.unwrap().generation, 5);
+
+        set_inbound_binding(&id, &older).unwrap();
+        assert_eq!(
+            parked(&id).binding.unwrap().generation,
+            5,
+            "a replayed superseded binding is dropped at the carriage, not only at the commit"
+        );
+
+        // Equal generation, different key: also not a change.
+        let other_at_five = {
+            let kp = crate::identity::mint_ephemeral().unwrap();
+            let now = crate::time::now_iso_utc();
+            let end = crate::time::shift_iso_utc(&now, 3600);
+            crate::seal::mint_binding(&kp, "age1somethingelse", 5, &now, &end).unwrap()
+        };
+        set_inbound_binding(&id, &other_at_five).unwrap();
+        assert_eq!(parked(&id).binding.unwrap().age_pubkey, newer.age_pubkey);
+
+        // A genuinely newer one DOES land.
+        set_inbound_binding(&id, &binding(6)).unwrap();
+        assert_eq!(parked(&id).binding.unwrap().generation, 6);
+    }
+
+    #[test]
+    fn an_outbound_release_never_walks_its_record_back_either() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        env(&aoide_test_support::unique_tmp("pairing-outbound-no-downgrade"));
+
+        let now_epoch = crate::time::parse_iso_utc(&crate::time::now_iso_utc()).unwrap();
+        park_outbound(OutboundPairingRequest {
+            binding: None,
+            id: "abcd1234".to_string(),
+            url: "http://box-b/".to_string(),
+            name: "box-b".to_string(),
+            pubkey_hex: keypair().info().pubkey_hex,
+            requester_nonce_hex: "b".repeat(32),
+            approver_nonce_hex: "c".repeat(32),
+            requested_at: crate::time::iso_utc_from_epoch(now_epoch),
+            expires_at: expires_at_from(now_epoch),
+            state: OutboundState::AwaitingApproval,
+            via: None,
+            tries: 0,
+        })
+        .unwrap();
+
+        set_outbound_binding("abcd1234", &binding(9)).unwrap();
+        set_outbound_binding("abcd1234", &binding(8)).unwrap();
+        let stored = list_outbound(now_epoch).into_iter().find(|e| e.id == "abcd1234").unwrap();
+        assert_eq!(stored.binding.unwrap().generation, 9, "the release cannot downgrade the record");
+
+        // An unknown id is a no-op, never an error: the carriage is
+        // enrichment an already-completed ceremony must not depend on.
+        assert!(set_outbound_binding("nosuchid", &binding(10)).is_ok());
+        assert!(set_inbound_binding("nosuchid", &binding(10)).is_ok());
     }
 }

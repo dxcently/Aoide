@@ -25,6 +25,13 @@ getrandom = { workspace = true }
 # scope as `ed25519-dalek`/`getrandom` above — see the workspace
 # Cargo.toml's own comment.
 sha2 = { workspace = true }
+# `seal` — the P-SEAL mail-sealing container and the signed age key
+# binding (`docs/architecture/HTTPS-MESH-API.md`, MAIL.md's P-SEAL slice).
+# The ONLY dependent of the workspace's `age` entry; see that entry's own
+# comment for the version/feature reasoning, the measured weight and the
+# third-sanctioned-break note. Every `age` use in this workspace lives in
+# `seal.rs`.
+age = { workspace = true }
 # `config` — the portable runtime config file (task #135 P-C,
 # `$AOIDE_ROOT/config.toml`). `toml` reads it into the typed schema,
 # `toml_edit` rewrites one key in place so `aoide config set` keeps an

@@ -26,6 +26,45 @@
 - Structured thread/reply IDs are signed context, not membership or delivery authority. Legacy four-field content remains valid.
 - Structured letter content is optional signed text, never a new transport header. Invalid or legacy content remains raw; decoding must not write or alter envelope identity.
 
+- **`seal` is the ONE module that touches the `age` crate, and `frame` is the
+  one encoding it is built from.** Every signed or hashed byte of the P-SEAL
+  container goes through `seal::frame(label, fields)` — a NUL-terminated label
+  then a `u32` big-endian length per field, with no field ever omitted and no
+  value ever entering as a rendering. The reserved label table is a block of
+  constants in that file and nowhere else; a new frame adds a label there.
+  Deleting `seal.rs` and the workspace `Cargo.toml`'s one `age` line removes
+  the dependency from the tree, which is the test this module has to keep
+  passing.
+- **No private key ever enters a `Serialize`/`Deserialize` type here, and
+  `seal.rs` enforces that on itself.** The age key is the stock
+  `AGE-SECRET-KEY-1…` text at `state/identity/age.key`, `0600`, beside
+  `ed25519.key`; the retired-key store is two plain files per generation for
+  the same reason. The `no_private_material_in_any_serialize_type` test reads
+  this module's own source text and fails the build if a serializable struct
+  ever grows a field that looks like key material — the same mechanical gate
+  `identity.rs` runs on itself.
+- **The filed record is the truth about filing, never a dedup gate's
+  memory.** `state/mail/containers.jsonl` only decides whether a container may
+  be OPENED, and it means **admitted AND filed**: `seal::record_admitted` is
+  called by the caller once `mail::deposit` has returned `Filed` or
+  `Duplicate`, never from inside `seal::deposit_container`. Whether a duplicate
+  was originally a letter — and so whether a lost receipt is owed — is read
+  back out of `base.jsonl` through `mail::filed_kind`/`mail::show`, never
+  remembered by the gate. Both halves of that ordering are load-bearing: record
+  any earlier and a refusal past the gate answers `duplicate` forever instead
+  of re-running, and a crash between the gate and `base.jsonl` claims a filing
+  that never happened.
+- **Housekeeping never decides a refusal word.** `seal::sweep_retired_keys`
+  runs only on the current key's own successful open — never before an
+  attempt, never on a failure. Deleting a just-expired key first would turn
+  an actionable `key-retired` into a bare `open-failed`; a refusal a caller
+  cannot act on is worse than no refusal.
+- **`outbox::poll_payloads` is a poll's only hand-over point, and it returns
+  pairs.** The container rides beside its envelope so the door can hand a
+  sealed entry over as a container and NO plaintext, while an entry spooled
+  before the destination published a binding still appears as an envelope. A
+  poll is still a pure read: nothing is marked, moved or counted.
+
 - **Enduring identity is independent of knowledge configuration.** Bind an
   explicit `valid_node_name`-shaped key in `session::bind_enduring_agent`;
   do not infer it from a persona title, session name, or optional Mneme map.
@@ -748,7 +787,7 @@
   counts as attemptable, so an unknown/absent value fails toward DIALED,
   never toward parked forever. `OutboxEntry::held` spools a held entry;
   nothing else should construct the flavor by hand.
-- **A poll is a READ, and `poll_entries` is its only entry point (P-M3).**
+- **A poll is a READ, and `poll_payloads` is its only entry point (P-M3).**
   The offer rule lives there and nowhere else: every held entry toward the
   node, plus every `now` entry with `tries > 0` whose last outcome did not
   reach the peer (parked/`refused` ones included — a poller asking for its
