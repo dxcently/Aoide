@@ -585,12 +585,28 @@ pub fn prune_done(
 /// queue, the output, the outcome and the report — so routine cleanup must not
 /// make a completed task vanish. An AUTOMATIC sweep (`reap_inner`, and anything
 /// else routing through [`prune_done`]) therefore retains EVERY `task`-carrying
-/// `done` record, filed or not; an unfiled one is retained by both scopes,
-/// because the record is the report lane's own trigger. `explicit: true` is the
-/// user's own `aoide session prune` — the one path allowed to drop a filed task
-/// run, and even then it keeps an UNFILED one. After an explicit prune the
-/// history still lives on disk (the session ledger line, the letters, the PTY
-/// transcript, the instruction sidecar); only the roster record is gone.
+/// `done` record THIS BOX ran, filed or not; an unfiled one is retained by both
+/// scopes, because the record is the report lane's own trigger. `explicit: true`
+/// is the user's own `aoide session prune` — the one path allowed to drop a
+/// filed task run, and even then it keeps an UNFILED one. After an explicit
+/// prune the history still lives on disk (the session ledger line, the letters,
+/// the PTY transcript, the instruction sidecar); only the roster record is gone.
+///
+/// **A DOOR SUMMON is not this box's history (P-RSA S10 review, H1).** A
+/// record whose `origin` is a `node:*` value was spawned by the A2A door on a
+/// peer's request (`graph/conduct.rs` refuses that shape from any environment,
+/// so the door is its sole writer), and no local sweep would ever have created
+/// one. Retaining those forever made the roster a remote caller's to grow: one
+/// `metadata["aoide/task"]` spawn per request, each ending `done`, each kept —
+/// permanent, revocation-proof state written by a grant the operator can only
+/// take back for FUTURE children (`node allow <n> spawn off`, `node remove`).
+/// So a door summon is retained only while its report is still owed — the
+/// cursor entry is the lane's own trigger, exactly as it is for an unfiled
+/// local run — and once filed it is swept like an ordinary finished session,
+/// by the automatic sweep AND by `session prune`. Its durable history is
+/// untouched (the ledger line, the transcript, the instruction sidecar, the
+/// letters, the cursor entry all stay); only the roster record goes, exactly as
+/// for a pruned local run. O(live runs) resident instead of O(all runs).
 ///
 /// The `removed` set this returns is also the ledger's own doom list: the
 /// caller hands it to [`drop_remote_child_rows`] once its `sessions.json` write
@@ -617,9 +633,16 @@ pub fn prune_done_scoped(
             if !is_task_run {
                 return true; // an ordinary finished session: swept as always
             }
-            // A task run: retained against every automatic sweep, and retained
-            // even by the explicit prune while its report is unfiled.
-            explicit && !unfiled.contains(s.session_id.as_str())
+            let filed = !unfiled.contains(s.session_id.as_str());
+            // A door summon: kept only while its report is still owed (see the
+            // doc above — a remote caller may not grow this roster forever).
+            if s.origin.as_deref().is_some_and(aoide_storage::attest::is_node_origin) {
+                return filed;
+            }
+            // A task run THIS BOX ran: retained against every automatic sweep,
+            // and retained even by the explicit prune while its report is
+            // unfiled.
+            explicit && filed
         })
         .map(|s| s.session_id.as_str())
         .collect();
@@ -1891,6 +1914,64 @@ mod tests {
         assert_eq!(aoide_storage::remote_children::load_remote_children().len(), 1);
 
         let _ = std::fs::remove_dir_all(&state);
+    }
+
+    /// P-RSA S10 review, H1: a DOOR SUMMON's finished record is not this box's
+    /// history. A task-carrying `done` record the door created (origin
+    /// `node:*` — the shape `session_conduct` refuses from any environment, so
+    /// the door is its only writer) is swept once its report is filed, exactly
+    /// like an untasked session; a task run THIS BOX ran is still retained by
+    /// the automatic sweep. A run whose report is still OWED is kept either
+    /// way, because the cursor entry is the report lane's own trigger.
+    ///
+    /// Driven through the real prune (`prune_done_scoped`, the one function
+    /// `reap_inner` and `session prune` both call), with the cursor file
+    /// written exactly as the lane writes it: one entry per FILED run.
+    #[test]
+    fn a_finished_door_summon_is_pruned_once_reported_while_a_local_task_run_is_kept() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR"]);
+        let root = unique_stage("door-retention");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", root.join("run"));
+
+        let tasked = |id: &str, slug: &str, origin: Option<&str>| {
+            let mut rec = session(id, "/x", "done", "2026-09-25T00:00:00Z", None);
+            rec.task = Some(slug.to_string());
+            rec.origin = origin.map(str::to_string);
+            rec
+        };
+        std::fs::write(
+            crate::graph::taskreport::taskreport_path(),
+            serde_json::json!({
+                "door-filed": { "outcome": "exit" },
+                "local-filed": { "outcome": "exit" },
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let sessions = vec![
+            tasked("door-filed", "t-1", Some("node:peer")),
+            tasked("door-owed", "t-2", Some("node:peer")),
+            tasked("local-filed", "build", None),
+            tasked("local-owed", "build-2", None),
+        ];
+        let (kept, _hooks, removed, _cleared) = prune_done_scoped(sessions, Vec::new(), false);
+        let ids: Vec<&str> = kept.iter().map(|s| s.session_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["door-owed", "local-filed", "local-owed"],
+            "a REPORTED door summon leaves the roster like any untasked session; every run on \
+             this box stays, reported or not, and an unreported door run stays until the lane \
+             can fire"
+        );
+        assert_eq!(removed, vec!["door-filed".to_string()]);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

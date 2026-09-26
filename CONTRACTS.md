@@ -1564,7 +1564,12 @@ tick, and its delivery cursor is `state/stage/taskreport.json` (beside
 `{endedAt, exitCode, outcome, msgid, mailbox, wake}`. The cursor advances only after the letter is
 in the mailbase, so a filing failure is retried on the next tick and a finished
 run whose report is not yet filed is retained against the sweep's prune
-(`prune_done`). Reads of it are read-only: no lock, no write, no cursor advance.
+(`prune_done`) — for a run summoned by the A2A door (`origin` `node:*`, the
+shape only that door writes) this is the ONLY retention it gets: once its
+report is filed (letter or the no-mailbox rail), it is swept like any untasked
+session, because a remote caller must not be able to grow this roster
+permanently (`prune_done_scoped`'s doc). Reads of it are read-only: no lock, no
+write, no cursor advance.
 
 **Additive in v0:** a session record MAY also carry an optional `outcome`
 (string, a CLOSED set) — a managed task run's discriminated end:

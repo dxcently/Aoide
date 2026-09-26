@@ -1268,7 +1268,10 @@ subagent, read against the child's own cursor through the read-only
 role mailbox `conductor`) through the registered `mail send` implementation,
 then woken once through the mail-side doorbell. A finished run's record is
 retained against routine cleanup — filed or not — and the lane's cursor is
-`state/stage/taskreport.json`.
+`state/stage/taskreport.json`. One carve-out: a run the A2A DOOR summoned
+(`origin` `node:*`) is retained only until its report is filed, because a
+remote caller must not be able to grow this roster without bound; see
+`prune_done_scoped`'s own doc.
 
 Live mail attachment catches up from the opening frame's watermark, including
 letters arriving while the watcher attaches or before the mailbase exists.

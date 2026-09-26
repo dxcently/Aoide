@@ -169,6 +169,16 @@ pub use self::spawn::session_spawn;
 // the same shape a local `spawn` produces, never a second spelling of it
 // (P-RSA S10).
 pub use self::spawn::build_conduct_args;
+// `live_run_for`/`live_run_refusal` — the ONE one-live-run-per-slug admission
+// step and its ONE refusal text (P-RSA S10 review, M2). The door composed
+// `conduct` directly and so bypassed the wrapper's own admission; sharing the
+// predicate (rather than writing a second copy of the message in the server)
+// is what closes that, and is why both are `pub`.
+pub use self::spawn::{live_run_for, live_run_refusal};
+// `clean_line` — the ONE sanitizer every surface that prints a peer's own
+// bytes uses, now including `aoide-server`'s A2A door (a slug echoed in a
+// refusal, P-RSA S10 review, L6). Never a second table of "unsafe" down there.
+pub use self::common::clean_line;
 // `graph resurrect` (P-D8, `docs/architecture/AOIDED.md`'s "L5"): revives a
 // project's undying set (or `--all`/`--id`) off the durable ledger, via the
 // windowed spawn path, resolving each candidate through a harness or a

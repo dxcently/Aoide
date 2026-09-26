@@ -847,7 +847,10 @@
   invisible non-`Cf` fillers (`is_invisible`: variation selectors, Hangul and
   braille blanks) — and a new sanitizer anywhere in this crate must too, never
   a copied table (S9's own review found the local lane filtering `is_control`
-  only, and the fillers missing).
+  only, and the fillers missing). `common::clean_line` is `pub` and re-exported
+  at `graph::clean_line` for the SAME reason (P-RSA S10 review, L6): the A2A
+  door echoes a caller's illegal slug in its refusal and must clean it with
+  this one, not with a second rule of its own.
   **Both ends of a child's exit are one input.** `pingback`'s `dropped` slice
   carries the eidolon sync's own drop set AND (H1 of the S8/S9 review) the
   end facts of every remote child `reap_inner` took off the roster this same
@@ -1966,9 +1969,15 @@
   (`rang:N`, `deferred:<state>`, `skipped:<reason>`, or its failure) is recorded
   in the cursor and shown by the view — a never-conducted (Codex desktop/app)
   parent cannot be woken at all, and that is reported rather than papered over.
-- **The live-slug check is a courtesy, not a lock.** `spawn --task` refuses a
-  slug whose record is not `done`, but two concurrent spawns can both pass it;
-  nothing afterwards enforces uniqueness, and no code claims it. In that race
+- **The live-slug check is a courtesy, not a lock — and it is ONE predicate
+  with TWO callers.** `live_run_for`/`live_run_refusal` (`graph/spawn.rs`, both
+  `pub`, re-exported at `graph::`) are consulted by `spawn --task` and by
+  `aoide-server`'s A2A door (P-RSA S10 review, M2): the door composes `conduct`
+  directly, so sharing this is what keeps a peer's child from squatting a slug
+  the operator owns — never write a second copy of the refusal text in the
+  server. `spawn --task` refuses a slug whose record is not `done`, but two
+  concurrent spawns can both pass it; nothing afterwards enforces uniqueness,
+  and no code claims it. In that race
   both records carry the slug and the mailbox holds both runs' letters, kept
   apart by each letter's `from` session id.
 - **The child is its task mailbox's own reader, and channels are distinct.**
@@ -1999,10 +2008,19 @@
   `do_session_end`/the reaper stamp `stopped` for a run they never saw exit.
   Nothing in this path reads a harness trace, so completion reporting does not
   depend on the ping-back (VV/JEV) lane.
-- **A completed task run is HISTORY, not garbage.** Routine cleanup retains
-  every `task`-carrying `done` record — `prune_done` cannot drop one, filed or
-  not — so a finished run stays resolvable by `session watch` (instructions,
-  the child's unread queue, output, outcome, report). Only the explicit
-  `aoide session prune` may drop a FILED task run; an unfiled one is retained
-  even there, and after any explicit prune the durable history (ledger line,
-  letters, PTY transcript, instruction sidecar) is still on disk.
+- **A completed task run is HISTORY, not garbage — but a DOOR SUMMON's history
+  is not this box's (P-RSA S10 review, H1).** Routine cleanup retains every
+  `task`-carrying `done` record THIS BOX ran — `prune_done` cannot drop one,
+  filed or not — so a finished run stays resolvable by `session watch`
+  (instructions, the child's unread queue, output, outcome, report). Only the
+  explicit `aoide session prune` may drop a FILED task run; an unfiled one is
+  retained even there, and after any explicit prune the durable history (ledger
+  line, letters, PTY transcript, instruction sidecar) is still on disk. A record
+  whose `origin` is a `node:*` value was created by the A2A door on a PEER's
+  request, and retaining those forever made the roster a remote caller's to
+  grow (one `metadata["aoide/task"]` spawn per request, each ending `done`),
+  permanent and revocation-proof — unpairing the peer does not sweep them. So a
+  door summon is retained only while its report is still owed (the cursor entry
+  is the lane's own trigger, as for an unfiled local run) and is swept once
+  filed, by the automatic sweep AND by `session prune`; its durable history
+  stays exactly as a pruned local run's does.

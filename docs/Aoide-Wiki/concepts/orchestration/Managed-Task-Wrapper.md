@@ -315,6 +315,17 @@ session-ledger line, the letters, the PTY transcript and the instruction
 sidecar. Deleting a session is the user's act, never a side effect of tidying
 the roster.
 
+**One run is somebody else's history: the one the [[A2A-Door|A2A door]]
+summoned.** A remote caller may name a task, and each such run ends `done` —
+retaining those forever would let a peer grow this node's roster without
+bound, permanently (unpairing it does not sweep them either). So a run carrying
+a `node:*` origin — the shape only the door can write — is retained only while
+its report is still owed, and once filed it is swept like an ordinary finished
+run, by the automatic sweep and by `session prune` alike. Its durable history is
+exactly as durable as a local run's: the ledger line, the transcript, the
+instruction sidecar, the letters and the cursor entry all stay; only the roster
+record goes.
+
 ## Platform
 
 This page describes Linux behavior; **native Windows is not supported today and

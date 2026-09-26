@@ -94,10 +94,16 @@ pub(in crate::graph) const LINE_MAX: usize = 200;
 /// includes the zero-width and bidi characters that would otherwise survive
 /// as an invisible instruction), whitespace flattened, clipped to
 /// [`LINE_MAX`] with an ellipsis. The single sanitizer `view.rs` (mail
-/// fragments, a run's own output lines) and `who.rs` (a pulled node
-/// document's own fields) both reach a terminal through, so neither surface
+/// fragments, a run's own output lines), `who.rs` (a pulled node
+/// document's own fields) and — across the crate boundary —
+/// `aoide-server`'s A2A door (a slug echoed back in a refusal, P-RSA S10
+/// review, L6) all reach a terminal through, so neither surface
 /// can hold a laxer rule than the other.
-pub(in crate::graph) fn clean_line(s: &str) -> String {
+///
+/// `pub` so that last one can reach it at all: the door prints peer bytes,
+/// and a second sanitizer over there is exactly how the two would drift.
+/// Widened rather than copied, and re-exported at `graph::clean_line`.
+pub fn clean_line(s: &str) -> String {
     clip_flat(&strip_unsafe(s), LINE_MAX)
 }
 
