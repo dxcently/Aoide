@@ -191,10 +191,24 @@
   primitive beside these two; the module's job stops at "one JSON object
   per line, capped, tailable," and a caller's own record shape and cap
   choice never leak back into it.
+- **A Windows seam another crate also needs is exposed from HERE, never
+  copied into it** (`pkgs/aoide/crates/AGENTS.md`: no cross-crate copying).
+  `owner_only` (the private file/directory policy) and `win_proc` (the
+  process table) exist because two consumers need the same native
+  implementation and this crate is the leaf both already depend on —
+  `aoide-storage` reaches them through the module, never through a second
+  `windows-sys` call sequence of its own. The rule cuts both ways: a new
+  Windows primitive with ONE consumer stays private to that consumer.
+- **A Windows arm keeps the Unix contract or refuses by name.** A missing
+  capability is never an `Ok(())`, a `true`, or an empty collection — the
+  `0o640` feed refusal and `feed_windows`'s validate-before-write are the
+  shapes; a site that cannot keep its guarantee names what is missing, and
+  a `cfg(windows)` body that answers a privacy question must read the DACL
+  (or refuse), never skip the read.
 
 ## Docs update required in the same commit
 
-- This `README.md` when a public module or seam is added or removed.
+- This `README.md` when a public module or seam is added or removed — the Windows `owner_only`/`win_proc` entries are a module addition like any other.
 - `CONTRACTS.md` when a wire/schema shape changes.
 - `pkgs/aoide/crates/AGENTS.md` is the layer above for registry-order and
   golden-discipline invariants that apply to CONSUMERS of this crate's

@@ -87,6 +87,18 @@ other crate in this workspace sits above.
   `PathIdentity`, because the identity question is not this module's alone:
   `agents`'s eidolon reader asks it about a journal whose cached cursor must
   never survive a replacement at the same path.
+- `owner_only` (Windows only) — the owner-only policy a native-Windows core
+  attaches to a private file or directory: an explicit, `SE_DACL_PROTECTED`,
+  single-ACE DACL for the current token user, attached AT creation and read
+  back before the first payload byte, plus the native stand-in for `chmod`
+  and one idempotent `ensure_private_dir`. Two consumers, one implementation
+  (`AGENTS.md`: no cross-crate copying): `feed`'s Windows writer and
+  `aoide-storage`'s private-write / private-directory half.
+- `win_proc` (Windows only) — the process table `/proc` would answer: one
+  `Toolhelp32` snapshot (pid · parent · executable name), a creation-time
+  start time for the pid-reuse defence, and the `kill(pid, 0)` liveness
+  reading with the same conservative verdicts. Its callers are
+  `aoide-storage::attest`'s ancestry walk and `dialog::probe_locker_running`.
 - `dialog` — the code-entry dialog substrate: `DialogResult` (a dialog
   child's outcome — approved/dismissed/cancelled/cancelled-externally/
   spawn-error/infra-failure) and `run_entry_dialog` (the generic
