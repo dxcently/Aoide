@@ -57,24 +57,39 @@ Two classes follow from that, and every row below is one of them:
 | shell resolution | `conduct/src/graph/resurrect.rs::passwd_login_shell` | required; **remaining** — a `getent passwd` shell-out (glibc/nss; its absence falls back to `/bin/sh`) |
 | `ps` invocation | `conduct/src/graph/codex_app.rs::process_table` | required, **named dependency** — `ps -axo pid=,ppid=,command=` works on Linux/macOS/FreeBSD; POSIX.1 only mandates `ps -e -f -o <format>`, so a strict/`BusyBox` `ps` may reject it |
 | stage/state lock | `storage/src/fs.rs`, `storage/src/outbox.rs`, `conduct/src/graph/codex_app.rs::lock_is_held` | required, **non-POSIX primitive by design** — `flock(2)` is BSD/XSI, not POSIX.1 (POSIX offers `fcntl(F_SETLK)`, per-process and dropped when any fd to the file closes). The guarantees here — the lock surviving a `fork`/`setsid` into a detached child, and `lock_is_held` as a liveness probe that never creates the file — rest on open-file-description semantics. Native Windows answers with `LockFileEx` on the same lock files (`LOCKFILE_FAIL_IMMEDIATELY` for the non-blocking probe). What it guarantees INSTEAD of surviving a `fork`: the lock belongs to the HANDLE, so a second handle in the same process blocks exactly as a second process's does — which is what `with_stage_lock`'s per-thread re-entrancy flag exists for — and `lock_is_held`'s "never creates the file" probe is unchanged. The one naming difference: Windows byte-range locks are mandatory where `flock` is advisory; nothing here ever reads or writes a lock file's bytes, so no caller can observe it. Evidence: native `fs_windows` lock tests on ThinkChiyo |
-| private file / directory policy | `storage/src/fs.rs::atomic_write_private`/`write_temp_file`/`secure_private_dir`, `protocol/src/owner_only.rs` | required baseline, **policy by host, never silently weakened**. Unix: the temp is created AT `0o600` via `OpenOptions::mode`, the directory `chmod`ed `0o700`. Native Windows: a protected, single-ACE owner-only DACL for the current token user is attached AT CREATION (no create-then-tighten window), read back through the object's own handle before the first payload byte, and any creation mode but `0o600` is refused by name; `secure_private_dir` creates-or-tightens and refuses a directory whose policy the filesystem would not honor. One implementation, exposed from `aoide-protocol` because `aoide-storage` needs the same policy — never a second copy. Exercise: `fs.rs`'s `assert_private_file`/`assert_private_dir` read the host's own policy; native tests on ThinkChiyo. |
+| private file / directory policy | `storage/src/fs.rs::atomic_write_private`/`write_temp_file`/`secure_private_dir`, `protocol/src/owner_only.rs` | required baseline, **policy by host, never silently weakened**. Unix: the temp is created AT `0o600` via `OpenOptions::mode`, the directory `chmod`ed `0o700`. Native Windows: a protected, single-ACE owner-only DACL for the current token user is attached AT CREATION (no create-then-tighten window), read back through the object's own handle before the first payload byte, and any creation mode but `0o600` is refused by name; A DIRECTORY is not a file here: its policy is the whole of `0o700`, which means `FILE_EXECUTE` (`FILE_TRAVERSE` — open what is inside by path) and `FILE_DELETE_CHILD` (the other half of `w`: on Unix removing an entry asks for write on the PARENT) on top of the file's bits, or the owner has made a directory they cannot list through. `secure_private_dir` creates-or-tightens and refuses a directory whose policy the filesystem would not honor, and a directory policy change is Windows' own re-propagation to children with merely inherited ACEs — a fact its test names. One implementation, exposed from `aoide-protocol` because `aoide-storage` needs the same policy — never a second copy. Exercise: `fs.rs`'s `assert_private_file`/`assert_private_dir` read the host's own policy; native tests on ThinkChiyo. |
 | OS hostname | `storage/src/display.rs::os_hostname` | required; Unix asks `gethostname(2)`, native Windows `GetComputerNameExW(ComputerNameDnsHostname)` — the DNS hostname, not the NetBIOS name, with a length checked against the buffer it was given so a too-long name is refused rather than reported truncated. `None` on any failure on either host, never a fabricated name. Verified natively on ThinkChiyo. |
 | append-only feed file (create policy + tail identity) | `protocol/src/feed.rs`, private `protocol/src/feed_windows.rs` | required baseline for the algorithm (append · cap · truncate-in-place · tail); **policy by host, never silently weakened**, `pkgs/aoide/crates/protocol/README.md`'s `feed` entry names the seams — and `protocol/src/owner_only.rs` is that policy factored out for its second consumer, `aoide-storage`'s private-write and private-directory half. Unix: `chmod` to the caller's exact `create_mode`, `(dev, ino)` identity — unchanged. Native Windows: owner-only policy attached at creation and read back before the first payload byte (a filesystem that ignores ACLs refuses), an existing file validated on its own handle before truncate/append, reparse points refused, identity by native 128-bit file id; **`0o600` is the only supported creation mode** — `0o640` (the group-shared broker feed) is refused by name, so the group feed is unavailable there, not narrowed. Compile-checked for `x86_64-pc-windows-gnu` and exercised natively on ThinkChiyo with MSVC; see the bounded runtime evidence below. |
 | desktop / systemd capabilities in core | `hyprctl` window ops, `loginctl` lock gate, power actions, `notify-send`, `zenity`/`lyra` dialogs, `/run`+`/var/lib` deployment paths | optional host-specific — window ops gate on `HYPRLAND_INSTANCE_SIGNATURE` and degrade to `None`; power actions surface a spawn failure rather than a named refusal; the deployment paths are env-overridable placeholders, not POSIX shapes |
 
 ## Evidence and limits
 
-- **Run**: Linux tests on `x86_64-unknown-linux-gnu`, plus the isolated
-  protocol feed tests on ThinkChiyo using native `x86_64-pc-windows-msvc`.
-  All 17 Windows-runnable feed tests pass, including ACL readback/refusal,
-  append/truncation and file replacement. This is module evidence, not a
-  working native core deployment.
-- **Not run**: macOS/FreeBSD runtime checks and the remaining Windows core
-  capabilities. No POSIX conformance claim follows from a `cfg` branch — `cfg(unix)` is
-  not evidence of POSIX (the tree already contains `cfg(unix)` branches whose
-  *semantics* are Linux: `SO_PEERCRED`, `flock`). The protocol library and
-  isolated native Windows test modules compile for `x86_64-pc-windows-gnu`;
-  this does not establish a working Windows core or POSIX conformance.
+- **Run**: Linux tests on `x86_64-unknown-linux-gnu`, plus `aoide-protocol`
+  and `aoide-storage` built AND tested on ThinkChiyo with native
+  `x86_64-pc-windows-msvc` (Rust 1.98.1): `cargo check -p aoide-protocol
+  -p aoide-storage --all-targets` is 0 errors, and `cargo test` on the pair
+  is 171 + 438 passed / 0 failed / 0 ignored. That covers the feed's 17
+  (ACL readback/refusal, append/truncation, replacement) plus this slice's
+  arms: the owner-only file and directory policy read back from the object's
+  own handle, `LockFileEx` held against a second handle and against a
+  blocking waiter, `MoveFileExW`'s no-clobber, the private-write refusal of
+  any mode but `0o600`, the `cmd.exe`-child liveness reading, the native
+  pid-ancestry/creation-time defence, and the lock probe over a real
+  snapshot. This is two crates' evidence, not a working native core
+  deployment — see the next bullet for what is still behind it.
+- **Not run**: macOS/FreeBSD runtime checks, and the rest of the core's
+  closure on native Windows. `cargo check -p aoide-secrets -p aoide-upkeep
+  -p aoide-client -p aoide-conduct --all-targets --keep-going` on ThinkChiyo
+  reports 151 error lines: `aoide-secrets` 147 (its lib 64 of those, from
+  `client`, `backend`, `broker`, `home`, `commands`, `store`, `watch`,
+  `peercred`, `enroll`), `aoide-upkeep` 4 (`commands`, `scan`), and
+  `aoide-client`/`aoide-conduct` not reached at all — both sit behind
+  `aoide-secrets` in the dependency order. No POSIX conformance claim follows
+  from a `cfg` branch — `cfg(unix)` is not evidence of POSIX (the tree still
+  contains `cfg(unix)` branches whose *semantics* are Linux: `SO_PEERCRED`,
+  the `/proc` reads `conduct` owns, `loginctl`). A `cfg(windows)` arm is
+  evidence only where a native host ran its tests, which is why every claim
+  above names the run it rests on.
 - **Per-OS claims above** (which targets define `libc::ucred`, the `sun_path`
   width, `sa_family_t`'s width, `getpeereid`'s signature) were read from the
   workspace's libc 0.2.189 source, not from documentation.
@@ -87,11 +102,15 @@ Two classes follow from that, and every row below is one of them:
   `src/` — so nothing here fills that byte, and nothing needs a per-target
   list to decide whether to.
 - **Test-runner gap**: ThinkChiyo provides a native Windows runner; no
-  macOS/FreeBSD runner is configured. Tests asserting
-  `/proc` facts, `/run/user/1000` paths, and Linux-only peer-credential reads
-  are either Linux-gated (they vanish elsewhere) or red elsewhere, so the
-  non-Linux arms need a macOS/FreeBSD runner, per-crate
-  (`cargo test -p <crate>`, never `--workspace`).
+  macOS/FreeBSD runner is configured. A test that asserts a `/proc` fact, a
+  `/run/user/1000` path, or a Linux-only peer-credential read is either
+  `cfg`-gated with the reason in place (its host-split sibling covers the
+  other side) or still red elsewhere; the non-Linux arms need a
+  macOS/FreeBSD runner, per-crate (`cargo test -p <crate>`, never
+  `--workspace`). Where a Linux fact is the FIXTURE rather than the subject —
+  a symlink needing a privilege, a `umask`, an AF_UNIX socket — the gate is
+  the honest answer and the Windows run is told so in the test's own doc,
+  never left silently skipped.
 - **Windows feed runtime evidence**: the real feed modules pass their 17
   native tests on ThinkChiyo with Rust 1.98.1/MSVC. A separate scratch probe
   releases two ready child processes together; each appends 1,000 JSON records
