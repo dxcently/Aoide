@@ -49,7 +49,7 @@
   written before this field existed — a deployed `lyra` on PATH may predate
   `preview set` entirely, which is exactly why a canvas launched by an
   older or different binary must not trust PATH for its own rail.
-- **`commands::preview`'s root seeds four OTHER facet-read stage files a
+- **`commands::preview`'s root seeds four OTHER lane-read stage files a
   song's own widgets/livery never touch, so nothing starts with a parse
   warning on a missing file:** `song/stage/mode.json`
   (`LiveryState.qml`'s convention) is REWRITTEN on every build and on
@@ -66,12 +66,12 @@
   repeat with nothing new is a true no-op, and it NEVER runs `git`, touches
   the live stage, `~/.aoide`, or `run/qml` — commit and rebuild stay the
   user's own gate (house rule 2). A `widget` field outside `run/qml/songs/`
-  (a facet symlink) is refused with a usage error, never silently declared
+  (a lane symlink) is refused with a usage error, never silently declared
   — and the `starts_with("songs/")` check alone is a STRING match, not a
   boundary: a `..` component is rejected outright, and the canonicalized
   source is additionally required to land inside a real songbook
   `widgets/` dir, since a `..`-laden field can otherwise satisfy the
-  prefix check while resolving straight out to a facet file. `--slot` is
+  prefix check while resolving straight out to a lane file. `--slot` is
   validated against the
   same shape as a song name (`valid_song_name`) before it is ever joined
   into a path — an unvalidated slot is exactly the same class of escape.
@@ -213,7 +213,7 @@
 - **`onboard`'s option derivation is DERIVED, never a hand-list.** Every
   `aoide.*` option `aoide.nix` documents comes from `flake.nix`'s
   `aoideOptions` output (`lib/options.nix`, `lib.evalModules` +
-  `lib.optionAttrSetToDocList`) — a new dendrite/facet option needs no edit
+  `lib.optionAttrSetToDocList`) — a new dendrite option needs no edit
   here or in `lib/options.nix`, it just appears on the next `lyra onboard`
   run. The env-knob appendix (`ENV_KNOBS` in `commands/onboard.rs`) is the
   ONE allowed hand-list, because env vars aren't module options and so

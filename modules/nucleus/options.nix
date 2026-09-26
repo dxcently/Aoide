@@ -1,7 +1,7 @@
 # modules/nucleus/options.nix — THE OPTION CONTRACT.
 #
 # Every other module (dendrites) builds against the options
-# declared here. This is versioned in CONTRACTS.md (livery schema v0). Facets
+# declared here. This is versioned in CONTRACTS.md (livery schema v0). Paint
 # read ONLY `aoide.livery`, `aoide.arrangement` and `aoide.surfaces` — an
 # enumerated, closed whitelist (AGENTS.md house rule 5); no module reads another
 # module. The coupling discipline is enforced by lib/checks.nix, not by
@@ -30,7 +30,7 @@ let
 
   # ── Component override submodules ─────────────────────────────────────────
   # v0 component tier: bar.* / notif.* / window.*. Each field is optional and
-  # falls back to the palette when unset. Facets read these; nothing else does.
+  # falls back to the palette when unset. Paint dendrites read these; nothing else.
   mkComponent =
     fields:
     types.submodule {
@@ -407,7 +407,7 @@ in
     livery = mkOption {
       description = ''
         The v0 livery schema — the single seam between the frozen nix layer
-        and the live desktop. Facets consume this and nothing else. Livery IS
+        and the live desktop. Paint dendrites consume this and nothing else.
         Aoide's design-token layer: the tokens themselves, named for the one
         set of house colours every surface wears in unison. Values and engine
         are one thing: the tokens are livery, resolved/validated/emitted by
@@ -464,7 +464,7 @@ in
             description = ''
               The cover-art note: the wallpaper image this song carries, as a
               literal nix path (copied to the store — never a song/ runtime
-              read). Facets bake it as the Stylix base-context image. null means
+              read). Paint dendrites bake it as the stylix base-context image. null
               "no cover" — the stylix lane falls back to its deterministic
               solid-colour derivation (from palette.bg), so the baked path stays
               buildable with no binary asset.

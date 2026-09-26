@@ -3,7 +3,7 @@
 # https://github.com/hyprnux/hyprglass — layered glass effects (gaussian
 # blur, edge refraction, fresnel glow, adaptive brightness) on translucent
 # windows AND layer surfaces. Aoide points it at the quickshell surfaces
-# (aoide-bar / aoide-dock namespaces) from the compositor facet: the "gloss"
+# (aoide-bar / aoide-dock namespaces) from the compositor lane: the "gloss"
 # layer of the rice's Aero glass, on top of Hyprland's own blur.
 #
 # Version discipline: a Hyprland plugin is ABI-locked to the compositor

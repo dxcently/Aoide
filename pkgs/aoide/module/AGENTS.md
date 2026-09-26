@@ -17,7 +17,7 @@
   value enters as a core option the AoideOS side sets, never a direct
   read of a paint lane's own enable flag from here — `aoided.nix`'s unit
   anchors to `aoide.sessionTarget` (declared in `options.nix`,
-  default `default.target`) rather than the quickshell facet flag
+  default `default.target`) rather than the lyra fact
   itself. The lane that brings a graphical session up is the one that
   sets that option; nothing in this bundle needs to know which lane it
   is.

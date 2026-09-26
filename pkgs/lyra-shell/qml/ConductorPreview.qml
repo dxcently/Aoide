@@ -23,7 +23,7 @@ import Quickshell.Wayland
 // default relative source resolves with no env needed.
 //
 // conductor.qml declares `livery` AND `bridge` as `required property`
-// (matching the facet original); `shared` is a plain (non-required)
+// (matching the lane original); `shared` is a plain (non-required)
 // property, defaulting to null — dock.qml's own anchor still passes it as a
 // slot extra (`extraProps: ({ shared: root.shared })`), so this harness
 // keeps supplying its stub for parity. A plain `Loader { source: }` cannot

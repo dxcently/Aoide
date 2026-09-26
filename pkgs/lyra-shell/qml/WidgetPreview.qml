@@ -639,7 +639,7 @@ ShellRoot {
 
     // A path under a checkout's `song/songbook/<s>/widgets/<file>` is rewritten
     // to `songs/<s>/<file>` so it loads from INSIDE the config root, where the
-    // facet types (MoodFaces, ScrollRail, …) its `import "../.."` needs
+    // lane types (MoodFaces, ScrollRail, …) its `import "../.."` needs
     // actually sit. Loading the same file as a bare `file://` URL puts it
     // outside the root and every such import fails — the exact reason
     // ConductorPreview needs its CONDUCTOR_WIDGET dance.
@@ -1313,7 +1313,7 @@ ShellRoot {
         canvas.tipText = text
     }
 
-    // An Iconoir glyph from run/qml/icons/ (the facet's `lyra icon resolve`
+    // An Iconoir glyph from run/qml/icons/ (the lane's `lyra icon resolve`
     // output, copied there by `lyra preview`). The SVGs are mono
     // (`stroke="currentColor"`), so one MultiEffect tint recolours the whole
     // glyph from the chrome.

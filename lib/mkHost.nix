@@ -66,7 +66,7 @@ inputs.nixpkgs.lib.nixosSystem {
   ++ stylixModule
   ++ [
     ../hosts/${name}
-    # Inject the flake's own packages into pkgs so nucleus/facet modules can
+    # Inject the flake's own packages into pkgs so nucleus/lane modules can
     # reference `pkgs.aoide` / … — auto-discovered by
     # lib/pkgs.nix from the SAME pkgs/<name> dirs the flake's `packages`
     # output uses, so there is one source. The overlay form also guards each

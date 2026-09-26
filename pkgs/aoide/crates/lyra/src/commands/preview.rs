@@ -9,7 +9,7 @@
 //! genuinely separate `quickshell -p <root>/run/qml/WidgetPreview.qml`
 //! against it, with `AOIDE_ROOT`/`AOIDE_STATE_DIR`/`AOIDE_STAGE_DIR`/
 //! `AOIDE_DAEMON_SOCKET` all repointed at that root on the CHILD's env
-//! only — `AOIDE_DAEMON_SOCKET` at a path that never exists, so no facet
+//! only — `AOIDE_DAEMON_SOCKET` at a path that never exists, so no lane
 //! QML can reach the real `aoided` even if a stub bridge were bypassed.
 //! `lyra preview set` edits that root's `preview.json` control document
 //! (widget, viewport, anchor, zoom, fixture, livery — the schema below)
@@ -124,7 +124,7 @@ const VIEWPORT_PRESETS: &[(&str, u32, u32)] = &[
     ("portrait", 1080, 1920),
 ];
 
-/// Env vars a facet's QML might already carry (a live `lyra` session's own
+/// Env vars a lane's QML might already carry (a live `lyra` session's own
 /// widget-slot overrides) that must never leak into the isolated canvas —
 /// the preview always renders the canvas's OWN `preview.json` choices, not
 /// whatever the shell happened to export.
@@ -678,13 +678,13 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
     let mut changed: Vec<String> = Vec::new();
 
     // ── widget body ─────────────────────────────────────
-    // Never declare a facet file or an out-of-songbook path -- only a
+    // Never declare a lane file or an out-of-songbook path -- only a
     // widget under `run/qml/songs/` (mirrors a real songbook's own
     // `<song>/widgets/`) is something `preview declare` has any business
     // copying back into the checkout. The prefix check alone is a STRING
     // match and nothing more: a `..`-laden field
     // (`songs/demo/../../../../pkgs/lyra-shell/qml/ShellBridge`)
-    // satisfies it while resolving to a facet file entirely outside any
+    // satisfies it while resolving to a lane file entirely outside any
     // songbook -- so a `..` component is refused outright, and (the
     // structural check underneath the string one) the field's resolved
     // CHECKOUT file is required to land inside the real checkout songbook.
@@ -1272,9 +1272,9 @@ fn stage_livery(
         .map_err(|e| LiveryStageError::Error(format!("writing {}: {e}", dst.display())))
 }
 
-// ─────────────────────────── other facet stage files ───────────────────────────
+// ─────────────────────────── other lane stage files ───────────────────────────
 
-/// `ROOT/song/stage/mode.json` -- the facet QML's own rice-mode read
+/// `ROOT/song/stage/mode.json` -- the lane QML's own rice-mode read
 /// (`LiveryState.qml`, lines 216/267, and its callers all expect this file
 /// to exist). Rewritten UNCONDITIONALLY on every `lyra preview` build and
 /// on `preview set --song`: the canvas's mode is always "staging" of the
@@ -1297,7 +1297,7 @@ fn write_mode_json(root: &Path, song: &str) -> Result<(), String> {
         .map_err(|e| format!("writing {}: {e}", path.display()))
 }
 
-/// Every OTHER facet-read stage file a preview root needs merely to EXIST
+/// Every OTHER lane-read stage file a preview root needs merely to EXIST
 /// so its QML doesn't start with a parse warning on a missing file:
 /// `song/stage/cover.json` (`LiveryState.qml`/`AoideWallpaper.qml:32`),
 /// `song/stage/grimoire.json` (`GrimoireLedger`), and `state/usage.json`.
@@ -1692,7 +1692,7 @@ pub(crate) fn resolve_widget_abs(checkout: &Path, widget_field: &str) -> Option<
 /// declare`): every `*.qml` under the CURRENT song's own
 /// `checkout/song/songbook/<song>/widgets/` (sorted), plus the previewed
 /// widget's own resolved file when it lives somewhere else -- a foreign
-/// song's widget, or a facet path passed in verbatim. Pure over an
+/// song's widget, or a lane path passed in verbatim. Pure over an
 /// already-resolved absolute widget path so it needs no env, no preview
 /// root, and no live filesystem beyond the two directories it's handed.
 fn compute_watch_list(checkout: &Path, song: &str, widget_abs: Option<&Path>) -> Vec<String> {
@@ -2036,7 +2036,7 @@ mod tests {
     }
     use std::collections::BTreeMap;
 
-    /// A fake CHECKOUT: `flake.nix`, a couple of facet qml files, two songs
+    /// A fake CHECKOUT: `flake.nix`, a couple of lane qml files, two songs
     /// (one with a `_`-prefixed shelved sibling that must be skipped).
     fn fake_checkout(dir: &Path) {
         std::fs::create_dir_all(dir).unwrap();
@@ -2138,7 +2138,7 @@ mod tests {
             .is_symlink());
         assert_eq!(std::fs::read_to_string(&bridge).unwrap(), "// bridge\n");
         assert!(!run_qml_dir.join("not-qml.txt").exists());
-        // icon assets: the facet's resolved tree, copied beside the QML.
+        // icon assets: the lane's resolved tree, copied beside the QML.
         let icon = run_qml_dir.join("icons/iconoir/drag-hand-gesture.svg");
         assert!(!std::fs::symlink_metadata(&icon)
             .unwrap()
@@ -2180,7 +2180,7 @@ mod tests {
         .unwrap();
         assert_eq!(hooks, json!({}));
 
-        // the four other facet-read stage files exist -- LiveryState.qml
+        // the four other lane-read stage files exist -- LiveryState.qml
         // (mode.json/cover.json), AoideWallpaper.qml (cover.json),
         // GrimoireLedger (grimoire.json), and state/usage.json -- so none
         // of those components starts with a parse warning.
@@ -3107,7 +3107,7 @@ mod tests {
         // `..`-laden persisted `widget` field satisfies it while
         // canonicalizing, through a REAL `run/qml/songs/<song>` directory
         // symlink (what an older, symlinking root left behind), straight out
-        // to a facet file entirely outside any songbook. Reproduces the
+        // to a lane file entirely outside any songbook. Reproduces the
         // coordinator's own review shape (`demo/../../../../pkgs/lyra-shell/
         // qml/ShellBridge`; "sonata" stands in for "demo" here).
         let base = scratch("declare_traversal_via_symlink");

@@ -53,9 +53,9 @@ QtObject {
     property var extraProps: ({})
 
     // Same baseline-fallback resolution WidgetSlot uses (CONTRACTS.md §5):
-    // the active song if it authored `slot`, else sonata. No facet-side
+    // the active song if it authored `slot`, else sonata. No lane-side
     // `fallback` Component here — unlike calendar/notifications, a
-    // window-owning slot has no shared PanelWindow left behind in the facet
+    // window-owning slot has no shared PanelWindow left behind in the lane
     // to fall back to; powermenu/launcher move as whole units, sonata IS
     // the floor.
     readonly property string resolvedSong: stagingEngine.resolveSong(livery.songName, slot)

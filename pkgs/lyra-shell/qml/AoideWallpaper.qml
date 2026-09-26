@@ -18,7 +18,7 @@ Item {
     required property var livery
 
     // ── Cover path ─────────────────────────────────────────────────────────
-    // The BAKED song wallpaper — the quickshell facet exports its immutable
+    // The BAKED song wallpaper — the lyra lane exports its immutable
     // store path as AOIDE_WALLPAPER, so the song's wallpaper is RELIABLY set on
     // every rebuild/boot (this was the "background gone after rebuild" bug: the
     // live stage/cover.json is runtime state nothing re-seeds from the song).

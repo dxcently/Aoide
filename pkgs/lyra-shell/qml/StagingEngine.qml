@@ -21,7 +21,7 @@
 // widget receives ONLY `livery` (LiveryState) and `bridge` (ShellBridge) —
 // plus whatever slot-specific extras the anchor declares (e.g. notifications'
 // `notification`) — never nix `config.*`. A song widget is store-copied
-// score, structurally incapable of reaching host/facet options through this
+// score, structurally incapable of reaching host/lane options through this
 // surface.
 //
 // ── Declared widget-type registry (Phase 4) ─────────────────────────────────
@@ -48,7 +48,7 @@ QtObject {
 
     // The baseline-fallback floor (CONTRACTS.md §5): when the ACTIVE song
     // doesn't dress a slot, resolution falls back to this song before
-    // falling back further to the anchor's own facet-side `fallback`
+    // falling back further to the anchor's own lane-side `fallback`
     // Component. Sonata is the shipped, guaranteed-present standard song —
     // a fixed constant here, independent of `aoide.song`'s own default
     // (`modules/nucleus/options.nix`, null) — so it's the correct floor to
@@ -134,7 +134,7 @@ QtObject {
     // Resolve <slot> to the song that actually authors it: <song> itself if
     // it dresses the slot, else the baseline (sonata) if IT dresses the
     // slot, else "" (no song provides it — the caller falls back further to
-    // its own facet-side `fallback` Component, or renders nothing).
+    // its own lane-side `fallback` Component, or renders nothing).
     function resolveSong(song, slot) {
         if (root.has(song, slot)) return song
         if (root.has(root.baselineSong, slot)) return root.baselineSong

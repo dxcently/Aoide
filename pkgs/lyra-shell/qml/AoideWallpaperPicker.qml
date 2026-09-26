@@ -19,7 +19,7 @@
 // `lyra` now (bare name resolves via PATH: modules/nucleus/packages.nix puts
 // lyra's own droppable output, pkgs.aoide.rice, on systemPackages whenever
 // aoide.lyra.enable is on — P-A8 — which defaults to true here since this
-// widget only exists under the quickshell facet).
+// widget only exists under the lyra lane).
 // AoideWallpaper.qml
 // FileView-watches that file and hot-swaps the live wallpaper. No new socket,
 // no QML file write.

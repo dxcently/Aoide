@@ -43,7 +43,7 @@
 //! [`handle_mode_declarative`]'s own no-arg form resolves differently, and
 //! deliberately: it goes to the DECLARED song
 //! ([`super::rice::declared_song`], off `song/declared/livery.json`) when the
-//! facet has published one, and only then falls back to the same current-song
+//! lane has published one, and only then falls back to the same current-song
 //! rule above — "back to declarative" must mean the venue's declared song, not
 //! whichever song happens to be staged.
 //!
@@ -134,7 +134,7 @@ fn handle_mode_status(_inv: &Invocation) -> Outcome {
 /// Read the song `stage/livery.json` is CURRENTLY carrying, straight off its
 /// own `"song"` field — the same field both `rice stage` (below) and the nix
 /// activation's `home.activation.aoideSeedStage` reseed script
-/// (the quickshell facet's activation) write on every stage, every activation.
+/// (the lyra lane's activation) write on every stage, every activation.
 /// This is how "the current rice" is knowable at all: the Rust
 /// side has no nix evaluation access, so the stage file's own breadcrumb is
 /// the only source of truth for "what is this host actually performing right
@@ -328,10 +328,10 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
 ///
 /// With NO name, this mirrors [`handle_mode_stage`]'s own no-arg auto-resolve
 /// pattern rather than freezing the stage as-is: it resolves "the declared
-/// song" off the facet's declared twin
+/// song" off the lane's declared twin
 /// (`song/declared/livery.json`, [`super::rice::declared_song`],
 /// CONTRACTS.md §4) — the song the VENUE declares for this host — and only
-/// when that twin is absent (a host that never activated the facet) falls
+/// when that twin is absent (a host that never activated the lane) falls
 /// back to [`current_staged_song`], the song `stage/livery.json` is currently
 /// carrying. It re-pins from the resolved song's notes, then locks — so `rice
 /// mode declarative` with no name discards whatever unsaved live edits sat in
@@ -783,7 +783,7 @@ mod tests {
         std::fs::write(sonata.join("livery.json"), VALID_NOTES).unwrap();
         std::fs::write(nocturne.join("livery.json"), VALID_NOTES).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        // The facet's activation seed published the DECLARED twin for sonata…
+        // The lane's activation seed published the DECLARED twin for sonata…
         std::fs::write(
             declared.join("livery.json"),
             r##"{"palette":{"accent":"#ebbcba","bg":"#0b1021","fg":"#c8d3f5","urgent":"#ff757f"},"schemaVersion":"0","song":"sonata"}"##,

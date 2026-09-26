@@ -15,7 +15,7 @@ One copy of the tree, two consumers:
 
 | consumer | what it takes | how |
 |---|---|---|
-| the quickshell facet's build (today's consumer) | `qml/` | `cp -r ${pkgs.lyra-shell}/share/lyra/qml/. "$out/qml/"`, then the manifest/registry/surfaces and the songs' widgets land beside it |
+| the lyra lane's build (today's consumer) | `qml/` | `cp -r ${pkgs.lyra-shell}/share/lyra/qml/. "$out/qml/"`, then the manifest/registry/surfaces and the songs' widgets land beside it |
 | `lyra preview` (`pkgs/aoide/crates/lyra/src/commands/preview.rs`) | `qml/`, `icons/`, `preview/fixtures/` | joins `aoide_storage::fs::LYRA_SHELL_SRC` onto the checkout (`$AOIDE_FLAKE_ROOT`, default `~/.aoide/Aoide`) — a preview root is copies of the checkout's own files, never symlinks into it |
 
 The Rust side reads the CHECKOUT, not this store path: `lyra preview` runs on

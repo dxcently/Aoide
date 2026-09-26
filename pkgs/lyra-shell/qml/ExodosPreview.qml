@@ -5,7 +5,7 @@ import Quickshell
 //   qs -p pkgs/lyra-shell/qml/ExodosPreview.qml
 // Loads the REAL powermenu.qml pre-shown — it owns its own full-screen
 // Overlay PanelWindow (namespace "aoide-powermenu", so a live compositor with
-// the facet's layerrules gives this preview the same blur + hyprglass the
+// the lane's layerrules gives this preview the same blur + hyprglass the
 // real surface gets). Stub gold-marble palette (hex sanctioned here only —
 // mirrors the livery roles, CalendarPreview-style) and a stub bridge that
 // logs the power command instead of dispatching it — the preview must never

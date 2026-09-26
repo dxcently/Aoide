@@ -20,7 +20,7 @@ import Quickshell.Wayland
 // default relative source resolves with no env needed.
 //
 // power.qml declares `livery` AND `bridge` as `required property` (the
-// facet original only requires `livery`) — a plain `Loader { source: }`
+// lane original only requires `livery`) — a plain `Loader { source: }`
 // cannot satisfy a required property (creation fails, null item, the
 // DockPreview Phase-3 hazard), so this goes through `setSource(url, props)`
 // with BOTH supplied.

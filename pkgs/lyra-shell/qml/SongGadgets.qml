@@ -5,7 +5,7 @@
 // hosts the `kind = "surface"` half of). Same data source
 // (`stagingEngine.declaredWidgets(song)`), same overall shape as
 // SongSurfaces.qml, but the opposite mount: a `dock` entry has no layer
-// surface of its own (the compositor facet already filters it out of
+// surface of its own (the compositor lane already filters it out of
 // layerrule generation) — it mounts as a plain Item straight into sonata's
 // `widgets/dock.qml`'s existing gadget column, alongside the shipped
 // conductor/terminals/etc. `WidgetSlot`s.
@@ -38,7 +38,7 @@
 // storm (see `SurfaceSlot.qml`'s `_builtSource`/`_sameExtras` guards) — an
 // `extraProps` binding here would risk the same storm for no reason, since
 // dock gadgets get the same fixed prop contract as everything else declared
-// so far, not the wider `livery+bridge+shared` the shipped facet gadgets get.
+// so far, not the wider `livery+bridge+shared` the shipped lane gadgets get.
 //
 // A declared dock slot whose declaring song has no actual
 // `widgets/<slot>.qml` body (neither the active song nor the sonata

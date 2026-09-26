@@ -11,7 +11,7 @@
 //! reference — so the guard is a visited-set over ref strings, matching SD's
 //! circular-reference rejection). The fallback is applied HERE for the
 //! live-side emitters so the stage file carries concrete colours (Quickshell
-//! never reads null — CONTRACTS.md §4). The nix FACET applies the same
+//! never reads null — CONTRACTS.md §4). The nix side applies the same
 //! fallback independently for the baked side; both derive from identical
 //! rules so preview and adopted state cannot diverge.
 

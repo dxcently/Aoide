@@ -47,10 +47,10 @@ in `lyra`, not core.
 - `health` — the `quickshell healthcheck` watchdog (`src/health.rs`, whose
   module header is the argument). Its bad-state predicate is
   `surfaces_fall_short` against the declaration published to
-  `run/qml/songs/surfaces.json` by the quickshell facet's build
+  `run/qml/songs/surfaces.json` by the lyra lane's build
   (`CONTRACTS.md §5`, `aoide.arrangement.surfaces`), read through
   `aoide_storage::fs::run_qml_dir` and folded by `asserted_expectation`: an
-  absent, unreadable, or EMPTY declaration (the facet publishes the file on
+  absent, unreadable, or EMPTY declaration (the lane publishes the file on
   every host, so every non-declaring song ships `{"surfaces": {}}`) means no
   expectation is declared and `shell_has_zero_layers` — the older total
   `aoide-*` count — decides exactly as before. A total count cannot see a
@@ -81,7 +81,7 @@ in `lyra`, not core.
   song already resolved through one of the two entry points. `element seed
   <song>` (L-E1) is the shell-reachable
   bridge to `crate::elements::seed_song` — the render pipeline's only
-  caller today; `rice stage` (L-E2) and the elements facet's activation
+  caller today; `rice stage` (L-E2) and the elements lane's activation
   hook (L-E3) call the same function later, not a fork of it.
 
 ## What it consumes
@@ -94,7 +94,7 @@ dev-dependency.
 
 `declared_notes` (`song/declared/livery.json`, CONTRACTS.md §4) is the
 DECLARED song's own notes, venue override applied — published by the
-quickshell facet's activation seed, read-only here.
+lyra lane's activation seed, read-only here.
 `commands::rice::notes_source` reads it whenever its `"song"` field equals the
 name being staged (never otherwise), so a runtime re-stage of the declared song
 reproduces the venue recolour instead of reverting it;

@@ -20,7 +20,7 @@ import Quickshell.Wayland
 // default relative source resolves with no env needed.
 //
 // terminals.qml declares `livery` AND `bridge` as `required property`
-// (matching the facet original); `shared` and `stagePath` are plain
+// (matching the lane original); `shared` and `stagePath` are plain
 // (non-required) properties with their own defaults — dock.qml's own anchor
 // still passes `shared` as a slot extra (`extraProps: ({ shared: root.shared
 // })`), and this harness keeps overriding both for parity with the direct-

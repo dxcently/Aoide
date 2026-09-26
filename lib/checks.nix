@@ -5,7 +5,7 @@
 # discovery specifically):
 #
 #   1. surface-ownership — no render surface may have two owners. The
-#      Quickshell facet declares `aoide.surfaces.<name>.owner`; Stylix reads
+#      lyra lane declares `aoide.surfaces.<name>.owner`; the stylix lane reads
 #      the same registry and disables derivation for owned surfaces. Two
 #      modules claiming the same surface is a build-time error.
 #
@@ -88,7 +88,7 @@ let
   # ── Check 1: surface ownership ────────────────────────────────────────────
   # Consumes the evaluated `aoide.surfaces` registry. Duplicate detection is a
   # no-op today because attrsets cannot hold duplicate keys; the real teeth
-  # arrive when a facet asserts, in its own module, that it is the sole owner
+  # arrive when a lane asserts, in its own module, that it is the sole owner
   # of a surface (Wave-1 wires the mkMerge/last-wins guard). Here we assert the
   # registry is well-formed: every declared surface names a non-empty owner.
   surfaceOwnership =

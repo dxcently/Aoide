@@ -321,7 +321,7 @@ fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
 /// not JSON, not an object, carries no string `"song"`, or carries one that
 /// fails [`crate::compose::valid_song_name`].
 ///
-/// Only the nix facet's activation seed writes that file; this crate only
+/// Only the nix side's activation seed writes that file; this crate only
 /// ever reads it.
 /// The name-shape guard mirrors [`super::mode::current_staged_song`]'s own
 /// read-side guard — the result is joined into a songbook path by callers, so
@@ -339,7 +339,7 @@ pub(crate) fn declared_song() -> Option<String> {
 /// own `"song"` field, else the committed
 /// [`shellbridge::songbook_notes(name)`].
 ///
-/// The twin is the facet's activation seed: the DECLARED song's committed
+/// The twin is the lane's activation seed: the DECLARED song's committed
 /// notes with the venue's `aoide.livery.override` already applied. Reading it
 /// here is what makes a runtime re-stage reproduce the venue instead of
 /// reverting the desktop to the song's own colours. The `"song"` equality test
@@ -371,7 +371,7 @@ fn notes_source(name: &str) -> PathBuf {
 ///
 /// This is the honest form of the hand-copy agents had been doing: drive the
 /// songbook notes into the stage so the shell has a palette to render — the
-/// DECLARED twin ([`notes_source`], CONTRACTS.md §4) when the facet has
+/// DECLARED twin ([`notes_source`], CONTRACTS.md §4) when the lane has
 /// published one for this song, else the song's own committed notes.
 ///
 /// `pub(crate)`, not private: `rice mode`'s `stage`/`declarative` handlers
@@ -1014,7 +1014,7 @@ mod tests {
 
     /// The declared twin (CONTRACTS.md §4) is the venue's copy of the
     /// declared song's notes — committed notes with `aoide.livery.override`
-    /// applied, published by the quickshell facet's activation seed. Staging
+    /// applied, published by the lyra lane's activation seed. Staging
     /// the DECLARED song must derive from THAT, not from the raw committed
     /// file, or the first runtime re-stage after activation reverts the
     /// venue recolour.
@@ -1030,7 +1030,7 @@ mod tests {
         std::fs::create_dir_all(&song).unwrap();
         std::fs::create_dir_all(&declared).unwrap();
         std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
-        // The twin is the same shape the facet's jq seed writes: committed
+        // The twin is the same shape the lane's jq seed writes: committed
         // notes, `"song"` injected, keys sorted, palette recoloured by the
         // venue override.
         std::fs::write(

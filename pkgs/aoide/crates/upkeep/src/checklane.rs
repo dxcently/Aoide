@@ -198,7 +198,7 @@ pub fn stop_message(delta: &LaneDelta) -> Option<String> {
 
 /// `git status --porcelain --untracked-files=all` scoped at `root` —
 /// `all`, not the default `normal` C1 uses: a brand-new NESTED directory
-/// (exactly what a new dendrite/facet looks like) collapses to one line
+/// (exactly what a new dendrite/lane looks like) collapses to one line
 /// under `normal` and would hide every `.nix` file inside it.
 pub fn untracked_nix_files(root: &Path) -> Vec<String> {
     crate::scan::run_git(root, &["status", "--porcelain", "--untracked-files=all"])

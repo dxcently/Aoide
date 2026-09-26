@@ -10,7 +10,7 @@
 # here, and no config is named here — which directory quickshell is pointed at
 # is `aoide.quickshell.config`, and what fills that directory (a song's
 # widgets, its manifest/registry/surfaces) is a host's own business. The
-# copy-out is the consumer's step: the quickshell facet's build copies `qml/`
+# copy-out is the consumer's step: the lyra lane's build copies `qml/`
 # into its generated config, and the lyra dendrite does the same with the songs
 # staged alongside.
 #

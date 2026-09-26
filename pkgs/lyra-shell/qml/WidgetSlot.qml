@@ -6,7 +6,7 @@
 // a piece of chrome with its own QML. It asks the staging engine to resolve
 // `slot` against a baseline-fallback chain (CONTRACTS.md §5): the active
 // song (`livery.songName`) if it authored the slot, else sonata (the shipped
-// baseline every song can fall back to), else the anchor's own facet-side
+// baseline every song can fall back to), else the anchor's own lane-side
 // `fallback` Component, else nothing.
 //
 // Fixed injected-prop contract (CONTRACTS.md §5 containment): whatever loads
@@ -14,7 +14,7 @@
 // it actually declares that property, plus each key of `extraProps`
 // (slot-specific extras, e.g. notifications' `notification`). Never nix
 // `config.*` — a song widget is store-copied score, structurally incapable
-// of reaching host/facet options through this surface. Both slots in scope
+// of reaching host/lane options through this surface. Both slots in scope
 // this pass (calendar's proof stubs, per the fixed contract) declare both
 // `livery` and `bridge` as `required` even though bridge goes unused today.
 //
@@ -53,7 +53,7 @@ Item {
     // chain (CONTRACTS.md §5): the active song if it authored `slot`, else
     // sonata (the baseline), else "" — an empty resolvedSong means neither
     // the active song nor the baseline provide it, so `_rebuild` falls
-    // through to the facet-side `fallback` Component.
+    // through to the lane-side `fallback` Component.
     readonly property string resolvedSong: stagingEngine.resolveSong(livery.songName, slot)
     readonly property bool songProvides: resolvedSong !== ""
 

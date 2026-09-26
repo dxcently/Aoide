@@ -153,7 +153,7 @@ are core `aoide` identity, root `AGENTS.md`).
   the live dir from inside its own canvas) as a usage error. A running
   canvas (`preview.pid` live) blocks only a second LAUNCH on its root;
   `--no-launch` re-stages the copies and merges into the control file
-  while it stays up. Every OTHER facet-read stage file
+  while it stays up. Every OTHER lane-read stage file
   the isolated root needs merely to exist gets written too:
   `song/stage/mode.json` (`LiveryState.qml`'s own convention — `mode`,
   `song`, `stagingSong`, `since`) is REWRITTEN on every build and on
@@ -187,7 +187,7 @@ are core `aoide` identity, root `AGENTS.md`).
   elsewhere — the set the P2 canvas hot-reloads against). The child's env
   is rewritten (`AOIDE_ROOT`/`AOIDE_STATE_DIR`/`AOIDE_STAGE_DIR` repointed
   at the isolated root, `AOIDE_DAEMON_SOCKET` at a path that never exists
-  so no facet QML can reach the real `aoided` even bypassing a stub
+  so no lane QML can reach the real `aoided` even bypassing a stub
   bridge, and every widget-slot env override — `QS_STAGE`,
   `CONDUCTOR_WIDGET`, etc. — stripped) and `PR_SET_PDEATHSIG`-armed
   exactly like `commands::dialog_qml::spawn_quickshell`'s own discipline,
@@ -209,7 +209,7 @@ are core `aoide` identity, root `AGENTS.md`).
   canvas's own counterpart of `rice declare` (`commands/stubs.rs`,
   `Self-Ricing.md`'s stage-vs-commit split): it copies the previewed
   widget body (refusing a `widget` outside `run/qml/songs/` — never a
-  facet symlink) and, unless `liverySource` is exactly the preview's own
+  lane symlink) and, unless `liverySource` is exactly the preview's own
   song (its palette is already checkout truth), the resolved palette
   tiers (`palette`/`base16`/`bar`/`notif`/`window` only — every other
   authored key in the checkout's `livery.json` survives untouched, and

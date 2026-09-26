@@ -19,7 +19,7 @@ Every slot below is hosted by one of two anchors:
   exposes the live instance as `.item` for the host to call directly (e.g.
   the bar's clef calling `.toggle()`). A slot that roots a `PanelWindow`
   documents its namespace here — that contract (which layer, what
-  identifies it to the compositor facet's layerrules) travels with the slot,
+  identifies it to the compositor lane's layerrules) travels with the slot,
   same as extras/fallback.
 
 Both anchor kinds resolve through the SAME baseline-fallback chain
@@ -27,10 +27,10 @@ Both anchor kinds resolve through the SAME baseline-fallback chain
 it authored the slot, else **sonata's** (the shipped standard song — the
 baseline every song falls back to, a fixed constant independent of
 `aoide.song`'s own default, which is null), else — `WidgetSlot`
-only — the anchor's own facet-side `fallback` Component, else nothing.
-`SurfaceSlot` slots have no facet-side fallback: sonata's file IS the floor,
+only — the anchor's own lane-side `fallback` Component, else nothing.
+`SurfaceSlot` slots have no lane-side fallback: sonata's file IS the floor,
 since a window-owning slot moves as one whole unit with nothing left behind
-in the facet to fall back to.
+in the lane to fall back to.
 
 ## The universal widget contract
 
@@ -65,7 +65,7 @@ Every widget QML file, whatever slot it fills, must follow this shape:
   positions the `WidgetSlot`, not the widget; the widget only needs to
   report its own footprint.
 - **NEVER receives `config.*`.** A song widget is store-copied score,
-  structurally incapable of reaching host/facet nix options through this
+  structurally incapable of reaching host/lane nix options through this
   surface — no anchor passes anything nix-shaped in, ever.
 
 A slot body is designed on the canvas, not on the live dock: `lyra preview
@@ -78,17 +78,17 @@ anchor, viewport, fixture (`docs/Aoide-Wiki/concepts/desktop/Widget-Preview.md`)
 | --- | --- | --- | --- | --- |
 | `calendar` | `WidgetSlot` | `bar.qml` (sonata) — the clock's calendar popout (`WidgetSlot { slot: "calendar" }`) | none | none — an unauthored `calendar` slot renders nothing (the popout itself gates on `stagingEngine.has(...)` before opening) |
 | `notifications` | retired 2026-08-16 — the Quickshell `NotificationServer` surface (AoideNotifications.qml) is gone; dunst owns `org.freedesktop.Notifications`. Superseded by `herald` below, which draws the popup WITHOUT owning the bus name | — | — |
-| `herald` | `SurfaceSlot` | `shell.qml` (facet) — `SurfaceSlot { slot: "herald" }`; the notification popup, drawn from `state/stage/herald.json` (dunst draws nothing — see `modules/dendrites/dunst.nix`) | none | none — sonata's `widgets/herald.qml` is the floor |
-| `dock` | `SurfaceSlot` | `shell.qml` (facet) — `SurfaceSlot { slot: "dock" }`; the bar's ✎N cell and the `aoide:dock` (SUPER+G) `GlobalShortcut`, both in the facet, call `.item.toggle()` | `shared` (session-state QtObject), `stagingEngine` (so the dock's own embedded gadget `WidgetSlot`s can resolve) | none — sonata's `widgets/dock.qml` is the floor |
+| `herald` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "herald" }`; the notification popup, drawn from `state/stage/herald.json` (dunst draws nothing — see `modules/dendrites/dunst.nix`) | none | none — sonata's `widgets/herald.qml` is the floor |
+| `dock` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "dock" }`; the bar's ✎N cell and the `aoide:dock` (SUPER+G) `GlobalShortcut`, both in the lane, call `.item.toggle()` | `shared` (session-state QtObject), `stagingEngine` (so the dock's own embedded gadget `WidgetSlot`s can resolve) | none — sonata's `widgets/dock.qml` is the floor |
 | `conductor` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "conductor" }`) | `shared` | none — sonata's own `widgets/conductor.qml` IS the baseline floor |
 | `terminals` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "terminals" }`) | `shared` | none — sonata's own `widgets/terminals.qml` IS the baseline floor |
 | `usage` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "usage" }`), visible only once it reports nonzero `implicitHeight` | none | none — sonata's own `widgets/usage.qml` IS the baseline floor |
 | `meters` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "meters" }`) | none | none — sonata's own `widgets/meters.qml` IS the baseline floor |
 | `power` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "power" }`) | none | none — sonata's own `widgets/power.qml` IS the baseline floor |
-| `herald-center` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "herald-center" }`), the column's last shipped gadget | none | none — sonata's own `widgets/herald-center.qml` IS the baseline floor; no facet-side Component fallback is wired |
-| `powermenu` | `SurfaceSlot` | `shell.qml` (facet) — `SurfaceSlot { slot: "powermenu" }`; the bar's clef calls `.item.toggle()` | none | none — sonata's `widgets/powermenu.qml` is the floor |
-| `launcher` | `SurfaceSlot` | `shell.qml` (facet) — `SurfaceSlot { slot: "launcher" }` | `clipboard` (the `AoideClipboard` instance), `ledger` (`GrimoireLedger` — stays in the facet, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |
-| `bar` | `WidgetSlot` | `shell.qml` (facet) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }` | `shared` (session-state QtObject), `powermenu` (the powermenu slot's live `.item`), `dock` (the dock slot's live `.item`), `stagingEngine` (so the bar's own embedded calendar `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
+| `herald-center` | `WidgetSlot` | `dock.qml` (sonata) — the dock's gadget column (`WidgetSlot { slot: "herald-center" }`), the column's last shipped gadget | none | none — sonata's own `widgets/herald-center.qml` IS the baseline floor; no lane-side Component fallback is wired |
+| `powermenu` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "powermenu" }`; the bar's clef calls `.item.toggle()` | none | none — sonata's `widgets/powermenu.qml` is the floor |
+| `launcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "launcher" }` | `clipboard` (the `AoideClipboard` instance), `ledger` (`GrimoireLedger` — stays in the lane, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |
+| `bar` | `WidgetSlot` | `shell.qml` (lane) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }` | `shared` (session-state QtObject), `powermenu` (the powermenu slot's live `.item`), `dock` (the dock slot's live `.item`), `stagingEngine` (so the bar's own embedded calendar `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
 
 ### Window-owning slot namespaces (`SurfaceSlot` contract)
 
@@ -129,15 +129,15 @@ top-level **lowercase-kebab** `.qml` files as slots; `.gitkeep` is always
 skipped. A helper file is carried to disk but never independently
 resolvable as a slot.
 
-### Facet or song?
+### Lane or song?
 
-**The facet is not a component library.** The destination for a shared
+**The lane is not a component library.** The destination for a shared
 visual component is the song's `widgets/` dir with an uppercase name —
 the helper mechanism directly above — not this directory.
 
 `CONTRACTS.md §0`'s test runs first and decides **bridge vs QML**: delete
 every `.qml` in the repo; if the capability is no longer reachable from a
-terminal, it was never QML's to hold. The test below decides **facet QML
+terminal, it was never QML's to hold. The test below decides **lane QML
 vs song QML**, and only applies to a file that already passed §0.
 
 > ### The paint test
@@ -160,18 +160,18 @@ vs song QML**, and only applies to a file that already passed §0.
 >
 > **Tie-breaker**, when an agent honestly cannot call question 2: *would a
 > reviewer file this file's diff under "design change"?* If yes, it is song. A
-> facet file's diff is always a mechanism change.
+> lane file's diff is always a mechanism change.
 >
 > **What the test is not.** It is not "does it paint" — `WidgetSlot` is an
-> `Item` and `SurfaceSlot` hosts a `PanelWindow`, and both are facet. It is not
+> `Item` and `SurfaceSlot` hosts a `PanelWindow`, and both are lane. It is not
 > "is it a `QtObject`" — `MoodFaces` and `MorphState` are `QtObject`s and both
 > are song. It is not line count — `AudioColonnade` is 1940 lines of song and
-> `AoideIpc` is 24 lines of facet. It is not "is it shared" — shared across
-> *widgets* is not shared across *songs*, and only the second earns a facet home.
+> `AoideIpc` is 24 lines of lane. It is not "is it shared" — shared across
+> *widgets* is not shared across *songs*, and only the second earns a lane home.
 >
-> **The corollary for a new API**: a new capability lands as a facet bridge that
+> **The corollary for a new API**: a new capability lands as a lane bridge that
 > answers **with data**, never with a component to instantiate, and the song
-> picks it up by name. Concretely: a facet bridge exposes `paletteAccent`; it
+> picks it up by name. Concretely: a lane bridge exposes `paletteAccent`; it
 > does not expose `ctxBar()`. If the natural shape of the new thing is "a
 > component every widget instantiates", it is not an API — it is a song helper,
 > and it goes in `widgets/` with an uppercase name.
@@ -185,7 +185,7 @@ Everything above is the **anchored** catalog: a slot name a host surface
 already wired a `WidgetSlot`/`SurfaceSlot` for. This section is a second,
 independent mechanism — a **declared** slot: a song registers a brand-new
 slot name via nix, apart from the fixed catalog above, instead of merely
-dressing a name the facet already anchored.
+dressing a name the lane already anchored.
 
 `aoide.arrangement.widgets.<slot>` (`modules/nucleus/options.nix`, sibling
 of `aoide.livery`) is the registration. It is twin-written into that song's

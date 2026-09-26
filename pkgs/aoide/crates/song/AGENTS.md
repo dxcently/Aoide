@@ -68,8 +68,8 @@
   `crate::live`/`crate::widgets` primitives directly, never
   `handle_rice_stage`.
 - **`song/declared/livery.json` (the declared twin, CONTRACTS.md §4) is
-  READ-ONLY for this crate — only the nix facet writes it.** The quickshell
-  facet's activation seed (`home.activation.aoideSeedStage`) publishes it: the
+  READ-ONLY for this crate — only the nix side writes it.** The lyra
+  lane's activation seed (`home.activation.aoideSeedStage`) publishes it: the
   declared song's committed notes with the venue's `aoide.livery.override`
   applied, `"song"` injected, keys sorted.
   `commands::rice::notes_source` reads it for `handle_rice_stage`, and
@@ -79,11 +79,11 @@
   EQUALITY against the name being staged — never a mode, never a mtime,
   never "the twin exists so use it".** The twin describes exactly one song;
   staging any other must derive from that song's own committed notes. A host
-  that never activated the facet has no twin at all, and every reader falls
+  that never activated the lane has no twin at all, and every reader falls
   back to the committed songbook — absent is the ordinary no-venue-override
   case, never an error. Never write this path from Rust: `rice stage` is a
   runtime writer of the STAGE, and a second Rust writer of the declared twin
-  would race the facet's seed and could never compute the override tier the
+  would race the lane's seed and could never compute the override tier the
   nix evaluator owns.
 - **`commands::rice::seed_songbook_from_templates` (task #41) is called
   from the STAGING ENTRY POINTS, never from inside `handle_rice_stage`
@@ -151,7 +151,7 @@
   makes the judgement unit-testable and is why an absent or malformed
   published file must read as "no expectation declared", never as an
   unhealthy desktop. **An EMPTY published declaration is the same case,
-  folded by `asserted_expectation`, not by the parser**: the facet publishes
+  folded by `asserted_expectation`, not by the parser**: the lane publishes
   the file on every host, so `{"surfaces": {}}` is what every non-declaring
   song ships, and it must reach `shell_has_zero_layers` — routing it to
   `surfaces_fall_short` gives a check with nothing to fail, which reads a

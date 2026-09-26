@@ -11,7 +11,7 @@
 # `$out/share/lyra/songbook/` = a verbatim copy of the committed
 # `song/songbook/` tree (every song's `rice.nix`/`livery.json`/`design/`/
 # `widgets/`) PLUS `manifest.json`/`registry.json` baked via `lib/songbook.nix`
-# — the SAME generator the quickshell facet's `quickshellConfig` derivation
+# — the SAME generator the lyra lane's `quickshellConfig` derivation
 # and the `songbookManifest` flake output both call, so this dir's baked files
 # can never drift from what a checkout host's `nix eval` would produce for the
 # same committed songs.

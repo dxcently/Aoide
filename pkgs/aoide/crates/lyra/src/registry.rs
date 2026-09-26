@@ -19,7 +19,7 @@
 //! `preview.tree`, `preview.notes` — shell-first agent tools over that same
 //! canvas (a screenshot, the live/static-joined item tree, and a
 //! scaffolding notes store). I1 added `icon.collections`, `icon.list`,
-//! `icon.resolve` (the pinned icon collections, resolved into the facet's own
+//! `icon.resolve` (the pinned icon collections, resolved into the lane's own
 //! SVG tree). See `commands/mod.rs::all()` for the assembly
 //! order.
 

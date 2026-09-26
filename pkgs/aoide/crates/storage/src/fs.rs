@@ -631,8 +631,8 @@ pub fn songbook_notes(name: &str) -> std::path::PathBuf {
 ///
 /// Same content as the active song's committed `livery.json` with the venue's
 /// `aoide.livery.override` applied (a plain file, never a symlink), published
-/// by the quickshell facet's activation seed — the file's own `"song"` field
-/// says WHICH song that was. Absent on a host that never activated the facet
+/// by the lyra lane's activation seed — the file's own `"song"` field
+/// says WHICH song that was. Absent on a host that never activated the lane
 /// (or before its first activation); readers then fall back to the committed
 /// songbook for that song. Shares [`song_dir`]'s `AOIDE_STAGE_DIR`-relative
 /// resolution like every other song-tree path.

@@ -318,7 +318,7 @@ lib.mkIf (config.aoide.enable && config.aoide.lyra.enable) {
 
   # ── Stage-file paths exposed as options for downstream modules ────────────
   # These are the stable v0 stage paths (CONTRACTS.md §4), split by tree.
-  # Facets and the Quickshell widget must read exactly these paths; never
+  # Lanes and the Quickshell widget must read exactly these paths; never
   # compute them independently. Note: these are RUNTIME paths — they are
   # NEVER imported by any nix module (checks.no-song-read enforces this).
   #

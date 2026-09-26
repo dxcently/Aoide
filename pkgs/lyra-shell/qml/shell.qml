@@ -61,7 +61,7 @@ ShellRoot {
     // properties, wired for its side effect (Quickshell.reload) alone.
     AoideIpc { id: ipc }
     // The staging engine (CONTRACTS.md §5) — reads the manifest
-    // the quickshell facet's build carries into $AOIDE_ROOT/run/qml/songs/, resolves
+    // the lyra lane's build carries into $AOIDE_ROOT/run/qml/songs/, resolves
     // WidgetSlot's "does the active song dress this slot" / "where's its QML".
     StagingEngine { id: stagingEngine }
 
@@ -157,11 +157,11 @@ ShellRoot {
 
     // ── Bar (top edge, exclusive — reserves its height) ────────────────────
     // Whole-content slot (CONTRACTS.md §5, slots.md): the PanelWindow itself
-    // — layer, namespace, exclusive-zone reservation — stays facet-owned;
+    // — layer, namespace, exclusive-zone reservation — stays lane-owned;
     // only its CONTENT is the per-song `bar` widget, loaded through
     // WidgetSlot like calendar/notifications. The song fully owns its own
     // footprint now: implicitHeight/exclusiveZone read back from the loaded
-    // item's own implicitHeight rather than a facet-pinned constant.
+    // item's own implicitHeight rather than a lane-pinned constant.
     //
     // ONE BAR PER OUTPUT, same as the wallpaper above: a singleton bound to
     // one dead screen stayed dead after an output blip, while a Variants
@@ -180,7 +180,7 @@ ShellRoot {
             exclusiveZone: barSlot.implicitHeight
             color: "transparent"
             WlrLayershell.layer: WlrLayer.Top
-            // Distinct namespace → target of the compositor facet's glass
+            // Distinct namespace → target of the compositor lane's glass
             // layerrule (blur behind the translucent barBg — dxflake's
             // "namespace waybar" posture, aoide-native name).
             WlrLayershell.namespace: "aoide-bar"
@@ -219,9 +219,9 @@ ShellRoot {
     // LEFT edge, vertically centred. Sonata's own `widgets/dock.qml` owns the
     // whole surface — its own PanelWindow, WlrLayershell namespace and
     // keyboard focus — the same `SurfaceSlot` contract powermenu/launcher/
-    // herald already carry (slots.md); it replaced the facet's own
+    // herald already carry (slots.md); it replaced the lane's own
     // `AoidePanel.qml`, retired once this slot anchor landed. The toggle
-    // keybind stays a facet contract on purpose (so a song's dock body can
+    // keybind stays a lane contract on purpose (so a song's dock body can
     // never forget to bind it): `aoide:dock` (SUPER+G) is a Hyprland global
     // shortcut registered here, dispatching into whatever `.item` the slot
     // resolves — the same pattern SongSurfaces uses for a declared widget's
@@ -266,7 +266,7 @@ ShellRoot {
     // permission summons, none of which dunst could draw itself. The dock's
     // `herald-center` slot reads the same file as a ledger.)
     AoideClipboard { id: clipboard }
-    // The Grimoire's usage ledger — stays in the facet (a data seam, not
+    // The Grimoire's usage ledger — stays in the lane (a data seam, not
     // chrome, CONTRACTS.md §4), injected into the launcher slot as an extra.
     GrimoireLedger { id: ledger }
     // powermenu/launcher: window-owning slots (SurfaceSlot, not WidgetSlot —

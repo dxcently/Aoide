@@ -149,7 +149,7 @@ let
       }
       {
         # null is a fourth, deliberate value the option type does not carry: an
-        # anchored-catalog slot, hosted by the facet's shell, registering
+        # anchored-catalog slot, hosted by the lane's shell, registering
         # nothing. `options.nix`'s submodule defaults `kind` to "surface"; a
         # record's ABSENT kind means the opposite, so `composeSong` filters
         # nulls out before mapping and never leans on the option default.

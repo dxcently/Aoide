@@ -17,7 +17,7 @@
 //! resolves ownership, and it runs in the nix evaluator, nowhere else. So
 //! both files are regenerated WHOLE, for every committed song at once, by
 //! shelling out to `nix eval --json` against the `songbookManifest` flake
-//! output (`flake.nix`) — the exact same generator the quickshell facet's
+//! output (`flake.nix`) — the exact same generator the lyra lane's
 //! `quickshellConfig` derivation calls at build time. One generator, two
 //! callers: [`eval_songbook`] is that shell-out, invoked once from the
 //! manifest path
@@ -37,7 +37,7 @@
 //! song" and "every committed song nix can see" are the same set).
 //!
 //! Mirrors the nix build's own per-song widget carry (the quickshell
-//! facet's `quickshellConfig` derivation) as closely as possible for the
+//! lane's `quickshellConfig` derivation) as closely as possible for the
 //! BODY copy: the WHOLE `widgets/` tree is copied unfiltered (helper
 //! components, asset subdirs,
 //! `.gitkeep`, everything), while the manifest only ever lists top-level
@@ -153,7 +153,7 @@ pub(crate) const SONGBOOK_EVAL_FIXTURE_VAR: &str = "AOIDE_SONGBOOK_EVAL_FIXTURE"
 /// On a CHECKOUT host (`flake_root()` names a real flake): one `nix eval
 /// --json` shell-out against the `songbookManifest` flake output
 /// (`flake.nix`), which wraps `lib/songbook.nix` — the SAME function the
-/// quickshell facet's `quickshellConfig` derivation calls at build time.
+/// lyra lane's `quickshellConfig` derivation calls at build time.
 /// Evaluates against
 /// [`aoide_storage::fs::flake_root`] (the git checkout, not the relocatable
 /// stage/runtime trees — see that function's doc), so the result reflects
@@ -697,7 +697,7 @@ fn copy_tree_atomic(
 }
 
 /// `name`'s top-level slot files in `src` — informational only (see
-/// [`WidgetSyncOk::slots`]'s doc), same rule the quickshell facet's manifest
+/// [`WidgetSyncOk::slots`]'s doc), same rule the lyra lane's manifest
 /// generation uses: a FILE (not a dir), not `.gitkeep`, ending `.qml`, first
 /// byte
 /// ascii-lowercase or an ascii digit.
