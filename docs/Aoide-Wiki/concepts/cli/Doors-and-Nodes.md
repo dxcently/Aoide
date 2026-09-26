@@ -172,8 +172,12 @@ lyra shellbridge [--run] [--json]
   (`reason: "no-compositor"`, the CLI's own sentence) rather than dropped,
   because a click is parked on a reply. Its reply is `{ok, message, action,
   workspace, project?, data?}` — the resolved workspace id is the key,
-  `project` rides only on `set` — and the file a bar reads to draw the
-  current bindings is `state/stage/projects.json`, `projects[].workspaces`).
+  `project` rides only on `set` — and what a bar draws the current bindings
+  from is `graph.json`'s TOP-LEVEL `workspaces` block (`{workspace, project?,
+  projects, sessions, live, working, awaiting, activeAt}`) with `ties` beside
+  it, the resolved projection of `state/stage/projects.json`'s
+  `projects[].workspaces` — which stays the record and an equally valid read,
+  and which `aoide workspace list --json` republishes as the same block).
   Also
   spawns the Hyprland window→session listener thread at startup
   (`graph::run_hypr_window_listener`). A malformed or unknown line is

@@ -2057,6 +2057,30 @@
   QML protocol line for it, and the bar's bind click in
   `song/songbook/cadenza/widgets/`, are the cadenza rice slice's to write
   (house rule 7 — bridge first), so the next commit touching either owes both.
+- **`graph.json`'s compositor block (`doc::workspace_block`) is ONE seam.**
+  `build_graph` publishes it and `aoide workspace list --json` prints it from
+  the same function — never a second builder, never a reader re-deriving the
+  rows, because the two doors disagreeing about a binding is exactly the bug
+  this seam exists to prevent. The block rides only when some session reports a
+  workspace or some project has a binding, and a session node's `activeAt`
+  rides under the SAME gate (it feeds the block, so it travels with it): a
+  document with no compositor in play must stay byte-identical, test or no
+  test (`nothing_in_play_leaves_the_document_byte_identical`). Rows and ties
+  are built from LOCAL sessions only — the input IS the local roster, and
+  another node's rows arrive nested under a fresh node's `children`, which the
+  block never reads. Both lineage walks (a headless session's activity folding
+  into its nearest windowed ancestor's row, and a spawned tie's leaving end)
+  go through `windowed_ancestor`, which is visited-set bounded: a malformed
+  parent cycle must never spin the builder. A headless session's pulse folds
+  in as ACTIVITY ONLY — no session id joins that row's `sessions`, no count
+  moves, and no tie is drawn. `projects.json` stays the RECORD; this block is
+  its projection, so a binding change belongs in `workspace set`/`clear` and
+  nowhere else.
+- A change to that block's shape, its gate, or its definitions updates
+  `CONTRACTS.md` §4's `state/stage/graph.json` section (the field tables),
+  `docs/Aoide-Wiki/concepts/orchestration/Session-Graph.md`'s bindings
+  paragraph, and `conduct/README.md`'s workspace-binding bullet, in the same
+  commit — the paint layer reads this shape and has no schema of its own.
 
 ## Managed task wrapper (`spawn --task`, `session watch`)
 

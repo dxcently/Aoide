@@ -64,10 +64,22 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   read, in the CALLER's process — `aoided` is a service with no compositor
   environment — and the forwarded argv carries the resolved integer, never the
   word "focused". With no adapter the caller gets a taught refusal asking for
-  the number (exit 2). `list` is a READ (no lock, no daemon, no write): the
-  bindings plus every workspace a local session reports, sorted by id, with
-  `"observed": false` and a named `reason` on a host where no session reports
-  one — §A's taught-refusal shape without a refusal.
+  the number (exit 2). Every write republishes `graph.json` (the same
+  `restage_graph` every project mutation runs), whose TOP-LEVEL `workspaces`
+  block (§E of the core-seams design, slice S3) is the desktop's read: one row
+  per workspace a session sits on or a project is bound to — the binding
+  (`project`, absent when unbound), the effective `projects` of its live
+  sessions, `sessions`, `live`/`working`/`awaiting` and `activeAt` — plus
+  `ties` between rows sharing a project or crossing a spawned edge, so the
+  bar/dock draws "workspace N → project X" and pulses it off the document it
+  already hot-reloads (a headless host's document carries neither key at all).
+  `aoide workspace list --json` prints the SAME block, from the same builder.
+  A desktop click reaches the same two mutations through the shellbridge
+  socket's `workspaceaction` (the action list below). `list` is a READ (no
+  lock, no daemon, no write): the bindings plus every workspace a local
+  session reports, sorted by id, with `"observed": false` and a named `reason`
+  on a host where no session reports one — §A's taught-refusal shape without a
+  refusal.
 
   A binding is a BIRTH DEFAULT, and the seam that applies it is
   `graph/model.rs::observe_workspace`: it writes `SessionRecord.workspace`
