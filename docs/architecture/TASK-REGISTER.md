@@ -338,6 +338,17 @@ Fields per entry: status · owner · depends on · evidence · next.
 
 - Status: QUEUED; proposal `PAIRING-WINDOW-PROPOSAL.md` (root) committed
   alongside this register; protocol review FIRST.
+- Scope as ruled (User, 2026-09-26): pairing is for links between machines
+  of DIFFERENT owners. One operator's machines join through the signed
+  roster (`HTTPS-MESH-API.md` "Rosters", MAIL.md P-ROSTER), which is the
+  proposal's "managed fleet automation" mode; there is no crowd pairing
+  mode. The reviewed protocol must: name the pair mesh the pairing is made
+  in (`--mesh`), carry each side's signed age binding, keep the
+  local-network guard, never run through a relay or the HTTPS adapter,
+  and serve as the carrier for `aoide mesh join <mesh> <operator-node>`
+  (operator key + signed roster, no pairwise record).
+- Open for the User: whether the timed batch window (`pair open --for`)
+  survives now that the roster covers one owner's fleet.
 - Owner: Fable (Opus for protocol review); no competing pairing executors.
 - Depends on: 1–3; a reviewed protocol before any code.
 - Evidence: proposal §Delivery phases and §Acceptance.
@@ -1214,8 +1225,8 @@ project/parent inheritance across local/remote/app/subagents;
   different things and neither is per project or per session; the User
   wants BOTH scopes. (1) A session recipient is displayed and resolved by
   petname/title but bound to the stable native session identity; (2) a
-  project inbox survives sessions, hangs off the project record, and is
-  read by several participants with independent cursors; (3) role
+  project board survives sessions, hangs off the project record, and is
+  read by several members with independent cursors; (3) role
   mailboxes stay as stable orchestration endpoints with their binding
   visible in Details, never as unexplained aliases. One canonical mail
   store and protocol — scopes are address resolution, not a second mail
@@ -1223,8 +1234,9 @@ project/parent inheritance across local/remote/app/subagents;
   role; existing `<node>/<name>` addresses keep working; an alias resolves
   to its stable destination BEFORE filing. Addresses are host-qualified —
   the same project name on two machines is never one identity; a
-  cross-host project inbox has one explicit authority host, no implicit
-  replication. Project membership grants no access; the doorbell notifies
+  cross-host project board has one explicit authority host (its owner
+  node), and posts replicate only to its member nodes, never implicitly.
+  Project membership grants no mesh access; the doorbell notifies
   subscribed/participating readers, never the whole mesh. Delivery,
   fetched, and acted stay separate; a shared cursor never swallows another
   reader's unread (per-mailbox per-reader cursors in `mail.rs` are
@@ -1254,6 +1266,14 @@ project/parent inheritance across local/remote/app/subagents;
   Seam put to root with five questions and one flagged gap (a bridge
   path for the send UI); no executor before agreement, ML1 after M1. Sits on top of
   §14 M1 (`ProjectHost`, `--host`) — no redesign of M1.
+- Board ruling (User, 2026-09-26): the project conversation is the
+  project's BOARD (MAIL.md §Boards, slice P-BOARD, after P-M4), not a
+  flat `project-<n>` mailbox: `project:` resolves to the project board,
+  its owner is the project's host node, its readers keep per-reader board
+  cursors, and its history defaults to `all`. `session:` and `role:`
+  stay mailbox targets, so ML1 (minus `project:`), ML3 and ML4 stand as
+  briefed; the brief's `project-<n>` flat name is superseded and needs a
+  re-brief before ML1 dispatches.
 
 ## 16. Livery stage seed bypasses the resolver (Osaka evidence, seq 395)
 
@@ -1546,10 +1566,12 @@ project/parent inheritance across local/remote/app/subagents;
   send/A2A approvals, not mail interception. Redesign: vintage message
   board with readable livery contrast and restrained square borders;
   Home (resume projects, live sessions, mesh health, review/failed mail
-  counts), Rooms (project/session mail threads with explicit
-  participants/hosts and a reply composer), Sessions, Mesh, Review,
-  searchable History; graph stays the project/session detail. The
-  chatroom is a VIEW of existing mail, never a second store; human
+  counts), Boards (project and direct boards, MAIL.md §Boards, with
+  their member mailboxes and nodes and a reply composer), Sessions,
+  Mesh, Review, searchable History; graph stays the project/session
+  detail. The Boards view is a VIEW of the mailbase (posts file in
+  `base.jsonl`) and `state/boards/`, which holds membership records and
+  epoch keys only, never a second store; human
   viewing never consumes an agent inbox cursor nor emits a fetched
   receipt; every letter shows author → recipient, time, id and its real
   queued/delivered/fetched/error state. Hold/review/edit needs daemon
@@ -1571,7 +1593,7 @@ project/parent inheritance across local/remote/app/subagents;
   four exhaustive test literals there, handed to root as exact lines.
 - Active overlaps to reconcile in the plan (not conflicts yet): §15
   scoped mail (`Mark.held` is the one storage addition proposed for
-  hold/release; project inbox + roles ARE the Rooms model — the TUI must
+  hold/release; project boards + roles ARE the Boards model — the TUI must
   consume that seam, not invent one); the mail-status projection
   (queued/retrying/refused/accepted/delivered/failed, client
   `commands.rs`) is the per-letter state column; §17 ACP routes agent
@@ -1762,12 +1784,12 @@ project/parent inheritance across local/remote/app/subagents;
   call. Acknowledged to root (seq
   512). Flag: dxflake pins Aoide rev 3b168ce, far behind 535241f.
 
-## 21. Conductor role metadata, project conversations, mesh/pairing in the TUI (User via root seq 621)
+## 21. Conductor role metadata, project boards, mesh/pairing in the TUI (User via root seq 621)
 
 - Requirement: the TUI lists each agent's assigned ROLE separately from
   its harness and model, shows its parent relationship and an optional
-  role mailbox, and says "unassigned" explicitly; mail/conversations are
-  project-scoped; mesh trust and pairing are manageable from the TUI
+  role mailbox, and says "unassigned" explicitly; conversations are
+  project boards; mesh trust and pairing are manageable from the TUI
   through Aoide's own commands and the secrets capability, with secret
   references/grants/status visible and no ordinary raw-secret exposure.
   No new mandatory role scheme.
@@ -1777,11 +1799,13 @@ project/parent inheritance across local/remote/app/subagents;
   `parent_session_id` (lineage, §13) and `project`; the ASSIGNED role is
   none of these — it is the §15 project-owned optional role
   (`Aoide/reviewer`), bound to sessions by `mail role` (ML3, not built)
-  and published as a binding (ML4). Project conversations = the §15
-  project inbox (`project:` typed target, ML1 resolver, not built) read
-  with per-reader cursors; the TUI mail view is a VIEW of that store
-  (§19), never a second one. Mesh trust = `node allow`/`node remove`
-  (grants are global per node, §11); pairing = `pair`/`pair watch`/
+  and published as a binding (ML4). A project conversation = the
+  project board (MAIL.md §Boards, P-BOARD, not built; `project:` resolves
+  to it) read with per-reader board cursors; the TUI mail view is a VIEW
+  of that store (§19), never a second one. Mesh trust = `node allow`/
+  `node remove` (grants are global per node today, §11, and per mesh from
+  P-ROSTER — a roster line for one operator's machines, a pairing in a
+  pair mesh for another owner's); pairing = `pair`/`pair watch`/
   `pair reject`/`mesh pair` (windows redesign §5 QUEUED, codes never
   ferried); secrets = the `secrets` command family (`grant`, `revoke`,
   `pending`, `approve`, `dismiss`, `expose`, `watch`; Harnox-backed
@@ -1793,28 +1817,30 @@ project/parent inheritance across local/remote/app/subagents;
   `assignedRole`/`roleMailbox` fields on the published session document
   (graph.json/`session --json`), never on `native_role`; (3) TUI: role
   column + parent + role mailbox + "unassigned" from the published
-  document (designer, after the seam lands), project-scoped mail threads
-  from the project inbox, Mesh panel actions calling the existing
+  document (designer, after the seam lands), project boards read
+  through `aoide board`, Mesh panel actions calling the existing
   `node`/`pair`/`secrets` commands through the local handler + `ring`;
   (4) secrets panel shows references, grant state and pending approvals
   only — the value path stays `secrets expose` under its own gate.
 - Permission boundaries (binding for every brief): project membership and
-  role assignment grant NO access — mesh trust is the node-level grant
-  and stays global; a TUI action never bypasses the daemon gate (`node
-  allow`, `secrets grant/approve`, `pair`) — it issues the same command a
-  terminal would and shows the gate's answer; pairing codes are typed by
+  role assignment grant NO access — mesh trust is the node's grant in
+  a mesh (global per node until P-ROSTER), and board membership grants
+  nothing beyond reading and posting that board; a TUI action never
+  bypasses the daemon gate (`node allow`, `secrets grant/approve`,
+  `pair`) — it issues the same command a terminal would and shows the
+  gate's answer; pairing codes are typed by
   the User, never displayed to or relayed by an agent; no raw secret value
   is rendered in any TUI surface, log, or letter; `--from` stays
   attribution, a role mailbox never authenticates its assignee; unknown/
   unassigned is displayed as such, never inferred from harness or model;
-  cross-host: a project inbox has one authority host (§15), remote rows
-  carry no local pid/window actions (§14).
+  cross-host: a project board has one authority host, its owner node
+  (§15), and remote rows carry no local pid/window actions (§14).
 - Operators use Eidolon executors and independent reviewers with Ollama
   `deepseek-v4.1-flash`; root inspects and lands scoped commits. The TUI
   operator slice covers pairing, node trust, configuration and secrets
   metadata/grants through existing commands; implementation and independent
-  review are complete. Assigned roles and project-mail work retain their
-  §15/§19 dependencies.
+  review are complete. Assigned roles retain their §15/§19 dependencies;
+  project boards wait on P-BOARD.
 
 ## 22. Orchestration graph: runs, work nodes, goals, typed editable edges (User via root seq 630/632/634)
 
@@ -2058,17 +2084,37 @@ project/parent inheritance across local/remote/app/subagents;
   loopback-only, so no home machine accepts inbound HTTPS: every node
   connects OUT to a relay. The relay is therefore not optional, and because
   it is not trusted with content, sealed E2E letters are what make it safe.
-- Consequence for phasing: the proposal's H1 (direct HTTPS edges) needs an
-  inbound listener on a home machine and does not serve this use case; the
-  first useful slice is outbound-only nodes plus a relay (today's H4 shape).
-  Re-phasing is a proposal amendment, not yet made.
-- [HTTPS-MESH-API.md](HTTPS-MESH-API.md) owns the proposed verification,
-  key-binding, revocation, receipt recovery and migration contracts.
-- Status: reviewed proposal; transport implementation and encryption-library
-  profile remain unfinished. HTTPS has no plaintext fallback. Existing SSH
-  delivery remains in service until parity and recovery are demonstrated.
-- Open: where the relay runs (an always-on host with a public 443 that is
-  not a home machine).
+- Rulings (User, 2026-09-25/26), carried by HTTPS-MESH-API.md and MAIL.md
+  as the design: relay-first, relay untrusted; every letter sealed at mint
+  with age and origin-signed with Ed25519, per-host keys that never move;
+  transport chosen by the address scheme (`ssh://`, `https://`, `poll`);
+  pairing LAN-only, never through a relay; HTTPS exposes only a node's
+  grants in a mesh, never a command endpoint; the hop chain signs `next`
+  (cut-and-reappend refused); trust is per mesh (existing paired records move
+  into the home mesh); one operator's machines share a signed roster
+  (operator key = mesh root, monotonic versions, remove + re-sign =
+  revocation, re-root costs one touch per machine), which answers
+  `sameOperator` and supersedes crowd pairing and symmetric declaration;
+  every group conversation is a board with a key per epoch, owned by its
+  creating node; in a roster mesh the operator can take a board over
+  (the new owner rotates the epoch), and a pair-mesh board whose owner
+  is gone is frozen and recreated.
+- Beta path (slice order, each with its tests in the two docs): P-M3 hold +
+  poll (in progress) → P-SEAL sealing + key bindings (SSH direct lane) →
+  P-ROSTER roster + trust per mesh → H1 mail-only HTTPS adapter on the
+  relay (native Windows `poll` node in its acceptance, §28) → P-M4 transit
+  with the `next` hop chain → P-BOARD boards. Then H2 state/events, H3
+  direct HTTPS edges, H4 typed control, each after its own review.
+- Status: design amended to the rulings; encryption-library profile
+  (`age` crate, `ctx` and roster-signature encodings) and a follow-up
+  review remain before P-SEAL. HTTPS has no plaintext fallback. Existing
+  SSH delivery remains in service until parity and recovery are
+  demonstrated.
+- Open (the docs' "Open design decisions"): where the relay runs (an
+  always-on host with a public 443 that is not a home machine); forward
+  secrecy; padding; roster expiry; a pre-committed successor operator key;
+  cross-mesh origin verification through a gate; read visibility per mesh;
+  relay failover.
 
 ## 30. Mail export (letters → one Mneme note per thread)
 
@@ -2113,6 +2159,14 @@ project/parent inheritance across local/remote/app/subagents;
 - Fix: `restrict,command="<aoide door entry>"` on each mesh key, the entry
   point to be read from the SSH transport path; stale or mislabelled keys
   removed on the User's word. The same audit runs on every host.
+- Interaction with trust per mesh (§29, HTTPS-MESH-API.md "Rosters"): a
+  roster or pairing grant is an Aoide grant at the door and never governs
+  SSH, so an unrestricted mesh key bypasses every grant in every mesh.
+  Trust per mesh holds on a host only once this fix is done there; it is a
+  prerequisite for claiming P-ROSTER's per-mesh scoping on any host another
+  owner's key can reach. Between roster nodes that reach each other through
+  a relay, an `ssh://` edge is optional and its key can be removed rather
+  than restricted.
 - Status: not started. Owner: unassigned. Keys are the User's to change.
 
 ## 32. Remote sub-agents (parent link, ping-back, watch across nodes)
