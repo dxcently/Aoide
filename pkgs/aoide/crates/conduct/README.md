@@ -797,7 +797,9 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   `graph` uses — longest-prefix across EVERY root of the project, not just
   its first, since a project is a set of anchor roots (`project add`
   appends to that set, `project edit` replaces it outright, `project
-  remove` drops one root or the whole project; see `Project::roots()`,
+  remove` drops one root — leaving a name-only project when that was the
+  last one — or, with no root at all, the whole project; see
+  `Project::roots()`,
   `aoide-storage`'s own docs). Selection then branches on the flags: `--all` widens to every
   anchored entry, `--id` narrows to one specific `sessionId`, and bare
   (neither flag) resumes the project's WHOLE undying set

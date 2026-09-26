@@ -94,8 +94,10 @@ from a terminal the call forwards to the live daemon and fails with
 except `aoide onboard`'s own clone registration, which runs the same
 locked mutation locally before any daemon exists.
 
-- **Reads:** `state/stage/projects.json`. `<path>` defaults to the current
-  working directory when omitted; give one or more — each is appended as a
+- **Reads:** `state/stage/projects.json`. With no `<path>` at all the project
+  is registered NAME-ONLY — no folder, and so nothing it can ever anchor by
+  cwd; a folder is added later with `project add <name> <root>`. Give one or
+  more paths and each is appended as a
   root. Every path is validated (absolute, an existing directory) BEFORE
   anything is written; one bad path in the list refuses the whole call
   (exit 2, `data.reason: "invalid-path"`) because anchoring is absolute-path
@@ -149,7 +151,8 @@ aoide project remove <name> [<path>] [--json]
   whole project (today's original behaviour, byte-for-byte) — an absent name
   is an ok no-op. With `<path>`: drops that one root — if it was the
   project's `path`, the next remaining root is promoted into `path`; if it
-  was the last root, the whole project is dropped; a `<path>` that is not
+  was the project's LAST root the project stays, NAME-ONLY (no folder, its
+  bindings intact — never deleted); a `<path>` that is not
   one of the project's roots is an ok no-op.
 
 ### aoide project list
@@ -160,7 +163,8 @@ aoide project list [--json]
 
 - **Reads:** `state/stage/projects.json`.
 - **Output:** text — `"N project(s) registered"` plus one `◆ <name>  <path>`
-  line each (name-sorted), followed by one indented line per extra root;
+  line each (name-sorted; a NAME-ONLY project prints its name alone, with no
+  empty path column), followed by one indented line per extra root;
   `data: {projects: [...]}`.
 - **Notes:** read-only.
 

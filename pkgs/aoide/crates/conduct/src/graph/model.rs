@@ -273,6 +273,40 @@ mod tests {
         assert_eq!(anchor_for("/srv/other", &p), None);
     }
     #[test]
+    fn a_rootless_project_never_anchors_but_is_still_reachable_by_name() {
+        // A name-only project (`project add <name>`, no folder) has no root to
+        // prefix-match, so the cwd-anchor rung skips it entirely — the empty
+        // root list is what does it, not a special case in `anchor_for`.
+        let p = vec![
+            Project { name: "cadenza".into(), ..Default::default() },
+            Project {
+                name: "aoide".into(),
+                path: "/home/k/Aoide".into(),
+                ..Default::default()
+            },
+        ];
+        assert!(p[0].roots().is_empty());
+        assert_eq!(anchor_for("/home/k/Aoide/src", &p), Some(1));
+        assert_eq!(anchor_for("/tmp/elsewhere", &p), None);
+        assert_eq!(
+            anchor_for("/cadenza", &p),
+            None,
+            "no cwd ever anchors a rootless project"
+        );
+
+        // An explicit `project` still resolves it — that is how a rootless
+        // project is reached (with a workspace binding, the other way).
+        let mut s = session("s1", "/tmp/elsewhere", "idle", "t", None);
+        s.project = Some("cadenza".into());
+        assert_eq!(project_for(&s, &p), Some(0));
+        assert_eq!(effective_project_for(&s, &[s.clone()], &p), Some(0));
+
+        // …and WITHOUT the explicit name it stays unanchored.
+        let bare = session("s2", "/tmp/elsewhere", "idle", "t", None);
+        assert_eq!(project_for(&bare, &p), None);
+        assert_eq!(anchor_for("/tmp/elsewhere", &p), None);
+    }
+    #[test]
     fn anchoring_longest_root_wins_across_projects() {
         let p = vec![
             Project {

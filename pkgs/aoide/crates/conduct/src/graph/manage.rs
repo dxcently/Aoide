@@ -131,14 +131,14 @@ fn validate_host_root(cmd: &str, host: &str, path: &str) -> Result<(), Outcome> 
 }
 
 /// `project add <name> [<path>...]` — register a project, or grow an
-/// existing one with more anchor roots. With no path, the current working
-/// directory supplies exactly one root, so a bare `aoide project add <name>`
-/// registers the dir you're in — and a session started there anchors to it
-/// by cwd prefix. `--new` refuses a name that already exists instead of
+/// existing one with more anchor roots. With NO path the project is registered
+/// with no folder at all (a NAME-ONLY project): it can never anchor a session
+/// by cwd, and is reached by a workspace binding (`workspace set`) or an
+/// explicit `session project` — a folder is added later with the same command
+/// plus a path. `--new` refuses a name that already exists instead of
 /// adding to it. `--host <node>` (P-14 M1) re-scopes the same positional
 /// path list from LOCAL to that host's own roots — a bare `--host <node>`
-/// with no path is membership-only and NEVER falls back to the cwd default,
-/// the one local-add convenience `--host` deliberately drops. DAEMON-OWNED
+/// with no path is membership-only. DAEMON-OWNED
 /// (`local_daemon`, above): a CLI caller forwards to `aoided`; only the door
 /// check and arg parsing happen out here, the actual mutation is
 /// [`add_roots`].
@@ -152,23 +152,13 @@ pub fn project_add(inv: &Invocation) -> Outcome {
     };
     let name = args[0].clone();
     let host = inv.flags.get("host").cloned();
+    // No path is never a cwd default: registering the directory you happen to
+    // stand in is how a project anchors sessions nobody meant it to. A folder
+    // is an explicit argument (`project add <name> <root>`) or nothing.
     let paths: Vec<String> = if inv.args.len() > 1 {
         inv.args[1..].to_vec()
-    } else if host.is_some() {
-        // Membership-only under `--host`: never the cwd default local `add`
-        // uses, since a bare path here would silently register the CALLER's
-        // local cwd as a REMOTE root on that host.
-        Vec::new()
     } else {
-        match std::env::current_dir() {
-            Ok(d) => vec![d.to_string_lossy().into_owned()],
-            Err(e) => {
-                return Outcome::error(
-                    "project.add",
-                    format!("no path given and the working directory is unavailable: {e}"),
-                )
-            }
-        }
+        Vec::new()
     };
     // `--auto-resume` (P-D8, `docs/architecture/AOIDED.md`'s "L5"): opts this
     // project into the daemon's boot-time auto-resume sweep. Only ever sets
@@ -336,8 +326,13 @@ fn add_roots(name: &str, paths: &[String], new: bool, auto_resume: bool, host: O
                     this_changed = true;
                 }
                 if this_changed {
-                    existing.path = current[0].clone();
-                    existing.roots = current;
+                    // A rootless project whose ONLY change is `--auto-resume`
+                    // has nothing to write back here — `current[0]` would be
+                    // an out-of-bounds index on the empty list.
+                    if !current.is_empty() {
+                        existing.path = current[0].clone();
+                        existing.roots = current;
+                    }
                 }
                 message = if !added_roots.is_empty() {
                     if added_roots.len() == 1 {
@@ -346,10 +341,16 @@ fn add_roots(name: &str, paths: &[String], new: bool, auto_resume: bool, host: O
                         format!("added roots {} to project `{name}`", added_roots.join(", "))
                     }
                 } else if this_changed {
-                    format!(
-                        "project `{name}`: autoResume → true (root {} already registered)",
-                        paths.join(", ")
-                    )
+                    if paths.is_empty() {
+                        format!("project `{name}`: autoResume → true")
+                    } else {
+                        format!(
+                            "project `{name}`: autoResume → true (root {} already registered)",
+                            paths.join(", ")
+                        )
+                    }
+                } else if paths.is_empty() {
+                    format!("project `{name}` already registered (no change)")
                 } else {
                     format!("project `{name}` already has root {} (no change)", paths.join(", "))
                 };
@@ -371,11 +372,17 @@ fn add_roots(name: &str, paths: &[String], new: bool, auto_resume: bool, host: O
                     hosts: Vec::new(),
                     lead: None,
                 });
-                changed.push(format!("registered project {name} → {first}"));
+                changed.push(if first.is_empty() {
+                    format!("registered project {name} (no folder)")
+                } else {
+                    format!("registered project {name} → {first}")
+                });
                 if auto_resume {
                     changed.push(format!("project {name}: autoResume → true"));
                 }
-                message = if rest_len > 0 {
+                message = if first.is_empty() {
+                    format!("registered project `{name}` with no folder")
+                } else if rest_len > 0 {
                     format!("registered project `{name}` → {first} (+{rest_len} more root(s))")
                 } else {
                     format!("registered project `{name}` → {first}")
@@ -438,7 +445,9 @@ pub fn register_bootstrap_project(name: &str, path: &str, auto_resume: bool) -> 
 }
 
 /// `project remove <name> [<path>]` — unregister a whole project, or one of
-/// its roots (dropping the project when that root was its last). No PATH is
+/// its roots (removing the LAST root leaves the project standing with no
+/// folder — a NAME-ONLY project, its workspace bindings intact — never
+/// deleting it). No PATH is
 /// today's behaviour byte-for-byte. Matching is exact string equality
 /// against the stored root — no trailing-slash normalization, no
 /// canonicalization, and no `is_dir` check: a root whose directory has
@@ -600,39 +609,18 @@ fn remove_roots(name: &str, path: Option<&str>, host: Option<&str>) -> Outcome {
             .with_data(json!({ "name": name, "path": path }));
         }
 
-        if roots.len() == 1 {
-            // PATH is the only root — drop the whole project.
-            file.projects.retain(|p| p.name != name);
-            file.schema_version = STAGE_GRAPH_VERSION.to_string();
-            if let Err(e) = write_stage(&projects_path(), &file) {
-                return stage_error("project.remove", e);
-            }
-            let mut changed = vec![format!("removed project {name}")];
-            match restage_graph() {
-                Ok(g) => changed.push(g.to_string_lossy().into_owned()),
-                Err(e) => return stage_error("project.remove", e),
-            }
-            return Outcome::ok(
-                "project.remove",
-                format!("removed project `{name}` (last root {path})"),
-            )
-            .changed(changed)
-            .with_data(json!({
-                "name": name,
-                "path": path,
-                "roots": Vec::<String>::new(),
-                "file": projects_path().to_string_lossy(),
-            }));
-        }
-
-        // PATH is one of several — rebuild from `roots()`, promoting the next
+        // PATH is one of the roots — rebuild from `roots()`, promoting the next
         // root into `path` when `path` itself was removed, leaving `path`
         // untouched otherwise. `roots` stays the FULL remaining list, `path`
-        // included at index 0.
+        // included at index 0. Removing the LAST root does NOT delete the
+        // project: it is left standing with no folder (a NAME-ONLY project —
+        // it keeps its name and its workspace bindings, and gains a folder
+        // again with `project add <name> <root>`). Only a bare `project remove
+        // <name>` deletes a project, and its bindings go with the record.
         let existing = file.projects.iter_mut().find(|p| p.name == name).unwrap();
         let all: Vec<String> = existing.roots().iter().map(|s| s.to_string()).collect();
         let remaining: Vec<String> = all.into_iter().filter(|r| r != path).collect();
-        existing.path = remaining[0].clone();
+        existing.path = remaining.first().cloned().unwrap_or_default();
         existing.roots = remaining;
 
         file.schema_version = STAGE_GRAPH_VERSION.to_string();
@@ -650,7 +638,12 @@ fn remove_roots(name: &str, path: Option<&str>, host: Option<&str>) -> Outcome {
             .find(|p| p.name == name)
             .map(|p| (p.path.clone(), p.roots().into_iter().map(str::to_string).collect()))
             .unwrap_or_default();
-        Outcome::ok("project.remove", format!("removed root {path} from project `{name}`"))
+        let message = if roots_after.is_empty() {
+            format!("removed root {path} from project `{name}` (now name-only)")
+        } else {
+            format!("removed root {path} from project `{name}`")
+        };
+        Outcome::ok("project.remove", message)
             .changed(changed)
             .with_data(json!({
                 "name": name,
@@ -860,7 +853,12 @@ pub fn project_list(_inv: &Invocation) -> Outcome {
     let projects = sorted_projects(&file.projects);
     let mut message = format!("{} project(s) registered", projects.len());
     for p in &projects {
-        message.push_str(&format!("\n◆ {}  {}", p.name, p.path));
+        // A NAME-ONLY project (`project add <name>`, no folder) prints its name
+        // alone — never a trailing empty path column.
+        message.push_str(&format!("\n◆ {}", p.name));
+        if !p.path.is_empty() {
+            message.push_str(&format!("  {}", p.path));
+        }
         for r in p.roots().into_iter().skip(1) {
             message.push_str(&format!("\n     {r}"));
         }
@@ -1285,34 +1283,88 @@ mod tests {
     }
 
     #[test]
-    fn project_add_defaults_path_to_cwd() {
+    fn project_add_with_no_path_registers_a_name_only_project_that_never_anchors() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_cwd = std::env::current_dir().ok();
-        let stage = unique_stage("cwd-default");
+        let stage = unique_stage("rootless-add");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
-        // Bare `project add <name>` registers the cwd as the anchor root.
+        // Bare `project add <name>` registers NO root — not the cwd you happen
+        // to stand in. Stand IN the stage dir so the removed cwd default would
+        // have been caught by the assertions below.
         std::env::set_current_dir(&stage).unwrap();
-        let out = project_add(&daemon_invocation(&["project", "add"], &["aoide"]));
+        let out = project_add(&daemon_invocation(&["project", "add"], &["cadenza"]));
         assert_eq!(out.status, aoide_protocol::output::Status::Ok);
-
-        let file: ProjectsFile = load_stage(&projects_path()).unwrap();
-        let p = file.projects.iter().find(|p| p.name == "aoide").unwrap();
-        assert_eq!(
-            p.path,
-            stage.to_string_lossy().into_owned(),
-            "bare `project add <name>` registers the cwd"
+        assert!(
+            out.message.contains("with no folder"),
+            "the outcome says what it registered: {}",
+            out.message
         );
 
-        // A session started in that cwd anchors under the project.
+        let file: ProjectsFile = load_stage(&projects_path()).unwrap();
+        let p = file.projects.iter().find(|p| p.name == "cadenza").unwrap();
+        assert_eq!(p.path, "", "a name-only project stores no path");
+        assert!(p.roots().is_empty(), "…and no roots: {:?}", p.roots());
+
+        // A session in that very cwd does NOT anchor under it — the cwd-anchor
+        // rung skips a project with no folder.
         let (ps, _, _) = load_inputs("test").unwrap();
-        assert_eq!(anchor_for(&stage.to_string_lossy(), &ps.projects), Some(0));
+        assert_eq!(
+            anchor_for(&stage.to_string_lossy(), &ps.projects),
+            None,
+            "a rootless project never matches by cwd"
+        );
+
+        // It is still a real project: a folder can be added later…
+        let root = stage.join("src");
+        std::fs::create_dir_all(&root).unwrap();
+        let root = root.to_string_lossy().into_owned();
+        let out = project_add(&daemon_invocation(&["project", "add"], &["cadenza", &root]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok);
+        let file: ProjectsFile = load_stage(&projects_path()).unwrap();
+        let p = file.projects.iter().find(|p| p.name == "cadenza").unwrap();
+        assert_eq!(p.path, root, "the first root added to a rootless project becomes `path`");
+        assert_eq!(p.roots(), vec![root.as_str()]);
+        let (ps, _, _) = load_inputs("test").unwrap();
+        assert!(anchor_for(&root, &ps.projects).is_some(), "…and now it anchors");
 
         if let Some(c) = saved_cwd {
             std::env::set_current_dir(c).unwrap();
         }
         match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    #[test]
+    fn project_list_prints_a_name_only_project_without_a_path_column() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("list-rootless");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let a = stage.join("a");
+        std::fs::create_dir_all(&a).unwrap();
+        let a = a.to_string_lossy().into_owned();
+        project_add(&daemon_invocation(&["project", "add"], &["cadenza"]));
+        project_add(&daemon_invocation(&["project", "add"], &["aoide", &a]));
+
+        let out = project_list(&daemon_invocation(&["project", "list"], &[]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok);
+        assert!(
+            out.message.contains(&format!("◆ aoide  {a}\n◆ cadenza")),
+            "a rootless project prints its name alone, a rooted one keeps its path:\n{}",
+            out.message
+        );
+        assert!(
+            !out.message.contains("cadenza  "),
+            "no trailing empty path column: {}",
+            out.message
+        );
+
+        match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
             None => std::env::remove_var("AOIDE_STAGE_DIR"),
         }
@@ -1743,10 +1795,10 @@ mod tests {
     }
 
     #[test]
-    fn project_remove_of_the_last_root_drops_the_project() {
+    fn project_remove_of_the_last_root_leaves_a_name_only_project() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
-        let stage = unique_stage("remove-drops-last-root");
+        let stage = unique_stage("remove-last-root-keeps-project");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let a = stage.join("a");
         std::fs::create_dir_all(&a).unwrap();
@@ -1754,6 +1806,23 @@ mod tests {
         project_add(&daemon_invocation(&["project", "add"], &["aoide", &a]));
 
         let out = project_remove(&daemon_invocation(&["project", "remove"], &["aoide", &a]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok);
+        assert!(
+            out.message.contains("name-only"),
+            "the outcome says the project survived folderless: {}",
+            out.message
+        );
+        let file: ProjectsFile = load_stage(&projects_path()).unwrap();
+        let p = file
+            .projects
+            .iter()
+            .find(|p| p.name == "aoide")
+            .expect("removing the last root must NOT delete the project");
+        assert_eq!(p.path, "");
+        assert!(p.roots().is_empty());
+
+        // Only a bare `project remove <name>` deletes it.
+        let out = project_remove(&daemon_invocation(&["project", "remove"], &["aoide"]));
         assert_eq!(out.status, aoide_protocol::output::Status::Ok);
         let file: ProjectsFile = load_stage(&projects_path()).unwrap();
         assert!(!file.projects.iter().any(|p| p.name == "aoide"));

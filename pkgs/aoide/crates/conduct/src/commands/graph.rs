@@ -47,15 +47,15 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["project", "add"],
-        summary: "Register a project anchor root in state/stage/projects.json, or ADD roots to an existing project (atomic, idempotent per root).",
+        summary: "Register a project in state/stage/projects.json — with folders to anchor by cwd, or name-only — or ADD roots to an existing project (atomic, idempotent per root).",
         args: [
             arg!("name", "string", true, "Project name (its node id becomes project:<name>)."),
-            arg!("path", "string", false, "Project root path; give one or more (defaults to the current working directory). Each is appended as a root — a name that already exists gains roots rather than losing the ones it has. Sessions anchor by cwd prefix, longest root wins."),
+            arg!("path", "string", false, "Project root path; give one or more. Each is appended as a root — a name that already exists gains roots rather than losing the ones it has. Sessions anchor by cwd prefix, longest root wins. Omit every path to register a NAME-ONLY project: it anchors no cwd and is reached by a workspace binding or an explicit `session project`."),
         ],
         flags: [
             flag!("auto-resume", "bool", "Opt this project into the daemon's boot-time auto-resume sweep (`resurrect --project <name>` on `run_loop` entry, once per boot). Only ever sets it true — hand-edit projects.json to clear it."),
             flag!("new", "bool", "Refuse if the project name already exists instead of adding roots to it."),
-            flag!("host", "string", "Re-scope the path list to that REGISTERED node's own roots instead of local ones — adds it as a member and appends any given roots (idempotent per root). With no path, membership-only; never falls back to the cwd default. Refused (unknown-host, zero writes) if the node isn't registered."),
+            flag!("host", "string", "Re-scope the path list to that REGISTERED node's own roots instead of local ones — adds it as a member and appends any given roots (idempotent per root). With no path, membership-only; no path is ever a cwd default. Refused (unknown-host, zero writes) if the node isn't registered."),
         ],
         gated: false,
         implemented: true,
@@ -73,7 +73,7 @@ pub fn register(r: &mut Registry) {
         summary: "Unregister a project anchor root, or one root of a multi-root project (ok + no-op if absent).",
         args: [
             arg!("name", "string", true, "Project name to remove."),
-            arg!("path", "string", false, "One root to remove instead of the whole project; removing the last root removes the project."),
+            arg!("path", "string", false, "One root to remove instead of the whole project; removing a project's LAST root leaves it standing with no folder (name-only), its workspace bindings intact — only omitting this path deletes the project."),
         ],
         flags: [
             flag!("host", "string", "Re-scope PATH to that host's own roots: bare `--host <node>` drops the whole membership (roots included); `--host <node> <path>` drops just that one host root and leaves the membership, even at zero roots."),

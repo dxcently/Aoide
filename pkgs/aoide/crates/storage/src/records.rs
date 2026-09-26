@@ -97,6 +97,13 @@ impl Project {
     /// because `path` always equals the first root. A hand-edited record
     /// whose `roots[0]` differs from `path`, or that repeats `path` inside
     /// `roots`, is READ this way and never rewritten on read.
+    ///
+    /// EMPTY is a legal answer: a NAME-ONLY project (`project add <name>`
+    /// with no folder) has neither `path` nor `roots`, and every reader
+    /// tolerates the empty list — [`crate::records::Project`]'s only
+    /// cwd-anchoring consumer matches by root prefix, so a rootless project
+    /// can never anchor a session and is reached by name (a workspace
+    /// binding, or an explicit `session project`) instead.
     pub fn roots(&self) -> Vec<&str> {
         let mut out: Vec<&str> = Vec::new();
         if !self.path.is_empty() {
@@ -852,6 +859,23 @@ mod tests {
         assert_eq!(p.roots(), vec!["/b"]);
     }
     #[test]
+    fn a_project_with_no_folder_has_no_roots_at_all() {
+        // A NAME-ONLY project (`project add <name>`, no folder — a rootless
+        // project) carries neither `path` nor `roots`; `roots()` answers the
+        // empty list rather than a `[""]` that would prefix-match nothing but
+        // still read as "one root".
+        let p = Project { name: "cadenza".into(), ..Default::default() };
+        assert!(p.roots().is_empty(), "a rootless project has no roots: {:?}", p.roots());
+        assert_eq!(p.path, "");
+
+        // Absent keys on the wire read the same way as empty ones.
+        let legacy: Project = serde_json::from_str(r#"{"name":"cadenza"}"#).unwrap();
+        assert!(legacy.roots().is_empty());
+        let explicit: Project =
+            serde_json::from_str(r#"{"name":"cadenza","path":"","roots":[]}"#).unwrap();
+        assert!(explicit.roots().is_empty());
+    }
+    #[test]
     fn a_project_with_extra_roots_round_trips_the_full_list_always_on_the_wire() {
         // ROOTS SERIALIZED COMPLETE: `roots` has no `skip_serializing_if`
         // any more, and the new-code shape is the FULL ordered root list
@@ -907,6 +931,21 @@ mod tests {
         let json = serde_json::to_string(&p).unwrap();
         assert!(!json.contains("hosts"), "serialised: {json}");
         assert_eq!(json, raw, "an untouched legacy record round-trips byte-identical");
+    }
+    #[test]
+    fn a_legacy_projects_file_round_trips_byte_identical() {
+        // A rootless project is a NEW kind of record, never a rewrite of an old
+        // one: a whole `projects.json` written before it existed (rooted,
+        // no `hosts`/`lead`/`workspaces`) still serializes byte-for-byte.
+        let raw = r#"{"schemaVersion":"0","projects":[{"name":"aoide","path":"/home/x/Aoide","roots":["/home/x/Aoide"]},{"name":"docs","path":"/home/x/docs","roots":["/home/x/docs"],"autoResume":true}]}"#;
+        let file: ProjectsFile = serde_json::from_str(raw).unwrap();
+        assert_eq!(file.projects.len(), 2);
+        assert!(file.projects.iter().all(|p| p.roots() == vec![p.path.as_str()]));
+        assert_eq!(
+            serde_json::to_string(&file).unwrap(),
+            raw,
+            "an existing projects.json round-trips byte-identical"
+        );
     }
     #[test]
     fn project_hosts_round_trip_and_stay_off_the_wire_when_empty() {

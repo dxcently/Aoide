@@ -2339,10 +2339,25 @@ outright, first path becoming `path`, the rest folded into the same
 `roots` list — the name stays immutable and `autoResume` is untouched.
 `project remove NAME [PATH]` drops one root (promoting the next into
 `path` when `path` itself was removed) or, with no `PATH`, the whole
-project. Every reader enumerates roots through `Project::roots()`
+project — and a deleted project's workspace bindings go with its record.
+Removing a project's LAST root does NOT delete it: the project is left
+standing with no folder, a NAME-ONLY project ("A project with no folder"
+below). Every reader enumerates roots through `Project::roots()`
 (`path` first, then `roots`, deduplicated) rather than the raw fields —
 a hand-edited record whose `path` does not match `roots[0]` is read, not
 silently rewritten.
+
+**A project with no folder.** A project entry MAY carry neither `path` nor
+`roots` (`{"name":"cadenza","path":"","roots":[]}`): `aoide project add NAME`
+with no path at all registers a NAME-ONLY project — a name a workspace can be
+bound to and a session can name explicitly, but that can never anchor a
+session by cwd, because `Project::roots()` is empty and the anchoring rung
+matches by root prefix. The cwd is NEVER a default root: registering the
+directory you happen to stand in is how a project anchors sessions nobody
+meant it to. A folder is added later with `project add NAME ROOT` and removed
+again with `project remove NAME ROOT`, which leaves the project name-only
+once more. Nothing else about the record changes — it keeps its
+`autoResume`/`hosts`/`lead` state and its workspace bindings.
 
 **Additive in v0 (P-D8, `docs/architecture/AOIDED.md`'s "L5"/"Open
 knobs"):** a project entry MAY also carry an optional `autoResume` (bool,
@@ -2383,8 +2398,9 @@ skip_serializing_if = "Vec::is_empty")]` keeps `hosts` off the wire for a
 project no `--host` invocation has touched, the discipline `autoResume`
 set. Set through the SAME three commands as local roots, scoped by a
 `--host <node>` flag: `project add NAME [PATH…] --host NODE` adds `NODE` as
-a member (membership-only when no path follows — `--host` never defaults
-to the cwd the way a bare `project add` does) and appends any given paths
+a member (membership-only when no path follows — a path is explicit for
+every command now, and a bare `project add NAME` registers a name-only
+project) and appends any given paths
 to that host's own root list, idempotently; `project edit NAME PATH… --host
 NODE` REPLACES that host's root list exactly (local roots and every other
 host untouched); `project remove NAME --host NODE` drops the whole

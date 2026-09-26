@@ -1420,10 +1420,23 @@
   touches the name or `autoResume` — `add`/`remove` stay the only ways a
   project appears or disappears. `project remove NAME [PATH]` drops one
   root, promoting the next remaining one into `path` so `path` always
-  equals the first root, or with no `PATH` drops the whole project.
+  equals the first root, or with no `PATH` drops the whole project — as do
+  the project's workspace bindings, which live on the record. Removing a
+  project's LAST root is the one root removal that does NOT delete the
+  project: it is left standing with no folder (a NAME-ONLY project).
   `project add` and `project edit` both validate EVERY given path
   (absolute, an existing directory) BEFORE mutating anything — one bad
   path in a multi-path call writes nothing.
+- **A project may have NO folder — `project add NAME` with no path
+  registers a name-only project, never the cwd.** The cwd is not a
+  default root: registering the directory you happen to stand in is how a
+  project anchors sessions nobody meant it to. A rootless project has an
+  empty `Project::roots()`, so `anchor_for` skips it structurally — its
+  per-project root scan finds nothing to match, with no special case and
+  no `cfg`; it is reached by a workspace
+  binding or an explicit `session project NAME` alone, and a folder is
+  added later with `project add NAME ROOT`. `project list` prints its name
+  with no path column.
 - **`project add`/`project edit`/`project remove` are daemon-owned atomic
   mutations (`manage.rs`'s `local_daemon`)** — the same door-gated shape
   as `actions.rs`'s `assign_project`/`session_kill`: a `Door::Cli` caller
