@@ -83,6 +83,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 /// How much of a quoted `say`/prompt reaches the parent's line — one short
 /// phrase, never a paragraph in somebody else's composer.
@@ -1047,6 +1049,19 @@ fn unreceptive(rec: &SessionRecord) -> Option<&'static str> {
 
 // ── the pull (the parent's own side) ─────────────────────────────────────
 
+/// How long ONE pull pass may take, all rows together (M3 of the S8/S9
+/// review): half the ~12 s tick the pass lives inside, so the tick's other
+/// work — the mail drain, the hand-edit sweep, the roster sweeps — is never
+/// starved by a node that is merely off. Rows the budget cuts off are named
+/// and rotated to the front of the next pass.
+const PULL_BUDGET: Duration = Duration::from_secs(6);
+
+/// Where the next pull pass starts in the ledger. The daemon is one process,
+/// so one counter is the whole state a rotation needs: no ledger field, no
+/// config, and a pass that runs out of budget still covers every row over the
+/// following ticks.
+static PULL_ROTATION: AtomicUsize = AtomicUsize::new(0);
+
 /// `pingback_pull`: for every child THIS node spawned on another node, ask
 /// that node's door for the events the child published for it, render them
 /// here, and deliver them to the parent through the same [`deliver`] the local
@@ -1078,7 +1093,7 @@ fn unreceptive(rec: &SessionRecord) -> Option<&'static str> {
 /// retry storm, and the next tick asks again from the same cursor (the brief
 /// names no backoff, so there is none — one pull per tick, per child).
 pub(crate) fn pingback_pull(inv: &Invocation) -> PingbackReport {
-    pingback_pull_with(inv, fetch_history)
+    pingback_pull_with(inv, PULL_BUDGET, fetch_history)
 }
 
 /// [`pingback_pull`]'s body, parameterised over its one effect — the wire fetch
@@ -1088,6 +1103,7 @@ pub(crate) fn pingback_pull(inv: &Invocation) -> PingbackReport {
 /// fetch.
 fn pingback_pull_with(
     inv: &Invocation,
+    budget: Duration,
     fetch: impl Fn(&aoide_storage::node_store::Node, &str, u64, &str) -> Result<RingRead, FrameReadError>,
 ) -> PingbackReport {
     let mut report = PingbackReport::default();
@@ -1103,7 +1119,35 @@ fn pingback_pull_with(
         .unwrap_or_default();
     let nodes = aoide_storage::node_store::load_nodes();
 
-    for entry in ledger.iter().filter(|e| !e.drained) {
+    // One deadline for the WHOLE pass (M3 of the S8/S9 review): the rows are
+    // pulled one after another, synchronously, inside the daemon's own tick,
+    // and a row for a node that is merely off burns its request's full
+    // timeout. Without a bound, N unreachable children cost N timeouts every
+    // tick — the mail drain and the hand-edit sweep in that same tick paying
+    // for them. Rows past the deadline are skipped BY NAME, never silently,
+    // and the rotation below is what keeps that from starving the same rows
+    // forever.
+    let deadline = Instant::now() + budget;
+    // Where this pass starts. Rotated one row per pass, from a counter that is
+    // the pass's own (the daemon is one process): a pass that runs out of
+    // budget still covers every row over the next few ticks, in a different
+    // order each time.
+    let rows: Vec<&aoide_storage::remote_children::RemoteChild> =
+        ledger.iter().filter(|e| !e.drained).collect();
+    if rows.is_empty() {
+        return report;
+    }
+    let start = PULL_ROTATION.fetch_add(1, Ordering::Relaxed) % rows.len();
+    let mut starved = 0usize;
+
+    for entry in rows.iter().cycle().skip(start).take(rows.len()) {
+        if Instant::now() >= deadline {
+            starved += 1;
+            report
+                .skipped
+                .push((entry.parent_session_id.clone(), "budget-spent".to_string()));
+            continue;
+        }
         let parent = entry.parent_session_id.as_str();
         // The target is judged BEFORE the far node is asked for anything: a
         // session that can never receive a line must not cost a request, and
@@ -1261,6 +1305,18 @@ fn pingback_pull_with(
                 );
             }
         }
+    }
+    // One line for the whole starved set, never one per row: the operator
+    // reads which tick was cut short, and the next pass starts one row along.
+    if starved > 0 {
+        eprintln!(
+            "[aoide/reap] remote ping-back pull ran out of budget; {starved} row(s) not pulled this tick"
+        );
+        audit_pull(
+            inv,
+            "budget-spent",
+            &format!("remote ping-back pull ran out of budget; {starved} row(s) not pulled this tick"),
+        );
     }
     report
 }
@@ -2569,7 +2625,7 @@ mod tests {
         ledger_row("wrap-1", "a2a-4411-1790");
 
         let acc = std::thread::spawn(move || read_all(listener));
-        let report = pingback_pull_with(&daemon_inv(), move |node, id, after, key| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, move |node, id, after, key| {
             assert_eq!(node.name, "nodeb", "the row resolves to the node its key names");
             assert_eq!(id, "a2a-4411-1790");
             assert_eq!(after, 0, "the cursor the ledger holds is what the far node is asked from");
@@ -2611,7 +2667,7 @@ mod tests {
         let _listener = headless_parent("wrap-1", "claude");
         ledger_row("wrap-1", "a2a-4411-1790");
 
-        let report = pingback_pull_with(&daemon_inv(), move |_, _, _, _| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, move |_, _, _, _| {
             // A kind this version does not know, a field of the wrong type, and
             // one honest event beside them. The ring is the SAME version as
             // this node, so a shape that does not deserialize is not an event
@@ -2651,7 +2707,7 @@ mod tests {
         let _listener = headless_parent("wrap-1", "claude");
         ledger_row("wrap-1", "a2a-4411-1790");
 
-        let report = pingback_pull_with(&daemon_inv(), move |_, _, _, _| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, move |_, _, _, _| {
             Ok(read_of(&[
                 // A quoted field that would read as a command, an ESC/colour
                 // sequence, and a bidi override — the sender's own cleaning
@@ -2703,7 +2759,7 @@ mod tests {
             Some(socket.to_str().unwrap()), None, None);
         ledger_row("shell-1", "a2a-4411-1790");
 
-        let report = pingback_pull_with(&daemon_inv(), |_, _, _, _| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, |_, _, _, _| {
             panic!("a shell parent is judged before the far node is asked anything")
         });
 
@@ -2732,7 +2788,7 @@ mod tests {
         ledger_row("wrap-1", "a2a-4411-1790");
         end_record("wrap-1", "done", Some(0), Some("exit"));
 
-        let report = pingback_pull_with(&daemon_inv(), |_, _, _, _| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, |_, _, _, _| {
             panic!("a done parent is never pulled for")
         });
         assert_eq!(report.skipped, vec![("wrap-1".to_string(), "parent-done".to_string())], "{report:?}");
@@ -2743,7 +2799,7 @@ mod tests {
         let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
         file.sessions.retain(|s| s.session_id != "wrap-1");
         write_stage(&sessions_path(), &file).unwrap();
-        let report = pingback_pull_with(&daemon_inv(), |_, _, _, _| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, |_, _, _, _| {
             panic!("a parent with no record is never pulled for")
         });
         assert_eq!(report.skipped, vec![("wrap-1".to_string(), "no-parent-record".to_string())]);
@@ -2771,7 +2827,7 @@ mod tests {
         // fails. This is the at-most-once direction the whole lane loses in.
         drop(listener);
 
-        let report = pingback_pull_with(&daemon_inv(), move |_, _, _, _| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, move |_, _, _, _| {
             Ok(read_of(&[(1, settled("read the catalog")), (2, settled("and then this"))]))
         });
 
@@ -2810,7 +2866,7 @@ mod tests {
 
         let calls = std::cell::Cell::new(0);
         let acc = std::thread::spawn(move || read_all(listener));
-        let report = pingback_pull_with(&daemon_inv(), |_, id, after, _| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, |_, id, after, _| {
             calls.set(calls.get() + 1);
             if id == "dead-child" {
                 assert_eq!(after, 4, "the retry starts from the cursor the ledger holds");
@@ -2845,6 +2901,73 @@ mod tests {
     }
 
     #[test]
+    fn a_spent_budget_stops_the_pass_and_names_what_it_left() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = setup("pingback-pull-budget");
+        register_far_node("nodeb");
+        let _listeners = (
+            headless_parent("wrap-1", "claude"),
+            headless_parent("wrap-2", "claude"),
+            headless_parent("wrap-3", "claude"),
+        );
+        for (i, parent) in ["wrap-1", "wrap-2", "wrap-3"].iter().enumerate() {
+            // A child's identity is `(key, sessionId)`, so three rows need
+            // three ids — one child has one parent.
+            ledger_row(parent, &format!("a2a-4411-179{i}"));
+        }
+
+        // Three rows, a fetch that takes longer than a third of the budget:
+        // the pass stops when the budget is spent and names the rows it never
+        // reached, instead of holding the daemon's tick for all three.
+        let calls = std::cell::Cell::new(0);
+        let before = PULL_ROTATION.load(Ordering::Relaxed);
+        let report = pingback_pull_with(&daemon_inv(), Duration::from_millis(60), |_, _, _, _| {
+            calls.set(calls.get() + 1);
+            std::thread::sleep(Duration::from_millis(40));
+            Ok(read_of(&[(1, settled("still here"))]))
+        });
+        assert!(
+            PULL_ROTATION.load(Ordering::Relaxed) > before,
+            "every pass starts one row further along than the last"
+        );
+        assert!(calls.get() < 3, "the budget cut the pass short: {} call(s)", calls.get());
+        let starved: Vec<&String> = report
+            .skipped
+            .iter()
+            .filter(|(_, why)| why == "budget-spent")
+            .map(|(who, _)| who)
+            .collect();
+        assert_eq!(
+            starved.len(),
+            3 - calls.get(),
+            "every row the budget cut off is named, never silently dropped: {report:?}"
+        );
+
+        // The cut is audited once for the pass, with the count.
+        let log = std::fs::read_to_string(root.join("log")).unwrap();
+        assert!(log.contains("budget-spent"), "{log}");
+        assert!(log.contains("not pulled this tick"), "{log}");
+
+        // A budget nobody can outrun reaches every row, so the rotation is a
+        // fairness device and not a second, hidden cap.
+        let reached = std::cell::Cell::new(0);
+        pingback_pull_with(&daemon_inv(), PULL_BUDGET, |_, _, _, _| {
+            reached.set(reached.get() + 1);
+            Ok(read_of(&[(2, settled("second pass"))]))
+        });
+        assert_eq!(reached.get(), 3, "a full budget pulls all three rows");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn an_overlapping_pass_owns_nothing_and_a_lying_last_moves_nothing() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(&[
@@ -2863,7 +2986,7 @@ mod tests {
         // the resync a GAP needs, and nothing else — believing it here would
         // drive the cursor past every seq the child can ever push, silencing
         // it forever and making the row undrainable.
-        let report = pingback_pull_with(&daemon_inv(), |_, _, after, _| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, |_, _, after, _| {
             assert_eq!(after, 0);
             Ok(RingRead { events: Vec::new(), gap: false, last: u64::MAX })
         });
@@ -2874,7 +2997,7 @@ mod tests {
         // delivered it. The overlap is staged where it really happens — the
         // claim section — by advancing the ledger inside the fetch, and the
         // delivery owes nothing: the events are already spoken for.
-        let report = pingback_pull_with(&daemon_inv(), |_, _, after, _| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, |_, _, after, _| {
             assert_eq!(after, 0, "this pass fetched BEFORE the other one claimed");
             aoide_storage::remote_children::advance_lines_after(&remote_key(), "a2a-4411-1790", 2)
                 .unwrap();
@@ -2904,7 +3027,7 @@ mod tests {
         // The far door's "no record and no ring" answer, with the code it
         // carries: the child is gone for good.
         let calls = std::cell::Cell::new(0);
-        let report = pingback_pull_with(&daemon_inv(), |_, _, _, _| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, |_, _, _, _| {
             calls.set(calls.get() + 1);
             Err(FrameReadError {
                 code: Some(aoide_protocol::wire::a2a::TASK_NOT_FOUND_CODE),
@@ -2916,7 +3039,7 @@ mod tests {
         assert!(drained_of("a2a-4411-1790"), "a child that is gone is never asked about again");
 
         // The latch is what stops the forever-retry: no second request, ever.
-        let report = pingback_pull_with(&daemon_inv(), |_, _, _, _| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, |_, _, _, _| {
             panic!("a latched row is never pulled again")
         });
         assert_eq!(report, PingbackReport::default(), "{report:?}");
@@ -2930,7 +3053,7 @@ mod tests {
         // A REFUSAL is not a gone child: the key may be fixable (a re-pair),
         // so the row stays and the next tick retries.
         ledger_row("wrap-1", "a2a-4411-9999");
-        let report = pingback_pull_with(&daemon_inv(), |_, _, _, _| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, |_, _, _, _| {
             Err(FrameReadError {
                 code: Some(aoide_protocol::wire::a2a::OUTPUT_READ_REFUSED_CODE),
                 message: "output read refused".to_string(),
@@ -2963,7 +3086,7 @@ mod tests {
         // The parent is four events behind and the ring only kept back to 5.
         aoide_storage::remote_children::advance_lines_after(&remote_key(), "a2a-4411-1790", 4).unwrap();
 
-        let report = pingback_pull_with(&daemon_inv(), move |_, _, after, _| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, move |_, _, after, _| {
             assert_eq!(after, 4);
             Ok(RingRead {
                 events: vec![aoide_storage::pingback_remote::RemoteEvent {
@@ -2987,7 +3110,7 @@ mod tests {
 
         // A gap whose answer carries NO event still moves the cursor to `last`
         // — otherwise the same gap would be re-reported every tick forever.
-        let report = pingback_pull_with(&daemon_inv(), move |_, _, after, _| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, move |_, _, after, _| {
             assert_eq!(after, 9);
             Ok(RingRead { events: Vec::new(), gap: true, last: 12 })
         });
@@ -3014,7 +3137,7 @@ mod tests {
         ledger_row("wrap-1", "a2a-4411-1790");
 
         let calls = std::cell::Cell::new(0);
-        let report = pingback_pull_with(&daemon_inv(), |_, _, _, _| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, |_, _, _, _| {
             calls.set(calls.get() + 1);
             Ok(read_of(&[(1, settled("one last thing")), (2, exited())]))
         });
@@ -3025,7 +3148,7 @@ mod tests {
 
         // The NEXT tick does not ask again: a ring is never pruned and a child
         // that has left the roster never pushes, so this is forever.
-        let report = pingback_pull_with(&daemon_inv(), |_, _, _, _| {
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, |_, _, _, _| {
             panic!("a drained child is never pulled again")
         });
         assert_eq!(report, PingbackReport::default(), "{report:?}");
@@ -3045,7 +3168,7 @@ mod tests {
         ]);
         let root = setup("pingback-pull-nobody");
         register_far_node("nodeb");
-        let report = pingback_pull_with(&daemon_inv(), |_, _, _, _| panic!("no rows, no calls"));
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, |_, _, _, _| panic!("no rows, no calls"));
         assert_eq!(report, PingbackReport::default());
 
         // The door gate: only the daemon's own tick pulls (the same boundary
@@ -3053,13 +3176,13 @@ mod tests {
         ledger_row("wrap-1", "a2a-4411-1790");
         let mut cli = daemon_inv();
         cli.door = Door::Cli;
-        let report = pingback_pull_with(&cli, |_, _, _, _| panic!("a CLI door never pulls"));
+        let report = pingback_pull_with(&cli, PULL_BUDGET, |_, _, _, _| panic!("a CLI door never pulls"));
         assert_eq!(report, PingbackReport::default());
 
         // An unresolved node is named, never dialed at a guess.
         let _listener = headless_parent("wrap-1", "claude");
         aoide_storage::node_store::save_nodes(&[]).unwrap();
-        let report = pingback_pull_with(&daemon_inv(), |_, _, _, _| panic!("an unknown node is never dialed"));
+        let report = pingback_pull_with(&daemon_inv(), PULL_BUDGET, |_, _, _, _| panic!("an unknown node is never dialed"));
         assert_eq!(report.skipped, vec![("wrap-1".to_string(), "unknown-node".to_string())]);
 
         let _ = std::fs::remove_dir_all(&root);
