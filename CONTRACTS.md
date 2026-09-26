@@ -5074,6 +5074,48 @@ loopback/user-scoped by default (same as the rest of §6's security posture),
 and every inject/spawn/error is audited through `Door::A2a`, the same single
 audit log every other door writes.
 
+**A spawn is a managed run when the caller names a task.** `message/send` may
+carry `metadata["aoide/task"]`
+(`aoide_protocol::wire::TASK_KEY`) — a task slug, read on the same two spots
+`aoide/spawn` is (`message.metadata` first, then top-level `params.metadata`,
+unlike `aoide/from`'s identity claim, because this one is a directive about
+what to do, not about who is calling). The door turns it into the wrapper's own
+`--task <slug>`; with it, the remote child IS a managed task run — the task
+mailbox, `session watch`'s task view, the exit report and the retained record
+all come from the same flag a local `aoide spawn --task` passes. Without it,
+the spawn is a plain headless conducted session: watchable through its log and
+steerable through the door, with no mailbox and no report.
+
+The slug is held to the one predicate every task slug and mailbox name already
+takes — `^[a-z0-9][a-z0-9-]*$`, `node_store::valid_node_name`, the validator
+`spawn --task` applies to its own flag, since the slug IS the mailbox name —
+and an illegal one is refused `-32602` with a taught message that quotes the
+value, states the shape and names the way out (a legal slug, or no key). Like
+S3's malformed `aoide/from`, that refusal is applied **spawn-side only**: an
+Inject request that happens to carry the key builds nothing out of it and is
+answered exactly as before. The check runs before an id is minted or
+`current_exe()` resolves, so an illegal slug costs one RPC and no process.
+
+Three things a managed spawn is NOT: `--parent` (the door never writes the
+LOCAL `parentSessionId` — the remote parent is the `remoteParent` RECORD field
+`stamp_spawn_provenance` stamps), `--instructions-path` (a remote caller names
+no sidecar; the prompt is injected as the first turn), and `--timeout` (the
+door has no deadline to impose, and a default one would kill a long remote run
+mid-flight). `--report-to` is equally absent, so the run's report is filed to
+its own slug on the child's node and stays there (Q5).
+
+**The child is always headless, and its argv is the local one.** `do_spawn`
+builds its argv through `aoide_conduct::graph::build_conduct_args` — the ONE
+builder a local `spawn` uses, never a second copy of it kept in step by hand —
+with `headless = true` unconditionally: this door has no terminal to hand a
+child (its stdio is nulled and it is `setsid`'d), so the log is the sink, the
+pty gets the conventional fallback geometry, and `conduct` reads no stdin. The
+door's environment for the child is unchanged by either flag — the same three
+entries as before this managed mode existed (`AOIDE_AUDIT_LOG` set,
+`AOIDE_SESSION_ORIGIN` and `AOIDE_SESSION_ID` removed) — because both travel by
+ARGV: `AOIDE_TASK`/`AOIDE_TASK_INSTRUCTIONS` are exported by the child's own
+`conduct` to the AGENT it wraps, never by this door.
+
 **Spawn acks only once the wrapper proves it's alive (task #103).**
 `do_spawn` launches the configured agent via a detached `aoide conduct`
 wrapper process; a successful `cmd.spawn()` there only proves that WRAPPER

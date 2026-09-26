@@ -2380,8 +2380,7 @@ project/parent inheritance across local/remote/app/subagents;
   gap marker with and without an event in the answer, the drain latch, no pull
   for a done/absent parent or an unresolved node, and the `Door::Daemon`
   gate), aoide-storage 439 (1 new), aoide-client 318 (2 new), all pass,
-  `cargo test --workspace --no-run` clean. S10 open, in the brief's order
-  (cargo builds serialize).
+  `cargo test --workspace --no-run` clean. S10 pending.
 - Review pass over S8+S9 (`ca73a2a..5275a8a`), every finding fixed on the
   branch. **H1** — `Exited` never fired for a remote child the reaper KILLED:
   the record is stamped `done` and `prune_done` drops it in the same pass,
@@ -2432,8 +2431,65 @@ project/parent inheritance across local/remote/app/subagents;
   so slipped every sanitizer. **L5** — `remote.rs`'s unused `node_graph_json`
   test helper deleted. Tests after the pass: aoide-conduct 914,
   aoide-storage 442, aoide-server 246, aoide-client 318, `cargo test
-  --workspace --no-run` clean. S10 open, in the brief's order (cargo builds
-  serialize).
+  --workspace --no-run` clean. S10 LANDED — an A2A spawn is a HEADLESS
+  MANAGED RUN (`a2a`), the last row of the brief and the lane's own
+  code-complete point. `do_spawn` no longer hand-rolls its argv: it composes
+  through `aoide_conduct::graph::build_conduct_args` (widened to `pub`, one
+  definition, never a second argv kept in step by hand — `graph.rs`
+  re-exports it) with `headless = true` ALWAYS, because this door has no
+  terminal to hand a child, plus `--task <slug>` when the caller sent
+  `metadata["aoide/task"]` (the protocol crate gains `wire::TASK_KEY`, read
+  on the same two spots `aoide/spawn` is — the message object first, then
+  top-level `params` — because this is a directive about what to do, so
+  `aoide/from`'s message-only discipline does not apply). Three things the
+  brief could not know, decided in this row: (1) the brief's "existing
+  task-slug validator" does not exist as its own function — the validator IS
+  `aoide_storage::node_store::valid_node_name` (`^[a-z0-9][a-z0-9-]*$`), the
+  predicate `spawn --task` applies to its own flag and `mail send` applies to
+  a name, because the slug IS the mailbox name; the door reuses it rather than
+  adding a second predicate one hyphen stricter; (2) an illegal slug is
+  refused `-32602` with a taught message (quoting the value, stating the
+  shape, naming the way out) BEFORE `spawn_session_id` mints an id or
+  `current_exe()` resolves, so it costs one RPC and no process — the same
+  spawn-side-only discipline S3's malformed `aoide/from` claim holds, and an
+  Inject carrying the key is answered exactly as before; (3) `--timeout`,
+  `--report-to`, `--instructions-path` and `--parent` have no source at this
+  door and stay absent — the door has no deadline to impose (inventing one
+  would kill long remote runs mid-flight), the report is filed to the child's
+  own slug and stays on its node (Q5), a remote caller names no sidecar, and
+  `parentSessionId` stays a LOCAL field (§4: the remote parent is the
+  `remoteParent` RECORD field S3 stamps). What S10 changes for the earlier
+  slices, stated rather than implied: NOTHING for S3 — the door's env for the
+  child is byte-identical (three entries: `AOIDE_AUDIT_LOG` set,
+  `AOIDE_SESSION_ORIGIN`/`AOIDE_SESSION_ID` removed), because both new flags
+  are ARGV facts, and the `origin`+`remoteParent` stamp still lands on a
+  record that already carries the child's own task slug, both stamps being
+  stage-lock sections that cannot clobber one another. S8/S9 are unchanged
+  too: `tracks()` keys on `agent == "eidolon" || remote_parent.is_some()`,
+  which the managed shape does not touch, and the `exited` latch lives in the
+  per-child cursor entry, which the record's longer life only keeps around.
+  What genuinely CHANGES is retention: with `--task`, a finished A2A child's
+  record is now retained by every AUTOMATIC sweep (`prune_done_scoped` keeps
+  every task-carrying `done` record, and an unfiled one survives even an
+  explicit prune), so a remote caller that names a task grows the roster by
+  one long-lived record per run — a consequence of the local wrapper's own
+  history rule, not a rule invented here. Two gaps left open, deliberately
+  and named: the door composes `conduct` directly, so `spawn --task`'s
+  ONE-LIVE-RUN-PER-SLUG check (`live_run_for`) and its child-reader enrolment
+  (`mail::enrol_reader`) do not run for a remote spawn — a slug a live run
+  already holds is not refused here, and the child reads its queue as an
+  unenrolled reader (mark 0, the same peek `session watch` prints). Neither
+  breaks a documented behaviour (the mailbox NAME is shared across runs by
+  design, and the view labels each run's letters), and neither is in S10's
+  row, so both are recorded as follow-ups rather than silently added. Tests
+  (aoide-server 246 → 251): the argv via `Command::get_args()` for no task and
+  a valid task (an illegal one has no argv at all — it is refused before one
+  exists); the env unchanged by `--headless`/`--task`; the S3 stamp landing on
+  a managed run and leaving its task slug alone. aoide-server 251,
+  aoide-conduct 914, aoide-client 318, aoide-storage 442, aoide-protocol 174,
+  all pass; `cargo test --workspace --no-run` clean. **The lane is
+  code-complete; acceptance runs 7a/7b remain the operator's, on two real
+  nodes.**
 - Review pass over S1–S3 (same branch, `8236675` onward): the caller now
   holds its own winning claim to `valid_claimed_session_id` and refuses
   locally before signing (the "one predicate, both sides" line was

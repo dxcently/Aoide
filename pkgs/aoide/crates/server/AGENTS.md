@@ -355,6 +355,29 @@
   process spawn this precedent exists to avoid inside a `cargo test`
   binary (`std::env::current_exe()` there is the TEST binary, not a real
   `aoide`).
+- **A spawn's wrapper argv comes from `aoide_conduct::graph::build_conduct_args`,
+  never a second copy in this crate (P-RSA S10, CONTRACTS.md §6).** The door
+  passes `headless = true` ALWAYS (it has no terminal to hand a child; stdio is
+  nulled and the child is `setsid`'d) and `--task <slug>` exactly when the
+  request named one under `metadata["aoide/task"]`
+  (`aoide_protocol::wire::TASK_KEY`, read on the same two spots `aoide/spawn`
+  is — `requested_task`). `spawn_argv`/`spawn_task_slug` are `do_spawn`'s own
+  two pure halves, split out for the same reason `spawn_child_command` was
+  (a `cargo test` binary's `current_exe()` is the harness): the argv is asserted
+  with `Command::get_args()` and the env with `get_envs()`, never by driving a
+  real spawn. Two invariants to hold while editing:
+  (a) **the slug check stays FIRST in `do_spawn`** — before `spawn_session_id`
+  mints an id and before `current_exe()` resolves — so an illegal slug costs one
+  RPC and no process (moving it later would make the refusal test spawn the test
+  binary); (b) **the slug refusal is `-32602` and spawn-side only**, the same
+  discipline S3's malformed `aoide/from` claim holds — an Inject request
+  carrying the key is answered exactly as before, because it builds no value
+  from it. The predicate is `aoide_storage::node_store::valid_node_name`
+  (there is no separate task-slug validator to call: the slug IS the mailbox
+  name). Do NOT add `--timeout`/`--report-to`/`--instructions-path`/`--parent`
+  here without a source for each — a default deadline would kill long remote
+  runs, the report stays on the child's node (Q5), and `parentSessionId` is a
+  LOCAL field (§4).
 - **The `metadata["aoide/from"]` parent claim is honoured on the Signature
   rung ONLY, and the value is built from the RESOLVED record, never from wire
   bytes (P-RSA S3, CONTRACTS.md §4/§6).** `parse_message_send_params`' fourth

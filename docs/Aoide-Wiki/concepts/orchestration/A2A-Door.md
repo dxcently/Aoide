@@ -45,7 +45,13 @@ The server serves:
   an existing conducted session named by `contextId`, or **spawns** a new
   conducted agent. The spawn runs a **configured** agent
   (`aoide.a2a.spawnAgent`), never a client-supplied command — the client
-  supplies only the prompt. See [[#Security and governance]].
+  supplies only the prompt. A spawn may also name a task
+  (`metadata["aoide/task"]`), which makes the child the SAME
+  [[Managed-Task-Wrapper|managed task run]] a local `aoide spawn --task`
+  produces: task mailbox, exit report, a record the routine prune retains. A
+  spawn is always headless — the door has no terminal to hand the child — and
+  its wrapper argv is the local one's, built by one shared builder. See
+  [[#Security and governance]].
 - **`message/stream`** and **`tasks/resubscribe`** — Server-Sent-Events
   streaming of task-status updates. A stream emits on state change, marks the
   terminal frame `final: true`, and polls the stage on a short tick. It is
@@ -127,6 +133,21 @@ to **rebuild time** instead.
   session already running under aoide's conductor, the same door `send`
   uses. A forwarded A2A message is **data**, routed through the dispatcher, never
   executed — the A2A door adds no new trust tier.
+- **A spawn's child is the local wrapper, always headless.** The door has no
+  terminal to hand a child, so its spawn is `conduct --spawned --headless`,
+  built by the ONE argv builder a local `aoide spawn` uses
+  ([[Managed-Task-Wrapper]]). A caller may also name a task
+  (`metadata["aoide/task"]`) — an illegal slug is refused `-32602` with a
+  taught message, before any id, argv or process exists — and that turns the
+  child into a full managed task run on the far node: a mailbox named by the
+  caller's slug, an exit report, and a record routine cleanup retains. Two
+  consequences a caller should know: the mailbox namespace is shared, so a
+  slug another live run already holds is not refused here (the door composes
+  `conduct` directly, so `spawn --task`'s one-live-run check does not run),
+  and a task run's record is retained indefinitely until an explicit
+  `session prune`, so a node taking repeated remote task spawns grows a roster
+  rather than recycling one. Both are the local wrapper's own semantics,
+  reached through this door — not a second set of rules.
 - **Non-loopback callers are gated at request time.** `message/send`
   classifies the caller's address first (`a2a::classify_origin` →
   `ConnOrigin`: `Loopback` / `Remote(IpAddr)` / `Unknown`). A `Remote`

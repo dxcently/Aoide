@@ -12,6 +12,15 @@ to the PTY transcript, and returns one deterministic outcome. `aoide spawn
 `conduct` argv, so every behavior below is shared by construction, and every
 fact either shape records lands on the same record.
 
+**A remote spawn is the same wrapper.** `message/send` on the [[A2A-Door]]
+spawns through `conduct --spawned --headless`, from the one argv builder
+`spawn` itself uses — so a child summoned from another node is this wrapper, not
+a lookalike. It has no terminal there and gets the log as its sink. It names a
+task when the caller sent `metadata["aoide/task"]`, and then everything on this
+page holds for it: the mailbox, the retained record, the exit report filed on
+the child's own node, the read-only observer. Without that key it is a plain
+conducted session — tracked, watchable, steerable, and nothing more.
+
 ```sh
 # foreground: the tool call. Blocks, streams, returns the outcome.
 aoide conduct --task fix-flaky --instructions-path /path/brief.md \

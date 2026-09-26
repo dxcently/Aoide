@@ -1643,7 +1643,13 @@
   from `$AOIDE_TERMINAL` instead of detaching) — call it, `--headless`
   aside; do NOT hand-roll a second argv builder for the windowed path, or
   registration/the control socket/the parent-autogate lane can drift
-  between the two modes. `build_terminal_argv` (the `$AOIDE_TERMINAL`
+  between the two modes. It is `pub` for ONE caller outside this crate —
+  `aoide-server`'s A2A `do_spawn` (P-RSA S10) — and that caller passes
+  `headless = true` with `--task` when its own request named one; widening
+  it was the point (the door's hand-rolled argv was a second spelling, and
+  an A2A child stopped being the wrapper `spawn` produces), so a third
+  caller adding a fourth spelling is exactly what this rule forbids.
+  `build_terminal_argv` (the `$AOIDE_TERMINAL`
   template parser) is a PURE function on purpose — no env read, no spawn —
   so it stays directly unit-testable; do the env reads (`terminal_template`/
   `require_display`) in the thin callers around it, never inside it.
