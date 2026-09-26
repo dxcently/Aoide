@@ -120,7 +120,26 @@ pub(in crate::graph) fn strip_unsafe(s: &str) -> String {
 /// letter body, a run's instructions), and the ping-back's own
 /// `SAY_MAX`-clipped `clean` for a line bound for a composer.
 pub(in crate::graph) fn is_unsafe(c: char) -> bool {
-    c.is_control() || is_format(c)
+    c.is_control() || is_format(c) || is_invisible(c)
+}
+
+/// Characters that render as NOTHING and are not `Cf` — the fillers a line can
+/// be padded with, and the variation selectors that attach invisibly to the
+/// glyph before them. They cannot reorder a line the way a bidi override can,
+/// which is why they are not in [`is_format`]; they can still hide text, so
+/// they are [`is_unsafe`] all the same (L4 of the S8/S9 review). A range added
+/// by a later Unicode version is a one-line addition here, exactly as in
+/// [`is_format`].
+fn is_invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{115f}' | '\u{1160}'             // Hangul choseong filler, jungseong filler
+        | '\u{2800}'                        // braille pattern blank
+        | '\u{3164}'                        // Hangul filler
+        | '\u{ffa0}'                        // halfwidth Hangul filler
+        | '\u{fe00}'..='\u{fe0f}'           // variation selectors 1-16
+        | '\u{e0100}'..='\u{e01ef}'         // variation selectors supplement
+    )
 }
 
 /// Unicode 15's `Cf` (FORMAT) category, enumerated — `char`'s stable API has
@@ -199,6 +218,20 @@ mod tests {
         // Not a licence to strip everything exotic: an ordinary multi-byte
         // glyph is text, and stays.
         assert_eq!(clean_line("ünicode 漢字"), "ünicode 漢字");
+    }
+
+    #[test]
+    fn clean_line_strips_the_invisible_fillers_and_variation_selectors() {
+        // Not `Cf`, so not `is_format` — but they render as nothing all the
+        // same, and a line padded or decorated with them says something other
+        // than what it appears to (L4 of the S8/S9 review).
+        assert_eq!(clean_line("a\u{3164}b\u{ffa0}c\u{115f}d\u{1160}e\u{2800}f"), "abcdef");
+        assert_eq!(clean_line("emoji\u{fe0f}x\u{fe0e}y"), "emojixy");
+        assert_eq!(clean_line("supp\u{e0100}\u{e01ef}lement"), "supplement");
+        // The neighbouring characters are NOT touched: U+FE10 (presentation
+        // form for vertical), U+2801 (braille pattern dots-1) and U+3163 are
+        // real text and stay.
+        assert_eq!(clean_line("\u{fe10}\u{2801}\u{3163}"), "\u{fe10}\u{2801}\u{3163}");
     }
 
     #[test]
