@@ -14,16 +14,22 @@
 #
 # HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.livery.
 # All livery values are literal nix expressions (no song/ runtime reads).
-{ lib, config, ... }:
+{
+  lib,
+  config,
+  song,
+  borrow,
+  ...
+}:
 let
-  song = import ../../../lib/song.nix { inherit lib; };
-
   # `_widgets/` is the widget-record shelf (lib/song.nix's header) — one
   # plain function per slot, rolled up and bound to owner "sonata" by
   # `_widgets/default.nix`. `composeSong` validates every record and folds
   # them into `arrangement.widgets` (empty today: all 14 records leave `kind`
   # unset, so none is a declared registry entry — see each file for why).
-  widgets = import ./_widgets { inherit lib; };
+  # Its OWN shelf, through the name-keyed door any other song would use:
+  # `borrow` is the one place a shelf is opened (CONTRACTS.md §5).
+  widgets = borrow "sonata";
 in
 {
   # Guard: apply only when this host performs "sonata".
