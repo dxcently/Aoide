@@ -85,6 +85,9 @@ else
     "$(o '[.userServices[], .userTimers[], .systemdUserServices[], .systemServices[] | select(test("healthcheck"))] | length')"
   check "only: no lane activation"              "0" \
     "$(o '[.activation[] | select(test("^aoide"))] | length')"
+  # No lyra, no reader: the units that would carry the staging path's own
+  # templates variable must not carry it (paired with the control below).
+  check "only: no templates var on any unit"    "[]" "$(o '.templates')"
 fi
 
 # ── test-quickshell-bare ─────────────────────────────────────────────────────
@@ -137,6 +140,16 @@ else
     "$(y '[.systemdUserServices[] | select(test("shellbridge"))] | length')"
   check "control: yomi HAS the rice binary"     "1" \
     "$(y '[.packages[] | select(test("-rice$"))] | length')"
+  # The staging path's session-sourced variable, declared on every unit a
+  # staged song can descend from — and all three naming ONE directory, so a
+  # unit cannot go stale on its own (found at the S9 yomi switch: an inherited
+  # login-environment value survived a switch until the operator relogged).
+  check "control: aoided declares the templates" "1" "$(y '.templates.aoided | length')"
+  check "control: shellbridge declares it"      "1" "$(y '.templates.shellbridge | length')"
+  check "control: the shell declares it"        "1" "$(y '.templates.quickshell | length')"
+  check "control: all three name one directory" "true" "$(y '.templatesAgree')"
+  check "control: it is the shipped songbook"   "true" \
+    "$(y '.templates.aoided[0] | endswith("-lyra-songbook-templates/share/lyra/songbook")')"
 fi
 
 printf '%s\n' "-----------------------------------------------------------------"

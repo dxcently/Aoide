@@ -3,7 +3,9 @@
 # `pkgs/aoide/module/aoided.nix` owns the tmpfiles rules, the core session
 # variables, and the `aoided.service` unit itself (portable, nixpkgs-only).
 # This file carries only what is paint-dependent: the lyra-gated
-# `AOIDE_SONG_TEMPLATES` session variable. `aoide.sessionTarget` — the seam
+# `AOIDE_SONG_TEMPLATES` — as a session variable for interactive shells AND on
+# the unit's own `Environment`, so a process aoided spawns resolves this
+# build's templates rather than whatever the login session was handed. `aoide.sessionTarget` — the seam
 # the core unit anchors through — is NOT set here: the lane that brings a
 # graphical session up sets it, so this file reads no lane's option (root
 # AGENTS.md house rule 5). Below that, the doors (mcp, a2a, pair-watch), the
@@ -36,6 +38,31 @@ lib.mkIf config.aoide.enable {
   environment.sessionVariables = lib.optionalAttrs config.aoide.lyra.enable {
     AOIDE_SONG_TEMPLATES = "${pkgs.lyra-songbook}/share/lyra/songbook";
   };
+
+  # ── The same variable on the unit itself ─────────────────────────────────
+  # The session variable above is a LOGIN fact: it lands in the systemd user
+  # manager's environment when the operator logs in and stays there, so a unit
+  # that started before a `nixos-rebuild switch` keeps the PREVIOUS build's
+  # templates until they relog (found at the S9 yomi switch). Any process
+  # aoided spawns — a conducted session, an agent, a terminal — inherits the
+  # unit's environment, so a `lyra rice stage` run from one of them resolved
+  # the old songbook with nothing saying so. Declared here, a unit restart is
+  # enough, and the value always names THIS build's `pkgs.lyra-songbook`.
+  #
+  # Why here and not in the portable core module: the templates path is
+  # `pkgs.lyra-songbook` (paint), which core neither knows nor may name. Why
+  # only this unit and `aoide-quickshell`: `fs::song_templates_dir` is read on
+  # the staging path (`rice stage|compose|preview|mode`, `take`, `onboard`),
+  # and those are what a shell born of these two units runs — shellbridge
+  # already spells it for the one process that stages in-process, and a door
+  # that spawns a fixed dialog (`lyra pair ask`, `lyra secrets ask`) never
+  # reaches the staging path at all. The rest of what the staging path reads
+  # from session variables was audited with it: `AOIDE_ROOT` and
+  # `AOIDE_FLAKE_ROOT` are spelled by every unit that can reach it,
+  # `AOIDE_STAGE_DIR` is deliberately unset anywhere (the default layout
+  # resolves under `AOIDE_ROOT`), and `XDG_RUNTIME_DIR` is the manager's own.
+  systemd.user.services.aoided.serviceConfig.Environment =
+    lib.optional config.aoide.lyra.enable "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook";
 
   # ── MCP façade (opt-in, off by default per house policy) ────────────────
   # When aoide.mcp.enable is true, also start the per-session MCP server stub.

@@ -8,7 +8,10 @@
 # ref was passed — a frozen ref has to name the commit whose files get read, or
 # it proves nothing about that commit.) The ref's source is the only input;
 # nothing here stubs the seam itself.
-{ flake, system ? "x86_64-linux" }:
+{
+  flake,
+  system ? "x86_64-linux",
+}:
 let
   lib = flake.inputs.nixpkgs.lib;
   inputs = flake.inputs;
@@ -28,7 +31,10 @@ let
       hostModules = [ (src + "/tests/quickshell-seam/hosts/${name}.nix") ];
       nucleus = src + "/modules/nucleus";
       homeManagerModule = inputs.home-manager.nixosModules.home-manager;
-      specialArgs = { inherit inputs; username = "khoa"; };
+      specialArgs = {
+        inherit inputs;
+        username = "khoa";
+      };
       # `mkNixosHost` hands `system` to the modules but not to `nixosSystem`
       # itself, so a constructor-built host at this point in the tree states its
       # platform in its own module — the S7 host record carries it, and this
@@ -47,12 +53,34 @@ let
   # the NixOS-level USER one — two different namespaces, and shellbridge is
   # declared in the second (`modules/dendrites/lyra/shellbridge.nix`), so a
   # check that reads only the first would pass on a host that has the bridge.
+  #
+  # `templates` is the units' OWN `AOIDE_SONG_TEMPLATES` (the staging path's
+  # one session-sourced variable — `fs::song_templates_dir`): declared on the
+  # unit, not inherited from the systemd user manager's login environment, so a
+  # unit restarted after a switch stages from THIS build's songbook. The two
+  # module systems spell it differently — NixOS user units put it under
+  # `serviceConfig.Environment`, home-manager units under `Service.Environment`
+  # — so both are read here rather than assumed.
+  unitEnv =
+    units: unit:
+    let
+      u = units.${unit} or { };
+    in
+    u.serviceConfig.Environment or u.Service.Environment or [ ];
+
+  templatesOf =
+    env:
+    map (lib.removePrefix "AOIDE_SONG_TEMPLATES=") (
+      lib.filter (lib.hasPrefix "AOIDE_SONG_TEMPLATES=") env
+    );
+
   read =
     name:
     let
       cfg = (host name).config;
       home = cfg.home-manager.users.${cfg.aoide.user};
       userUnits = home.systemd.user.services or { };
+      systemUnits = cfg.systemd.user.services;
     in
     {
       config = cfg.aoide.quickshell.config;
@@ -65,6 +93,10 @@ let
       systemServices = builtins.attrNames cfg.systemd.services;
       systemdUserServices = builtins.attrNames cfg.systemd.user.services;
       activation = builtins.attrNames (home.home.activation or { });
+      templates =
+        templatesOf (unitEnv userUnits "aoide-quickshell")
+        ++ templatesOf (unitEnv systemUnits "aoided")
+        ++ templatesOf (unitEnv systemUnits "shellbridge");
       service =
         if userUnits ? aoide-quickshell then
           {
@@ -95,11 +127,29 @@ in
   songWithoutLyra = (host "test-song-without-lyra").config.system.build.toplevel.drvPath;
 
   # The positive control for the absence checks: yomi runs lyra, so it HAS the
-  # shellbridge unit and the rice binary the two lyra-less fixtures must not
-  # have. Read off the ref's own `nixosConfigurations`, so it is the real host
-  # and not a fourth fixture.
-  yomi = {
-    systemdUserServices = builtins.attrNames flake.nixosConfigurations.yomi-strix.config.systemd.user.services;
-    packages = map (p: baseNameOf p.outPath) flake.nixosConfigurations.yomi-strix.config.environment.systemPackages;
-  };
+  # shellbridge unit, the rice binary and the templates declaration the two
+  # lyra-less fixtures must not have. Read off the ref's own
+  # `nixosConfigurations`, so it is the real host and not a fourth fixture.
+  yomi =
+    let
+      cfg = flake.nixosConfigurations.yomi-strix.config;
+      home = cfg.home-manager.users.${cfg.aoide.user};
+      # Every unit that stages, or whose spawned children can: the daemon that
+      # spawns sessions, the shell whose QML execs `lyra`, and the bridge that
+      # stages in-process. One entry per unit, so a check can name the one that
+      # went missing.
+      templates = {
+        aoided = templatesOf (unitEnv cfg.systemd.user.services "aoided");
+        shellbridge = templatesOf (unitEnv cfg.systemd.user.services "shellbridge");
+        quickshell = templatesOf (unitEnv (home.systemd.user.services or { }) "aoide-quickshell");
+      };
+    in
+    {
+      systemdUserServices = builtins.attrNames cfg.systemd.user.services;
+      packages = map (p: baseNameOf p.outPath) cfg.environment.systemPackages;
+      inherit templates;
+      # All three must agree on ONE directory: a unit left with a different
+      # answer is the drift this reading exists to catch.
+      templatesAgree = builtins.length (lib.unique (lib.concatLists (lib.attrValues templates))) == 1;
+    };
 }

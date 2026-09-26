@@ -160,6 +160,20 @@ let
                 # song before, so a rebuild lost the background. Null → no env.
                 ++ lib.optionals (config.aoide.livery.wallpaper != null) [
                   "AOIDE_WALLPAPER=${config.aoide.livery.wallpaper}"
+                ]
+                # The shipped templates, spelled on the unit rather than left to
+                # the LOGIN environment (`environment.sessionVariables`, nucleus/
+                # aoided.nix): a user unit inherits the manager's environment as
+                # of the session's login, so an inherited
+                # `AOIDE_SONG_TEMPLATES` keeps pointing at the PREVIOUS build's
+                # songbook until the operator relogs — while the QML this unit
+                # starts execs `lyra` itself (`cover set`, the widget-maker's
+                # rail), which resolves the templates from exactly this
+                # environment. Declared here, a restart is enough. Gated on the
+                # lyra dendrite for the same reason the nucleus delta is: a
+                # shell with no `lyra` installed has no reader for it.
+                ++ lib.optionals config.aoide.lyra.enable [
+                  "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
                 ];
                 Restart = "on-failure";
                 RestartSec = 3;
