@@ -56,6 +56,24 @@ pub const DRAIN_BACKOFF_FLOOR_SECS: u64 = 12;
 /// longer than that unrelated spawn-retry convention.
 pub const BACKOFF_CEILING_SECS: u64 = 900;
 
+/// The two delivery flavors a spooled entry can carry (MAIL.md "Outbox",
+/// vocabulary table). [`FLAVOR_NOW`]: deliver or queue+retry — attempted on
+/// every drain. [`FLAVOR_HOLD`]: wait to be polled — never attempted by a
+/// drain, moved only by the destination's own `aoide/mailPoll`.
+pub const FLAVOR_NOW: &str = "now";
+pub const FLAVOR_HOLD: &str = "hold";
+
+/// [`OutboxEntry::flavor`]'s serde default: an absent key is `now`.
+fn flavor_now() -> String {
+    FLAVOR_NOW.to_string()
+}
+
+/// [`OutboxEntry::flavor`]'s `skip_serializing_if` — only a held entry
+/// carries the key at all.
+fn flavor_is_now(flavor: &String) -> bool {
+    flavor == FLAVOR_NOW
+}
+
 /// `$AOIDE_STATE_DIR/outbox/` (ordinary [`state_dir`] resolution).
 pub fn outbox_dir() -> PathBuf {
     state_dir().join("outbox")
@@ -112,6 +130,17 @@ fn ack_marker_path(node: &str, acked_msgid: &str) -> PathBuf {
 #[serde(rename_all = "camelCase")]
 pub struct OutboxEntry {
     pub envelope: Envelope,
+    /// This entry's own delivery flavor (MAIL.md "Outbox"): [`FLAVOR_NOW`]
+    /// is attempted on every drain, [`FLAVOR_HOLD`] is never attempted by a
+    /// drain at all — it leaves only through the destination's own
+    /// `aoide/mailPoll`. An entry that has never been held omits the key
+    /// entirely ([`flavor_is_now`]), so a pre-P-M3 spool file stays
+    /// byte-identical and reads back as `now` — the same additive/v0-safe
+    /// discipline `hub`/`verified`/`headless` set. A value that is neither
+    /// constant reads as `now` too: an unknown flavor fails toward being
+    /// DIALED, never toward being silently parked forever.
+    #[serde(default = "flavor_now", skip_serializing_if = "flavor_is_now")]
+    pub flavor: String,
     #[serde(default)]
     pub tries: u32,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -132,9 +161,32 @@ pub struct OutboxEntry {
 
 impl OutboxEntry {
     /// A fresh entry for a just-minted envelope — zero tries, no recorded
-    /// outcome yet.
+    /// outcome yet, [`FLAVOR_NOW`]: the drain attempts it.
     pub fn fresh(envelope: Envelope) -> Self {
-        Self { envelope, tries: 0, last_try_at: String::new(), last_outcome: String::new(), refused: false }
+        Self { envelope, flavor: FLAVOR_NOW.to_string(), tries: 0, last_try_at: String::new(), last_outcome: String::new(), refused: false }
+    }
+
+    /// The same thing, held: [`FLAVOR_HOLD`] — a drain never attempts it, so
+    /// only the destination's own `aoide/mailPoll` moves it (MAIL.md
+    /// §Outbox).
+    pub fn held(envelope: Envelope) -> Self {
+        Self { flavor: FLAVOR_HOLD.to_string(), ..Self::fresh(envelope) }
+    }
+
+    /// This entry is [`FLAVOR_HOLD`] — the one flavor a drain must skip.
+    /// Compared as an exact match against `hold` rather than to `now`, so any
+    /// other value (absent, empty, or a future flavor) counts as attemptable.
+    pub fn is_held(&self) -> bool {
+        self.flavor == FLAVOR_HOLD
+    }
+
+    /// Has this entry's own last attempt already reached the peer? The one
+    /// spelling of "the deposit landed" in `last_outcome` (written by
+    /// `aoide_client::mail_wire::drain_node`'s delivered arm, and by nothing
+    /// else) — what [`pollable`] reads to answer "have this entry's attempts
+    /// been FAILING".
+    pub fn last_attempt_reached_the_peer(&self) -> bool {
+        self.last_outcome == "accepted" || self.last_outcome == "duplicate"
     }
 }
 
@@ -340,6 +392,57 @@ pub fn list_entries(node: &str) -> Result<Vec<OutboxEntry>, String> {
         });
         Ok(out)
     })
+}
+
+/// The envelopes one node's own `aoide/mailPoll` receives (MAIL.md §Wire):
+/// every `hold` entry spooled toward it, plus every `now` entry whose own
+/// attempts have been failing — in [`list_entries`]'s oldest-first order.
+///
+/// **A poll is a READ.** Hand-over writes nothing at all: no `tries`, no
+/// `last_outcome`, no new state file. That is what makes a re-poll before
+/// the ack hand the same entries over again by construction (the predicate
+/// still holds), and it is why an entry leaves the spool only the two ways
+/// it always did — a valid ack ([`retire_by_ack`]) or `mail outbox rm`.
+///
+/// "Attempts have been failing" = the entry has been attempted at least
+/// once (`tries > 0`) and its last attempt did not reach the peer
+/// ([`OutboxEntry::last_attempt_reached_the_peer`]): a transport failure, or
+/// a policy refusal — both are failures the peer asking for its own mail can
+/// end. An entry never attempted at all is NOT offered: the drain owns it,
+/// and offering it here would double-drive one entry from two callers.
+///
+/// **Bounded at [`POLL_BATCH_CAP`] like the drain's own batch** — the same
+/// size and the same position (after the filter, so a backlog of held
+/// entries cannot be spent twice), for a different reason: a poll's answer
+/// is ONE JSON array of whole envelopes, and a hub holding more than
+/// `aoide_client`'s `MAX_RESPONSE_BYTES` (20 MiB) of held mail for one node
+/// would answer with a body the poller refuses outright — a permanent
+/// head-of-line stall that no retry could clear, since nothing at the hub
+/// changes. Capping is SAFE here precisely because retirement is by ack: the
+/// poller acks what it files, those entries retire, and the next poll gets
+/// the next batch, so a large spool drains in bounded steps instead of never.
+pub fn poll_entries(node: &str) -> Result<Vec<Envelope>, String> {
+    Ok(list_entries(node)?
+        .into_iter()
+        .filter(pollable)
+        .take(POLL_BATCH_CAP)
+        .map(|entry| entry.envelope)
+        .collect())
+}
+
+/// The most envelopes one poll answers with — the deposit direction's own
+/// batch size (`aoide_client::mail_wire::DRAIN_BATCH_CAP`, 50), re-derived
+/// here rather than imported for the reason [`DRAIN_BACKOFF_FLOOR_SECS`]'s
+/// own doc gives: `storage` sits below `client` in the crate DAG. See
+/// [`poll_entries`] for why a poll can afford to bound itself and why
+/// bounding it is what keeps a big spool draining instead of stalling.
+pub const POLL_BATCH_CAP: usize = 50;
+
+/// Is one spooled entry offered to the node's own poll? See [`poll_entries`]
+/// for the rule; held out-of-band so a test can pin each arm without a
+/// filesystem.
+fn pollable(entry: &OutboxEntry) -> bool {
+    entry.is_held() || (entry.tries > 0 && !entry.last_attempt_reached_the_peer())
 }
 
 /// Retire one entry — a valid ack (spec item 7) or explicit `mail outbox
@@ -1097,6 +1200,135 @@ mod tests {
         drop(first);
         let third = try_take_link_lock("there").unwrap();
         assert!(third.is_some(), "releasing the first frees the link for the next taker");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── flavor and the poll's read (P-M3, MAIL.md §Outbox/§Wire) ──────────
+
+    /// The flavor is ADDITIVE on disk: a `now` entry writes no key at all, so
+    /// a pre-P-M3 spool file stays byte-identical, and a file that predates
+    /// the field reads back as `now` (dialed), never as held.
+    #[test]
+    fn flavor_is_additive_on_the_spool_and_a_pre_pm3_entry_reads_as_now() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-flavor-additive");
+
+        let entry = OutboxEntry::fresh(envelope("here", "there", "msg-now"));
+        write_entry("there", &entry).unwrap();
+        let path = dir.join("state").join("outbox").join("there").join("msg-now.json");
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("flavor"), "a `now` entry omits the key entirely: {raw}");
+
+        // The file above IS the pre-P-M3 shape (no key at all). It reads back
+        // as `now` — the dialect an old spool file is always read in.
+        assert_eq!(list_entries("there").unwrap()[0].flavor, FLAVOR_NOW, "an absent key reads as now");
+
+        let held = OutboxEntry::held(envelope("here", "there", "msg-hold"));
+        write_entry("there", &held).unwrap();
+        let raw_held = std::fs::read_to_string(
+            dir.join("state").join("outbox").join("there").join("msg-hold.json"),
+        )
+        .unwrap();
+        assert!(raw_held.contains("\"flavor\": \"hold\""), "a held entry carries the key: {raw_held}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The poll's read, arm by arm: held always, `now` only when its own
+    /// attempts have been failing, a never-attempted `now` entry never (the
+    /// drain owns it), and an entry whose last attempt reached the peer never
+    /// (it already landed; a re-offer is the drain's business, not a poll's).
+    #[test]
+    fn poll_entries_offers_held_entries_and_failing_now_entries_only() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-poll-entries");
+
+        let mut held = OutboxEntry::held(envelope("here", "there", "msg-held"));
+        let mut fresh_now = OutboxEntry::fresh(envelope("here", "there", "msg-fresh"));
+        let mut transport_failed = OutboxEntry::fresh(envelope("here", "there", "msg-transport"));
+        transport_failed.tries = 3;
+        transport_failed.last_outcome = "transport: connection refused".to_string();
+        let mut refused = OutboxEntry::fresh(envelope("here", "there", "msg-refused"));
+        refused.tries = 1;
+        refused.last_outcome = "refused: refused: bad-msgid".to_string();
+        refused.refused = true;
+        let mut accepted = OutboxEntry::fresh(envelope("here", "there", "msg-accepted"));
+        accepted.tries = 1;
+        accepted.last_outcome = "accepted".to_string();
+        // Distinct, ascending mint times, so the OFFERED ORDER below is a real
+        // assertion rather than an accident of how equal timestamps tie-break
+        // on msgid.
+        for (i, entry) in [&mut held, &mut fresh_now, &mut transport_failed, &mut refused, &mut accepted]
+            .into_iter()
+            .enumerate()
+        {
+            entry.envelope.header.minted_at = format!("2026-09-07T00:00:{:02}Z", i + 1);
+        }
+        for entry in [&held, &fresh_now, &transport_failed, &refused, &accepted] {
+            write_entry("there", entry).unwrap();
+        }
+
+        assert!(pollable(&held), "a hold entry is always offered to its own node's poll");
+        assert!(!pollable(&fresh_now), "a never-attempted `now` entry belongs to the drain");
+        assert!(pollable(&transport_failed), "a failing transport attempt is what a poll exists to recover");
+        assert!(pollable(&refused), "a parked entry's own attempts are failing too — the poller asking for its mail is a new fact");
+        assert!(!pollable(&accepted), "an entry whose last attempt reached the peer is not failing");
+
+        let offered: Vec<String> = poll_entries("there").unwrap().into_iter().map(|e| e.msgid).collect();
+        assert_eq!(
+            offered,
+            vec!["msg-held".to_string(), "msg-transport".to_string(), "msg-refused".to_string()],
+            "oldest-first, and only the three failing/held entries"
+        );
+
+        // A poll is a READ: nothing about the spool changed by asking.
+        let after = list_entries("there").unwrap();
+        assert_eq!(after.len(), 5, "polling retires nothing");
+        assert_eq!(after.iter().find(|e| e.envelope.msgid == "msg-transport").unwrap().tries, 3, "a poll records no attempt");
+
+        assert!(poll_entries("nobody").unwrap().is_empty(), "a node with no spool at all is an empty poll, never an error");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// M1: the offer is BOUNDED at [`POLL_BATCH_CAP`], and that is safe
+    /// because retirement is by ack — the poller acks what it files, those
+    /// entries leave the spool, and the next poll hands over the next batch.
+    /// An unbounded answer would be one JSON array of whole envelopes, and a
+    /// hub holding more than the client's 20 MiB response cap for one node
+    /// would answer with a body the poller refuses outright: a stall no retry
+    /// could clear, since nothing at the hub ever changes.
+    #[test]
+    fn poll_entries_is_bounded_and_the_next_poll_advances() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("outbox-poll-batch-cap");
+
+        let total = POLL_BATCH_CAP + 10;
+        let mut expected: Vec<String> = Vec::new();
+        for i in 0..total {
+            let mut entry = OutboxEntry::held(envelope("here", "there", &format!("held-{i:03}")));
+            entry.envelope.header.minted_at = format!("2026-09-07T00:00:{:02}Z", i % 60);
+            expected.push(entry.envelope.msgid.clone());
+            write_entry("there", &entry).unwrap();
+        }
+
+        let first = poll_entries("there").unwrap();
+        assert_eq!(first.len(), POLL_BATCH_CAP, "one poll hands over at most the batch cap");
+        let handed: Vec<String> = first.into_iter().map(|e| e.msgid).collect();
+        assert_eq!(handed[0], expected[0], "oldest first: the batch is the head of the spool, never a random slice");
+
+        // What the poller's acks do: the handed-over entries retire. The next
+        // poll must then advance rather than handing the same batch forever.
+        for msgid in &handed {
+            assert!(remove_entry("there", msgid).unwrap());
+        }
+        let second = poll_entries("there").unwrap();
+        assert_eq!(second.len(), total - POLL_BATCH_CAP, "the next poll gets what is left");
+        assert!(
+            second.iter().all(|e| !handed.contains(&e.msgid)),
+            "and never re-offers what already retired"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

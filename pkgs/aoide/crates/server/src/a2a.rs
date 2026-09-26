@@ -2733,26 +2733,17 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
     };
     let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", audit_status, &audit_detail);
 
+    // Everything a filed/duplicate envelope does here — mint and spool the
+    // ack, retire an entry this receipt confirms — hangs off the outcome
+    // alone, so it lives in ONE shared function
+    // (`aoide_client::mail_wire::settle_deposit`, through its bridge) that
+    // the poll's own hand-over loop calls too. This arm only SHAPES the
+    // answer.
+    aoide_conduct::mail_bridge::settle_deposit(&envelope, &outcome);
+
     match &outcome {
-        aoide_storage::mail::DepositOutcome::Filed { msgid, kind } if kind == aoide_storage::mail::ENTRY_TYPE_LETTER => {
-            spool_and_drain_ack(&envelope, msgid);
-            Ok(json!({ "status": "accepted", "msgid": msgid }))
-        }
-        aoide_storage::mail::DepositOutcome::Filed { msgid, kind } if kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT => {
-            let _ = aoide_storage::outbox::retire_by_ack(&envelope);
-            Ok(json!({ "status": "accepted", "msgid": msgid }))
-        }
-        aoide_storage::mail::DepositOutcome::Filed { msgid, .. } => {
-            // No third `Header.kind` exists today — kept as a fallthrough
-            // rather than an `unreachable!` so a future kind degrades to
-            // "filed, no side effect" instead of a panic.
-            Ok(json!({ "status": "accepted", "msgid": msgid }))
-        }
-        aoide_storage::mail::DepositOutcome::Duplicate { filed_letter: true } => {
-            spool_and_drain_ack(&envelope, &envelope.msgid);
-            Ok(json!({ "status": "duplicate" }))
-        }
-        aoide_storage::mail::DepositOutcome::Duplicate { filed_letter: false } => Ok(json!({ "status": "duplicate" })),
+        aoide_storage::mail::DepositOutcome::Filed { msgid, .. } => Ok(json!({ "status": "accepted", "msgid": msgid })),
+        aoide_storage::mail::DepositOutcome::Duplicate { .. } => Ok(json!({ "status": "duplicate" })),
         aoide_storage::mail::DepositOutcome::BadMsgid => Ok(json!({
             "status": "refused",
             "reason": "bad-msgid",
@@ -2769,34 +2760,115 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
     }
 }
 
-/// Mint an ack for `acked_msgid` (destination is `envelope.header.to`,
-/// the mailbox that just received it; origin is `envelope.header.from`,
-/// who it goes back to), spool it into that origin's outbox, and
-/// best-effort drain that node once. Shared by `mail_deposit`'s `Filed`
-/// letter arm and its `Duplicate{filed_letter: true}` arm — the ack is
-/// identical either way, just re-sent on the duplicate path.
-///
-/// Spooled via `aoide_storage::outbox::write_ack_if_absent`, never the bare
-/// `write_entry`: a `Duplicate` redelivery of a letter whose ack is STILL
-/// sitting undelivered in the outbox spools nothing new — without this
-/// gate, a sender that keeps redelivering because its earlier ack never
-/// arrived drove this function to mint a brand-new ack envelope, with a
-/// brand-new msgid, on every single redelivery (the outbox investigation's
-/// own root cause). Once that pending ack is actually delivered (removed by
-/// `mail_wire::drain_node`'s `Delivered` arm), the next redelivery finds
-/// nothing pending and respools — spec item 5's "a duplicate re-sends the
-/// ack because the sender's earlier one evidently never arrived" still
-/// holds for a genuine loss; see `write_ack_if_absent`'s own doc.
-fn spool_and_drain_ack(envelope: &aoide_storage::mail::Envelope, acked_msgid: &str) {
-    let Ok(ack) = aoide_storage::mail::mint_ack(&envelope.header.to.name, envelope.header.from.clone(), acked_msgid)
-    else {
-        return;
-    };
-    let origin_node = envelope.header.from.node.clone();
-    let entry = aoide_storage::outbox::OutboxEntry::fresh(ack);
-    if aoide_storage::outbox::write_ack_if_absent(&origin_node, acked_msgid, &entry) == Ok(true) {
-        let _ = aoide_conduct::mail_bridge::drain_node(&origin_node);
+// ── `aoide/mailPoll` (messaging plan P-M3, CONTRACTS.md §6) ────────────────
+//
+// The relay-first half of the model (MAIL.md §Wire): a member with no inbound
+// address asks a node it CAN reach — its declared relay, today a directly
+// paired node over the SSH door — for everything that node spooled toward it.
+// A pull, never a push: the caller dials out, and nothing here ever reaches
+// back over a connection the caller did not open. HTTPS (a `poll` node's
+// `https://` relay) lands on this same method unchanged; only the transport
+// under the signed request differs.
+//
+// Admission is the deposit arm's own question, asked one node narrower:
+// `node_may_message`, plus "and you are asking for YOUR OWN node". Handed-over
+// entries stay in this box's outbox until the far end's normal ack retires
+// them, so the poll is a READ of local state — it writes nothing at all, which
+// is what makes a re-poll before the ack hand the same envelopes over again by
+// construction rather than by a bookmark.
+
+/// The poll arm's admission check. `resolved` is the caller via a verified
+/// per-request signature ([`deposit_admitted`]'s own narrowing — signature
+/// only, no Addr/Token rung to fall back to); `claimed` is `params.node`, the
+/// node whose outbox the caller is asking about. Both halves matter: MAIL.md
+/// §Wire's "the caller's verified identity must BE `node` (no polling on
+/// another's behalf)" is the `==`, and "hold `message`, and not be `down`" is
+/// [`node_may_message`] — which today is exactly `verified + message`, since
+/// `down` is a mesh-declaration fact this door does not read yet (P-M4 adds
+/// that clause to this same predicate; `aoide node allow <node> message off`
+/// is the per-request quarantine that IS expressible today, and it lands on
+/// the `message` half).
+fn poll_admitted(resolved: Option<&aoide_storage::node_store::Node>, claimed: &str) -> bool {
+    matches!(resolved, Some(node) if node_may_message(node) && node.name == claimed)
+}
+
+/// The poll arm's refusal — the SAME `-32010` `mail_deposit` uses (one code
+/// for "this caller may not speak to this method", CONTRACTS.md §6), in three
+/// shapes: claiming a node this request is not signed as, paired but missing
+/// `message` (the same `node allow` fix deposit names), or no verified
+/// signature resolution at all.
+fn poll_refusal(resolved: Option<&aoide_storage::node_store::Node>, claimed: &str) -> (i64, String) {
+    match resolved {
+        Some(node) if node.name != claimed => (
+            -32010,
+            format!(
+                "mail poll refused: this request is validly signed as node `{}`, which is not the node it \
+                 asks for (`{claimed}`) — a poll asks for the CALLER's own outbox, never another node's; \
+                 sign as `{claimed}` or ask for `{}`",
+                node.name, node.name
+            ),
+        ),
+        Some(node) => (
+            -32010,
+            format!(
+                "mail poll refused: node `{}` is paired and this request is validly signed, but THIS \
+                 node's `allows` for it does not include `message` — on this (polled) host run \
+                 `aoide node allow {} message on`; the poller's own allows are not consulted",
+                node.name, node.name
+            ),
+        ),
+        None => (
+            -32010,
+            "mail poll refused: this method requires the caller be identified via a verified, per-request \
+             SIGNED request from a paired node — pair first via `aoide pair`"
+                .to_string(),
+        ),
     }
+}
+
+/// `aoide/mailPoll` (P-M3): `{ node }` → `{ envelopes: [ <Envelope>, … ] }`.
+/// Every outbox entry this box spooled toward `node` that `node` itself may
+/// take — all `hold`-flavored ones, and `now` ones whose own attempts have
+/// been failing ([`aoide_storage::outbox::poll_entries`]'s rule, and the ONE
+/// place that rule lives). Handed over oldest-first; nothing is marked,
+/// moved, or counted, and an entry leaves the spool only when its ack lands
+/// (`mail_deposit`'s receipt arm, the same retirement a push would earn).
+///
+/// **Self-audits under its own `a2a.aoide/mailPoll` label, unconditionally**
+/// (MAIL.md item 13's one-door-one-inspection, per method name; the audit
+/// name whitelist in the connection handler gains this name so a poll never
+/// logs as bare `a2a.rpc`) — one line per call whether it was refused or
+/// answered, carrying the caller and how many envelopes it was handed. That
+/// count is the flood signal for the pull direction: a relay handing one node
+/// hundreds of letters in one answer is visible here, at the node that
+/// spooled them.
+fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
+    let claimed = params.get("node").and_then(Value::as_str).unwrap_or("").trim().to_string();
+    if claimed.is_empty() {
+        return Err((-32602, "invalid params: node is required".to_string()));
+    }
+
+    let nodes = aoide_storage::node_store::load_nodes();
+    let resolved = ctx.signed_caller.and_then(|c| nodes.iter().find(|p| p.name == c.name));
+    if !poll_admitted(resolved, &claimed) {
+        let (code, msg) = poll_refusal(resolved, &claimed);
+        let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailPoll", "unauthorized", &msg);
+        return Err((code, msg));
+    }
+    let poller = resolved.map(|n| n.name.clone()).unwrap_or_default();
+
+    let envelopes = aoide_storage::outbox::poll_entries(&poller)
+        .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
+
+    let _ = audit(
+        ctx.audit_log,
+        Door::A2a,
+        EventClass::Audit,
+        "a2a.aoide/mailPoll",
+        "ok",
+        &format!("node {poller} polled: {} envelope(s) handed over", envelopes.len()),
+    );
+    Ok(json!({ "envelopes": envelopes }))
 }
 
 // ── The pairing ceremony wire (CONTRACTS.md §6, P-P2,
@@ -3330,6 +3402,7 @@ fn handle_jsonrpc(req: &Value, ctx: &RequestCtx) -> Value {
         "aoide/pairReveal" => pair_reveal(&params, ctx.audit_log),
         "aoide/pairPoll" => pair_poll(&params, ctx.audit_log),
         "aoide/mailDeposit" => mail_deposit(&params, ctx),
+        "aoide/mailPoll" => mail_poll(&params, ctx),
         "" => Err((-32600, "invalid request: missing method".to_string())),
         other => Err((-32601, format!("method not found: {other}"))),
     };
@@ -4190,6 +4263,7 @@ fn route(
                     Some("aoide/pairReveal") => "aoide/pairReveal",
                     Some("aoide/pairPoll") => "aoide/pairPoll",
                     Some("aoide/mailDeposit") => "aoide/mailDeposit",
+                    Some("aoide/mailPoll") => "aoide/mailPoll",
                     _ => "rpc",
                 };
                 let self_url = self_url(bind, port);
@@ -12295,7 +12369,7 @@ mod tests {
         let root = mail_deposit_root("dup");
         act_as(&root, "here");
 
-        // `spool_and_drain_ack`'s best-effort drain must never hang or
+        // `settle_deposit`'s best-effort drain must never hang or
         // block this test — a dead loopback port refuses instantly, unlike
         // the file's own `"http://node/"` placeholder (unresolvable
         // hostname, fine for the pure-predicate tests above that never
@@ -12359,7 +12433,7 @@ mod tests {
         // The outbox investigation's own root cause: a sender that never
         // sees its ack redelivers the SAME letter, `mail::deposit`
         // correctly classifies each redelivery as `Duplicate{filed_letter:
-        // true}`, and `spool_and_drain_ack` used to mint a BRAND-NEW ack
+        // true}`, and the old `spool_and_drain_ack` used to mint a BRAND-NEW ack
         // envelope — new msgid, new file — on every single one, with the
         // ack still sitting undelivered in the spool the whole time (never
         // removed, so this never depends on `mail_deposit`'s own
@@ -12532,6 +12606,283 @@ mod tests {
         assert!(log.contains("\"status\":\"invalid\""), "a refused RESULT still audits as invalid, unconditionally: {log}");
 
         assert!(aoide_storage::mail::read_base().unwrap().is_empty(), "a bad msgid is never filed");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    // ── `aoide/mailPoll` (messaging plan P-M3, CONTRACTS.md §6) ────────────
+
+    /// Two paired, `message`-holding nodes with a held letter spooled toward
+    /// each — the fixture every poll test below starts from. Returns the
+    /// (box-b msgid, box-c msgid) pair.
+    fn two_pollers_fixture() -> (String, String) {
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        let mut box_c = fixture_node("box-c", "http://node/", false);
+        box_c.verified = true;
+        box_c.allows = vec!["message".to_string()];
+        nodes.push(box_c);
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+
+        let for_b = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "held for b").unwrap();
+        let for_c = aoide_storage::mail::mint_outbound_letter("alice", "box-c", "carol", "held for c").unwrap();
+        let (b, c) = (for_b.msgid.clone(), for_c.msgid.clone());
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::held(for_b)).unwrap();
+        aoide_storage::outbox::write_entry("box-c", &aoide_storage::outbox::OutboxEntry::held(for_c)).unwrap();
+        (b, c)
+    }
+
+    #[test]
+    fn poll_admitted_requires_a_verified_message_holder_asking_for_its_own_node() {
+        let mut paired = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        paired.verified = true;
+        paired.allows = vec!["read".to_string(), "message".to_string()];
+        assert!(poll_admitted(Some(&paired), "box-b"), "paired + message + asking for itself");
+
+        assert!(!poll_admitted(Some(&paired), "box-c"), "no polling on another's behalf");
+        let mut denied = paired.clone();
+        denied.allows = vec!["read".to_string()];
+        assert!(!poll_admitted(Some(&denied), "box-b"), "paired but message revoked");
+        let mut unpaired = paired.clone();
+        unpaired.verified = false;
+        assert!(!poll_admitted(Some(&unpaired), "box-b"), "allows populated but never verified — still refused");
+        assert!(!poll_admitted(None, "box-b"), "no verified signature resolution at all");
+    }
+
+    /// Spec, P-M3: **a poller receives only its own entries.** box-b asks for
+    /// box-b and gets exactly what was spooled toward box-b — box-c's held
+    /// letter is not in the answer, and is still sitting in box-c's spool
+    /// afterwards.
+    #[test]
+    fn a_poller_receives_only_its_own_entries() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-own-entries");
+        act_as(&root, "here");
+
+        let (for_b, for_c) = two_pollers_fixture();
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+
+        let answer = mail_poll(&json!({ "node": "box-b" }), &ctx).unwrap();
+        let handed: Vec<String> = answer["envelopes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["msgid"].as_str().unwrap_or("").to_string())
+            .collect();
+        assert_eq!(handed, vec![for_b.clone()], "exactly this node's own entry: {answer}");
+        assert!(!handed.contains(&for_c), "another node's held letter is never handed over: {answer}");
+        assert_eq!(aoide_storage::outbox::list_entries("box-c").unwrap().len(), 1, "and it is untouched in its own spool");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// Spec, P-M3: **a non-`message` poller is refused.** A paired,
+    /// validly-signed caller whose `allows` lacks `message` is refused as a
+    /// JSON-RPC ERROR (admission, MAIL.md §Wire) — never a 200 result with an
+    /// empty envelope list, which would read as "nothing waiting for you."
+    ///
+    /// This is the reachable half of the spec's "non-`message` or `down`"
+    /// pair: `down` is `[mesh.<name>.status]`, a declaration this door does
+    /// not read until P-M4 (MAIL.md §Status), and `aoide node allow <node>
+    /// message off` is the per-request quarantine that IS expressible today —
+    /// it lands on this same `message` half. P-M4 adds its clause to
+    /// [`poll_admitted`].
+    #[test]
+    fn a_non_message_poller_is_refused() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-noallow");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["read"]);
+        let held = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "waiting").unwrap();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::held(held)).unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        let (code, msg) = mail_poll(&json!({ "node": "box-b" }), &ctx).expect_err("message not in allows — must refuse");
+        assert_eq!(code, -32010);
+        assert!(msg.contains("node allow box-b message on"), "names the exact fix: {msg}");
+
+        let log = std::fs::read_to_string(&audit_log).unwrap();
+        assert!(log.contains("a2a.aoide/mailPoll"), "{log}");
+        assert!(!log.contains("a2a.rpc"), "never falls back to the generic label: {log}");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// A signed caller asking for a mailbox it is not: refused, and told
+    /// which name it is actually signed as. Nothing is handed over — the
+    /// claim buys no reach into another node's spool.
+    #[test]
+    fn a_poller_claiming_another_nodes_mailbox_is_refused_and_hands_nothing_over() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-other-node");
+        act_as(&root, "here");
+
+        let (for_b, _for_c) = two_pollers_fixture();
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+
+        let (code, msg) = mail_poll(&json!({ "node": "box-c" }), &ctx).expect_err("no polling on another's behalf");
+        assert_eq!(code, -32010);
+        assert!(msg.contains("box-c") && msg.contains("box-b"), "names both the claim and the signer: {msg}");
+
+        assert!(
+            aoide_storage::outbox::list_entries("box-b").unwrap().iter().any(|e| e.envelope.msgid == for_b),
+            "box-b's own entry is untouched — the refusal handed nothing over"
+        );
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    #[test]
+    fn an_unsigned_poller_and_a_missing_node_param_are_both_refused() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-unsigned");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let audit_log = root.join("log");
+
+        let ctx = mail_deposit_ctx(&audit_log, None);
+        let err = mail_poll(&json!({ "node": "box-b" }), &ctx).expect_err("no signature headers — must refuse");
+        assert_eq!(err.0, -32010);
+
+        // A missing `node` is a SHAPE error, refused before any lookup
+        // (`pair_poll`'s own precedence: malformed params reveal nothing).
+        let signed = mail_deposit_ctx(&audit_log, Some("box-b"));
+        let shape = mail_poll(&json!({}), &signed).expect_err("node is required");
+        assert_eq!(shape.0, -32602);
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// Spec, P-M3: **a hold entry drains only via poll** — the door half.
+    /// The held letter is handed over by the node's own ask, and the entry
+    /// stays exactly where it was: a poll is a READ, and an entry leaves the
+    /// spool only when its ack retires it (or `mail outbox rm`).
+    #[test]
+    fn a_hold_entry_is_handed_over_by_the_poll_and_stays_spooled_until_acked() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-hold");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let held = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "waiting to be asked for").unwrap();
+        let msgid = held.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::held(held)).unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        let answer = mail_poll(&json!({ "node": "box-b" }), &ctx).unwrap();
+        assert_eq!(answer["envelopes"][0]["msgid"], Value::String(msgid.clone()), "{answer}");
+        assert_eq!(answer.as_object().unwrap().len(), 1, "the result is exactly `envelopes`, per the wire shape: {answer}");
+
+        let rows = aoide_storage::outbox::list_entries("box-b").unwrap();
+        assert_eq!(rows.len(), 1, "handing over retires nothing");
+        assert_eq!(rows[0].tries, 0, "and records no attempt");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// Spec, P-M3: **re-poll before ack is idempotent.** The same held entry
+    /// comes back on the next ask, byte-identically — hand-over writes no
+    /// bookmark, so the predicate that offered it the first time still holds.
+    /// (What the POLLER does with the second copy — dedup, one ack — is
+    /// `aoide-client`'s `a_repoll_before_the_ack_files_nothing_twice`.)
+    #[test]
+    fn a_repoll_before_the_ack_hands_the_same_envelope_over_again() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-repoll");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let held = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "twice").unwrap();
+        let msgid = held.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::held(held)).unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        let first = mail_poll(&json!({ "node": "box-b" }), &ctx).unwrap();
+        let second = mail_poll(&json!({ "node": "box-b" }), &ctx).unwrap();
+        assert_eq!(first, second, "the same ask, the same answer, byte for byte");
+        assert_eq!(second["envelopes"][0]["msgid"], Value::String(msgid));
+
+        assert_eq!(aoide_storage::outbox::list_entries("box-b").unwrap().len(), 1, "still exactly one entry, still unretired");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// A `now` entry whose own attempts have been failing is a poll's
+    /// business too (MAIL.md §Wire): the peer asking for its own mail is the
+    /// way a stuck spool clears when the drain's own dials cannot.
+    #[test]
+    fn a_poll_offers_a_failing_now_entry_beside_the_held_ones() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-failing-now");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let mut stuck = aoide_storage::outbox::OutboxEntry::fresh(
+            aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "stuck").unwrap(),
+        );
+        stuck.tries = 4;
+        stuck.last_outcome = "transport: connection refused".to_string();
+        let stuck_msgid = stuck.envelope.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &stuck).unwrap();
+        let untried = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "untried").unwrap();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::fresh(untried)).unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        let answer = mail_poll(&json!({ "node": "box-b" }), &ctx).unwrap();
+        let handed: Vec<String> = answer["envelopes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["msgid"].as_str().unwrap_or("").to_string())
+            .collect();
+        assert_eq!(handed, vec![stuck_msgid], "the failing entry, never the never-attempted one: {answer}");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// The poll's own audit line, unconditionally, under its own label, with
+    /// the handed-over count — the pull direction's flood signal (a relay
+    /// answering one node with hundreds of letters is visible HERE, at the
+    /// node that spooled them).
+    #[test]
+    fn every_poll_self_audits_under_its_own_label_with_the_count() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-audit");
+        act_as(&root, "here");
+
+        let (_for_b, _for_c) = two_pollers_fixture();
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        mail_poll(&json!({ "node": "box-b" }), &ctx).unwrap();
+
+        let log = std::fs::read_to_string(&audit_log).unwrap();
+        assert!(log.contains("a2a.aoide/mailPoll"), "{log}");
+        assert!(log.contains("1 envelope(s) handed over"), "the count rides the line: {log}");
+        assert!(!log.contains("a2a.rpc"), "never falls back to the generic label: {log}");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }

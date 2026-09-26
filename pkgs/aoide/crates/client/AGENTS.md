@@ -675,6 +675,42 @@
   short-circuiting the loop over other nodes (see
   `aoide_conduct::mail_bridge`'s own
   `one_dead_nodes_entries_never_block_another_nodes_drain`).
+- **Hold, poll, and poll-on-contact (P-M3) live in this same three-caller
+  path — never at a fourth call site.** `drain_node` filters a `hold`
+  entry the way it filters a parked one (BEFORE `DRAIN_BATCH_CAP`: held is
+  permanent to a drain, so counting it would starve the spool exactly as
+  counting parked entries did), and after a pass that actually reached the
+  node (≥1 deposit answered) it calls `poll_node` on the same session,
+  under the same `.bsy` lock and `TunnelTeardownGuard`. Two invariants:
+  **never poll a pass that got no response** (a second failure recorded
+  nowhere), and **never dial for a held entry** to force that contact — a
+  `--hold`-only spool is deliberately silent, and `mail send --hold`'s
+  `data.delivery` reading `queued` is correct rather than a missing
+  status word (MAIL.md §Status's vocabulary is closed; don't invent
+  `held` in `delivery_projection` without a doc amendment).
+  `post_signed`/`SignedCall` is the one signed-POST implementation —
+  `attempt_deposit` and `poll_node` read it, neither re-implements bearer
+  resolve/sign/POST/parse. **`poll_node` has exactly two callers and must
+  not gain a third shape: `drain_node`'s poll-on-contact, and the
+  `mail poll` handler (plus `pollable_nodes` for its no-argument sweep).**
+  The command exists because an empty outbox never dials — poll-on-contact
+  is a free reply for a node that HAS something to say, and useless to a
+  node that does not; a box that can only receive must ask. Nothing about
+  `drain_node`'s dial policy changes for it (a pass with nothing
+  attemptable still dials nothing), and the sweep must never let one
+  node's `Err` stop the next. `settle_deposit` is the ONE place an outcome
+  turns into spool side effects (ack minted and spooled on a filed letter
+  or a letter duplicate, `retire_by_ack` on a filed receipt); the door
+  reaches it through `aoide_conduct::mail_bridge::settle_deposit`, so
+  `aoide-server` never keeps a second copy — do not put the ack mint back
+  in `a2a.rs`. A poll's answer is bounded at
+  `aoide_storage::outbox::POLL_BATCH_CAP` (50) and must stay bounded: the
+  poller's own `MAX_RESPONSE_BYTES` is what an unbounded batch walks into.
+  A poll may ask this same crate to drain a node whose `.bsy`
+  the CURRENT pass already holds (a relay handing back a letter it
+  originated): `.bsy` is `LOCK_NB`, so that inner drain is skipped and the
+  ack waits for the next tick — correct, not a leak; never make `.bsy`
+  blocking to "fix" it.
 - **`handle_mail_send` reports the WRITE, never the drain's outcome (spec
   item 8).** Minting and spooling the outbox entry is what the command's
   `Outcome` status describes; the best-effort `mail_wire::drain_node` call

@@ -1853,8 +1853,8 @@
   cleared at logout): liveness is judged at every boundary, never from
   the stored flag or a remembered path alone. A missing or empty socket
   path is not-conductable.
-- **`mail_bridge` carries NO logic of its own — it stays two passthrough
-  functions, forever (P-M2, ruling 1).** It exists only because
+- **`mail_bridge` carries NO logic of its own — it stays passthrough
+  functions only, forever (P-M2 ruling 1, extended by P-M3's third).** It exists only because
   `aoide-server` may not carry a production `aoide-client` dependency
   while this crate already does; growing a real decision, retry policy, or
   new drain shape inside `mail_bridge` itself — rather than in
@@ -1862,9 +1862,11 @@
   crates each partially responsible for one behavior. A change to WHEN or
   HOW a node's outbox drains belongs in `mail_wire`; a change to WHICH
   crates may reach it does not belong here either — that is the manifest's
-  job. Don't add a third function to this module without first checking
-  whether it truly cannot be `mail_wire::drain_node`/`drain_all` called
-  directly.
+  job. P-M3's `settle_deposit` is the pattern a further addition must
+  follow: a one-line `pub fn` delegating straight to
+  `aoide_client::mail_wire`, never a second implementation, and only after
+  checking it truly cannot be called directly from `mail_wire` by whoever
+  needs it.
 
 ## Extension points
 

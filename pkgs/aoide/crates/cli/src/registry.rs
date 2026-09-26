@@ -263,6 +263,12 @@ mod tests {
         // `state/mail-export/` (`aoide_client::mail_export`). Sorts between
         // `mail` and `mail.mark`, the same family, giving this list 98 paths.
         //
+        // Mail poll (P-M3) adds `mail.poll` (+1) — the receive trigger a node
+        // with nothing to send needs, and the only caller of
+        // `aoide_client::mail_wire::poll_node` outside the drain. Same
+        // family, so it sorts between `mail.outbox.rm` and `mail.read`; no
+        // other entry moves.
+        //
         // Bumped by 1 for `project.edit` (multi-root projects) — the
         // exact-replacement editor for a project's root list, the
         // `project edit` that `records.rs`'s `Project.auto_resume` doc
@@ -308,6 +314,7 @@ mod tests {
             "mail.outbox",
             "mail.outbox.retry",
             "mail.outbox.rm",
+            "mail.poll",
             "mail.read",
             "mail.ring",
             "mail.rm",
