@@ -48,6 +48,12 @@ pub(crate) mod identity;
 mod model;
 mod node_list;
 mod pending;
+// Addressing a session on ANOTHER node (P-RSA): the cached-graph resolution
+// `send --to <node>/<query>` and `session watch <node>/<query>` both stand on,
+// moved out of `send.rs` when the watch became the second caller — one
+// definition, so the two doors cannot disagree about what a `<node>/<query>`
+// means or how an unresolvable one is refused.
+mod remote;
 // The ping-back (P-EIDOLON slice E5b, EIDOLON-TRACE.md's "Second slice"):
 // the reaper tick's own reader of an eidolon child's trace, delivering ONE
 // line about the child to the parent that spawned it — the doorbell's path

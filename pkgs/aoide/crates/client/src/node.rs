@@ -22,6 +22,12 @@
 //! handlers live in `aoide-server::a2a` (`pair_request`/`pair_reveal`/
 //! `pair_poll`), never duplicated here; this module only builds/parses the
 //! JSON-RPC envelope either side of that wire.
+//!
+//! The watch frame's own wire shapes (P-RSA S7) join the same split:
+//! [`build_task_get_frame_request`] asks a node for one session's frame over
+//! `tasks/get` + `metadata["aoide/frame"]`, and [`parse_frame_response`] hands
+//! back the frame JSON the far door put in its `frame` artifact — the shape
+//! `aoide_conduct::graph::Frame` owns, never a second one here.
 
 use aoide_protocol::wire::JsonRpcRequest;
 use aoide_storage::node_store::NodeCacheEntry;
@@ -217,6 +223,82 @@ pub fn parse_pair_poll_response(resp: &Value) -> Result<PairPollStatus, String> 
     }
 }
 
+// ── the watch frame: `tasks/get` + `metadata["aoide/frame"]` ───────────────
+
+/// A frame read that failed. `code` is the FAR door's own JSON-RPC code when
+/// it refused — `-32011` is the output-read gate (CONTRACTS.md §6) — and
+/// `None` for a transport, HTTP or parse failure; `message` is the door's own
+/// text verbatim, never translated, so the caller can tell a refused read
+/// from an unreachable node by the code alone instead of by matching prose
+/// (the same discipline `SpawnNodeError::reason` holds).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrameReadError {
+    pub code: Option<i64>,
+    pub message: String,
+}
+
+impl std::fmt::Display for FrameReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.code {
+            Some(code) => write!(f, "{} (JSON-RPC {code})", self.message),
+            None => write!(f, "{}", self.message),
+        }
+    }
+}
+
+/// Build the JSON-RPC `tasks/get` body the WATCHER POSTs to ask a node for one
+/// session's watch frame (P-RSA S7, CONTRACTS.md §6): `params.id` is the
+/// remote `sessionId`, and `metadata["aoide/frame"]`'s own `tail` is the
+/// output-line window. Only `params.metadata` counts on the far side —
+/// `message.metadata`, the `message/send` fallback other methods accept, is
+/// never read by this arm — so this builder puts the key exactly where the
+/// door looks. `aoide_protocol::wire::a2a::FRAME_KEY` is the ONE spelling of
+/// that key, shared with the door that serves it. Pure.
+pub fn build_task_get_frame_request(id: &str, tail: u64) -> Value {
+    let req = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: json!(1),
+        method: "tasks/get".to_string(),
+        params: json!({ "id": id, "metadata": { aoide_protocol::wire::a2a::FRAME_KEY: { "tail": tail } } }),
+    };
+    serde_json::to_value(&req).expect("JsonRpcRequest always serializes")
+}
+
+/// Parse a `tasks/get` frame response into the frame JSON itself — the `data`
+/// of the artifact `artifactId: "frame"`, which is what
+/// `aoide_conduct::graph::Frame` deserializes from. The frame's own SHAPE is
+/// not this function's business: this side reads the envelope (a JSON-RPC
+/// `error`, a missing `result`, a missing artifact) and hands the `data` over
+/// unread, so the type that owns the frame is the only thing that parses it.
+/// Pure. A JSON-RPC error keeps the door's own code in
+/// [`FrameReadError::code`].
+pub fn parse_frame_response(resp: &Value) -> Result<Value, FrameReadError> {
+    if let Some(err) = resp.get("error") {
+        return Err(FrameReadError {
+            code: err.get("code").and_then(Value::as_i64),
+            message: err.get("message").and_then(Value::as_str).unwrap_or("(no message)").to_string(),
+        });
+    }
+    let plain = |message: &str| FrameReadError { code: None, message: message.to_string() };
+    let result = resp.get("result").ok_or_else(|| plain("response has no `result`"))?;
+    let artifacts = result
+        .get("artifacts")
+        .and_then(Value::as_array)
+        .ok_or_else(|| plain("response carries no `artifacts` — the frame was not asked for"))?;
+    let artifact = artifacts
+        .iter()
+        .find(|a| a.get("artifactId").and_then(Value::as_str) == Some(aoide_protocol::wire::a2a::FRAME_ARTIFACT_ID))
+        .ok_or_else(|| plain("response carries no `frame` artifact"))?;
+    let part = artifact
+        .get("parts")
+        .and_then(Value::as_array)
+        .and_then(|p| p.first())
+        .ok_or_else(|| plain("the `frame` artifact carries no part"))?;
+    part.get("data")
+        .cloned()
+        .ok_or_else(|| plain("the `frame` artifact's part carries no `data`"))
+}
+
 /// `aoide/pairReveal`'s reply carries only `{ok}` — a JSON-RPC `error`
 /// becomes a refusal message; anything else is `Ok(())`. Pure.
 pub fn check_pair_reveal_response(resp: &Value) -> Result<(), String> {
@@ -237,6 +319,53 @@ mod tests {
         assert_eq!(body["jsonrpc"], "2.0");
         assert_eq!(body["method"], "aoide/graphSummary");
         assert!(body["params"].is_object());
+    }
+
+    #[test]
+    fn build_task_get_frame_request_puts_the_frame_key_where_the_door_reads_it() {
+        let body = build_task_get_frame_request("sess-1", 50);
+        assert_eq!(body["jsonrpc"], "2.0");
+        assert_eq!(body["method"], "tasks/get");
+        assert_eq!(body["params"]["id"], "sess-1");
+        assert_eq!(body["params"]["metadata"]["aoide/frame"]["tail"], 50);
+        // Only `params.metadata` counts on the far side — never
+        // `message.metadata`, which `message/send` accepts instead.
+        assert!(body["params"]["message"].is_null());
+    }
+
+    #[test]
+    fn parse_frame_response_hands_back_the_frame_and_keeps_the_door_s_code() {
+        let frame = json!({ "sessionId": "sess-1", "presence": "running" });
+        let ok = json!({
+            "jsonrpc": "2.0", "id": 1,
+            "result": {
+                "id": "sess-1", "contextId": "sess-1", "kind": "task",
+                "status": { "state": "working", "timestamp": "2026-09-21T05:00:00Z" },
+                "artifacts": [{
+                    "artifactId": "frame", "name": "session watch frame",
+                    "parts": [{ "kind": "data", "data": frame }],
+                }],
+            }
+        });
+        assert_eq!(parse_frame_response(&ok).unwrap()["presence"], "running");
+
+        // The output-read refusal: the code rides back with the message, which
+        // is what lets the caller teach the fix instead of printing "refused".
+        let refused = json!({
+            "jsonrpc": "2.0", "id": 1,
+            "error": { "code": -32011, "message": "output read refused" }
+        });
+        let e = parse_frame_response(&refused).unwrap_err();
+        assert_eq!(e.code, Some(-32011));
+        assert_eq!(e.message, "output read refused");
+        assert!(e.to_string().contains("-32011"), "the code rides the Display too: {e}");
+
+        // A transport-shaped response with no frame in it is an error WITHOUT
+        // a code — nothing to teach about a door that answered something else.
+        let wrong_shape = json!({ "jsonrpc": "2.0", "id": 1, "result": { "id": "sess-1" } });
+        let e = parse_frame_response(&wrong_shape).unwrap_err();
+        assert_eq!(e.code, None);
+        assert!(e.message.contains("artifacts"), "{}", e.message);
     }
 
     #[test]

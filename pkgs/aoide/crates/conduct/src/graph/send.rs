@@ -44,6 +44,7 @@ use super::model::{
     load_stage, resolved_parent, sessions_path, write_stage, SessionRecord, SessionsFile,
     STAGE_GRAPH_VERSION,
 };
+use super::remote::{node_record, resolve_on_node};
 use super::session_store::{
     clear_stale_parent, do_session_end, do_session_phase, do_session_phase_if, do_session_start,
     do_subagent_end, do_subagent_rekey, do_subagent_spawn, ensure_session_ceiling, now_iso_utc,
@@ -989,15 +990,13 @@ fn session_send_to(inv: &Invocation, target: &str) -> Outcome {
 
     match addr::resolve_with_hub(target, &host, &candidates, &node_names, hub) {
         Resolution::Local(id) => deliver_local(inv, &id),
-        Resolution::Remote { node, query } => match nodes.iter().find(|p| p.name == node) {
-            Some(p) => deliver_remote(inv, p, &query),
+        Resolution::Remote { node, query } => match node_record(cmd, &node) {
+            Ok(p) => deliver_remote(inv, &p, &query),
             // `addr::resolve` only ever names a node it was HANDED in
             // `node_names` above (built from this SAME `nodes` slice), so a
             // miss here is unreachable in practice — a defensive clean error
             // rather than an unwrap/panic.
-            None => {
-                let out = Outcome::error(cmd, format!("node `{node}` vanished mid-resolution"))
-                    .with_data(json!({ "reason": "node-not-found", "node": node }));
+            Err(out) => {
                 audit_send(inv, "error", &out.message, &text);
                 out
             }
@@ -1034,67 +1033,6 @@ fn session_send_to(inv: &Invocation, target: &str) -> Outcome {
             out
         }
     }
-}
-
-/// Extract every `kind:"session"` node from a node's CACHED graph document
-/// as (sessionId, petname, role) triples — role derived from the SAME
-/// document's own `spawned` edges. A `send`-local twin of
-/// `who.rs::sessions_from_graph`'s extraction: not reused directly, since
-/// that function returns `who`'s own display-only `SessionView`, a shape
-/// this door has no use for — this needs only what [`LocalCandidate`] and an
-/// error-message label need.
-fn node_cached_sessions(graph: &Value) -> Vec<(String, Option<String>, &'static str)> {
-    let empty: Vec<Value> = Vec::new();
-    let nodes = graph.get("nodes").and_then(Value::as_array).unwrap_or(&empty);
-    let edges = graph.get("edges").and_then(Value::as_array).unwrap_or(&empty);
-    nodes
-        .iter()
-        .filter(|n| n["kind"] == "session")
-        .map(|n| {
-            let full_id = n["id"].as_str().unwrap_or("");
-            let session_id = full_id.strip_prefix("session:").unwrap_or(full_id).to_string();
-            let role = if edges.iter().any(|e| e["kind"] == "spawned" && e["to"] == full_id) {
-                "child"
-            } else {
-                "root"
-            };
-            let petname = n["petname"].as_str().map(String::from);
-            (session_id, petname, role)
-        })
-        .collect()
-}
-
-/// Resolve `query` (the remainder after `node/` — see `aoide_storage::addr`'s
-/// tier-5 doc) against `node`'s cached session set. Tries `query` AS TYPED
-/// first — this covers the common, DOCUMENTED case (`addr.rs`'s own module
-/// doc example: `Remote { node: "yomi-strix", query: "brave-otter" }`, a
-/// bare petname) via tiers 1–3 (exact remote id, id tail4, bare petname) —
-/// and only on a miss retries the RECONSTRUCTED `<node>/<query>` form, so a
-/// `role/petname` remainder (what tier 5 stripped the host segment OFF of —
-/// `addr.rs`'s "multi-segment rest… passes it through verbatim" test case)
-/// still resolves via tier 4 against the node's own name standing in as
-/// `host`. `nodes: &[]` on BOTH attempts: a remote-of-remote is not a shape
-/// this phase resolves, so tier 5 can never fire here — see
-/// [`deliver_remote`]'s `Resolution::Remote` arm.
-fn resolve_remote_query(node: &str, query: &str, candidates: &[LocalCandidate<'_>]) -> Resolution {
-    match addr::resolve(query, node, candidates, &[]) {
-        Resolution::NotFound => addr::resolve(&format!("{node}/{query}"), node, candidates, &[]),
-        other => other,
-    }
-}
-
-/// A node session's display label for an error message — mirrors
-/// `who.rs::sessions_from_graph`'s label construction
-/// (`display::session_label` with the node's own name standing in as
-/// `host`), so an ambiguous/not-found `--to` error names candidates the same
-/// way `aoide session --hosts` would already be showing them.
-fn node_session_label(node: &str, session_id: &str, petname: Option<&str>, role: &str) -> String {
-    let rec = aoide_storage::records::SessionRecord {
-        session_id: session_id.to_string(),
-        petname: petname.map(String::from),
-        ..Default::default()
-    };
-    aoide_storage::display::session_label(&rec, node, role)
 }
 
 /// Which of `--submit`/`--yes` the caller actually passed on THIS
@@ -1205,28 +1143,9 @@ fn deliver_remote_with(
         )
     };
 
-    let cache = aoide_storage::node_store::load_node_cache(&node.name);
-    let Some(graph) = cache.and_then(|c| c.graph) else {
-        let out = Outcome::error(
-            cmd,
-            format!(
-                "node `{}` has no cached graph — run `aoide node pull {}` first",
-                node.name, node.name
-            ),
-        )
-        .with_data(json!({ "reason": "node-never-pulled", "node": node.name }));
-        audit_send(inv, "error", &out.message, &text);
-        return out;
-    };
-
-    let sess = node_cached_sessions(&graph);
-    let candidates: Vec<LocalCandidate<'_>> = sess
-        .iter()
-        .map(|(id, pet, role)| LocalCandidate { session_id: id, petname: pet.as_deref(), role })
-        .collect();
-
-    match resolve_remote_query(&node.name, query, &candidates) {
-        Resolution::Local(remote_id) => {
+    let resolved = resolve_on_node(cmd, &node.name, query);
+    match resolved {
+        Ok(remote_id) => {
             // The `aoide/from` claim (P-RSA S5): who this node PROVES it is,
             // resolved before the body is built because the claim rides inside
             // the signed body digest. An unruly claim never stops the send (see
@@ -1272,56 +1191,11 @@ fn deliver_remote_with(
                 }
             }
         }
-        Resolution::Ambiguous(ids) => {
-            let labels: Vec<String> = ids
-                .iter()
-                .filter_map(|id| {
-                    sess.iter().find(|(sid, _, _)| sid == id).map(|(sid, pet, role)| {
-                        node_session_label(&node.name, sid, pet.as_deref(), role)
-                    })
-                })
-                .collect();
-            let out = Outcome::error(
-                cmd,
-                format!(
-                    "`{query}` is ambiguous on node `{}` — {} session(s) match: {}",
-                    node.name,
-                    ids.len(),
-                    labels.join(", ")
-                ),
-            )
-            .with_data(json!({ "reason": "ambiguous", "node": node.name, "query": query, "candidates": ids }));
-            audit_send(inv, "error", &out.message, &text);
-            out
-        }
-        Resolution::NotFound => {
-            let labels: Vec<String> = sess
-                .iter()
-                .map(|(id, pet, role)| node_session_label(&node.name, id, pet.as_deref(), role))
-                .collect();
-            let hint = if labels.is_empty() {
-                format!(" (node `{}` has no cached sessions)", node.name)
-            } else {
-                format!(" — available on `{}`: {}", node.name, labels.join(", "))
-            };
-            let out = Outcome::error(
-                cmd,
-                format!("no session on node `{}` matches `{query}`{hint}", node.name),
-            )
-            .with_data(json!({ "reason": "not-found", "node": node.name, "query": query }));
-            audit_send(inv, "error", &out.message, &text);
-            out
-        }
-        Resolution::Remote { .. } => {
-            // Unreachable: `resolve_remote_query` always passes `nodes: &[]`
-            // to `addr::resolve`, so tier 5 (the only source of `Remote`)
-            // never fires. A clean error, not a panic/unwrap, in case that
-            // invariant ever drifts.
-            let out = Outcome::error(
-                cmd,
-                format!("`{query}` resolved to a nested node reference, which is not supported"),
-            )
-            .with_data(json!({ "reason": "nested-remote-unsupported", "node": node.name, "query": query }));
+        Err(out) => {
+            // Every refusal `resolve_on_node` can build — an unpulled node,
+            // and the two query outcomes that name no single session — with
+            // this door's own audit line. One arm, because there is one
+            // definition of what each of them says (`remote::unresolved_remote`).
             audit_send(inv, "error", &out.message, &text);
             out
         }
@@ -4442,73 +4316,6 @@ mod tests {
             .map(|(id, _, _)| json!({ "from": "session:parent", "to": format!("session:{id}"), "kind": "spawned" }))
             .collect();
         json!({ "schemaVersion": "0", "nodes": nodes, "edges": edges })
-    }
-
-    #[test]
-    fn resolve_remote_query_table() {
-        // Pure, no I/O — mirrors `aoide_storage::addr`'s own table-driven
-        // style, scoped to what this function adds on top of `addr::resolve`
-        // itself: trying `query` exactly as typed first (tiers 1-3), and
-        // only on a miss retrying the reconstructed `<node>/<query>` form
-        // (tier 4, the `role/petname` remainder tier 5 stripped the host off
-        // of).
-        struct Case {
-            name: &'static str,
-            query: &'static str,
-            candidates: Vec<(&'static str, Option<&'static str>, &'static str)>,
-            expected: Resolution,
-        }
-        let node = "yomi-strix";
-        let cases = vec![
-            Case {
-                name: "exact remote id, tried as typed",
-                query: "sess-aaaa-1111",
-                candidates: vec![("sess-aaaa-1111", Some("brave-otter"), "root")],
-                expected: Resolution::Local("sess-aaaa-1111".into()),
-            },
-            Case {
-                name: "id tail4, tried as typed",
-                query: "1111",
-                candidates: vec![("sess-aaaa-1111", Some("brave-otter"), "root")],
-                expected: Resolution::Local("sess-aaaa-1111".into()),
-            },
-            Case {
-                name: "bare petname, tried as typed (the documented common case)",
-                query: "brave-otter",
-                candidates: vec![("sess-aaaa-1111", Some("brave-otter"), "root")],
-                expected: Resolution::Local("sess-aaaa-1111".into()),
-            },
-            Case {
-                name: "role/petname compound falls back to the reconstructed <node>/<query> form",
-                query: "root/brave-otter",
-                candidates: vec![("sess-aaaa-1111", Some("brave-otter"), "root")],
-                expected: Resolution::Local("sess-aaaa-1111".into()),
-            },
-            Case {
-                name: "petname collision on the node's own cache is ambiguous",
-                query: "brave-otter",
-                candidates: vec![
-                    ("sess-aaaa-1111", Some("brave-otter"), "root"),
-                    ("sess-bbbb-2222", Some("brave-otter"), "child"),
-                ],
-                expected: Resolution::Ambiguous(vec!["sess-aaaa-1111".into(), "sess-bbbb-2222".into()]),
-            },
-            Case {
-                name: "no match in either attempt",
-                query: "ghost-name",
-                candidates: vec![("sess-aaaa-1111", Some("brave-otter"), "root")],
-                expected: Resolution::NotFound,
-            },
-        ];
-        for c in cases {
-            let candidates: Vec<LocalCandidate<'_>> = c
-                .candidates
-                .iter()
-                .map(|(id, pet, role)| LocalCandidate { session_id: id, petname: *pet, role })
-                .collect();
-            let got = resolve_remote_query(node, c.query, &candidates);
-            assert_eq!(got, c.expected, "case failed: {}", c.name);
-        }
     }
 
     #[test]

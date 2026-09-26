@@ -59,6 +59,15 @@ fn run_curl(extra: &[&str], stdin_body: Option<&str>) -> Result<(u16, String), S
 /// runaway one.
 const MAX_RESPONSE_BYTES: usize = 20 * 1024 * 1024; // 20 MiB
 
+/// The ceiling ONE read gets instead of [`MAX_RESPONSE_BYTES`]: the watch
+/// frame (`tasks/get` + `metadata["aoide/frame"]`, P-RSA S7). 512 KiB — the
+/// far door bounds a frame to 256 KiB (the wire cap on
+/// `aoide_conduct::graph::Frame` in `aoide-server`), so this is double the
+/// largest frame any honest node can send and still orders of magnitude below
+/// the general cap. A refusal here is a node sending something other than a
+/// frame.
+const FRAME_MAX_RESPONSE_BYTES: usize = 512 * 1024;
+
 /// `run_curl`'s parameterised core: same transport, an explicit `--max-time`
 /// instead of the hardcoded `15`. Split out for `pull_node_live` (the
 /// roster core's presence probe, workstream C2 — reached via bare
@@ -79,14 +88,34 @@ const MAX_RESPONSE_BYTES: usize = 20 * 1024 * 1024; // 20 MiB
 /// crosses the cap — every real fetch in this crate (`post_json`'s node
 /// POSTs, the AgentCard GET, `mcp_client`'s Melete calls) routes through
 /// this one function, so there is exactly one place this needed wiring.
+///
+/// A call site with its OWN, tighter ceiling ([`FRAME_MAX_RESPONSE_BYTES`])
+/// goes through [`run_curl_capped`] instead; every other caller keeps this
+/// wrapper and [`MAX_RESPONSE_BYTES`].
 fn run_curl_with_timeout(
     timeout_secs: u64,
     extra: &[&str],
     stdin_body: Option<&str>,
 ) -> Result<(u16, String), String> {
+    run_curl_capped(timeout_secs, MAX_RESPONSE_BYTES, extra, stdin_body)
+}
+
+/// [`run_curl_with_timeout`] with an explicit ceiling, in BYTES — the same
+/// transport, the same bounded read loop, one `--max-filesize` value and one
+/// cut-off compared against the caller's own cap instead of
+/// [`MAX_RESPONSE_BYTES`]. The watch frame is the caller that needs it: a
+/// frame is bytes another box wrote and this process only displays, and
+/// `--max-filesize 524288` names the ceiling the far door's own 256 KiB frame
+/// bound never reaches.
+fn run_curl_capped(
+    timeout_secs: u64,
+    max_bytes: usize,
+    extra: &[&str],
+    stdin_body: Option<&str>,
+) -> Result<(u16, String), String> {
     let mut cmd = std::process::Command::new("curl");
     let timeout = timeout_secs.to_string();
-    let max_filesize = MAX_RESPONSE_BYTES.to_string();
+    let max_filesize = max_bytes.to_string();
     cmd.args(["-sS", "--max-time", &timeout, "--max-filesize", &max_filesize, "-w", "\n%{http_code}"]);
     cmd.args(extra);
     cmd.stdout(Stdio::piped()).stderr(Stdio::null());
@@ -113,11 +142,11 @@ fn run_curl_with_timeout(
             }
         };
         buf.extend_from_slice(&chunk[..n]);
-        if buf.len() > MAX_RESPONSE_BYTES {
+        if buf.len() > max_bytes {
             let _ = child.kill();
             let _ = child.wait();
             return Err(format!(
-                "response exceeded the {MAX_RESPONSE_BYTES}-byte cap \u{2014} refusing (the far side sent too much data)"
+                "response exceeded the {max_bytes}-byte cap \u{2014} refusing (the far side sent too much data)"
             ));
         }
     }
@@ -275,13 +304,31 @@ const HTTP_METHOD: &str = "POST";
 /// making this parameter's addition byte-identical-when-empty by
 /// construction.
 pub(crate) fn post_json(url: &str, body: &str, bearer: Option<&str>, extra_headers: &[(String, String)], timeout_secs: u64) -> Result<(u16, String), String> {
+    post_json_capped(url, body, bearer, extra_headers, timeout_secs, MAX_RESPONSE_BYTES)
+}
+
+/// [`post_json`] with an explicit response ceiling — the same request build,
+/// the same transport, one cap passed through to [`run_curl_capped`] instead
+/// of [`MAX_RESPONSE_BYTES`]. Extracted rather than adding the parameter to
+/// `post_json` so every existing call site is untouched, the same
+/// "the override-free path stays the simpler function" split
+/// [`post_json_to_node`]/[`post_json_to_node_with_via_override`] holds.
+/// [`task_get_on_node`] is the one caller that passes a tighter cap.
+pub(crate) fn post_json_capped(
+    url: &str,
+    body: &str,
+    bearer: Option<&str>,
+    extra_headers: &[(String, String)],
+    timeout_secs: u64,
+    max_bytes: usize,
+) -> Result<(u16, String), String> {
     let header_args: Vec<String> = extra_headers.iter().flat_map(|(k, v)| ["-H".to_string(), format!("{k}: {v}")]).collect();
     match bearer {
         None => {
             let mut args: Vec<&str> = vec!["-X", HTTP_METHOD, "-H", "Content-Type: application/json"];
             args.extend(header_args.iter().map(String::as_str));
             args.extend(["--data-binary", "@-", "--", url]);
-            run_curl_with_timeout(timeout_secs, &args, Some(body))
+            run_curl_capped(timeout_secs, max_bytes, &args, Some(body))
         }
         Some(token) => {
             let scratch = ScratchBodyFile::write(body)?;
@@ -290,8 +337,9 @@ pub(crate) fn post_json(url: &str, body: &str, bearer: Option<&str>, extra_heade
             let mut args: Vec<&str> = vec!["-X", HTTP_METHOD, "-H", "Content-Type: application/json"];
             args.extend(header_args.iter().map(String::as_str));
             args.extend(["-H", "@-", "--data-binary", &data_arg, "--", url]);
-            run_curl_with_timeout(
+            run_curl_capped(
                 timeout_secs,
+                max_bytes,
                 &args,
                 Some(&header_line),
             )
@@ -484,14 +532,45 @@ pub(crate) fn post_json_to_node(
     extra_headers: &[(String, String)],
     timeout_secs: u64,
 ) -> Result<(u16, String), String> {
+    post_json_to_node_with_tunnel_key(
+        node,
+        body,
+        bearer,
+        extra_headers,
+        timeout_secs,
+        &node.name,
+        MAX_RESPONSE_BYTES,
+    )
+}
+
+/// [`post_json_to_node`]'s own body with the tunnel key stated EXPLICITLY
+/// rather than taken from `node.name`, and its own response ceiling instead of
+/// [`MAX_RESPONSE_BYTES`] — the two things [`task_get_on_node`] needs and no
+/// other caller varies. `node.name` is the key convention every caller here
+/// holds (`Node-Transport.md`: "keyed by `(session id, node name)`"), which is
+/// why the override-free call site keeps the simpler signature and this stays
+/// a sibling rather than a sixth parameter on `post_json_to_node` — the same
+/// split [`post_json_to_node_with_via_override`] holds. An explicit key must
+/// still be `valid_node_name`-shaped: [`resolve_dial_url`]'s own record write
+/// refuses anything else, so a caller cannot smuggle a path separator or a
+/// `..` out of a session id through here.
+pub(crate) fn post_json_to_node_with_tunnel_key(
+    node: &aoide_storage::node_store::Node,
+    body: &str,
+    bearer: Option<&str>,
+    extra_headers: &[(String, String)],
+    timeout_secs: u64,
+    tunnel_key: &str,
+    cap_bytes: usize,
+) -> Result<(u16, String), String> {
     let via = node
         .via
         .as_deref()
         .map(aoide_storage::tunnel::parse_via)
         .transpose()
         .map_err(|e| format!("node `{}`'s recorded via: {e}", node.name))?;
-    let dial_url = resolve_dial_url(&node.url, via.as_ref(), &node.name)?;
-    post_json(&dial_url, body, bearer, extra_headers, timeout_secs)
+    let dial_url = resolve_dial_url(&node.url, via.as_ref(), tunnel_key)?;
+    post_json_capped(&dial_url, body, bearer, extra_headers, timeout_secs, cap_bytes)
 }
 
 /// [`post_json_to_node`]'s own body, plus an explicit `via_override` that
@@ -1089,6 +1168,60 @@ pub fn send_message_to_node(
         return Err(format!("node returned an error: {detail}"));
     }
     Ok(parsed)
+}
+
+/// Read ONE session's watch frame off a NODE — `session watch <node>/<query>`
+/// (aoide-conduct, P-RSA S7) resolves `<query>` against the node's cached
+/// graph to that one remote sessionId, then drives THIS function. The
+/// transport lives here, not duplicated in `conduct`, for the same reason
+/// [`send_message_to_node`] does (see the crate's `Cargo.toml`/`AGENTS.md` on
+/// the `conduct → client` edge).
+///
+/// It signs exactly as [`send_message_to_node`] does — `sign_headers_for_node`
+/// over the canonical string of THIS body, plus the node's bearer when it has
+/// one — because the far door's output-read gate admits nothing less than the
+/// SIGNATURE rung with `read` in the record's `allows` (`-32011`, CONTRACTS.md
+/// §6). An unpaired node therefore gets NO headers and a guaranteed refusal,
+/// exactly as a spawn does; the caller (`conduct`) is the side that turns that
+/// into a taught error, and it can, because the refusal code rides back in
+/// [`crate::node::FrameReadError::code`].
+///
+/// `tunnel_key` is the key this call opens/reuses its `via` forward under —
+/// `node.name` at every call site that is not `conduct`'s watch, stated
+/// explicitly here because that caller passes the key it chose. `frame_tail`
+/// is the output-line window asked for; the door clamps it to its own
+/// `1..=200` regardless, so a larger number is not an error, just narrowed.
+///
+/// Returns the frame JSON itself (the `frame` artifact's `data`, unread by
+/// this side — `aoide_conduct::graph::Frame` owns that shape). 512 KiB
+/// response cap: this reads bytes another box wrote and only DISPLAYS them,
+/// so it is bounded tighter than every other call in this file.
+pub fn task_get_on_node(
+    node: &aoide_storage::node_store::Node,
+    id: &str,
+    frame_tail: u64,
+    tunnel_key: &str,
+) -> Result<Value, crate::node::FrameReadError> {
+    let wire = crate::node::build_task_get_frame_request(id, frame_tail);
+    let body_str = serde_json::to_string(&wire).unwrap_or_default();
+    let plain = |message: String| crate::node::FrameReadError { code: None, message };
+    let bearer = resolve_node_bearer(node).map_err(plain)?;
+    let extra_headers = sign_headers_for_node(node, &body_str).map_err(plain)?;
+    let (code, resp) = post_json_to_node_with_tunnel_key(
+        node,
+        &body_str,
+        bearer.as_deref(),
+        &extra_headers,
+        15,
+        tunnel_key,
+        FRAME_MAX_RESPONSE_BYTES,
+    )
+    .map_err(plain)?;
+    if code != 200 {
+        return Err(plain(format!("HTTP {code}")));
+    }
+    let parsed: Value = serde_json::from_str(&resp).map_err(|e| plain(format!("unparseable response: {e}")))?;
+    crate::node::parse_frame_response(&parsed)
 }
 
 /// Prompt `y/N` before spawning on a node — a LOCAL UX confirmation only
