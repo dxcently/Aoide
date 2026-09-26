@@ -1810,6 +1810,23 @@
   than every letter in the mailbox. Every untrusted fragment it renders is
   sanitized (control characters stripped, lines clipped) — including a sender's
   id, wherever it is printed — and raw PTY bytes go only to a real terminal.
+- **A watch of `<node>/<query>` reads the far frame; it never reads the far
+  disk.** The resolution is `graph::remote`'s (one definition, shared with
+  `send --to`: the node's CACHED graph, a taught `node pull` refusal when there
+  is none), and the read is one signed `tasks/get`
+  (`aoide_client::commands::task_get_on_node`, 512 KiB cap, tunnel keyed
+  `(session, node name)` like every other node action). Every string that
+  arrives is re-cleaned by `Frame::clamp_untrusted` and every count re-clamped
+  to the LOCAL bounds — the requested tail, `MAIL_RAIL`, `BLOCK_LINES_MAX` —
+  before a byte is rendered; **raw PTY bytes have no path at all on the remote
+  side**, whatever stdout is, because there is no terminal gate there to open.
+  `suggested` is rebuilt locally (`aoide send --to <node>/<id> --submit -- …`),
+  never taken from the frame, and the header carries the node. Live polls every
+  2 s and ends on the far record's own `presence != running`, or Ctrl-C: no
+  cursor is kept on either box, so a remote watch is exactly as read-only as a
+  local one. The far door's `-32011` refusal is rendered as a taught error
+  naming the grant and the box it runs on — never as a bare refusal, and never
+  as "the session does not exist".
 - **A finished run's exit report is filed by the daemon tick through the
   registered `mail.send` implementation** (`Door::Daemon`, in-process — the
   daemon authority path, not a bypass), never by the mail layer called directly

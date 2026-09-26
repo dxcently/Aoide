@@ -109,6 +109,30 @@ return (MCP/stdin) — it renders one frame from the same gather, so it can neve
 drift from the live view. `--tail <n>` sets the output window (default 50);
 `--json` returns the frame in the registry's envelope.
 
+`<id>` may also name a session **on another node** — `session watch
+<node>/<query>` — resolved by the same rule `send --to` uses against that
+node's cached graph (`graph pull`'s document; a node never pulled is a taught
+`aoide node pull <node>` refusal, never an implicit fetch). The watch then
+reads the run's frame OFF that node over `tasks/get`
+(`params.metadata["aoide/frame"]`, CONTRACTS.md §6) — the same frame as the
+local one, gathered on the box that owns the run and rendered by the same
+renderer, with the node prefixing the header line (`yomi/brave-otter (child) ·
+claude · running · …`). The far frame is **untrusted data**: every string goes
+through the same sanitizers the local view uses, every count is re-clamped to
+the local bounds (the requested tail, the mail rail, the block cap), raw PTY
+bytes have no path to this terminal at all, and the suggested follow-up is
+rebuilt here as `aoide send --to <node>/<id> --submit -- "<text>"` rather than
+taken from a line naming a session in that box's namespace. A refusal by the
+far door's output gate (`-32011`: no signed, verified node holding `read` on
+that host) is a taught error naming the grant and the box it runs on —
+`aoide node allow <this box> read on` **on the far node**.
+
+Remote live mode polls every 2 s and stops when the far record's own
+`presence` is no longer `running`, or on Ctrl-C: the frame carries the state
+that decides, so there is no cursor to keep and nothing to hold open. (Frame
+deltas over `tasks/resubscribe` are deliberately deferred — that stream holds
+a connection slot for the run's whole life and carries status changes only.)
+
 A frame shows the instructions the run was started with, the run's own output,
 the child's mailbox, and where it stands —
 
@@ -157,19 +181,21 @@ Refusals are taught, never an empty view: an unknown id, a `sub:` card (which
 shares its executor's process and keeps no PTY of its own), and a record that
 keeps no conduct-owned PTY.
 
-**Across a node, the same frame rides `tasks/get`.** A paired node whose
-`allows` include `read` asks this box for a run's frame over the A2A door
-(`params.metadata["aoide/frame"]`, CONTRACTS.md §6) and gets the frame above as
-one `data` artifact — the same `render` draws it, so a remote frame reads like a
-local one, with `logPath`/`instructionsPath`/`socket`/`suggested` struck because
-they name paths and a command on the box that wrote them. The door bounds it:
-`tail` to 200 lines, each letter's body to 40 lines, the whole frame to 256 KiB
-(that cap sheds the oldest letter first, then the oldest output line, and says
-`truncated`), and an instruction block it never sheds. The suggested follow-up
-is the reader's own — `aoide send --to <node>/<id> --submit -- "<text>"` — and
-the frame is still read-only: no cursor moves here, and raw PTY bytes exist on
-no wire. Unsigned, bearer and address callers are refused, as is a signed node
-never granted `read`.
+**Across a node, the same frame rides `tasks/get`.** A signed, verified node
+whose `allows` include `read` reads **any** session's frame on this box over the
+A2A door (`params.metadata["aoide/frame"]`, CONTRACTS.md §6) and gets the frame
+above as one `data` artifact — the same `render` draws it, so a remote frame
+reads like a local one, with `logPath`/`instructionsPath`/`socket`/`suggested`
+struck because they name paths and a command on the box that wrote them. The
+door bounds it: `tail` to 200 lines, each letter's body to 40 lines, the whole
+frame to 256 KiB (that cap sheds the oldest letter first, then the oldest output
+line, and says `truncated`), and an instruction block it never sheds. The frame
+is read-only on both ends: no cursor moves, and raw PTY bytes exist on no wire.
+Unsigned, bearer and address callers are refused (`-32011`), as is a signed node
+never granted `read` — and the reader's own end re-clamps what arrives before
+anything is printed, because a peer's frame is data like any other. This is the
+same read `aoide session watch <node>/<query>` performs; the `suggested` line
+above is the one that reader rebuilds for itself.
 
 ## The end: a closed vocabulary, and a deadline that is not inactivity
 

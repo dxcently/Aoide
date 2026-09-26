@@ -118,7 +118,15 @@ never the inbound/serve half (that's `aoide-server`).
   dialing back) — pure JSON-RPC envelope builders/parsers only, same split
   as the graphSummary pair above them; the server-side handlers
   (`pair_request`/`pair_reveal`/`pair_poll`) live in `aoide-server::a2a`,
-  never duplicated here.
+  never duplicated here. The watch frame's own pair (P-RSA S7) joins the
+  same module: `build_task_get_frame_request` (the `tasks/get` body that
+  asks for ONE session's frame — `params.metadata["aoide/frame"]`, the key
+  `aoide_protocol::wire::a2a::FRAME_KEY` spells once for both sides) and
+  `parse_frame_response`, which hands back the frame JSON out of the
+  `frame` artifact unread and keeps the door's own JSON-RPC code in
+  `FrameReadError.code` (`-32011` is the output-read refusal; a transport
+  or shape failure is `None`) — so a caller can tell a REFUSED read from
+  an unreachable node without matching prose.
 - `discover` — the discovery advertisement's LISTEN half (P-P6 + task
   #120, `docs/architecture/PAIRING.md`'s "Discovery
   (advertise-but-locked)" section): `run_sweep(secs)` binds
@@ -836,7 +844,14 @@ never the inbound/serve half (that's `aoide-server`).
   via bare `session`/`--hosts` — read-only) and
   `send_message_to_node` (`send --to <node>/<query>`'s delivery,
   workstream C3 — POSTs `message/send` with an explicit `contextId` naming
-  the resolved remote session). **Outbound bearer presentation (task
+  the resolved remote session), and `task_get_on_node` (P-RSA S7 —
+  `session watch <node>/<query>`'s READ: a signed `tasks/get` with the frame
+  attached, bounded at `FRAME_MAX_RESPONSE_BYTES` (512 KiB, double the far
+  door's own 256 KiB frame cap) rather than the general
+  `MAX_RESPONSE_BYTES`, and dialed through
+  `post_json_to_node_with_tunnel_key` — the one helper that takes the tunnel
+  key EXPLICITLY instead of reading it off `node.name` — so the key a
+  `--via` forward is opened under is the caller's stated choice). **Outbound bearer presentation (task
   #84)**: `node add --bearer-secret <name>` records a per-node
   `Node.bearerSecret` (`aoide-storage`'s `node_store`); every outbound
   node POST (`pull_one_node`, `pull_node_live`, `send_message_to_node`)
