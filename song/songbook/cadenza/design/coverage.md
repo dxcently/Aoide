@@ -27,7 +27,7 @@ widget bodies for what each one reaches. Status: `design` → `preview` →
 
 | slot | why no cadenza body now |
 |---|---|
-| `wallpaper` | shell.qml still hosts the facet's own wallpaper; the slot anchor lands with a later phase. Cadenza's cover is `null` (solid `palette.bg`), so the facet's solid fallback is already the right picture. |
+| `wallpaper` | shell.qml still hosts the facet's own wallpaper; the slot anchor lands with a later phase. Cadenza answers with a COVER, not a slot: the generated circuit board (`cover/pcb-<w>x<h>.png`, intent §3.9), staged with `lyra cover set`; the facet's wallpaper draws it. |
 | `wallpaper-picker` | no `SurfaceSlot` wired; the facet's `AoideWallpaperPicker` (SUPER+W) draws. Revisit when anchored. |
 
 ## Facet-owned, not dressable by a song today
@@ -40,10 +40,16 @@ recolours them; their shapes are out of the song's reach.
 
 | surface | reads (proposal's names) | slice | today |
 |---|---|---|---|
-| jack project labels | `graph.json` `workspaces[].project` | S1 (+S3 for the block) | not drawn |
-| tie lines | `graph.json` `ties[]` (`kind` `project` / `spawned`) | S3 | not drawn |
-| lamps | `activeAt` on `workspaces[]` / `ties[]` | S3 | not drawn |
+| jack project labels | `graph.json` `workspaces[].project` | S1 (+S3 for the block) | derived: the project anchoring the jack's sessions |
+| tie lines | `graph.json` `ties[]` (`kind` `project` / `spawned`) | S3 | derived: `spawned`/`anchors` edges + session window → Hyprland workspace |
+| lamps + patch panel | `activeAt` on `workspaces[]` / `ties[]` | S3 | derived: `hooks.json` `updatedAt` advancing |
 | jack insight + SYS per-jack numbers | `state/usage/now.json` (`by: "workspace"`) | S5 tokens/cost, S6 CPU/mem, S7 history | honest empty |
 | board feed + OVERVIEW mail | `aoide project board` via a shellbridge read op | S8–S10 | honest empty |
 | composer → agent | `{cmd:"boardpost", to:{session}}` | S11 | disabled |
 | composer → project | `{cmd:"boardpost", to:{project}}` | S12 (after §15 ML1) | agent targets only |
+
+**The derivation bend.** Until S3 publishes `ties`/`activeAt`, the bar
+joins three published facts itself: `graph.json` edges, `sessions.json`
+`windowAddress`, and Hyprland's toplevel workspaces (intent §3.2). It is
+paint over published data, never a new fact, and it yields to the core's
+fields the moment they exist. Delete the join when S3 lands.

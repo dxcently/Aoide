@@ -11,12 +11,14 @@ lit by lamps.
 titles, braille/dot charts, sparklines, a gauge) and `refs/ref-crt.jpg` (the
 light: green phosphor on near-black, a faint bloom, nothing else).
 **Polarity:** dark. Needs a livery field the facet does not read yet (§5).
-**Cover:** none. The wallpaper note is `null`, so the stylix facet bakes a
-solid field from `palette.bg` — CRT black. The screen is the tube.
+**Cover:** a static circuit board on the CRT black (§3.9): dim copper-green
+tracks, pads and vias, generated from the palette. Staged live with
+`lyra cover set`; the wallpaper note stays `null` until the cover is
+declared for the rebuild.
 **Glass:** none. No compositor blur, no hyprglass (§5).
 
 Companion files: `coverage.md` (every bridged surface and cadenza's answer),
-`refs/` (the two references). Data names follow the core-seams proposal
+`refs/` (the references). Data names follow the core-seams proposal
 (workspace binding, `ties`, `state/usage/now.json`, the board, `boardpost`).
 
 ---
@@ -26,7 +28,8 @@ Companion files: `coverage.md` (every bridged surface and cadenza's answer),
 Everything is a terminal. Every surface is a termui **pane**: a single-line
 rule (`┌─ TITLE ───┐ │ │ └───┘`) with the title cut into the top edge in
 phosphor green, content on a monospace character grid, no radius, no glass,
-no gradient, no drop shadow. Colour is spent the way a 16-colour terminal
+no drop shadow, and one gradient only: the phosphor glowing just inside a
+pane's rule. Colour is spent the way a 16-colour terminal
 spends it: green is the default voice, amber is the one live thing, and a
 small set of terminal contrast colours each carry exactly one kind of
 highlight. The bar is a switchboard: workspaces are **jacks**, the real
@@ -41,7 +44,9 @@ At rest nothing moves.
 | **tie** | a real edge between two workspaces, kind `project` or `spawned` | core's noun (`graph.json` `ties`); the paint draws it as a tie line |
 | **trunk** | the bar's bottom rule; every tie line drops from it | paint only |
 | **pad** | the hollow ring under a tied jack where its tie lines meet it | paint only |
-| **lamp** | the lit dash that runs a line when its `activeAt` advances | paint only; core publishes `activeAt` |
+| **lamp** | the lit dash that runs a line when its activity advances | paint only; core publishes `activeAt` (until then, `hooks.json` `updatedAt`) |
+| **patch panel** | the bar-end map of agents, child wired to parent | paint only |
+| **track** | a copper line on the circuit-board cover | paint only |
 | **board** | the dock: the per-project message board | core's noun (`aoide project board`) |
 | **pane** | one termui box | paint only |
 
@@ -74,6 +79,13 @@ Conductor Channel).
 - A **borderless block** (termui's magenta one) holds a single message that
   is not a pane — a herald toast, one board item.
 - Panes are opaque `base00` at 0.94. Black glass, not frost.
+- **Inner glow:** the rule's own colour bleeds ~12px inward from all four
+  edges, fading to nothing — the phosphor lit just inside the tube's frame
+  (`refs/ref-inner-glow.png`). At rest it starts at 0.10 alpha; a focused
+  pane's starts at 0.22. Four static gradient `Rectangle`s drawn once by
+  the kit's Pane, behind the content: no shader, no blur, nothing redrawn
+  at rest, so it costs what tier-0 text glow costs. It is the only
+  gradient in the song.
 
 ### Instruments (termui's widgets, re-drawn)
 | instrument | glyphs | used by |
@@ -146,8 +158,9 @@ a window border, not text, and stays darker.
 ### Motion
 - At rest, nothing animates. No blinking cursor unless a field has focus.
   No scanline roll, no flicker, no idle shimmer.
-- **Lamp:** when a jack's or a tie's `activeAt` advances between two reads
-  of `graph.json`, a 12px amber dash runs the tie line (or drops from the
+- **Lamp:** when a jack's or a tie's activity advances between two reads
+  (`activeAt`, or `hooks.json` `updatedAt` until core publishes it), a
+  12px amber dash runs the tie line (or drops from the
   trunk into the jack) in 600ms linear, then the line goes dark. One
   `NumberAnimation` on one `Rectangle`; at most one lamp in flight per line,
   later advances coalesce into it.
@@ -245,11 +258,44 @@ One 28px line in the tmux/termui idiom, left to right:
     connection.
   - At most 2 lanes below the pad row; a further tie collapses into a
     `+n` badge (cyan) on its left jack.
-- Lamps run on `activeAt` (§2 Motion).
+- Lamps run on activity (§2 Motion).
 - Hovering a jack opens the **jack insight pane** (§3.4).
-- **Until the seams land:** jack numbers, occupancy, active and urgent are
-  real today (Hyprland + `sessions.json`). Tie lines, project labels and
-  lamps are NOT drawn — no fake edges. The trunk is drawn, dark.
+- **Where ties come from.** When `graph.json` carries the core's
+  `workspaces`/`ties`/`activeAt`, the bar draws those. Until then it
+  derives real ties from what is published today, and nothing else:
+  - a session's jack: its `sessions.json` `windowAddress` matched to the
+    Hyprland toplevel's workspace (a session without a window has no jack);
+  - a `spawned` tie: a `graph.json` `spawned` edge whose two sessions sit
+    on different jacks;
+  - a `project` tie: sessions anchored to the same project (`anchors`
+    edges) on 2+ jacks — one bus per project;
+  - a project label: the project anchoring a jack's sessions (the most
+    sessions wins; ties show none);
+  - activity: a session's `hooks.json` `updatedAt` advancing lights its
+    jack, and the spawned tie to its parent.
+  The derivation lives in the bar until core publishes ties; it is paint
+  over published facts, never a new fact (coverage.md records the bend).
+  No edge is ever invented: no window, no jack; no edge, no tie.
+
+### 3.2a The patch panel (the bar's right end)
+A small live map of the agents, after the clock at the bar's right end,
+about 16 cells wide and the bar's full height.
+- Every live agent session (not shells) is a small **state lamp** dot
+  (§2 Instruments colours: working, awaiting, idle, stopped). Roots sit on
+  the upper row; a spawned child sits on the lower row under its parent;
+  2px `ink` wires join child to parent (`graph.json` `spawned` edges).
+- When a child's `hooks.json` `updatedAt` advances, a **lamp** (the same
+  amber dash as the switchboard's, shortened to fit) runs its wire from
+  child to parent: the agent reporting upward. A root's own activity
+  flashes its dot once. At most 6 lamps in flight at once; later ones
+  coalesce into the wire's lamp already running.
+- More agents than fit: the rightmost slot becomes `+n` (cyan).
+- Click opens the board on OVERVIEW. Hover shows a pane listing the
+  agents with their state, like the board's AGENTS pane.
+- This is activity, not message traffic: nothing published records one
+  agent sending another a message yet. When core's board feed lands
+  (S8–S10), a lamp can run per real message instead.
+- Nothing moves when no agent is active.
 
 ### 3.3 Dock → the board (`dock`, `aoide-dock`)
 A right-edge pane, full height under the bar, tabbed. The dock is cadenza's
@@ -330,6 +376,22 @@ quoted body; a summons carries `[y] approve [n] deny`.
 ### 3.8 Calendar (`calendar`)
 A `cal`-style month grid in a pane from the clock cell, today in accent.
 
+### 3.9 Cover — the circuit board (`cover/`)
+The wallpaper is a still image of a circuit board under the tube.
+- Tracks run orthogonally with 45° bends, in `base02` (the darkest
+  phosphor that still reads), 2–3px wide. Pads and vias are hollow rings
+  in `base03`. A few long buses run parallel, the way a real board routes
+  them. No labels, no text, no component silkscreen.
+- Density falls off toward the screen centre, so windows sit on quiet
+  black and the tracks live at the edges and corners.
+- It is generated, not drawn: `widgets/CoverPcb.qml` (an uppercase helper,
+  never a slot) renders it from the livery with a fixed seed, and the
+  preview canvas shoots it at each monitor's size into
+  `cover/pcb-<w>x<h>.png`. Regenerating after a palette change is one shot.
+- Static. Nothing moves on the wallpaper; the moving parts are the lamps.
+- Live: `lyra cover set <abs path>` (a hot swap). Declaring it into
+  `aoide.livery.wallpaper` for the rebuild is the User's to admit.
+
 ## 4. Preview fixtures
 
 Unbuilt feeds are drawn with fixtures in the preview canvas ONLY
@@ -378,3 +440,8 @@ reads a fixture path.
 - 2026-09-26 — khoa: not everything needs an icon. Glyphs only replace a
   needed word label (status cells, board cells, RICE); the clock, `$`, the
   tray and every list row stay bare.
+- 2026-09-26 — khoa: the ties were missing live (core's `ties` field is
+  unbuilt), so the bar derives them from published edges + windows until
+  core does (§3.2); a patch panel of agents with lamps on activity at the
+  bar's right end (§3.2a); a circuit-board cover (§3.9); and an inner
+  border glow on every pane after a reference shot (`refs/ref-inner-glow.png`).
