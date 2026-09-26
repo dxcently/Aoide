@@ -174,12 +174,15 @@ pub struct AgentProfile {
     /// summons at all rather than typing a guess into someone's session.
     pub permission_keys: Option<PermissionKeys>,
     /// The keystroke that SUBMITS a composed line in this harness's own
-    /// input — what `graph send --submit` appends to the payload after the
-    /// text, resolved per-target from the DELIVERED session's own agent
-    /// profile (never a fixed byte at the call site). Every registered
-    /// profile names one; there is no absent case, only the unregistered-
-    /// agent fallback to claude's `\n` every other profile lookup already
-    /// takes.
+    /// input — what `graph send --submit` (and every other pty injection:
+    /// the doorbell ring, `spawn --prompt`, `resurrect`'s restore delivery,
+    /// the A2A door's opening turn) appends to the payload as a SEPARATE,
+    /// later write after the submit-keystroke gap. Resolved per-target
+    /// through the conduct crate's own `profile_for_agent` off the DELIVERED
+    /// session's agent (never a fixed byte at the call site); every
+    /// registered profile names one, and there is no absent case — an
+    /// unregistered agent name takes the claude profile's own key, the same
+    /// fallback every other profile lookup in the tree takes.
     pub submit_key: &'static str,
     /// Normalize a raw hook payload onto the canonical field names the hook
     /// door reads (`user_prompt`, `tool_use_id`, `agent_type`, …), in place,

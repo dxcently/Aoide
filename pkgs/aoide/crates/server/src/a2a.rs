@@ -1582,7 +1582,14 @@ fn do_inject(
 /// exactly the race this function's own retry loop exists to survive (the
 /// socket file itself may not even exist). Routing through the session
 /// registry here would just trade the socket race for a registration race,
-/// so this stays on the raw socket path it already computed.
+/// so this stays on the raw socket path it already computed — but the WRITE
+/// is the tree's one pty-injection shape, `write_delivery`: the text, a
+/// flush, the submit-keystroke gap, then **the target harness's own
+/// `submit_key`** (`profile_for_agent`, resolved from the configured program
+/// — never a byte spelled at this call site) as a SEPARATE write. This door
+/// typed `{prompt}\n` for as long as it existed, which is a keystroke of its
+/// own and the wrong one wherever the target submits on `\r` (claude, kimi):
+/// the opening turn landed in the composer and never submitted.
 ///
 /// **Messaging plan P-M1, `state/mail/base.jsonl`**: because of the above,
 /// this is the SECOND (and last) mailbase-filing site in the tree, alongside
@@ -1591,8 +1598,10 @@ fn do_inject(
 /// itself. `from` is empty: the a2a door has no caller identity to offer
 /// today (#51's scope), same reasoning [`do_inject`]'s callers rely on.
 /// Best-effort, same tolerance as the rest of this function — a write error
-/// above is already swallowed (the retry loop only confirms a bound socket,
-/// never delivery), so a failed mailbase write is no less tolerated.
+/// above is swallowed (the retry loop only confirms a bound socket, never
+/// delivery), so a failed mailbase write is no less tolerated. What the write
+/// error DOES decide is the receipt: it is filed only for a delivery that went
+/// out, so a letter is never acknowledged by a turn nobody received.
 fn spawn_inject_prompt(id: &str, agent_cmd: &str, prompt: &str, ready_budget: Duration) {
     if prompt.is_empty() {
         return;
@@ -1610,9 +1619,10 @@ fn spawn_inject_prompt(id: &str, agent_cmd: &str, prompt: &str, ready_budget: Du
     if aoide_conduct::graph::program_is_a_shell(&configured) {
         return;
     }
-    // WHICH harness the configured command IS decides what readiness means;
-    // an unconfigured/unknown program has no profile and takes the hookless
-    // answer, the same fallback every other profile lookup in the tree takes.
+    // WHICH harness the configured command IS decides what readiness means
+    // (an unconfigured/unknown program has no profile and takes the hookless
+    // answer, the same fallback every other profile lookup in the tree takes)
+    // and which keystroke SUBMITS a line in it.
     let agent = configured
         .first()
         .map(|program| aoide_conduct::graph::command_basename(program))
@@ -1620,14 +1630,34 @@ fn spawn_inject_prompt(id: &str, agent_cmd: &str, prompt: &str, ready_budget: Du
     if !aoide_conduct::graph::wait_ready(&agent, id, ready_budget) {
         return;
     }
+    // The target harness's own submit keystroke, resolved from the SAME table
+    // every other delivery reads (`profile_for_agent`; claude when the name is
+    // unregistered). Never a byte spelled here: claude's is `\r`, and a bare
+    // `\n` only inserts a newline in its composer — the exact way this door
+    // used to type an opening turn that never submitted.
+    let submit_key = aoide_conduct::graph::profile_for_agent(&agent).submit_key;
     let socket = aoide_conduct::graph::conduct_socket_path(id);
-    let payload = format!("{prompt}\n");
     for _ in 0..300 {
         if socket.exists() {
             if let Ok(mut s) = UnixStream::connect(&socket) {
-                let _ = s.write_all(payload.as_bytes());
-                let _ = s.flush();
-                let _ = aoide_storage::mail::file_receipt("", id, prompt);
+                // The tree's ONE pty-injection shape: the text, a flush, the
+                // submit-keystroke gap, then the submit key as a SEPARATE
+                // write (`write_delivery`) — never one concatenated payload,
+                // which a harness reading the composer mid-paste can coalesce
+                // differently (task #124).
+                let written = aoide_conduct::graph::write_delivery(
+                    &mut s,
+                    prompt.as_bytes(),
+                    true,
+                    submit_key,
+                    aoide_conduct::graph::SUBMIT_KEYSTROKE_DELAY,
+                );
+                // A receipt acknowledges a TURN: file it only for a write that
+                // actually went out, so a broken delivery leaves the sender's
+                // letter unacknowledged (retryable) instead of acknowledged.
+                if written.is_ok() {
+                    let _ = aoide_storage::mail::file_receipt("", id, prompt);
+                }
                 return;
             }
         }
@@ -8835,16 +8865,43 @@ mod tests {
         let listener = UnixListener::bind(&socket).unwrap();
 
         let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
             use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
+            let (mut conn, _) = listener.accept().unwrap();
+            // Exactly the text, no more: the submit keystroke must NOT be
+            // part of this write.
+            let mut text = Vec::new();
+            let mut chunk = [0u8; 64];
+            while text.len() < "hello new session".len() {
+                let n = conn.read(&mut chunk).unwrap();
+                assert!(n > 0, "the writer closed before the text arrived");
+                text.extend_from_slice(&chunk[..n]);
+            }
+            let before_submit = Instant::now();
+            let mut submit = [0u8; 8];
+            let n = conn.read(&mut submit).unwrap();
+            (text, submit[..n].to_vec(), before_submit.elapsed())
         });
 
         spawn_inject_prompt(id, "claude", "hello new session", Duration::from_millis(500));
-        let got = acc.join().unwrap();
-        assert_eq!(String::from_utf8(got).unwrap(), "hello new session\n", "--submit's newline, same as do_spawn's payload");
+        let (text, submit, gap) = acc.join().unwrap();
+        assert_eq!(
+            String::from_utf8(text).unwrap(),
+            "hello new session",
+            "the text goes out alone — no keystroke concatenated into it"
+        );
+        assert_eq!(
+            String::from_utf8(submit).unwrap(),
+            "\r",
+            "claude's own submit key (CLAUDE_PROFILE.submit_key), never a hand-rolled `\\n`"
+        );
+        // And it is a SEPARATE, LATER write, not a lucky read boundary: the
+        // writer sleeps `SUBMIT_KEYSTROKE_DELAY` (300ms in a non-test build of
+        // aoide-conduct, which is what a dependent crate compiles) between the
+        // two writes, so the submit byte cannot arrive with the text.
+        assert!(
+            gap >= Duration::from_millis(150),
+            "the submit keystroke arrived {gap:?} after the text — one write, not two"
+        );
 
         let entries = aoide_storage::mail::read_base().unwrap();
         assert_eq!(entries.len(), 1, "the spawned session's opening turn is filed exactly once");

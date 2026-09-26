@@ -178,10 +178,12 @@ pub(in crate::graph) fn summons_enabled(env_value: Option<&str>) -> bool {
 // ── The command ────────────────────────────────────────────────────────────
 
 /// Resolve the harness profile for a session record's `agent` field, falling
-/// back to claude the way every other hook consumer does. `pub(in
-/// crate::graph)`: `send.rs`'s delivery path reuses this SAME resolver to
-/// pick the target's submit keystroke — no second lookup of the same table.
-pub(in crate::graph) fn profile_for_agent(agent: &str) -> &'static AgentProfile {
+/// back to claude the way every other hook consumer does. `pub`: `send.rs`'s
+/// delivery path reuses this SAME resolver to pick the target's submit
+/// keystroke — no second lookup of the same table — and so does
+/// `aoide-server`'s A2A door, whose opening turn is typed by name
+/// (`spawnAgent`'s program) rather than off a record.
+pub fn profile_for_agent(agent: &str) -> &'static AgentProfile {
     agent_profile(agent).unwrap_or(&CLAUDE_PROFILE)
 }
 

@@ -150,6 +150,16 @@ pub use self::view::session_watch;
 pub use self::view::{watch_frame, Frame, MailLine};
 pub use self::permit::{answer_summons, session_permit, summons_card_id};
 pub use self::send::{pending_path, session_hook, session_send};
+// The ONE keystroke shape a pty injection has — payload, flush, the gap, then
+// the target's own submit key ALONE (`write_delivery`), plus the profile
+// resolver that picks that key (`profile_for_agent`, claude's fallback for an
+// unregistered name) and the gap itself (`SUBMIT_KEYSTROKE_DELAY`). `pub` for
+// the third caller, in another crate: `aoide-server`'s
+// `a2a::spawn_inject_prompt` used to hand-roll `{prompt}\n` at a spawned
+// session's socket, which is a keystroke spelling of its own — and the wrong
+// one for every harness whose `submit_key` is `\r`.
+pub use self::send::{write_delivery, SUBMIT_KEYSTROKE_DELAY};
+pub use self::permit::profile_for_agent;
 pub use self::session_store::{session_bind, session_end, session_phase, session_start};
 // LANE IDENTITY P-ID0 (G16/G5): `aoide-server`'s `a2a::do_spawn` is the
 // authenticated-node-origin writer — it stamps `node:<name>` directly on

@@ -189,8 +189,12 @@ the inbound half of the two-door contract (the outbound half is
   (`mail::file_receipt`); `do_inject` itself files no entry of its own,
   since its Invocation can only ever reach `session_send`'s LOCAL branch
   (see `do_inject`'s doc comment). `do_spawn` (Spawn, a BRAND-NEW session)
-  types the opening turn via `spawn_inject_prompt`, which files ITS OWN
-  receipt right after the write — a spawned session has no `SessionRecord`
+  types the opening turn via `spawn_inject_prompt`, which writes it with the
+  tree's one pty-injection shape (`write_delivery`: the text, a flush, the
+  submit-keystroke gap, then the target harness's own `submit_key` resolved
+  through `profile_for_agent` as a SEPARATE write — never a keystroke spelled
+  at that call site) and files ITS OWN receipt right after a write that
+  actually went out — a spawned session has no `SessionRecord`
   yet at that moment, so it cannot reach `session_send` at all (see
   `spawn_inject_prompt`'s doc comment for the race that rules it out).
   These were the only two mailbase-filing call sites until P-M2 added a
