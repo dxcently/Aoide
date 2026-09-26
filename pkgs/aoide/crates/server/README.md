@@ -155,7 +155,14 @@ the inbound half of the two-door contract (the outbound half is
   falls back to reading the DAEMON's own ambient `AOIDE_SESSION_ID` as if
   it were the connecting client's attribution (G8); `a2a::do_inject` does
   the identical stamp for a remote inject, so it never picks up `aoide a2a
-  serve`'s own ambient env either (G9). Neither closes the GATE itself
+  serve`'s own ambient env either (G9). The hook door's half of the same
+  class is the OTHER direction — this daemon STAMPS the fact rather than
+  emptying it: `invocation_from_dispatch_request` writes its own
+  `SO_PEERCRED` peer pid under `aoide_conduct::graph::DAEMON_PEER_PID_FLAG`
+  unconditionally (a wire value for that key is discarded), so a
+  daemon-served `session hook` checks the caller's parent claim against the
+  connection's real pid instead of the daemon's env or the caller's word.
+  Neither closes the GATE itself
   (`aoide_conduct::graph::send::real_attested_sender`, out of this phase's
   scope fence) — see `aoide-conduct`'s own README/AGENTS for the honest
   accounting of what that leaves open.

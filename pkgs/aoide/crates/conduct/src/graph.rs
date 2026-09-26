@@ -149,6 +149,10 @@ pub use self::view::session_watch;
 // shape exists to drift from the rendered one.
 pub use self::view::{watch_frame, Frame, MailLine};
 pub use self::permit::{answer_summons, session_permit, summons_card_id};
+pub use self::send::DAEMON_PEER_PID_FLAG;
+// `session_hook`/`session_send`/`pending_path`: the hook door and the injection
+// door, both `pub` for the doors that live outside this crate (`aoide-cli`'s
+// registry, `aoide-server`'s dispatch).
 pub use self::send::{pending_path, session_hook, session_send};
 // The ONE keystroke shape a pty injection has — payload, flush, the gap, then
 // the target's own submit key ALONE (`write_delivery`), plus the profile
@@ -211,6 +215,13 @@ pub use self::spawn::{live_run_for, live_run_refusal};
 // this crate: `aoide-server`'s `a2a::spawn_inject_prompt`, whose opening turn
 // would otherwise be the one injection path with no readiness gate at all.
 pub use self::spawn::{wait_ready, Ready, READY_BUDGET};
+// `harness_session_started` — the hook arm's readiness PREDICATE itself
+// (`wait_ready`'s `Readiness::Hook` clause), `pub` for the door-policy
+// integration proof that must assert "readiness opened" without restating the
+// predicate's own clauses (`crates/cli/tests/daemon_dispatch_door.rs`, the
+// daemon-served `session hook` arm). The one-writer/one-reader pair stays one
+// implementation — never a second copy of it in a test.
+pub use self::spawn::harness_session_started;
 // `command_basename` — the agent-name default a spawned command's own
 // `argv[0]` gives (spawn.rs's copy, widened for the `pub` caller below).
 pub use self::spawn::command_basename;

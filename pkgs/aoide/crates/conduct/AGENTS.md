@@ -606,6 +606,22 @@
   hook chatter into a channel nobody reads on that event — `on_stop`'s
   delivery is the pending-note relay through `on_prompt_submit`/
   `on_session_start`, never a wrapper change.
+- **The hook door reads the hook's OWN claim exactly once, and never takes a
+  pid from the wire.** `session_hook` is the only place that may read
+  `AOIDE_SESSION_ID` for a parent (`own_parent_claim`), because it is the only
+  place that knows whether this process IS the hook; the daemon arm takes the
+  claim off `HOOK_PARENT_FLAG` and its pid off `DAEMON_PEER_PID_FLAG` — stamped
+  by the door from `SO_PEERCRED`, never sent by a caller — and both arms resolve
+  through ONE `resolve_parent_claim` (attested wrap first, then the claim, which
+  is dropped when the claimed record carries a pid the hook process cannot be
+  found under). Do NOT re-add a
+  `std::env::var("AOIDE_SESSION_ID")` inside `hook_for_profile_gated`,
+  `hook_ensure_session_with`, or either action arm: daemon-side that variable
+  belongs to `aoided`, and a daemon launched from inside a conducted session
+  would hand every hook-registered child that session as its parent. Do not
+  stamp `hookAncestry` from `std::process::id()` either — use
+  `hook_ancestry(door_pid)`, for the same reason — and do not give a
+  `hook_pid: None` arm a fallback pid: no pid means `Unclaimed` and no stamp.
 - **The undying transfer is one `save_undying` call, never two.**
   `resurrect.rs`'s `resurrect_one` adds the new id and drops the old one in
   the SAME in-memory `Vec<UndyingSession>` before writing — the new id goes

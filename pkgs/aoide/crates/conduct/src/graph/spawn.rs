@@ -1288,44 +1288,29 @@ mod tests {
         std::env::set_var("AOIDE_CONDUCT_SPAWN_EXE", built_aoide_bin());
 
         let id = "spawn-prompt-ready";
-        // The harness's own SessionStart, as its hook subprocess runs it: the
-        // real door, the real payload, the wrapper's id in the ambient
-        // AOIDE_SESSION_ID (what `conduct` exports into its child). `XDG_
-        // RUNTIME_DIR` is this test's own root, so the door's daemon probe
-        // finds no daemon socket and writes the record locally.
+        // The harness's own SessionStart, as its hook subprocess REALLY runs it:
+        // from inside the WRAPPED CHILD's own process tree, inheriting the
+        // wrapper's id in `AOIDE_SESSION_ID` (`conduct`'s own export). That
+        // descendant relationship is the fact the hook door checks a claim
+        // against (`resolve_parent_claim`), so a hook fired from beside the
+        // wrapper — this test's earlier shape, a process the test spawned itself
+        // — is a different fact and is (correctly) refused. `XDG_RUNTIME_DIR` is
+        // this test's own root, so the door's daemon probe finds no daemon socket
+        // and writes the record locally.
         let bin = built_aoide_bin();
-        let hook = std::thread::spawn({
-            let id = id.to_string();
-            move || {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                let mut child = std::process::Command::new(bin)
-                    .args(["session", "hook", "--agent", "claude"])
-                    .env("AOIDE_SESSION_ID", &id)
-                    .stdin(std::process::Stdio::piped())
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .spawn()
-                    .expect("the built aoide binary runs");
-                use std::io::Write as _;
-                child
-                    .stdin
-                    .as_mut()
-                    .unwrap()
-                    .write_all(
-                        br#"{"session_id":"claude-uuid-ready","hook_event_name":"SessionStart","cwd":"/w","source":"startup"}"#,
-                    )
-                    .unwrap();
-                let _ = child.wait();
-            }
-        });
+        let child_cmd = format!(
+            "printf '%s' '{{\"session_id\":\"claude-uuid-ready\",\"hook_event_name\":\"SessionStart\",\"cwd\":\"/w\",\"source\":\"startup\"}}' \
+             | {} session hook --agent claude; exec timeout 5 cat",
+            bin.display()
+        );
 
-        // The wrapped child echoes whatever it is handed, then leaves on its
-        // own — a pty reader for the injected bytes, and no lingering process.
+        // The wrapped child fires the hook, then echoes whatever it is handed
+        // and leaves on its own — a pty reader for the injected bytes, and no
+        // lingering process.
         let out = session_spawn(&spawn_invocation(
-            &["sh", "-c", "timeout 5 cat"],
+            &["sh", "-c", child_cmd.as_str()],
             &[("id", id), ("agent", "claude"), ("prompt", "say pong")],
         ));
-        hook.join().unwrap();
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
         let data = out.data.as_ref().unwrap();
         assert_eq!(data["prompt"], "delivered", "data: {data}");
