@@ -156,7 +156,13 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   never whether a wrap is reachable) — under
   a dedicated `.ring.lock` file (`aoide_storage::mail::with_ring_lock`) —
   never `.stage.lock`, and only the daemon's own serializer, not a second
-  policy boundary. `ring` executes only under `Door::Daemon`: its two
+  policy boundary. The PTY fallback is refused for a wrap whose WRAPPED
+  program is a shell (`shell-parent`, `wrapped_program_is_a_shell`): the
+  line is submitted, so a shell would RUN it. The channel arm is not that
+  and is still taken — it pushes into the harness's own MCP subprocess and
+  types nothing — so a shell wrap hosting a channel-connected agent (the
+  ordinary terminal wrap, `kitty.nix` conducting a login shell) is rung.
+  `ring` executes only under `Door::Daemon`: its two
   callers are `mail_ring`'s own `Door::Daemon` arm and this crate's
   Stop-hook replay when that hook is likewise being handled by the
   daemon. Every other door forwards instead of ringing — `mail_ring`
@@ -188,8 +194,14 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   `with_stage_lock` section before the socket write, so a line is delivered
   at most once. It reuses `graph/trace.rs`'s renderers, the roster's own
   `TranscriptSpec::say`, and `graph/eidolon.rs::eidolon_state_from_trace` —
-  never a second formatter, extractor or state fold. A bare-shell parent is
-  skipped, never injected into.
+  never a second formatter, extractor or state fold. A shell parent is
+  skipped, never injected into — on the label (`""`/`"shell"`, no registered
+  profile) OR the wrapped program
+  (`wrapped_program_is_a_shell`, the P-C5 capture), so a session labelled
+  from a harness profile over a `bash` pty is refused like any other shell.
+  The LOCAL parent/sibling autogate in `send.rs` is not this rule: that
+  caller steers a shell it can see in its own roster and no remote text
+  rides the line.
 - **The undying mark (P-C2/P-C3, durable-sessions plan; renamed from "carry"
   at command-defrag lane U1, 2026-08-27; relocated under `session grant` at
   the session-surface redesign, command-defrag lane X, 2026-08-28):**
@@ -919,7 +931,12 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   `typed_capture_active` gates the buffer's very existence to an
   interactive shell (`is_shell && read_stdin`) — a headless conduct never
   reads stdin, so it never populates `typed`. See AGENTS.md for why this
-  is refusal-based, not best-effort.
+  is refusal-based, not best-effort. The same verdict is readable OFF a
+  record as `wrapped_program_is_a_shell(&rec)` (`restore.is_some()`), which
+  is how a lane that was not there at spawn time — ping-back, doorbell,
+  the A2A door — can refuse to type into a shell without knowing the
+  wrapped argv: stamped on the multiplexer's opening tick, so it is present
+  from the start of a live shell session.
 - **Session origin (P-P3, `docs/architecture/PAIRING.md` decision 7;
   write-authority tightened at LANE IDENTITY P-ID0, G16/G5, review round 1):**
   `session_store.rs::stamp_origin` (now `pub`, crossing the crate boundary)

@@ -280,8 +280,11 @@ carries whatever the journal carries; that fix is harnox's.
   entry, no provenance prefix, no title rename, one audit line with gate
   label `autogate-child`. It runs in `reap()`'s post-lock collector block
   after `sync_eidolon_sessions()`, only under `Door::Daemon`, and its result
-  never joins `outcome.changed`. A parent that is a bare shell is skipped —
-  a line typed into a shell runs — as is one whose record is gone, not
+  never joins `outcome.changed`. A parent that is a shell is skipped — a line
+  typed into a shell runs — and the WRAP is what decides it: the record's
+  `agent` label (`""`/`"shell"`/no registered profile) or its P-C5 capture
+  (`wrapped_program_is_a_shell`), so `--agent <harness> -- bash` is refused
+  like any other shell. As is one whose record is gone, not
   conductable, or already `done`.
 
   **At-most-once by a claimed cursor.** `state/stage/pingback.json`
@@ -376,6 +379,7 @@ carries whatever the journal carries; that fix is harnox's.
   good). A refusal or a transport failure is retryable instead: no line, one
   audit record, and the next tick asks again from the same cursor — one pull
   per child per tick, with no backoff. A target that can never receive a line
-  — no record, a bare shell, not conductable, already `done` — is judged
+  — no record, a shell (by label OR by its wrapped program, the same read the
+  delivery itself makes), not conductable, already `done` — is judged
   before the far node is asked anything, so it neither spends a request nor
   consumes events it would not have shown.

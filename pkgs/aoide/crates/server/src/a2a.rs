@@ -1368,6 +1368,28 @@ fn session_remote_parent(id: &str) -> Option<RemoteParent> {
     sf.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.remote_parent.clone())
 }
 
+/// Whether `id`'s record is conducting a SHELL — the same read the ping-back
+/// and doorbell lanes make (`aoide_conduct::graph::wrapped_program_is_a_shell`,
+/// the record-side half of `captures_like_a_shell`), so the whole box agrees
+/// on which sessions a submitted line must never reach.
+///
+/// Unlike [`session_remote_parent`], an unreadable stage answers **true**:
+/// this is a refusal's input, so "cannot tell" takes the safe arm — the same
+/// fail-safe direction `should_deliver_now(ConnOrigin::Unknown, _)` already
+/// takes one screen up. An unknown id (no record) answers `false` and is
+/// unreachable anyway: `decide_send_action` resolves through
+/// [`session_ref_lookup`] first, and a missing record is its own `Error` arm.
+fn session_wrapped_is_a_shell(id: &str) -> bool {
+    match load_stage::<SessionsFile>(&sessions_path()) {
+        Ok(sf) => sf
+            .sessions
+            .iter()
+            .find(|s| s.session_id == id)
+            .is_some_and(aoide_conduct::graph::wrapped_program_is_a_shell),
+        Err(_) => true,
+    }
+}
+
 fn unix_ts_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2361,7 +2383,34 @@ fn message_send(
                 effective_origin(origin, token_configured, token_state),
                 signed_caller.is_some() && !sig_autogate && !remote_parent_hit,
             );
-            let deliver_now = should_deliver_now(eff_origin, autogate_match || remote_parent_hit);
+            // Every OTHER rung of this decision is about the CALLER (its
+            // origin, its signature, its token). This one is about the
+            // TARGET: a session conducting a SHELL takes no line that was not
+            // held pending and approved by a human, whoever asked for it and
+            // however well they proved who they are. A shell's input is a
+            // command line, and `--agent <harness> -- bash` is a record that
+            // names a harness while running a shell — the door therefore reads
+            // the WRAP (house rule 4, `wrapped_program_is_a_shell`), exactly
+            // as the ping-back and doorbell lanes do, rather than the `agent`
+            // label it was handed. Paid only where it can matter: a decision
+            // that was going to pend anyway is left alone, and its audit line
+            // is not written.
+            let door_delivers = should_deliver_now(eff_origin, autogate_match || remote_parent_hit);
+            let shell_target = door_delivers && session_wrapped_is_a_shell(&session_id);
+            if shell_target {
+                let _ = audit(
+                    audit_log,
+                    Door::A2a,
+                    EventClass::Audit,
+                    "a2a.message/send",
+                    "shell-wrapped",
+                    &format!(
+                        "holding for a human: `{session_id}` is conducting a shell — a submitted \
+                         line would RUN in it as a command"
+                    ),
+                );
+            }
+            let deliver_now = door_delivers && !shell_target;
             // The `from` attribution rides ONLY the QUEUED path (P-P3
             // decision 7: "pending-queue entries a node's send creates").
             // `session_send`'s own `from` mechanism ALSO prefixes an
@@ -8421,6 +8470,103 @@ mod tests {
         .expect_err("a missing socket must be a structured error, not a failed connect");
         assert_eq!(err.0, -32004);
         assert_eq!(err.1, "session not conductable");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
+    /// A shell child takes no auto-delivered steer from ANY rung of this door
+    /// (house rule 4): loopback included, remote-parent autogate included. The
+    /// line is held PENDING instead — a human's own approval, and nothing else,
+    /// is what lets it reach a shell. Both arms run on the same fixture, so the
+    /// difference is exactly the target record's own P-C5 capture, never the
+    /// caller's standing.
+    #[test]
+    fn a_shell_wrapped_target_takes_no_auto_delivered_inject() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-shell-target-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        let mut records = Vec::new();
+        let mut listeners = Vec::new();
+        for id in ["plain-target", "shell-target"] {
+            let socket = aoide_conduct::graph::conduct_socket_path(id);
+            std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+            listeners.push((id, UnixListener::bind(&socket).unwrap()));
+            let mut rec = conductable_session(id, &socket);
+            // The shell arm is the SAME record with the P-C5 capture on it —
+            // a `--agent <harness> -- bash` session a moment after it started.
+            if id == "shell-target" {
+                rec.restore = Some(aoide_storage::records::RestoreSnapshot::default());
+            }
+            records.push(rec);
+        }
+        write_stage(&sessions_path(), &SessionsFile { schema_version: "0".to_string(), sessions: records }).unwrap();
+        let audit_log = root.join("log");
+
+        // Arm 1 — an ordinary target on the door's own trusted loopback rung:
+        // delivered, exactly as before this rule existed.
+        let plain = listeners.iter().find(|(id, _)| *id == "plain-target").unwrap().1.try_clone().unwrap();
+        let acc = std::thread::spawn(move || {
+            let (mut conn, _) = plain.accept().unwrap();
+            use std::io::Read as _;
+            let mut buf = Vec::new();
+            let _ = conn.read_to_end(&mut buf);
+            buf
+        });
+        let result = message_send(
+            &json!({ "message": { "parts": [{ "kind": "text", "text": "plain hello" }], "contextId": "plain-target" } }),
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Loopback,
+            "",
+            None,
+            None,
+        );
+        assert_eq!(String::from_utf8(acc.join().unwrap()).unwrap(), "plain hello\r");
+        assert_eq!(result.unwrap()["id"], "plain-target");
+
+        // Arm 2 — the same call, the same loopback origin, into the shell:
+        // held, nothing on the wire, the synchronous answer the door's own
+        // held-pending shape (`submitted_task`).
+        let shell = listeners.iter().find(|(id, _)| *id == "shell-target").unwrap().1.try_clone().unwrap();
+        shell.set_nonblocking(true).unwrap();
+        let held = message_send(
+            &json!({ "message": { "parts": [{ "kind": "text", "text": "would run" }], "contextId": "shell-target" } }),
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Loopback,
+            "",
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(held["status"]["state"], "submitted", "{held}");
+        assert!(shell.accept().is_err(), "a shell target is never written to");
+        let log = std::fs::read_to_string(&audit_log).unwrap();
+        assert!(log.contains("shell-wrapped"), "the refusal is named, never silent: {log}");
+        assert!(log.contains("is conducting a shell"), "{log}");
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {

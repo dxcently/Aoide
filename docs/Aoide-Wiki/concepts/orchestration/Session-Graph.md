@@ -248,9 +248,11 @@ socket, else the control socket with the wrap's own submit key), with no
 gate, no pending entry, no provenance prefix and no rename of the parent.
 `state/stage/pingback.json` holds the per-child cursor (`seen`, `silentAt`),
 claimed inside one short stage-lock section before the write, so each event
-is delivered at most once. A parent that is a bare shell is skipped — a line
-typed into a shell would run — as is one whose record is gone, not
-conductable, or already `done`. The ruling is the User's (2026-09-17): a
+is delivered at most once. A parent that is a shell is skipped — a line
+typed into a shell would run, and the WRAP decides that (its wrapped
+program's own basename, not the `agent` label a caller chose) — as is one
+whose record is gone, not conductable, or already `done`. The ruling is the
+User's (2026-09-17): a
 parent hears the children it spawned, and nothing wider.
 
 The contrasting shape is **a desktop Codex/ChatGPT thread**

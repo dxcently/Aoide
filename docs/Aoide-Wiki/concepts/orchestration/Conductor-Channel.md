@@ -280,8 +280,10 @@ through.
     stripped, clipped to 80 characters; the quoted ones never allowed to
     start with `/` or `!`. Per-child at-most-once is the
     `state/stage/pingback.json` cursor, claimed before the write. A parent
-    that is a bare shell is skipped outright — a line typed into a shell RUNS
-    — as is a parent whose record is gone, not conductable, or already
+    that is a shell is skipped outright — a line typed into a shell RUNS —
+    and it is the WRAPPED program that answers it (a record labelled from a
+    harness profile can be conducting `bash`), never the label alone. As is a
+    parent whose record is gone, not conductable, or already
     `done`. Nothing wider than the children it spawned: a stranger's send
     still holds pending. The full statement is `docs/architecture/
     EIDOLON-TRACE.md`'s "Second slice".
@@ -307,7 +309,9 @@ through.
     NEW children. An unruly claim (an id the far door could never
     have stamped) is dropped by the sender — one warning line, `not claiming
     parent: <reason>` — and the send goes out unclaimed rather than failing.
-    `CONTRACTS.md` §6 carries the full rule.
+    One thing overrides every rail of it: a TARGET conducting a shell, whose
+    line is held pending whoever asks (`shell-wrapped`, N1) — a submitted
+    line in a shell's input runs. `CONTRACTS.md` §6 carries the full rule.
 - **Sender provenance.** A delivered payload that NAMES the node (carries a
   letter — a real message, not a bare keystroke answer) is prefixed on its
   first line with `from <sender>: `, where `<sender>` resolves from

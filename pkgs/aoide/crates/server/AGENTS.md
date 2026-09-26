@@ -535,6 +535,21 @@
   `a_door_token_refuses_a_remote_parents_delivery_uniformly` is the bearer
   running first; `a_remote_parent_mismatch_leaves_todays_result_byte_for_byte`
   is the miss.
+- **A shell target takes no auto-delivered inject from ANY rung — loopback
+  and remote-parent autogate alike (N1, house rule 4).** The Inject arm
+  reads the TARGET's own record
+  (`session_wrapped_is_a_shell` → `aoide_conduct::graph::
+  wrapped_program_is_a_shell`, the record-side half of
+  `captures_like_a_shell`) before it folds `deliver_now`, and holds the line
+  PENDING when it comes back true — a shell's input is a command line, and
+  `--agent <harness> -- bash` names a harness over a pty running a shell, so
+  the `agent` label is not the question. Paid only where it can change the
+  outcome (a decision that was going to pend anyway reads nothing), audited
+  `a2a.message/send`/`status:"shell-wrapped"`. An unreadable stage answers
+  TRUE (this is a refusal's input: "cannot tell" takes the safe arm), unlike
+  `session_remote_parent`'s `None`. Pinned by
+  `a_shell_wrapped_target_takes_no_auto_delivered_inject`, whose two arms
+  differ only by the target's P-C5 capture.
 - **`do_inject`'s `from` attribution (P-P3 decision 7) is scoped to the
   QUEUED path only — never an immediately-delivered payload's bytes.**
   `session_send`'s own `from` mechanism also prefixes DELIVERED text

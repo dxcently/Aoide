@@ -68,7 +68,7 @@
 //! or `!`.
 
 use super::common::{clean_line, clip_flat, strip_unsafe};
-use super::conduct::channel_socket_path;
+use super::conduct::{channel_socket_path, wrapped_program_is_a_shell};
 use super::doorbell::{connect_for_ring, write_channel};
 use super::eidolon::{eidolon_state_from_trace, DroppedEidolon};
 use super::model::{canonical_state, load_stage, sessions_path, SessionRecord, SessionsFile};
@@ -1071,8 +1071,19 @@ fn deliver(
 /// Never a shell parent: a line reaching a bare shell's input is a COMMAND
 /// LINE, and it would run. A record naming no registered harness profile is
 /// the same shape `profile_for_agent` itself falls back for.
+///
+/// The shell arm reads the WRAP, never the label alone (house rule 4). `agent`
+/// is a caller's choice (`--agent <name>`), so `--agent pi -- bash` — the
+/// live shape that executed a ping-back line as a command — passes an
+/// `agent`-only test while the pty on the other end is a shell with a
+/// readline prompt. [`wrapped_program_is_a_shell`] is the same
+/// `captures_like_a_shell` verdict read off the record, so the two halves
+/// cannot drift.
 fn unreceptive(rec: &SessionRecord) -> Option<&'static str> {
-    if matches!(rec.agent.as_str(), "" | "shell") || agent_profile(&rec.agent).is_none() {
+    if matches!(rec.agent.as_str(), "" | "shell")
+        || agent_profile(&rec.agent).is_none()
+        || wrapped_program_is_a_shell(rec)
+    {
         return Some("shell-parent");
     }
     if !super::doc::is_conductable_now(rec) {
@@ -2229,6 +2240,79 @@ mod tests {
         let cursor: CursorFile = serde_json::from_str(&std::fs::read_to_string(pingback_path()).unwrap()).unwrap();
         assert_eq!(cursor.get("user-0001").and_then(|e| e.seen.clone()).as_deref(), Some("131"));
         assert_eq!(pingback(&daemon_inv(), &[]), PingbackReport::default());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// N1, through the whole chain and with no fixture standing in for a
+    /// layer: a REAL `conduct --agent pi -- sh` (the live `--agent pi -- bash`
+    /// shape that got its ping-back line executed as a command) is judged
+    /// `shell-parent` by the very predicate the delivery lane calls. The
+    /// record's `agent` is a registered harness profile throughout — the label
+    /// the old `agent`-only arm trusted.
+    #[test]
+    fn a_harness_labelled_shell_parent_is_unreceptive_end_to_end() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+        ]);
+        let _root = setup("pingback-pi-bash-unreceptive");
+
+        let out = crate::graph::conduct::session_conduct(&conduct_invocation(
+            &["sh", "-c", "sleep 1"],
+            &[("id", "pi-bash"), ("agent", "pi")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+
+        let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = file.sessions.iter().find(|s| s.session_id == "pi-bash").unwrap();
+        assert_eq!(rec.agent, "pi", "the caller's own label, a registered harness profile");
+        assert!(aoide_protocol::agents::agent_profile(&rec.agent).is_some());
+        assert_eq!(
+            unreceptive(rec),
+            Some("shell-parent"),
+            "the WRAPPED program is a shell whatever the label says: {rec:?}"
+        );
+    }
+
+    /// The guard's two arms on one fixture, so what makes the difference is
+    /// unambiguous: the SAME harness-labelled record, conducting the same
+    /// kind of session, refused with the P-C5 capture on it and delivered
+    /// without. A label-only rule cannot tell these apart — which is N1.
+    #[test]
+    fn a_harness_parent_is_unreceptive_only_when_it_wrapped_a_shell() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+            "AOIDE_CONDUCT_AUTOGATE",
+        ]);
+        let root = setup("pingback-harness-label-arms");
+
+        let shelled = headless_parent("wrap-bash", "pi");
+        child_fixture(&root, "user-shell", "wrap-bash", &[USER, SETTLED]);
+        stamp_shell_capture("wrap-bash");
+        let bare = headless_parent("wrap-harness", "pi");
+        child_fixture(&root, "user-harness", "wrap-harness", &[USER, SETTLED]);
+
+        let acc = std::thread::spawn(move || read_all(bare));
+        let report = pingback(&daemon_inv(), &[]);
+        let bytes = acc.join().unwrap();
+
+        shelled.set_nonblocking(true).unwrap();
+        assert!(shelled.accept().is_err(), "a shell wrap is never written to");
+        assert_eq!(report.skipped, vec![("wrap-bash".to_string(), "shell-parent".to_string())]);
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.starts_with("[eidolon brave-otter] settled end_turn"), "the harness wrap still hears its child: {text:?}");
+        assert_eq!(report.delivered.len(), 1, "{report:?}");
+        assert_eq!(report.delivered[0].0, "wrap-harness");
 
         let _ = std::fs::remove_dir_all(&root);
     }

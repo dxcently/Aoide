@@ -398,7 +398,13 @@ the inbound half of the two-door contract (the outbound half is
   attribution rides `do_inject`'s existing `--from` flag onto a QUEUED
   `pending.json` entry only (an immediately-delivered payload's bytes stay
   untouched, so an already-autogated node's delivery is byte-identical to
-  before this phase).
+  before this phase). That same arm holds any inject PENDING whose TARGET is
+  conducting a shell (`session_wrapped_is_a_shell`, N1): every other rung of
+  the decision is about the caller, this one is about the target — a
+  submitted line in a shell's input RUNS, whatever the caller proved — so a
+  shell target is never auto-delivered to by the loopback rung or the
+  remote-parent rung either, and the hold is audited
+  `a2a.message/send`/`status:"shell-wrapped"` with no bytes on the wire.
   **`tasks/get` reads a session's watch frame (P-RSA S6, CONTRACTS.md §6).**
   `params.metadata["aoide/frame"]` asks for the frame the local
   `session watch` renders; it rides as one `data` artifact, and is answered

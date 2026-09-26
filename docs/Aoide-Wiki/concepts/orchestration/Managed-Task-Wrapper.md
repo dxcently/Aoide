@@ -291,7 +291,8 @@ so a node that is merely unreachable cannot eat the tick that reaps everything
 else. Nothing is pushed, nothing is mailed, and the child's node never writes
 into anyone's composer — the parent's node re-validates each event against the
 closed event set, re-cleans every string, renders the line itself, and applies
-the same delivery skips a local line gets (a bare shell parent included, and it
+the same delivery skips a local line gets (a shell parent included — by label
+or by its wrapped program — and it
 is judged before the far node is asked anything). The row's cursor is claimed
 *atomically with the read of it* and only then is a line delivered, so this
 lane's guarantee is at-most-once — the opposite direction from the letter's

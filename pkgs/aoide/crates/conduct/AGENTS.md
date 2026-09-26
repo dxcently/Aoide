@@ -752,7 +752,9 @@
   for a live channel socket (one write, close, no keystroke), else
   `send.rs::write_delivery` + the target's own profile submit key for a
   headless wrap, an interactive wrap with no channel skipped
-  `interactive-composer` — with no gate, no `pending.json` entry, no
+  `interactive-composer`, and a wrap whose WRAPPED program is a shell skipped
+  `shell-parent` (the channel arm is not a keystroke and is still taken for
+  one) — with no gate, no `pending.json` entry, no
   provenance prefix, no `names_the_node` title rename (the line starts with
   `[`, and must never be routed through `session_send` for it), and no
   mailbase receipt. One audit line per delivery through `send.rs::audit_send`
@@ -796,12 +798,26 @@
   gone, so its cursor entry leaves on that pass — so a dropped REMOTE child
   claims its trace row AND its exit on that one pass, and the ring always ends
   with exactly one `Exited`.
-  **Never a shell parent.** A target whose `rec.agent` is `""`/`"shell"` or
-  names no registered harness profile is skipped and counted
-  (`shell-parent`) — a line submitted into a bare shell would RUN as a
-  command. The same applies to `not-conductable`, `parent-done` and
+  **Never a shell parent.** A target is unreceptive on either of two reads:
+  its `rec.agent` is `""`/`"shell"` or names no registered harness profile, or
+  its WRAPPED program is a shell
+  (`conduct.rs::wrapped_program_is_a_shell` — `restore.is_some()`, the P-C5
+  capture) — a line submitted into a shell would RUN as a command, and `agent`
+  is only a label a caller picks: `--agent pi -- bash` names a registered
+  profile over a pty running a shell, which is how a ping-back line came to be
+  executed (N1). The wrapped-program read is the SAME predicate the tick
+  already applies (`captures_like_a_shell`), so the two can never drift; it is
+  stamped on the multiplexer's opening tick, so a record carries it for the
+  whole life of a live shell and misses it only for the microseconds between
+  the socket being bound and that first tick — never a lane's actual window,
+  since a ping-back needs its child to have ended first. Skipped and counted
+  `shell-parent`. The same applies to `not-conductable`, `parent-done` and
   `no-parent-record`; those four predicates live in ONE function
   (`unreceptive`), which `deliver` itself calls, so nothing may restate them.
+  The LOCAL parent/sibling autogate in `send.rs` is deliberately not this rule:
+  the caller there is a resident session steering a shell it can see in its own
+  roster, with no remote text riding the line, and conducting shells is the
+  product's headline.
   **The parent pulls its own remote children (P-RSA S9, `CONTRACTS.md`
   §4/§6).** `pingback_pull` runs in the SAME post-lock block, right after
   `pingback`, and only under `Door::Daemon`: for every row in
@@ -1604,6 +1620,17 @@
   control-layer guard for that raw-keystroke case (P-M5a-3 in
   `docs/architecture/MAIL.md`'s roadmap), and update MAIL.md's doorbell
   section in the same commit that does.
+- **A ring never PTY-injects into a wrap whose WRAPPED program is a shell
+  either — `shell-parent`, the same refusal the ping-back lane makes
+  (`conduct.rs::wrapped_program_is_a_shell`, never the `agent` label: a
+  wrap labelled from a harness profile can be conducting `bash`).** The
+  line is submitted, so a shell would RUN it. The channel arm is exempt by
+  construction — a one-way push into the harness's own MCP subprocess types
+  nothing into any pty — so a shell wrap hosting a channel-connected agent
+  is still rung, which is the ordinary terminal wrap's own shape
+  (`kitty.nix` conducts the login shell). Refusing the whole record instead
+  would silently kill the doorbell for every terminal a human runs an agent
+  in.
 - **A ring's readiness signal is the CHILD's hook state, checked with
   `aoide_protocol::agents::agent_profile` (returns `None` for an
   unrecognized harness) — never `profile_for_agent` (its `CLAUDE_PROFILE`

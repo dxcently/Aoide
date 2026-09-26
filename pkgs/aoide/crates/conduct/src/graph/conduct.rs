@@ -7,8 +7,8 @@
 
 use super::doc::restage_graph;
 use super::model::{
-    canonical_state, load_stage, sessions_path, write_stage, RestoreSnapshot, SessionsFile,
-    STAGE_GRAPH_VERSION,
+    canonical_state, load_stage, sessions_path, write_stage, RestoreSnapshot, SessionRecord,
+    SessionsFile, STAGE_GRAPH_VERSION,
 };
 use super::identity::peer_cred;
 use super::session_store::{
@@ -58,6 +58,31 @@ const SHELL_BASENAMES: &[&str] = &["bash", "zsh", "fish", "sh"];
 /// spawn" case to special-case here.
 pub(in crate::graph) fn captures_like_a_shell(program: &str) -> bool {
     SHELL_BASENAMES.contains(&command_basename(program).as_str())
+}
+
+/// [`captures_like_a_shell`]'s verdict, read back off a RECORD: `Some` restore
+/// snapshot ⟺ this session's wrapped command is a shell. Not a second
+/// predicate — the same one, projected: [`SHELL_BASENAMES`] above stays the
+/// only place shell-likeness is decided, and the only writer of `restore` is
+/// the P-C5 tick this file runs (`conduct_refresh_shell`, entered only under
+/// `is_shell`), so the field cannot be set for a session the predicate did not
+/// call a shell. Stamped on the very first tick (the multiplexer's opening
+/// refresh, before its loop), so it is present for the whole life of a live
+/// shell session; `reap.rs` and `resurrect.rs` already read the same field for
+/// the same question.
+///
+/// This is how a caller who was NOT there at spawn time — the daemon's
+/// ping-back, the doorbell, the A2A door — can tell a shell from a harness
+/// WRAP: `agent` cannot answer it (it is a label a caller chooses, and
+/// `--agent pi -- bash` is exactly the mismatch that made `agent == "shell"`
+/// insufficient), and the wrapped argv is not on the record. Never type into
+/// what this returns true for.
+///
+/// `pub`, not `pub(in crate::graph)`: `aoide-server`'s A2A door applies the
+/// same read before its own inject (`server/src/a2a.rs`), the same
+/// pre-Phase-3b visibility `conduct_socket_path` carries one screen down.
+pub fn wrapped_program_is_a_shell(rec: &SessionRecord) -> bool {
+    rec.restore.is_some()
 }
 
 pub(in crate::graph) fn unix_ts() -> u64 {

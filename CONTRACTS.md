@@ -4944,7 +4944,19 @@ consults no setting of its own. The levers an operator actually holds are
 unpairing the node (`node remove` — with no candidate record
 `verify_signed_request` has nothing to resolve, so every claim fails) and the
 child ending; `node allow <name> spawn off` stops only NEW children, and
-unpairs nothing already spawned. A malformed claim needs no handling here
+unpairs nothing already spawned.
+**A target conducting a SHELL is the one thing that overrides every rail
+above** (N1, house rule 4): the Inject arm reads the target record's own
+wrapped-program shape (`session_wrapped_is_a_shell` →
+`aoide_conduct::graph::wrapped_program_is_a_shell`, the record-side half of
+conduct's `captures_like_a_shell`) and holds the line PENDING when it is a
+shell — the loopback arm, the exemption, the fold and a door-wide bearer all
+deliver to a harness, never to a pty whose submitted input RUNS. Audited
+`a2a.message/send`/`status:"shell-wrapped"`, paid only where it can change the
+outcome, and an unreadable stage answers "shell" (a refusal's safe arm). The
+`agent` label is deliberately not the question: `--agent <harness> -- bash`
+names a registered profile over a shell, which is the shape that made this
+necessary. A malformed claim needs no handling here
 at all: this door never stamped a value outside `valid_claimed_session_id` as
 any record's `sessionId`, so equality is false, and the `-32602` stays spawn-side
 where the value is actually built. It follows that the CALLER need not refuse one

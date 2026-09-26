@@ -5,7 +5,7 @@
 //! `#[cfg(test)]`-gated at its `mod testutil;` declaration in `graph.rs`, so
 //! nothing here ships in a non-test build regardless of the wider visibility.
 
-use super::model::{Project, SessionRecord};
+use super::model::{load_stage, sessions_path, write_stage, Project, SessionRecord, SessionsFile};
 use super::window::TermWindow;
 use aoide_protocol::Invocation;
 use serde_json::Map;
@@ -250,6 +250,23 @@ pub(crate) fn built_aoide_bin() -> PathBuf {
         "expected a pre-built `aoide` binary at {bin:?} — run `cargo build --bin aoide` first"
     );
     bin
+}
+/// Stamp the P-C5 capture onto an already-registered stage record — the one
+/// durable trace `conduct.rs::captures_like_a_shell`'s verdict leaves on a
+/// record, and therefore what
+/// [`crate::graph::conduct::wrapped_program_is_a_shell`] reads. Its only real
+/// writer is conduct's own ~1 Hz tick, out of reach from a unit test, so the
+/// tests that need the shape write it directly — the same direct-field-write
+/// idiom `set_petname` (doorbell) and `doc.rs`'s own petname tests already use.
+pub(crate) fn stamp_shell_capture(id: &str) {
+    let mut file: SessionsFile = load_stage(&sessions_path()).unwrap();
+    let rec = file
+        .sessions
+        .iter_mut()
+        .find(|s| s.session_id == id)
+        .unwrap_or_else(|| panic!("no stage record for `{id}`"));
+    rec.restore = Some(aoide_storage::records::RestoreSnapshot::default());
+    write_stage(&sessions_path(), &file).unwrap();
 }
 pub(crate) fn flag_invocation(path: &[&str], flags: &[(&str, &str)]) -> Invocation {
     Invocation {
