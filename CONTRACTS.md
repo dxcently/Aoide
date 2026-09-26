@@ -4791,6 +4791,37 @@ Each song's `rice.nix` **self-gates**, exactly like a dendrite:
   "only defines `aoide.livery`" invariant, `TODO(song-shape v1)` in
   `lib/checks.nix`).
 
+### The shelf, and the two injected arguments
+
+A song is a SELF-CONTAINED folder: its `.nix` files name nothing outside
+`song/songbook/<song>/`. The two things a song genuinely needs from elsewhere
+arrive as ARGUMENTS, injected at the two sites that evaluate a song:
+
+- **`<song>/rice.nix`** is imported by the module system (the constructor's
+  hook), so it receives them as module args: `_module.args.song` and
+  `_module.args.borrow`.
+- **`<song>/_widgets/default.nix`** is imported by `lib/songbook.nix`'s
+  `borrow`, so it receives them as ordinary function arguments. That function is
+  also the ONE place a shelf is opened, which is why the generator, the
+  `packages` a lane installs and the lane's `builtin.json` all see the same
+  roll-up.
+
+- **`song`** is the `lib/song.nix` API (`composeSong`, `mkWidget`, …) — the thing
+  a `rice.nix` used to reach for with `../../../lib/song.nix`.
+- **`borrow`** is `name → that song's _widgets/, rolled up with the same two
+  arguments`. It is the one cross-song idiom (`lib/song.nix`'s header): a
+  composition that dresses a slot with another song's body borrows it BY NAME —
+  `borrow "sonata" // { inherit (borrow "fugue") bar herald; }`. An unknown name,
+  or a song with no `_widgets/` shelf, throws a message naming the discovered set.
+- **A `../` path literal in any `.nix` under a song folder is a contract
+  violation**, not a style question: it is what makes a song un-shippable to a
+  machine whose songbook is not this checkout — which is what
+  `pkgs/lyra-songbook`, `aoideSeedSongbook` and the offline generator all assume.
+- **Signatures.** A `rice.nix` declares `{ lib, config, song, borrow, ... }:`;
+  a shelf's `default.nix` declares `{ lib, song, borrow, ... }:`. Both keep
+  `...`: a file that wants only one of the two names it (`{ borrow, ... }:`),
+  and a third argument later does not break every song at once.
+
 ### The songbook is versioned score, not runtime
 
 `checks.no-song-read` (§4) bans reading `song/` **runtime** dirs at eval

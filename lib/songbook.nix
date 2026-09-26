@@ -42,10 +42,50 @@ let
   # sibling song of its own.
   discover =
     dir:
-    lib.filterAttrs (name: type: type == "directory" && !lib.hasPrefix "_" name) (builtins.readDir dir);
+    lib.mapAttrs (name: _: dir + "/${name}") (
+      lib.filterAttrs (name: type: type == "directory" && !lib.hasPrefix "_" name) (builtins.readDir dir)
+    );
 
   songs = discover songbook;
   songNames = builtins.attrNames songs;
+
+  # ── The two arguments every song is handed ──────────────────────────────────
+  # §7.4 constraint 1: a song is a SELF-CONTAINED folder. Where a `rice.nix` or a
+  # shelf used to reach out of itself — `../../../lib/song.nix`, or another
+  # song's `_widgets/` — the two things it actually needed arrive as ARGUMENTS:
+  #
+  #   song    the `lib/song.nix` API (`composeSong`, `mkWidget`, …)
+  #   borrow  name → that song's `_widgets/`, rolled up with the same two args
+  #
+  # `borrow` is the one cross-song idiom there is (`lib/song.nix`'s header), and
+  # it is keyed by NAME: a song composes another song's slots without ever naming
+  # a path, so nothing in a song folder can point outside it. It is also the one
+  # place a shelf is imported — `songMeta` below borrows a song's own shelf
+  # through it rather than opening the directory a second time.
+  #
+  # The two names are OFFERED, not forced: a shelf is handed exactly the
+  # arguments its own signature declares (`builtins.functionArgs` ∩ the offer), so
+  # a shelf that still says `{ lib }:` — every song's did before this slice —
+  # receives `lib` alone and is unaffected. A shelf's signature is its own; the
+  # injection is what makes `song` and `borrow` available, not what obliges a
+  # shelf to take them.
+  borrow =
+    name:
+    let
+      dir = songs.${name} or null;
+      shelf = if dir == null then null else dir + "/_widgets";
+      fn = if shelf == null || !(builtins.pathExists shelf) then null else import shelf;
+      offered = {
+        inherit lib borrow;
+        song = songLib;
+      };
+    in
+    if dir == null then
+      throw "borrow: song '${name}' is not in the songbook; discovered: ${lib.concatStringsSep ", " songNames}"
+    else if fn == null then
+      throw "borrow: song '${name}' has no _widgets/ shelf to borrow from"
+    else
+      fn (lib.intersectAttrs (builtins.functionArgs fn) offered);
 
   isSlotFile = name: type: type == "regular" && builtins.match "[a-z0-9].*\\.qml" name != null;
 
@@ -113,7 +153,7 @@ let
           }
         else
           let
-            composed = songLib.composeSong (import shelfDir { inherit lib; });
+            composed = songLib.composeSong (borrow name);
             shelfSlots = builtins.attrNames composed.manifest;
 
             # The slots THIS song actually authors — the only ones the
@@ -337,7 +377,12 @@ in
     builtIn
     songModules
     packagesFor
+    borrow
     ;
+
+  # The `lib/song.nix` API under the name a song receives it by (the injected
+  # argument is `song`), so one site names what a song is handed.
+  song = songLib;
 
   # Only songs with at least one slot appear in manifest.json; registry.json
   # keeps EVERY committed song, `{}` when it declares nothing — an empty

@@ -101,6 +101,14 @@ in
         songbook.songModules song
         ++ [
           {
+            # The two arguments every `rice.nix` reads (CONTRACTS §5): the
+            # `lib/song.nix` API, and the name-keyed borrow. A module may define
+            # `_module.args`, and nothing else on this host defines these names —
+            # they are how a song gets what it needs by ARGUMENT instead of by a
+            # `../` path out of its own folder.
+            _module.args = {
+              inherit (songbook) song borrow;
+            };
             aoide.song = song.declared;
             aoide.songbook.builtIn = songbook.builtIn song;
           }
