@@ -512,7 +512,7 @@ the inbound half of the two-door contract (the outbound half is
   signed as; paired but `message` not in `allows`, told the exact `node
   allow … message on` fix; no verified signature resolution at all). The
   answer is exactly `{envelopes: […]}` — the sealed envelopes, oldest
-  first, from `aoide_storage::outbox::poll_entries`: every `hold` entry
+  first, from `aoide_storage::outbox::poll_payloads`: every `hold` entry
   toward that node plus every `now` entry whose own attempts have been
   failing. **A poll writes NOTHING** — no `tries`, no bookmark, no new
   state file anywhere: hand-over leaves the entry exactly where it was, and

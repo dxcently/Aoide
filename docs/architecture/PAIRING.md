@@ -123,7 +123,8 @@ aoide pair <target> [--name b]
   → POST commitment to B's door ─────────► parks pending, UNREVEALED
      (A's pubkey, A's name,                (id, A's pubkey, A's claimed
       commit = H(pubkey_A, nonce_A),        name, origin addr, commit,
-      selfVia = A's own reach-back claim)   A's selfVia claim if given)
+      selfVia = A's own reach-back claim,   A's selfVia claim if given,
+      binding = A's signed age binding)     A's binding if given)
   ◄── B's pubkey + B's own nonce ─────────┘
   → POST reveal ──────────────────────────► verifies H(pubkey_A, nonce_A)
      (id, nonce_A)                             == commit; stores nonce_A
@@ -814,6 +815,38 @@ nodes, in what order, through which hops, at what grant — which `--yes`
 skips exactly as it skips the sweep's proceed-prompt on `aoide pair`. It is
 a convenience over the listing, never a substitute for a code: skipping it
 bypasses no gate, because the codes are the gate.
+
+**The ceremony carries the age binding (P-SEAL).** The pairing ceremony is
+one of the two carriages `HTTPS-MESH-API.md` gives a node's self-signed age
+key binding; the other is the `aoide/binding` door read. This is the one
+that reaches a pair before either side has exchanged a letter, which is why
+it exists: without it, two freshly paired nodes seal nothing to each other
+until one of them happens to drain an outbox or poll.
+
+- `aoide/pairRequest` carries an OPTIONAL `binding` beside `selfVia` — A's
+  own signed binding. B checks it against the `pubkeyHex` the SAME request
+  claims, before it parks anything: a binding whose signer is not that key
+  is a malformed request, not an older-peer one. A request carrying no
+  binding at all parks and pairs exactly as it always did, and the parked
+  record has no `binding` key rather than a null one, so an older binary
+  reading B's state sees nothing new. **This is the per-peer upgrade path,
+  and it is why the field is optional rather than required.**
+- `aoide/pairPoll`'s `approved` answer carries B's own binding beside
+  `pubkeyHex`, minted at release time. A requester against an older approver
+  gets none, and its pairing still completes.
+- Each side records the other's binding when the pairing commits:
+  `seal::learn_binding`, which re-verifies it against the key now on record
+  and refuses `stale-binding` for a generation that is not above the stored
+  one.
+- **The high-water mark is enforced at the carriage as well as at the
+  commit.** A binding that is not newer than what the parked record already
+  carries is dropped on arrival, so a replay cannot walk the record
+  backwards while it waits for approval; an equal generation with different
+  bytes is not a change either. The rule lives in two places on purpose:
+  neither the wait nor the commit is its single home.
+- A binding the ceremony cannot record never fails the pairing. Both
+  recordings are best-effort by construction; an age key that will not mint
+  costs a node its sealing until it can, never its pairing.
 
 **`sameOperator` is declared and not acted on.** A converge never
 satisfies the far side's typed code on an operator's behalf: a mesh
