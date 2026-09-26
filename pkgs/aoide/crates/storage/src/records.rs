@@ -543,14 +543,30 @@ pub struct SessionRecord {
     )]
     pub session_start_at: Option<String>,
     /// The OPENING TURN of a session the A2A door spawned: what became of the
-    /// first turn a remote peer asked for (`pending` from the moment the door
-    /// accepts the spawn until its worker's wait-and-type concludes — then
-    /// `delivered`, `delivered-unverified`, `not-ready`, or `skipped-shell`).
-    /// One writer: the A2A door's own stamp (`a2a::do_spawn` + its worker),
-    /// which is the only party that knows; one reader: `tasks/get`, so a peer
-    /// whose opening turn never ran sees that instead of a bare `submitted`.
-    /// Additive/v0-safe: absent on every locally-spawned session and every
-    /// legacy record.
+    /// first turn a remote peer asked for. One writer: the A2A door's own
+    /// stamp (`a2a::do_spawn` + its worker). The vocabulary, complete:
+    ///
+    /// - `pending` — accepted, the worker is waiting for the target;
+    /// - `delivered` / `delivered-unverified` — the turn went out (the second
+    ///   when the target declared no readiness fact, so whether it submitted
+    ///   is not known);
+    /// - `not-ready` — the budget ran out and NOTHING was typed;
+    /// - `busy` — the door's opening-turn worker pool was full (nothing was
+    ///   typed; ask again);
+    /// - `no-worker` — no worker thread could be started (nothing was typed);
+    /// - `skipped-empty` / `skipped-shell` — nothing to type, or a shell may
+    ///   not be typed at;
+    /// - `no-socket` / `write-failed` — the target's control socket never
+    ///   answered, or the write failed (no receipt filed in either case);
+    /// - `unknown` — the process that owed a verdict died before it could
+    ///   stamp one (a boot pass reconciles a stranded `pending` to this).
+    ///
+    /// It is a HISTORICAL fact, not live state: it is stamped once and never
+    /// cleared, so a `tasks/get` long after the fact reports what happened to
+    /// the OPENING turn even though the session has moved on (its own `state`
+    /// is the live word). One reader: `tasks/get`, as the task's
+    /// `status.message`. Additive/v0-safe: absent on every locally-spawned
+    /// session and every legacy record.
     #[serde(
         rename = "openingTurn",
         default,

@@ -940,7 +940,13 @@ never the inbound/serve half (that's `aoide-server`).
   `aoide_storage::remote_children` (`remote_child_row`, keyed on the node's
   pubkey and the child's session id — and it holds the ack's own id to that
   same predicate, so a paired-but-hostile node cannot plant a ledger row on a
-  shape no session can occupy). `--task <slug>` (P-RSA S10) rides the same
+  shape no session can occupy). The printed line carries what became of the
+  OPENING TURN, read off the ack Task's `status.message` — an A2A `Message`
+  object whose first text part reads `opening turn: <verdict>` (CONTRACTS.md
+  §4 vocabularies it, §6 types it), `pending` at the ack and the door's
+  worker's verdict after — so a `node spawn` whose remote turn has not run
+  (or never will) says so in the operator's own line, instead of looking like
+  a clean handoff. `--task <slug>` (P-RSA S10) rides the same
   body as `metadata["aoide/task"]` and is held to the same
   `valid_node_name` shape locally, so a bad slug costs no round trip either;
   with it the far node runs the child as a MANAGED task run (task mailbox,

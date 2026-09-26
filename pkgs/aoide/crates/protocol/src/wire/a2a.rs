@@ -122,18 +122,19 @@ pub struct Artifact {
 pub struct TaskStatus {
     pub state: String,
     pub timestamp: String,
-    /// A2A's optional human-readable companion to `state` — aoide's use is
-    /// the OPENING TURN a spawned session was asked to run: `opening turn:
-    /// pending` while the door's worker is still waiting for the target,
-    /// then `opening turn: delivered` / `delivered-unverified` /
-    /// `not-ready`, so a remote peer reads what became of its first turn
-    /// instead of assuming `submitted` meant the turn ran. Absent (and
+    /// A2A's optional `status.message` — a `Message` OBJECT in this binding
+    /// (v0.3.x: `role` + `parts`), never a bare string, so a strict A2A client
+    /// parses `tasks/get` unchanged. aoide's use is the OPENING TURN a spawned
+    /// session was asked to run: one `agent` message whose single text part
+    /// reads `opening turn: <verdict>` (`pending` while the door's worker is
+    /// still waiting for the target, then the record's own verdict — see
+    /// `openingTurn` in CONTRACTS.md §4 for the vocabulary). Absent (and
     /// skipped on the wire, byte-identical to the pre-amendment shape) on
     /// every task whose record carries no `openingTurn` — every locally
     /// spawned session, every inject into an existing one, every legacy
     /// record.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub message: Option<String>,
+    pub message: Option<Message>,
 }
 
 /// The FINAL event a `message/stream`/`tasks/resubscribe` SSE loop emits
@@ -263,6 +264,41 @@ pub struct Part {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_task_status_message_is_an_a2a_message_object_or_absent() {
+        // Branch re-review M3 gap 2: in the v0.3.x binding this module mirrors,
+        // `TaskStatus.message` is a `Message`, never a bare string — a strict
+        // A2A client must be able to parse `tasks/get` unchanged.
+        let bare = TaskStatus {
+            state: "submitted".to_string(),
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+            message: None,
+        };
+        let v = serde_json::to_value(&bare).unwrap();
+        assert!(v.get("message").is_none(), "absent stays absent: {v}");
+
+        let with_verdict = TaskStatus {
+            message: Some(Message {
+                role: "agent".to_string(),
+                parts: vec![Part {
+                    kind: "text".to_string(),
+                    text: Some("opening turn: not-ready".to_string()),
+                    extra: serde_json::Map::new(),
+                }],
+                message_id: None,
+                context_id: Some("sess-1".to_string()),
+                metadata: None,
+            }),
+            ..bare
+        };
+        let v = serde_json::to_value(&with_verdict).unwrap();
+        assert_eq!(v["message"]["role"], "agent", "v: {v}");
+        assert_eq!(v["message"]["parts"][0]["kind"], "text", "v: {v}");
+        assert_eq!(v["message"]["parts"][0]["text"], "opening turn: not-ready");
+        let back: TaskStatus = serde_json::from_value(v).unwrap();
+        assert_eq!(back, with_verdict);
+    }
 
     #[test]
     fn agent_card_serializes_every_field_and_round_trips() {

@@ -179,6 +179,11 @@ pub use self::session_store::stamp_remote_parent;
 // `submitted` over a session no turn ever reached. `pub` because the writer
 // lives in `aoide-server`, the authority that accepted the spawn.
 pub use self::session_store::stamp_opening_turn;
+// `settle_lost_opening_turns` — the boot pass that reconciles a `pending`
+// opening turn whose worker died with its process (`unknown`), so a peer
+// never reads "still waiting" for a verdict nobody will ever stamp. `pub` for
+// the daemon (`aoide-server`) at boot.
+pub use self::session_store::settle_lost_opening_turns;
 // LANE IDENTITY P-ID1: `aoide-server`'s daemon `dispatch` handler is the one
 // legitimate caller — it stamps a just-minted sealed credential directly
 // onto the record it just registered a pid for, the same "stamp from the

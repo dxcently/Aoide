@@ -1221,7 +1221,19 @@ pub fn run_loop(
     // they proceed in parallel here, and the tick starts immediately.
     if let Err(e) = std::thread::Builder::new()
         .name("boot-auto-resume".to_string())
-        .spawn(run_boot_auto_resume)
+        .spawn(|| {
+            // Reconcile FIRST: an opening turn stranded at `pending` belongs to
+            // the process that died before stamping its verdict, and this boot
+            // is the moment that is knowable (`unknown`, never a word that
+            // reads as "still waiting").
+            let settled = aoide_conduct::graph::settle_lost_opening_turns();
+            if settled > 0 {
+                eprintln!(
+                    "aoide aoided: settled {settled} stranded opening turn(s) to `unknown` (their worker died with a previous process)"
+                );
+            }
+            run_boot_auto_resume()
+        })
     {
         // No thread to run them on: the resumes are best-effort by design, and
         // stalling the tick to attempt them synchronously would trade one

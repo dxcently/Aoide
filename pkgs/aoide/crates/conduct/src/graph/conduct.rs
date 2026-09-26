@@ -1977,12 +1977,23 @@ mod tests {
         std::env::set_var("CLAUDE_CONFIG_DIR", "/home/someone/.claude");
         std::env::set_var("AOIDE_SESSION_ID", "not-this-childs");
 
-        let args: Vec<String> = vec!["-c".to_string(), "sleep 5".to_string()];
+        let args: Vec<String> = vec!["-c".to_string(), "sleep 30".to_string()];
         let (child, _master) = spawn_on_pty("sh", &args, "scrub-exec-child", None, None)
             .expect("a pty child starts");
         let pid = child.id();
-        // The pty child is a session leader; its own environ is the fact.
-        let environ = std::fs::read(format!("/proc/{pid}/environ")).expect("own child, own /proc");
+        // The pty child is a session leader; its own environ is the fact. The
+        // child sleeps well past this read (a short-lived one raced the
+        // `/proc/<pid>/environ` read into a panic under load), and the read
+        // itself retries briefly for the same reason.
+        let mut environ = Vec::new();
+        for _ in 0..20 {
+            if let Ok(bytes) = std::fs::read(format!("/proc/{pid}/environ")) {
+                environ = bytes;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert!(!environ.is_empty(), "own child, own /proc — no environ read back");
         let env: Vec<String> = environ
             .split(|b| *b == 0)
             .map(|v| String::from_utf8_lossy(v).into_owned())

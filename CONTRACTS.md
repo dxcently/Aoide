@@ -1769,11 +1769,23 @@ round-trip fields they do not know.
 
 **Additive in v0 (A2A opening turn, 2026-09-26):** a session record MAY also
 carry an optional `openingTurn` (string) — what became of the first turn the
-A2A door asked a
-spawned session to run (`pending` at the spawn acknowledgement, then the
-worker's `delivered`/`delivered-unverified`/`not-ready`/`skipped-shell`),
-written by `stamp_opening_turn` from the door that accepted the spawn and read
-by `tasks/get` as the task's `status.message`. Absent on every locally
+A2A door asked a spawned session to run. The vocabulary is complete and
+closed, and its home is the field's own doc in `storage/src/records.rs`:
+`pending` (accepted; a worker is waiting for the target), `delivered` /
+`delivered-unverified` (the turn went out; the second when the target
+declared no readiness fact), `not-ready` (the budget ran out, nothing typed),
+`busy` (the door's opening-turn worker pool was full — nothing typed, ask
+again), `no-worker` (no worker thread could be started), `skipped-empty` /
+`skipped-shell` (nothing to type, or a shell may not be typed at),
+`no-socket` / `write-failed` (the control socket never answered, or the write
+failed — no receipt filed either way), and `unknown` (the process that owed
+the verdict died; a boot pass reconciles a stranded `pending` to this). It is
+a HISTORICAL fact: stamped once, never cleared by a later turn, so a
+`tasks/get` days later reports the opening turn while the record's own
+`state` carries the live word. Its one reader is `tasks/get`, which reports
+it as the task's `status.message` — an A2A `Message` object (`role: "agent"`,
+one text part reading `opening turn: <verdict>`), which is what this binding
+types that field as (CONTRACTS.md §6). Absent on every locally
 spawned session.
 
 **Additive in v0 (P-D7, `docs/architecture/AOIDED.md`'s "L5"):** a session
@@ -4860,6 +4872,16 @@ Server-Sent Events. The MVP door serves exactly:
 `tasks/cancel` remains an **additive** follow-on — v0 does not require it, and
 adding it later is not a version bump to this contract (same additive
 discipline as §1/§4's optional tiers).
+
+**Additive in v0 (spawn readiness, 2026-09-26):** a `TaskStatus` MAY carry
+`message` — A2A's own optional field, and typed as this binding has it: a
+`Message` OBJECT (`role` + `parts`), never a string, so a strict A2A client
+parses `tasks/get` unchanged. aoide's use is one `agent` message whose single
+text part reads `opening turn: <verdict>` (the vocabulary is §4's
+`openingTurn`), so a remote peer whose opening turn has not run yet — or never
+will — reads that instead of assuming `submitted` meant the turn ran. Absent
+(and skipped on the wire) for every task whose record carries no
+`openingTurn`, so those responses stay byte-identical.
 
 ### Streaming: SSE (Phase C)
 

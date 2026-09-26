@@ -1722,9 +1722,30 @@ fn handle_node_spawn(inv: &Invocation) -> Outcome {
                 Some(p) => format!("parent `{p}`"),
                 None => "parent: none (unattested)".to_string(),
             };
+            // What became of the opening turn, straight off the ack Task's
+            // `status.message` — a proper A2A `Message` (role + parts), so the
+            // text is its first part's `text`. The spawn ack carries `pending`
+            // (the door's worker is still waiting for the target); a later
+            // `tasks/get` carries the verdict, and this line is where the
+            // operator sees that the opening turn has NOT run yet rather than
+            // assuming it did.
+            let opening_note = parsed
+                .get("result")
+                .and_then(|r| r.get("status"))
+                .and_then(|s| s.get("message"))
+                .and_then(|m| m.get("parts"))
+                .and_then(Value::as_array)
+                .and_then(|parts| parts.first())
+                .and_then(|part| part.get("text"))
+                .and_then(Value::as_str)
+                .map(|text| format!(" — {text}"))
+                .unwrap_or_default();
             Outcome::ok(
                 cmd,
-                format!("spawned on `{}` — remote session `{session_id}` ({parent_note})", node.name),
+                format!(
+                    "spawned on `{}` — remote session `{session_id}` ({parent_note}){opening_note}",
+                    node.name
+                ),
             )
             .with_data(json!({
                 "name": node.name,

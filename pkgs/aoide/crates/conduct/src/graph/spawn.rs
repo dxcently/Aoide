@@ -1030,7 +1030,7 @@ pub fn session_spawn(inv: &Invocation) -> Outcome {
     if prompt_result == "delivered-unverified" {
         message = format!(
             "{message} — `--prompt` injected but UNVERIFIED: `{agent}` has no declared readiness \
-             fact (no profile for that name), so the turn was typed once its output settled and \
+             fact (that harness name declares none), so the turn was typed once its output settled and \
              whether it submitted is not known here"
         );
     }

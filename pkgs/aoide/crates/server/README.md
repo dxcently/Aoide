@@ -201,10 +201,19 @@ the inbound half of the two-door contract (the outbound half is
   wait runs on a WORKER, one per spawn, never on the connection handler — 20s
   of budget plus the socket retry against `MAX_CONN` would hand every other
   RPC a `503 server busy`. The worker's verdict lands on the record
-  (`stamp_opening_turn`: `pending` is stamped as the spawn is acknowledged,
-  then `delivered` / `delivered-unverified` / `not-ready` / `skipped-shell`),
-  and `tasks/get` reports it as the task's `status.message` — so a peer whose
-  opening turn never ran is told so instead of reading a bare `submitted`.
+  (`stamp_opening_turn`: `pending` is stamped the moment the record registers,
+  then `delivered` / `delivered-unverified` / `not-ready` / `busy` /
+  `no-worker` / `skipped-shell` / `skipped-empty` / `no-socket` /
+  `write-failed`, or `unknown` when a boot pass reconciles a verdict lost with
+  the process that owed it — the complete list and its meaning live on the
+  field's own doc, `storage/src/records.rs`), and `tasks/get` reports it as the
+  task's `status.message` — an A2A `Message` object, never a bare string — so a
+  peer whose opening turn never ran is told so instead of reading a bare
+  `submitted`. `aoide node spawn` prints that same line, so the operator does
+  not have to reach for `tasks/get` to see it. The pool is bounded
+  (`OPENING_TURN_WORKERS_MAX` waits in flight, the handler's own slot being
+  released too early to be a bound): past it the opening turn is stamped
+  `busy`, never silently dropped.
   These were the only two mailbase-filing call sites until P-M2 added a
   third, unrelated to either: `mail_deposit`'s own call into
   `aoide_storage::mail::deposit` (below), which files a letter or receipt

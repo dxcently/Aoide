@@ -675,11 +675,75 @@ fn build_task(sessions: &[SessionRecord], id: &str) -> Result<Task, (i64, String
     })
 }
 
-/// What became of the opening turn, as `status.message` — `None` for every
-/// record that carries no `openingTurn` (a local spawn, an inject into an
-/// existing session, a legacy record), so those tasks stay byte-identical.
-fn opening_turn_message(rec: &SessionRecord) -> Option<String> {
-    rec.opening_turn.as_deref().map(|word| format!("opening turn: {word}"))
+/// How many opening-turn workers may be WAITING at once, across every spawn
+/// this door is serving. The wait is the expensive part (up to `READY_BUDGET`
+/// plus the socket retry) and it OUTLIVES the RPC that started it, so
+/// `MAX_CONN` no longer bounds it — the connection slot is released when the
+/// handler returns (branch re-review N2: the comment here used to claim that
+/// slot WAS the cap, which stopped being true the moment the work moved off
+/// the handler). This is that bound: a small pool, because a spawn-granted
+/// peer looping `message/send` against a never-ready `spawnAgent` would
+/// otherwise park one 20s thread (plus its real agent process) per request
+/// with no backpressure at all. Past the cap the opening turn is reported
+/// `busy` — an honest word the caller can retry on, never a silent drop.
+const OPENING_TURN_WORKERS_MAX: usize = 8;
+static OPENING_TURN_WORKERS: AtomicUsize = AtomicUsize::new(0);
+
+/// One slot in that pool, released when the worker holding it ends — the guard
+/// moves into the thread, so a panic or an early return still frees it.
+struct OpeningTurnSlot;
+
+impl OpeningTurnSlot {
+    fn acquire() -> Option<OpeningTurnSlot> {
+        let mut current = OPENING_TURN_WORKERS.load(Ordering::Acquire);
+        loop {
+            if current >= OPENING_TURN_WORKERS_MAX {
+                return None;
+            }
+            match OPENING_TURN_WORKERS.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Some(OpeningTurnSlot),
+                Err(observed) => current = observed,
+            }
+        }
+    }
+}
+
+impl Drop for OpeningTurnSlot {
+    fn drop(&mut self) {
+        OPENING_TURN_WORKERS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// One `status.message` for an opening-turn verdict — the A2A `Message` shape
+/// this binding types the field as, built in one place so the ack
+/// (`pending`), the record's own verdict and any future reader cannot drift.
+fn opening_turn_status(id: &str, word: &str) -> Message {
+    Message {
+        role: "agent".to_string(),
+        parts: vec![Part {
+            kind: "text".to_string(),
+            text: Some(format!("opening turn: {word}")),
+            extra: Default::default(),
+        }],
+        message_id: None,
+        context_id: Some(id.to_string()),
+        metadata: None,
+    }
+}
+
+/// What became of the opening turn, as the task's `status.message`, off the
+/// record the worker stamped. `None` for every record that carries no
+/// `openingTurn` (a local spawn, an inject into an existing session, a legacy
+/// record), so those tasks stay byte-identical.
+fn opening_turn_message(rec: &SessionRecord) -> Option<Message> {
+    rec.opening_turn
+        .as_deref()
+        .map(|word| opening_turn_status(&rec.session_id, word))
 }
 
 /// Load `sessions.json` off the stage and resolve one task by id.
@@ -1719,6 +1783,11 @@ fn stamp_spawn_provenance(id: &str, origin: &str, remote_parent: Option<RemotePa
             .map(|f: SessionsFile| f.sessions.iter().any(|s| s.session_id == id))
             .unwrap_or(false);
         if registered {
+            // `pending` goes on the record the instant it EXISTS (branch
+            // re-review N4's nit): this loop is already the door's
+            // wait-for-registration, so stamping here closes the window in
+            // which a fast peer's `tasks/get` saw no `openingTurn` at all.
+            aoide_conduct::graph::stamp_opening_turn(id, "pending");
             aoide_conduct::graph::stamp_origin(id, origin);
             if let Some(parent) = &remote_parent {
                 aoide_conduct::graph::stamp_remote_parent(id, parent);
@@ -2130,41 +2199,79 @@ fn do_spawn(
             // can run for `READY_BUDGET` (20s) and then the socket retry for
             // ~3s more, and a handler parked that long against `MAX_CONN`
             // hands `503 server busy` to every other RPC — read commands
-            // included. ONE worker per spawn is the cap (a spawn already owns
-            // a connection slot); nothing joins it, and the record carries the
-            // outcome so `tasks/get` can tell the peer what became of its turn.
+            // included. The handler's slot is released the moment it returns,
+            // so the real bound on these waits is the pool below
+            // ([`OPENING_TURN_WORKERS_MAX`]): past it the opening turn is
+            // reported `busy`, never silently dropped. Nothing joins the
+            // worker, and the record carries the outcome so `tasks/get` can
+            // tell the peer what became of its turn.
             aoide_conduct::graph::stamp_opening_turn(&id, "pending");
             let worker_audit = audit_log.to_path_buf();
-            {
-                let worker_id = id.clone();
-                let agent_cmd = agent_cmd.to_string();
-                let prompt = prompt.to_string();
-                let launch_at = launch_at.clone();
-                let scheduled = std::thread::Builder::new()
-                    .name(format!("a2a-opening-turn-{worker_id}"))
-                    .spawn(move || {
-                        let word = spawn_inject_prompt(
-                            &worker_id,
-                            &agent_cmd,
-                            &prompt,
-                            &launch_at,
-                            aoide_conduct::graph::READY_BUDGET,
-                        );
-                        aoide_conduct::graph::stamp_opening_turn(&worker_id, word);
+            let mut ack_word = "pending";
+            match OpeningTurnSlot::acquire() {
+                None => {
+                    // The pool is saturated with other spawns' waits. This is
+                    // NOT "the target never reported readiness" — it is "this
+                    // door is full" — so it gets its own word, and the peer can
+                    // ask again.
+                    aoide_conduct::graph::stamp_opening_turn(&id, "busy");
+                    ack_word = "busy";
+                    let _ = audit(
+                        audit_log,
+                        Door::A2a,
+                        EventClass::Audit,
+                        "a2a.message/send",
+                        "busy",
+                        &format!(
+                            "opening turn for `{id}`: busy — {OPENING_TURN_WORKERS_MAX} waits already in flight; the session is spawned, ask again for its opening turn"
+                        ),
+                    );
+                }
+                Some(slot) => {
+                    let worker_id = id.clone();
+                    let agent_cmd = agent_cmd.to_string();
+                    let prompt = prompt.to_string();
+                    let launch_at = launch_at.clone();
+                    let scheduled = std::thread::Builder::new()
+                        .name(format!("a2a-opening-turn-{worker_id}"))
+                        .spawn(move || {
+                            // Hold the slot for the worker's whole life.
+                            let _slot = slot;
+                            let word = spawn_inject_prompt(
+                                &worker_id,
+                                &agent_cmd,
+                                &prompt,
+                                &launch_at,
+                                aoide_conduct::graph::READY_BUDGET,
+                            );
+                            aoide_conduct::graph::stamp_opening_turn(&worker_id, word);
+                            let _ = audit(
+                                &worker_audit,
+                                Door::A2a,
+                                EventClass::Audit,
+                                "a2a.message/send",
+                                word,
+                                &format!("opening turn for `{worker_id}`: {word}"),
+                            );
+                        })
+                        .is_ok();
+                    if !scheduled {
+                        // No worker means no turn will ever be typed — and
+                        // `not-ready` would be a lie about the TARGET, so this
+                        // says what actually happened.
+                        aoide_conduct::graph::stamp_opening_turn(&id, "no-worker");
+                        ack_word = "no-worker";
                         let _ = audit(
-                            &worker_audit,
+                            audit_log,
                             Door::A2a,
                             EventClass::Audit,
                             "a2a.message/send",
-                            word,
-                            &format!("opening turn for `{worker_id}`: {word}"),
+                            "no-worker",
+                            &format!(
+                                "opening turn for `{id}`: no-worker — the door could not start a worker thread; nothing was typed"
+                            ),
                         );
-                    })
-                    .is_ok();
-                if !scheduled {
-                    // No worker means no turn will ever be typed; say so
-                    // rather than leave the record `pending` forever.
-                    aoide_conduct::graph::stamp_opening_turn(&id, "not-ready");
+                    }
                 }
             }
             let _ = audit(
@@ -2187,7 +2294,7 @@ fn do_spawn(
                 status: TaskStatus {
                     state: "submitted".to_string(),
                     timestamp: now_iso_utc(),
-                    message: Some("opening turn: pending".to_string()),
+                    message: Some(opening_turn_status(&id, ack_word)),
                 },
                 kind: "task".to_string(),
                 artifacts: None,
@@ -9118,12 +9225,16 @@ mod tests {
         // The door's own pending stamp, then the worker's verdict.
         aoide_conduct::graph::stamp_opening_turn("spawned-remote", "pending");
         let task = task_get("spawned-remote").unwrap();
-        assert_eq!(task["status"]["message"], "opening turn: pending", "task: {task}");
+        assert_eq!(
+            task["status"]["message"]["parts"][0]["text"], "opening turn: pending",
+            "the status message is an A2A Message object, not a string: {task}"
+        );
+        assert_eq!(task["status"]["message"]["role"], "agent", "task: {task}");
 
         aoide_conduct::graph::stamp_opening_turn("spawned-remote", "not-ready");
         let task = task_get("spawned-remote").unwrap();
         assert_eq!(
-            task["status"]["message"], "opening turn: not-ready",
+            task["status"]["message"]["parts"][0]["text"], "opening turn: not-ready",
             "a peer whose opening turn never ran is TOLD so: {task}"
         );
 
@@ -9178,6 +9289,28 @@ mod tests {
             Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
             None => std::env::remove_var("XDG_RUNTIME_DIR"),
         }
+    }
+
+    /// N2: the opening-turn worker pool is a REAL bound — the eighth waiter
+    /// fits, the ninth is refused (`busy`), and a released slot is reusable.
+    /// Without it the wait the M4 fix moved off the handler is bounded by
+    /// nothing at all.
+    #[test]
+    fn the_opening_turn_worker_pool_refuses_past_its_cap() {
+        let mut held: Vec<OpeningTurnSlot> = Vec::new();
+        for _ in 0..OPENING_TURN_WORKERS_MAX {
+            held.push(OpeningTurnSlot::acquire().expect("a slot inside the cap"));
+        }
+        assert!(
+            OpeningTurnSlot::acquire().is_none(),
+            "the pool must refuse the {}-th concurrent wait",
+            OPENING_TURN_WORKERS_MAX + 1
+        );
+        held.pop();
+        assert!(
+            OpeningTurnSlot::acquire().is_some(),
+            "a released slot is reusable"
+        );
     }
 
     #[test]
