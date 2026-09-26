@@ -28,10 +28,10 @@ The repo is a **snowflake**: everything lives under `modules/`, and a capability
 ├── modules/
 │   ├── nucleus/    core: aoided daemon, shellbridge, CLI packaging, options, policy
 │   ├── dendrites/  opt-in features — one tree, shipped + personal branches
-│   └── facets/     render surfaces (read ONLY aoide.livery): quickshell · compositor · stylix
+│   └── lyra/       the shell surface · compositor/ the Hyprland look + behaviour
 ├── hosts/
 │   ├── common/     cross-machine baseline (which dendrites default ON)
-│   └── <host>/     machine-specific picks (hardware, enabled facets, song)
+│   └── <host>/     machine-specific picks (hardware, enabled lanes, song)
 ├── pkgs/           the aoide CLI + daemon (Rust, its own flake, consumed as a path input)
 ├── lib/            mkHost + checks + the walker (song/songbook, pkgs discovery)
 ├── song/           the performed half (rices, songbook, runtime stage/)
@@ -43,8 +43,7 @@ Three layers, radial distance from the nucleus governing who may change what —
 | Layer | Owner | What it holds |
 |---|---|---|
 | `modules/nucleus/` | upstream | The daemon, CLI packaging, the option contract, policy. |
-| `modules/dendrites/` | shipped + you | Opt-in features, one flat tree; new personal dendrites are additive files. |
-| `modules/facets/` | upstream | Render surfaces — Quickshell, the compositor, Stylix — reading only `aoide.livery`. |
+| `modules/dendrites/` | shipped + you | Opt-in features, one flat tree; new personal dendrites are additive files — the paint lanes (compositor, greeter, stylix, lyra) read only `aoide.livery`. |
 | `song/` | you (agent-written) | The performed half: committed songs, palettes, and the gitignored runtime `stage/`. |
 
 Deeper reads:
@@ -105,7 +104,7 @@ An independently-owned vault API serving a folder of notes over MCP — read, wr
 
 ## 4. Install (Nix flakes)
 
-Aoide is a framework you **clone and run**, not a package you install — the upstream repo ships the shape-making machinery (engine, contracts, walker, facets) but never the shapes themselves. Your clone is your instance, and shared git history means upstream improvements arrive as an ordinary merge. A remote fork is optional — for backup, fleet sync, or contributing back.
+Aoide is a framework you **clone and run**, not a package you install — the upstream repo ships the shape-making machinery (engine, contracts, walker, paint lanes) but never the shapes themselves. Your clone is your instance, and shared git history means upstream improvements arrive as an ordinary merge. A remote fork is optional — for backup, fleet sync, or contributing back.
 
 **Prerequisites:** a NixOS box with flakes enabled (`nix.settings.experimental-features = [ "nix-command" "flakes" ];` in your existing config, or `experimental-features = nix-command flakes` in `/etc/nix/nix.conf`).
 
@@ -150,4 +149,4 @@ Two axes move independently, and neither has a background updater — house poli
 | [`docs/Aoide-Wiki/concepts/desktop/Controls.md`](docs/Aoide-Wiki/concepts/desktop/Controls.md) | Every keybind and shell alias: the `ad*` rebuild family, compositor keybinds, bar interactions, shell QoL aliases. |
 | [`AGENTS.md`](AGENTS.md) | The agent-facing onboarding doc — house rules and pointers, for any agent driving this repo; `docs/agent/` is its checkout-side router. |
 | [`CONTRACTS.md`](CONTRACTS.md) | Versioned interfaces: the note schema, dendrite shape, `schema --json`, stage-file formats. |
-| [`docs/BUILD.md`](docs/BUILD.md) | Module-authoring: how to write a dendrite or facet. |
+| [`docs/BUILD.md`](docs/BUILD.md) | Module-authoring: how to write a dendrite. |

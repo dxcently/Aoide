@@ -1,7 +1,7 @@
 // StagingEngine.qml — the staging engine: resolves the active song's livery
 // tokens to per-slot QML.
 //
-// The quickshell facet's build (modules/facets/quickshell/default.nix) carries
+// The lyra lane's build (modules/dendrites/lyra/default.nix) carries
 // every committed song's authored widget slots into $out/qml/songs/<name>/
 // <slot>.qml, plus a generated songs/manifest.json — an OWNER MAP recording
 // which song's manifest entry provides each slot, and which song's directory

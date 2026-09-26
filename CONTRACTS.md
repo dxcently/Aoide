@@ -24,16 +24,20 @@ The repo already runs this way and did before it had a name for it. A dendrite
 is one file (or one directory) plus **one catalogue line** — the whole-tree
 aggregate derives its imports from that catalogue, so no second list follows it.
 `lib/walk.nix` discovers `pkgs/*` and `song/songbook/*/rice.nix` by a
-directory's one typed scan the same way (§2, §5). `modules/facets/` and
-`modules/nucleus/` name their own files in their own `default.nix`: a layer
-nothing selects has no name to be reached by, and their one line per file is
-what puts them in the tree. Each of those modules
+directory's one typed scan the same way (§2, §5). `modules/nucleus/default.nix`
+names its own files in directory order: it is the unconditional core, so a layer
+nothing selects has no name to be reached by, and its one line per file is what
+puts them in the tree. Each of those modules
 self-gates on its own `enable`/`aoide.song` rather than being switched on from
 outside. A widget resolves through `StagingEngine.resolveSong(song, slot)` — by
 slot *name*, falling back to sonata — so no surface ever imports a concrete
-widget (§5). Facets read only the closed namespace whitelist house rule 5
-enumerates (`AGENTS.md` owns the list): named services, never another
-module's internals.
+widget (§5). Paint dendrites read only the closed namespace whitelist house
+rule 5 enumerates (`AGENTS.md` owns the list): named services, never another
+module's internals. The catalogue is also what the selection constructor reads:
+`lib/composition.nix` (exported as `lib.composition`) resolves a host's
+selection in a pass that runs before any module graph exists and imports only
+what that pass kept — a provider registry resolves to the alternative the host
+named, and a file nothing selected is never read.
 
 Two names for the halves, taken from **Cordis** — *A Programming Paradigm for
 Spatiotemporal Composability* (Shi, Zhang & Cui; preprint 2026-08-13,
@@ -68,12 +72,12 @@ defaults `false`; `aoide.quickshell.config` defaults `null`:
 
 | Fact | What it means | Set by |
 |---|---|---|
-| `aoide.quickshell.enable` | a Quickshell shell surface exists here | the lane that renders one (`facets/quickshell` today) |
+| `aoide.quickshell.enable` | a Quickshell shell surface exists here | the lane that renders one (`dendrites/lyra`) |
 | `aoide.quickshell.config` (`nullOr str`, `null`) | the directory a shell runs; `null` is the bare case — package installed, no shell service | whoever supplies one: a lane, or the host |
-| `aoide.lyra.enable` | the paint/rice binary is installed (`pkgs.aoide.rice`) | the lane that paints (`facets/quickshell` today) |
-| `aoide.stylix.enable` | the theme is baked at build time, painted by nix | the Stylix lane (`facets/stylix` today) |
-| `aoide.compositor.enable` | a Wayland compositor is started here | the compositor lane (`facets/compositor` today) |
-| `aoide.greeter.enable` | a display-manager greeter comes up on this host's tty | the compositor lane (`facets/compositor` today) |
+| `aoide.lyra.enable` | the paint/rice binary is installed (`pkgs.aoide.rice`) | the lane that paints (`dendrites/lyra`) |
+| `aoide.stylix.enable` | the theme is baked at build time, painted by nix | the stylix lane (`dendrites/stylix.nix`) |
+| `aoide.compositor.enable` | a Wayland compositor is started here | the compositor lane (`dendrites/compositor`) |
+| `aoide.greeter.enable` | a display-manager greeter comes up on this host's tty | the compositor lane (`dendrites/compositor`) |
 
 The lane that owns a fact sets it `mkDefault true` while it is on, so a host
 that flips it back off still wins. Every reader then reads the FACT — never the
@@ -82,7 +86,7 @@ the one place house rule 5 must hold in both directions at once: nucleus
 plumbing (`modules/nucleus/secrets.nix`) and sibling lanes alike need to know
 whether a session exists, and neither may name the lane that made one. A lane
 reading a fact is reading nucleus's own declaration rather than another
-module's internals; which of these names a *facet* may read is whatever root
+module's internals; which of these names a *paint dendrite* may read is whatever
 `AGENTS.md` rule 5's list currently enumerates.
 
 `aoide.sessionTarget` is the same seam answering a different question — *which
@@ -94,7 +98,7 @@ which lane did.
 ### The corollary for Quickshell: render surfaces only
 
 **Quickshell paints; it never *is* the capability.** Every QML file in
-`modules/facets/quickshell/` and `song/songbook/*/widgets/` is a render surface
+`modules/dendrites/lyra/` and `song/songbook/*/widgets/` is a render surface
 that picks up an agnostic bridge or API by name. State, policy, IPC and system
 access live behind a bridge (a CLI command, a stage file in §4, an IPC socket) that
 is reachable **with only a shell**.
@@ -109,11 +113,11 @@ the reverse, and never only in QML. A surface may read, arrange, animate and
 draw; it may not own the only copy of a fact, shell out to do work a command should
 do, or decide policy.
 
-#### The paint test — facet QML vs song QML
+#### The paint test — lane QML vs song QML
 
 The terminal test above decides **bridge vs QML**. This second test decides
-where a file that already passed it lives: the facet keeps agnostic bridges and
-APIs, the song keeps everything that paints (§5). **The facet is not a component
+where a file that already passed it lives: the lane keeps agnostic bridges and
+APIs, the song keeps everything that paints (§5). **A lane is not a component
 library** — a shared visual component's home is the song's `widgets/` dir under
 an uppercase name, not `pkgs/lyra-shell/qml/`.
 
@@ -135,18 +139,18 @@ an uppercase name, not `pkgs/lyra-shell/qml/`.
 >
 > **Tie-breaker**, when an agent honestly cannot call question 2: *would a
 > reviewer file this file's diff under "design change"?* If yes, it is song. A
-> facet file's diff is always a mechanism change.
+> lane file's diff is always a mechanism change.
 >
 > **What the test is not.** It is not "does it paint" — `WidgetSlot` is an
-> `Item` and `SurfaceSlot` hosts a `PanelWindow`, and both are facet. It is not
+> `Item` and `SurfaceSlot` hosts a `PanelWindow`, and both are lane. It is not
 > "is it a `QtObject`" — `MoodFaces` and `MorphState` are `QtObject`s and both
 > are song. It is not line count — `AudioColonnade` is 1940 lines of song and
-> `AoideIpc` is 24 lines of facet. It is not "is it shared" — shared across
-> *widgets* is not shared across *songs*, and only the second earns a facet home.
+> `AoideIpc` is 24 lines of lane. It is not "is it shared" — shared across
+> *widgets* is not shared across *songs*, and only the second earns a lane home.
 >
-> **The corollary for a new API**: a new capability lands as a facet bridge that
+> **The corollary for a new API**: a new capability lands as a lane bridge that
 > answers **with data**, never with a component to instantiate, and the song
-> picks it up by name. Concretely: a facet bridge exposes `paletteAccent`; it
+> picks it up by name. Concretely: a lane bridge exposes `paletteAccent`; it
 > does not expose `ctxBar()`. If the natural shape of the new thing is "a
 > component every widget instantiates", it is not an API — it is a song helper,
 > and it goes in `widgets/` with an uppercase name.
@@ -204,7 +208,7 @@ validator; the option type is a permissive gate only.
 
 Additive-optional (same status as the base16 tier): every field is `nullOr`,
 defaulting to `null`. A notes file with no `geometry` block behaves exactly
-as before — the compositor facet applies the fallback, not the option
+as before — the compositor lane applies the fallback, not the option
 system. Rides `song/stage/livery.json` for live application: `lyra rice
 stage` live-applies this tier (plus `window.border`/`borderInactive`) via
 best-effort, guarded `hyprctl keyword` calls — see §4's staged-geometry
@@ -229,10 +233,10 @@ unaffected by this tier.
 
 | Key         | Type            | Default | Falls back to                          |
 | ----------- | --------------- | ------- | -------------------------------------- |
-| `wallpaper` | `nullOr path`   | `null`  | facet's deterministic solid-colour PNG |
+| `wallpaper` | `nullOr path`   | `null`  | the stylix lane's deterministic solid-colour PNG |
 
 A literal nix path (copied to the store — never a `song/` runtime read). The
-stylix facet bakes it as the base-context image; `null` bakes the solid-colour
+the stylix lane bakes it as the base-context image; `null` bakes the solid-colour
 fallback derived from `palette.bg`.
 
 ### Override tier (v0 additive — venue recolour, `override.*`)
@@ -346,9 +350,12 @@ Rules:
 - Subfolders under `modules/dendrites/` are grouping only; a file inside one
   still needs its own catalogue line to be selectable.
 
-Facets (`modules/facets/`) are bare modules, not lane records: they MAY read
-`aoide.livery` and MAY declare `aoide.surfaces.<name>.owner` — they read no
-other module.
+A paint dendrite is a lane record like any other, and its `nixos` half is what
+sets its fact `mkDefault true`. Its guard is the FACT `modules/nucleus`
+declares (`aoide.<name>.enable`), not an option it declares itself: the
+cross-lane seam exists so that a consumer can ask "is there a shell here?"
+without reading the lane that made one. It MAY read `aoide.livery` and MAY
+declare `aoide.surfaces.<name>.owner` — and it reads no other module.
 
 ### Repo shape (the root is closed)
 
@@ -358,7 +365,7 @@ its designated place** — never a new root entry:
 - covers (wallpapers) → `song/songbook/<song>/assets/`
 - chimes (sounds) → `song/songbook/<song>/sounds/`
 - per-song assets → `song/songbook/<song>/`
-- module assets → next to their module, as a directory dendrite/facet
+- module assets → next to their module, as a directory dendrite or provider dir
 
 Content paths are looked up in the Song Map (`concepts/Song-Vocabulary` in the
 wiki). Creating a new **closed** root entry is a **contract change**, not a
@@ -407,7 +414,7 @@ suites that take them — runtime-only, absent from disk today), `log`
 (content-pipeline + audit runtime, newline-
 delimited JSON — a **file**, not a directory), `state/` (account/usage runtime,
 e.g. `state/usage.json`), and `run/` (the deployed Quickshell tree rsynced from
-the store by home-manager, `modules/facets/quickshell/default.nix`). All are
+the store by home-manager, `modules/dendrites/lyra/default.nix`). All are
 disposable and never committed. `.gitignore` also reserves `catalog/` and
 `index/` for the same content-pipeline runtime; neither exists on disk today.
 
@@ -431,7 +438,7 @@ untracked both).
 `pkgs/` self-registers by the same walk `song/songbook/` still uses
 (`modules/` self-registers through the catalogue instead — one line per
 dendrite, which the whole-tree aggregate derives over — and
-`modules/{facets,nucleus}/` through their own `default.nix`). Drop
+`modules/nucleus/` through its own `default.nix`). Drop
 `pkgs/<name>/default.nix` — a `callPackage`-able derivation taking standard
 nixpkgs args — and `lib/pkgs.nix` (the packages walker) discovers it into **all
 four** consumers from one source:
@@ -996,7 +1003,7 @@ adapter) the way `$AOIDE_ROOT`/`$AOIDE_FLAKE_ROOT` do — those exec plain
 would drag paint data onto a headless core for nothing. `pkgs/lyra-songbook`
 bakes a verbatim copy of the committed `song/songbook/` tree plus
 `manifest.json`/`registry.json` (via `lib/songbook.nix`, the SAME generator
-the checkout-host `nix eval` path and the quickshell facet's own build-time
+the checkout-host `nix eval` path and the lyra lane's own build-time
 carry both call) at nix build time. The sibling-of-binary tier exists for a
 future non-nix tarball install instead. Neither tier resolving is a taught
 error naming both locations, never a panic; a song with a `_widgets/` shelf
@@ -1322,7 +1329,7 @@ mirror + fallback were dropped in Phase 4 of the livery merge —
 Beyond `lyra rice stage <name>`/`cover set`/other emitters writing this
 live, it is also **seeded from the active song's committed notes, with the
 venue's `aoide.livery.override` applied, on every activation**
-(`home.activation.aoideSeedStage`, `modules/facets/quickshell/default.nix`,
+(`home.activation.aoideSeedStage`, `modules/dendrites/lyra/default.nix`,
 via `lib/livery.nix`'s `stagePatch`) — so a host that boots without ever
 running `rice stage` still has a correct, recoloured live stage twin from
 boot. The same jq run publishes the declared twin below, which is what the
@@ -1377,7 +1384,7 @@ venue's `aoide.livery.override` applied (`lib/livery.nix`'s `stagePatch`, §1's
 override tier), its top-level `song` field set to that song's name, keys
 sorted (`jq -S`, matching `serde_json::Value`'s BTreeMap ordering). Written by
 the SAME activation seed that writes `song/stage/livery.json` above
-(`home.activation.aoideSeedStage`, `modules/facets/quickshell/default.nix`) —
+(`home.activation.aoideSeedStage`, `modules/dendrites/lyra/default.nix`) —
 one `jq` run, two destinations, so the two files can never disagree.
 
 Why it exists: `stage/livery.json` is the LIVE stage, rewritten by runtime
@@ -1385,7 +1392,7 @@ writers, so it cannot itself say what the venue declared. This file is the
 venue's read-only statement of that, and the runtime writers reach for it when
 they need to re-derive the DECLARED song's notes rather than the committed
 ones. A plain file, never a symlink (nothing routes it — the draft routing
-above applies to `stage/livery.json` alone). **Absent** means the facet has
+above applies to `stage/livery.json` alone). **Absent** means the lane has
 never activated on this host; readers then fall back to the committed
 `song/songbook/<name>/livery.json` unchanged, which is the ordinary
 behaviour on a host with no venue override anyway.
@@ -4160,7 +4167,7 @@ about "broker-owned" is permanent, only "not yet a cross-crate contract".
 
 A **song** (rice) is a committed, **host-agnostic** score. The design thesis:
 a song is host-agnostic; ANY host in the fleet performs it by naming it, and
-the performance adapts to that host's specifics and its enabled facet/dendrite
+the performance adapts to that host's specifics and its enabled dendrite
 set. The **venue (host) decides its instruments; the song carries only the
 notes.**
 
@@ -4178,7 +4185,7 @@ aoide.song = "moonlight";
 Naming no song performs no song: `aoide.song` defaults to null, and every
 committed song's `rice.nix` self-gates on `config.aoide.song == "<name>"`,
 which is never true against null — so a host that names nothing gets no
-song's config, and the paint facets (which read the active song to bake and
+song's config, and the paint lanes (which read the active song to bake and
 deploy) activate only when a song IS named: no QML tree, no shell service
 otherwise, not an empty surface. A host wanting the desktop names its song
 explicitly; `sonata` is the shipped standard (`song/songbook/sonata/rice.nix`),
@@ -4218,7 +4225,7 @@ Each song's `rice.nix` **self-gates**, exactly like a dendrite:
   **`aoide.arrangement`** (declared widget/surface types) and — later —
   cover/chime references inside `song/`.
 - A song **NEVER** sets host options (monitors, hardware, services) and
-  **NEVER** enables facets or dendrites. Those are the venue's decision.
+  **NEVER** enables paint lanes or dendrites. Those are the venue's decision.
 - All note values are **literal nix** — a song never reads `song/` runtime
   paths (`stage/` · `auditions/`), same as the standard.
 - Shelving/subfolders follow the walker rules (a `/_` path is skipped).
@@ -4261,11 +4268,11 @@ set of "flavor" surfaces — committed files, not nix options:
   renders until a host surface actually embeds a `WidgetSlot` anchor for
   that slot name. The **wired-slot catalog** — which slots a real anchor
   resolves today, which host embeds each, and each slot's extras/fallback —
-  lives in `modules/facets/quickshell/qml/slots.md`, documented there only
+  lives in `pkgs/lyra-shell/qml/slots.md`, documented there only
   once an anchor is actually wired (same "what IS built" discipline as this
   section).
-- **Build:** the quickshell facet's derivation
-  (`modules/facets/quickshell/default.nix`) walks every committed song's
+- **Build:** the lyra lane's derivation
+  (`modules/dendrites/lyra/default.nix`) walks every committed song's
   `widgets/*.qml` files to `$out/qml/songs/<name>/<slot>.qml`, plus a
   generated `$out/qml/songs/manifest.json` recording which songs authored
   which slots — ALL songs' bodies land on disk at once (home-manager
@@ -4301,7 +4308,7 @@ set of "flavor" surfaces — committed files, not nix options:
   — **never** nix `config.*`. This does not loosen the song-shape rule above:
   a song's `rice.nix` still sets **ONLY** `aoide.livery` — widgets are
   committed QML files carried by the build, not nix options, and a widget is
-  structurally incapable of reaching host/facet options through this surface.
+  structurally incapable of reaching host/lane options through this surface.
 - **Playbook:** `song/songbook/update-playbook.md`.
 
 **Additive (2026-08-14) — baseline-fallback resolution:**
@@ -4309,7 +4316,7 @@ set of "flavor" surfaces — committed files, not nix options:
 just the one song: the active song's own file if it authored the slot, else
 **sonata**'s (the shipped standard song — the baseline every song can fall
 back to, a fixed constant independent of `aoide.song`'s own default, which
-is null), else `""` (the anchor's own facet-side
+is null), else `""` (the anchor's own lane-side
 `fallback` Component, when it has one, or nothing). `WidgetSlot.resolvedSource`
 keys off the RESOLVED song, not a bool, so a live song-switch between two
 songs that both provide a slot re-triggers correctly instead of silently
@@ -4325,7 +4332,7 @@ props)` mechanism `WidgetSlot` uses, exposing the live instance as `.item`
 for the host to call directly (e.g. the bar's clef calling
 `.item.toggle()`). A slot's catalog entry in `slots.md` documents which
 anchor kind hosts it — a slot that roots a `PanelWindow` also documents its
-WlrLayershell namespace there, since the compositor facet's glass
+WlrLayershell namespace there, since the compositor lane's glass
 layerrules match on it; that contract travels with the slot.
 
 **Additive (2026-08-14) — helper files:** a widget needing its own helper
@@ -4348,7 +4355,7 @@ already wired a `WidgetSlot`/`SurfaceSlot` for. `aoide.arrangement.widgets`
 (`modules/nucleus/options.nix`, house rule 5's other half of the closed
 `aoide.livery` + `aoide.arrangement` pair) is a second, independent
 mechanism: it lets a song **register a brand-new slot** via nix, apart from
-the fixed catalog above, instead of only dressing a name the facet already
+the fixed catalog above, instead of only dressing a name the lane already
 anchored. `arrangement` carries the song's STRUCTURE (which widget/surface
 TYPES it brings into existence) where `livery` carries its DRESS — different
 questions, hence a separate option tree, but still the same two-namespace
@@ -4397,22 +4404,22 @@ the one stage/draft-routed twin file (`rice mode draft` symlinks it), so
 splitting a second file off would have to duplicate that same routing and
 keep two files atomically consistent across every flip — a cost the option
 tree split doesn't need to pay, since that split is a NIX NAMESPACE decision
-about what facets may read, not a file-layout decision.
+about what paint lanes may read, not a file-layout decision.
 
 **`registry.json`:** a build-time artifact parallel to `manifest.json` but
 serving a different purpose — NOT merged into it. `manifest.json` answers
 "which slot **bodies** exist" (any `.qml` file a song drops under
 `widgets/`); `registry.json` answers "which slots did a song **register as
 a widget-TYPE declaration**" (a rarer, smaller set — most songs declare
-none). The quickshell facet's build
-(`modules/facets/quickshell/default.nix`) walks every committed song's
+none). The lyra lane's build
+(`modules/dendrites/lyra/default.nix`) walks every committed song's
 `livery.json` `.widgets // {}` into `$out/qml/songs/registry.json`, shaped
 `{ "<song>": { "<slot>": {…declaration…} } }` — every committed song gets an
 entry, `{}` when absent, never an error, never a skipped song. `rice
 stage` hot-syncs one song's entry live, no rebuild
 (`sync_song_registry`, `pkgs/aoide/crates/song/src/widgets.rs`), mirroring
 `sync_song_widgets`'s existing `manifest.json` hot-sync. The compositor
-facet (`modules/facets/compositor/default.nix`) reads `aoide.arrangement.widgets`
+look (`modules/dendrites/compositor/hyprland/default.nix`) reads `aoide.arrangement.widgets`
 (the nix option, active song only) to generate one layerrule pair per
 `kind = "surface"` entry — filtered to `surface` first, since a `dock` entry
 has no layer surface of its own and must never generate a namespace/glass
@@ -4454,12 +4461,12 @@ committed song declares a `kind = "dock"` entry yet.
 `aoide.arrangement.surfaces` (`modules/nucleus/options.nix`, the same
 `arrangement` namespace as `widgets` above — deliberately NOT a fourth
 top-level `aoide.*` name, and not `aoide.surfaces`, which is the separate
-facet ownership registry Stylix reads) declares which painted surfaces a
+lane ownership registry Stylix reads) declares which painted surfaces a
 song **expects to be mapped**. It is `attrsOf` one-flag entries, keyed by
 slot name, `perMonitor` (bool, default `false`): `true` = one mapped layer
 surface per enabled output, `false` = exactly one, wherever it lands. A
 declaration is an **expectation** and instantiates nothing — the surfaces it
-names are facet-owned windows (`shell.qml`'s bar/wallpaper `Variants`
+names are lane-owned windows (`shell.qml`'s bar/wallpaper `Variants`
 delegates, `SurfaceSlot { slot: "dock" }`), never `arrangement.widgets`
 entries, which would stand up a second copy of each.
 
@@ -4471,8 +4478,8 @@ owner is not this shell at all (a host where waybar owns the bar) is
 likewise declared by nobody, which is the point: the expectation is the
 song's statement, not a hardcoded list.
 
-**The generated artifact:** the quickshell facet's build
-(`modules/facets/quickshell/default.nix`) emits
+**The generated artifact:** the lyra lane's build
+(`modules/dendrites/lyra/default.nix`) emits
 `$out/qml/songs/surfaces.json`, deployed with the rest of the tree to
 `run/qml/songs/surfaces.json`. It is deliberately NOT keyed by song, unlike
 `manifest.json`/`registry.json` beside it: those describe the whole
@@ -4520,7 +4527,7 @@ widgets above already get. The design authority is
 `docs/architecture/ELEMENTS.md` (task #121); this subsection pins the
 descriptor's on-disk contract and `run/elements/`'s runtime shape.
 `crates/song/src/elements.rs` is the one parser/render pipeline every
-consumer (`element seed`, and later `rice stage`/the elements facet) calls
+consumer (`element seed`, and later `rice stage`/the elements lane) calls
 through — never a second implementation.
 
 **The descriptor:** one `song/songbook/<song>/elements/<element>/element.json`
@@ -4560,14 +4567,14 @@ on refusal:
   unknown or malformed placeholder is a structured error, never a silent
   no-op.
 - `surfaces` — optional list of surface names the element claims; folded
-  into `aoide.surfaces` with `owner = "<element>"` once the elements facet
+  into `aoide.surfaces` with `owner = "<element>"` once the elements lane
   (L-E3) lands. Not consumed by the cargo pipeline itself.
 - `run.exec` — the full command line; the literal token `{run}` is
   substituted with the absolute `run/elements/<element>` path at
   generation time (`elements::substitute_run_token`) — never re-expanded
   at runtime.
 - `run.via` — exactly `"unit"` or `"exec-once"`; anything else refuses.
-- `reload` / `restart` — optional command overrides for the facet's
+- `reload` / `restart` — optional command overrides for the lane's
   restart derivation (L-E2/L-E3); not read by the cargo render pipeline.
 
 **Render pipeline:** for each element, every declared file is rendered
@@ -4590,7 +4597,7 @@ The ONLY place a running element reads its config from; nothing under
 **Landed vs. designed (L-E1 only):** the descriptor parser, the render
 pipeline, `run_elements_dir()`, and `element seed` are implemented and
 tested. `rice stage` does not yet render elements as part of the stage
-loop, and no nix facet yet reads `elements/` at eval or generates a
+loop, and no nix lane yet reads `elements/` at eval or generates a
 systemd unit / exec-once line / `aoide.surfaces` claim — those are L-E2
 and L-E3, later phases in the same lane, not yet built.
 
@@ -5936,12 +5943,10 @@ cadence and is NEVER treated as a dismissal. `--popup` is refused up front
 when NEITHER `lyra` nor `zenity` resolves; `--popup`+`--json` together is
 a usage error. Deployed as the graphical-session USER unit
 `aoide-pair-watch.service` (`modules/nucleus/aoided.nix`), gated on
-`aoide.a2a.enable && aoide.facets.quickshell.enable &&
-aoide.a2a.pairingPopup` — the last of those DEFAULT FALSE (modules' own
-"flags default off" house rule): the unit exists and is desktop-facet-
-gated the same way `aoide-secrets-watch` is, but the popup itself is
-opt-in on top of that, never assumed just because a2a and the quickshell
-facet are both on.
+`aoide.a2a.enable && aoide.a2a.pairingPopup` — the last of those DEFAULT FALSE
+(modules' own "flags default off" house rule): the unit exists whenever a2a is
+on, but the popup itself is opt-in on top of that, never assumed just because
+a2a is on.
 
 This subsection is **additive**: a new events-feed record shape and a
 new CLI command, no change to the wire methods above, no version bump.

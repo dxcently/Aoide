@@ -1172,7 +1172,7 @@ fn normalize_hex(s: &str) -> String {
 /// Synthesize a v0 livery container from a bare base16 scheme. The palette
 /// mapping — `bg=base00, fg=base05, accent=base0D, urgent=base08,
 /// hot=base0B` — is CONTRACTS.md §1's base16 column read in reverse, the
-/// mirror of `modules/facets/stylix/default.nix`'s `synthesisedScheme`
+/// mirror of `modules/dendrites/stylix.nix`'s `synthesisedScheme`
 /// (lines 77-105), which derives base16 FROM the palette in the opposite
 /// direction. `hot=base0B` is this reverse seam's own choice: stylix's
 /// forward mapping never emits a `hot` slot at all (`hot` is optional and
@@ -1313,7 +1313,7 @@ fn seed_static_stage_files(root: &Path) -> Result<(), String> {
     // workspace writes (`jq .schemaVersion` against the live
     // `grimoire.json`/`usage.json` both print `"0"`, matching
     // `SCHEMA_VERSION`'s own type here) -- a bare number would be a type
-    // mismatch against what these facets actually read on a real host.
+    // mismatch against what these paint lanes actually read on a real host.
     // `launches` is an OBJECT keyed by app id on both the live file and
     // `GrimoireLedger.qml:113`, never an array.
     seed_if_absent(

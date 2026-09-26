@@ -327,7 +327,7 @@ lib.mkMerge [
           # own `AOIDE_CORE_BIN` comment already documents in the other
           # direction), so sibling resolution would silently fail here without
           # this. Only set when `aoide.lyra.enable` is actually on — mirrors
-          # shellbridge.nix's own guard, since a host with the facet on but
+          # shellbridge.nix's own guard, since a host with the lane on but
           # lyra explicitly disabled has no `pkgs.aoide.rice` output to point
           # at.
           ++ lib.optional config.aoide.lyra.enable "AOIDE_RICE_BIN=${pkgs.aoide.rice}/bin/lyra";

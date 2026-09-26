@@ -35,7 +35,7 @@ in the facet to fall back to.
 ## The universal widget contract
 
 Any `song/songbook/<name>/widgets/<slot>.qml` file that a song drops is
-carried by the build (`modules/facets/quickshell/default.nix`) and becomes
+carried by the build (`modules/dendrites/lyra/default.nix`) and becomes
 resolvable by name — the build imposes no fixed slot enum. But **being
 carried is not being rendered**: nothing shows on screen until a host
 surface embeds a `WidgetSlot` anchor for that exact slot name (see the
@@ -98,7 +98,7 @@ anchor, viewport, fixture (`docs/Aoide-Wiki/concepts/desktop/Widget-Preview.md`)
 | `powermenu` | `aoide-powermenu` | Overlay |
 | `launcher` | `aoide-launcher` | Overlay |
 
-The compositor facet's glass layerrules (`modules/facets/compositor/default.nix`)
+The compositor lane's glass layerrules (`modules/dendrites/compositor/hyprland/default.nix`)
 match on these namespaces (`layerrule blur` + hyprglass) — the namespace
 string is part of the slot's documented contract, not an implementation
 detail a song widget is free to rename.
@@ -123,7 +123,7 @@ A widget that needs its own helper components (e.g. `bar.qml` needs a
 workspace-row component) drops them alongside it under the same song's
 `widgets/` dir, with an **uppercase** filename — QML's own type-file
 convention marks these as helper components, not slots. The build
-(`modules/facets/quickshell/default.nix`) copies the WHOLE `widgets/` dir
+(`modules/dendrites/lyra/default.nix`) copies the WHOLE `widgets/` dir
 per song (helper files, asset subdirs, all of it) but only manifests
 top-level **lowercase-kebab** `.qml` files as slots; `.gitkeep` is always
 skipped. A helper file is carried to disk but never independently

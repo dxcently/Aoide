@@ -5,9 +5,9 @@
 #
 # The dxflake combo, ported verbatim: hyprshot freezes the screen and selects
 # (region or output), satty annotates and copies. Binds live HERE, with the
-# tools — not in the compositor facet (whose bind block documents this seam).
+# tools — not in the compositor lane (whose bind block documents this seam).
 # HM merges the extraConfig fragment into hyprland.conf; on a box without the
-# compositor facet the fragment is inert.
+# compositor lane the fragment is inert.
 #
 # The AGENT capture path is a separate dendrite (vision.nix — grim/slurp
 # primitives, non-interactive). hyprshot depends on grim under the hood, but

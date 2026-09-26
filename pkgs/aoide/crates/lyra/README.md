@@ -22,7 +22,7 @@ are core `aoide` identity, root `AGENTS.md`).
   the nix half of the onboarding flow, reached only via `aoide onboard`'s
   delegate spawn once `rice_bin()` resolves. Shells `nix eval --json
   <checkout>#aoideOptions` (flake.nix/lib/options.nix — every `aoide.*`
-  option declared across `modules/{nucleus,facets,dendrites}`, derived, not
+  option declared across `modules/{nucleus,dendrites}`, derived, not
   hand-listed) and renders `aoide.nix`: a nix module the user imports, every
   option commented out at its default. Reruns over a previously-generated
   file warn, back up to `<out>.bak`, and regenerate; a hand-written file at

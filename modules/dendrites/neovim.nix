@@ -81,7 +81,7 @@ let
                   pkgs.cargo
                 ];
 
-                # mkForce: the Stylix facet's auto-imported HM nvf target pushes a
+                # mkForce: the stylix lane's auto-imported HM nvf target pushes a
                 # base16 theme at nvf; dxflake pinned rose-pine over its stylix the
                 # same way. Forced so the dendrite's pick wins deterministically.
                 theme = lib.mkForce {

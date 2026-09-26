@@ -1,8 +1,8 @@
-# AGENTS.md — invariants across `modules/{dendrites,facets,nucleus}/` and the registry
+# AGENTS.md — invariants across `modules/{dendrites,nucleus}/` and the registry
 
 Cross-module rules only. A directory's own `AGENTS.md` holds what's local to
 it; this file holds what would otherwise be repeated in all three. Points up
-to the root `AGENTS.md` for house rule 5 (the closed facet-read whitelist),
+to the root `AGENTS.md` for house rule 5 (the closed paint-read whitelist),
 house rule 1 (only `song/` is agent-writable — `modules/` changes by
 upstream merge or new-dendrite-addition only) and house rule 7 (everything is
 a plugin).
@@ -31,7 +31,7 @@ selected. Nothing else reads a lane, and a lane is never imported by
 
 ## Flags default off
 
-Every dendrite (and every facet feature behind a toggle) gates on its own
+Every dendrite (and every paint feature behind a toggle) gates on its own
 `aoide.<name>.enable`, and that default is `false` unless the module is
 core plumbing discovered unconditionally (`modules/nucleus/*`, which has no
 `mkIf` guard by design — see `options.nix`'s header). A dendrite ships
@@ -47,9 +47,9 @@ for this reason, so the linter does not fight the style.
 
 ## Aggregate discipline
 
-`modules/facets/default.nix` and `modules/nucleus/default.nix` each name every
-file in their own directory, one line per file, in `LC_ALL=C` order, and nothing
-from outside it — a layer nothing selects has no selection name, so its own
+`modules/nucleus/default.nix` names every
+file in its own directory, one line per file, in `LC_ALL=C` order, and nothing
+from outside it — the core is nothing selectable, so its own
 directory is what names it. `modules/dendrites/default.nix` is the other half of
 the rule: it names no dendrite at all and derives its imports from the
 catalogue, in attribute-name order — the `LC_ALL=C` order the catalogue itself
@@ -74,7 +74,7 @@ code-review discipline, not a build failure.
 
 ## What needs a docs update in the same commit
 
-- The owning directory's `README.md`/`AGENTS.md` when a new dendrite/facet
+- The owning directory's `README.md`/`AGENTS.md` when a new dendrite
   lands, a toggle's default changes, a lane's shape changes, or a
   read-whitelist entry is added.
 - `CONTRACTS.md` §2 when the dendrite shape itself moves.

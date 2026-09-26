@@ -28,7 +28,7 @@ covers only what's specific to nucleus.
   defaulting `false`, and `aoide.quickshell.config`, defaulting `null`) are
   declared here; the lane that owns one sets it with `mkDefault`. A nucleus file that needs to
   know "is there a shell / a session here" reads the fact — never
-  `aoide.facets.*`, never a lane's own option. `aoide.sessionTarget` is the
+  `aoide.<name>.enable`, never a lane's own option. `aoide.sessionTarget` is the
   same rule from the other side: it is core-declared
   (`pkgs/aoide/module/options.nix`) and a painting lane sets it, so the unit
   that anchors on it need not know which lane did.

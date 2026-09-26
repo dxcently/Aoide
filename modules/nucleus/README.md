@@ -1,19 +1,19 @@
 # modules/nucleus
 
 Core plumbing, discovered and applied unconditionally on every host — no
-`mkIf` guard, no per-host opt-in (unlike `dendrites`/`facets`). Every other
+`mkIf` guard, no per-host opt-in (unlike `dendrites`). Every other
 module builds against what nucleus declares.
 
 ## Named seams (what it exposes)
 
 - `options.nix` — the paint half of the option contract, plus the core door
   toggles whose units still live here: `aoide.livery`,
-  `aoide.arrangement`, `aoide.surfaces` — the enumerated, closed set facets
+  `aoide.arrangement`, `aoide.surfaces` — the enumerated, closed set a paint
   are allowed to read (root `AGENTS.md` house rule 5). Versioned in
-  CONTRACTS.md (livery schema v0). Also carries the non-facet-read option
+  CONTRACTS.md (livery schema v0). Also carries the non-paint-read option
   namespaces (`aoide.mcp`, `aoide.a2a`, `aoide.usage`, `aoide.lyra`,
   `aoide.secrets`, `aoide.pairing` — deployment/door toggles, not part of
-  the facet whitelist). And it declares the ENABLE FACTS — the seam between
+  the paint whitelist). And it declares the ENABLE FACTS — the seam between
   this layer and the paint lanes (CONTRACTS.md §0): `aoide.quickshell.enable`
   (a shell surface exists here), `aoide.lyra.enable` (the paint/rice binary
   is installed), `aoide.stylix.enable`, `aoide.compositor.enable`,
@@ -35,7 +35,7 @@ module builds against what nucleus declares.
   rules, and the core session variables): the lyra-gated
   `AOIDE_SONG_TEMPLATES` session variable, and nothing else paint-shaped.
   `aoide.sessionTarget` is no longer set here but by the lane that brings a
-  graphical session up (`facets/quickshell` today), so this file reads no
+  graphical session up (the lyra lane), so this file reads no
   lane's option either. Below that, still here: every door (mcp, a2a,
   pair-watch) the daemon's event stream
   serves, the discovery-advertisement firewall carve, and the usage
@@ -116,16 +116,17 @@ module builds against what nucleus declares.
 
 ## What it consumes
 
-Stock NixOS/Home-Manager options only; nothing from `dendrites`/`facets`. The
+Stock NixOS/Home-Manager options only; nothing from `dendrites`. The
 enable facts it reads are its own, declared in `options.nix` — a lane sets
 them, which is the only way a lane's existence reaches nucleus.
 
 ## How it composes
 
-Every dendrite and facet reads `aoide.livery`/`aoide.arrangement`/
-`aoide.surfaces` from here and nothing else of nucleus's internals; nucleus
+Every dendrite reads its own options and stock ones; a paint dendrite reads
+`aoide.livery`/`aoide.arrangement`/`aoide.surfaces` from here and nothing else of
+nucleus's internals; nucleus
 reads back only options a lane SETS — an enable fact it declared itself
 (`aoide.quickshell.enable`, `aoide.lyra.enable`, …) or the core seam
 `aoide.sessionTarget` (`pkgs/aoide/module/options.nix`). In both directions
 the subject is an option declared outside the lane: nucleus never reads a
-dendrite's or facet's own option, and no lane reads another lane.
+lane's own option, and no lane reads another lane.

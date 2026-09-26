@@ -1,9 +1,9 @@
 # modules
 
 The AoideOS module tree: everything a host needs beyond the core flake's own
-`nixosModules.default`. Three layers, in the order the module system merges
-them — `dendrites/` (opt-in), `facets/` (render surfaces), `nucleus/`
-(unconditional core) — each with its own charter, in its own `README.md`, plus
+`nixosModules.default`. Two layers, in the order the module system merges
+them — `dendrites/` (opt-in), `nucleus/` (unconditional core) — each with its
+own charter, in its own `README.md`, plus
 the catalogue that names what can be selected.
 
 ## Named seams (what it exposes)
@@ -16,13 +16,14 @@ the catalogue that names what can be selected.
   `modules/aggregations/` and `modules/overrides/` land. `lib/composition.nix`
   reads this record before any module graph exists and imports only what
   selection kept.
-- `dendrites/default.nix`, `facets/default.nix`, `nucleus/default.nix` —
+- `dendrites/default.nix`, `nucleus/default.nix` —
   one aggregate per layer. `dendrites/default.nix` names no dendrite: it derives
   its imports from the catalogue
-  (`builtins.attrValues (import ../default.nix).catalogue`). `facets/default.nix`
-  and `nucleus/default.nix` name only the files inside their own directory —
-  neither layer is selectable, so neither has a catalogue name to be found by.
-  `lib/mkHost.nix` and `tests/vm-boot.nix` import the three aggregates directly;
+  (`builtins.attrValues (import ../default.nix).catalogue`, and a provider
+  registry entry contributes every alternative). `nucleus/default.nix` names only
+  the files inside its own directory — it is the unconditional core, so it has no
+  catalogue name to be found by. `lib/mkHost.nix` and `tests/vm-boot.nix` import
+  the two aggregates directly;
   nothing imports the catalogue as a module.
 - A dendrite file is a lane record (`{ body; nixos; }`, CONTRACTS.md §2):
   `body` is the module this tree merges (its `aoide.<name>.*` options and its
@@ -42,7 +43,7 @@ from the catalogue: a dendrite's ONE line is its catalogue line, and the full
 tree follows it.
 
 That order is a contract, not taste: list-typed NixOS options merge in
-definition order, so `[ ./dendrites ./facets ./nucleus ]` reproduces the same
+definition order, so `[ ./dendrites ./nucleus ]` reproduces the same
 leaf order a reader gets from `ls -A | LC_ALL=C sort` inside each directory. The
 dendrite aggregate's order is the catalogue's attribute-name order instead —
 `LC_ALL=C` too, and the two agree for every name in the tree, but they diverge
@@ -50,7 +51,7 @@ the day a name and its filename stop sorting alike (`foo.nix` beside
 `foo-bar.nix`). The catalogue is that layer's authority: the file that names a
 capability names its order with it.
 
-A new dendrite is a new file plus one catalogue line; a new facet or nucleus
+A new dendrite is a new file plus one catalogue line; a new nucleus
 module is a new file plus one line in its own directory's `default.nix`.
 Deleting both removes it without a trace elsewhere in the tree. `_`-prefix
 shelving is the same act short of the deletion: a `_`-prefixed file is never
@@ -73,4 +74,5 @@ draws around `song/`.
 Nothing above itself. The catalogue plus the three aggregates are the whole
 surface a host sees; the layers below never read from outside their own
 directory tree (root `AGENTS.md` house rule 5 is the one enumerated exception,
-for facets reading `aoide.livery`/`aoide.arrangement`/`aoide.surfaces`).
+for paint dendrites reading `aoide.livery`/`aoide.arrangement`/`aoide.surfaces`
+plus the identity scalars).

@@ -1721,7 +1721,7 @@ is not.
 `aoide-secrets-watch.service`, running `aoide secrets watch --popup`.**
 Before this, nothing ever started `secrets watch` at all — a parked ask
 surfaced only if an operator happened to have one running by hand in some
-terminal. Gated on `aoide.facets.quickshell.enable`, the SAME condition the
+terminal. Gated on `aoide.a2a.pairingPopup` on top of `aoide.a2a.enable`, the SAME condition the
 module's own `pkgs.zenity` package pull already uses (a headless box has no
 display for a dialog); `Type = "simple"` + `Restart = "on-failure"` for the
 same "blocks forever" reason the broker service above holds. Its `path`

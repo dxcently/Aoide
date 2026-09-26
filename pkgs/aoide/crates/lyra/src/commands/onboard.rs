@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["onboard"],
-        summary: "Generate `aoide.nix`: every `aoide.*` module option, derived fresh from modules/{nucleus,facets,dendrites}, commented out at its current default -- then print the `imports` line to teach it in. Never edits the user's flake.",
+        summary: "Generate `aoide.nix`: every `aoide.*` module option, derived fresh from modules/{nucleus,dendrites}, commented out at its current default -- then print the `imports` line to teach it in. Never edits the user's flake.",
         args: [],
         flags: [
             flag!("out", "string", "Where to emit the generated module (default: ./aoide.nix)."),
@@ -321,9 +321,9 @@ const ENV_KNOBS: &[(&str, &str)] = &[
 /// The pure formatter: `options` in, the whole `aoide.nix` text out. A real
 /// nix module, `{ config, lib, pkgs, ... }: { … }` — the function head is
 /// required, not decorative: several derived defaults are literal nix
-/// SOURCE TEXT that references `config` (`aoide.auditLog`'s `"/home/${config
-/// .aoide.user}/…"`, `aoide.lyra.enable`'s `config.aoide.facets.quickshell.
-/// enable`, three melete/mneme path defaults) — pasting that text into a
+/// SOURCE TEXT that references `config` (`aoide.root`/`aoide.checkout`'s
+/// `"/home/${config.aoide.user}/…"`, `aoide.auditLog`'s `config.aoide.root`
+/// chain, the melete/mneme path defaults) — pasting that text into a
 /// bare attrset with no `config` in scope would fail to evaluate the moment
 /// a user uncomments one of those lines. Every option renders as ONE dotted
 /// attrpath assignment (`aoide.a2a.port = 8710;`) — nix accepts a dotted
