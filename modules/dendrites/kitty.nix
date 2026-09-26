@@ -97,6 +97,11 @@
             confirm_os_window_close = 0;
             window_padding_width = 5;
             window_border_width = 1.5;
+            # The compositor tiles every window, so kitty must not restore the
+            # last-closed window's size or state: with remember_window_size on,
+            # one kitty closed while maximized (a lone window on a scrolling
+            # workspace) makes every later kitty open maximized.
+            remember_window_size = "no";
             # Aero-glass terminal: a translucent background so the compositor's
             # blur reads through as frosted glass (the Win7-style sheen), while
             # the TEXT stays fully opaque and crisp (background_opacity fades only
