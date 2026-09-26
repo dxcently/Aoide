@@ -2382,6 +2382,58 @@ project/parent inheritance across local/remote/app/subagents;
   gate), aoide-storage 439 (1 new), aoide-client 318 (2 new), all pass,
   `cargo test --workspace --no-run` clean. S10 open, in the brief's order
   (cargo builds serialize).
+- Review pass over S8+S9 (`ca73a2a..5275a8a`), every finding fixed on the
+  branch. **H1** — `Exited` never fired for a remote child the reaper KILLED:
+  the record is stamped `done` and `prune_done` drops it in the same pass,
+  before `pingback` re-reads the roster, so neither of its two end-facts
+  inputs could see it. `reap_inner` now returns a third value — the end facts
+  of every REMOTE child that left the roster this pass, whatever drop path
+  took it — and `reap` chains that into the same `dropped` slice. Its test
+  drives the REAL path (a pre-boot-ghost remote record through `reap()` under
+  `Door::Daemon`), which is precisely what the hand-written fixtures could not
+  see; that test also exposed a latent S8 double-`exited` (a dropped remote
+  child with NO readable trace got one from `decide` and a second from the
+  claim's own extra push — now pushed only when `decide` did not already
+  answer with one, plus a per-id dedupe of the two producers). **H2** — the
+  ring was designed to outlive the record and the door made it unreadable the
+  moment it did (the gate read `remoteParent` off a pruned record, and
+  `build_task` answered `-32001` before `history` was set), so a child that
+  ended while its parent's daemon was down left a row that could only retry
+  forever. The ring entry now carries the key it was stamped with
+  (`ChildRing.key`, written with the first event, never replaced) and the
+  history arm gates on the RING first, the record second — serving a
+  `ring_task` envelope (status from the ring's own tail: an `exited` last
+  event is `completed`) when the record is gone. The pull keeps the door's
+  CODE (`FrameReadError`, never a `String`) so it can tell a permanent answer
+  from a transient one, and latches the row on `TASK_NOT_FOUND_CODE`
+  (`-32001`, newly named in `protocol::wire::a2a`) — which the door now
+  answers, in place of the history refusal, for an id with NEITHER a record
+  NOR a ring: gone-for-good is not "not your child". **M1/M2/L2** — `last` was
+  believed outside a `gap` (a peer could drive the cursor to `u64::MAX` and
+  silence the child forever), and the remote lane's read-decide-advance was
+  not atomic, so the daemon's loop and a `session reap` re-entering through a
+  connection thread could both deliver the same window. The pull now claims
+  through `remote_children::claim_lines_after` — read the stored cursor and
+  advance it in ONE locked section, deliver only `seq` past what it returned —
+  and a claim that cannot be written delivers nothing. **M3** — no pass
+  budget: N unreachable children cost N curl timeouts inside every tick.
+  `PULL_BUDGET` (6 s) bounds the whole loop, rows it cuts off are named
+  (`budget-spent`) and audited once, and a process-global rotation starts each
+  pass one row along so none starves. **L1** — a re-rendered event's numbers
+  are clamped (`COUNT_MAX`, `MINS_MAX`; an exit code outside `0..=255` is
+  DROPPED, never clamped into a fabricated `exit 0`). **L3** — rings grew
+  unbounded across children while every spool rewrote the whole file: the
+  entry gains `at`, and the child-side pass drops a ring whose record is gone
+  and whose `at` is past `RING_GRACE_SECS` (a week) — CONTRACTS §4 now states
+  that bound where it used to say "nothing prunes a ring". **L4** —
+  `is_unsafe` gains `is_invisible`: the variation selectors
+  (`U+FE00..FE0F`, `U+E0100..E01EF`) and the Hangul/braille fillers
+  (`U+115F`, `U+1160`, `U+2800`, `U+3164`, `U+FFA0`), which are not `Cf` and
+  so slipped every sanitizer. **L5** — `remote.rs`'s unused `node_graph_json`
+  test helper deleted. Tests after the pass: aoide-conduct 914,
+  aoide-storage 442, aoide-server 246, aoide-client 318, `cargo test
+  --workspace --no-run` clean. S10 open, in the brief's order (cargo builds
+  serialize).
 - Review pass over S1–S3 (same branch, `8236675` onward): the caller now
   holds its own winning claim to `valid_claimed_session_id` and refuses
   locally before signing (the "one predicate, both sides" line was

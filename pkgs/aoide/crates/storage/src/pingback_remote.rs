@@ -20,15 +20,20 @@
 //! a parent that falls further behind than the cap misses events, and a read
 //! that has missed any says so (`gap`) instead of silently handing over a
 //! non-contiguous run. `seq` is per child, starts at 1, and only ever climbs.
-//! Rings are never pruned: the parent that owns one may still be reading it
-//! long after the child left this node's roster, and the last thing it reads
-//! is that child's exit.
+//! A ring is never rewound, and it OUTLIVES the child's roster record: the
+//! parent that owns one may still be reading it after the child left the
+//! roster, and the last thing it reads is that child's exit. That is why the
+//! entry carries its own gate input ([`ChildRing::key`]) and its own retention
+//! clock ([`ChildRing::at`]): the door serves the read from here, and
+//! [`retain_rings`] eventually drops what no parent can be owed any more —
+//! called by the child-side pass, which knows the roster, never by this layer
+//! on a guess.
 //!
 //! Same discipline `remote_children.rs`/`undying.rs` set: a `schemaVersion`
 //! container, tolerate-missing/corrupt-as-empty on read, `fs::atomic_write` on
 //! write, pure mutations for the ring algebra so the cap and the gap are
 //! unit-testable off disk, and every write inside one short
-//! `fs::with_stage_lock` section.
+//! `fs::with_stage_lock` section — the spool, and the prune alike.
 
 use crate::fs::{atomic_write, conducting_stage_dir, with_stage_lock};
 use crate::stage::load_stage;

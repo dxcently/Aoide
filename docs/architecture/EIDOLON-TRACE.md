@@ -314,11 +314,17 @@ carries whatever the journal carries; that fix is harnox's.
   harness) sends each event to `state/stage/pingback-remote.json`
   (CONTRACTS.md §4) instead of to `deliver`: at most 16 events per child,
   `seq` monotonic from 1, the oldest dropped past the cap, and a read that
-  lost any event says `gap` with `last` to resync from. The far parent pulls
-  them off this node's own door (`tasks/get` with `aoide/linesAfter`,
-  CONTRACTS.md §6) — nothing here pushes, mails or opens a route. The claim is
-  written first and the event lands after, the same at-most-once direction the
-  cursor itself holds.
+  lost any event says `gap` with `last` to resync from. The entry is stamped
+  with the child's own `remoteParent.key` — the key the far parent's door
+  gates its read on, and the reason a ring can still be read once the record
+  is gone — and with the tick's `at`, which is the ring's whole retention
+  clock. The far parent pulls them off this node's own door (`tasks/get` with
+  `aoide/linesAfter`, CONTRACTS.md §6) — nothing here pushes, mails or opens
+  a route. The claim is written first and the event lands after, the same
+  at-most-once direction the cursor itself holds. A ring whose child's record
+  has left the roster is kept for a week and then dropped by this same pass
+  (`RING_GRACE_SECS`): a ring is rewritten whole on every spool, so carrying
+  the dead forever would be paid for by every live event.
 
   **`exited` is the one row that comes from the record, and the one that
   closes a ring.** A record whose state folds to `done` gives a remote child's
@@ -346,17 +352,30 @@ carries whatever the journal carries; that fix is harnox's.
   built from the row because the far node supplies no tag at all. Then
   `deliver()`, as always, with the audit label `autogate-child remote`.
 
-  The row's cursor advances BEFORE any line is delivered — at-most-once, so a
-  failed write loses a line rather than repeating one — and it advances to
-  whatever the answer CARRIED: the newest event in it, or `last` for a `gap`
-  the ring cannot hand over an event for. A `gap` costs the parent exactly one
-  extra line, built here from that same arithmetic (`· <n> events lost before
-  this point`) and never a fabricated event. Once an `exited` has been drained
-  the row is latched (`drained`): a ring is never pruned and a child that has
-  left the roster never pushes again, so without the latch every tick would
-  ask about a session with nothing left to say. A target that can never
-  receive a line — no record, a bare shell, not conductable, already `done` —
-  is judged before the far node is asked anything, so it neither spends a
-  request nor consumes events it would not have shown. A failed pull is quiet:
-  no line, no retry storm, one audit record, and the next tick asks again from
-  the same cursor — one pull per child per tick, with no backoff.
+  **The claim is atomic with the read.** The cursor moves through
+  `remote_children::claim_lines_after` — one `with_stage_lock` section that
+  reads the stored value and advances it, returning the cursor this pass may
+  deliver from — and only events past that cursor are delivered, so two
+  overlapping passes (the daemon's own loop and a `session reap` re-entering
+  through a connection thread) cannot each hand over the same line. A claim
+  that cannot be written delivers nothing: a lost line is the safe direction,
+  a duplicated one is not. `last` is trusted only under a `gap`, where it is
+  the resync the ring documents — without one, an honest ring cannot report a
+  `last` beyond the events it sent, and believing a peer's number there would
+  drive the cursor past every `seq` the child can ever push. A `gap` costs the
+  parent exactly one extra line, built here from that same arithmetic (`· <n>
+  events lost before this point`) and never a fabricated event.
+
+  **The pass is bounded and rotated.** `PULL_BUDGET` (six seconds) caps the
+  whole loop — the rows are pulled one after another inside the daemon's tick,
+  and a node that is merely off burns its request's full timeout — and rows
+  the budget cuts off are named (`budget-spent`) so the next pass, which
+  starts one row further along, covers them. Once an `exited` has been drained
+  the row is latched (`drained`), and so is a row whose child the far node no
+  longer holds at all (`-32001`: no record and no ring, the child is gone for
+  good). A refusal or a transport failure is retryable instead: no line, one
+  audit record, and the next tick asks again from the same cursor — one pull
+  per child per tick, with no backoff. A target that can never receive a line
+  — no record, a bare shell, not conductable, already `done` — is judged
+  before the far node is asked anything, so it neither spends a request nor
+  consumes events it would not have shown.

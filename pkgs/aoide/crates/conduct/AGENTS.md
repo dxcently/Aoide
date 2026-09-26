@@ -778,18 +778,24 @@
   A2A door's stamp, whatever its harness) SPOOLS its events to
   `state/stage/pingback-remote.json` through `aoide_storage::pingback_remote`
   — cap 16 per child, monotonic `seq` per child, a read that missed any says
-  `gap` — and `deliver` is NEVER called for it: the far parent pulls them off
-  this node's own door. `PingEvent::Exited` is the one row that comes from the
+  `gap` — stamping the ring entry with that stamp's KEY (the far door's only
+  gate input once the record is gone) and with the tick's own `at`. `deliver`
+  is NEVER called for it: the far parent pulls them off this node's own door.
+  The same pass drops the rings no parent can be owed any more
+  (`retain_rings`: the child's record is gone AND the ring's `at` is past
+  `RING_GRACE_SECS`), because a ring is rewritten whole on every spool and an
+  unbounded set of dead children would be paid for by every live event.
+  `PingEvent::Exited` is the one row that comes from the
   RECORD (`state` folds to `done`, plus its `outcome`/`exitCode`) rather than
   from the trace, it is claimed ONCE per child (the cursor's `exited` latch —
   a child that keeps no trace has no `seen` to advance past its own end), and
   it fires only for a remote child (Q5's ruled default: a local parent hears
   the run's own report). It sits AFTER every trace row and takes the place of
   the silence row, so the last thing before an exit is the child's own last
-  word. A child the sync DROPPED is never decided again — its record is gone,
-  so its cursor entry leaves on that pass — so a dropped REMOTE child claims
-  its trace row AND its exit on that one pass, and the ring always ends with
-  exactly one `Exited`.
+  word. A child that leaves the roster is never decided again — its record is
+  gone, so its cursor entry leaves on that pass — so a dropped REMOTE child
+  claims its trace row AND its exit on that one pass, and the ring always ends
+  with exactly one `Exited`.
   **Never a shell parent.** A target whose `rec.agent` is `""`/`"shell"` or
   names no registered harness profile is skipped and counted
   (`shell-parent`) — a line submitted into a bare shell would RUN as a
@@ -809,19 +815,47 @@
   each is re-validated against the closed set (`ping_event_of` — an unknown
   kind is dropped), every string re-cleaned (`reclean` = the shared
   `common::strip_unsafe` + `SAY_MAX` + the `/`/`!` guard, because the BARE
-  segments `render_line` emits are never quoted), and rendered by the LOCAL
-  `render_line` under `[<node>/<child id>]`. The cursor advances BEFORE the
-  line (at-most-once), to the newest `seq` the answer carried or `last` for a
-  `gap`; a `gap` buys exactly one arithmetic marker line, never a fabricated
-  event; a drained `Exited` latches the row with
-  `remote_children::mark_drained`. A failed pull is quiet — cleaned audit
-  record, named skip, no retry storm, the next tick from the same cursor (no
-  backoff: one pull per child per tick) — and must never be fatal to the
+  segments `render_line` emits are never quoted) and every number re-clamped
+  (`COUNT_MAX`/`MINS_MAX`, and an exit code outside `0..=EXIT_CODE_MAX` is
+  DROPPED rather than clamped into a fabricated `exit 0`), then rendered by
+  the LOCAL `render_line` under `[<node>/<child id>]`.
+  **The claim is atomic, not a read-then-write.** The cursor is advanced
+  through `remote_children::claim_lines_after` — one `with_stage_lock`
+  section that reads the stored value and advances it, returning the cursor
+  the caller may deliver from — and only events with `seq` past that are
+  delivered; two overlapping passes therefore cannot duplicate a line, and a
+  claim that cannot be written delivers NOTHING (losing a line is this lane's
+  safe direction, duplicating one is not). `last` is trusted ONLY under
+  `gap`, where the ring's own doc says it is the resync; without a gap an
+  honest ring cannot report a `last` beyond the events it sent, and believing
+  a peer's number there would silence the child forever. A `gap` buys exactly
+  one arithmetic marker line, and only when the claim left a hole to name.
+  **The pass has a budget and a rotation.** `PULL_BUDGET` (6 s) bounds the
+  whole loop, because the rows are pulled synchronously inside the daemon's
+  tick and a node that is merely off burns its request's full timeout; rows
+  past the deadline are named (`budget-spent`) and audited once, and
+  `PULL_ROTATION` moves the pass's starting row one along every time, so no
+  row starves. A drained `Exited` latches the row with
+  `remote_children::mark_drained` — and so does a PERMANENT answer
+  (`TASK_NOT_FOUND_CODE`: the far node holds neither a record nor a ring for
+  that child, so it is gone for good and retrying it forever would only grow
+  the audit log). A refusal or a transport failure is NOT permanent: both stay
+  retryable, from the same cursor, with no backoff — one pull per child per
   tick. `deliver`'s gate label is a parameter: `autogate-child` for a local
   line, `autogate-child remote` for a pulled one. `clean`/`quote`/`reclean`
-  all judge through `common::strip_unsafe` — control AND Unicode `Cf` — and a
-  new sanitizer anywhere in this crate must too, never a copied `is_format`
-  table (S9's own review found the local lane filtering `is_control` only).
+  all judge through `common::strip_unsafe` — control, Unicode `Cf`, AND the
+  invisible non-`Cf` fillers (`is_invisible`: variation selectors, Hangul and
+  braille blanks) — and a new sanitizer anywhere in this crate must too, never
+  a copied table (S9's own review found the local lane filtering `is_control`
+  only, and the fillers missing).
+  **Both ends of a child's exit are one input.** `pingback`'s `dropped` slice
+  carries the eidolon sync's own drop set AND (H1 of the S8/S9 review) the
+  end facts of every remote child `reap_inner` took off the roster this same
+  pass — the kill path, the prune, the superseded tombstone — because the
+  roster is re-read after the sweep and a record that left before that read is
+  otherwise never decided over. One pass yields at most ONE event per child
+  (the dropped loop dedupes by id, and the exit `decide` already answered is
+  never pushed a second time): a ring closes with exactly one `Exited`.
   **`died mid-turn` is the sync's own additive return.**
   `sync_eidolon_sessions` returns `(bool, Vec<DroppedEidolon>)` — the bool
   means exactly what it did before, so every existing caller is unchanged in

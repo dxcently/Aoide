@@ -274,21 +274,26 @@ A run spawned over the A2A door carries `remoteParent` on its record: its report
 lane is unchanged — the letter is filed and the mailbase keeps it — but the exit
 line that would have gone to a local parent takes the child's own ring instead
 (`docs/architecture/EIDOLON-TRACE.md`'s "Second slice"). The parent's own node
-pulls it: one signed `tasks/get` per child per tick, with `aoide/linesAfter` set
-to the cursor in this node's `remote-children.json` row, keyed on the ssh
-forward of the **parent's own session id** so the forward closes with that
-session. Nothing is pushed, nothing is mailed, and the child's node never writes
+pulls it: signed `tasks/get` calls with `aoide/linesAfter` set to the cursor in
+this node's `remote-children.json` row, keyed on the ssh forward of the
+**parent's own session id** so the forward closes with that session, and bounded
+per pass — a six-second budget over all the rows, the start rotated each tick —
+so a node that is merely unreachable cannot eat the tick that reaps everything
+else. Nothing is pushed, nothing is mailed, and the child's node never writes
 into anyone's composer — the parent's node re-validates each event against the
 closed event set, re-cleans every string, renders the line itself, and applies
 the same delivery skips a local line gets (a bare shell parent included, and it
-is judged before the far node is asked anything). The row's cursor advances
-*before* the line is delivered, so this lane's guarantee is at-most-once — the
-opposite direction from the letter's at-least-once above: a crash loses a line
-rather than repeating one, and a ring that rolled past the cursor is reported as
-exactly that (`· <n> events lost before this point`) instead of being papered
-over. Once a run's `exited` has been drained the row is latched and the pull
-stops for it, because a ring is never pruned and a run that has left the roster
-never speaks again.
+is judged before the far node is asked anything). The row's cursor is claimed
+*atomically with the read of it* and only then is a line delivered, so this
+lane's guarantee is at-most-once — the opposite direction from the letter's
+at-least-once above: a crash, or a failed write, loses a line rather than
+repeating one, and a ring that rolled past the cursor is reported as exactly
+that (`· <n> events lost before this point`) instead of being papered over.
+Once a run's `exited` has been drained the row is latched and the pull stops for
+it — as it does for a child the far node no longer holds at all, which answers
+the plain `task not found`. A ring whose child has left the roster is still
+readable by its parent for a week before it is dropped, so a parent whose own
+daemon was down still gets the child's last words.
 
 ## Completed runs stay inspectable
 

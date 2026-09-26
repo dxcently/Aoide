@@ -2605,10 +2605,15 @@ latch every later tick would ask a far node about a session with nothing left
 to say. It is `false` until set and nothing ever clears it; like every other
 `false` flag in this tree it is omitted when false, so a row written before
 the field existed is byte-identical to one written today. Both fields are
-written only by `aoide-conduct`'s `pingback_pull` (`advance_lines_after`
-BEFORE the line is delivered, `mark_drained` after it), and a pull resolves
-the far node by `key` alone — never by `node`, so a rename cannot break a
-pull and a re-pair cannot silently dial a node the child does not live on.
+written only by `aoide-conduct`'s `pingback_pull`: the cursor through
+`claim_lines_after`, which reads the stored value and advances it in ONE
+`with_stage_lock` section and hands back the cursor the caller may deliver
+from — so two overlapping passes (the daemon's loop and a `session reap`
+re-entering through a connection thread) cannot each hand over the same events
+— and the latch after the line, from `mark_drained`. A failed claim delivers
+nothing, and a pull resolves the far node by `key` alone — never by `node`, so
+a rename cannot break a pull and a re-pair cannot silently dial a node the
+child does not live on.
 
 Written only through `aoide_storage::remote_children`, inside one short
 `state/stage/.stage.lock` section and atomically (temp-then-rename); a missing
@@ -2642,6 +2647,8 @@ events may not be pushed and may not be mailed (CONTRACTS.md §6,
   "children": {
     "a2a-4411-1790": {
       "last": 3,
+      "key": "<ed25519 pubkey hex, the parent's node>",
+      "at": 1790313000,
       "events": [
         { "seq": 2, "event": { "settled": { "stop": "end_turn", "calls": 1, "mins": 56,
                                             "say": "read the slot catalog", "errors": 0 } } },
@@ -2660,22 +2667,35 @@ push past it drops the OLDEST. `last` is the highest `seq` ever pushed for
 that child, which is what lets a parent whose cursor fell off the retained
 window resynchronize instead of re-reading an empty answer forever.
 
+`key` is the parent's node key — the same string this node stamped on the
+child's `remoteParent` when it admitted the spawn — written on the child's
+FIRST event and never replaced. It is the ring's own gate input, and it is
+here because the ring OUTLIVES the record: the door's history arm compares the
+caller's verifying key against this, and against the record only as a
+fallback, so the parent can still read its child's last events once the record
+is pruned (CONTRACTS.md §6). `at` is the unix second the ring last took an
+event — its retention clock. A ring whose child's record is gone is kept for a
+week and then dropped by the child-side pass
+(`aoide_storage::pingback_remote::retain_rings`), because a ring is rewritten
+whole on every spool and an unbounded set of dead children would cost every
+live event a rewrite proportional to their number. A ring for a child still on
+the roster is never a candidate, and neither is one that keeps taking events.
+
 `event` is the reaper's own closed event vocabulary, written by
 `aoide-conduct`'s `PingEvent` and OPAQUE here — a queue that parsed its own
 payload would be a second definition of the event. Every string in it is
-already cleaned by the sender (control characters stripped, clipped to 80
-with `…`), never by the reader. The events are claimed by the same
-at-most-once cursor as `pingback.json` and written after it: a crash between
-the two loses an event rather than duplicating one, the direction the whole
-lane loses in. Nothing prunes a ring — the parent that owns one may still be
-reading it long after the child left this node's roster — so its size is
-bounded by 16 events per child this node ever ran.
+already cleaned by the sender (control characters and every unsafe invisible
+mark stripped, clipped to 80 with `…`), and a reader re-cleans and re-clamps
+every field it re-renders rather than trusting another node's sanitizing. The
+events are claimed by the same at-most-once cursor as `pingback.json` and
+written after it: a crash between the two loses an event rather than
+duplicating one, the direction the whole lane loses in.
 
 Written only through `aoide_storage::pingback_remote`, inside one short
 `state/stage/.stage.lock` section and atomically (temp-then-rename); a missing
 or corrupt file reads as empty. Like `remote-children.json` it is attribution,
 never a grant: the door that serves it gates the read on the caller's own key
-against the child's stamped `remoteParent.key` (CONTRACTS.md §6).
+against the ring's `key` (CONTRACTS.md §6).
 There is no command that edits it.
 
 ### `state/stage/mesh.json` — **v0**
@@ -4988,23 +5008,40 @@ reads as `0` (the same tolerant reading `aoide/frame`'s `tail` takes: a wrong
 cursor costs duplicates the caller can see in `seq`, while refusing it would
 cost a parent its child's history over one integer type).
 
-**It is gated by `output_read_admitted` AND the child's own stamped key.** The
-child's record carries `remoteParent.key` — the key this door stamped when it
-admitted the spawn that created it — and history is served only to a caller
-whose signature verified against exactly that key. This is the one read the
-2026-09-25 ruling did NOT widen: a signed, `read`-holding node may watch any
-session's frame, but what a child published for its parent belongs to that
-parent. The stored `node` label is never consulted (a name follows a rename, a
-key is the identity), an empty stored key matches nobody, and an unsigned,
-bearer-token or bare-address caller is refused by the output gate before the
-key is even compared. The refusal is `-32011` — §4.4 of the lane brief names
-no code of its own for this arm, and both refusals are one family: an output
-read this caller is not admitted to — with its own TEXT, because the reason is
-not the same one and an operator deserves to read which it was. Like every
-refusal in this arm it says nothing about the session asked for, and the gate
-runs before the status read, so it is no existence oracle either. A read
-audits under its own label, `a2a.tasks/get.history` (which wins the tie when a
-request asks for both output keys).
+**It is gated by `output_read_admitted` AND the parent's own key — read off
+the RING first, the record second.** The child's record carries
+`remoteParent.key` (the key this door stamped when it admitted the spawn that
+created it) and its ring entry carries the same key as its own `key`
+(CONTRACTS.md §4); history is served only to a caller whose signature verified
+against one of them. This is the one read the 2026-09-25 ruling did NOT widen:
+a signed, `read`-holding node may watch any session's frame, but what a child
+published for its parent belongs to that parent. The ring is consulted FIRST
+because it outlives the record: a gate that could only read `sessions.json`
+would refuse a parent the child's every remaining event the moment the record
+was pruned, which is exactly the read the ring exists to serve. The stored
+`node` label is never consulted (a name follows a rename, a key is the
+identity), an empty stored key matches nobody, and an unsigned, bearer-token or
+bare-address caller is refused by the output gate before the key is even
+compared. The refusal is `-32011` — §4.4 of the lane brief names no code of its
+own for this arm, and both refusals are one family: an output read this caller
+is not admitted to — with its own TEXT, because the reason is not the same one
+and an operator deserves to read which it was. Like every refusal in this arm
+it says nothing about the sessions it is not yours to read, and the gate runs
+before the status read, so it is no existence oracle either.
+A read audits under its own label, `a2a.tasks/get.history` (which wins the tie
+when a request asks for both output keys).
+
+**A ring whose child's record is gone is still served, and an id this node
+holds at all is still not an oracle.** When the record has been pruned
+(any unrelated reap can prune it) and the ring remains, the history read is
+answered from the ring itself: the SAME status envelope, with the ring's own
+tail deciding the one field that must be derived — an `exited` last event
+means `completed`, anything else `working` — and no `artifacts` (a frame needs
+a record, and there is none). An id this node holds **neither** a record nor a
+ring is not a refusal at all: it answers `-32001` (`TASK_NOT_FOUND_CODE`), the
+same "task not found" every other `tasks/get` arm answers an unknown id with,
+which the pulling parent reads as the permanent answer it is — the child is
+gone for good and its ledger row is latched rather than retried forever.
 
 **Asking for history decides the whole request.** A request carrying BOTH
 `aoide/frame` and `aoide/linesAfter` is judged by the stricter of the two

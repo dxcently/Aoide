@@ -70,10 +70,17 @@
   round-trip for (unlike `SessionRecord`, whose writer is shellbridge).
 - **A `state/stage/` ledger with a cursor moves the cursor FORWARD ONLY, and
   writes both inside one `with_stage_lock` section.** `remote_children::
-  advance_lines_after` and `retain_remote_children` are the shape: mutate
-  in-memory, write once, return whether anything changed; a no-op result
+  claim_lines_after` and `retain_remote_children` are the shape (P-RSA S9):
+  mutate in-memory, write once, return whether anything changed; a no-op result
   never rewrites the file (so an idle tick does not churn the tree), and a
-  replayed pull can never rewind a cursor and re-deliver a line.
+  replayed pull can never rewind a cursor and re-deliver a line. Where a
+  caller reads the cursor, acts on it over a NETWORK (the remote ping-back
+  pull), and only then advances it, the read and the advance must be ONE
+  operation — `claim_lines_after` returns the cursor the caller may act on, so
+  two overlapping passes cannot each hand over the same events. Its failure
+  mode is deliberate: a claim that cannot be written delivers NOTHING, because
+  with the cursor where it was the same events would come back and the line
+  would land twice.
 - **A one-way latch is a field that is only ever set, and it is never
   written while it is false.** `remote_children::mark_drained` is the shape
   (P-RSA S9): the remote-children ledger's `drained` latch stops the parent's
@@ -89,9 +96,21 @@
   climbs, the cap drops the OLDEST, and a read that missed any event between
   the cursor and the oldest retained one sets `gap` rather than handing over a
   non-contiguous run as if it were whole. A reader that needs to resync with
-  no event to advance past uses `last`. The payload is `Value`, opaque on
+  no event to advance past uses `last` — and only there: a reader that
+  believes `last` outside a `gap` is taking a peer's word for a cursor no
+  honest ring could report. The payload is `Value`, opaque on
   purpose: the event vocabulary belongs to the crate that produces it, and
   this layer is a queue.
+- **A ring that outlives its record carries its own way in and its own clock.**
+  `pingback_remote::ChildRing`'s `key` and `at` are that pair (P-RSA S9): the
+  key is the parent's node key, stamped with the child's FIRST event and never
+  replaced, so the door that serves the ring can admit the parent after the
+  child's `sessions.json` record is pruned; `at` is the last spool's unix
+  second, which is what `retain_rings` measures. Pruning is the CALLER's
+  decision (`retain_rings` takes the predicate) because only the caller knows
+  the roster — this layer refuses nothing on its own, and a rejected-nothing
+  call is not a write, the same change-only discipline every other mutator
+  here holds.
 - **`fs::migrate_root_once` is `pub` and deliberately NOT wired into any
   path getter (L-C2, lyra-carrier lane, task #107) — don't "fix" this by
   hanging it off `fs::root`'s no-override fallback the way

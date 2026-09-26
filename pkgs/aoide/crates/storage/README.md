@@ -428,8 +428,14 @@ by decision — no embedded database yet
   `linesAfter` cursor. `push_event`/`events_after` are the pure ring algebra
   (per-child `seq` from 1, cap 16, the OLDEST dropped, `gap` when the ring
   rolled past the cursor, `last` as the newest `seq`); `spool_event` appends
-  under one `fs::with_stage_lock` section and `events_for` reads without a
-  lock. The events are OPAQUE `serde_json::Value`: the closed vocabulary is
+  under one `fs::with_stage_lock` section, stamping the entry's `key` (the
+  parent's node key, written once, and the door's own gate input once the
+  record is gone) and its `at` (the retention clock); `events_for` reads
+  without a lock and `ring_key` answers one child's stamped key;
+  `retain_rings` is the prune the child-side pass drives — a ring whose record
+  is gone and whose `at` is older than the caller's grace leaves, and a
+  rejected-nothing call is not a write. The events are OPAQUE
+  `serde_json::Value`: the closed vocabulary is
   `aoide-conduct`'s `PingEvent`, and a queue that parsed its own payload would
   be a second definition of the event it carries.
 - `remote_children` — the remote-children ledger (remote sub-agents lane,
@@ -439,7 +445,10 @@ by decision — no embedded database yet
   verified identity `(key, sessionId)`. `append_remote_child` is idempotent
   on that identity; `retain_remote_children` is how a roster exit drops them;
   `advance_lines_after` moves one child's ping-back pull cursor forward only
-  (a replayed pull never rewinds it), and `mark_drained` latches the row once
+  (a replayed pull never rewinds it) and `claim_lines_after` is what the pull
+  actually uses — the same advance, in the same locked section that READS the
+  stored cursor and hands it back, so the read and the write cannot be split
+  by a second pass; `mark_drained` latches the row once
   the parent has drained the child's `Exited` — a ring is never pruned and a
   child that has left the roster never speaks again, so that latch is what
   stops the parent's every later tick from asking about it. All of them run
