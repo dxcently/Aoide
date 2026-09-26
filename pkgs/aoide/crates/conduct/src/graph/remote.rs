@@ -294,33 +294,6 @@ mod tests {
         }
     }
 
-    /// A `(sessionId, petname, role)` triple set → a minimal cached-graph
-    /// document [`node_cached_sessions`] can extract back out of — a `role:
-    /// "child"` entry gets a synthetic `spawned` edge so the role-derivation
-    /// half of the extraction is exercised too, mirroring `who.rs`'s own
-    /// `node_graph` test fixture.
-    fn node_graph_json(sessions: &[(&str, Option<&str>, &str)]) -> Value {
-        let nodes: Vec<Value> = sessions
-            .iter()
-            .map(|(id, petname, _role)| {
-                let mut n = json!({
-                    "id": format!("session:{id}"), "kind": "session",
-                    "state": "working", "cwd": "/x", "agent": "claude",
-                });
-                if let Some(p) = petname {
-                    n["petname"] = json!(p);
-                }
-                n
-            })
-            .collect();
-        let edges: Vec<Value> = sessions
-            .iter()
-            .filter(|(_, _, role)| *role == "child")
-            .map(|(id, _, _)| json!({ "from": "session:parent", "to": format!("session:{id}"), "kind": "spawned" }))
-            .collect();
-        json!({ "schemaVersion": "0", "nodes": nodes, "edges": edges })
-    }
-
     /// A peer's own petname and session id reach an error message through
     /// [`node_session_label`], which renders them as they arrived — so they are
     /// cleaned first (`common::clean_line`, the same sanitizer every other
