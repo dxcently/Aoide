@@ -151,6 +151,8 @@ mod tests {
             project: None,
             agent: "claude".to_string(),
             harness_session_id: Some("h1".to_string()),
+            session_start_at: None,
+            opening_turn: None,
             cwd: "/home/khoa/Aoide".to_string(),
             title: Some("do the thing".to_string()),
             petname: Some("brave-otter".to_string()),

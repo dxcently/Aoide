@@ -750,15 +750,12 @@ fn build_signed_pair_poll_body(id: &str) -> Result<String, String> {
     Ok(serde_json::to_string(&body).unwrap_or_default())
 }
 
-/// A unique `messageId` for one outbound `message/send` (pid + wall-clock
-/// nanos — never reused within a process).
-fn gen_message_id() -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("aoide-{}-{}", std::process::id(), nanos)
-}
+/// A unique `messageId` for one outbound `message/send`. One home
+/// (`aoide_protocol::wire::gen_message_id`, re-exported here so this module's
+/// callers are unchanged): the server's outbound A2A `status.message` mints
+/// ids the same way, and the binding marks `messageId` required on a
+/// `Message`.
+pub use aoide_protocol::wire::gen_message_id;
 
 // ── The seven `node` commands (CONTRACTS.md §7: same-network federation) ───────
 //
@@ -1722,9 +1719,30 @@ fn handle_node_spawn(inv: &Invocation) -> Outcome {
                 Some(p) => format!("parent `{p}`"),
                 None => "parent: none (unattested)".to_string(),
             };
+            // What became of the opening turn, straight off the ack Task's
+            // `status.message` — a proper A2A `Message` (role + parts), so the
+            // text is its first part's `text`. The spawn ack carries `pending`
+            // (the door's worker is still waiting for the target); a later
+            // `tasks/get` carries the verdict, and this line is where the
+            // operator sees that the opening turn has NOT run yet rather than
+            // assuming it did.
+            let opening_note = parsed
+                .get("result")
+                .and_then(|r| r.get("status"))
+                .and_then(|s| s.get("message"))
+                .and_then(|m| m.get("parts"))
+                .and_then(Value::as_array)
+                .and_then(|parts| parts.first())
+                .and_then(|part| part.get("text"))
+                .and_then(Value::as_str)
+                .map(|text| format!(" — {text}"))
+                .unwrap_or_default();
             Outcome::ok(
                 cmd,
-                format!("spawned on `{}` — remote session `{session_id}` ({parent_note})", node.name),
+                format!(
+                    "spawned on `{}` — remote session `{session_id}` ({parent_note}){opening_note}",
+                    node.name
+                ),
             )
             .with_data(json!({
                 "name": node.name,

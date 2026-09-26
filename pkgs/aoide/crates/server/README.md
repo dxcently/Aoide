@@ -189,10 +189,33 @@ the inbound half of the two-door contract (the outbound half is
   (`mail::file_receipt`); `do_inject` itself files no entry of its own,
   since its Invocation can only ever reach `session_send`'s LOCAL branch
   (see `do_inject`'s doc comment). `do_spawn` (Spawn, a BRAND-NEW session)
-  types the opening turn via `spawn_inject_prompt`, which files ITS OWN
-  receipt right after the write — a spawned session has no `SessionRecord`
+  types the opening turn via `spawn_inject_prompt`, which writes it with the
+  tree's one pty-injection shape (`write_delivery`: the text, a flush, the
+  submit-keystroke gap, then the target harness's own `submit_key` resolved
+  through `profile_for_agent` as a SEPARATE write — never a keystroke spelled
+  at that call site) and files ITS OWN receipt right after a write that
+  actually went out — a spawned session has no `SessionRecord`
   yet at that moment, so it cannot reach `session_send` at all (see
-  `spawn_inject_prompt`'s doc comment for the race that rules it out).
+  `spawn_inject_prompt`'s doc comment for the race that rules it out). That
+  write waits first: readiness is a per-harness fact (`Readiness`), and the
+  wait runs on a WORKER, one per spawn, never on the connection handler — 20s
+  of budget plus the socket retry against `MAX_CONN` would hand every other
+  RPC a `503 server busy`. The worker's verdict lands on the record
+  (`stamp_opening_turn`: `pending` is stamped by the ack path and again as the
+  worker's own first write — the same thread that stamps the verdict
+  immediately after, so nothing can clobber a verdict back — then `delivered`
+  / `delivered-unverified` / `not-ready` / `busy` /
+  `no-worker` / `skipped-shell` / `skipped-empty` / `no-socket` /
+  `write-failed`, or `unknown` when a boot pass reconciles a verdict lost with
+  the process that owed it — the complete list and its meaning live on the
+  field's own doc, `storage/src/records.rs`), and `tasks/get` reports it as the
+  task's `status.message` — an A2A `Message` object, never a bare string — so a
+  peer whose opening turn never ran is told so instead of reading a bare
+  `submitted`. `aoide node spawn` prints that same line, so the operator does
+  not have to reach for `tasks/get` to see it. The pool is bounded
+  (`OPENING_TURN_WORKERS_MAX` waits in flight, the handler's own slot being
+  released too early to be a bound): past it the opening turn is stamped
+  `busy`, never silently dropped.
   These were the only two mailbase-filing call sites until P-M2 added a
   third, unrelated to either: `mail_deposit`'s own call into
   `aoide_storage::mail::deposit` (below), which files a letter or receipt

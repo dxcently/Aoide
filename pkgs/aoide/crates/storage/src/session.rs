@@ -142,6 +142,8 @@ pub fn upsert_session(
             // payload's own `session_id` (P-D7); a fresh record starts
             // without one.
             harness_session_id: None,
+            session_start_at: None,
+            opening_turn: None,
             // A fresh registration is a first run, never a revival — the
             // resurrect path (P-D8) stamps this after the fact via
             // `stamp_resumed_from`, once the new record exists.

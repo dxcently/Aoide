@@ -53,9 +53,12 @@
 //! candidate with neither hits the pre-existing taught skip.
 //!
 //! **Post-spawn delivery into a resurrected terminal (decision 8):** once a
-//! terminal candidate's spawn actually registers, its `restore` snapshot
-//! decides what — if anything — lands in the new pty, through
-//! [`super::send::session_send`], never a direct socket write:
+//! terminal candidate's spawn actually registers — and its harness is READY to
+//! take a turn ([`super::spawn::wait_ready`], the same gate `spawn --prompt`
+//! passes; a target that never becomes ready is reported `not-ready` and typed
+//! at by nothing) — its `restore` snapshot decides what — if anything — lands
+//! in the new pty, through [`super::send::session_send`], never a direct socket
+//! write:
 //! - **not idle, with a foreground `argv`** — the session was demonstrably
 //!   RUNNING something when it left. Re-exec it, `--yes --submit` and all:
 //!   the never-auto-run rule below covers the typed-but-unsubmitted case,
@@ -379,6 +382,12 @@ fn resurrect_one(
         flags,
         door,
     };
+    // This launch's start instant, taken before the spawn exists — the
+    // readiness wait below reads only a harness `SessionStart` stamped at or
+    // after it, so a leftover record from the session this one is replacing
+    // (the ledger's own old id, or a reused `--id`) cannot pass for the new
+    // one's hello.
+    let launch_at = super::session_store::now_iso_utc();
     let out = session_spawn(&spawn_inv);
     if out.status != aoide_protocol::output::Status::Ok {
         failed.push(json!({
@@ -450,23 +459,51 @@ fn resurrect_one(
 
     // Post-spawn restore delivery (P-C6, durable-sessions plan) — only for a
     // TERMINAL candidate (a `restore` snapshot present) whose spawn actually
-    // registered: an unregistered session has no live pty to deliver into,
-    // the same posture `spawn --prompt` already takes toward its own
-    // injection. `restore_delivery` is pure and decides the whole shape; the
-    // `submit` key on its returned flags (never present on the preload
-    // shape) is what this reads back to report which branch fired.
+    // registered AND became READY: an unregistered session has no live pty to
+    // deliver into, and a registered-but-unstarted one has a pty whose harness
+    // is still coming up, where the same early-typing defect `spawn --prompt`
+    // just fixed would lose the line (or, for the re-exec branch's Enter, run
+    // it somewhere it was never aimed at). `restore_delivery` is pure and
+    // decides the whole shape; the `submit` key on its returned flags (never
+    // present on the preload shape) is what this reads back to report which
+    // branch fired.
     let restore_result = if !registered {
         "skipped-unregistered".to_string()
     } else {
         match c.entry.restore.as_ref().and_then(|r| restore_delivery(door, &new_id, r)) {
             None => "none".to_string(),
-            Some(inv) => {
-                let submit = inv.flags.contains_key("submit");
-                let inner = session_send(&inv);
-                if inner.status == Status::Ok {
-                    if submit { "reexec".to_string() } else { "preload".to_string() }
+            Some(_) => {
+                let ready = super::spawn::wait_ready(
+                    &c.entry.agent,
+                    &new_id,
+                    &launch_at,
+                    super::spawn::READY_BUDGET,
+                );
+                if ready == super::spawn::Ready::NotReady {
+                    "not-ready".to_string()
                 } else {
-                    format!("failed: {}", inner.message)
+                    let inv = c
+                        .entry
+                        .restore
+                        .as_ref()
+                        .and_then(|r| restore_delivery(door, &new_id, r))
+                        .expect("checked just above");
+                    let submit = inv.flags.contains_key("submit");
+                    let inner = session_send(&inv);
+                    if inner.status != Status::Ok {
+                        format!("failed: {}", inner.message)
+                    } else {
+                        // The branch that fired, and whether the readiness was
+                        // a fact or a settled guess: a terminal candidate whose
+                        // agent has no profile is typed at on the guess, and
+                        // says so.
+                        let word = if submit { "reexec" } else { "preload" };
+                        if ready == super::spawn::Ready::Verified {
+                            word.to_string()
+                        } else {
+                            format!("{word}-unverified")
+                        }
+                    }
                 }
             }
         }
@@ -478,8 +515,17 @@ fn resurrect_one(
         c.entry.agent,
         if registered { "" } else { " (not yet registered)" }
     ));
-    if restore_result == "reexec" || restore_result == "preload" {
+    if matches!(
+        restore_result.as_str(),
+        "reexec" | "preload" | "reexec-unverified" | "preload-unverified"
+    ) {
         changed.push(format!("session {new_id}: restore {restore_result}"));
+    }
+    if restore_result == "not-ready" {
+        changed.push(format!(
+            "session {new_id}: restore not injected — `{}` was not ready",
+            c.entry.agent
+        ));
     }
     resurrected.push(json!({
         "sessionId": new_id,

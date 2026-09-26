@@ -49,7 +49,7 @@ use super::session_store::{
     clear_stale_parent, do_session_end, do_session_phase, do_session_phase_if, do_session_start,
     do_subagent_end, do_subagent_rekey, do_subagent_spawn, ensure_session_ceiling, now_iso_utc,
     refresh_subagent_says, refresh_transcript_fields, set_owner_activity, stamp_attested_parent,
-    stamp_harness_session_id, stamp_hook_ancestry, stored_phase,
+    stamp_harness_session_id, stamp_hook_ancestry, stamp_session_start_at, stored_phase,
 };
 use super::window::{discover_window, ensure_session_window, pid_ancestry, windowless_by_lineage_from_parent};
 use aoide_protocol::agents::{agent_profile, known_agents, AgentProfile, HookClass, CLAUDE_PROFILE};
@@ -86,13 +86,16 @@ use std::path::{Path, PathBuf};
 /// `cfg(test)` so the unit suite doesn't pay it — a real delay is only
 /// meaningful against a real pty reader; [`write_delivery`]'s own tests
 /// pass a real, explicit delay when they need to observe the boundary.
-// `pub(in crate::graph)`: the ring (`graph/doorbell.rs`, P-M5a-2) is a
-// SECOND production caller of `write_delivery`, alongside `deliver_local_with`
-// below — both raw-inject, both want the exact same submit-keystroke gap.
+// `pub`: the ring (`graph/doorbell.rs`, P-M5a-2) is a SECOND production
+// caller of `write_delivery`, alongside `deliver_local_with` below — both
+// raw-inject, both want the exact same submit-keystroke gap — and
+// `aoide-server`'s A2A door (`a2a::spawn_inject_prompt`) is the THIRD, from
+// another crate: a spawned session's opening turn is a pty injection like any
+// other and must not carry a keystroke spelling of its own.
 #[cfg(not(test))]
-pub(in crate::graph) const SUBMIT_KEYSTROKE_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+pub const SUBMIT_KEYSTROKE_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
 #[cfg(test)]
-pub(in crate::graph) const SUBMIT_KEYSTROKE_DELAY: std::time::Duration = std::time::Duration::from_millis(0);
+pub const SUBMIT_KEYSTROKE_DELAY: std::time::Duration = std::time::Duration::from_millis(0);
 
 // ── `send`: the gated injection door ──────────────────────────────────
 
@@ -634,13 +637,17 @@ fn deliver_local(inv: &Invocation, id: &str) -> Outcome {
 /// #124; see [`SUBMIT_KEYSTROKE_DELAY`]'s doc comment for why this must be
 /// two writes, never one concatenated write). `delay` is a parameter, not a
 /// hardcoded read of the constant, so a test can pass a real, observable gap
-/// directly — [`deliver_local_with`] is the one production caller, and it
-/// always passes [`SUBMIT_KEYSTROKE_DELAY`].
+/// directly — [`deliver_local_with`] is the one production caller inside this
+/// crate, and it always passes [`SUBMIT_KEYSTROKE_DELAY`].
 ///
-/// `pub(in crate::graph)`: the ring (`graph/doorbell.rs`, P-M5a-2) is the
-/// second production caller — raw injection into a target wrap's socket,
-/// no gate, no provenance prefix, exactly this function's own contract.
-pub(in crate::graph) fn write_delivery(
+/// `pub`: the ring (`graph/doorbell.rs`, P-M5a-2) is the second production
+/// caller — raw injection into a target wrap's socket, no gate, no provenance
+/// prefix, exactly this function's own contract — and `aoide-server`'s
+/// `a2a::spawn_inject_prompt` the third, typing a brand-new session's opening
+/// turn over the same control socket. Every pty injection in the tree goes
+/// through here, which is the point: the keystroke shape (payload, flush, the
+/// gap, then the TARGET's own submit key alone) has one implementation.
+pub fn write_delivery(
     stream: &mut UnixStream,
     payload: &[u8],
     submit: bool,
@@ -1880,6 +1887,13 @@ fn hook_for_profile_gated(
                 pid,
             );
             stamp_hook_ancestry(&id, &my_hook_ancestry());
+            // The harness's own hello, timestamped: the one writer of
+            // `sessionStartAt`, and the fact a first-turn injection waits on
+            // (`wait_ready`). Stamped AFTER `do_session_start` above, so the
+            // record it lands on exists — and on every SessionStart, a resume
+            // included, so the stamp always names the most recent launch this
+            // harness announced.
+            stamp_session_start_at(&id, &now_iso_utc());
             // The check lane's own SessionStart trigger. Settled: run the
             // lane, drain any pending note, flag an already-red or
             // already-.nix-carrying tree. Mid-turn: no lane run, just replay

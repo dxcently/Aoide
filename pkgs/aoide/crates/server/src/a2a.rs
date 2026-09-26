@@ -67,7 +67,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, TcpListener, TcpStream};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -668,11 +668,118 @@ fn build_task(sessions: &[SessionRecord], id: &str) -> Result<Task, (i64, String
         // MVP simplification: task id == sessionId, contextId == sessionId —
         // see the doc comment above.
         context_id: rec.session_id.clone(),
-        status: TaskStatus { state: state.to_string(), timestamp: now_iso_utc() },
+        status: TaskStatus { state: state.to_string(), timestamp: now_iso_utc(), message: opening_turn_message(rec) },
         kind: "task".to_string(),
         artifacts: None,
         history: None,
     })
+}
+
+/// How many opening-turn workers may be WAITING at once, across every spawn
+/// this door is serving. The wait is the expensive part (up to `READY_BUDGET`
+/// plus the socket retry) and it OUTLIVES the RPC that started it, so
+/// `MAX_CONN` no longer bounds it — the connection slot is released when the
+/// handler returns (branch re-review N2: the comment here used to claim that
+/// slot WAS the cap, which stopped being true the moment the work moved off
+/// the handler). This is that bound: a small pool, because a spawn-granted
+/// peer looping `message/send` against a never-ready `spawnAgent` would
+/// otherwise park one 20s thread (plus its real agent process) per request
+/// with no backpressure at all. Past the cap the opening turn is reported
+/// `busy` — an honest word the caller can retry on, never a silent drop.
+const OPENING_TURN_WORKERS_MAX: usize = 8;
+static OPENING_TURN_WORKERS: AtomicUsize = AtomicUsize::new(0);
+
+/// One slot in that pool, released when the worker holding it ends — the guard
+/// moves into the thread, so a panic or an early return still frees it.
+struct OpeningTurnSlot;
+
+impl OpeningTurnSlot {
+    fn acquire() -> Option<OpeningTurnSlot> {
+        let mut current = OPENING_TURN_WORKERS.load(Ordering::Acquire);
+        loop {
+            if current >= OPENING_TURN_WORKERS_MAX {
+                return None;
+            }
+            match OPENING_TURN_WORKERS.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Some(OpeningTurnSlot),
+                Err(observed) => current = observed,
+            }
+        }
+    }
+}
+
+impl Drop for OpeningTurnSlot {
+    fn drop(&mut self) {
+        OPENING_TURN_WORKERS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// The opening-turn worker's whole life, in ONE function so its write order is
+/// a property of the code rather than of a closure's shape: stamp `pending`,
+/// wait for readiness and type, stamp the verdict, audit it. `pending` and the
+/// verdict therefore come from the SAME thread in that order — nothing can
+/// land a verdict first and then be clobbered back to `pending` (branch
+/// re-review 2's L was a second writer of `pending`: the door's registration
+/// wait stamped it from its own thread, so a verdict that landed first was
+/// overwritten, and a verdict written before registration left a stranded
+/// `pending` behind). `slot` is held for this whole life, so the pool counts
+/// real waits.
+fn opening_turn_worker(
+    id: String,
+    agent_cmd: String,
+    prompt: String,
+    launch_at: String,
+    budget: Duration,
+    audit_log: PathBuf,
+    slot: OpeningTurnSlot,
+) {
+    let _slot = slot;
+    // The door's ack-path stamp can miss a record that registered after it;
+    // this one closes that window. A no-op when the value is already `pending`,
+    // and — being this thread's first write — always before the verdict below.
+    aoide_conduct::graph::stamp_opening_turn(&id, "pending");
+    let word = spawn_inject_prompt(&id, &agent_cmd, &prompt, &launch_at, budget);
+    aoide_conduct::graph::stamp_opening_turn(&id, word);
+    let _ = audit(
+        &audit_log,
+        Door::A2a,
+        EventClass::Audit,
+        "a2a.message/send",
+        word,
+        &format!("opening turn for `{id}`: {word}"),
+    );
+}
+
+/// One `status.message` for an opening-turn verdict — the A2A `Message` shape
+/// this binding types the field as, built in one place so the ack
+/// (`pending`), the record's own verdict and any future reader cannot drift.
+fn opening_turn_status(id: &str, word: &str) -> Message {
+    Message {
+        role: "agent".to_string(),
+        parts: vec![Part {
+            kind: "text".to_string(),
+            text: Some(format!("opening turn: {word}")),
+            extra: Default::default(),
+        }],
+        message_id: Some(aoide_protocol::wire::gen_message_id()),
+        context_id: Some(id.to_string()),
+        metadata: None,
+    }
+}
+
+/// What became of the opening turn, as the task's `status.message`, off the
+/// record the worker stamped. `None` for every record that carries no
+/// `openingTurn` (a local spawn, an inject into an existing session, a legacy
+/// record), so those tasks stay byte-identical.
+fn opening_turn_message(rec: &SessionRecord) -> Option<Message> {
+    rec.opening_turn
+        .as_deref()
+        .map(|word| opening_turn_status(&rec.session_id, word))
 }
 
 /// Load `sessions.json` off the stage and resolve one task by id.
@@ -1010,6 +1117,7 @@ fn ring_task(task_id: &str) -> Task {
         context_id: task_id.to_string(),
         status: TaskStatus {
             state: if ended { "completed" } else { "working" }.to_string(),
+            message: None,
             timestamp: now_iso_utc(),
         },
         kind: "task".to_string(),
@@ -1461,7 +1569,7 @@ fn submitted_task(session_id: &str) -> Value {
     let task = Task {
         id: session_id.to_string(),
         context_id: session_id.to_string(),
-        status: TaskStatus { state: "submitted".to_string(), timestamp: now_iso_utc() },
+        status: TaskStatus { state: "submitted".to_string(), timestamp: now_iso_utc(), message: None },
         kind: "task".to_string(),
         artifacts: None,
         history: None,
@@ -1550,15 +1658,28 @@ fn do_inject(
     }
 }
 
-/// Best-effort: connect to a just-spawned conducted session's control socket
-/// and type `prompt` as its first turn, retrying while the child hasn't
-/// bound it yet — the same connect-and-retry shape
+/// Best-effort: wait for a just-spawned conducted session to be READY to take
+/// a turn, then connect to its control socket and type `prompt` as its first
+/// turn — the same connect-and-retry shape
 /// `aoide_conduct::graph::conduct`'s own PTY-injection test uses (there,
 /// proving the production socket-write path; here, actually driving it). A
 /// missed connect after the retry budget is tolerated: the session still
 /// exists and is `conductable`, just without its opening turn typed in — a
 /// client can always follow up with a plain `send`/another
 /// `message/send`.
+///
+/// **Readiness comes FIRST** ([`aoide_conduct::graph::wait_ready`], whose fact
+/// is the target harness's own `AgentProfile::readiness`), because a bound
+/// socket is not a started agent: this door used to type at the socket the
+/// instant it appeared, which for a harness still drawing its TUI put the
+/// opening turn into a composer that was not there yet and dropped its submit
+/// keystroke — the live 2026-09-26 defect `spawn --prompt` fixed. A target
+/// that never becomes ready within `ready_budget` is typed at by NOTHING and
+/// files NO receipt: an unacknowledged letter that the sender can retry, never
+/// a receipt for a turn that never started. `ready_budget` is a parameter, not
+/// a hardcoded read of the constant, so a test can pass an observable one
+/// directly — [`do_spawn`] always passes
+/// [`aoide_conduct::graph::READY_BUDGET`].
 ///
 /// **Deliberately a RAW socket write, not `session_send`/`deliver_local`.**
 /// `session_send` requires a `SessionRecord` already present in
@@ -1569,7 +1690,14 @@ fn do_inject(
 /// exactly the race this function's own retry loop exists to survive (the
 /// socket file itself may not even exist). Routing through the session
 /// registry here would just trade the socket race for a registration race,
-/// so this stays on the raw socket path it already computed.
+/// so this stays on the raw socket path it already computed — but the WRITE
+/// is the tree's one pty-injection shape, `write_delivery`: the text, a
+/// flush, the submit-keystroke gap, then **the target harness's own
+/// `submit_key`** (`profile_for_agent`, resolved from the configured program
+/// — never a byte spelled at this call site) as a SEPARATE write. This door
+/// typed `{prompt}\n` for as long as it existed, which is a keystroke of its
+/// own and the wrong one wherever the target submits on `\r` (claude, kimi):
+/// the opening turn landed in the composer and never submitted.
 ///
 /// **Messaging plan P-M1, `state/mail/base.jsonl`**: because of the above,
 /// this is the SECOND (and last) mailbase-filing site in the tree, alongside
@@ -1578,11 +1706,19 @@ fn do_inject(
 /// itself. `from` is empty: the a2a door has no caller identity to offer
 /// today (#51's scope), same reasoning [`do_inject`]'s callers rely on.
 /// Best-effort, same tolerance as the rest of this function — a write error
-/// above is already swallowed (the retry loop only confirms a bound socket,
-/// never delivery), so a failed mailbase write is no less tolerated.
-fn spawn_inject_prompt(id: &str, agent_cmd: &str, prompt: &str) {
+/// above is swallowed (the retry loop only confirms a bound socket, never
+/// delivery), so a failed mailbase write is no less tolerated. What the write
+/// error DOES decide is the receipt: it is filed only for a delivery that went
+/// out, so a letter is never acknowledged by a turn nobody received.
+fn spawn_inject_prompt(
+    id: &str,
+    agent_cmd: &str,
+    prompt: &str,
+    launch_at: &str,
+    ready_budget: Duration,
+) -> &'static str {
     if prompt.is_empty() {
-        return;
+        return "skipped-empty";
     }
     // Belt and braces on H1: `decide_send_action` already refuses a shell
     // `spawnAgent` before anything starts, and this is the last gate before a
@@ -1595,21 +1731,59 @@ fn spawn_inject_prompt(id: &str, agent_cmd: &str, prompt: &str) {
     // taught one.
     let configured: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
     if aoide_conduct::graph::program_is_a_shell(&configured) {
-        return;
+        return "skipped-shell";
     }
+    // WHICH harness the configured command IS decides what readiness means
+    // (an unconfigured/unknown program has no profile and takes the hookless
+    // answer, the same fallback every other profile lookup in the tree takes)
+    // and which keystroke SUBMITS a line in it.
+    let agent = configured
+        .first()
+        .map(|program| aoide_conduct::graph::command_basename(program))
+        .unwrap_or_default();
+    let ready = aoide_conduct::graph::wait_ready(&agent, id, &launch_at, ready_budget);
+    if ready == aoide_conduct::graph::Ready::NotReady {
+        return "not-ready";
+    }
+    // The target harness's own submit keystroke, resolved from the SAME table
+    // every other delivery reads (`profile_for_agent`; claude when the name is
+    // unregistered). Never a byte spelled here: claude's is `\r`, and a bare
+    // `\n` only inserts a newline in its composer — the exact way this door
+    // used to type an opening turn that never submitted.
+    let submit_key = aoide_conduct::graph::profile_for_agent(&agent).submit_key;
     let socket = aoide_conduct::graph::conduct_socket_path(id);
-    let payload = format!("{prompt}\n");
     for _ in 0..300 {
         if socket.exists() {
             if let Ok(mut s) = UnixStream::connect(&socket) {
-                let _ = s.write_all(payload.as_bytes());
-                let _ = s.flush();
-                let _ = aoide_storage::mail::file_receipt("", id, prompt);
-                return;
+                // The tree's ONE pty-injection shape: the text, a flush, the
+                // submit-keystroke gap, then the submit key as a SEPARATE
+                // write (`write_delivery`) — never one concatenated payload,
+                // which a harness reading the composer mid-paste can coalesce
+                // differently (task #124).
+                let written = aoide_conduct::graph::write_delivery(
+                    &mut s,
+                    prompt.as_bytes(),
+                    true,
+                    submit_key,
+                    aoide_conduct::graph::SUBMIT_KEYSTROKE_DELAY,
+                );
+                // A receipt acknowledges a TURN: file it only for a write that
+                // actually went out, so a broken delivery leaves the sender's
+                // letter unacknowledged (retryable) instead of acknowledged.
+                if written.is_ok() {
+                    let _ = aoide_storage::mail::file_receipt("", id, prompt);
+                    return if ready == aoide_conduct::graph::Ready::Verified {
+                        "delivered"
+                    } else {
+                        "delivered-unverified"
+                    };
+                }
+                return "write-failed";
             }
         }
         std::thread::sleep(Duration::from_millis(10));
     }
+    "no-socket"
 }
 
 /// Stamp `origin=node:<name>` directly on the just-spawned session's own
@@ -1645,6 +1819,11 @@ fn stamp_spawn_provenance(id: &str, origin: &str, remote_parent: Option<RemotePa
             .map(|f: SessionsFile| f.sessions.iter().any(|s| s.session_id == id))
             .unwrap_or(false);
         if registered {
+            // NOTE: no `pending` stamp here. The ack path stamps it before the
+            // worker is scheduled and the worker stamps it as its own first
+            // write, in one thread with its verdict — a third writer from THIS
+            // thread could land after a verdict and clobber it back (branch
+            // re-review 2's L, fixed).
             aoide_conduct::graph::stamp_origin(id, origin);
             if let Some(parent) = &remote_parent {
                 aoide_conduct::graph::stamp_remote_parent(id, parent);
@@ -1986,6 +2165,11 @@ fn do_spawn(
         .map_err(|e| (-32603_i64, format!("resolving the aoide binary: {e}")))?;
 
     let argv = spawn_argv(&id, agent_cmd, task);
+    // This launch's start instant, taken BEFORE the child exists: the worker's
+    // readiness wait reads only a harness `SessionStart` stamped at or after
+    // it, so a leftover child record from a previous run of a reused id cannot
+    // pass for this launch's hello.
+    let launch_at = now_iso_utc();
 
     let origin = format!("node:{node_name}");
     // Project roots are already loaded the same way `session_ref_lookup`
@@ -2046,8 +2230,77 @@ fn do_spawn(
                 let origin = origin.clone();
                 std::thread::spawn(move || stamp_spawn_provenance(&id, &origin, remote_parent));
             }
-            // Best-effort first-turn injection — see the doc comment above.
-            spawn_inject_prompt(&id, agent_cmd, prompt);
+            // Best-effort first-turn injection — see the doc comment above —
+            // on its OWN WORKER, never this handler thread: the readiness wait
+            // can run for `READY_BUDGET` (20s) and then the socket retry for
+            // ~3s more, and a handler parked that long against `MAX_CONN`
+            // hands `503 server busy` to every other RPC — read commands
+            // included. The handler's slot is released the moment it returns,
+            // so the real bound on these waits is the pool below
+            // ([`OPENING_TURN_WORKERS_MAX`]): past it the opening turn is
+            // reported `busy`, never silently dropped. Nothing joins the
+            // worker, and the record carries the outcome so `tasks/get` can
+            // tell the peer what became of its turn.
+            aoide_conduct::graph::stamp_opening_turn(&id, "pending");
+            let worker_audit = audit_log.to_path_buf();
+            let mut ack_word = "pending";
+            match OpeningTurnSlot::acquire() {
+                None => {
+                    // The pool is saturated with other spawns' waits. This is
+                    // NOT "the target never reported readiness" — it is "this
+                    // door is full" — so it gets its own word, and the peer can
+                    // ask again.
+                    aoide_conduct::graph::stamp_opening_turn(&id, "busy");
+                    ack_word = "busy";
+                    let _ = audit(
+                        audit_log,
+                        Door::A2a,
+                        EventClass::Audit,
+                        "a2a.message/send",
+                        "busy",
+                        &format!(
+                            "opening turn for `{id}`: busy — {OPENING_TURN_WORKERS_MAX} waits already in flight; the session is spawned, ask again for its opening turn"
+                        ),
+                    );
+                }
+                Some(slot) => {
+                    let worker_id = id.clone();
+                    let agent_cmd = agent_cmd.to_string();
+                    let prompt = prompt.to_string();
+                    let launch_at = launch_at.clone();
+                    let scheduled = std::thread::Builder::new()
+                        .name(format!("a2a-opening-turn-{worker_id}"))
+                        .spawn(move || {
+                            opening_turn_worker(
+                                worker_id,
+                                agent_cmd,
+                                prompt,
+                                launch_at,
+                                aoide_conduct::graph::READY_BUDGET,
+                                worker_audit,
+                                slot,
+                            )
+                        })
+                        .is_ok();
+                    if !scheduled {
+                        // No worker means no turn will ever be typed — and
+                        // `not-ready` would be a lie about the TARGET, so this
+                        // says what actually happened.
+                        aoide_conduct::graph::stamp_opening_turn(&id, "no-worker");
+                        ack_word = "no-worker";
+                        let _ = audit(
+                            audit_log,
+                            Door::A2a,
+                            EventClass::Audit,
+                            "a2a.message/send",
+                            "no-worker",
+                            &format!(
+                                "opening turn for `{id}`: no-worker — the door could not start a worker thread; nothing was typed"
+                            ),
+                        );
+                    }
+                }
+            }
             let _ = audit(
                 audit_log,
                 Door::A2a,
@@ -2055,7 +2308,7 @@ fn do_spawn(
                 "a2a.message/send",
                 "ok",
                 &format!(
-                    "spawned conducted session `{id}` (configured agent, {origin}{})",
+                    "spawned conducted session `{id}` (configured agent, {origin}{}) — opening turn pending, typed by a worker once the target reports itself ready",
                     match task {
                         Some(slug) => format!(", managed run on task `{slug}`"),
                         None => String::new(),
@@ -2068,6 +2321,7 @@ fn do_spawn(
                 status: TaskStatus {
                     state: "submitted".to_string(),
                     timestamp: now_iso_utc(),
+                    message: Some(opening_turn_status(&id, ack_word)),
                 },
                 kind: "task".to_string(),
                 artifacts: None,
@@ -8859,21 +9113,75 @@ mod tests {
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
 
         let id = "spawn-inject-target";
+        let launch_at = now_iso_utc();
+        // READINESS comes before the write, so this test stages the fact the
+        // hook door would have written: the target harness's own session,
+        // parented to the wrapper. Without it the gate refuses and nothing is
+        // typed — the same staged-roster shape `wait_ready` reads live.
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".to_string(),
+                sessions: vec![SessionRecord {
+                    session_id: "claude-child".to_string(),
+                    state: "idle".to_string(),
+                    parent_session_id: Some(id.to_string()),
+                    agent: "claude".to_string(),
+                    // THIS launch's `SessionStart`, stamped after it began —
+                    // the only child record that may satisfy the hook arm.
+                    session_start_at: Some(launch_at.clone()),
+                    harness_session_id: Some("claude-child".to_string()),
+                    ..Default::default()
+                }],
+            },
+        )
+        .unwrap();
         let socket = aoide_conduct::graph::conduct_socket_path(id);
         std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
         let listener = UnixListener::bind(&socket).unwrap();
 
         let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
             use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
+            let (mut conn, _) = listener.accept().unwrap();
+            // Exactly the text, no more: the submit keystroke must NOT be
+            // part of this write.
+            let mut text = Vec::new();
+            let mut chunk = [0u8; 64];
+            while text.len() < "hello new session".len() {
+                let n = conn.read(&mut chunk).unwrap();
+                assert!(n > 0, "the writer closed before the text arrived");
+                text.extend_from_slice(&chunk[..n]);
+            }
+            let before_submit = Instant::now();
+            let mut submit = [0u8; 8];
+            let n = conn.read(&mut submit).unwrap();
+            (text, submit[..n].to_vec(), before_submit.elapsed())
         });
 
-        spawn_inject_prompt(id, "claude", "hello new session");
-        let got = acc.join().unwrap();
-        assert_eq!(String::from_utf8(got).unwrap(), "hello new session\n", "--submit's newline, same as do_spawn's payload");
+        assert_eq!(spawn_inject_prompt(id, "claude", "hello new session", &launch_at, Duration::from_millis(500)), "delivered");
+        let (text, submit, gap) = acc.join().unwrap();
+        assert_eq!(
+            String::from_utf8(text).unwrap(),
+            "hello new session",
+            "the text goes out alone — no keystroke concatenated into it"
+        );
+        assert_eq!(
+            String::from_utf8(submit).unwrap(),
+            "\r",
+            "claude's own submit key (CLAUDE_PROFILE.submit_key), never a hand-rolled `\\n`"
+        );
+        // And it is a SEPARATE, LATER write, not a lucky read boundary: the
+        // writer sleeps `SUBMIT_KEYSTROKE_DELAY` (300ms in a non-test build of
+        // aoide-conduct, which is what a dependent crate compiles) between the
+        // two writes, so the submit byte cannot arrive with the text.
+        assert!(
+            gap >= Duration::from_millis(150),
+            "the submit keystroke arrived {gap:?} after the text — one write, not two"
+        );
 
         let entries = aoide_storage::mail::read_base().unwrap();
         assert_eq!(entries.len(), 1, "the spawned session's opening turn is filed exactly once");
@@ -8882,6 +9190,395 @@ mod tests {
         assert_eq!(entries[0].envelope.header.from.name, "", "no caller identity to offer — #51's scope");
 
         let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+        match saved_runtime {
+            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
+            None => std::env::remove_var("XDG_RUNTIME_DIR"),
+        }
+    }
+
+    /// The opening turn's WRITE SHAPE, on its own: the text, then the target
+    /// profile's own submit key as a SECOND write after the keystroke gap —
+    /// never `{prompt}\n`, which is what this door used to type.
+    ///
+    /// The configured program names no profile at all, so this also pins the
+    /// resolution's fallback (claude's key, through `profile_for_agent`) and
+    /// drives the READINESS arm such a target gets: output quiescence, since it
+    /// has no `SessionStart` hook to fire — the wrapper's own log appears and
+    /// then stands still.
+    #[test]
+    fn the_opening_turn_writes_the_text_then_the_targets_submit_key_as_a_second_write() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-spawninject-shape-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+
+        let id = "spawn-inject-shape";
+        let launch_at = now_iso_utc();
+        // The wrapper's own record, with a log that has already spoken — what
+        // a hookless target's readiness is read off.
+        let log = root.join("wrapper.log");
+        std::fs::write(&log, "no-such-agent$ ").unwrap();
+        let mut wrap = fixture_session(id, "idle", None);
+        wrap.log_path = Some(log.to_string_lossy().into_owned());
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".to_string(), sessions: vec![wrap] },
+        )
+        .unwrap();
+
+        let socket = aoide_conduct::graph::conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+
+        let expected = aoide_protocol::agents::CLAUDE_PROFILE.submit_key;
+        let acc = std::thread::spawn(move || {
+            use std::io::Read as _;
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut text = Vec::new();
+            let mut chunk = [0u8; 64];
+            while text.len() < "first turn".len() {
+                let n = conn.read(&mut chunk).unwrap();
+                assert!(n > 0, "the writer closed before the text arrived");
+                text.extend_from_slice(&chunk[..n]);
+            }
+            let before_submit = Instant::now();
+            let mut submit = [0u8; 8];
+            let n = conn.read(&mut submit).unwrap();
+            (text, submit[..n].to_vec(), before_submit.elapsed())
+        });
+
+        // A budget comfortably past the quiescence window the readiness wait
+        // uses for a target with no hook.
+        assert_eq!(spawn_inject_prompt(id, "no-such-agent", "first turn", &launch_at, Duration::from_secs(10)), "delivered-unverified", "no declarable fact for this name");
+        let (text, submit, gap) = acc.join().unwrap();
+        assert_eq!(String::from_utf8(text).unwrap(), "first turn", "the text, alone");
+        assert_eq!(
+            String::from_utf8(submit).unwrap(),
+            expected,
+            "the target profile's submit key, resolved through the table"
+        );
+        assert!(
+            gap >= Duration::from_millis(150),
+            "the keystroke is a separate, later write — it arrived {gap:?} after the text"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+        match saved_runtime {
+            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
+            None => std::env::remove_var("XDG_RUNTIME_DIR"),
+        }
+    }
+
+    /// M3/M4, at the read end: what the worker stamped is what `tasks/get`
+    /// shows. A record whose opening turn never ran carries `not-ready`, and
+    /// that reaches the peer as the task's `status.message` — never a bare
+    /// `submitted` over a session no turn ever reached.
+    #[test]
+    fn the_opening_turns_outcome_is_what_tasks_get_shows() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-openingturn-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+
+        let mut rec = fixture_session("spawned-remote", "idle", None);
+        rec.parent_session_id = Some("node-parent".to_string());
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".to_string(), sessions: vec![rec] },
+        )
+        .unwrap();
+
+        // Before any stamp: the task carries no opening-turn message at all
+        // (byte-identical to the pre-amendment shape).
+        let task = task_get("spawned-remote").unwrap();
+        assert!(task["status"].get("message").is_none(), "task: {task}");
+
+        // The door's own pending stamp, then the worker's verdict.
+        aoide_conduct::graph::stamp_opening_turn("spawned-remote", "pending");
+        let task = task_get("spawned-remote").unwrap();
+        assert_eq!(
+            task["status"]["message"]["parts"][0]["text"], "opening turn: pending",
+            "the status message is an A2A Message object, not a string: {task}"
+        );
+        assert_eq!(task["status"]["message"]["role"], "agent", "task: {task}");
+
+        aoide_conduct::graph::stamp_opening_turn("spawned-remote", "not-ready");
+        let task = task_get("spawned-remote").unwrap();
+        assert_eq!(
+            task["status"]["message"]["parts"][0]["text"], "opening turn: not-ready",
+            "a peer whose opening turn never ran is TOLD so: {task}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
+    /// M4, the cost the handler no longer pays: an unready target makes the
+    /// wait run its whole budget. That is exactly why `do_spawn` runs
+    /// `spawn_inject_prompt` on a worker instead of on its connection handler
+    /// — 20s of a `MAX_CONN` slot is `503 server busy` for every other RPC.
+    #[test]
+    fn the_readiness_wait_is_the_cost_that_moved_off_the_handler() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-waitcost-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".to_string(), sessions: Vec::new() },
+        )
+        .unwrap();
+
+        let budget = Duration::from_millis(400);
+        let launch_at = now_iso_utc();
+        let started = Instant::now();
+        let word = spawn_inject_prompt("never-ready", "claude", "hello", &launch_at, budget);
+        let took = started.elapsed();
+        assert_eq!(word, "not-ready");
+        assert!(
+            took >= Duration::from_millis(350),
+            "the wait must spend its budget on an unready target (took {took:?}) — this is the \
+             handler time the worker exists to absorb"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_runtime {
+            Some(v) => std::env::set_var("XDG_RUNTIME_DIR", v),
+            None => std::env::remove_var("XDG_RUNTIME_DIR"),
+        }
+    }
+
+    /// N2: the opening-turn worker pool is a REAL bound — the eighth waiter
+    /// fits, the ninth is refused (`busy`), and a released slot is reusable.
+    /// Without it the wait the M4 fix moved off the handler is bounded by
+    /// nothing at all.
+    /// The L of the second re-review, at the ordering itself: the worker
+    /// stamps `pending` and then its verdict, from one thread, so the record
+    /// can never be left reading `pending` after the worker is done — not even
+    /// when a verdict was already there.
+    #[test]
+    fn the_opening_turn_worker_ends_on_its_verdict_never_on_pending() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-worker-order-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        let audit_log = root.join("log");
+
+        let id = "worker-order";
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".to_string(),
+                sessions: vec![fixture_session(id, "idle", None)],
+            },
+        )
+        .unwrap();
+
+        let read_word = || -> Option<String> {
+            let f: SessionsFile = load_stage(&sessions_path()).unwrap();
+            f.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.opening_turn.clone())
+        };
+
+        // A target with no readiness fact and no log settles at the deadline —
+        // the verdict is `not-ready`, and that is what the record ends on.
+        opening_turn_worker(
+            id.to_string(),
+            "no-such-agent".to_string(),
+            "hi".to_string(),
+            now_iso_utc(),
+            Duration::from_millis(50),
+            audit_log.clone(),
+            OpeningTurnSlot::acquire().expect("a slot"),
+        );
+        assert_eq!(read_word().as_deref(), Some("not-ready"), "the verdict, never `pending`");
+
+        // And a verdict already on the record is replaced by THIS worker's own
+        // — the pending write in between is the same thread's, so nothing can
+        // strand it.
+        aoide_conduct::graph::stamp_opening_turn(id, "delivered");
+        opening_turn_worker(
+            id.to_string(),
+            "no-such-agent".to_string(),
+            "hi".to_string(),
+            now_iso_utc(),
+            Duration::from_millis(50),
+            audit_log,
+            OpeningTurnSlot::acquire().expect("a slot"),
+        );
+        assert_eq!(read_word().as_deref(), Some("not-ready"), "still ends on its own verdict");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
+    /// The exact regression the second re-review found: the door's
+    /// registration wait must NOT write `pending` from its own thread any more,
+    /// because a verdict that landed first would be clobbered back to it.
+    #[test]
+    fn the_registration_wait_never_writes_pending_over_a_verdict() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-prov-order-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+
+        let id = "prov-order";
+        let mut rec = fixture_session(id, "idle", None);
+        rec.opening_turn = Some("not-ready".to_string());
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".to_string(), sessions: vec![rec] },
+        )
+        .unwrap();
+
+        stamp_spawn_provenance(id, "node:remote-1", None);
+
+        let f: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = f.sessions.iter().find(|s| s.session_id == id).unwrap();
+        assert_eq!(
+            rec.opening_turn.as_deref(),
+            Some("not-ready"),
+            "the registration wait must not touch the verdict"
+        );
+        assert_eq!(rec.origin.as_deref(), Some("node:remote-1"), "it still stamps the origin");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
+    #[test]
+    fn the_opening_turn_worker_pool_refuses_past_its_cap() {
+        let mut held: Vec<OpeningTurnSlot> = Vec::new();
+        for _ in 0..OPENING_TURN_WORKERS_MAX {
+            held.push(OpeningTurnSlot::acquire().expect("a slot inside the cap"));
+        }
+        assert!(
+            OpeningTurnSlot::acquire().is_none(),
+            "the pool must refuse the {}-th concurrent wait",
+            OPENING_TURN_WORKERS_MAX + 1
+        );
+        held.pop();
+        assert!(
+            OpeningTurnSlot::acquire().is_some(),
+            "a released slot is reusable"
+        );
+    }
+
+    #[test]
+    fn spawn_inject_prompt_types_nothing_and_files_no_receipt_when_the_target_is_never_ready() {
+        // The readiness gate's refusal arm, against a real bound listener: a
+        // socket nobody's harness has announced itself behind is NOT a session
+        // ready to take a turn, so nothing is written into it and no receipt is
+        // filed — the sender's letter stays unacknowledged rather than
+        // acknowledged by a turn that never ran.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-spawninject-unready-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        // An empty roster: no harness under this wrapper has started.
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".to_string(), sessions: Vec::new() },
+        )
+        .unwrap();
+
+        let id = "spawn-inject-unready";
+        let launch_at = now_iso_utc();
+        let socket = aoide_conduct::graph::conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+
+        assert_eq!(spawn_inject_prompt(id, "claude", "hello unready target", &launch_at, Duration::from_millis(150)), "not-ready");
+
+        let deadline = Instant::now() + Duration::from_millis(600);
+        let mut typed_at = false;
+        while Instant::now() < deadline {
+            if listener.accept().is_ok() {
+                typed_at = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!typed_at, "an unready target was typed at");
+        assert!(
+            aoide_storage::mail::read_base().unwrap().is_empty(),
+            "no receipt may be filed for an opening turn that never ran"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
         match saved_state {
             Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
             None => std::env::remove_var("AOIDE_STATE_DIR"),
@@ -8907,7 +9604,8 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
 
-        spawn_inject_prompt("whatever-id", "claude", "");
+        let launch_at = now_iso_utc();
+        assert_eq!(spawn_inject_prompt("whatever-id", "claude", "", &launch_at, Duration::from_millis(50)), "skipped-empty");
         assert!(aoide_storage::mail::read_base().unwrap().is_empty());
 
         let _ = std::fs::remove_dir_all(&root);

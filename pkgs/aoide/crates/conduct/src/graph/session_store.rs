@@ -901,6 +901,106 @@ pub(in crate::graph) fn stamp_harness_session_id(id: &str, harness_session_id: &
     });
 }
 
+/// Stamp `sessionStartAt` — WHEN this harness's own `SessionStart` was
+/// recorded for this session. One writer (the hook door's `SessionStart`
+/// arm, `send.rs`), one consumer: `aoide_conduct::graph::wait_ready`, which
+/// will not type a first turn into a target whose harness has not said hello
+/// since that launch began. A record that merely EXISTS is not the fact —
+/// an earlier run's child under a reused `--id` lingers for days (a
+/// hook-registered child carries no pid, so the reaper's `/proc` signal
+/// never fires for it), and reading it as readiness is the original
+/// early-inject defect with a `delivered` message over it.
+///
+/// Same locked, change-only read-modify-write as
+/// [`stamp_harness_session_id`] above, and the same silent no-op for an
+/// unknown id: a later `SessionStart` (a resume, a compact) re-stamps it, so
+/// the guard is "would this write change anything", never "is this the
+/// first". No `restage_graph()` — the field is read by launch paths, not
+/// rendered by the widgets.
+pub(in crate::graph) fn stamp_session_start_at(id: &str, at: &str) {
+    if at.is_empty() {
+        return;
+    }
+    with_stage_lock(|| {
+        let mut file: SessionsFile = match load_stage(&sessions_path()) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        if let Some(s) = file.sessions.iter_mut().find(|s| {
+            s.session_id == id && s.session_start_at.as_deref() != Some(at)
+        }) {
+            s.session_start_at = Some(at.to_string());
+            if file.schema_version.is_empty() {
+                file.schema_version = STAGE_GRAPH_VERSION.to_string();
+            }
+            let _ = write_stage(&sessions_path(), &file);
+        }
+    });
+}
+
+/// Stamp `openingTurn` — what became of the first turn a REMOTE peer asked
+/// for when the A2A door spawned this session. One writer, from another
+/// crate: `aoide-server`'s `a2a::do_spawn` stamps `pending` as it accepts the
+/// spawn (the reply it hands back cannot yet know) and its worker stamps the
+/// conclusion once the wait-and-type is over; `tasks/get` reads it so a peer
+/// whose opening turn never ran is told that, rather than reading a bare
+/// `submitted` over a session no turn ever reached. Change-only and a silent
+/// no-op for an unknown id, like every other stamp here.
+pub fn stamp_opening_turn(id: &str, word: &str) {
+    if word.is_empty() {
+        return;
+    }
+    with_stage_lock(|| {
+        let mut file: SessionsFile = match load_stage(&sessions_path()) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        if let Some(s) = file
+            .sessions
+            .iter_mut()
+            .find(|s| s.session_id == id && s.opening_turn.as_deref() != Some(word))
+        {
+            s.opening_turn = Some(word.to_string());
+            if file.schema_version.is_empty() {
+                file.schema_version = STAGE_GRAPH_VERSION.to_string();
+            }
+            let _ = write_stage(&sessions_path(), &file);
+        }
+    });
+}
+
+/// Settle the opening turns whose verdict was LOST — every record still
+/// carrying `pending`, flipped to `unknown`. One caller: the daemon's boot
+/// pass (off-thread, `server/src/daemon.rs`). The verdict is stamped by the
+/// A2A door's worker, and a process that dies with that worker still in flight
+/// leaves `pending` on the record with nobody left to decide it; a fresh boot
+/// is exactly the moment that is knowable, and `unknown` says what happened
+/// ("the process that owed this verdict is gone") rather than leaving a word
+/// that reads as "still waiting". Change-only, locked like every other stamp
+/// here, and a no-op when there is nothing stranded.
+pub fn settle_lost_opening_turns() -> usize {
+    with_stage_lock(|| {
+        let mut file: SessionsFile = match load_stage(&sessions_path()) {
+            Ok(f) => f,
+            Err(_) => return 0,
+        };
+        let mut settled = 0;
+        for s in file.sessions.iter_mut() {
+            if s.opening_turn.as_deref() == Some("pending") {
+                s.opening_turn = Some("unknown".to_string());
+                settled += 1;
+            }
+        }
+        if settled > 0 {
+            if file.schema_version.is_empty() {
+                file.schema_version = STAGE_GRAPH_VERSION.to_string();
+            }
+            let _ = write_stage(&sessions_path(), &file);
+        }
+        settled
+    })
+}
+
 /// Stamp `resumedFrom` on a just-registered session record — the ledger
 /// entry's own `sessionId` its resume argv was built from (P-D8,
 /// `docs/architecture/AOIDED.md`'s "L5"). Unlike [`stamp_harness_session_id`]
@@ -2886,6 +2986,50 @@ mod tests {
             None => std::env::remove_var("AOIDE_STAGE_DIR"),
         }
         let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// N4: a `pending` opening turn whose worker died with its process is
+    /// reconciled at the next boot — `unknown`, never a word that reads as
+    /// "still waiting" — and every other verdict is left exactly as it was.
+    #[test]
+    fn settle_lost_opening_turns_reconciles_only_a_stranded_pending() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("settle-opening-turns");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        for (id, word) in [
+            ("stranded", Some("pending")),
+            ("done-already", Some("not-ready")),
+            ("local", None),
+        ] {
+            do_session_start(id, Some("a2a"), Some("/w"), None, None, None, None, None, None);
+            if let Some(word) = word {
+                stamp_opening_turn(id, word);
+            }
+        }
+
+        assert_eq!(settle_lost_opening_turns(), 1, "exactly the stranded one");
+
+        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let word = |id: &str| {
+            after
+                .sessions
+                .iter()
+                .find(|r| r.session_id == id)
+                .and_then(|r| r.opening_turn.clone())
+        };
+        assert_eq!(word("stranded").as_deref(), Some("unknown"));
+        assert_eq!(word("done-already").as_deref(), Some("not-ready"));
+        assert_eq!(word("local"), None, "a locally-spawned session carries none");
+
+        // Idempotent: nothing stranded the second time, no write.
+        assert_eq!(settle_lost_opening_turns(), 0);
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
     }
 
     #[test]

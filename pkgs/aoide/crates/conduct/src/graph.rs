@@ -150,6 +150,16 @@ pub use self::view::session_watch;
 pub use self::view::{watch_frame, Frame, MailLine};
 pub use self::permit::{answer_summons, session_permit, summons_card_id};
 pub use self::send::{pending_path, session_hook, session_send};
+// The ONE keystroke shape a pty injection has — payload, flush, the gap, then
+// the target's own submit key ALONE (`write_delivery`), plus the profile
+// resolver that picks that key (`profile_for_agent`, claude's fallback for an
+// unregistered name) and the gap itself (`SUBMIT_KEYSTROKE_DELAY`). `pub` for
+// the third caller, in another crate: `aoide-server`'s
+// `a2a::spawn_inject_prompt` used to hand-roll `{prompt}\n` at a spawned
+// session's socket, which is a keystroke spelling of its own — and the wrong
+// one for every harness whose `submit_key` is `\r`.
+pub use self::send::{write_delivery, SUBMIT_KEYSTROKE_DELAY};
+pub use self::permit::profile_for_agent;
 pub use self::session_store::{session_bind, session_end, session_phase, session_start};
 // LANE IDENTITY P-ID0 (G16/G5): `aoide-server`'s `a2a::do_spawn` is the
 // authenticated-node-origin writer — it stamps `node:<name>` directly on
@@ -163,6 +173,17 @@ pub use self::session_store::stamp_origin;
 // crate/flag/env path may write it. `stamp_remote_parent`'s own doc has the
 // full argument.
 pub use self::session_store::stamp_remote_parent;
+// `stamp_opening_turn` — the A2A door's own record of what became of the
+// first turn a remote peer asked for (`pending` at the spawn ack, the worker's
+// conclusion after), so `tasks/get` can say `not-ready` instead of a bare
+// `submitted` over a session no turn ever reached. `pub` because the writer
+// lives in `aoide-server`, the authority that accepted the spawn.
+pub use self::session_store::stamp_opening_turn;
+// `settle_lost_opening_turns` — the boot pass that reconciles a `pending`
+// opening turn whose worker died with its process (`unknown`), so a peer
+// never reads "still waiting" for a verdict nobody will ever stamp. `pub` for
+// the daemon (`aoide-server`) at boot.
+pub use self::session_store::settle_lost_opening_turns;
 // LANE IDENTITY P-ID1: `aoide-server`'s daemon `dispatch` handler is the one
 // legitimate caller — it stamps a just-minted sealed credential directly
 // onto the record it just registered a pid for, the same "stamp from the
@@ -184,6 +205,15 @@ pub use self::spawn::build_conduct_args;
 // predicate (rather than writing a second copy of the message in the server)
 // is what closes that, and is why both are `pub`.
 pub use self::spawn::{live_run_for, live_run_refusal};
+// `wait_ready`/`READY_BUDGET` — WHEN a just-launched target may be typed at,
+// and for how long the tree waits for it (the per-harness fact is
+// `AgentProfile::readiness`). `pub` for the third first-turn caller outside
+// this crate: `aoide-server`'s `a2a::spawn_inject_prompt`, whose opening turn
+// would otherwise be the one injection path with no readiness gate at all.
+pub use self::spawn::{wait_ready, Ready, READY_BUDGET};
+// `command_basename` — the agent-name default a spawned command's own
+// `argv[0]` gives (spawn.rs's copy, widened for the `pub` caller below).
+pub use self::spawn::command_basename;
 // `clean_line` — the ONE sanitizer every surface that prints a peer's own
 // bytes uses, now including `aoide-server`'s A2A door (a slug echoed in a
 // refusal, P-RSA S10 review, L6). Never a second table of "unsafe" down there.
