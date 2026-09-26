@@ -2065,8 +2065,20 @@ project/parent inheritance across local/remote/app/subagents;
 - The shared liveness probe and socket-address layout are repaired.
   `docs/architecture/CORE-POSIX.md` owns the remaining capability matrix;
   source guards and Linux tests do not prove non-Linux runtime support.
-- Status: incomplete. Native Windows still encounters Unix-only APIs;
-  non-Linux peer identity currently refuses daemon dispatch connections.
+- Status: incomplete — the remaining layer is `aoide-conduct` alone (measured
+  on ThinkChiyo: 108 errors in its lib, 227 in its lib test, ALL of them there;
+  `aoide-client` is 0 errors and its 313 native tests pass after this slice).
+  Native Windows now has: `aoide-protocol`, `aoide-storage`, `aoide-secrets`,
+  `aoide-upkeep` and `aoide-client` building AND testing there, the daemon's
+  seal-pubkey channel live on both hosts (the non-Linux peer-identity refusal
+  this line used to record is DELETED, not kept beside a second arm), and the
+  process acts — end a pid, wait for it, read its argv — behind one seam each.
+  What is still host-specific is stated per row in `docs/architecture/
+  CORE-POSIX.md`, including the arms that promise less than their siblings
+  (Windows' `TerminateProcess` cannot be trapped where `SIGTERM` can) and the
+  contracts that have no native test yet (the transport's response cap).
+  `aoide-server` and `aoide-cli` were NOT independently re-measured: they
+  depend on `aoide-conduct`, so cargo cannot build them while it fails.
 - The managed task wrapper (`spawn --task`, `session watch`) is Linux-only for
   the same reasons: its live view reads a conduct-owned PTY transcript, and both
   its record writes and its delivery cursor ride the stage lock. Its earliest
