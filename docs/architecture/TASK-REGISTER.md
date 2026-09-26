@@ -2274,7 +2274,60 @@ project/parent inheritance across local/remote/app/subagents;
   signature carries a `lines_after` the Do's own list drops — S7 sends only
   the frame key, and `aoide/linesAfter` stays S8's. Tests: aoide-conduct 892,
   aoide-client 316, aoide-protocol 174, aoide-server 240 — all pass,
-  `cargo test --workspace --no-run` clean. S8–S10
+  `cargo test --workspace --no-run` clean. S8 LANDED — the ping-back decision
+  and the line are two things and a remote parent gets the DECISION:
+  `choose_event` answers `Option<PingEvent>` (closed enum, snake_case on the
+  wire, every string already `clean`ed at the SENDER so no receiver sanitizes
+  for the far node) and `render_line(tag, &event)` renders the one line from
+  it, the tag belonging to whoever renders; the local lines are the same bytes
+  they were, pinned by the module's own unchanged fixtures. A child whose
+  record carries `remoteParent` spools each event to
+  `state/stage/pingback-remote.json` through the new
+  `aoide-storage::pingback_remote` (CONTRACTS §4) instead of calling
+  `deliver`, and NEVER calls it: per-child `seq` from 1, 16 retained, the
+  oldest dropped past the cap, `gap` when the ring rolled past the caller's
+  cursor and `last` to resync from — the cap is also the wire bound, one
+  number. The events are opaque `Value` at that layer on purpose: the closed
+  vocabulary is conduct's, and a queue that parsed its own payload would be a
+  second definition of the event. `PingEvent::Exited` is the one row that
+  comes from the RECORD (`state` folds to `done`, plus its
+  `outcome`/`exitCode`) rather than the trace, fired once per child by a new
+  `exited` latch in the cursor (serialised only when true, so every existing
+  cursor file is byte-identical — `skip_serializing_if is_false`), remote
+  children only (Q5's ruled default) and last among the trace rows so it takes
+  the silence row's place; a row of the brief's table that had to move, since
+  a ring's last event before the exit must be the child's own last word. The
+  gather's filter had to widen with it: `tracks(rec) = agent == "eidolon" ||
+  remoteParent.is_some()`, because a remote child has NO local
+  `parentSessionId` and the old "nobody to tell" gate dropped it before any
+  event could be decided. The door serves the ring as `tasks/get` +
+  `params.metadata["aoide/linesAfter"]` → `Task.history` (one `data` message,
+  `messageId: "pingback"`, the `RingRead{events, gap, last}` under the part's
+  `data`), gated by `output_read_admitted` AND
+  `history_admitted` = the child's stamped `remoteParent.key` equal to the key
+  the caller's signature verified against — the key, never the stored `node`
+  label, never a wildcard, an empty stored key matching nobody. §4.4 names no
+  code for that refusal, so it reuses `-32011` (`OUTPUT_READ_REFUSED_CODE`)
+  with its OWN text: "not this child's parent" is not the same reason as "no
+  `read`", and an operator must be able to read which one refused. A request
+  carrying BOTH output keys is judged by the STRICTER of the two — asking for
+  the history is asking for the history, and the alternative is a frame handed
+  out around a silently missing ring — while the same caller's frame-only
+  request is still admitted, which is the ruling Q2 widened. `lines_after` is
+  `params.metadata` only and reads a non-number as 0 (the tolerant reading
+  `frame_tail` already takes). Review pass over the gap the S8 brief left
+  open, and closed here: a remote EIDOLON child whose presence the sync
+  DROPPED mid-turn published nothing at all (it has no local parent, and
+  `DroppedEidolon` carried no `remoteParent`), so its ring could never close —
+  `DroppedEidolon` now carries `remote`/`exit_code`/`outcome` off the record
+  it was built from, the dropped child is gathered on the same rule as a live
+  one, and because a dropped child is never decided again (its cursor entry
+  leaves that same pass) it claims its trace row AND its exit in ONE pass.
+  One bound named and left as-is: nothing prunes a ring, so its size is 16
+  events per child this node ever ran — the same "never reconciled" shape the
+  remote-children ledger holds. Tests: aoide-storage 438 (6 new),
+  aoide-conduct 896 (4 new), aoide-protocol 174, aoide-server 245 (5 new), all
+  pass, `cargo test --workspace --no-run` clean. S9–S10
   open, in the brief's order (cargo builds serialize).
 - Review pass over S1–S3 (same branch, `8236675` onward): the caller now
   holds its own winning claim to `valid_claimed_session_id` and refuses

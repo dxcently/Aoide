@@ -421,6 +421,17 @@ by decision — no embedded database yet
   the pre-rename `state/carry.json`, idempotent by construction (a cheap
   `exists()` check, no process-wide `Once` needed for a single file) —
   narrated, never a clobber of a fresher `undying.json`.
+- `pingback_remote` — the remote ping-back ring (remote sub-agents lane,
+  P-RSA S8): `state/stage/pingback-remote.json` (CONTRACTS.md §4), per child,
+  the events a child whose parent sits on ANOTHER node published for that
+  parent to pull — the child-side sibling of `remote_children`'s
+  `linesAfter` cursor. `push_event`/`events_after` are the pure ring algebra
+  (per-child `seq` from 1, cap 16, the OLDEST dropped, `gap` when the ring
+  rolled past the cursor, `last` as the newest `seq`); `spool_event` appends
+  under one `fs::with_stage_lock` section and `events_for` reads without a
+  lock. The events are OPAQUE `serde_json::Value`: the closed vocabulary is
+  `aoide-conduct`'s `PingEvent`, and a queue that parsed its own payload would
+  be a second definition of the event it carries.
 - `remote_children` — the remote-children ledger (remote sub-agents lane,
   P-RSA): `state/stage/remote-children.json` (CONTRACTS.md §4), one row per
   child THIS node spawned on another node over its A2A door — the

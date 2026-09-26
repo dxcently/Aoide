@@ -255,6 +255,7 @@ carries whatever the journal carries; that fix is harnox's.
   [eidolon <petname>] wrapping up · <n> calls left      (or · <s> s left)
   [eidolon <petname>] failing · <k> tool errors in a row · last: <tool label>
   [eidolon <petname>] silent <M> min · last: <tool label or say>
+  [eidolon <petname>] exited               (or · exit <code>, or · <outcome>)
   ```
 
   `<N> calls` counts `tool_use` blocks since the turn's opening
@@ -295,3 +296,34 @@ carries whatever the journal carries; that fix is harnox's.
   (`Vec<DroppedEidolon>`) as an ADDITIVE second half — the boolean means
   what it always did — and that is the `died mid-turn` row's only evidence;
   no second liveness probe exists (`reap` is the only sweep).
+
+  **The decision and the line are two things, and a remote parent gets the
+  decision.** `choose_event` decides WHICH event a child's new records amount
+  to — a closed `PingEvent`, one variant per row of the table above plus
+  `exited` below — and `render_line(tag, &event)` renders the line from it,
+  taking the tag from whoever renders. Every string in an event is already
+  cleaned at the sender (control characters stripped, clipped to 80 with `…`,
+  a payload number left a number), because the renderer may be another node's
+  code. Local lines are the same bytes they always were.
+
+  **A child whose parent is elsewhere spools instead of delivering.**
+  `remoteParent` on the record (the A2A door's stamp, whatever the child's
+  harness) sends each event to `state/stage/pingback-remote.json`
+  (CONTRACTS.md §4) instead of to `deliver`: at most 16 events per child,
+  `seq` monotonic from 1, the oldest dropped past the cap, and a read that
+  lost any event says `gap` with `last` to resync from. The far parent pulls
+  them off this node's own door (`tasks/get` with `aoide/linesAfter`,
+  CONTRACTS.md §6) — nothing here pushes, mails or opens a route. The claim is
+  written first and the event lands after, the same at-most-once direction the
+  cursor itself holds.
+
+  **`exited` is the one row that comes from the record, and the one that
+  closes a ring.** A record whose state folds to `done` gives a remote child's
+  parent an `exited` event carrying its `outcome`/`exitCode` — no trace needed,
+  so a non-eidolon harness gets it too — and it is claimed ONCE per child by
+  the cursor's own `exited` latch (a child that keeps no trace has no `seen` to
+  advance past its end). It is last among the trace rows and takes the silence
+  row's place, so the last word before a child's exit is the child's own. Only
+  a remote child ever publishes one: a local parent hears the run's report
+  (Q5's ruling). A child the sync DROPPED is never decided again, so a dropped
+  remote child claims its trace row and this exit on that one pass.

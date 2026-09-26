@@ -657,6 +657,35 @@
   text and the `-32011` code, `a_signed_node_without_read_is_refused` the
   revocation shape, and `a_signed_reader_reads_any_sessions_frame` the ruling
   that reading needs no `remoteParent`.
+- **`tasks/get` also serves the ping-back history, and THAT read keeps the key
+  match (P-RSA S8, CONTRACTS.md §6).** `params.metadata["aoide/linesAfter"]`
+  — read by `lines_after`, `params` only and tolerant of a non-numeric value
+  (it reads as `0`: a wrong cursor costs duplicates, never a parent its
+  child's history) — answers with the same status read plus the ring after
+  that cursor as ONE `data` message under `Task.history` (found by
+  `messageId: "pingback"`, its part's `data` the whole
+  `RingRead{events, gap, last}`). The gate is `output_read_admitted` AND
+  `history_admitted`, which is the output gate plus the child's own stamped
+  `remoteParent.key` equal to the key the caller's signature verified against:
+  the key, never the stored `node` label, never a wildcard, and an empty
+  stored key matches nobody. This is the ONE output read the 2026-09-25 ruling
+  does NOT widen — a `read`-holding node may watch any frame, but what a child
+  published for its parent belongs to that parent. The refusal reuses
+  `OUTPUT_READ_REFUSED_CODE` (`-32011`; §4.4 of the lane brief names no code of
+  its own for this arm) with its OWN text, because "you are not this child's
+  parent" is not the same reason as "you hold no `read`", and the gate still
+  runs before the status read so neither is an existence oracle. **A request
+  carrying BOTH output keys is judged by the stricter one**: asking for the
+  history is asking for the history, so a foreign key is refused for the whole
+  request rather than handed a frame around a silently missing ring — while
+  the same caller's frame-only request is still admitted. The label is
+  `a2a.tasks/get.history` (it wins the tie). Tests:
+  `history_is_admitted_only_for_the_key_this_door_stamped` is the table,
+  `a_signed_parent_reads_its_childs_ping_back_history` the admitted read and
+  its cursor, `a_foreign_key_is_refused_for_history_while_its_frame_is_admitted`
+  the refusal, the both-keys rule and the no-existence-oracle pin,
+  `an_unsigned_history_read_is_refused` the unsigned shape, and
+  `lines_after_reads_only_params_metadata_and_tolerates_any_value` the reader.
 - **`aoide/mailDeposit` (P-M2) is the SECOND capability-gated A2A arm,
   after Spawn, and the first not gated on `spawn` — `deposit_admitted`
   mirrors `spawn_admitted` one capability over, but signature-only from

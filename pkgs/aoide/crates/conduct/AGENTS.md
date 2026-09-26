@@ -768,6 +768,28 @@
   noise in a parent's composer); a child whose `agent:"eidolon"` record is
   gone drops out of the file on the same pass. Do NOT move the delivery
   inside that critical section, and do not add a second lock.
+  **The event and the line are two things, and a remote parent gets the
+  event (P-RSA S8, `CONTRACTS.md` §4/§6).** `choose_event` decides WHICH
+  `PingEvent` a child's new records amount to — a closed enum whose every
+  string is already `clean`ed at the sender — and `render_line(tag, &event)`
+  renders the ONE line from it; the tag belongs to whoever renders, so an
+  event names no node. Local lines are unchanged to the byte, which the
+  module's own fixtures pin. A child whose record carries `remoteParent` (the
+  A2A door's stamp, whatever its harness) SPOOLS its events to
+  `state/stage/pingback-remote.json` through `aoide_storage::pingback_remote`
+  — cap 16 per child, monotonic `seq` per child, a read that missed any says
+  `gap` — and `deliver` is NEVER called for it: the far parent pulls them off
+  this node's own door. `PingEvent::Exited` is the one row that comes from the
+  RECORD (`state` folds to `done`, plus its `outcome`/`exitCode`) rather than
+  from the trace, it is claimed ONCE per child (the cursor's `exited` latch —
+  a child that keeps no trace has no `seen` to advance past its own end), and
+  it fires only for a remote child (Q5's ruled default: a local parent hears
+  the run's own report). It sits AFTER every trace row and takes the place of
+  the silence row, so the last thing before an exit is the child's own last
+  word. A child the sync DROPPED is never decided again — its record is gone,
+  so its cursor entry leaves on that pass — so a dropped REMOTE child claims
+  its trace row AND its exit on that one pass, and the ring always ends with
+  exactly one `Exited`.
   **Never a shell parent.** A target whose `rec.agent` is `""`/`"shell"` or
   names no registered harness profile is skipped and counted
   (`shell-parent`) — a line submitted into a bare shell would RUN as a
@@ -1787,7 +1809,11 @@
   "Second slice" section (the ping-back's canonical prose statement), the
   `state/stage/pingback.json` shape in `CONTRACTS.md` §4, and
   `docs/Aoide-Wiki/concepts/orchestration/Conductor-Channel.md`'s
-  "Child-of-target (reciprocal)" paragraph.
+  "Child-of-target (reciprocal)" paragraph. A change to the event/line split
+  or to what a remote child spools also updates `CONTRACTS.md`'s
+  `state/stage/pingback-remote.json` (§4) and its ping-back-history paragraph
+  (§6) — the reaper that writes the ring and the door that serves it are two
+  ends of the one shape.
 - A change to shellbridge's `sessionaction`/`projectaction` whitelists or
   reply shape updates `ShellBridge.qml`'s protocol comment and
   `concepts/cli/Doors-and-Nodes.md`'s socket-command list, in the same

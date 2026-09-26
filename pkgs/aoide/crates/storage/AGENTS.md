@@ -74,6 +74,15 @@
   in-memory, write once, return whether anything changed; a no-op result
   never rewrites the file (so an idle tick does not churn the tree), and a
   replayed pull can never rewind a cursor and re-deliver a line.
+- **A bounded ring carries its own `seq`, never an index, and says when it
+  dropped something.** `pingback_remote::push_event`/`events_after` are the
+  shape (P-RSA S8): the cursor a reader hands back is a `seq` that only
+  climbs, the cap drops the OLDEST, and a read that missed any event between
+  the cursor and the oldest retained one sets `gap` rather than handing over a
+  non-contiguous run as if it were whole. A reader that needs to resync with
+  no event to advance past uses `last`. The payload is `Value`, opaque on
+  purpose: the event vocabulary belongs to the crate that produces it, and
+  this layer is a queue.
 - **`fs::migrate_root_once` is `pub` and deliberately NOT wired into any
   path getter (L-C2, lyra-carrier lane, task #107) — don't "fix" this by
   hanging it off `fs::root`'s no-override fallback the way

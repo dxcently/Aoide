@@ -2615,6 +2615,58 @@ its rows already gone. A row whose parent still lives is untouched, and a row
 whose far child died is never reconciled — nothing on the child's side reports
 the death, so `↓ n remote` and the entry persist until the parent leaves.
 
+### `state/stage/pingback-remote.json` — **v0**
+
+The remote ping-back ring (P-RSA S8, `docs/architecture/EIDOLON-TRACE.md`'s
+"Second slice"): what a child whose parent sits on ANOTHER node has published
+for that parent to pull. It is the sibling of `remote-children.json`'s
+`linesAfter` cursor — that one is the parent-side "how far have I read", this
+one is the child-side "what is there to read" — and it exists because the
+events may not be pushed and may not be mailed (CONTRACTS.md §6,
+`aoide/linesAfter`).
+
+```json
+{
+  "schemaVersion": "0",
+  "children": {
+    "a2a-4411-1790": {
+      "last": 3,
+      "events": [
+        { "seq": 2, "event": { "settled": { "stop": "end_turn", "calls": 1, "mins": 56,
+                                            "say": "read the slot catalog", "errors": 0 } } },
+        { "seq": 3, "event": { "exited": { "code": 7, "outcome": "exit" } } }
+      ]
+    }
+  }
+}
+```
+
+Keyed by the CHILD's own session id — the id its node knows it by, and the
+`tasks/get` id its parent pulls with. `seq` is per child, starts at 1, and
+only ever climbs; the ring retains at most 16 events per child (the cap is
+also the wire bound, so a read never promises what was already dropped) and a
+push past it drops the OLDEST. `last` is the highest `seq` ever pushed for
+that child, which is what lets a parent whose cursor fell off the retained
+window resynchronize instead of re-reading an empty answer forever.
+
+`event` is the reaper's own closed event vocabulary, written by
+`aoide-conduct`'s `PingEvent` and OPAQUE here — a queue that parsed its own
+payload would be a second definition of the event. Every string in it is
+already cleaned by the sender (control characters stripped, clipped to 80
+with `…`), never by the reader. The events are claimed by the same
+at-most-once cursor as `pingback.json` and written after it: a crash between
+the two loses an event rather than duplicating one, the direction the whole
+lane loses in. Nothing prunes a ring — the parent that owns one may still be
+reading it long after the child left this node's roster — so its size is
+bounded by 16 events per child this node ever ran.
+
+Written only through `aoide_storage::pingback_remote`, inside one short
+`state/stage/.stage.lock` section and atomically (temp-then-rename); a missing
+or corrupt file reads as empty. Like `remote-children.json` it is attribution,
+never a grant: the door that serves it gates the read on the caller's own key
+against the child's stamped `remoteParent.key` (CONTRACTS.md §6).
+There is no command that edits it.
+
 ### `state/stage/mesh.json` — **v0**
 
 The widget-shaped sibling of `aoide node list`'s roster (P-14 M2): staged
@@ -4907,6 +4959,50 @@ audits under its own label, `a2a.tasks/get.frame`, so an operator can tell which
 no frame to read — an unknown id, a `sub:` card, a record that keeps no
 conduct-owned PTY — answers with `session watch`'s own taught refusal under
 `-32001`, after the gate.
+
+**The ping-back history is `tasks/get` with `aoide/linesAfter`, and it is the
+one output read the key match still gates.** The request carries
+`params.metadata["aoide/linesAfter"]` (`aoide_protocol::wire::LINES_AFTER_KEY`)
+— the `seq` the caller has already seen, a number — and the answer is the SAME
+status read plus the ring's events after it as ONE `data` message under
+`Task.history` (`messageId: "pingback"`, the whole read under the part's
+`data`: `{events: [{seq, event}], gap, last}`). Both the ring's cap (16) and
+the wire's come from the same number, so a pull never asks for more than a
+ring can hold; `gap: true` says the ring rolled past the caller's cursor and
+something was dropped between it and the oldest event returned, and `last` is
+the newest `seq` the child ever pushed — the cursor a caller that saw a `gap`
+with no event to advance past can move to. A `seq` beyond the end is the
+quiet empty answer, never an error, and a key whose value is not a number
+reads as `0` (the same tolerant reading `aoide/frame`'s `tail` takes: a wrong
+cursor costs duplicates the caller can see in `seq`, while refusing it would
+cost a parent its child's history over one integer type).
+
+**It is gated by `output_read_admitted` AND the child's own stamped key.** The
+child's record carries `remoteParent.key` — the key this door stamped when it
+admitted the spawn that created it — and history is served only to a caller
+whose signature verified against exactly that key. This is the one read the
+2026-09-25 ruling did NOT widen: a signed, `read`-holding node may watch any
+session's frame, but what a child published for its parent belongs to that
+parent. The stored `node` label is never consulted (a name follows a rename, a
+key is the identity), an empty stored key matches nobody, and an unsigned,
+bearer-token or bare-address caller is refused by the output gate before the
+key is even compared. The refusal is `-32011` — §4.4 of the lane brief names
+no code of its own for this arm, and both refusals are one family: an output
+read this caller is not admitted to — with its own TEXT, because the reason is
+not the same one and an operator deserves to read which it was. Like every
+refusal in this arm it says nothing about the session asked for, and the gate
+runs before the status read, so it is no existence oracle either. A read
+audits under its own label, `a2a.tasks/get.history` (which wins the tie when a
+request asks for both output keys).
+
+**Asking for history decides the whole request.** A request carrying BOTH
+`aoide/frame` and `aoide/linesAfter` is judged by the stricter of the two
+gates: the frame alone needs `output_read_admitted` (and a `read`-granted
+caller with a FOREIGN key still gets its frame when it asks for one), but a
+request that also asks for history is answered — or refused — as a history
+read. The alternative is a response carrying a frame and a silently missing
+ring, and this door never answers a question it did not understand with
+silence.
 
 **The command a spawn runs is `aoide.a2a.spawnAgent`** — a nix option, off
 (`""`) by default, resolved once at `a2a serve` launch (`--spawn-agent` flag →

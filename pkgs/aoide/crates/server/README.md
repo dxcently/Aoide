@@ -420,6 +420,22 @@ the inbound half of the two-door contract (the outbound half is
   are told apart by the code alone, never by matching prose. The refusal
   TEXT is unchanged: one sentence for every refused read, the same whether
   the named session exists or not.
+  **`tasks/get` also serves a session's ping-back history (P-RSA S8,
+  CONTRACTS.md §6).** `params.metadata["aoide/linesAfter"]` — the `seq` the
+  caller has already seen — answers with the same status read plus the child's
+  ring after that cursor, as one `data` message under `Task.history`
+  (`messageId: "pingback"`, `{events, gap, last}` under the part's `data`).
+  This one read is gated by `output_read_admitted` AND the key match: the
+  child's record's own `remoteParent.key` must equal the key the caller's
+  signature verified against (`history_admitted`), because those events belong
+  to that parent and the 2026-09-25 ruling widens the FRAME, never this. The
+  refusal reuses `-32011` (the lane brief names no code of its own for this
+  arm) with its own text naming the missing key. A request carrying BOTH
+  output keys is judged by the stricter one: the frame alone is still admitted
+  for a `read`-granted caller whose key is foreign, and a request that also
+  asks for history is refused as a history read rather than answered with a
+  frame around a silently missing ring. A history read audits under its own
+  label, `a2a.tasks/get.history`.
   **`aoide/mailDeposit` (P-M2, `docs/architecture/MAIL.md`, CONTRACTS.md
   §6's new subsection) is the SECOND capability-gated method, after
   Spawn, and the first one not gated on `spawn`.** `mail_deposit` resolves
