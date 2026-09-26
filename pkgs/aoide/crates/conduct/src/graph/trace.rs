@@ -275,9 +275,17 @@ pub(in crate::graph) fn clip_keep_ws(s: &str, max: usize) -> String {
 
 /// One record's own timestamp as `hh:mm:ss` in LOCAL time — libc's
 /// `localtime_r` over `ts_ms / 1000` (eidolon's clock at append, epoch
-/// milliseconds). A record with no readable `ts_ms`, or a timestamp
-/// `localtime_r` refuses, renders `--:--:--` rather than a guess. Local, not
-/// UTC: the reader is a human comparing this against their own clock.
+/// milliseconds). A record with no readable `ts_ms`, or a timestamp the host's
+/// own reentrant local-time call refuses, renders `--:--:--` rather than a
+/// guess. Local, not UTC: the reader is a human comparing this against their
+/// own clock.
+///
+/// **The conversion is host-split by NAME only**: POSIX's `localtime_r` and the
+/// MSVC CRT's `localtime_s` are the same out-parameter call with the same
+/// failure signal (a null return, a nonzero errno). What matters on both is
+/// that it is the REENTRANT one — never `localtime`, whose shared static a
+/// thread-per-connection caller may not touch — so this is one body with one
+/// line per host, not a second clock.
 fn hh_mm_ss_local(ts_ms: Option<i64>) -> String {
     const UNKNOWN: &str = "--:--:--";
     let Some(ms) = ts_ms else {
@@ -285,7 +293,11 @@ fn hh_mm_ss_local(ts_ms: Option<i64>) -> String {
     };
     let secs = ms.div_euclid(1000) as libc::time_t;
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    if unsafe { libc::localtime_r(&secs, &mut tm) }.is_null() {
+    #[cfg(unix)]
+    let converted = !unsafe { libc::localtime_r(&secs, &mut tm) }.is_null();
+    #[cfg(windows)]
+    let converted = unsafe { libc::localtime_s(&mut tm, &secs) } == 0;
+    if !converted {
         return UNKNOWN.to_string();
     }
     format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec)
@@ -1106,18 +1118,24 @@ mod tests {
 
         let presence = root.join("eidolon").join(id);
         std::fs::create_dir_all(&presence).unwrap();
-        let trace_field = if with_trace_key {
-            format!(r#","trace":"{}""#, trace.display())
-        } else {
-            String::new()
-        };
-        std::fs::write(
-            presence.join("meta.json"),
-            format!(
-                r#"{{"id":"{id}","pid":4242,"log":"{id}.eid","cwd":"/home/khoa","model":"claude-cli:opus","title":"ng","busy":false{trace_field}}}"#
-            ),
-        )
-        .unwrap();
+        // Built with `serde_json`, NEVER by pasting a path into a raw
+        // `format!` string: a Windows path carries `\`, and a raw paste makes
+        // the file invalid JSON there (`"C:\Users\…"` — `\U` is not an escape),
+        // so the presence reads as naming no trace at all. Same one-writer rule
+        // `pingback`'s own `child_fixture` follows.
+        let mut meta = serde_json::json!({
+            "id": id,
+            "pid": 4242,
+            "log": format!("{id}.eid"),
+            "cwd": "/home/khoa",
+            "model": "claude-cli:opus",
+            "title": "ng",
+            "busy": false,
+        });
+        if with_trace_key {
+            meta["trace"] = serde_json::Value::String(trace.display().to_string());
+        }
+        std::fs::write(presence.join("meta.json"), meta.to_string()).unwrap();
 
         std::fs::write(
             stage.join("sessions.json"),

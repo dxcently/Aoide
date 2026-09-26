@@ -61,13 +61,26 @@ by decision — no embedded database yet
   before the split; `conducting_stage_dir`'s own no-override fallback is
   `state_dir().join("stage")` instead of `stage_dir`'s `song/stage`.
 
-  **The host split inside `fs`.** The one place a Unix primitive had no
-  Windows spelling is `fs_windows.rs`, beside `fs.rs` the way
-  `aoide-protocol`'s `feed_windows.rs` sits beside `feed.rs`:
-  `flock(LOCK_EX)`/`LOCK_EX|LOCK_NB` become `LockFileEx` on the same lock
-  files (and a lock that belongs to the HANDLE, so a second handle in the
-  same process blocks exactly as a second process's does — the property
-  `with_stage_lock`'s re-entrancy flag exists for), `renameat2(RENAME_NOREPLACE)`
+  **The host split inside `fs`.** Two places, and both are seams rather than
+  branches at the call sites: the private-write primitives keep their Windows
+  spellings in `fs_windows.rs`, beside `fs.rs` the way
+  `aoide-protocol`'s `feed_windows.rs` sits beside `feed.rs`
+  (`flock(LOCK_EX)`/`LOCK_EX|LOCK_NB` become `LockFileEx` on the same lock
+  files — and a lock that belongs to the HANDLE, so a second handle in the
+  same process blocks exactly as a second process's does, the property
+  `with_stage_lock`'s re-entrancy flag exists for), and `fs.rs` itself now
+  carries FIVE public seams whose two arms are answers for one question:
+  `detach` (the detached-spawn posture: `setsid` in a `pre_exec`, or
+  `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`), `link_dir` (a directory link:
+  `symlink(2)`, or `symlink_dir`), `path_is_under` (a project-prefix question,
+  component-wise and verbatim-stripped), `looks_absolute_any_host` (a path's
+  absoluteness in the grammar of the node it NAMES, not this host's) and
+  `create_new_private`, plus the widened `lock_exclusive`/`try_lock_exclusive`/
+  `unlock` trio that `aoide-conduct` now probes through rather than carrying a
+  second `flock`. Nothing on this list is a convenience wrapper: each one
+  replaced a platform spelling at two or more call sites, and each is what the
+  callers are meant to ask.
+  `renameat2(RENAME_NOREPLACE)`
   becomes `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING`, and the
   link-preserving copy picks `symlink_dir`/`symlink_file` by asking the
   source what its target is. The private-file and private-directory policy is

@@ -1264,7 +1264,13 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let thread_id = "00000000-0000-7000-8000-000000000011";
         let link = dir.join(format!("rollout-2026-09-12T09-00-00-{thread_id}.jsonl"));
-        std::os::unix::fs::symlink(dir.join("does-not-exist.jsonl"), &link).unwrap();
+        // A dangling link is a link on both hosts; only the CALL is host-split
+        // (Unix's `symlink(2)` is kind-agnostic, Windows asks file-or-dir).
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(dir.join("does-not-exist.jsonl"), &link);
+        #[cfg(windows)]
+        let made = std::os::windows::fs::symlink_file(dir.join("does-not-exist.jsonl"), &link);
+        made.unwrap();
         let cap = capture_for(&codex_home, thread_id);
         assert_eq!(cap, CodexCapture::default());
     }

@@ -2831,3 +2831,19 @@ project/parent inheritance across local/remote/app/subagents;
   checkout nor nix for its own data. Self-Ricing's staging invariant carries no
   checkout-evaluation sentence any more. Workaround withdrawn: an
   `AOIDE_FLAKE_ROOT` pointing at a branch is no longer a hazard.
+
+## 34. Secrets setup error handling (User, 2026-09-26, osaka enrollment)
+
+- Requirement (User): improve the error handling of the first-time secrets
+  setup on a fresh host — later, not now.
+- Found on osaka: `secrets add <name>` refuses with `missing --key <key>`
+  although `Secrets-Commands.md` documents `--key` as optional; nothing says
+  what a key is (for `age` it is only the file name under `values/`, so the
+  secret's own name is the obvious default). Before that, `secrets status`
+  on a host whose broker has no `members` answers "not in the
+  `aoide-secrets-access` group" without naming the fix (the host's
+  `aoide.secrets.members`, a switch, a fresh login).
+- Fix, open (core, `crates/secrets`): default `--key` to the name where the
+  backend allows it, else say what the key means for that backend; make each
+  first-run refusal name its next command; code and `Secrets-Commands.md`
+  agree.

@@ -65,8 +65,10 @@ use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, TcpListener, TcpStream};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
-use std::os::unix::process::CommandExt;
+#[cfg(windows)]
+use aoide_protocol::win_unix::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -75,8 +77,10 @@ use std::time::{Duration, Instant};
 
 #[cfg(test)]
 use aoide_conduct::graph::write_stage;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use std::os::unix::net::UnixListener;
+#[cfg(all(test, windows))]
+use aoide_protocol::win_unix::UnixListener;
 
 // ── Hostile-input hardening limits (security review, pre-commit) ────────────
 //
@@ -1977,18 +1981,13 @@ fn spawn_child_command(
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }
-    // SAFETY: `setsid()` is async-signal-safe and is the only call made in
-    // this pre_exec hook (same discipline as `graph/conduct.rs::spawn_on_pty`'s
-    // pre_exec) — it detaches the child into its own session so it survives
-    // this HTTP handler thread's lifetime. A failure here (already a session
-    // leader — vanishingly unlikely for a freshly-forked child) is not fatal
-    // to the spawn; the child would just inherit our process group instead.
-    unsafe {
-        cmd.pre_exec(|| {
-            let _ = libc::setsid();
-            Ok(())
-        });
-    }
+    // ONE seam for the detached-spawn posture: Unix's `setsid(2)` in a
+    // `pre_exec` hook, native Windows' `DETACHED_PROCESS |
+    // CREATE_NEW_PROCESS_GROUP` flags — `aoide_storage::fs::detach`, which
+    // `conduct`'s `spawn_detached` calls too, never a second copy
+    // (`crates/AGENTS.md`). After it returns, the child is in its own group,
+    // owns no inherited console, and outlives this handler thread.
+    aoide_storage::fs::detach(&mut cmd);
     cmd
 }
 
@@ -5499,7 +5498,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-shell-spawn-agent-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -5967,7 +5966,7 @@ mod tests {
     fn the_remote_parent_is_built_from_the_resolved_node_not_the_header_name() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-remote-parent-resolved-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -6760,7 +6759,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-sse-msend-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -7230,15 +7229,39 @@ mod tests {
     // they're testable without a real spawn — same "never through `do_spawn`
     // itself" precedent the table below states for the gate predicates.
 
+    /// A REAL `exit 1` status from this host's own shell. `std::process::
+    /// ExitStatus` has no portable constructor — `ExitStatusExt::from_raw` is
+    /// POSIX-only — and a status FABRICATED for the fixture is exactly what
+    /// these two tests must not come to depend on, so the fixture asks the
+    /// host for one. Asserts the code on the way out, so a shell that answered
+    /// differently could never silently become the fixture.
+    fn exit_one_status() -> std::process::ExitStatus {
+        #[cfg(unix)]
+        let mut cmd = {
+            let mut c = std::process::Command::new("sh");
+            c.args(["-c", "exit 1"]);
+            c
+        };
+        #[cfg(windows)]
+        let mut cmd = {
+            let mut c = std::process::Command::new("cmd");
+            c.args(["/C", "exit 1"]);
+            c
+        };
+        cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+        let status = cmd.status().expect("this host's shell runs");
+        assert_eq!(status.code(), Some(1), "the fixture must be exit 1");
+        status
+    }
+
     #[test]
     fn poll_bounded_exit_returns_the_status_the_moment_try_wait_reports_one() {
-        use std::os::unix::process::ExitStatusExt;
         let mut calls = 0u32;
         let status = poll_bounded_exit(
             || {
                 calls += 1;
                 if calls == 3 {
-                    Ok(Some(std::process::ExitStatus::from_raw(1 << 8))) // exit code 1
+                    Ok(Some(exit_one_status())) // exit code 1
                 } else {
                     Ok(None)
                 }
@@ -7267,8 +7290,7 @@ mod tests {
 
     #[test]
     fn spawn_died_immediately_message_names_the_program_never_the_full_command_line() {
-        use std::os::unix::process::ExitStatusExt;
-        let status = std::process::ExitStatus::from_raw(1 << 8); // exit code 1
+        let status = exit_one_status(); // exit code 1
         let msg = spawn_died_immediately_message("claude --dangerously-skip-permissions", status);
         assert!(msg.contains("`claude`"), "names the configured binary: {msg}");
         assert!(
@@ -7287,6 +7309,15 @@ mod tests {
     // mailbase`'s doc comment states for `current_exe()` resolving to the
     // TEST binary under `cargo test`.
 
+    /// GATED on native Windows with its PROVEN reason: the fixture proves the
+    /// child's environment by spawning `/bin/sh` and comparing `printf`'s exact
+    /// bytes (`sibling-ok|unset`, and no trailing newline). This host has neither
+    /// `/bin/sh` nor `printf`, and `cmd` neither expands an undefined `%VAR%`
+    /// the way `${VAR:-unset}` does nor prints without a trailing CRLF — so the
+    /// PROBE is a POSIX fact. The builder-state assertions above the spawn are
+    /// consequently not run there either, and that gap is named rather than
+    /// implied.
+    #[cfg_attr(windows, ignore = "the probe spawns `/bin/sh` and compares `printf`'s exact bytes; this host has no /bin/sh or printf")]
     #[test]
     fn a2a_spawn_clears_the_daemons_own_session_id_from_the_child() {
         // The Osaka wrong-ancestry bug: the `aoide-a2a` unit's own
@@ -7364,7 +7395,7 @@ mod tests {
 
     #[test]
     fn a2a_spawn_uses_a_registered_project_root_as_the_child_cwd() {
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-spawncwd-ok-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -7440,8 +7471,12 @@ mod tests {
             log.contains("\"status\":\"skipped\""),
             "the reject path audits exactly once, as \"skipped\": {log}"
         );
+        // The audit line is JSON, so the rejected path appears ESCAPED there
+        // (`\\` on native Windows) — accept either spelling rather than
+        // comparing raw text, which a backslash path can never match.
+        let escaped = unregistered_str.replace('\\', "\\\\");
         assert!(
-            log.contains(&unregistered_str),
+            log.contains(&unregistered_str) || log.contains(&escaped),
             "names the rejected path, never silently: {log}"
         );
 
@@ -7657,7 +7692,7 @@ mod tests {
     fn verify_signed_request_round_trips_a_genuine_signature() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-verify-sig-ok-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -7692,7 +7727,7 @@ mod tests {
         // "your key isn't registered here" from "your signature is wrong".
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-verify-sig-unknown-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -7752,7 +7787,7 @@ mod tests {
     fn verify_signed_request_refuses_a_tampered_body_or_path() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-verify-sig-tamper-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -7795,7 +7830,7 @@ mod tests {
     fn verify_signed_request_refuses_clock_skew_beyond_the_window_naming_both_timestamps() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-verify-sig-skew-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -7831,7 +7866,7 @@ mod tests {
     fn verify_signed_request_refuses_a_replayed_nonce_inside_the_window() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-verify-sig-replay-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -7879,7 +7914,7 @@ mod tests {
         // attribution, and the mismatch produces a drift audit line.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-verify-by-key-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -7923,7 +7958,7 @@ mod tests {
         // authentication must not break.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-verify-renamed-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -7960,7 +7995,7 @@ mod tests {
         // exact-name match, refusing beats guessing which grants apply.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-verify-shared-key-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -8013,7 +8048,7 @@ mod tests {
         // name still lands on the same cache key and refuses.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-verify-twin-replay-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -8109,7 +8144,7 @@ mod tests {
     fn node_spawn_signed_and_allowed_is_admitted_up_to_the_do_spawn_boundary() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-node-spawn-admitted-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -8159,7 +8194,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-node-spawn-revoked-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -8217,7 +8252,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-from-claim-bad-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -8305,7 +8340,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-inject-bad-from-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -8406,7 +8441,7 @@ mod tests {
     fn the_remote_parent_keys_on_the_verifying_key_not_a_second_name_lookup() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-remote-parent-twin-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -8474,7 +8509,7 @@ mod tests {
     fn message_send_spawn_refuses_a_paired_node_whose_allows_lacks_spawn() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-spawn-denied-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -8522,7 +8557,7 @@ mod tests {
         // attributed to this node.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-spawn-addr-only-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -8574,7 +8609,7 @@ mod tests {
         // still refuse.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-spawn-doorwide-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -8609,7 +8644,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-nonloopback-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -8692,7 +8727,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-pending-origin-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -8758,7 +8793,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-sig-attr-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -8837,7 +8872,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-sig-nofall-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -8927,7 +8962,7 @@ mod tests {
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_session_id = std::env::var("AOIDE_SESSION_ID").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-g9-no-env-leak-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -9016,7 +9051,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-loopback-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -9096,7 +9131,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-socket-gone-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -9192,7 +9227,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-shell-target-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -9286,7 +9321,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-mail-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -9382,7 +9417,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-spawninject-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -9498,7 +9533,7 @@ mod tests {
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-spawninject-shape-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -9581,7 +9616,7 @@ mod tests {
     fn the_opening_turns_outcome_is_what_tasks_get_shows() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-openingturn-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -9634,7 +9669,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-waitcost-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -9683,7 +9718,7 @@ mod tests {
     fn the_opening_turn_worker_ends_on_its_verdict_never_on_pending() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-worker-order-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -9749,7 +9784,7 @@ mod tests {
     fn the_registration_wait_never_writes_pending_over_a_verdict() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-prov-order-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -9813,7 +9848,7 @@ mod tests {
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_runtime = std::env::var("XDG_RUNTIME_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-spawninject-unready-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -9875,7 +9910,7 @@ mod tests {
         // mailbase entry either.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-spawninject-empty-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -9910,7 +9945,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             // Kept SHORT deliberately: XDG_RUNTIME_DIR is set to this root, so
             // conduct_socket_path() hangs `/aoide/session-<id>.sock` off it and
             // the whole thing must fit SUN_LEN (107 bytes + NUL).
@@ -9992,7 +10027,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             // Kept SHORT deliberately — see the sibling test above for why.
             "aoide-a2a-tok-ok-{}-{}",
             std::process::id(),
@@ -10058,7 +10093,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-autogate-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -10151,7 +10186,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             // Kept SHORT deliberately: XDG_RUNTIME_DIR is set to this root, so
             // conduct_socket_path() hangs `/aoide/session-<id>.sock` off it and
             // the whole thing must fit SUN_LEN (107 bytes + NUL). The verbose
@@ -10256,7 +10291,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-sig-loop-pending-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -10333,7 +10368,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-sig-loop-autogate-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -10491,7 +10526,7 @@ mod tests {
     }
 
     fn remote_parent_box_root(tag: &str) -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-{tag}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -10894,7 +10929,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-uniform-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -10999,7 +11034,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-uniform-valid-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -11106,7 +11141,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-uniform-off-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -11227,7 +11262,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-uniform-ptok-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -11490,7 +11525,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-pairrequest-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -11543,7 +11578,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-pairrequest-invalid-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -11589,7 +11624,7 @@ mod tests {
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_cap = std::env::var(aoide_storage::pairing::PAIRING_PARK_CAP_ENV).ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-pairrequest-cap-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -11639,7 +11674,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-pairrequest-supersede-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -11695,7 +11730,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-pairrequest-supersede-case-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -11743,7 +11778,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-pairreveal-ok-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -11784,7 +11819,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-pairreveal-mismatch-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -11819,7 +11854,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-pairreveal-unknown-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -11863,7 +11898,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-pairpoll-uniform-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -11937,7 +11972,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-pairpoll-released-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -12003,7 +12038,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-pairpoll-malformed-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -12056,7 +12091,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-pairevent-parked-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -12099,7 +12134,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-pairevent-nosecrets-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -12148,7 +12183,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-pairevent-reveal-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -12201,6 +12236,14 @@ mod tests {
     /// `resolve_still_succeeds_when_the_events_feed_path_is_unwritable`.
     /// Root ignores directory permissions too, so this skips under a root
     /// test runner, same precedent.
+    /// GATED on Unix with its reason: the fixture makes a directory UNWRITABLE
+    /// by mode (`0o500`), root ignores modes so the test skips under a root
+    /// runner, and `effective_uid` is this host's uid lookup — all three are
+    /// POSIX facts. The ceremony's "an unwritable events path never fails the
+    /// pair request" contract is therefore not asserted on native Windows,
+    /// where a directory's policy is a DACL this fixture cannot spell in a
+    /// mode. Said plainly: no native twin exists for this one.
+    #[cfg(unix)]
     #[test]
     fn pair_request_still_succeeds_when_the_events_path_is_unwritable() {
         if aoide_secrets::home::effective_uid() == 0 {
@@ -12209,7 +12252,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-pairevent-unwritable-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -12289,7 +12332,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-a2a-ceremony-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
@@ -12945,6 +12988,22 @@ mod tests {
     /// (deliberately wrong) `file_token` also set — the broker-resolved
     /// value wins outright, proving the precedence [`resolve_inbound_bearer`]'s
     /// own doc states.
+    /// GATED on native Windows with its PROVEN reason, measured from the
+    /// refusal itself: the fixture's broker stores through the built-in `file`
+    /// backend, whose template is the POSIX preset `cat {home}/store/{name}` —
+    /// and this tree REFUSES a POSIX-preset template BY NAME on native Windows
+    /// (`CORE-POSIX.md`'s "shell interpreter for a stored command line" row:
+    /// "never run under `cmd`, never silently stubbed"), which `put` returns as
+    /// `Err(Other("backend `file` (set) is a built-in POSIX-shell preset …"))`.
+    ///
+    /// The contract this test covers is NOT left uncovered there: a
+    /// broker-over-a-real-socket round trip with a HOST-SHAPED template is
+    /// exercised natively by `aoide-secrets`' own
+    /// `backend::tests::a_native_windows_template_*` (a real `cmd /C` template,
+    /// end to end) and by the broker's own native suite, and the PRECEDENCE
+    /// half stays covered on both hosts by the pure `bearer_cfg` asserts around
+    /// this test.
+    #[cfg_attr(windows, ignore = "the fixture stores through the built-in `file` backend, whose template is the POSIX preset `cat ...` — refused by name on native Windows (CORE-POSIX.md's shell-interpreter row); native cover: secrets::backend::tests::a_native_windows_template_*")]
     #[test]
     fn resolve_inbound_bearer_prefers_a_resolved_broker_secret_over_the_file_token() {
         let home = std::env::temp_dir().join(format!(
@@ -12959,11 +13018,14 @@ mod tests {
         )
         .unwrap();
 
-        let socket_path = std::path::PathBuf::from(format!(
-            "/tmp/aoide-a2a-bearer-precedence-{}-{}.sock",
+        // `/tmp` is not a path native Windows has, and a long socket name does
+        // not fit `sun_path` there either — the one short-path seam answers both.
+        let socket_path = aoide_test_support::short_tmp(&format!(
+            "bearer-precedence-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
-        ));
+        ))
+        .join("b.sock");
         let home_for_thread = home.clone();
         let sock_for_thread = socket_path.clone();
         let broker_thread = std::thread::spawn(move || {
@@ -12979,10 +13041,9 @@ mod tests {
         }
         assert!(connected, "broker did not bind {} in time", socket_path.display());
 
-        assert_eq!(
-            aoide_secrets::client::put(&socket_path, "melete-door-token", "the-broker-value", false),
-            Ok(false)
-        );
+        let stored =
+            aoide_secrets::client::put(&socket_path, "melete-door-token", "the-broker-value", false);
+        assert!(matches!(stored, Ok(false)), "put must store a FRESH value: {stored:?}");
 
         let cfg = bearer_cfg("melete-door-token", &socket_path, "the-file-value-must-lose");
         assert_eq!(resolve_inbound_bearer(&cfg), "the-broker-value");
@@ -13008,7 +13069,15 @@ mod tests {
     /// what it checks), which is noise, not a real call site.
     fn production_source() -> &'static str {
         let src = include_str!("a2a.rs");
-        let test_mod_start = src.find("#[cfg(test)]\nmod tests {").expect("this file has a `mod tests` block");
+        // The marker is searched LINE-ENDING AGNOSTICALLY: a Windows checkout
+        // legitimately carries CRLF (`core.autocrlf`), and `include_str!` hands
+        // back the file's bytes verbatim — so a `\n`-spelled needle finds
+        // nothing there and this gate failed for a reason that has nothing to do
+        // with what it guards. Same file, same scan, either checkout.
+        let test_mod_start = src
+            .find("#[cfg(test)]\r\nmod tests {")
+            .or_else(|| src.find("#[cfg(test)]\nmod tests {"))
+            .expect("this file has a `mod tests` block");
         &src[..test_mod_start]
     }
 
@@ -13212,7 +13281,10 @@ mod tests {
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
 
-    /// Registers a node under `display::local_host_name()` — the only name
+    /// Registers a node under `display::local_node_name()` — the name this box
+/// presents as a NODE (the folded form; every registered node's own name and
+/// every mesh key is `valid_node_name`-shaped, so the raw, case-preserving host
+/// name would never match one — see `MeshSection::self_declared` in `client`).
     /// [`aoide_storage::mail::mint_outbound_letter`] will ever stamp as
     /// `header.from.node` (P-M1 ruling: self never crosses the wire) — so an
     /// envelope this test mints has a genuinely verifiable origin, using
@@ -13221,7 +13293,7 @@ mod tests {
     /// [`setup_signed_node`] already documents). Origin and hop coincide in
     /// P-M2, so this ALSO doubles as the connection's signed hop.
     fn setup_verifiable_origin(allows: &[&str]) -> String {
-        let origin_name = aoide_storage::display::local_host_name();
+        let origin_name = aoide_storage::display::local_node_name();
         setup_signed_node_with_allows(&origin_name, allows);
         origin_name
     }
@@ -13481,7 +13553,7 @@ mod tests {
         assert_eq!(ack.header.kind, aoide_storage::mail::ENTRY_TYPE_RECEIPT);
         assert_eq!(ack.header.to.node, origin_name, "the ack's `to` is the origin");
         assert_eq!(ack.text, msgid, "the ack's text is the acked msgid");
-        assert_eq!(ack.header.from.node, aoide_storage::display::local_host_name(), "signed by this box");
+        assert_eq!(ack.header.from.node, aoide_storage::display::local_node_name(), "signed by this box");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
@@ -13909,7 +13981,7 @@ mod tests {
             stage: std::env::var("AOIDE_STAGE_DIR").ok(),
             state: std::env::var("AOIDE_STATE_DIR").ok(),
         };
-        let root = std::env::temp_dir().join(format!(
+        let root = aoide_test_support::short_tmp(&format!(
             "aoide-server-a2a-frame-{tag}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()

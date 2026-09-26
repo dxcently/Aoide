@@ -1,5 +1,30 @@
 # AGENTS.md — aoide-server
 
+## Native Windows: seamed, not branched
+
+The daemon's doors are native on both hosts and go through seams rather than
+platform branches: the socket TYPE (`aoide_protocol::win_unix`), a bound socket's
+POLICY (`daemon::tighten_socket` — `chmod 0600` on Unix, the parent directory's
+owner-only policy on Windows, where a bound `AF_UNIX` socket is a reparse point no
+policy read can describe), the peer identity in `accept_loop` (uid on Unix, this
+token's user SID via `win_proc::current_user_sid` on Windows, `None` = refuse),
+and the detached spawn `a2a`'s handler uses (`aoide_storage::fs::detach`, shared
+with `conduct`).
+
+Fixtures here have three host facts to respect, and each one has a seam:
+`aoide_test_support::short_tmp` (a socket path must fit `sun_path` — 107 bytes on
+Windows against a ~36-byte temp prefix; measured 108/110/114/119 before),
+`aoide_test_support::owner_only_file` (a feed file created by `std::fs::write`
+carries an inherited DACE the feed READER refuses, which surfaces as a deadline,
+not as the policy fact), and `built_aoide_bin` (a built binary's name carries this
+host's `EXE_SUFFIX`). A node's own name is the FOLDED `display::local_node_name`,
+never `local_host_name` — production mints and verifies under the former, so a
+fixture that signs under the raw name fails only on a case-differing host.
+
+Two proven host facts are gated with reasons rather than worked around:
+`boot_epoch` is `None` off Linux (three `run_boot_auto_resume_*` tests) and one
+a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
+
 ## Invariants
 
 - **Inbound/serve only.** This crate is the SERVER half of every door.

@@ -37,15 +37,21 @@ mod fs_windows;
 /// Unix `flock(LOCK_EX)`; Windows `LockFileEx`. `false` means it was not
 /// taken — every caller here already reads that as "not held", never as
 /// "assume held".
+///
+/// `pub` (not `pub(crate)`): `aoide-conduct`'s own file-lock probe
+/// (`graph/codex_app.rs::lock_is_held`) and its tests ask this exact question
+/// of a file on the SAME host, so they call these three functions rather than
+/// a second per-host lock mechanism (`pkgs/aoide/crates/AGENTS.md`, "no
+/// cross-crate copying": widen the symbol, never fork it).
 #[cfg(unix)]
-pub(crate) fn lock_exclusive(file: &std::fs::File) -> bool {
+pub fn lock_exclusive(file: &std::fs::File) -> bool {
     use std::os::unix::io::AsRawFd;
     let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
     rc == 0
 }
 
 #[cfg(windows)]
-pub(crate) fn lock_exclusive(file: &std::fs::File) -> bool {
+pub fn lock_exclusive(file: &std::fs::File) -> bool {
     fs_windows::lock_exclusive(file).is_ok()
 }
 
@@ -55,7 +61,7 @@ pub(crate) fn lock_exclusive(file: &std::fs::File) -> bool {
 /// for `outbox`'s `.bsy` guard, which skips a busy link and must not mistake
 /// "busy" for "broken".
 #[cfg(unix)]
-pub(crate) fn try_lock_exclusive(file: &std::fs::File) -> std::io::Result<bool> {
+pub fn try_lock_exclusive(file: &std::fs::File) -> std::io::Result<bool> {
     use std::os::unix::io::AsRawFd;
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
         return Ok(true);
@@ -68,7 +74,7 @@ pub(crate) fn try_lock_exclusive(file: &std::fs::File) -> std::io::Result<bool> 
 }
 
 #[cfg(windows)]
-pub(crate) fn try_lock_exclusive(file: &std::fs::File) -> std::io::Result<bool> {
+pub fn try_lock_exclusive(file: &std::fs::File) -> std::io::Result<bool> {
     fs_windows::try_lock_exclusive(file)
 }
 
@@ -76,7 +82,7 @@ pub(crate) fn try_lock_exclusive(file: &std::fs::File) -> std::io::Result<bool> 
 /// `Drop` guard and the tail of a closure, neither of which has anywhere to
 /// report a failure to.
 #[cfg(unix)]
-pub(crate) fn unlock(file: &std::fs::File) {
+pub fn unlock(file: &std::fs::File) {
     use std::os::unix::io::AsRawFd;
     unsafe {
         libc::flock(file.as_raw_fd(), libc::LOCK_UN);
@@ -84,7 +90,7 @@ pub(crate) fn unlock(file: &std::fs::File) {
 }
 
 #[cfg(windows)]
-pub(crate) fn unlock(file: &std::fs::File) {
+pub fn unlock(file: &std::fs::File) {
     fs_windows::unlock(file);
 }
 
@@ -977,6 +983,225 @@ pub fn atomic_write_private(path: &std::path::Path, contents: &[u8]) -> std::io:
     atomic_write_bytes_impl(path, contents, Some(0o600))
 }
 
+/// Detach a `Command` before it is spawned: its own session/process group, no
+/// inherited console, so the child outlives the process that started it — the
+/// ONE seam for that posture (`pkgs/aoide/crates/AGENTS.md`, "no cross-crate
+/// copying": `conduct`'s `spawn_detached` and `a2a`'s handler spawn both call
+/// this, and neither spells a flag of its own).
+///
+/// Unix: `setsid(2)` in a `pre_exec` hook — async-signal-safe, and the same
+/// discipline every `pre_exec` in this tree keeps (no allocation, no lock). A
+/// failure there (already a session leader) is not fatal to the spawn; the child
+/// merely inherits our process group.
+///
+/// Native Windows: the equivalent pair of `CreateProcess` flags, which is a
+/// property of the spawn CALL rather than of a hook inside the child, so the two
+/// arms share a contract and a name, not a body. `DETACHED_PROCESS` replaces
+/// `setsid`'s "no controlling tty" and `CREATE_NEW_PROCESS_GROUP` replaces the
+/// session's own group. The flags are spelled here rather than pulled from
+/// `windows_sys` so this crate needs no Windows API edge for two bits — the
+/// Windows API surface lives in `aoide-protocol` (`win_proc`/`win_unix`/
+/// `owner_only`), never here. No `CREATE_NO_WINDOW`: the windowed caller's whole
+/// point is a terminal that draws, and `DETACHED_PROCESS` alone already denies
+/// the child an inherited console.
+pub fn detach(command: &mut std::process::Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: `setsid()` is async-signal-safe and the only call made in this
+        // hook.
+        unsafe {
+            command.pre_exec(|| {
+                let _ = libc::setsid();
+                Ok(())
+            });
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+}
+
+/// Point `link` at the directory `source` — the ONE symlink seam the tree has,
+/// because the two hosts differ on whether the target's KIND is part of the
+/// call: Unix's `symlink(2)` is kind-agnostic, while native Windows has two
+/// calls and asks the creator which one it is, so a directory gets
+/// `symlink_dir` there, never `symlink_file`. One implementation, two callers
+/// (`conduct`'s `hooks install` skill links, `cli`'s `onboard` song link) —
+/// never a second copy.
+///
+/// A refused creation surfaces its own error to the caller: native Windows
+/// needs `SeCreateSymbolicLinkPrivilege` (developer mode or an elevated token)
+/// for this call at all. Nothing here works around that by copying a tree
+/// instead of linking it.
+pub fn link_dir(source: &std::path::Path, link: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(source, link)
+    }
+    #[cfg(windows)]
+    {
+        std::os::windows::fs::symlink_dir(source, link)
+    }
+}
+
+/// Is `path` spelled ABSOLUTE in some host's own grammar?
+///
+/// **This exists because a remote node's root is not this process's path.** A
+/// host root names something on a NODE that may not even run this OS, so a
+/// validator that asks only `Path::is_absolute()` is asking THIS host's
+/// question: on native Windows that call says no to `/srv/proj` (a root with no
+/// drive prefix) and on Unix it says no to `C:\proj`. Neither path is wrong —
+/// each is a wrong question, and the cost was real: a Windows node could not
+/// record a POSIX node's roots at all.
+///
+/// So this answers the union of the two grammars the core targets:
+///
+/// * **POSIX**: a leading `/` — the only absolute form POSIX has, and also the
+///   forward-slash spelling of a Windows root-relative path;
+/// * **Windows**: a drive-qualified root (`C:\…`, `C:/…`) or the bare `C:`
+///   drive root, and a UNC share (`\\server\share…`). `C:foo` is DRIVE-RELATIVE
+///   on Windows and is deliberately NOT accepted here.
+///
+/// One implementation, no `cfg`: the predicate must give the same answer on
+/// both hosts, which is the whole point of it.
+pub fn looks_absolute_any_host(path: &str) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+    // POSIX root, and Windows' own `/`-rooted spelling.
+    if path.starts_with('/') {
+        return true;
+    }
+    let bytes = path.as_bytes();
+    // A drive-qualified root: `X:` where X is an ASCII letter.
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        return bytes.len() == 2 || matches!(bytes[2], b'\\' | b'/');
+    }
+    // A UNC share, and the `\\?\` extended-length spelling of any path.
+    path.starts_with(r"\\")
+}
+
+/// Is `path` inside the directory `root` — a DIRECTORY-boundary test, in the
+/// separator and prefix grammar of whichever host spelled them?
+///
+/// The bug this closes was a hard-coded `/`: `cwd.starts_with("{root}/")` is
+/// the POSIX separator, so on native Windows a session cwd of `C:\p\proj\sub`
+/// under the root `C:\p\proj` matched NOTHING — the roster simply lost its
+/// `project:… → session:… "anchors"` edge, silently, while every Linux run was
+/// green. Both spellings are accepted on both hosts, because a path recorded by
+/// one host's grammar can still name a directory on the other (a shared
+/// checkout, a remote worktree).
+///
+/// **The verbatim prefix is stripped first,** dunce-style: `canonicalize`
+/// returns `\\?\C:\p` on Windows, which compares unequal to the `C:\p` a
+/// caller (or a record) spells for the same directory. Only the two shapes that
+/// are representable without it are rewritten; anything else is left alone.
+///
+/// One seam: every project-prefix question in the tree asks this
+/// (`conduct`'s `model::cwd_under`), so no caller re-derives the separator.
+pub fn path_is_under(path: &str, root: &str) -> bool {
+    let path = strip_verbatim_prefix(path);
+    let root = strip_verbatim_prefix(root);
+    if root.is_empty() {
+        // An empty root is not a boundary: nothing is inside "".
+        return false;
+    }
+    // `Path::starts_with` is a COMPONENT comparison, which is exactly the
+    // relation wanted and is why no separator is spelled here: on Windows a
+    // `/` and a `\` are the same separator (so a mixed pair still matches), on
+    // Unix only `/` is, and a backslash in a Unix file name stays part of that
+    // name. `C:\a\bc` is under `C:\a` (bc is an entry INSIDE a) while `C:\ab`
+    // is not — component equality gets both right, and a string prefix with a
+    // hard-coded `/` got the Windows half of that wrong for every single path.
+    std::path::Path::new(path.as_ref()).starts_with(root.as_ref())
+}
+
+/// `\\?\C:\p` → `C:\p`, and `\\?\UNC\srv\share` → `\\srv\share`; every other
+/// spelling is returned untouched. The verbatim form is an implementation
+/// detail of the Windows API, not a name anyone spells, and leaving it in
+/// breaks every comparison against a path that did not come from
+/// `canonicalize`.
+fn strip_verbatim_prefix(path: &str) -> std::borrow::Cow<'_, str> {
+    let Some(rest) = path.strip_prefix(r"\\?\") else {
+        return path.into();
+    };
+    match rest.strip_prefix(r"UNC\") {
+        Some(share) => format!(r"\\{share}").into(),
+        None => rest.into(),
+    }
+}
+
+/// Create a PRIVATE file exclusively — `create_new(2)`'s semantics (a second
+/// call for the same path fails `AlreadyExists`, never truncating what is
+/// already there) with the private policy attached AT CREATION.
+/// `spawn`'s write-once instruction sidecar
+/// (`conduct/src/graph/spawn.rs::write_instructions_sidecar`) is the caller:
+/// that file is written exactly once per session id by construction, so the
+/// create-or-open shape [`atomic_write_private`] uses would be a silent
+/// overwrite of the instructions a run was started with.
+///
+/// Unix: `OpenOptions::mode(0o600)` — created AT 0600, never narrowed after
+/// (the same no-window ordering [`atomic_write_private`]'s doc argues).
+/// Windows: `owner_only::create_new`, whose owner-only DACL is attached by the
+/// `CreateFileW` that makes the file, then read back through `file_privacy`
+/// BEFORE the first payload byte — the same readback
+/// [`atomic_write_private`] performs on its temp, and for the same reason:
+/// "created at 0600" is worth nothing if nobody asked the filesystem. The
+/// `AlreadyExists` outcome is preserved one-for-one, because the caller's
+/// taught refusal keys on it; and a readback that REFUSES removes the file it
+/// just made before returning, so the caller's next attempt is a fresh one
+/// rather than a taught "stale sidecar" refusal about this process's own file.
+pub fn create_new_private(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)
+    }
+    #[cfg(windows)]
+    {
+        let file = match aoide_protocol::owner_only::create_new(path) {
+            Ok(file) => file,
+            Err(aoide_protocol::owner_only::CreateError::Exists) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!("{} already exists", path.display()),
+                ))
+            }
+            Err(aoide_protocol::owner_only::CreateError::Failed(e)) => return Err(e),
+        };
+        match aoide_protocol::owner_only::file_privacy(path)? {
+            None => Ok(file),
+            Some(reason) => {
+                // The file this call JUST created is removed before the refusal
+                // returns: leaving it would make the caller's next attempt answer
+                // `AlreadyExists` and print the taught "stale sidecar" refusal
+                // about a file this process itself made a moment ago — a
+                // confusing, self-inflicted state that only a host which cannot
+                // persist the policy can reach.
+                drop(file);
+                let _ = std::fs::remove_file(path);
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!(
+                        "refusing the private file {} this process just created: {reason} \
+                         (this filesystem may not persist ACLs, and nothing here writes a private file it cannot prove is owner-only; the file was removed again)",
+                        path.display()
+                    ),
+                ))
+            }
+        }
+    }
+}
+
 /// Create `dir` (if absent) and lock it down to `0700` (owner rwx only) —
 /// the directory-level half of [`atomic_write_private`]'s discipline
 /// (review rider: nothing else in this crate secured the DIRECTORY a
@@ -1451,6 +1676,58 @@ pub fn seed_if_absent(path: &std::path::Path, empty_body: &str, key: &str) -> Op
 
 #[cfg(test)]
 mod tests {
+    /// The ONE seam every project-prefix question now goes through, asserted in
+    /// BOTH hosts' grammars at once — so its answer cannot depend on which host
+    /// is asking, and a Windows cwd under a Windows root matches exactly as a
+    /// POSIX pair does. (The live defect: a hard-coded `/` boundary, so on
+    /// native Windows no cwd ever matched a root and the roster silently lost
+    /// every project "anchors" edge.)
+    #[test]
+    fn path_is_under_knows_both_hosts_grammars() {
+        // POSIX grammar — a `/` is a separator on every host this core runs,
+        // so these hold wherever the suite runs.
+        assert!(super::path_is_under("/srv/proj/sub", "/srv/proj"));
+        assert!(super::path_is_under("/srv/proj/", "/srv/proj"));
+        assert!(super::path_is_under("/srv/proj", "/srv/proj"));
+        assert!(!super::path_is_under("/srv/projX", "/srv/proj"));
+        assert!(!super::path_is_under("/srv/proj", "/srv/projX"));
+        assert!(super::path_is_under("/srv/x", "/"));
+        assert!(!super::path_is_under("proj/sub", "/srv/proj"));
+        assert!(!super::path_is_under("/srv/proj", ""));
+
+        // The verbatim-prefix strip is pure string work, so it is asserted
+        // here too: `canonicalize` mints `\\?\…` on Windows, and that spelling
+        // must keep naming the same directory as the plain one.
+        assert_eq!(super::strip_verbatim_prefix(r"\\?\C:\p").as_ref(), r"C:\p");
+        assert_eq!(super::strip_verbatim_prefix(r"\\?\UNC\srv\share").as_ref(), r"\\srv\share");
+        assert_eq!(super::strip_verbatim_prefix("/srv/p").as_ref(), "/srv/p");
+
+        // Windows grammar — which separator is a separator is decided by THIS
+        // host's own component rules, and the defect being closed (a hard-coded
+        // `/`) lived entirely on the Windows side: no cwd ever matched a root
+        // there, so every project "anchors" edge was silently absent.
+        #[cfg(windows)]
+        {
+            assert!(super::path_is_under(r"C:\p\proj\sub", r"C:\p\proj"));
+            assert!(super::path_is_under(r"C:\p\proj", r"C:\p\proj"));
+            assert!(super::path_is_under(r"C:\p\proj\", r"C:\p\proj"));
+            assert!(super::path_is_under("C:/p/proj/sub", r"C:\p\proj"));
+            assert!(!super::path_is_under(r"C:\p\projX", r"C:\p\proj"));
+            assert!(!super::path_is_under(r"C:\p\other", r"C:\p\proj"));
+            assert!(super::path_is_under(r"\\?\C:\p\proj\sub", r"C:\p\proj"));
+            assert!(super::path_is_under(r"\\?\C:\p\proj\sub", r"\\?\C:\p\proj"));
+            assert!(!super::path_is_under(r"\\?\C:\p\projX", r"C:\p\proj"));
+            assert!(super::path_is_under(r"\\?\UNC\srv\share\a", r"\\srv\share"));
+        }
+        // On Unix those are one FILE NAME each (a backslash is an ordinary
+        // byte there), so no path relation is claimed and none is invented.
+        #[cfg(unix)]
+        {
+            assert!(!super::path_is_under(r"C:\p\proj\sub", r"C:\p\proj"));
+            assert!(super::path_is_under(r"/srv/a\b/c", r"/srv/a\b"));
+            assert!(!super::path_is_under(r"/srv/a\bc", r"/srv/a\b"));
+        }
+    }
     use super::*;
 
     /// Save/restore `AOIDE_ROOT`, mirroring every other single-var guard in

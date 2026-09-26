@@ -218,7 +218,7 @@ fn register_clone(root: &Path) -> (Vec<String>, Vec<String>) {
             "{} already exists and is not a symlink -- leaving it (move it aside to let onboard link it)",
             home_song.display()
         )),
-        Err(_) => match std::os::unix::fs::symlink(&root_song, &home_song) {
+        Err(_) => match aoide_storage::fs::link_dir(&root_song, &home_song) {
             Ok(()) => {
                 notes.push(format!("linked {} -> {}", home_song.display(), root_song.display()));
                 changed.push(format!("~/song -> {}", root_song.display()));
@@ -406,6 +406,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
+    /// GATED on Unix with its reason: the fixture creates a symlink to a second
+    /// directory, and native Windows needs `SeCreateSymbolicLinkPrivilege`
+    /// (developer mode or an elevated token) for that call at all —
+    /// `aoide_storage::fs::link_dir` surfaces the refusal, so the conflict this
+    /// test stages cannot be built there. No native twin.
+    #[cfg(unix)]
     #[test]
     fn register_clone_leaves_a_wrong_target_symlink_alone_with_a_note() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -456,6 +462,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
+    /// GATED on Unix with its reason: the fixture creates a symlink (and
+    /// deliberately a DANGLING one), which native Windows refuses without
+    /// `SeCreateSymbolicLinkPrivilege` — see
+    /// `register_clone_leaves_a_wrong_target_symlink_alone_with_a_note`'s own
+    /// gate. No native twin.
+    #[cfg(unix)]
     #[test]
     fn register_clone_reports_a_dangling_but_correctly_targeted_link_as_already_linked() {
         // The cosmetic fix: a symlink aimed at the RIGHT path whose target

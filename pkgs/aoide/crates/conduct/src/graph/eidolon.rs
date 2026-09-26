@@ -536,7 +536,10 @@ struct PresenceMeta {
 /// third "can't tell" state for one directory's probe.
 fn socket_answers(path: &Path) -> bool {
     use std::io::{Read, Write};
+    #[cfg(unix)]
     use std::os::unix::net::UnixStream;
+    #[cfg(windows)]
+    use aoide_protocol::win_unix::UnixStream;
     use std::time::Duration;
     const PING_TIMEOUT: Duration = Duration::from_millis(250);
 
@@ -1597,7 +1600,10 @@ mod tests {
     #[test]
     fn socket_answers_true_only_for_an_exact_ok_reply() {
         use std::io::{Read, Write};
+        #[cfg(unix)]
         use std::os::unix::net::UnixListener;
+        #[cfg(windows)]
+        use aoide_protocol::win_unix::UnixListener;
 
         let dir = unique_stage("eidolon-socket-live");
         let path = dir.join("sock");
@@ -1641,7 +1647,10 @@ mod tests {
         .unwrap();
 
         use std::io::{Read, Write};
+        #[cfg(unix)]
         use std::os::unix::net::UnixListener;
+        #[cfg(windows)]
+        use aoide_protocol::win_unix::UnixListener;
         let sock_path = presence_dir.join("user-0001").join("sock");
         let listener = UnixListener::bind(&sock_path).unwrap();
         let handle = std::thread::spawn(move || {
@@ -1682,7 +1691,10 @@ mod tests {
     #[test]
     fn the_gather_reads_a_presences_trace_and_ignores_a_non_trace_path() {
         use std::io::{Read, Write};
+        #[cfg(unix)]
         use std::os::unix::net::UnixListener;
+        #[cfg(windows)]
+        use aoide_protocol::win_unix::UnixListener;
 
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(&["XDG_RUNTIME_DIR"]);

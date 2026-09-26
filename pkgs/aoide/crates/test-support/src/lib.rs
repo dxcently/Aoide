@@ -12,6 +12,91 @@ use aoide_protocol::{Door, Invocation};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+/// Create-or-truncate an EMPTY file in the shape THIS host's feed reader
+/// demands: Unix's mode bits have no such reader, so a plain write is the whole
+/// fixture; native Windows reads a feed's policy back from the object and
+/// REFUSES one whose DACL still carries inherited ACEs — and `std::fs::write`
+/// creates exactly such a file there. So the fixture creates it owner-only,
+/// through the same policy seam a real writer uses.
+///
+/// This is a FIXTURE fact, not a test convenience: without it a follower sees
+/// nothing, a daemon's own write is refused, and the failure surfaces as a
+/// deadline ("never saw the appended lines in time") rather than as the policy
+/// fact it is. ONE seam — `aoide-server`'s `events` and `daemon` fixtures both
+/// ask this.
+pub fn owner_only_file(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        std::fs::write(path, b"").unwrap();
+    }
+    #[cfg(windows)]
+    match aoide_protocol::owner_only::create_new(path) {
+        Ok(file) => drop(file),
+        Err(aoide_protocol::owner_only::CreateError::Exists) => {
+            let file = aoide_protocol::owner_only::create_truncating(path)
+                .expect("re-create the fixture's feed file owner-only");
+            drop(file);
+        }
+        Err(aoide_protocol::owner_only::CreateError::Failed(e)) => {
+            panic!("create the fixture's feed file owner-only: {e}")
+        }
+    }
+}
+
+/// A SHORT scratch directory under this host's temp dir, bounded for `AF_UNIX`:
+/// `sun_path` is 108 bytes with its terminator and native Windows accepts at
+/// most 107, while this host's own temp prefix (`%LOCALAPPDATA%\Temp`) spends
+/// ~36 of them — so a per-test root that spells its tag and a nanosecond stamp
+/// stops fitting the moment a socket file name is appended. Measured, before
+/// this seam: 108, 110, 114 and 119 bytes in `aoide-server`'s `a2a` fixtures,
+/// all refused by name by the native binder.
+///
+/// The tag is HASHED rather than spelled: it stays identifiable in a directory
+/// dump and stops costing bytes. ONE seam — `a2a`, `shellbridge` and `conduct`'s
+/// socket fixtures all ask this instead of composing a path of their own, so the
+/// budget is answered in one place.
+pub fn short_tmp(tag: &str) -> PathBuf {
+    // FNV-1a over the tag, then the FULL 64 bits folded with the pid: the hash
+    // keeps the name short (a directory dump still identifies it) and the pid
+    // keeps two RUNS apart even when their tags repeat — a stale socket file in
+    // a path two runs shared is an `EADDRINUSE` for the next `bind`, which is
+    // the failure this shape prevents. Length: `aoide-<16 hex>-<pid%100000>` is
+    // 32 chars, ~70 bytes under this host's ~36-byte temp prefix — inside the
+    // 107-byte `sun_path` cap a socket needs.
+    let hash: u64 = tag.bytes().fold(0xcbf2_9ce4_8422_2325u64, |acc, b| {
+        (acc ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3)
+    });
+    let mut dir = std::env::temp_dir();
+    dir.push(format!("aoide-{hash:016x}-{}", std::process::id() % 100_000));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// The built `aoide` binary beside the calling test's own executable — the
+/// REAL program a fixture needs when it must run a hook/dispatcher as its own
+/// process (its own argv, env, stdin and its own daemon probe), not an
+/// in-process imitation. `cargo test -p <crate>` builds the workspace's bins,
+/// so the sibling is there whenever a test binary is.
+///
+/// ONE seam, because the name is a HOST fact: `std::env::consts::EXE_SUFFIX`
+/// (`.exe` on native Windows, empty on Unix). Two copies of this helper spelled
+/// a bare `aoide`, so on Windows each reported a binary it had just built as
+/// missing — and on the cli's door test that meant the fixture never reached the
+/// door at all, so the door's peer-pid stamping was silently unexercised.
+pub fn built_aoide_bin() -> PathBuf {
+    let test_exe = std::env::current_exe().expect("current_exe resolves under cargo test");
+    let profile_dir = test_exe
+        .parent() // .../target/<profile>/deps
+        .and_then(|p| p.parent()) // .../target/<profile>
+        .expect("test exe has a target/<profile>/deps parent");
+    let bin = profile_dir.join(format!("aoide{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        bin.exists(),
+        "expected a pre-built `aoide` binary at {bin:?} — run `cargo build --bin aoide` first"
+    );
+    bin
+}
+
 pub fn unique_tmp(tag: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();
     dir.push(format!(

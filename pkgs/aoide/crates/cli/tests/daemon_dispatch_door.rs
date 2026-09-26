@@ -18,7 +18,10 @@ use aoide::dispatch::{dispatch, registry};
 use aoide_server::daemon::serve_daemon;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(windows)]
+use aoide_protocol::win_unix::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -314,17 +317,11 @@ fn a_daemon_dispatched_send_never_resolves_this_processs_own_ambient_session_id(
 /// this test binary is (`aoide-conduct`'s `testutil::built_aoide_bin` holds the
 /// same shape and the same assertion).
 fn built_aoide_bin() -> PathBuf {
-    let test_exe = std::env::current_exe().expect("current_exe resolves under cargo test");
-    let profile_dir = test_exe
-        .parent() // .../target/<profile>/deps
-        .and_then(|p| p.parent()) // .../target/<profile>
-        .expect("test exe has a target/<profile>/deps parent");
-    let bin = profile_dir.join("aoide");
-    assert!(
-        bin.exists(),
-        "expected a pre-built `aoide` binary at {bin:?} — run `cargo build --bin aoide` first"
-    );
-    bin
+    // ONE seam for the built binary's name (`aoide-test-support`): a bare
+    // `aoide` is a name native Windows does not have (`aoide.exe`), and this
+    // fixture must reach the real hook process for the door's peer-pid
+    // verification to be exercised at all.
+    aoide_test_support::built_aoide_bin()
 }
 
 /// Run a REAL `aoide session hook` the way a harness runs one — its own process,

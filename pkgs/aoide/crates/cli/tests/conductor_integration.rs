@@ -147,7 +147,12 @@ fn app_loads_recomputes_selects_and_dispatches_against_the_tempdir() {
     // Outcome — proving the intended live-daemon path actually works,
     // rather than papering over the new requirement.
     let daemon_socket = stage.join("fake-aoided.sock");
-    let listener = std::os::unix::net::UnixListener::bind(&daemon_socket).unwrap();
+    // The socket TYPE is the seam, as everywhere else in this tree.
+    #[cfg(unix)]
+    use std::os::unix::net::UnixListener;
+    #[cfg(windows)]
+    use aoide_protocol::win_unix::UnixListener;
+    let listener = UnixListener::bind(&daemon_socket).unwrap();
     let daemon_thread = std::thread::spawn(move || {
         use std::io::{BufRead, BufReader, Write};
         let (conn, _) = listener.accept().unwrap();

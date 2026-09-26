@@ -823,7 +823,10 @@ fn spared_exempt_spawned_shells(
 /// Plus [`SOCKET_SETTLE_SECS`] off the file's mtime, for the moment between
 /// `bind` and `listen` where an infant socket would refuse a connection.
 fn sweep_orphan_sockets(live_ids: &HashSet<&str>, now_epoch: i64) -> Vec<String> {
+    #[cfg(unix)]
     use std::os::unix::net::UnixStream;
+    #[cfg(windows)]
+    use aoide_protocol::win_unix::UnixStream;
     let Some(dir) = crate::graph::conduct_socket_path("probe")
         .parent()
         .map(|d| d.to_path_buf())
@@ -3466,14 +3469,22 @@ mod tests {
         assert!(spared_exempt_spawned_shells(&[busy], now, recent).is_empty());
     }
 
+    /// Backdate a file's modification time by `secs` — the ONE staleness
+    /// fixture in this module, spelled in `std` (`File::set_modified`, the
+    /// same fact `utimes(2)` sets) so no test here needs a POSIX-only call
+    /// and the same fixture serves both hosts.
+    fn backdate(path: &std::path::Path, secs: i64) {
+        let when = std::time::SystemTime::now() - std::time::Duration::from_secs(secs.max(0) as u64);
+        let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        file.set_modified(when).unwrap();
+    }
+
     /// End-to-end through `reap()`: a spawned worker shell whose pty log
     /// has sat untouched past `REAP_SPAWNED_SHELL_STALE_SECS` is reaped — proving
     /// `reap_inner`'s `log_mtime` closure actually reads the real log
     /// file's mtime off disk, not just the pure predicate above.
     #[test]
     fn reap_collects_a_spawned_worker_shell_whose_log_has_gone_stale() {
-        use std::os::unix::ffi::OsStrExt;
-
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = crate::graph::testutil::EnvVars::save(&[
             "AOIDE_STAGE_DIR",
@@ -3489,14 +3500,7 @@ mod tests {
         let log = stage.join("worker.log");
         std::fs::write(&log, b"$ the last thing that ever ran here\n").unwrap();
         let backdate_secs = REAP_SPAWNED_SHELL_STALE_SECS + 3600; // an hour past the band
-        let t = (std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64
-            - backdate_secs) as libc::time_t;
-        let tv = [libc::timeval { tv_sec: t, tv_usec: 0 }; 2];
-        let c = std::ffi::CString::new(log.as_os_str().as_bytes()).unwrap();
-        assert_eq!(unsafe { libc::utimes(c.as_ptr(), tv.as_ptr()) }, 0);
+        backdate(&log, backdate_secs);
 
         let mut rec = spawned_shell("worker", "idle");
         rec.log_path = Some(log.to_string_lossy().into_owned());
@@ -3530,24 +3534,20 @@ mod tests {
     /// real [`log_mtime`]-style disk read, not a fake closure.
     #[test]
     fn abandoned_spawned_shells_reaches_a_stale_log_the_same_way_headless_or_windowed() {
-        use std::os::unix::ffi::OsStrExt;
-
         let stage = crate::graph::testutil::unique_stage("reap-headless-vs-windowed");
         std::fs::create_dir_all(&stage).unwrap();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        let stale_mtime = now - REAP_SPAWNED_SHELL_STALE_SECS - 3600; // an hour past the band
-        let tv = [libc::timeval { tv_sec: stale_mtime as libc::time_t, tv_usec: 0 }; 2];
+        let stale_secs = REAP_SPAWNED_SHELL_STALE_SECS + 3600; // an hour past the band
 
         let headless_log = stage.join("headless.log");
         std::fs::write(&headless_log, b"$ headless conduct's own log\n").unwrap();
         let windowed_log = stage.join("windowed.log");
         std::fs::write(&windowed_log, b"$ interactive conduct's own log\n").unwrap();
         for p in [&headless_log, &windowed_log] {
-            let c = std::ffi::CString::new(p.as_os_str().as_bytes()).unwrap();
-            assert_eq!(unsafe { libc::utimes(c.as_ptr(), tv.as_ptr()) }, 0);
+            backdate(p, stale_secs);
         }
 
         let mut headless = spawned_shell("headless-worker", "idle");
@@ -3702,6 +3702,16 @@ mod tests {
         assert!(inv.flag_present("announce") && inv.flag_present("json") && inv.flag_present("now"));
     }
 
+    /// GATED on Unix, with its reason: this fixture ages SOCKET files past
+    /// `SOCKET_SETTLE_SECS` by setting their mtime, and no `std` API can do
+    /// that — `File::set_modified` needs an open handle, and opening a bound
+    /// `AF_UNIX` socket's path fails on BOTH hosts (`open(2)` on a socket file
+    /// is `ENXIO` on Unix; the Windows object is a reparse point). `utimes(2)`
+    /// is the only path-based time setter here, and it is POSIX. The sweep's
+    /// other two clauses — a live listener is spared, and an unsettled socket
+    /// is spared — are covered natively by
+    /// `orphan_control_sockets_spare_a_live_listener_and_an_unsettled_one`.
+    #[cfg(unix)]
     #[test]
     fn orphan_control_sockets_are_unlinked_only_with_nothing_listening() {
         use std::os::unix::ffi::OsStrExt;
@@ -3719,7 +3729,8 @@ mod tests {
             .unwrap()
             .as_secs() as i64;
         // Backdate past the settle window — the sweep only considers a socket
-        // that has sat still for a minute.
+        // that has sat still for a minute. `utimes(2)` (not `backdate`): see
+        // this test's own gate doc above for why a socket file needs it.
         let backdate = |p: &std::path::Path| {
             let t = (now - 600) as libc::time_t;
             let tv = [libc::timeval {
@@ -3766,6 +3777,51 @@ mod tests {
         let _ = std::fs::remove_dir_all(&runtime);
     }
 
+    /// The native half of the gate above: the same `sweep_orphan_sockets`
+    /// contract, minus the one clause whose fixture is POSIX-only (ageing a
+    /// socket FILE's mtime). A socket a live listener holds is spared because a
+    /// connect SUCCEEDS, and a socket bound a moment ago is spared because it
+    /// is inside `SOCKET_SETTLE_SECS` — the two clauses that do not need a
+    /// doctored timestamp. Runs on both hosts over the socket-type seam.
+    #[test]
+    fn orphan_control_sockets_spare_a_live_listener_and_an_unsettled_one() {
+        #[cfg(unix)]
+        use std::os::unix::net::UnixListener;
+        #[cfg(windows)]
+        use aoide_protocol::win_unix::UnixListener;
+
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::graph::testutil::EnvVars::save(&["XDG_RUNTIME_DIR"]);
+        let runtime = crate::graph::testutil::unique_stage("reap-sockets-native");
+        std::fs::create_dir_all(runtime.join("aoide")).unwrap();
+        std::env::set_var("XDG_RUNTIME_DIR", &runtime);
+        let dir = runtime.join("aoide");
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        // A real live conduct: the listener is held for the whole test, so a
+        // connect succeeds and outranks a roster that never mentions it.
+        let listening = dir.join("session-listening.sock");
+        let _held = UnixListener::bind(&listening).unwrap();
+        // Bound a moment ago — inside the settle window between `bind` and the
+        // session record reaching sessions.json.
+        let infant = dir.join("session-infant.sock");
+        drop(UnixListener::bind(&infant).unwrap());
+
+        let live: HashSet<&str> = HashSet::new();
+        assert_eq!(
+            sweep_orphan_sockets(&live, now),
+            Vec::<String>::new(),
+            "a listener a connect reaches is live, and an unsettled socket is never touched",
+        );
+        for spared in [&listening, &infant] {
+            assert!(spared.exists(), "spared: {}", spared.display());
+        }
+        let _ = std::fs::remove_dir_all(&runtime);
+    }
+
     /// Mirrors `orphan_control_sockets_are_unlinked_only_with_nothing_listening`
     /// one crate DAG hop down: fake `TunnelRecord`s (no real `ssh` anywhere —
     /// the P-S3 test seam this sweep leans on is `aoide_client::tunnel`'s own
@@ -3779,8 +3835,6 @@ mod tests {
     /// between since this test has no stage files to guard.
     #[test]
     fn orphan_ssh_tunnels_are_swept_only_when_roster_less_and_settled() {
-        use std::os::unix::ffi::OsStrExt;
-
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = crate::graph::testutil::EnvVars::save(&["XDG_RUNTIME_DIR"]);
         let runtime = crate::graph::testutil::unique_stage("reap-tunnels");
@@ -3791,16 +3845,9 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        // Backdate past the settle window — same recipe the socket test uses.
-        let backdate = |p: &std::path::Path| {
-            let t = (now - 600) as libc::time_t;
-            let tv = [libc::timeval {
-                tv_sec: t,
-                tv_usec: 0,
-            }; 2];
-            let c = std::ffi::CString::new(p.as_os_str().as_bytes()).unwrap();
-            assert_eq!(unsafe { libc::utimes(c.as_ptr(), tv.as_ptr()) }, 0);
-        };
+        // Backdate past the settle window — the module's own staleness fixture
+        // (`backdate`), never a second recipe.
+        let backdate = |p: &std::path::Path| backdate(p, 600);
         let write_record = |session_id: &str, key: &str, pid: u32| {
             let rec = aoide_storage::tunnel::TunnelRecord {
                 schema_version: aoide_storage::tunnel::TUNNEL_VERSION.to_string(),
@@ -3899,6 +3946,15 @@ mod tests {
     /// process whose cmdline actually matches `looks_like_our_ssh` but
     /// traps `SIGTERM` away survives the sweep with its record intact,
     /// while an ordinary dead-pid candidate is swept exactly as before.
+    ///
+    /// GATED on Unix, with its reason: the fact under test — a live process
+    /// that IGNORES the terminate request and must therefore be re-tried —
+    /// does not exist on native Windows, where the act is uncatchable
+    /// `TerminateProcess` and a survivor is impossible (`CORE-POSIX.md`'s
+    /// "end a process, and wait for it" row says exactly this). The fixture is
+    /// a `bash` script with an `arg0` override (the shape the client's own
+    /// gated SIGTERM-survivor tests use), neither of which exists there.
+    #[cfg(unix)]
     #[test]
     fn sweep_orphan_tunnels_keeps_a_record_whose_child_survives_the_kill() {
         use std::os::unix::process::CommandExt;
@@ -4032,20 +4088,9 @@ mod tests {
         upsert_hook(&mut hooks, "live-sess", "working", &now);
         write_stage(&hooks_path(), &HooksFile { schema_version: "0".into(), hooks }).unwrap();
 
-        let now_epoch = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        let backdate = |p: &std::path::Path| {
-            use std::os::unix::ffi::OsStrExt;
-            let t = (now_epoch - 600) as libc::time_t;
-            let tv = [libc::timeval {
-                tv_sec: t,
-                tv_usec: 0,
-            }; 2];
-            let c = std::ffi::CString::new(p.as_os_str().as_bytes()).unwrap();
-            assert_eq!(unsafe { libc::utimes(c.as_ptr(), tv.as_ptr()) }, 0);
-        };
+        // The module's own staleness fixture (`backdate`), never a second
+        // recipe — the records it ages are ordinary files.
+        let backdate = |p: &std::path::Path| backdate(p, 600);
         let write_record = |session_id: &str, key: &str| {
             let rec = aoide_storage::tunnel::TunnelRecord {
                 schema_version: aoide_storage::tunnel::TUNNEL_VERSION.to_string(),

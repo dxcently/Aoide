@@ -395,6 +395,19 @@
   `seed.<pid>` are deliberately distinct shapes and must stay out of the
   sweep. A new temp-file shape in this crate picks a separator that is NOT
   `.tmp.` unless it wants this sweep to own it.
+- **`fs.rs` carries five PUBLIC seams, each with one answer per host**, and a
+  caller asks one of them rather than spelling a platform: `detach` (the
+  detached-spawn posture — `setsid` in a `pre_exec`, or
+  `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`), `link_dir` (a directory link —
+  `symlink(2)` or `symlink_dir`, with a refused creation surfacing its own
+  error), `path_is_under` (a project-prefix question, component-wise, with the
+  `\\?\` verbatim prefix stripped; case-SENSITIVE on both hosts, stated as a
+  limit), `looks_absolute_any_host` (a remote node's root judged by the grammar
+  of the node it names) and `create_new_private` (write-once, the policy attached
+  at creation, and an unlink before any refusal so a caller never inherits a
+  "stale" file this process just made). The lock trio is `pub` for the same
+  reason: `aoide-conduct` probes with it instead of a second `flock`. Each of
+  these has a native test on both hosts, or states its limit.
 - **`fs::atomic_write_private` is the ONE way a sensitive file gets written
   in this crate** (`identity.rs`'s `ed25519.key` is its first caller) — the
   TEMP file is created ALREADY at `0600` (`OpenOptions::mode`, not

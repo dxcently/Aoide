@@ -31,8 +31,14 @@ use aoide_protocol::{Door, Invocation};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
-use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
 use std::os::unix::net::UnixListener;
+#[cfg(windows)]
+use aoide_protocol::win_unix::UnixListener;
+#[cfg(all(test, unix))]
+use std::os::unix::net::UnixStream;
+#[cfg(all(test, windows))]
+use aoide_protocol::win_unix::UnixStream;
 use std::sync::{Arc, Mutex};
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
@@ -309,9 +315,12 @@ fn spawn_channel_socket<W: Write + Send + 'static>(
         }
     };
     // 0600, structural, not umask luck — the same posture
-    // `daemon::bind_socket` already holds for its own control socket.
-    if let Err(e) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)) {
-        eprintln!("aoide mcp serve: channel socket chmod failed: {e}");
+    // `daemon::bind_socket` already holds for its own control socket, through
+    // the SAME seam (which is host-split: a file mode on Unix, the parent
+    // directory's owner-only policy on native Windows, where the bound socket
+    // is a reparse point no policy read can describe).
+    if let Err(e) = crate::daemon::tighten_socket(&path) {
+        eprintln!("aoide mcp serve: channel socket policy failed: {e}");
         return None;
     }
     std::thread::spawn(move || run_channel_listener(listener, out));
@@ -497,7 +506,7 @@ mod tests {
             .expect("bind must succeed under a fresh tempdir");
 
         {
-            let mut conn = std::os::unix::net::UnixStream::connect(&path).unwrap();
+            let mut conn = UnixStream::connect(&path).unwrap();
             writeln!(
                 conn,
                 "[aoide mail] new mail for alice — aoide mail read --for alice"
@@ -618,7 +627,7 @@ mod tests {
         // then close — the listener must drop it silently, never emitting
         // a notification for it.
         {
-            let mut conn = std::os::unix::net::UnixStream::connect(&path).unwrap();
+            let mut conn = UnixStream::connect(&path).unwrap();
             let chunk = vec![b'x'; 64 * 1024];
             let mut sent: usize = 0;
             while sent <= MAX_REQUEST_LINE_BYTES {
@@ -639,7 +648,7 @@ mod tests {
         // Second connection: one well-formed line — the listener must still
         // be alive to accept it and emit exactly one notification for it.
         {
-            let mut conn = std::os::unix::net::UnixStream::connect(&path).unwrap();
+            let mut conn = UnixStream::connect(&path).unwrap();
             writeln!(
                 conn,
                 "[aoide mail] new mail for bob — aoide mail read --for bob"
@@ -704,11 +713,30 @@ mod tests {
         let path = spawn_channel_socket("chan-mode", Arc::clone(&out))
             .expect("bind must succeed under a fresh tempdir");
 
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(
-            mode, 0o600,
-            "expected the channel socket to be user-private, got {mode:o}"
-        );
+        // The socket is user-private. Unix states that as the FILE's own mode;
+        // native Windows cannot (a bound `AF_UNIX` socket is a reparse point
+        // this tree's policy reader refuses by name), and does not need to —
+        // what gates a connect there is the parent DIRECTORIES' owner-only
+        // policy, which `tighten_socket` pins. Both are the same claim.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(
+                mode, 0o600,
+                "expected the channel socket to be user-private, got {mode:o}"
+            );
+        }
+        #[cfg(windows)]
+        {
+            assert_eq!(
+                aoide_protocol::owner_only::dir_privacy(path.parent().unwrap()).unwrap(),
+                None,
+                "the socket's directory must be owner-only on this host — the FILE carries no readable \
+                 policy there (a reparse point the policy reader refuses by name), so the directory IS \
+                 the gate; cross-user reachability is unmeasured on a box with one account"
+            );
+        }
 
         std::fs::remove_file(&path).ok();
         match saved {

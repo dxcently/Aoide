@@ -108,6 +108,16 @@ pub(crate) fn fixture_projects() -> Vec<Project> {
 /// and `activeworkspace` prints that same id in the focused-workspace shape.
 /// Returns the env guard (restores `PATH`/`HYPRLAND_INSTANCE_SIGNATURE`/
 /// `AOIDE_TEST_WS` on drop) and the shim directory, for the caller to remove.
+///
+/// GATED on Unix, with its reason: the shim is a `#!/bin/sh` SCRIPT made
+/// executable by a mode, and `CreateProcess` understands neither a shebang nor
+/// an extension-less name — the identical gate (and the identical reason) the
+/// client crate's `curl`/`zenity` shim groups carry. Its subject is a
+/// compositor that does not exist on native Windows (the adapter's own
+/// "no adapter" path is what runs there), so a Windows twin would have to
+/// build a real `.exe` to fake a program the host never launches. The four
+/// callers below are gated with it.
+#[cfg(unix)]
 pub(crate) fn fake_hyprctl(tag: &str) -> (EnvVars, PathBuf) {
     use std::os::unix::fs::PermissionsExt;
     let dir = std::env::temp_dir().join(format!("aoide-fake-hypr-{tag}-{}", std::process::id()));
@@ -281,17 +291,11 @@ pub(crate) fn isolated_xdg_runtime(tag: &str) -> EnvVars {
 /// which point `AOIDE_CONDUCT_SPAWN_EXE` at it so `graph spawn [--windowed]`
 /// re-execs a real dispatcher instead of the test harness binary.
 pub(crate) fn built_aoide_bin() -> PathBuf {
-    let test_exe = std::env::current_exe().expect("current_exe resolves under cargo test");
-    let profile_dir = test_exe
-        .parent() // .../target/<profile>/deps
-        .and_then(|p| p.parent()) // .../target/<profile>
-        .expect("test exe has a target/<profile>/deps parent");
-    let bin = profile_dir.join("aoide");
-    assert!(
-        bin.exists(),
-        "expected a pre-built `aoide` binary at {bin:?} — run `cargo build --bin aoide` first"
-    );
-    bin
+    // ONE seam for the built binary's name: `aoide-test-support`'s own copy,
+    // which knows this host's `EXE_SUFFIX` (the bare name is not a file native
+    // Windows has, so the older body here reported a binary it had just built as
+    // missing). Shared by `spawn`'s and `resurrect`'s end-to-end tests.
+    aoide_test_support::built_aoide_bin()
 }
 /// Stamp the P-C5 capture onto an already-registered stage record — the one
 /// durable trace `conduct.rs::program_is_a_shell`'s verdict leaves on a

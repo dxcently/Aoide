@@ -64,7 +64,10 @@ use aoide_protocol::output::Outcome;
 use aoide_protocol::{Door, Invocation};
 use serde_json::json;
 use std::collections::HashSet;
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
+#[cfg(windows)]
+use aoide_protocol::win_unix::UnixStream;
 
 /// One `ring(name, _)` call's outcome, per target wrap id — the shape both
 /// [`mail_ring`]'s JSON data and a caller inspecting [`ring`] directly want.
@@ -408,7 +411,10 @@ mod tests {
     use crate::graph::session_store::{do_session_phase, do_session_start, stamp_headless};
     use crate::graph::testutil::*;
     use std::io::{Read as _, Write as _};
+    #[cfg(unix)]
     use std::os::unix::net::UnixListener;
+    #[cfg(windows)]
+    use aoide_protocol::win_unix::UnixListener;
     use std::path::PathBuf;
 
     /// Point every state/stage/runtime env var this crate's writers read at
@@ -1782,8 +1788,29 @@ mod tests {
         // genuinely blocks on a peer that never drains it rather than
         // completing in one syscall.
         let payload = vec![b'x'; 8 * 1024 * 1024];
+        // 8 MiB fits entirely in this host's AF_UNIX send buffer (measured on
+        // native Windows: the single write returns `Ok`, where Linux's smaller
+        // default buffer makes it fail) — so the fixture fills the buffer
+        // instead of assuming one write is enough. What is under test is the
+        // BOUND, not the payload: an error must arrive within a generous cap,
+        // and the elapsed-time assertion below still measures the armed
+        // `RING_WRITE_TIMEOUT` rather than the peer's lifetime.
+        const CAP: usize = 512 * 1024 * 1024;
         let started = std::time::Instant::now();
-        let result = write_channel(&stream, &payload);
+        let mut written = 0usize;
+        let result: std::io::Result<()> = loop {
+            match write_channel(&stream, &payload) {
+                Ok(()) => {
+                    written += payload.len();
+                    assert!(
+                        written < CAP,
+                        "{written} bytes accepted by a peer that never reads — the write timeout is \
+                         not armed on this host"
+                    );
+                }
+                Err(e) => break Err(e),
+            }
+        };
         let elapsed = started.elapsed();
 
         let err = result.expect_err("a write to a peer that never reads must give up, not succeed");

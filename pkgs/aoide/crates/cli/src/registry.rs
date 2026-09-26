@@ -97,6 +97,13 @@ mod tests {
     /// gets a `schema --json` byte-identical to before the field existed —
     /// no `external` key at all — while dropping one on a scoped `PATH`
     /// surfaces it by name, resolved command spelling, and path.
+    /// GATED on Unix with its reason: the fixture installs a `#!/bin/sh` shim
+    /// on `PATH` and makes it executable by a mode (`CreateProcess` understands
+    /// neither a shebang nor an extension-less name), so external-subcommand
+    /// discovery cannot be driven on native Windows without a real `.exe`.
+    /// Same gate and reason as the rest of this tree's shim groups; no native
+    /// twin.
+    #[cfg(unix)]
     #[test]
     fn external_key_is_absent_unless_a_plugin_is_on_path() {
         let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
