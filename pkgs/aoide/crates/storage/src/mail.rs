@@ -33,10 +33,15 @@
 //! originMesh are defined to start equal and nothing before P-M4 can ever
 //! diverge them.
 //!
-//! `self` resolves at mint time through [`crate::display::local_host_name`]
-//! — the literal `"self"` never enters a header, a signature, or a `msgid`
-//! (architect's ruling 3); `--to self/<name>` is surface sugar the command
-//! layer resolves before calling [`file_letter`].
+//! `self` resolves at mint time through [`crate::display::local_node_name`]
+//! (the ADDRESS form of this box's own name — see that function: an OS host
+//! name is case-preserved and native Windows' is conventionally uppercase
+//! while a node name is grammar-lowercase) — the literal `"self"` never enters
+//! a header, a signature, or a `msgid` (architect's ruling 3); `--to
+//! self/<name>` is surface sugar the command layer resolves before calling
+//! [`file_letter`]. Every node this box stamps on its OWN mail — `from` on the
+//! way out, `to` on a local filing — is that same form, so the name it accepts
+//! in an address and the name it writes down are one name.
 //!
 //! ## The store
 //!
@@ -446,7 +451,7 @@ fn migrate_if_needed() -> Result<(), String> {
     let legacy: LegacyInboxFile = serde_json::from_str(&raw)
         .map_err(|e| format!("{}: unreadable legacy inbox: {e}", old_path.display()))?;
 
-    let node = display::local_host_name();
+    let node = display::local_node_name();
     let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
     let already_seen = read_seen_msgids_unlocked()?;
 
@@ -741,7 +746,7 @@ fn file_received_entry(envelope: Envelope, via: &str) -> Result<Entry, String> {
 /// itself: the caller decides whether/how to surface it. Always `via:
 /// "self"` — both call sites file a LOCAL delivery, never a remote one.
 pub fn file_receipt(from: &str, to_name: &str, text: &str) -> Result<(), String> {
-    let node = display::local_host_name();
+    let node = display::local_node_name();
     let from_addr = Address { node: node.clone(), name: from.to_string() };
     let to_addr = Address { node, name: to_name.to_string() };
     let text = text.to_string();
@@ -756,7 +761,7 @@ pub fn file_letter(from_name: &str, to_name: &str, text: &str) -> Result<Entry, 
     if !crate::node_store::valid_node_name(to_name) {
         return Err("invalid mailbox name: must match ^[a-z0-9][a-z0-9-]*$".to_string());
     }
-    let node = display::local_host_name();
+    let node = display::local_node_name();
     let from_addr = Address { node: node.clone(), name: from_name.to_string() };
     let to_addr = Address { node, name: to_name.to_string() };
     let text = text.to_string();
@@ -778,7 +783,7 @@ pub fn mint_outbound_letter(from_name: &str, to_node: &str, to_name: &str, text:
     let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
     let header = Header {
         version: ENVELOPE_VERSION.to_string(),
-        from: Address { node: display::local_host_name(), name: from_name.to_string() },
+        from: Address { node: display::local_node_name(), name: from_name.to_string() },
         to: Address { node: to_node.to_string(), name: to_name.to_string() },
         kind: ENTRY_TYPE_LETTER.to_string(),
         minted_at: now_iso_utc(),
@@ -801,7 +806,7 @@ pub fn mint_ack(from_name: &str, to: Address, acked_msgid: &str) -> Result<Envel
     let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
     let header = Header {
         version: ENVELOPE_VERSION.to_string(),
-        from: Address { node: display::local_host_name(), name: from_name.to_string() },
+        from: Address { node: display::local_node_name(), name: from_name.to_string() },
         to,
         kind: ENTRY_TYPE_RECEIPT.to_string(),
         minted_at: now_iso_utc(),
@@ -1874,7 +1879,7 @@ mod tests {
         // directly. inbox.json stays present, as it would after a real
         // crash — nothing here goes through `migrate_if_needed`.
         std::fs::create_dir_all(mail_dir()).unwrap();
-        let node = display::local_host_name();
+        let node = display::local_node_name();
         let (kp, _) = identity::load_or_mint().unwrap();
         let row1_header = Header {
             version: ENVELOPE_VERSION.to_string(),

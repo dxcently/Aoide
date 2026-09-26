@@ -1534,7 +1534,24 @@ mod tests {
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         ));
+        // The feed file's POLICY is attached at creation on native Windows,
+        // where the reader refuses one whose DACL still carries inherited ACEs
+        // — `std::fs::write` creates exactly such a file there (measured: "its
+        // DACL is not SE_DACL_PROTECTED"). Unix's mode bits have no such reader,
+        // so the plain write is the whole fixture on that host.
+        #[cfg(unix)]
         std::fs::write(&path, b"").unwrap();
+        #[cfg(windows)]
+        match aoide_protocol::owner_only::create_new(&path) {
+            Ok(file) => drop(file),
+            Err(aoide_protocol::owner_only::CreateError::Exists) => {
+                panic!("the fixture's own feed path already existed")
+            }
+            Err(aoide_protocol::owner_only::CreateError::Failed(e)) => {
+                panic!("create the feed file owner-only: {e}")
+            }
+        }
+
         let mut follower = Follower::open_at_end(&path).unwrap();
         let feed = aoide_protocol::feed::FeedWriter::new(path.clone(), 1024 * 1024, 0o600);
 
@@ -1990,6 +2007,14 @@ mod tests {
     /// provides — `/usr/bin/env` does not exist there; secrets' shims set
     /// the precedent), shell builtins only (`echo`/`exit` — never an
     /// external `sleep`).
+    // cfg(unix): the fixture is a `#!/bin/sh` script standing in for `zenity`/
+    // `lyra` by PATH-invocation — native Windows has no shebang, and a program
+    // it could run at that path would have to be a compiled binary these tests
+    // cannot build at run time. The runner's contract (a child's stdout and exit
+    // code decide the result, and a dialog that never exits is still killed and
+    // reported) keeps its native evidence in
+    // `run_zenity_entry_reports_a_spawn_error_for_a_nonexistent_shim`.
+    #[cfg(unix)]
     fn write_shim(tag: &str, script: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "aoide-client-pair-confirm-shim-{tag}-{}-{}",
@@ -2005,12 +2030,15 @@ mod tests {
         shim
     }
 
+    #[cfg(unix)]
     fn remove_shim(shim: &std::path::Path) {
         if let Some(dir) = shim.parent() {
             std::fs::remove_dir_all(dir).ok();
         }
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_zenity_entry_exit_zero_is_approved_with_the_typed_code() {
         let _guard = shim_lock();
@@ -2020,6 +2048,8 @@ mod tests {
         remove_shim(&shim);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_zenity_entry_reject_label_on_stdout_is_dismissed() {
         let _guard = shim_lock();
@@ -2029,6 +2059,8 @@ mod tests {
         remove_shim(&shim);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_zenity_entry_bare_cancel_is_cancelled_not_dismissed() {
         let _guard = shim_lock();
@@ -2053,6 +2085,8 @@ mod tests {
 
     // ── run_ask_dialog: the lyra/zenity choice + fallback ─────────────────
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_ask_dialog_prefers_lyra_when_a_bin_resolves() {
         let _guard = shim_lock();
@@ -2064,6 +2098,8 @@ mod tests {
         remove_shim(&zenity_shim);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_ask_dialog_falls_back_to_zenity_on_a_lyra_spawn_error() {
         let _guard = shim_lock();
@@ -2073,6 +2109,8 @@ mod tests {
         remove_shim(&zenity_shim);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_ask_dialog_with_no_lyra_bin_goes_straight_to_zenity() {
         let _guard = shim_lock();
@@ -2128,6 +2166,8 @@ mod tests {
         assert!(!dbody.starts_with("--"), "body must not start with a flag: {dbody}");
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_show_dialog_prefers_lyra_when_a_bin_resolves() {
         let _guard = shim_lock();
@@ -2139,6 +2179,8 @@ mod tests {
         remove_shim(&zenity_shim);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_show_dialog_falls_back_to_zenity_on_a_lyra_spawn_error() {
         let _guard = shim_lock();
@@ -2157,6 +2199,8 @@ mod tests {
         remove_shim(&zenity_shim);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_show_dialog_with_no_lyra_bin_goes_straight_to_zenity() {
         let _guard = shim_lock();
@@ -2166,6 +2210,8 @@ mod tests {
         remove_shim(&zenity_shim);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `zenity`/`lyra` (see `write_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_show_dialog_cancels_on_interrupt_with_no_deadline_involved() {
         // R2's own point: there is no timer left to race — `should_cancel`

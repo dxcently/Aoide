@@ -349,7 +349,12 @@ pub fn poll_node(node_name: &str) -> Result<usize, String> {
     // over, so a node that has just published one never hands us plaintext
     // it did not have to.
     let _ = exchange_bindings(node);
-    let params = json!({ "node": aoide_storage::display::local_host_name() });
+    // The calling node's own name in the mail protocol — the ADDRESS form
+    // (`display::local_node_name`), the same one every envelope this box mints
+    // stamps and the same one a peer's poll is answered against. A raw OS host
+    // name would not match on a host whose name is case-preserved (native
+    // Windows' is upper-case — measured red against the folded fixture).
+    let params = json!({ "node": aoide_storage::display::local_node_name() });
     let result = match post_signed(node, "aoide/mailPoll", params) {
         SignedCall::Result(result) => result,
         SignedCall::Refused(detail) => return Err(detail),
@@ -1081,14 +1086,14 @@ mod tests {
 
     /// Registers the node the polled side hands a letter over FROM. An
     /// envelope this box mints is signed by this process's own identity and
-    /// stamped `header.from.node = display::local_host_name()` (P-M1's
+    /// stamped `header.from.node = display::local_node_name()` (P-M1's
     /// "self never crosses the wire"), so the only name whose recorded key
     /// can verify it is that one — the same "one process plays both roles"
     /// shortcut the server's `setup_verifiable_origin` documents. `url`
     /// points nowhere: the ack this filing spools must STAY spooled for the
     /// assertion, not be delivered and retired.
     fn register_local_origin() -> String {
-        let me = aoide_storage::display::local_host_name();
+        let me = aoide_storage::display::local_node_name();
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
         let mut node = unpaired_node(&me);
         node.pubkey = Some(kp.info().pubkey_hex.clone());

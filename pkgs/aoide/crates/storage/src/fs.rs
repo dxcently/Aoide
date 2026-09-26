@@ -1139,6 +1139,105 @@ fn probe_verdict(errno: Option<i32>) -> bool {
     errno != Some(libc::ESRCH)
 }
 
+/// End `pid` — the one act core performs on a process it did not spawn.
+///
+/// **The guarantee is the host's, and it is NOT the same fact on both** (the
+/// host-split `docs/architecture/CORE-POSIX.md`'s process row records):
+///
+/// | | Unix | native Windows |
+/// | --- | --- | --- |
+/// | primitive | `SIGTERM` | `TerminateProcess` |
+/// | what it is | a REQUEST a child may catch | the only primitive there is |
+/// | can the child decline? | yes — a trapped, hung or broken child survives it | no |
+/// | a clean shutdown | possible: `ssh` can unwind on its own | impossible: the child is gone mid-anything |
+/// | when this returns | the request was delivered | the child has ended, or the call failed for want of access |
+///
+/// So the name is the one word both hosts call their own primitive by, and
+/// the ONE thing it promises a caller on either host is **"asked to end, by
+/// this host's own means"** — never "cleanly", and on Unix not even "ended":
+/// only [`wait_for_exit`]/[`pid_is_alive`] answer that. A caller must be
+/// written for the weaker arm (a survivor is possible) and take the stronger
+/// one as a bonus; `client::tunnel`'s record-keeping does exactly that, and
+/// its module doc says why. **What makes a hard kill acceptable on the
+/// Windows arm is the caller's own guard, not this function**: every caller
+/// reaches it only after confirming the pid is alive AND its argv is that
+/// record's own `ssh … -L <local>:<host>:<remote>` child.
+///
+/// Failures are deliberately swallowed at every arm — an already-dead pid is
+/// the ordinary case this is called in, and a caller's real question is the
+/// one [`wait_for_exit`] asks next.
+pub fn terminate(pid: u32) {
+    #[cfg(unix)]
+    {
+        if let Some(pid) = probeable_pid(pid) {
+            // SAFETY: `pid` is a positive `pid_t` (never a group name), and
+            // `SIGTERM` is the one signal a caller here is documented to send.
+            unsafe {
+                libc::kill(pid, libc::SIGTERM);
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        let _ = aoide_protocol::win_proc::terminate(pid);
+    }
+}
+
+/// Wait for `pid` to end: `waitpid(pid, …, WNOHANG)`'s three verdicts, with
+/// `block = false` (the `WNOHANG` form) or a real `wait(2)` (`block = true`).
+///
+/// Unix: a REAL wait, so when `pid` is this process's own child the zombie is
+/// collected here. Native Windows: `WaitForSingleObject` on a `SYNCHRONIZE`
+/// handle — no zombie exists there (the process object is signalled when the
+/// process ends and freed with its last handle), and a wait is not restricted
+/// to this process's own children, so a pid an EARLIER invocation spawned is
+/// still waitable. The three verdicts map one-for-one; see
+/// `aoide_protocol::win_proc::wait_for_exit` for the table.
+pub fn wait_for_exit(pid: u32, block: bool) -> Waited {
+    #[cfg(unix)]
+    {
+        let Some(pid) = probeable_pid(pid) else {
+            return Waited::NotWaitable;
+        };
+        let mut status: libc::c_int = 0;
+        let flags = if block { 0 } else { libc::WNOHANG };
+        // SAFETY: `pid` is a positive `pid_t`; `&mut status` is a valid local
+        // that `waitpid` writes on a successful reap; `WNOHANG` never blocks.
+        let r = unsafe { libc::waitpid(pid, &mut status, flags) };
+        if r == pid {
+            return Waited::Exited;
+        }
+        if r == 0 {
+            return Waited::Running; // WNOHANG: still running.
+        }
+        // A negative return (`ECHILD` above all: not, or no longer, a child of
+        // this process) means no wait can ever succeed for this pid here.
+        Waited::NotWaitable
+    }
+    #[cfg(windows)]
+    {
+        match aoide_protocol::win_proc::wait_for_exit(pid, block) {
+            aoide_protocol::win_proc::Waited::Exited => Waited::Exited,
+            aoide_protocol::win_proc::Waited::Running => Waited::Running,
+            aoide_protocol::win_proc::Waited::NotWaitable => Waited::NotWaitable,
+        }
+    }
+}
+
+/// The three verdicts of [`wait_for_exit`]: the process ended, it is still
+/// running, or no wait can ever succeed for this pid from this process (the
+/// `ECHILD`/unopenable case) — in which case a caller falls back to
+/// [`pid_is_alive`] polling, exactly as its Unix arm always has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Waited {
+    /// The process has ended (and, on Unix, was reaped).
+    Exited,
+    /// It is still running (only ever the non-blocking form's answer).
+    Running,
+    /// No wait can succeed here.
+    NotWaitable,
+}
+
 /// Remove leaked atomic-write temporaries from `path`'s DIRECTORY: any sibling
 /// named `<stem>.tmp.<pid>` whose `<pid>` is no longer a live process, whatever
 /// its stem. An atomic write interrupted between create and rename (SIGKILL,

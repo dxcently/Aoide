@@ -355,9 +355,15 @@ mod tests {
 
     #[test]
     fn describe_sweep_error_teaches_the_port_already_bound_condition() {
-        // EADDRINUSE — another sweep already holds the one fixed port.
-        // Pure string logic, no socket: runs everywhere.
-        let e = std::io::Error::from_raw_os_error(98);
+        // EADDRINUSE — another sweep already holds the one fixed port. Pure
+        // string logic, no socket — but the CODE is the host's own, because the
+        // condition is spelled differently on each: POSIX's `EADDRINUSE` is 98,
+        // and Winsock answers the same refusal with `WSAEADDRINUSE` (10048).
+        // `Error::kind()` normalizes both to `AddrInUse` (which is what the
+        // production arm reads), but this test builds the error from a raw code,
+        // so a remembered 98 asserted nothing on Windows — measured red there.
+        let code = if cfg!(windows) { 10048 } else { 98 };
+        let e = std::io::Error::from_raw_os_error(code);
         let msg = describe_sweep_error(&e);
         assert!(msg.contains("already bound"), "{msg}");
         assert!(msg.contains(&advertise::PORT.to_string()), "the taught line names the port: {msg}");

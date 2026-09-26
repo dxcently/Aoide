@@ -719,7 +719,10 @@ pub(crate) fn sign_headers_for_node(node: &aoide_storage::node_store::Node, body
     let canonical = aoide_storage::wire_auth::canonical_string(HTTP_METHOD, &path, &timestamp, &nonce, body.as_bytes());
     let signature = aoide_storage::wire_auth::sign_hex(&keypair, canonical.as_bytes());
     Ok(vec![
-        (aoide_storage::wire_auth::HEADER_NODE.to_string(), aoide_storage::display::local_host_name()),
+        // The node this request claims to be: the ADDRESS form of this box's own
+        // name (`display::local_node_name`) — the same name its mail and its
+        // pairing handshake declare, and the one a peer's registry stores for it.
+        (aoide_storage::wire_auth::HEADER_NODE.to_string(), aoide_storage::display::local_node_name()),
         (aoide_storage::wire_auth::HEADER_TIMESTAMP.to_string(), timestamp),
         (aoide_storage::wire_auth::HEADER_NONCE.to_string(), nonce),
         (aoide_storage::wire_auth::HEADER_SIGNATURE.to_string(), signature),
@@ -2526,7 +2529,12 @@ pub(crate) fn run_pair_request(
     // `remember_outbound` below; sending it here instead made the approver
     // file the requester under the requester's-nickname-for-the-approver
     // (the live yomi↔sakaki ceremony's phantom-node defect, 2026-08-26).
-    let self_name = aoide_storage::display::local_host_name();
+    // The name this handshake DECLARES, and therefore the name every approver
+    // stores for this box: the address form (`display::local_node_name`), the
+    // same one its mail envelopes carry — a raw OS host name would be stored by
+    // peers as a node name no address grammar accepts (native Windows' is
+    // upper-case).
+    let self_name = aoide_storage::display::local_node_name();
     let body = crate::node::build_pair_request_body(
         &own_pubkey,
         &self_name,
@@ -4681,7 +4689,7 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
     let from = mail_sender_attribution(inv).unwrap_or_default();
     let hold = inv.flag_present("hold");
 
-    if node == "self" || node == aoide_storage::display::local_host_name() {
+    if node == "self" || node == aoide_storage::display::local_node_name() {
         if hold {
             // A hold is a SPOOL fact — "wait to be polled" has no meaning for
             // a filing that never leaves this box and has nobody to poll it.
@@ -5344,6 +5352,38 @@ fn retry_refused_entries(cmd: &str, target: Option<&str>) -> Outcome {
 mod tests {
     use super::*;
 
+    /// The listener a fake daemon binds: `std`'s `AF_UNIX` on Unix, the native
+    /// binding out of `aoide_protocol::win_unix` on Windows — one type per host
+    /// at the seam, never a second socket implementation (the same shape
+    /// `aoide-secrets`' `test_net` holds for its own fixtures).
+    #[cfg(unix)]
+    fn fake_daemon_listener(path: &std::path::Path) -> std::os::unix::net::UnixListener {
+        std::os::unix::net::UnixListener::bind(path).unwrap()
+    }
+
+    #[cfg(windows)]
+    fn fake_daemon_listener(path: &std::path::Path) -> aoide_protocol::win_unix::UnixListener {
+        aoide_protocol::win_unix::UnixListener::bind(path).unwrap()
+    }
+
+    /// The identity of a FILE OBJECT, for tests that assert a file was not
+    /// replaced: `ino` on Unix; on native Windows, `Metadata::ino`'s named
+    /// alternative — the creation time. Both are "fresh for a new file object
+    /// at that path, unchanged by a rewrite in place", which is the fact the
+    /// callers assert; `std`'s Windows `file_index()` is still unstable, and
+    /// a number derived from a path would be invented rather than observed.
+    #[cfg(unix)]
+    fn file_identity(meta: &std::fs::Metadata) -> u64 {
+        use std::os::unix::fs::MetadataExt;
+        meta.ino()
+    }
+
+    #[cfg(windows)]
+    fn file_identity(meta: &std::fs::Metadata) -> u64 {
+        use std::os::windows::fs::MetadataExt;
+        meta.creation_time()
+    }
+
     fn fixture_node(bearer_secret: Option<&str>) -> aoide_storage::node_store::Node {
         aoide_storage::node_store::Node {
             name: "yomi-strix".to_string(),
@@ -5449,6 +5489,8 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_user = std::env::var("USER").ok();
         let saved_logname = std::env::var("LOGNAME").ok();
+        #[cfg(windows)]
+        let saved_username = std::env::var("USERNAME").ok();
         std::env::set_var("USER", "testuser");
         std::env::remove_var("LOGNAME");
 
@@ -5473,6 +5515,11 @@ mod tests {
 
         std::env::remove_var("USER");
         std::env::remove_var("LOGNAME");
+        // Native Windows' own login variable is the LAST in the chain, so the
+        // refusal only fires once it is gone too — the same three-name sweep
+        // `tunnel`'s own `resolve_login` test makes.
+        #[cfg(windows)]
+        std::env::remove_var("USERNAME");
         assert_eq!(
             default_self_via_with(
                 "198.51.100.9",
@@ -5490,6 +5537,11 @@ mod tests {
         match saved_logname {
             Some(v) => std::env::set_var("LOGNAME", v),
             None => std::env::remove_var("LOGNAME"),
+        }
+        #[cfg(windows)]
+        match saved_username {
+            Some(v) => std::env::set_var("USERNAME", v),
+            None => std::env::remove_var("USERNAME"),
         }
     }
 
@@ -5666,7 +5718,7 @@ mod tests {
                     .map(|(_, v)| v.clone())
                     .unwrap_or_else(|| panic!("missing header {name}: {headers:?}"))
             };
-            assert_eq!(get(aoide_storage::wire_auth::HEADER_NODE), aoide_storage::display::local_host_name());
+            assert_eq!(get(aoide_storage::wire_auth::HEADER_NODE), aoide_storage::display::local_node_name());
             let timestamp = get(aoide_storage::wire_auth::HEADER_TIMESTAMP);
             let nonce = get(aoide_storage::wire_auth::HEADER_NONCE);
             let signature = get(aoide_storage::wire_auth::HEADER_SIGNATURE);
@@ -5717,7 +5769,7 @@ mod tests {
                 .find(|(k, _)| k == aoide_storage::wire_auth::HEADER_NODE)
                 .map(|(_, v)| v.clone())
                 .unwrap_or_else(|| panic!("missing {}: {headers:?}", aoide_storage::wire_auth::HEADER_NODE));
-            assert_eq!(sent, aoide_storage::display::local_host_name(), "must carry this instance's own self name");
+            assert_eq!(sent, aoide_storage::display::local_node_name(), "must carry this instance's own self name");
             assert_ne!(sent, node.name, "must never carry the local nickname for the counterpart");
         });
     }
@@ -6127,6 +6179,11 @@ mod tests {
         });
     }
 
+    // cfg(unix): the fixture is a `#!/bin/sh` fake `curl` — native Windows has
+    // no shebang and `CreateProcess` resolves `curl` to `curl.exe` only, so no
+    // script can stand in for the program under test there. The reason, and
+    // what covers this contract on that host, is in `install_fake_curl`'s note.
+    #[cfg(unix)]
     #[test]
     fn node_spawn_writes_the_ledger_row_for_its_parent_on_the_ack() {
         // The real handler, a REAL signed body, and a fake `curl` standing in
@@ -6172,6 +6229,8 @@ mod tests {
         assert_eq!(row.lines_after, 0);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).
+    #[cfg(unix)]
     #[test]
     fn node_spawn_writes_no_ledger_row_without_a_parent() {
         // No parent to attribute (no attestation, no --parent): the spawn is
@@ -6688,6 +6747,26 @@ mod tests {
     /// The drain is load-bearing — `post_json` always writes to curl's
     /// stdin, and a shim that exits without reading turns a descheduled
     /// caller's write into an EPIPE (`crates/AGENTS.md`).
+    ///
+    /// **POSIX-only fixture, and the reason is the host's, not a shortcut**:
+    /// the shim is a `#!/bin/sh` script placed at the front of `PATH` under
+    /// the NAME `curl`, which is how a Unix `execvp` finds it. Native Windows
+    /// resolves a bare name through `CreateProcess`, which appends `.exe` and
+    /// understands no shebang at all: a script named `curl` is not a program
+    /// there, and a `curl.exe` this suite could control would have to be a
+    /// compiled binary the tests cannot build at run time. What that leaves
+    /// unproven natively, and where it is proven instead: the
+    /// credential-placement half (a bearer/session value on stdin, never in
+    /// argv) is covered on ThinkChiyo by `mcp_client`'s
+    /// `native_windows_the_bearer_value_never_reaches_curls_argv`, which drives
+    /// the REAL system `curl.exe` against a loopback server and reads the live
+    /// child's own command line through `aoide_protocol::win_proc`. The
+    /// response-CAP half (an over-cap body refused rather than buffered) has no
+    /// native arm in this slice and is listed as such in CORE-POSIX: its
+    /// fixture streams more than `MAX_RESPONSE_BYTES` from a stand-in, and the
+    /// seam to do that with the real client over a loopback socket does not
+    /// exist yet.
+    #[cfg(unix)]
     fn with_fake_curl<T>(tag: &str, script: &str, f: impl FnOnce() -> T) -> T {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (shim_dir, saved_path) = install_fake_curl(tag, script);
@@ -6702,6 +6781,7 @@ mod tests {
     /// then restore. The shim's stdin drain is load-bearing — `post_json`
     /// always writes to curl's stdin, and a shim that exits without reading
     /// turns a descheduled caller's write into an EPIPE (`crates/AGENTS.md`).
+    #[cfg(unix)]
     fn install_fake_curl(tag: &str, script: &str) -> (std::path::PathBuf, Option<String>) {
         let shim_dir = std::env::temp_dir().join(format!(
             "aoide-client-curlshim-{tag}-{}-{}",
@@ -6720,6 +6800,7 @@ mod tests {
         (shim_dir, saved_path)
     }
 
+    #[cfg(unix)]
     fn uninstall_fake_curl(shim_dir: &std::path::Path, saved_path: Option<String>) {
         match saved_path {
             Some(p) => std::env::set_var("PATH", p),
@@ -6739,6 +6820,8 @@ mod tests {
     /// The child is killed the moment the running total crosses the cap,
     /// so this test returns promptly rather than waiting for the shim's
     /// full `dd` to finish writing.
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_curl_refuses_a_response_over_the_max_response_bytes_cap() {
         let over_cap_mib = (MAX_RESPONSE_BYTES / (1024 * 1024)) + 1;
@@ -6755,6 +6838,8 @@ mod tests {
     /// #114's other half: an ordinary, well-under-cap payload passes
     /// through the same read-loop untouched — the byte cap must not
     /// mangle or truncate a normal response.
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_curl_passes_an_ordinary_payload_under_the_cap() {
         let script = "printf '{\"ok\":true}\\n200'\n";
@@ -6774,6 +6859,8 @@ mod tests {
     /// driven through a fake `curl` shim standing in for the remote door's
     /// HTTP 200 / JSON-RPC-error response (JSON-RPC errors are always HTTP
     /// 200 — the error lives in the envelope, not the status line).
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).
+    #[cfg(unix)]
     #[test]
     fn spawn_on_node_via_surfaces_a_json_rpc_error_ack_as_a_taught_node_refused_error() {
         let taught = "the configured agent (`claude`) exited immediately after launch \
@@ -6867,6 +6954,8 @@ mod tests {
     /// `run_curl` anyway, the fake responds with neither a `200` nor
     /// parseable JSON, so the command would ALSO fail — a false pass here
     /// is not possible by construction.
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).
+    #[cfg(unix)]
     #[test]
     fn handle_node_add_no_verify_never_invokes_curl() {
         with_node_state("add-no-verify", || {
@@ -6976,6 +7065,8 @@ mod tests {
     /// This is THE test that pins "no approver->requester network callback
     /// happens" at the client layer (the a2a.rs full-ceremony test pins the
     /// same invariant one layer down, by never dialing an undialable url).
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).
+    #[cfg(unix)]
     #[test]
     fn approve_inbound_never_invokes_curl_purely_local_commit() {
         with_node_state("approve-inbound-no-curl", || {
@@ -8288,7 +8379,12 @@ mod tests {
     fn structured_mail_send_files_signed_to_and_cc_once_with_local_aliases() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("structured-mail-real-send");
-        let local = aoide_storage::display::local_host_name();
+        // The ADDRESS form of this box's own name: every use below is a mail
+        // address or a paired-node name, both of which the grammar constrains
+        // to lowercase (`display::local_node_name`'s own doc) — a fixture
+        // building these from the raw host name refuses itself on a Windows box
+        // whose host name is upper-case (measured on ThinkChiyo).
+        let local = aoide_storage::display::local_node_name();
         let (key, _) = aoide_storage::identity::load_or_mint().unwrap();
         let mut nodes = Vec::new();
         aoide_storage::node_store::upsert_paired_node(&mut nodes, &local, "http://localhost", &key.info().pubkey_hex, "2026-09-13T00:00:00Z", &["message".into()]);
@@ -8386,8 +8482,15 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-ring-daemon");
 
-        let socket_path = root.join("fake-daemon.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
+        // The daemon socket lives in this host's own temp directory under a
+        // SHORT name, never inside the mail root: a socket path is bounded by
+        // the target's `sun_path` (108 bytes including its terminator, 107
+        // usable on native Windows), and the mail root's own generated name
+        // already spends most of that there — measured: the long form refused
+        // the bind by name on ThinkChiyo. Both binds check the budget; this is
+        // the fixture staying inside it.
+        let socket_path = std::env::temp_dir().join(format!("aoide-md-{}.sock", std::process::id()));
+        let listener = fake_daemon_listener(&socket_path);
         std::env::set_var("AOIDE_DAEMON_SOCKET", &socket_path);
 
         let handle = std::thread::spawn(move || {
@@ -8594,7 +8697,7 @@ mod tests {
         // same one-process-plays-both-roles shortcut `mail_wire`'s own tests
         // document). Its url points nowhere: the ack this poll spools has to
         // STAY spooled for the assertion below.
-        let me = aoide_storage::display::local_host_name();
+        let me = aoide_storage::display::local_node_name();
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
         let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "conductor", "held for a quiet box").unwrap();
         let letter_msgid = letter.msgid.clone();
@@ -8906,7 +9009,7 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("delivery-ack-validation");
 
-        let node_name = aoide_storage::display::local_host_name();
+        let node_name = aoide_storage::display::local_node_name();
         let letter = aoide_storage::mail::mint_outbound_letter("here", &node_name, "bob", "hi").unwrap();
         let msgid = letter.msgid.clone();
         let entry = aoide_storage::outbox::OutboxEntry::fresh(letter);
@@ -8947,7 +9050,7 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("delivery-genuine-ack");
 
-        let node_name = aoide_storage::display::local_host_name();
+        let node_name = aoide_storage::display::local_node_name();
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
         let mut nodes = Vec::new();
         aoide_storage::node_store::upsert_paired_node(
@@ -9089,6 +9192,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).
+    #[cfg(unix)]
     #[test]
     fn mail_outbox_listing_never_invokes_curl() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -9270,7 +9375,7 @@ mod tests {
     /// malformed lines and checks nothing else), so a torn or hand-edited base
     /// is the boundary the note naming has to hold at.
     fn file_raw_letter(seq: u64, msgid: &str, text: &str) {
-        let local = aoide_storage::display::local_host_name();
+        let local = aoide_storage::display::local_node_name();
         let header = aoide_storage::mail::Header {
             version: aoide_storage::mail::ENVELOPE_VERSION.to_string(),
             from: aoide_storage::mail::Address { node: local.clone(), name: "peer".into() },
@@ -9373,7 +9478,9 @@ mod tests {
     fn mail_export_groups_a_thread_and_gives_everything_else_its_own_note() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-group");
-        let local = aoide_storage::display::local_host_name();
+        // Address form (`display::local_node_name`): every use below is a mail
+        // address or an assertion on one the export renders.
+        let local = aoide_storage::display::local_node_name();
 
         let thread = "a".repeat(64);
         for body in ["the first word", "the second word"] {
@@ -9494,8 +9601,6 @@ mod tests {
 
     #[test]
     fn mail_export_rewrites_nothing_when_the_note_already_matches() {
-        use std::os::unix::fs::MetadataExt;
-
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-idempotent");
         let thread = "b".repeat(64);
@@ -9523,7 +9628,7 @@ mod tests {
         );
 
         let after = std::fs::metadata(&path).unwrap();
-        assert_eq!(after.ino(), before.ino(), "an unchanged note must not be re-created");
+        assert_eq!(file_identity(&after), file_identity(&before), "an unchanged note must not be re-created");
         assert_eq!(after.modified().unwrap(), before.modified().unwrap(), "nor rewritten");
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
 
@@ -9534,7 +9639,8 @@ mod tests {
     fn mail_export_fences_a_body_that_carries_its_own_fence() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-fence");
-        let local = aoide_storage::display::local_host_name();
+        // Address form (`display::local_node_name`) — see the group's own test.
+        let local = aoide_storage::display::local_node_name();
 
         let thread = "c".repeat(64);
         let body = "before\n```\n## not a heading\n```\nafter";
@@ -9626,7 +9732,8 @@ mod tests {
     fn mail_export_joins_only_copies_that_are_adjacent_in_seq() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-adjacent");
-        let local = aoide_storage::display::local_host_name();
+        // Address form (`display::local_node_name`) — see the group's own test.
+        let local = aoide_storage::display::local_node_name();
         let thread = "f".repeat(64);
 
         // TWO sends of ONE identical text, each declaring the same To/Cc and
@@ -9679,6 +9786,8 @@ mod mcp_http_tests {
         assert!(parse_http_response(200, "{\"missing\":\"headers\"}").is_err());
     }
 
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).
+    #[cfg(unix)]
     #[test]
     fn mcp_credentials_and_session_headers_use_stdin_never_argv_or_body_file() {
         use std::os::unix::fs::PermissionsExt;

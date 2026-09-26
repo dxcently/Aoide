@@ -29,6 +29,29 @@ pub fn local_host_name() -> String {
         .unwrap_or_else(|| "aoide".to_string())
 }
 
+/// This box's own NODE NAME — [`local_host_name`] in the form an address
+/// grammar accepts: folded to lowercase, because both a mail recipient's node
+/// and a pair/node name are constrained to `^[a-z0-9][a-z0-9-]*$`
+/// (`node_store::valid_node_name`, `crate::letter`'s validator,
+/// `client`'s `letter_send`/`mail` self-resolution).
+///
+/// **Why the fold is the host's business, not a cosmetic one**: an OS host
+/// name is case-PRESERVED, and native Windows' DNS name is conventionally
+/// uppercase (`THINKCHIYO`) where Linux boxes are almost always lowercase
+/// already — so the same `self/x` address resolves to a name one host accepts
+/// and the other refuses with a grammar error. DNS itself is
+/// case-insensitive, so folding loses nothing a lookup would use: a node name
+/// is an identifier, and this is its case. The raw [`local_host_name`] stays
+/// what a human is shown and what an ssh target spells.
+///
+/// The limit, stated rather than papered over: a host name carrying anything
+/// outside `[a-z0-9-]` (a dot, an underscore) still cannot BE a node name —
+/// folding makes the case right and nothing else, so such a host is refused by
+/// the grammar it always was, never silently mangled into a different name.
+pub fn local_node_name() -> String {
+    local_host_name().to_lowercase()
+}
+
 /// The OS hostname, or `None` on any failure (truncated/non-UTF8/errno) —
 /// best-effort, never a panic. Unix asks `gethostname(2)`; Windows asks
 /// `GetComputerNameExW` for the DNS hostname, the same name a Unix host
@@ -108,6 +131,24 @@ mod tests {
         // on something non-empty without unwinding.
         let name = local_host_name();
         assert!(!name.is_empty());
+    }
+
+    /// The node-name form is the raw name FOLDED and nothing else — asserted
+    /// against the host's own name rather than a remembered string, and against
+    /// a name that is upper-case on a host whose OS name is (this test's own
+    /// box on native Windows, whose DNS name is `ThinkChiyo` — measured).
+    #[test]
+    fn local_node_name_is_the_local_host_name_folded() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(local_node_name(), local_host_name().to_lowercase());
+        let saved = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "THINKCHIYO");
+        let folded = local_node_name();
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_A2A_NODE_NAME", v),
+            None => std::env::remove_var("AOIDE_A2A_NODE_NAME"),
+        }
+        assert_eq!(folded, "thinkchiyo");
     }
 
     /// Windows: the hostname arm is ASSERTED, not merely executed. The test

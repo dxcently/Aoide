@@ -112,11 +112,18 @@ other crate in this workspace sits above.
   fallback: a host that cannot hand out OS randomness fails rather than
   returning something weaker. Its one consumer is `aoide-secrets`'
   enrollment.
-- `win_proc` (Windows only) — the process table `/proc` would answer: one
-  `Toolhelp32` snapshot (pid · parent · executable name), a creation-time
-  start time for the pid-reuse defence, and the `kill(pid, 0)` liveness
-  reading with the same conservative verdicts. Its callers are
-  `aoide-storage::attest`'s ancestry walk and `dialog::probe_locker_running`.
+- `win_proc` (Windows only) — the process table `/proc` would answer, plus the
+  two acts `kill`/`waitpid` perform and the one fact the table does not carry:
+  one `Toolhelp32` snapshot (pid · parent · executable name), a creation-time
+  start time for the pid-reuse defence, the `kill(pid, 0)` liveness reading
+  with the same conservative verdicts, `terminate` (`TerminateProcess` — the
+  only primitive that host has), `wait_for_exit` (`WaitForSingleObject`, whose
+  three verdicts map onto `waitpid`'s), and `command_argv`
+  (`NtQueryInformationProcess(ProcessCommandLineInformation)` + this host's own
+  `CommandLineToArgvW`, for callers that must know WHAT a pid is running before
+  signalling it). Its callers are `aoide-storage::attest`'s ancestry walk,
+  `aoide-storage::fs`'s process acts, `aoide-client::tunnel`'s recycled-pid
+  guard and `dialog::probe_locker_running`.
 - `dialog` — the code-entry dialog substrate: `DialogResult` (a dialog
   child's outcome — approved/dismissed/cancelled/cancelled-externally/
   spawn-error/infra-failure) and `run_entry_dialog` (the generic
