@@ -6,6 +6,7 @@
 //! | a pid's parent | `/proc/<pid>/stat` field 4 | `PROCESSENTRY32W.th32ParentProcessID` |
 //! | a pid's start time | `/proc/<pid>/stat` field 22 | `GetProcessTimes` creation `FILETIME` |
 //! | is a pid live | `kill(pid, 0)` | `OpenProcess` + `GetExitCodeProcess` |
+//! | whose token a pid is | `/proc/<pid>/status` `Uid:` | `OpenProcess`+`OpenProcessToken`+`GetTokenInformation` |
 //!
 //! Two callers, one implementation (`pkgs/aoide/crates/AGENTS.md`: no
 //! cross-crate copying): `aoide_storage::attest`'s pid-ancestry walk and
@@ -38,9 +39,11 @@
 use std::io;
 
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, ERROR_NOT_FOUND, FILETIME, HANDLE, INVALID_HANDLE_VALUE,
-    STILL_ACTIVE,
+    CloseHandle, ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, ERROR_NOT_FOUND, FILETIME, HANDLE, HLOCAL,
+    INVALID_HANDLE_VALUE, LocalFree, STILL_ACTIVE,
 };
+use windows_sys::Win32::Security::Authorization::ConvertStringSidToSidW;
+use windows_sys::Win32::Security::{LookupAccountSidW, PSID, SidTypeUnknown};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
@@ -171,6 +174,132 @@ pub fn is_alive(pid: u32) -> bool {
     ok == 0 || code == STILL_ACTIVE as u32
 }
 
+/// The user a token belongs to, as the canonical `S-1-5-…` string Windows
+/// prints — the native answer to the `Uid:` line of `/proc/<pid>/status`,
+/// and the only form of "who" a Windows caller can compare or show. There is
+/// no uid: a SID is the fact, and a number derived from one would be
+/// invented.
+///
+/// `0` is refused before the call, exactly as [`is_alive`] refuses it (the
+/// Idle pseudo-process is nobody's peer). A pid this process may not query
+/// is an error, not a guess.
+pub fn process_user_sid(pid: u32) -> io::Result<String> {
+    if pid == 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "pid 0 names no user"));
+    }
+    sid_of_pid(pid)
+}
+
+/// The SID of the user THIS process's token is for — the native stand-in for
+/// `geteuid()`'s "which user am I", and the other half of every same-user
+/// comparison ([`process_user_sid`] is the first).
+pub fn current_user_sid() -> io::Result<String> {
+    crate::owner_only::TokenUserSid::current()?.to_string_sid()
+}
+
+/// A pid's token user, with the pid-reuse window closed around it: the
+/// process is created once, but a pid is only a NAME for it, and between the
+/// moment a caller is told a pid and the moment this reads its token the name
+/// can be reassigned. The creation time is therefore read BY NAME, before and
+/// after the token read, and a change means the token belongs to a different
+/// process than the one the caller asked about — refused, never returned.
+///
+/// That does not make the answer atomic: the two `start_time` reads and the
+/// token read are three separate opens, and a reuse that happened to land
+/// wholly inside a window between them would be invisible. What it removes is
+/// the case that matters — a pid that died and was reused is never reported
+/// as the old process's user, because one of the two time reads lands on the
+/// other side of the reuse and the pair disagrees. A caller needing a
+/// stronger proof needs a handle held across the whole read; nothing in this
+/// core holds process handles, and this is the honest limit of a pid-based
+/// lookup.
+fn sid_of_pid(pid: u32) -> io::Result<String> {
+    sid_of_pid_with(pid, start_time)
+}
+
+/// [`sid_of_pid`] with the creation-time reads INJECTED — the production pair
+/// (`start_time` before the token read, `start_time` after it) is what this is
+/// called with, and everything else is the same body. The seam exists because
+/// the refusal below cannot be reached by waiting: it needs a pid whose
+/// creation time MOVED between two reads microseconds apart, and no test can
+/// arrange for a real process to die and have its name reused inside that
+/// window. Injecting the reads is the only way the branch is exercised at all,
+/// and the token read it brackets stays the real one.
+fn sid_of_pid_with(pid: u32, mut read_start_time: impl FnMut(u32) -> Option<u64>) -> io::Result<String> {
+    let before = read_start_time(pid)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("no process with pid {pid}")))?;
+    let sid = crate::owner_only::TokenUserSid::of_process(pid)?.to_string_sid()?;
+    let after = read_start_time(pid)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("no process with pid {pid}")))?;
+    if before != after {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("pid {pid} was reused between the two reads: the token read is not this process's"),
+        ));
+    }
+    Ok(sid)
+}
+
+/// The account behind a SID, as `DOMAIN\name` — the spelling `whoami` uses —
+/// or an error when the SID names no account this host can resolve. This is
+/// DISPLAY DATA (`aoide_secrets::peercred::username_for`'s origin line), so a
+/// failure is reported, never guessed at: no name is invented for a SID that
+/// has none.
+///
+/// The SID arrives as the string [`process_user_sid`] produced, because that
+/// string is the only form an identity is carried in; converting it back is
+/// what `LookupAccountSidW` needs, and the SID it allocates is freed here.
+pub fn account_name_of_sid(sid: &str) -> io::Result<String> {
+    let mut text: Vec<u16> = sid.encode_utf16().collect();
+    text.push(0);
+    let mut raw: PSID = std::ptr::null_mut();
+    if unsafe { ConvertStringSidToSidW(text.as_ptr(), &mut raw) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // The SID is `LocalAlloc`'d by the call above, so it is freed by the
+    // guard, on the error path too.
+    let owned = OwnedLocal(raw);
+
+    let mut name = vec![0u16; 256];
+    let mut domain = vec![0u16; 256];
+    let mut name_len = name.len() as u32;
+    let mut domain_len = domain.len() as u32;
+    let mut kind = SidTypeUnknown;
+    let ok = unsafe {
+        LookupAccountSidW(
+            std::ptr::null(),
+            owned.0,
+            name.as_mut_ptr(),
+            &mut name_len,
+            domain.as_mut_ptr(),
+            &mut domain_len,
+            &mut kind,
+        )
+    };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let name = String::from_utf16_lossy(&name[..name_len as usize]);
+    let domain = String::from_utf16_lossy(&domain[..domain_len as usize]);
+    if name.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, format!("the SID {sid} resolves to no name")));
+    }
+    Ok(if domain.is_empty() { name } else { format!("{domain}\\{name}") })
+}
+
+/// A `PSID` allocated by the SID helpers, released on the way out — the same
+/// shape `owner_only`'s allocator guards have, for the same reason: an early
+/// return must not leak it.
+struct OwnedLocal(PSID);
+
+impl Drop for OwnedLocal {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe { LocalFree(self.0 as HLOCAL) };
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,5 +340,86 @@ mod tests {
         assert!(row.parent > 0, "{}'s parent is a real pid, got {}", me, row.parent);
         assert!(table.iter().any(|p| p.pid == row.parent), "the parent is a row in the same table");
         assert!(!row.exe.is_empty(), "a process table row names its executable");
+    }
+
+    // ── the user a pid's token is for ────────────────────────────────────
+
+    /// The assertion a constant, a `None`, or a never-run arm cannot pass:
+    /// the string has to be a SID, and the SID this process names for itself
+    /// has to be the same one a caller reading it by PID gets.
+    #[test]
+    fn this_process_names_one_sid_for_itself_by_token_and_by_pid() {
+        let mine = current_user_sid().expect("this process's own token user");
+        assert!(mine.starts_with("S-1-"), "a token user is a SID, not a name or a number: {mine}");
+        assert_eq!(process_user_sid(std::process::id()).expect("read by pid"), mine);
+    }
+
+    #[test]
+    fn a_child_process_runs_as_the_same_user_and_a_bogus_pid_has_no_user() {
+        let mut child = std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("exit 0")
+            .spawn()
+            .expect("spawn a short-lived child");
+        let sid = process_user_sid(child.id()).expect("a live child's token user");
+        assert_eq!(sid, current_user_sid().expect("ours"), "a child inherits its parent's token user");
+        let _ = child.wait();
+
+        assert_eq!(process_user_sid(0).expect_err("pid 0 is refused").kind(), io::ErrorKind::InvalidInput);
+        assert!(process_user_sid(u32::MAX).is_err(), "a pid above the real range names nobody");
+    }
+
+    /// The REFUSAL branch, which a happy path, a constant or a `None` cannot
+    /// cover: a pid whose creation time moved between the two reads is never
+    /// reported as the process the caller asked about. Driven through the
+    /// injected reads (see [`sid_of_pid_with`]) — no test can make a real
+    /// process die and be renamed inside that window — and the agreeing pair
+    /// asserted alongside it so the seam cannot pass by refusing everything.
+    #[test]
+    fn a_pid_that_changes_identity_between_the_two_reads_is_refused() {
+        let me = std::process::id();
+        let mut call = 0;
+        let err = super::sid_of_pid_with(me, |_| {
+            call += 1;
+            Some(if call == 1 { 1 } else { 2 })
+        })
+        .expect_err("a changed creation time must refuse, not return a SID");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("reused"), "{err}");
+
+        assert_eq!(
+            super::sid_of_pid_with(me, |_| Some(7)).expect("two agreeing reads"),
+            current_user_sid().expect("this process's own token user")
+        );
+    }
+
+    /// A peer that EXITED before the read — and the answer here is NOT the
+    /// Unix one: MEASURED on this host, a just-reaped pid still resolves
+    /// (`OpenProcess` on the exiting object succeeds long enough to name its
+    /// token user), so "the peer is gone" is not a refusal a pid-based lookup
+    /// gets for free. The case is still worth pinning, because what a reaped
+    /// pid must never do is name a DIFFERENT user than the one that process
+    /// ran as — that is the pid-reuse hazard, and the two bracketing
+    /// creation-time reads (`sid_of_pid_with`) are what close it rather than
+    /// this function's pid check. A pid that never existed is the refusal that
+    /// does fire, asserted in `a_child_process_runs_as_the_same_user...`.
+    #[test]
+    fn a_peer_that_exits_before_the_read_names_our_own_user_or_nothing() {
+        let mut child = std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("exit 0")
+            .spawn()
+            .expect("spawn a short-lived child");
+        let pid = child.id();
+        let _ = child.wait();
+
+        match process_user_sid(pid) {
+            Ok(sid) => assert_eq!(
+                sid,
+                current_user_sid().expect("ours"),
+                "a reaped pid {pid} must never name somebody else's user"
+            ),
+            Err(_) => {}
+        }
     }
 }

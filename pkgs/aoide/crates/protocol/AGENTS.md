@@ -193,12 +193,17 @@
   choice never leak back into it.
 - **A Windows seam another crate also needs is exposed from HERE, never
   copied into it** (`pkgs/aoide/crates/AGENTS.md`: no cross-crate copying).
-  `owner_only` (the private file/directory policy) and `win_proc` (the
-  process table) exist because two consumers need the same native
-  implementation and this crate is the leaf both already depend on —
-  `aoide-storage` reaches them through the module, never through a second
-  `windows-sys` call sequence of its own. The rule cuts both ways: a new
-  Windows primitive with ONE consumer stays private to that consumer.
+  `owner_only` (the private file/directory policy), `win_proc` (the
+  process table) and `win_unix` (the `AF_UNIX` binding) exist because two or
+  more consumers need the same native implementation and this crate is the
+  leaf both already depend on — `aoide-storage` reaches them through the
+  module, never through a second `windows-sys` call sequence of its own. The
+  same rule covers the host-shaped seams that are NOT Windows-only:
+  `host_shell` (which interpreter runs a stored command line) and
+  `host_random` (this host's OS CSPRNG) each have two consumers and each
+  keeps ONE spelling per host, never a `cfg` in the consumer. The rule cuts
+  both ways: a new primitive with ONE consumer stays private to that
+  consumer.
 - **A Windows arm keeps the Unix contract or refuses by name.** A missing
   capability is never an `Ok(())`, a `true`, or an empty collection — the
   `0o640` feed refusal and `feed_windows`'s validate-before-write are the

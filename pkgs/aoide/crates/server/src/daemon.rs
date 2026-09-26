@@ -24,10 +24,11 @@
 //!
 //! `$AOIDE_DAEMON_SOCKET` override, else `$XDG_RUNTIME_DIR/aoide/aoided.sock`
 //! (`socket_path`) — the same `$XDG_RUNTIME_DIR/aoide/` directory the conduct
-//! session sockets already own (`aoide_conduct::graph::conduct_socket_path`),
-//! a sibling convention re-derived here rather than imported: that function
-//! is session-id-shaped and lives in a crate `aoide-server` sits ABOVE, so a
-//! shared import would invert the DAG. [`bind_socket`] mirrors
+//! session sockets already own, and now the ONE `aoide_storage::runtime_dir`
+//! seam every core socket path goes through (that crate is below this one, so
+//! this is a downward edge; the earlier sibling copy here could only re-derive
+//! it because the only other spelling then lived in a crate ABOVE `aoide-server`,
+//! where an import would have inverted the DAG). [`bind_socket`] mirrors
 //! `aoide_secrets::broker::bind_socket` (create parent, remove a stale
 //! socket file, bind, chmod) but to `0600` — unlike the secrets socket there
 //! is no cross-uid audience, `$XDG_RUNTIME_DIR` is `0700` anyway, the chmod
@@ -669,11 +670,7 @@ fn run_boot_auto_resume() {
 }
 
 fn runtime_dir() -> PathBuf {
-    let runtime = std::env::var("XDG_RUNTIME_DIR")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "/run/user/1000".into());
-    PathBuf::from(runtime).join("aoide")
+    aoide_storage::runtime_dir::socket_dir()
 }
 
 /// Bind `socket_path`: create its parent dir if absent, remove a stale
@@ -893,26 +890,27 @@ pub fn serve_daemon(
 /// `aoide_secrets::broker::admin_gate` and `aoide_conduct::shellbridge::
 /// cross_uid_gate` exactly — the SAME decision restated at this third
 /// socket, not a fourth wording for it). `None` (admitted) only when the
-/// peer's kernel-attested uid equals `my_euid` — this daemon's OWN euid,
-/// since every legitimate connector (the CLI's `daemon_dispatch` proxy, a
-/// hook's `session hook`, the conductor) already runs as the SAME uid this
-/// process does. An unidentified peer (`SO_PEERCRED` read failed) is
-/// refused the same fail-closed way a mismatched uid is.
+/// peer's kernel-attested identity equals `my_user` — this daemon's OWN
+/// identity, since every legitimate connector (the CLI's `daemon_dispatch`
+/// proxy, a hook's `session hook`, the conductor) already runs as the SAME
+/// user this process does. An unidentified peer (no kernel-truth peer
+/// credential on this host, i.e. that read failed) is refused the same
+/// fail-closed way a mismatched identity is.
 ///
 /// **This closes a CROSS-uid gap only.** It does not, and was never meant
 /// to, stop a same-uid process from dispatching a request over this socket
 /// — see [`invocation_from_dispatch_request`]'s own doc for the SEPARATE
 /// attribution fix (G8's other half) and `CONTRACTS.md`'s identity section
 /// for the honest accounting of what remains open.
-fn cross_uid_gate(peer: Option<aoide_secrets::peercred::PeerCred>, my_euid: u32) -> Option<String> {
-    match peer {
-        Some(p) if p.uid == my_euid => None,
-        Some(p) => Some(format!(
-            "aoided dispatch connection refused: peer uid {} does not match this daemon's own uid {my_euid}",
-            p.uid
+fn cross_uid_gate(peer: Option<aoide_secrets::peercred::PeerCred>, my_user: Option<&aoide_secrets::peercred::PeerUser>) -> Option<String> {
+    match peer.as_ref().and_then(|p| p.user()) {
+        Some(uid) if Some(&uid) == my_user => None,
+        Some(uid) => Some(format!(
+            "aoided dispatch connection refused: peer identity {uid} does not match this daemon's own ({})",
+            my_user.map(|u| u.to_string()).unwrap_or_else(|| "unidentified".to_string())
         )),
         None => Some(
-            "aoided dispatch connection refused: peer uid could not be determined (SO_PEERCRED read failed)"
+            "aoided dispatch connection refused: peer identity could not be determined (no kernel-truth peer credential on this host)"
                 .to_string(),
         ),
     }
@@ -926,7 +924,7 @@ fn accept_loop(
     watcher: SharedHandEditWatcher,
 ) {
     // SAFETY: `geteuid()` takes no arguments and cannot fail.
-    let my_euid = unsafe { libc::geteuid() };
+    let my_identity = aoide_secrets::peercred::PeerUser::Uid(unsafe { libc::geteuid() });
     for conn in listener.incoming() {
         match conn {
             Ok(stream) => {
@@ -936,7 +934,7 @@ fn accept_loop(
                 // caller's, and nothing on the wire can name it
                 // (`invocation_from_dispatch_request`'s own doc).
                 let door_pid = peer.as_ref().map(|p| p.pid);
-                if let Some(reason) = cross_uid_gate(peer, my_euid) {
+                if let Some(reason) = cross_uid_gate(peer, Some(&my_identity)) {
                     let _ = audit(
                         &aoide_protocol::default_audit_log(),
                         Door::Daemon,
@@ -1384,7 +1382,7 @@ mod tests {
     #[test]
     fn cross_uid_gate_admits_a_matching_euid() {
         assert_eq!(
-            cross_uid_gate(Some(aoide_secrets::peercred::PeerCred { uid: 1000, gid: 1000, pid: 42 }), 1000),
+            cross_uid_gate(Some(aoide_secrets::peercred::PeerCred { uid: Some(1000), gid: Some(1000), sid: None, pid: 42 }), Some(&aoide_secrets::peercred::PeerUser::Uid(1000))),
             None
         );
     }
@@ -1392,7 +1390,7 @@ mod tests {
     #[test]
     fn cross_uid_gate_refuses_a_mismatched_uid() {
         assert!(
-            cross_uid_gate(Some(aoide_secrets::peercred::PeerCred { uid: 1001, gid: 1001, pid: 42 }), 1000).is_some()
+            cross_uid_gate(Some(aoide_secrets::peercred::PeerCred { uid: Some(1001), gid: Some(1001), sid: None, pid: 42 }), Some(&aoide_secrets::peercred::PeerUser::Uid(1000))).is_some()
         );
     }
 
@@ -1401,7 +1399,7 @@ mod tests {
         // Fail-closed, never a benign default — the same posture
         // `aoide_secrets::broker::admin_gate` holds for a `SO_PEERCRED` read
         // that failed.
-        assert!(cross_uid_gate(None, 1000).is_some());
+        assert!(cross_uid_gate(None, Some(&aoide_secrets::peercred::PeerUser::Uid(1000))).is_some());
     }
 
     /// End-to-end against a REAL socketpair: a connection entirely local to
@@ -1414,8 +1412,8 @@ mod tests {
     fn a_real_same_process_socketpair_is_admitted() {
         let (a, _b) = UnixStream::pair().expect("socketpair");
         let peer = aoide_secrets::peercred::peer_cred(&a);
-        let my_euid = unsafe { libc::geteuid() };
-        assert_eq!(cross_uid_gate(peer, my_euid), None);
+        let my_identity = aoide_secrets::peercred::PeerUser::Uid(unsafe { libc::geteuid() });
+        assert_eq!(cross_uid_gate(peer, Some(&my_identity)), None);
     }
 
     // ── invocation_from_dispatch_request (LANE IDENTITY P-ID3, G8) ──────

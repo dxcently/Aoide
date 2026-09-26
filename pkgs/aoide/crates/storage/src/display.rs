@@ -36,8 +36,14 @@ pub fn local_host_name() -> String {
 /// uppercase form). Ported from `aoide_server::a2a::os_hostname` (moved here
 /// so conduct/conductor renderers, which cannot depend on the server crate,
 /// can call it too; the server copy is deleted once this one is wired in).
+///
+/// Public because it has a SECOND consumer with the same need and the same
+/// no-fork rule (`pkgs/aoide/crates/AGENTS.md`): `aoide_secrets::enroll::
+/// local_hostname` labels an `otpauth://` URI with this host, and an
+/// enrollment must not spell the hostname differently from every other
+/// surface.
 #[cfg(unix)]
-fn os_hostname() -> Option<String> {
+pub fn os_hostname() -> Option<String> {
     let mut buf = vec![0u8; 256];
     let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
     if rc != 0 {
@@ -54,7 +60,7 @@ fn os_hostname() -> Option<String> {
 /// what keeps a name too long for the first buffer from coming back
 /// truncated-but-plausible: a truncated name would be a DIFFERENT host.
 #[cfg(windows)]
-fn os_hostname() -> Option<String> {
+pub fn os_hostname() -> Option<String> {
     use windows_sys::Win32::System::SystemInformation::{ComputerNameDnsHostname, GetComputerNameExW};
     let mut buf = vec![0u16; 256];
     let mut len = buf.len() as u32;

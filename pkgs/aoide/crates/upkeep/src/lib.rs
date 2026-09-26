@@ -34,3 +34,26 @@ pub mod scan;
 pub(crate) fn env_lock() -> &'static std::sync::Mutex<()> {
     aoide_test_support::env_lock()
 }
+
+/// The one symlink fixture the clutter tests plant: `symlink(2)` on Unix, and
+/// on native Windows `symlink_file`/`symlink_dir`, which need
+/// `SeCreateSymbolicLinkPrivilege` (Developer Mode, or an elevated token).
+/// `false` means this host will not create one, so a caller SAYS SO and
+/// returns rather than asserting against a fixture that does not exist — the
+/// checks themselves read `symlink_metadata` and have no Unix-only piece, so
+/// this is a fixture limit stated at the call site, never a capability hidden
+/// behind a gate.
+#[cfg(test)]
+pub(crate) mod test_fixture {
+    /// `true` when the link exists afterwards.
+    #[cfg(unix)]
+    pub fn plant_symlink(target: &str, link: &std::path::Path) -> bool {
+        std::os::unix::fs::symlink(target, link).is_ok()
+    }
+
+    #[cfg(windows)]
+    pub fn plant_symlink(target: &str, link: &std::path::Path) -> bool {
+        std::os::windows::fs::symlink_file(target, link).is_ok()
+            || std::os::windows::fs::symlink_dir(target, link).is_ok()
+    }
+}

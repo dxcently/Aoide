@@ -102,6 +102,16 @@ by decision — no embedded database yet
   resolver uses, applied to a directory instead of an executable. Returns
   `None` (never a default that might not exist) when neither resolves; the
   caller turns that into a taught error naming both locations.
+- `runtime_dir::socket_dir` — the per-user runtime directory every aoide
+  socket lives in, and the ONE authority for it (`tunnel`, `attest::
+  daemon_socket_path`, conduct's conductor-control/channel/shellbridge
+  sockets, `client::pair_watch`, `server::daemon`, lyra's preview all call
+  it). `$XDG_RUNTIME_DIR` (non-empty) wins on BOTH hosts, else
+  `/run/user/<this process's euid>` on Unix and `%LOCALAPPDATA%\aoide` on
+  native Windows — where the host provides neither the directory nor an
+  owner-only policy on a new one, so a native binder creates it through
+  `aoide_protocol::owner_only::ensure_private_dir`. A PURE resolution: it
+  creates and chmods nothing.
 - `fs::pid_is_alive` — the one process-liveness probe (POSIX `kill(pid, 0)`:
   `0`/`EPERM` live, `ESRCH` absent, any other errno conservatively live; `0`
   and `pid > pid_t::MAX` refused before the syscall, both naming a process

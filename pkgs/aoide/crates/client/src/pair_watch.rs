@@ -934,15 +934,12 @@ fn poll_pending_outbound(now_epoch: i64, backoff: &mut HashMap<String, (Duration
 
 // ── the pid-marker arbiter (F6, task #135 popup phase, part 4) ──────────
 
-/// `$XDG_RUNTIME_DIR/aoide/` — RE-DERIVED here rather than imported
-/// (`aoide_storage::tunnel`'s own module doc states the identical rule for
-/// this SAME directory, and re-derives it rather than depending upward for
-/// the identical reason [`ZENITY_CMD`]'s own doc gives for its literal: a
-/// three-line resolution carries none of the "no cross-crate copying"
-/// weight a moved TYPE or FUNCTION would).
+/// `$XDG_RUNTIME_DIR/aoide/` — [`aoide_storage::runtime_dir::socket_dir`], the
+/// ONE authority for this convention (`aoide-storage` sits BELOW this crate,
+/// so reaching for it is a downward edge — never the inversion importing
+/// `aoide_conduct::graph::conduct_socket_path` would have been).
 fn marker_runtime_dir() -> std::path::PathBuf {
-    let runtime = std::env::var("XDG_RUNTIME_DIR").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/run/user/1000".into());
-    std::path::PathBuf::from(runtime).join("aoide")
+    aoide_storage::runtime_dir::socket_dir()
 }
 
 /// Where a LIVE blocking `aoide pair <id>`'s own pid marker lives —

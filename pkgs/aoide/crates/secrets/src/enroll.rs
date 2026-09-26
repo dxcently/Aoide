@@ -11,10 +11,10 @@
 //!
 //! Widens this crate's I/O boundary (`AGENTS.md`'s "I/O is confined to
 //! five named modules") to six: this module owns random-secret generation
-//! (`/dev/urandom`), the local hostname (`libc::gethostname`, same
-//! precedent as `aoide_storage::display::local_host_name` — see
-//! `Cargo.toml`'s comment for why this crate repeats rather than depends
-//! on it), and the `qrencode` shell-out. Secrets-home file persistence
+//! (this host's OS CSPRNG, through `aoide_protocol::host_random`), the local
+//! hostname (`aoide_storage::display::os_hostname` — `gethostname(2)` on
+//! Unix, `GetComputerNameExW` on native Windows), and the `qrencode`
+//! shell-out. Secrets-home file persistence
 //! itself stays `store`'s job ([`store::save_totp_secret`]/
 //! [`store::save_replay_ledger`]) — this module never writes a secrets-home
 //! file directly.
@@ -29,7 +29,7 @@
 //! `run` or `show` from the SAME `["secrets", "enroll"]` arm (no second
 //! arm — see that hook's own comment).
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -38,37 +38,31 @@ use std::process::{Command, Stdio};
 /// (`totp.rs`'s module doc).
 pub const SECRET_LEN: usize = 20;
 
-/// A fresh random TOTP secret: `SECRET_LEN` bytes read from `/dev/urandom`
-/// — zero new deps (the phase brief's own constraint: no `rand`/`getrandom`
-/// crate). `/dev/urandom` never blocks on Linux once the kernel's CSPRNG is
-/// seeded (true well before userspace runs) — the standard justification
-/// for reading it directly rather than `/dev/random`.
+/// A fresh random TOTP secret: `SECRET_LEN` bytes from this host's own OS
+/// CSPRNG — zero new deps (the phase brief's own constraint: no
+/// `rand`/`getrandom` crate), and no second implementation of "ask the host
+/// for randomness" either: `aoide_protocol::host_random` is the ONE seam
+/// (`/dev/urandom` on Unix, whose non-blocking shape is documented there;
+/// CNG's `BCryptGenRandom` on native Windows, where `/dev/urandom` simply
+/// does not exist — the arm this function was missing, which made every
+/// enrollment on that host fail with a raw "cannot find the file").
 pub fn generate_secret() -> std::io::Result<Vec<u8>> {
     let mut buf = vec![0u8; SECRET_LEN];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut buf)?;
+    aoide_protocol::host_random::fill(&mut buf)?;
     Ok(buf)
 }
 
-/// This host's name for the enrollment's `otpauth://` label — the OS
-/// hostname via `libc::gethostname`, mirroring `aoide_storage::display::
-/// local_host_name`'s own call (module doc: this crate stays off
-/// `aoide-storage` on purpose, so the short call is repeated here rather
-/// than reached for, same as `policy::valid_secret_name`'s precedent).
-/// Falls back to the literal `"host"` on any failure — never panics, never
-/// blocks an enrollment on a hostname syscall going sideways.
+/// This host's name for the enrollment's `otpauth://` label. The fact comes
+/// from the ONE implementation of it — `aoide_storage::display::os_hostname`,
+/// which asks `gethostname(2)` on Unix and `GetComputerNameExW` on native
+/// Windows (module doc's "this crate stays off `aoide-storage` on purpose" is
+/// superseded for this function: the crate edge already exists for
+/// `attest`, and a hostname spelled two different ways on two hosts is worse
+/// than one short call reached for). Falls back to the literal `"host"` on
+/// any failure — never panics, never blocks an enrollment on a hostname
+/// syscall going sideways.
 pub fn local_hostname() -> String {
-    let mut buf = vec![0u8; 256];
-    let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
-    if rc != 0 {
-        return "host".to_string();
-    }
-    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-    let s = String::from_utf8_lossy(&buf[..end]).trim().to_string();
-    if s.is_empty() {
-        "host".to_string()
-    } else {
-        s
-    }
+    aoide_storage::display::os_hostname().unwrap_or_else(|| "host".to_string())
 }
 
 /// Render `uri` as an ANSI-UTF8 QR code by shelling out to `qrencode -t
@@ -213,6 +207,16 @@ pub fn show(secrets_home: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    // ── the POSIX-shell fixture class (gated, with the reason) ───────────
+    //
+    // Every test below carrying `#[cfg(unix)]` drives the backend TEMPLATE
+    // mechanism with a POSIX fixture: an `sh -c` command line, or a
+    // `#!/bin/sh` shim script on `PATH`. The mechanism itself is portable and
+    // HAS a native arm — `sh -c` on Unix, `cmd /C` on native Windows
+    // (`backend::run_backend_command`'s own doc) — so these gates name the
+    // FIXTURE, never the code under test. The Windows arm of the same path is
+    // exercised natively by `backend::tests::a_native_windows_template_*`.
+
     #[test]
     fn generate_secret_returns_the_expected_length() {
         let secret = generate_secret().unwrap();
@@ -253,6 +257,9 @@ mod tests {
     /// may be tested with a fake shim script on PATH in a tempdir if
     /// cheap"). Proves the URI is fed over STDIN (the shim reads it and
     /// discards it) and the shim's stdout is what `render_qr` returns.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn render_qr_returns_the_shim_output_when_qrencode_is_present() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -265,8 +272,7 @@ mod tests {
         let shim = dir.join("qrencode");
         std::fs::write(&shim, "#!/bin/sh\ncat > /dev/null\necho FAKE-QR-OUTPUT\n").unwrap();
         {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+            crate::home::set_mode(&shim, 0o755).unwrap();
         }
 
         let saved_path = std::env::var("PATH").ok();
@@ -291,6 +297,13 @@ mod tests {
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
+        // Pinned at creation, the way the crate creates a home of its own
+        // (`store::save_policies`): on an elevated Windows token a bare
+        // `create_dir_all` leaves the directory owned by
+        // `BUILTIN\Administrators`, and `home::admin_identity_check` — which
+        // `enroll::run` passes through — then refuses a home this process
+        // does not own.
+        crate::home::secure_dir(&dir).unwrap();
         dir
     }
 

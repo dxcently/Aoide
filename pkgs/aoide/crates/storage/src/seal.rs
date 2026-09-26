@@ -1531,9 +1531,22 @@ mod tests {
         assert_eq!(age_key_path().file_name().unwrap(), "age.key");
         assert_eq!(age_key_path().parent(), Some(identity::identity_dir().as_path()));
         assert!(identity::identity_dir().join("ed25519.key").exists());
-        use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(age_key_path()).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "the age key is owner-only");
+        // The "owner-only" contract, in each host's own terms: mode bits on
+        // Unix, the protected owner-only DACL on native Windows (read back
+        // through the same `owner_only` policy every private storage write
+        // attaches).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(age_key_path()).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "the age key is owner-only");
+        }
+        #[cfg(windows)]
+        assert_eq!(
+            aoide_protocol::owner_only::file_privacy(&age_key_path()).expect("read the age key's policy back"),
+            None,
+            "the age key is owner-only"
+        );
     }
 
     #[test]

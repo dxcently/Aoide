@@ -276,11 +276,8 @@ pub fn daemon_socket_path() -> PathBuf {
             return PathBuf::from(p);
         }
     }
-    let runtime = std::env::var("XDG_RUNTIME_DIR")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "/run/user/1000".into());
-    PathBuf::from(runtime).join("aoide").join("aoided.sock")
+    let runtime = crate::runtime_dir::socket_dir();
+    runtime.join("aoided.sock")
 }
 
 /// Bound a Unix-socket connect with a background-thread-plus-channel race

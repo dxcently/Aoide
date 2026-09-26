@@ -330,10 +330,15 @@
 //! the mode bits.
 
 use crate::park::{AskOrigin, ParkOutcome, ParkRegistry, WaitResult};
+use crate::peercred::PeerUser;
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(windows)]
+use aoide_protocol::win_unix::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -349,9 +354,32 @@ fn bind_socket(socket_path: &Path) -> std::io::Result<UnixListener> {
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = std::fs::remove_file(socket_path);
-    let listener = UnixListener::bind(socket_path)?;
-    std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o660))?;
-    Ok(listener)
+    // **The socket's policy is the DIRECTORY's on native Windows**, and it is
+    // attached BEFORE the bind: a Windows `AF_UNIX` socket file is a REPARSE
+    // POINT (tag `0x80000023`, `IO_REPARSE_TAG_AF_UNIX` — measured), and this
+    // crate's own policy reader refuses a reparse point by name, so there is no
+    // `chmod`-after-bind here to mirror the Unix arm's. What governs who can
+    // reach the socket is therefore the parent directory's DACL — which is
+    // exactly what `owner_only::ensure_private_dir` pins to this user, before
+    // the name exists. The row that holds this answer, and says what it does
+    // and does not prove (the parent read back owner-only, the socket file
+    // reading back as that reparse refusal; NOT a cross-account connect
+    // refusal, which this host cannot arrange), is
+    // `docs/architecture/CORE-POSIX.md`'s unix-socket-addressing row.
+    #[cfg(unix)]
+    {
+        let listener = UnixListener::bind(socket_path)?;
+        std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o660))?;
+        Ok(listener)
+    }
+    #[cfg(windows)]
+    {
+        let parent = socket_path
+            .parent()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "the socket path has no directory"))?;
+        aoide_protocol::owner_only::ensure_private_dir(parent)?;
+        UnixListener::bind(socket_path)
+    }
 }
 
 /// Bind `socket_path` and serve `resolve`/`put`/`pending`/`status`/
@@ -482,7 +510,7 @@ fn handle_conn(secrets_home: &Path, events_path: &Path, stream: UnixStream, park
         if line.trim().is_empty() {
             continue;
         }
-        let reply = handle_line(secrets_home, events_path, &line, parked, &mut writer, peer);
+        let reply = handle_line(secrets_home, events_path, &line, parked, &mut writer, peer.clone());
         if write_json_line(&mut writer, &reply).is_err() {
             break;
         }
@@ -541,8 +569,33 @@ fn handle_line(
 /// (an unidentified connection, `peercred::peer_cred`'s own doc) prints as
 /// `"unidentified"` rather than a bare blank, so a human reading `audit.log`
 /// or a refusal never mistakes it for uid 0 or an omitted field.
-fn peer_uid_display(peer_uid: Option<u32>) -> String {
+fn peer_uid_display(peer_uid: Option<&PeerUser>) -> String {
     peer_uid.map(|u| u.to_string()).unwrap_or_else(|| "unidentified".to_string())
+}
+
+/// The `peerUid` a record carries: the number Unix has always written, and
+/// `null` where this host's identity is not a number — the same `null` an
+/// unidentified connection has always produced, so a reader that only knows
+/// `peerUid` sees exactly what it always saw.
+fn peer_uid_value(peer_uid: Option<&PeerUser>) -> Value {
+    match peer_uid {
+        Some(PeerUser::Uid(uid)) => Value::from(*uid),
+        _ => Value::Null,
+    }
+}
+
+/// Attach the ADDITIVE half of an identity to a record about to be written:
+/// `peerSid`, present only where the host's own identity is a SID. An absent
+/// SID is an ABSENT field, never a null one, so every Unix record keeps the
+/// exact key set it has always had and no reader has to learn a new key to
+/// keep reading them.
+fn with_peer_sid(mut record: Value, peer_uid: Option<&PeerUser>) -> Value {
+    if let Some(PeerUser::Sid(sid)) = peer_uid {
+        if let Some(fields) = record.as_object_mut() {
+            fields.insert("peerSid".to_string(), Value::from(sid.clone()));
+        }
+    }
+    record
 }
 
 /// Capture a parking ask's [`AskOrigin`] — ONCE, right here, at the SAME
@@ -553,10 +606,11 @@ fn peer_uid_display(peer_uid: Option<u32>) -> String {
 /// knowable regardless of who's asking — but no username/pid/comm, since
 /// there is no kernel-truth pid to read either from.
 fn capture_origin(peer: Option<crate::peercred::PeerCred>) -> AskOrigin {
+    let user = peer.as_ref().and_then(|p| p.user());
     AskOrigin {
-        username: peer.and_then(|p| crate::peercred::username_for_uid(p.uid)),
-        pid: peer.map(|p| p.pid),
-        comm: peer.and_then(|p| crate::peercred::read_comm(p.pid)),
+        username: user.as_ref().and_then(crate::peercred::username_for),
+        pid: peer.as_ref().map(|p| p.pid),
+        comm: peer.as_ref().and_then(|p| crate::peercred::read_comm(p.pid)),
         hostname: Some(crate::enroll::local_hostname()),
     }
 }
@@ -600,7 +654,8 @@ fn handle_resolve(
     let argv0 = req.get("argv0").and_then(Value::as_str).map(str::to_string);
     let totp = req.get("totp").and_then(Value::as_str).map(str::to_string);
     let wait = req.get("wait").and_then(Value::as_bool).unwrap_or(true);
-    let peer_uid = peer.map(|p| p.uid);
+    let peer_identity = peer.as_ref().and_then(|p| p.user());
+    let peer_uid = peer_identity.as_ref();
     // Optional, self-asserted, DISPLAY-ONLY context for why this ask exists
     // — named `ask_reason` (not `reason`) purely to avoid shadowing this
     // function's own many `reason` locals (the DENIAL text each `Denied`/
@@ -618,7 +673,7 @@ fn handle_resolve(
     // (LANE IDENTITY P-ID4) — like the clock, an impure read taken at the
     // edge and handed into the deterministic gate as a parameter.
     let now_unix = aoide_protocol::audit::now_secs();
-    let caller = attested_caller_origin(peer);
+    let caller = attested_caller_origin(peer.clone());
     match resolve_gate(
         secrets_home,
         &secret,
@@ -662,9 +717,9 @@ fn handle_resolve(
             // Captured NOW, once, never re-read later (`AskOrigin`'s own
             // doc: the pid can exit and be reused long before this ask
             // resolves or a dialog renders it).
-            let origin = capture_origin(peer);
+            let origin = capture_origin(peer.clone());
             let Some((id, rx)) =
-                parked.park_if_room(&secret, &consumer, now_unix, cap, peer_uid, ask_reason.as_deref(), origin.clone())
+                parked.park_if_room(&secret, &consumer, now_unix, cap, peer_identity.clone(), ask_reason.as_deref(), origin.clone())
             else {
                 // FIX 3b: at the registry-wide cap — the SAME immediate
                 // refusal `wait:false` gives, plus a hint naming the
@@ -770,18 +825,22 @@ fn handle_pending(parked: &ParkRegistry) -> Value {
     let pending: Vec<Value> = parked
         .list()
         .into_iter()
-        .map(|(id, secret, consumer, requested_at, peer_uid, reason, origin)| {
-            json!({
+        .map(|(id, secret, consumer, requested_at, peer_user, reason, origin)| {
+            // The identity rides the row TWICE: `peerUid` where the host has
+            // a uid (the field every reader already knows, `null` where it
+            // does not), and `peerSid` only where the identity IS a SID.
+            let row = json!({
                 "id": id,
                 "secret": secret,
                 "consumer": consumer,
                 "requestedAt": requested_at,
-                "peerUid": peer_uid,
+                "peerUid": peer_uid_value(peer_user.as_ref()),
                 // Additive over the pre-this-phase shape (`peerUid`'s own
                 // precedent, task #73) — `null` per field when unknown.
                 "reason": reason,
                 "origin": origin_to_json(&origin),
-            })
+            });
+            with_peer_sid(row, peer_user.as_ref())
         })
         .collect();
     json!({"ok": true, "pending": pending})
@@ -924,7 +983,8 @@ fn handle_approve(
     req: &Value,
     peer: Option<crate::peercred::PeerCred>,
 ) -> Value {
-    let approver_uid = peer.map(|p| p.uid);
+    let approver_identity = peer.as_ref().and_then(|p| p.user());
+    let approver_uid = approver_identity.as_ref();
     let id = req.get("id").and_then(Value::as_str).unwrap_or("").to_string();
     if id.is_empty() {
         return json!({"ok": false, "error": "malformed request: `id` is required"});
@@ -1023,9 +1083,9 @@ fn fetch_secret_value(secrets_home: &Path, secret: &str) -> Result<String, Strin
 /// dismissed by the broker's own uid (the operator path never depended on
 /// matching the ask's uid to begin with), but by no ordinary caller — again,
 /// nothing to match.
-fn dismiss_authorized(dismisser_uid: Option<u32>, ask_peer_uid: Option<u32>, broker_euid: u32) -> bool {
+fn dismiss_authorized(dismisser_uid: Option<&PeerUser>, ask_peer_uid: Option<&PeerUser>, broker_user: Option<&PeerUser>) -> bool {
     match dismisser_uid {
-        Some(uid) if uid == broker_euid => true,
+        Some(uid) if Some(uid) == broker_user => true,
         Some(uid) => ask_peer_uid == Some(uid),
         None => false,
     }
@@ -1034,13 +1094,13 @@ fn dismiss_authorized(dismisser_uid: Option<u32>, ask_peer_uid: Option<u32>, bro
 /// The taught error a refused `dismiss` (task #73) gets — names BOTH uids
 /// (task requirement) so an operator immediately sees why the refusal fired
 /// rather than having to go correlate `audit.log` by hand.
-fn dismiss_refused_message(id: &str, dismisser_uid: Option<u32>, ask_peer_uid: Option<u32>, broker_euid: u32) -> String {
+fn dismiss_refused_message(id: &str, dismisser_uid: Option<&PeerUser>, ask_peer_uid: Option<&PeerUser>, broker_user: Option<&PeerUser>) -> String {
     format!(
         "dismiss `{id}` refused: this connection's peer uid ({}) is neither the ask's own peer uid ({}) nor \
-         the broker's own uid ({broker_euid}) — only the original caller or the broker's own operator (uid \
-         {broker_euid}) may dismiss it",
+         the broker's own identity ({}) — only the original caller or the broker's own operator may dismiss it",
         peer_uid_display(dismisser_uid),
         peer_uid_display(ask_peer_uid),
+        peer_uid_display(broker_user),
     )
 }
 
@@ -1062,18 +1122,21 @@ fn handle_dismiss(
     req: &Value,
     peer: Option<crate::peercred::PeerCred>,
 ) -> Value {
-    let dismisser_uid = peer.map(|p| p.uid);
+    let dismisser_identity = peer.as_ref().and_then(|p| p.user());
+    let dismisser_uid = dismisser_identity.as_ref();
     let id = req.get("id").and_then(Value::as_str).unwrap_or("").to_string();
     if id.is_empty() {
         return json!({"ok": false, "error": "malformed request: `id` is required"});
     }
-    let Some((secret, _consumer, ask_peer_uid)) = parked.peek(&id) else {
+    let Some((secret, _consumer, ask_peer_identity)) = parked.peek(&id) else {
         let reason = format!("unknown pending id `{id}`");
         audit_dismiss(secrets_home, &id, "", false, Some(&reason), dismisser_uid);
         return json!({"ok": false, "error": reason});
     };
 
-    let broker_euid = crate::home::effective_uid();
+    let broker_identity = crate::home::effective_user();
+    let broker_euid = broker_identity.as_ref();
+    let ask_peer_uid = ask_peer_identity.as_ref();
     if !dismiss_authorized(dismisser_uid, ask_peer_uid, broker_euid) {
         let reason = dismiss_refused_message(&id, dismisser_uid, ask_peer_uid, broker_euid);
         // The ask itself is left exactly where it was — never `take`n on
@@ -1127,7 +1190,8 @@ fn handle_put(secrets_home: &Path, events_path: &Path, req: &Value, peer: Option
     let secret = req.get("secret").and_then(Value::as_str).unwrap_or("").to_string();
     let value = req.get("value").and_then(Value::as_str).unwrap_or("").to_string();
     let overwrite = req.get("overwrite").and_then(Value::as_bool).unwrap_or(false);
-    let peer_uid = peer.map(|p| p.uid);
+    let peer_identity = peer.as_ref().and_then(|p| p.user());
+    let peer_uid = peer_identity.as_ref();
 
     if secret.is_empty() {
         return json!({"ok": false, "error": "malformed request: `secret` is required"});
@@ -1172,14 +1236,26 @@ fn handle_put(secrets_home: &Path, events_path: &Path, req: &Value, peer: Option
 /// `None` — the ucred read failed) is refused outright, the SAME
 /// fail-closed default [`dismiss_authorized`] holds: there is no uid to
 /// compare, so the safe answer is refusal, never a permissive fallback.
-fn admin_gate(peer_uid: Option<u32>, secrets_home: &Path, subcommand: &str) -> Option<String> {
-    let broker_euid = crate::home::effective_uid();
-    match peer_uid {
-        Some(uid) => crate::home::admin_identity_error(uid, broker_euid, secrets_home, subcommand),
-        None => Some(format!(
+fn admin_gate(peer_uid: Option<&PeerUser>, secrets_home: &Path, subcommand: &str) -> Option<String> {
+    let broker_identity = crate::home::effective_user();
+    let broker_euid = broker_identity.as_ref();
+    match (peer_uid, broker_euid) {
+        (Some(uid), Some(broker)) => crate::home::admin_identity_error(uid, broker, secrets_home, subcommand),
+        // Two different unidentifieds, and they are NOT the same lie: the peer
+        // may be the one nobody can name, or THIS BROKER may be the one whose
+        // own identity it cannot read. The decision is the same refusal either
+        // way (fail closed), but the message says which half is missing —
+        // blaming the peer for a broker that cannot read its own token would
+        // send an operator looking in the wrong place.
+        (_, None) => Some(format!(
+            "secrets {subcommand} over the broker socket must come from an IDENTIFIED connection, and this broker \
+             cannot read its OWN user identity, so nothing can be compared — refused the same way a mismatched \
+             identity would be. Run: sudo -u aoide-secrets aoide secrets {subcommand} ..."
+        )),
+        _ => Some(format!(
             "secrets {subcommand} over the broker socket must come from an IDENTIFIED connection — this connection's \
-             peer uid could not be determined (SO_PEERCRED read failed), so it is refused the same way a \
-             mismatched uid would be. Run: sudo -u aoide-secrets aoide secrets {subcommand} ..."
+             peer identity could not be determined (no kernel-truth peer credential on this host), so it is refused \
+             the same way a mismatched identity would be. Run: sudo -u aoide-secrets aoide secrets {subcommand} ..."
         )),
     }
 }
@@ -1208,7 +1284,8 @@ fn admin_gate(peer_uid: Option<u32>, secrets_home: &Path, subcommand: &str) -> O
 /// missing/malformed field gets a plain domain error from [`crate::admin`],
 /// never a second usage-error vocabulary grown here.
 fn handle_admin(secrets_home: &Path, req: &Value, peer: Option<crate::peercred::PeerCred>) -> Value {
-    let peer_uid = peer.map(|p| p.uid);
+    let peer_identity = peer.as_ref().and_then(|p| p.user());
+    let peer_uid = peer_identity.as_ref();
     let Some(subcommand) = req.get("command").and_then(Value::as_str) else {
         return json!({"ok": false, "error": "malformed request: `command` is required"});
     };
@@ -1287,17 +1364,17 @@ fn handle_admin(secrets_home: &Path, req: &Value, peer: Option<crate::peercred::
 /// the way `commands::audit_migrate`'s `source -> target` detail is) —
 /// `name` is empty when a request never got far enough to know one (a
 /// missing `command`, an `admin_gate` refusal before any field was read).
-fn audit_admin(secrets_home: &Path, subcommand: &str, name: &str, granted: bool, reason: Option<&String>, peer_uid: Option<u32>) {
+fn audit_admin(secrets_home: &Path, subcommand: &str, name: &str, granted: bool, reason: Option<&String>, peer_uid: Option<&PeerUser>) {
     let record = json!({
         "ts": aoide_protocol::audit::now_secs(),
         "op": "admin",
         "command": subcommand,
         "name": name,
-        "peerUid": peer_uid,
+        "peerUid": peer_uid_value(peer_uid),
         "granted": granted,
         "reason": reason,
     });
-    if let Err(e) = append_own_log(secrets_home, &record) {
+    if let Err(e) = append_own_log(secrets_home, &with_peer_sid(record, peer_uid)) {
         eprintln!("[aoide/secrets] could not write the secrets audit log: {e}");
     }
 
@@ -1674,7 +1751,12 @@ const EVENTS_MAX_BYTES: u64 = 1024 * 1024;
 /// The events feed's create mode (P-G4, task #77): `0640` — group-read,
 /// no world access, never left to the process umask, since the deployed
 /// unit's `Group=aoide-secrets-access` makes group-read exactly the
-/// socket's own audience.
+/// socket's own audience. **Native Windows writes this mode's feed
+/// OWNER-ONLY**: there is no group reader on that host (no `lyra`/desktop
+/// surface) and no gid to name, so the mode is advisory there and the policy
+/// attached is a protected owner-only DACL — the same user and nobody else,
+/// which is stricter than what is asked for here, never weaker
+/// (`aoide_protocol::feed`'s module doc is the authority for that arm).
 const EVENTS_CREATE_MODE: u32 = 0o640;
 
 /// Append ONE event line to the broker-owned events feed (P-G4, task
@@ -1721,18 +1803,18 @@ fn audit_resolve(
     argv0: Option<&str>,
     granted: bool,
     reason: Option<&String>,
-    peer_uid: Option<u32>,
+    peer_uid: Option<&PeerUser>,
 ) {
     let record = json!({
         "ts": aoide_protocol::audit::now_secs(),
         "secret": secret,
         "consumer": consumer,
-        "peerUid": peer_uid,
+        "peerUid": peer_uid_value(peer_uid),
         "argv0": argv0,
         "granted": granted,
         "reason": reason,
     });
-    if let Err(e) = append_own_log(secrets_home, &record) {
+    if let Err(e) = append_own_log(secrets_home, &with_peer_sid(record, peer_uid)) {
         eprintln!("[aoide/secrets] could not write the secrets audit log: {e}");
     }
 
@@ -1770,18 +1852,18 @@ fn audit_put(
     granted: bool,
     reason: Option<&String>,
     replaced: Option<bool>,
-    peer_uid: Option<u32>,
+    peer_uid: Option<&PeerUser>,
 ) {
     let record = json!({
         "ts": aoide_protocol::audit::now_secs(),
         "op": "put",
         "secret": secret,
-        "peerUid": peer_uid,
+        "peerUid": peer_uid_value(peer_uid),
         "granted": granted,
         "reason": reason,
         "replaced": replaced,
     });
-    if let Err(e) = append_own_log(secrets_home, &record) {
+    if let Err(e) = append_own_log(secrets_home, &with_peer_sid(record, peer_uid)) {
         eprintln!("[aoide/secrets] could not write the secrets audit log: {e}");
     }
 
@@ -1817,7 +1899,7 @@ fn audit_park(
     id: &str,
     secret: &str,
     consumer: &str,
-    peer_uid: Option<u32>,
+    peer_uid: Option<&PeerUser>,
     reason: Option<&str>,
     origin: &AskOrigin,
 ) {
@@ -1827,14 +1909,14 @@ fn audit_park(
         "id": id,
         "secret": secret,
         "consumer": consumer,
-        "peerUid": peer_uid,
+        "peerUid": peer_uid_value(peer_uid),
         // Additive, same "display-only, self-asserted/best-effort" posture
         // `argv0` already holds on `audit_resolve`'s own record — never a
         // value.
         "reason": reason,
         "origin": origin_to_json(origin),
     });
-    if let Err(e) = append_own_log(secrets_home, &record) {
+    if let Err(e) = append_own_log(secrets_home, &with_peer_sid(record, peer_uid)) {
         eprintln!("[aoide/secrets] could not write the secrets audit log: {e}");
     }
     let message = format!(
@@ -1856,17 +1938,17 @@ fn audit_park(
 /// eventual line on the PARKED caller's side. `secret` is `None` only for
 /// an unknown id (nothing to name). Never carries the typed code (untrusted
 /// input, module doc) or the released value.
-fn audit_approve(secrets_home: &Path, id: &str, secret: Option<&str>, granted: bool, reason: &str, peer_uid: Option<u32>) {
+fn audit_approve(secrets_home: &Path, id: &str, secret: Option<&str>, granted: bool, reason: &str, peer_uid: Option<&PeerUser>) {
     let record = json!({
         "ts": aoide_protocol::audit::now_secs(),
         "op": "approve",
         "id": id,
         "secret": secret,
-        "peerUid": peer_uid,
+        "peerUid": peer_uid_value(peer_uid),
         "granted": granted,
         "reason": if reason.is_empty() { Value::Null } else { Value::String(reason.to_string()) },
     });
-    if let Err(e) = append_own_log(secrets_home, &record) {
+    if let Err(e) = append_own_log(secrets_home, &with_peer_sid(record, peer_uid)) {
         eprintln!("[aoide/secrets] could not write the secrets audit log: {e}");
     }
     let status = if granted { "granted" } else { "denied" };
@@ -1888,17 +1970,17 @@ fn audit_approve(secrets_home: &Path, id: &str, secret: Option<&str>, granted: b
 
 /// Write BOTH audit lines for one `dismiss` attempt (P-N2) — mirrors
 /// [`audit_approve`]'s shape. `secret` is `""` only for an unknown id.
-fn audit_dismiss(secrets_home: &Path, id: &str, secret: &str, granted: bool, reason: Option<&str>, peer_uid: Option<u32>) {
+fn audit_dismiss(secrets_home: &Path, id: &str, secret: &str, granted: bool, reason: Option<&str>, peer_uid: Option<&PeerUser>) {
     let record = json!({
         "ts": aoide_protocol::audit::now_secs(),
         "op": "dismiss",
         "id": id,
         "secret": if secret.is_empty() { Value::Null } else { Value::String(secret.to_string()) },
-        "peerUid": peer_uid,
+        "peerUid": peer_uid_value(peer_uid),
         "granted": granted,
         "reason": reason,
     });
-    if let Err(e) = append_own_log(secrets_home, &record) {
+    if let Err(e) = append_own_log(secrets_home, &with_peer_sid(record, peer_uid)) {
         eprintln!("[aoide/secrets] could not write the secrets audit log: {e}");
     }
     let status = if granted { "dismissed" } else { "denied" };
@@ -1975,6 +2057,16 @@ fn emit_notify(secrets_home: &Path, events_path: &Path, kind: &str, payload: Val
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── the POSIX-shell fixture class (gated, with the reason) ───────────
+    //
+    // Every test below carrying `#[cfg(unix)]` drives the backend TEMPLATE
+    // mechanism with a POSIX fixture: an `sh -c` command line, or a
+    // `#!/bin/sh` shim script on `PATH`. The mechanism itself is portable and
+    // HAS a native arm — `sh -c` on Unix, `cmd /C` on native Windows
+    // (`backend::run_backend_command`'s own doc) — so these gates name the
+    // FIXTURE, never the code under test. The Windows arm of the same path is
+    // exercised natively by `backend::tests::a_native_windows_template_*`.
     use crate::policy::Policy;
 
     fn tmp_home(tag: &str) -> PathBuf {
@@ -1987,6 +2079,12 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
+        // Pinned at creation, the way the crate creates its own home — see
+        // `commands.rs`'s fixture for the fact this mirrors (on an elevated
+        // Windows token a bare `create_dir_all` leaves the directory owned by
+        // `BUILTIN\Administrators`, and every same-user check then reads a
+        // home this process does not own).
+        crate::home::secure_dir(&dir).unwrap();
         dir
     }
 
@@ -1999,14 +2097,56 @@ mod tests {
     /// there would now be a genuinely unidentified dismisser, refused by
     /// the fail-closed rule even against an ask whose own `peer_uid` is
     /// also `None`.
+    /// The base the "a peer that is NOT this broker" sentinels are derived
+    /// from. Unix answers this process's real uid; **native Windows answers
+    /// `0`, and that is not a stand-in for a uid**: the sentinels below are
+    /// built as `PeerUser::Uid`, which no Windows identity can ever equal
+    /// (this broker's own is a SID), so the tests' premise holds there
+    /// trivially rather than approximately.
+    fn real_euid_or_a_value_no_identity_on_this_host_will_equal() -> u32 {
+        #[cfg(unix)]
+        {
+            unsafe { libc::geteuid() }
+        }
+        #[cfg(windows)]
+        {
+            0
+        }
+    }
+
     fn operator_peer() -> Option<crate::peercred::PeerCred> {
-        Some(crate::peercred::PeerCred { uid: crate::home::effective_uid(), gid: 0, pid: 0 })
+        crate::home::effective_user().map(|u| crate::peercred::PeerCred::for_user(&u))
     }
 
     fn seed(home: &Path, policies: &[Policy]) {
         crate::store::save_policies(home, policies).unwrap();
-        let backends = serde_json::json!({ "scratch": { "get": "printf %s {name}" } });
+        let backends = serde_json::json!({ "scratch": { "get": scratch_template() } });
         std::fs::write(crate::backend::backends_path(home), serde_json::to_vec(&backends).unwrap()).unwrap();
+    }
+
+    /// The `scratch` backend's `get` template, written for THIS host's command
+    /// interpreter: `printf %s {name}` needs a POSIX shell, and native Windows
+    /// has none — its arm echoes the substituted key back through `cmd`, the
+    /// same "give me the key as the value" fixture in the language of the host
+    /// it runs on. Every broker test that does not deliberately override the
+    /// template therefore runs natively on either host.
+    ///
+    /// The Windows arm's exit STATUS is load-bearing, not decoration:
+    /// `echo|set /p=` (the no-newline idiom) prints the key and then exits 1 —
+    /// `set /p` reporting that stdin yielded it nothing — and a non-zero exit
+    /// is a backend FAILURE (`run_backend_command`), so a scratch `get`
+    /// written that way denied every gate it was meant to grant. `echo` exits
+    /// 0, and the carriage return it adds is exactly what `fetch_value`'s
+    /// host-spelled trim removes. Measured on native Windows.
+    fn scratch_template() -> &'static str {
+        #[cfg(unix)]
+        {
+            "printf %s {name}"
+        }
+        #[cfg(windows)]
+        {
+            "echo {name}"
+        }
     }
 
     /// A fixed "now" for every test that doesn't specifically exercise TOTP
@@ -2049,24 +2189,25 @@ mod tests {
     /// just `commands.rs`'s `add`/`rm`/`grant`/`revoke`/`set-totp`. Skipped
     /// under a root test runner (root reads `0000` files fine, so the
     /// denial this test depends on wouldn't happen).
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn an_unreadable_policy_json_teaches_the_chown_reference_fix_on_both_gates() {
-        if crate::home::effective_uid() == 0 {
+        if crate::home::running_as_root() {
             return;
         }
         let home = tmp_home("unreadable-policy");
         seed(&home, &[Policy::new("t", "scratch", "k")]);
-
-        use std::os::unix::fs::PermissionsExt;
         let path = crate::store::policy_path(&home);
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        crate::home::set_mode(&path, 0o000).unwrap();
 
         let (resolve_granted, resolve_result) = gate_outcome_as_result(resolve_gate(&home, "t", "m", None, NOW, None));
         let (put_granted, put_result) = put_outcome_as_result(put_gate(&home, "t", "irrelevant", false));
 
         // Restore before any assertion could early-return and leave the
         // tempdir's cleanup unable to remove an unreadable file.
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        crate::home::set_mode(&path, 0o600).unwrap();
 
         assert!(!resolve_granted);
         let resolve_err = resolve_result.unwrap_err();
@@ -2205,6 +2346,9 @@ mod tests {
     /// resolve is refused; re-seal the roster under a STALE starttime and
     /// the caller degrades to UNIDENTIFIED (the pid-reuse defense holding
     /// through the new call path) and is admitted again.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn handle_resolve_refuses_an_attested_remote_origin_caller_end_to_end() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2252,7 +2396,7 @@ mod tests {
         // A one-shot fake daemon per connection attempt, serving the REAL
         // minting key's pubkey.
         let sock = home.join("aoided.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        let listener = crate::test_net::UnixListener::bind(&sock).unwrap();
         let pubkey = kp.info().pubkey_hex;
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
@@ -2266,13 +2410,16 @@ mod tests {
         });
         std::env::set_var("AOIDE_DAEMON_SOCKET", &sock);
 
-        let peer = Some(crate::peercred::PeerCred {
-            uid: crate::home::effective_uid(),
-            gid: 0,
-            pid: me,
-        });
+        let me = std::process::id() as i32;
+        let mut peer = crate::peercred::PeerCred::for_user(
+            &crate::home::effective_user().expect("this process has an identity"),
+        );
+        // The kernel would have stamped THIS process's pid; `for_user` carries
+        // none, so the attestation walk below (which reads `peer.pid`) is given
+        // the real one.
+        peer.pid = me;
         let req = r#"{"op":"resolve","secret":"t","consumer":"m"}"#;
-        let reply = handle_line(&home, &home.join("events.jsonl"), req, &ParkRegistry::new(), &mut Vec::new(), peer);
+        let reply = handle_line(&home, &home.join("events.jsonl"), req, &ParkRegistry::new(), &mut Vec::new(), Some(peer.clone()));
         assert_eq!(reply["ok"], false, "{reply}");
         let err = reply["error"].as_str().unwrap();
         assert!(err.contains("allowRemoteOrigin"), "{err}");
@@ -2282,7 +2429,7 @@ mod tests {
         // was minted over a STALE starttime no longer attests — the caller
         // is UNIDENTIFIED and the same resolve is admitted.
         write_roster(seal_over(starttime + 1));
-        let reply = handle_line(&home, &home.join("events.jsonl"), req, &ParkRegistry::new(), &mut Vec::new(), peer);
+        let reply = handle_line(&home, &home.join("events.jsonl"), req, &ParkRegistry::new(), &mut Vec::new(), Some(peer.clone()));
         assert_eq!(reply["ok"], true, "{reply}");
         assert_eq!(reply["value"], "stored-value");
 
@@ -2463,6 +2610,9 @@ mod tests {
     /// Every TOTP denial path must short-circuit BEFORE the backend ever
     /// runs — same "positive control" discipline as `tests/e2e.rs`'s
     /// backend-invoked marker.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn totp_denial_paths_never_invoke_the_backend() {
         let home = tmp_home("totp-marker");
@@ -2569,12 +2719,15 @@ mod tests {
 
     // ── socket permissions (P-V4) ───────────────────────────────────────
 
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn bind_socket_chmods_the_socket_file_to_0660() {
         let home = tmp_home("sockmode");
         let socket_path = home.join("secrets.sock");
         let listener = bind_socket(&socket_path).unwrap();
-        let mode = std::fs::metadata(&socket_path).unwrap().permissions().mode() & 0o777;
+        let mode = crate::home::mode_of(&socket_path);
         assert_eq!(mode, 0o660, "secrets socket must be group-connectable (0660), got {mode:o}");
         drop(listener);
         std::fs::remove_dir_all(&home).ok();
@@ -2792,6 +2945,7 @@ mod tests {
 
     // ── `put` (P-V4c) ────────────────────────────────────────────────────
 
+    #[cfg(unix)]
     fn seed_with_set(home: &Path, policies: &[Policy], get: &str, set: &str) {
         crate::store::save_policies(home, policies).unwrap();
         let backends = serde_json::json!({ "scratch": { "get": get, "set": set } });
@@ -2837,6 +2991,7 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_granted_put_writes_through_the_named_backends_set_template() {
         let home = tmp_home("put-granted");
@@ -2854,6 +3009,7 @@ mod tests {
     /// `put` never checks `requireTotp` — even a policy with it set is
     /// storable without any code at all (module doc: put is CLI-only/
     /// admin-side, not agent-facing).
+    #[cfg(unix)]
     #[test]
     fn put_ignores_require_totp_entirely() {
         let home = tmp_home("put-ignorestotp");
@@ -2943,6 +3099,9 @@ mod tests {
     /// `enroll.rs` precedent for a PATH-shimmed external tool) so this
     /// runs deterministically with no real `age` install and no
     /// `age_tools_available()` skip.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn put_never_mints_an_age_identity_for_a_backend_not_configured_in_backends_json() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2955,8 +3114,6 @@ mod tests {
         )
         .unwrap();
         crate::store::save_policies(&home, &[Policy::new("t", "age", "t")]).unwrap();
-
-        use std::os::unix::fs::PermissionsExt;
         // A fake `age-keygen` that would succeed if ever invoked — proves
         // a REAL mint attempt, not merely a missing-binary short-circuit.
         let shim_dir = std::env::temp_dir().join(format!(
@@ -2971,7 +3128,7 @@ mod tests {
             "#!/bin/sh\nif [ \"$1\" = \"-y\" ]; then echo age1fakerecipient > \"$3\"; else echo AGE-SECRET-KEY-1FAKE > \"$2\"; fi\n",
         )
         .unwrap();
-        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::home::set_mode(&shim, 0o755).unwrap();
         let saved_path = std::env::var("PATH").ok();
         std::env::set_var("PATH", format!("{}:{}", shim_dir.display(), saved_path.clone().unwrap_or_default()));
 
@@ -2998,6 +3155,7 @@ mod tests {
 
     // ── overwrite (P-67, "warn before overwrite") ───────────────────────
 
+    #[cfg(unix)]
     #[test]
     fn put_gate_on_an_existing_value_without_overwrite_is_a_distinct_exists_denial_and_leaves_the_value_unchanged() {
         let home = tmp_home("put-exists-denied");
@@ -3015,6 +3173,13 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    // cfg(unix): this test's OWN fixture spells POSIX commands (`cat` /
+    // `cat >`) as the scratch backend's `get`/`set` templates — the mechanism
+    // has a native arm, the fixture does not. The SAME put path is covered
+    // natively by `tests/e2e.rs`'s
+    // `native_windows_a_user_supplied_cmd_backend_puts_and_resolves_over_the_real_socket`
+    // (a real broker, a real `cmd` template, put → store file → resolve).
+    #[cfg(unix)]
     #[test]
     fn put_gate_with_overwrite_true_replaces_an_existing_value() {
         let home = tmp_home("put-overwrite-granted");
@@ -3042,6 +3207,9 @@ mod tests {
     /// straight through the existence probe into the `set` template that
     /// hangs, all under the SAME `put_lock` critical section the KNOWN GAP
     /// note describes.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn a_hung_set_template_no_longer_wedges_put_lock_forever() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3074,6 +3242,9 @@ mod tests {
     /// returns, must not itself see any lingering effect of the first —
     /// proving `put_lock` was genuinely released, not merely that the
     /// first call's own thread gave up waiting on it.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn put_lock_is_free_for_the_next_caller_right_after_a_timeout() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3113,6 +3284,9 @@ mod tests {
     /// `age-keygen` timeout test uses) proves that hang is now ALSO bounded,
     /// and that `put_lock` is free for a second, unrelated put right after —
     /// closing the exact gap a hung mint would otherwise have reopened.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn a_hung_age_keygen_mint_no_longer_wedges_put_lock_forever() {
         let shim_dir = std::env::temp_dir().join(format!(
@@ -3125,8 +3299,7 @@ mod tests {
         std::fs::write(&shim, "#!/bin/sh\nsleep 60\n").unwrap();
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+            crate::home::set_mode(&shim, 0o755).unwrap();
         }
 
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3182,6 +3355,7 @@ mod tests {
     /// stores; a second `put` (no `overwrite`) is refused with the
     /// `exists` flag and leaves the stored value untouched; a third `put`
     /// with `overwrite:true` replaces it.
+    #[cfg(unix)]
     #[test]
     fn a_full_put_overwrite_cycle_round_trips_through_handle_line() {
         let home = tmp_home("put-overwrite-wire");
@@ -3215,6 +3389,7 @@ mod tests {
     /// is read exactly like `overwrite: false` — an old client's request
     /// line, sent against a new broker, still gets the tightened refusal on
     /// a second `put`.
+    #[cfg(unix)]
     #[test]
     fn an_absent_overwrite_field_behaves_exactly_like_false() {
         let home = tmp_home("put-overwrite-absent");
@@ -3230,6 +3405,12 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    // cfg(unix): this test's own fixture spells POSIX commands (`cat` /
+    // `cat >`) as the scratch backend's `get`/`set` templates — the mechanism
+    // has a native arm, the fixture does not. The SAME put path is covered
+    // natively by `tests/e2e.rs`'s
+    // `native_windows_a_user_supplied_cmd_backend_puts_and_resolves_over_the_real_socket`.
+    #[cfg(unix)]
     #[test]
     fn a_full_put_line_round_trips_through_handle_line_with_no_value_in_the_reply() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3723,16 +3904,16 @@ mod tests {
     /// task requirement names, no I/O.
     #[test]
     fn dismiss_authorized_matches_the_asks_own_peer_uid() {
-        assert!(dismiss_authorized(Some(1000), Some(1000), 0));
-        assert!(!dismiss_authorized(Some(1000), Some(1001), 0), "a different peer uid must be refused");
+        assert!(dismiss_authorized(Some(&PeerUser::Uid(1000)), Some(&PeerUser::Uid(1000)), Some(&PeerUser::Uid(0))));
+        assert!(!dismiss_authorized(Some(&PeerUser::Uid(1000)), Some(&PeerUser::Uid(1001)), Some(&PeerUser::Uid(0))), "a different peer uid must be refused");
     }
 
     #[test]
     fn dismiss_authorized_always_admits_the_brokers_own_euid() {
         // The broker's own operator uid may dismiss ANY ask, regardless of
         // who parked it — including one whose own peer_uid is unidentified.
-        assert!(dismiss_authorized(Some(4242), Some(1000), 4242));
-        assert!(dismiss_authorized(Some(4242), None, 4242));
+        assert!(dismiss_authorized(Some(&PeerUser::Uid(4242)), Some(&PeerUser::Uid(1000)), Some(&PeerUser::Uid(4242))));
+        assert!(dismiss_authorized(Some(&PeerUser::Uid(4242)), None, Some(&PeerUser::Uid(4242))));
     }
 
     #[test]
@@ -3740,13 +3921,13 @@ mod tests {
         // No kernel fact to check the dismisser against — refuse, never
         // pass, even when the ask's own peer_uid is ALSO unidentified (a
         // coincidental "both unknown" is not a match).
-        assert!(!dismiss_authorized(None, Some(1000), 4242));
-        assert!(!dismiss_authorized(None, None, 4242));
+        assert!(!dismiss_authorized(None, Some(&PeerUser::Uid(1000)), Some(&PeerUser::Uid(4242))));
+        assert!(!dismiss_authorized(None, None, Some(&PeerUser::Uid(4242))));
     }
 
     #[test]
     fn dismiss_refused_message_names_both_uids() {
-        let msg = dismiss_refused_message("3f2a-1", Some(1001), Some(1000), 0);
+        let msg = dismiss_refused_message("3f2a-1", Some(&PeerUser::Uid(1001)), Some(&PeerUser::Uid(1000)), Some(&PeerUser::Uid(0)));
         assert!(msg.contains("1001"), "{msg}");
         assert!(msg.contains("1000"), "{msg}");
         assert!(msg.contains("3f2a-1"), "{msg}");
@@ -3754,7 +3935,7 @@ mod tests {
 
     #[test]
     fn dismiss_refused_message_spells_unidentified_not_a_blank() {
-        let msg = dismiss_refused_message("id", None, Some(1000), 0);
+        let msg = dismiss_refused_message("id", None, Some(&PeerUser::Uid(1000)), Some(&PeerUser::Uid(0)));
         assert!(msg.contains("unidentified"), "{msg}");
     }
 
@@ -3767,16 +3948,16 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("dismiss-wrong-peer-uid");
         let parked = ParkRegistry::new();
-        let real_euid = unsafe { libc::geteuid() };
+        let real_euid = real_euid_or_a_value_no_identity_on_this_host_will_equal();
         // Sentinel uids deliberately far from this test process's own real
         // euid (which would otherwise coincidentally satisfy the
         // broker-euid bypass in `dismiss_authorized`).
         let owner_uid = real_euid.wrapping_add(10_000);
         let wrong_uid = real_euid.wrapping_add(20_000);
-        let (id, _rx) = parked.park_if_room("t", "m", NOW, usize::MAX, Some(owner_uid), None, AskOrigin::default()).unwrap();
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, usize::MAX, Some(PeerUser::Uid(owner_uid)), None, AskOrigin::default()).unwrap();
 
         with_redirected_audit_log(&home, || {
-            let wrong_peer = Some(crate::peercred::PeerCred { uid: wrong_uid, gid: 0, pid: 0 });
+            let wrong_peer = Some(crate::peercred::PeerCred { uid: Some(wrong_uid), gid: Some(0), sid: None, pid: 0 });
             let reply = handle_line(
                 &home,
                 &home.join("events.jsonl"),
@@ -3802,12 +3983,12 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("dismiss-matching-peer-uid");
         let parked = ParkRegistry::new();
-        let real_euid = unsafe { libc::geteuid() };
+        let real_euid = real_euid_or_a_value_no_identity_on_this_host_will_equal();
         let owner_uid = real_euid.wrapping_add(30_000);
-        let (id, _rx) = parked.park_if_room("t", "m", NOW, usize::MAX, Some(owner_uid), None, AskOrigin::default()).unwrap();
+        let (id, _rx) = parked.park_if_room("t", "m", NOW, usize::MAX, Some(PeerUser::Uid(owner_uid)), None, AskOrigin::default()).unwrap();
 
         with_redirected_audit_log(&home, || {
-            let matching_peer = Some(crate::peercred::PeerCred { uid: owner_uid, gid: 0, pid: 0 });
+            let matching_peer = Some(crate::peercred::PeerCred { uid: Some(owner_uid), gid: Some(0), sid: None, pid: 0 });
             let reply = handle_line(
                 &home,
                 &home.join("events.jsonl"),
@@ -3882,7 +4063,7 @@ mod tests {
         let entry = arr.iter().find(|e| e["id"] == unstamped_id).unwrap();
         assert!(entry["peerUid"].is_null(), "{entry}");
 
-        let (stamped_id, _rx2) = parked.park_if_room("with-peer", "m", 2, usize::MAX, Some(4242), None, AskOrigin::default()).unwrap();
+        let (stamped_id, _rx2) = parked.park_if_room("with-peer", "m", 2, usize::MAX, Some(PeerUser::Uid(4242)), None, AskOrigin::default()).unwrap();
         let listed = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"pending"}"#, &parked, &mut Vec::new(), None);
         let arr = listed["pending"].as_array().unwrap();
         let entry = arr.iter().find(|e| e["id"] == stamped_id).unwrap();
@@ -4066,6 +4247,9 @@ mod tests {
     /// THAT DOES NOT YET HAVE A VALUE must store exactly once — the other
     /// must see the value the first one stored and refuse with
     /// `DeniedExists`, never silently clobber it.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn concurrent_overwrite_false_puts_store_exactly_once() {
         for i in 0..20 {
@@ -4518,12 +4702,15 @@ mod tests {
 
     /// `append_events_feed` creates the file `0640` — group-read, no
     /// world access, never left to the process umask.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn append_events_feed_creates_the_file_0640() {
         let home = tmp_home("events-perms");
         let events_path = home.join("events.jsonl");
         append_events_feed(&events_path, &json!({"event": "released", "secret": "t", "consumer": "m"}));
-        let mode = std::fs::metadata(&events_path).unwrap().permissions().mode() & 0o777;
+        let mode = crate::home::mode_of(&events_path);
         assert_eq!(mode, 0o640, "the events feed must be 0640, got {mode:o}");
         std::fs::remove_dir_all(&home).ok();
     }
@@ -4532,14 +4719,17 @@ mod tests {
     /// the file staying readable/writable by its own owner after a mode
     /// change in between (if a later append re-created it, the manual
     /// chmod below would have been silently undone).
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn append_events_feed_does_not_rechmod_an_existing_file() {
         let home = tmp_home("events-no-rechmod");
         let events_path = home.join("events.jsonl");
         append_events_feed(&events_path, &json!({"event": "released", "secret": "t", "consumer": "m"}));
-        std::fs::set_permissions(&events_path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        crate::home::set_mode(&events_path, 0o600).unwrap();
         append_events_feed(&events_path, &json!({"event": "released", "secret": "t2", "consumer": "m"}));
-        let mode = std::fs::metadata(&events_path).unwrap().permissions().mode() & 0o777;
+        let mode = crate::home::mode_of(&events_path);
         assert_eq!(mode, 0o600, "a later append must not re-chmod an already-existing file, got {mode:o}");
         std::fs::remove_dir_all(&home).ok();
     }
@@ -4560,6 +4750,12 @@ mod tests {
         // extra coverage; `append_events_feed` only ever consults the
         // file's CURRENT size, not how it got there.
         std::fs::write(&events_path, vec![b'x'; (EVENTS_MAX_BYTES + 1) as usize]).unwrap();
+        // Pinned, because this crate validates an EXISTING feed's own policy
+        // before it writes through it (`feed_windows`' validate-before-write
+        // arm) — a plain `std::fs::write` leaves the file with an inherited
+        // DACL, which is rightly refused on native Windows and would leave
+        // this test asserting against a file the feed never touched.
+        crate::home::secure_file(&events_path).unwrap();
         assert!(std::fs::metadata(&events_path).unwrap().len() > EVENTS_MAX_BYTES);
 
         append_events_feed(&events_path, &json!({"event": "released", "secret": "t", "consumer": "m"}));
@@ -4590,6 +4786,31 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    /// The feed a `secrets watch` popup reads, end to end on ONE host: the
+    /// broker's own append creates it under its create mode, and a FOLLOWER —
+    /// the popup reader, the same user — sees the line that lands after it
+    /// opened. Runs natively on both hosts: on Unix the file carries the
+    /// group-shared `0640`, on native Windows that mode is written OWNER-ONLY
+    /// (no group reader exists there, so it is stricter, never weaker), and
+    /// either way the reader here is this same user.
+    #[test]
+    fn a_follower_sees_the_events_feed_the_broker_writes() {
+        let home = tmp_home("events-follower");
+        let events_path = home.join("events.jsonl");
+        // The feed must exist before a follower can open AT ITS END, which is
+        // the real ordering: the broker's first append creates it, and every
+        // watcher after that opens at the end it then sits on.
+        append_events_feed(&events_path, &json!({"event": "released", "secret": "first", "consumer": "m"}));
+        let mut follower = crate::watch::Follower::open_at_end(&events_path).expect("open the feed at its end");
+        assert_eq!(follower.poll().unwrap(), Vec::<String>::new(), "nothing new yet");
+
+        append_events_feed(&events_path, &json!({"event": "parked", "id": 7, "secret": "t", "consumer": "m"}));
+        let lines = follower.poll().expect("poll the feed");
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("\"parked\""), "{lines:?}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
     /// Best-effort proof (task requirement): a resolve still succeeds when
     /// BOTH notify destinations are unavailable — the own `audit.log` file
     /// is read-only (root ignores file permissions, so this skips under a
@@ -4597,9 +4818,12 @@ mod tests {
     /// teaches_the_chown_reference_fix_on_both_gates` sets) and the
     /// mirrored aoide log points at a path no process could ever create
     /// (a parent component is a plain FILE, not a directory).
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn resolve_still_succeeds_when_the_notify_sink_is_unavailable() {
-        if crate::home::effective_uid() == 0 {
+        if crate::home::running_as_root() {
             return;
         }
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -4612,8 +4836,7 @@ mod tests {
         // permission — `append_own_log`'s `OpenOptions::append` must fail.
         let own_log = own_audit_log_path(&home);
         std::fs::write(&own_log, "").unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&own_log, std::fs::Permissions::from_mode(0o400)).unwrap();
+        crate::home::set_mode(&own_log, 0o400).unwrap();
 
         // A mirrored-log path that can never be created: a regular FILE
         // stands in for what would need to be a directory component.
@@ -4632,7 +4855,7 @@ mod tests {
             None => std::env::remove_var("AOIDE_AUDIT_LOG"),
         }
         // Restore write permission before cleanup can remove the tempdir.
-        std::fs::set_permissions(&own_log, std::fs::Permissions::from_mode(0o600)).unwrap();
+        crate::home::set_mode(&own_log, 0o600).unwrap();
 
         assert_eq!(reply["ok"], true, "a resolve must succeed even when BOTH notify sinks are unreachable: {reply}");
         assert_eq!(reply["value"], "stored-value");
@@ -4649,9 +4872,12 @@ mod tests {
     /// rides alongside" contract `emit_notify`'s own doc holds for all
     /// three writes. Root ignores directory permissions too, so this skips
     /// under a root test runner — same precedent as the sibling test.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn resolve_still_succeeds_when_the_events_feed_path_is_unwritable() {
-        if crate::home::effective_uid() == 0 {
+        if crate::home::running_as_root() {
             return;
         }
         let home = tmp_home("events-feed-unwritable");
@@ -4661,17 +4887,16 @@ mod tests {
 
         let ro_dir = home.join("events-ro-dir");
         std::fs::create_dir_all(&ro_dir).unwrap();
-        use std::os::unix::fs::PermissionsExt;
         // Read + execute (so the dir can still be traversed/stat'd), no
         // write — a brand-new file can never be created under it.
-        std::fs::set_permissions(&ro_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        crate::home::set_mode(&ro_dir, 0o500).unwrap();
         let events_path = ro_dir.join("events.jsonl");
 
         let parked = ParkRegistry::new();
         let reply = handle_line(&home, &events_path, r#"{"op":"resolve","secret":"t","consumer":"m"}"#, &parked, &mut Vec::new(), None);
 
         // Restore write permission before cleanup can remove the tempdir.
-        std::fs::set_permissions(&ro_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        crate::home::set_mode(&ro_dir, 0o700).unwrap();
 
         assert_eq!(reply["ok"], true, "a resolve must succeed even when the events feed's own path is unwritable: {reply}");
         assert_eq!(reply["value"], "stored-value");
@@ -4743,12 +4968,12 @@ mod tests {
     fn admin_op_from_a_mismatched_peer_uid_is_refused_and_policy_json_is_untouched() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("admin-wrong-uid");
-        let real_euid = unsafe { libc::geteuid() };
+        let real_euid = real_euid_or_a_value_no_identity_on_this_host_will_equal();
         let wrong_uid = real_euid.wrapping_add(40_000);
 
         with_redirected_audit_log(&home, || {
             let req = json!({"op": "admin", "command": "add", "name": "t", "backend": "scratch", "key": "k"});
-            let wrong_peer = Some(crate::peercred::PeerCred { uid: wrong_uid, gid: 0, pid: 0 });
+            let wrong_peer = Some(crate::peercred::PeerCred { uid: Some(wrong_uid), gid: Some(0), sid: None, pid: 0 });
             let reply = handle_admin(&home, &req, wrong_peer);
             assert_eq!(reply["ok"], false, "{reply}");
             let err = reply["error"].as_str().unwrap();
@@ -4769,7 +4994,7 @@ mod tests {
         let home = tmp_home("admin-root");
         with_redirected_audit_log(&home, || {
             let req = json!({"op": "admin", "command": "add", "name": "t", "backend": "scratch", "key": "k"});
-            let root_peer = Some(crate::peercred::PeerCred { uid: 0, gid: 0, pid: 0 });
+            let root_peer = Some(crate::peercred::PeerCred { uid: Some(0), gid: Some(0), sid: None, pid: 0 });
             let reply = handle_admin(&home, &req, root_peer);
             assert_eq!(reply["ok"], false, "{reply}");
             let err = reply["error"].as_str().unwrap();
@@ -4858,6 +5083,9 @@ mod tests {
     /// — this proves the SAME bound applies through the admin socket op,
     /// since that composition (admin command -> `crate::admin` -> a hung
     /// backend shell-out -> `put_lock`) was never exercised by those two.
+    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
+    // (the module note above names the class; the code under test is portable).
+    #[cfg(unix)]
     #[test]
     fn a_hung_admin_migrate_no_longer_wedges_put_lock_forever() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

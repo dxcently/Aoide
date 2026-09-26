@@ -15,7 +15,11 @@
 - **Nix appears as data, never as source.** `checklane::run_verify` shells
   out to whatever command `aoide_storage::config::Upkeep::verify_command`
   hands it; this crate never spawns `nix` itself and never parses that
-  command's own output — only its exit code. See `checklane`'s module doc.
+  command's own output — only its exit code. The interpreter that runs it is
+  THIS host's, through the one `aoide_protocol::host_shell` seam (`sh -c`,
+  or `cmd /C` on native Windows): a `cfg` in this crate choosing a shell would
+  be a second discovery path for a fact protocol already owns. See
+  `checklane`'s module doc.
 - **A hook never fails.** `checklane`'s three entry points degrade to `None`
   (or, for `on_stop`, silently write nothing) on a missing config, an
   unloadable config, a lane left disabled, or a verify command that can't
