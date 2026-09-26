@@ -4109,7 +4109,7 @@ mod tests {
     /// production code never lets `aoide-server` reach `aoide-client`.
     #[test]
     fn build_message_send_body_round_trips_through_the_inbound_parser() {
-        let body = aoide_client::wire::build_message_send_body("hello there", "mid-123", None);
+        let body = aoide_client::wire::build_message_send_body("hello there", "mid-123", None, None);
         let (prompt, ctx, spawn) = parse_message_send_params(&body["params"]);
         assert_eq!(prompt, "hello there");
         assert_eq!(ctx, None);
@@ -4118,7 +4118,7 @@ mod tests {
 
     /// P-P5b (`node spawn`): the exact body `handle_node_spawn`
     /// (`aoide-client::commands`) posts is
-    /// `aoide_client::wire::build_message_send_body(text, id, None)` — this
+    /// `aoide_client::wire::build_message_send_body(text, id, None, None)` — this
     /// proves that shape routes all the way to `SendAction::Spawn`, carrying
     /// the client's prompt text verbatim as the argument `do_spawn` would
     /// type as the newly spawned session's first turn, against the SERVER's
@@ -4126,7 +4126,7 @@ mod tests {
     /// shape.
     #[test]
     fn build_message_send_body_routes_to_the_spawn_arm_exactly_as_do_spawn_expects() {
-        let body = aoide_client::wire::build_message_send_body("status check please", "mid-456", None);
+        let body = aoide_client::wire::build_message_send_body("status check please", "mid-456", None, None);
         let (prompt, ctx, spawn_asked) = parse_message_send_params(&body["params"]);
         assert_eq!(prompt, "status check please");
         assert_eq!(ctx, None, "no contextId — the Spawn signal `decide_send_action` reads");
@@ -5878,7 +5878,7 @@ mod tests {
     // ── P-P5b (`node spawn`) — the real signed wire round trip ──────────────
     //
     // Both tests below build the SPAWN-SHAPED body via `aoide_client::wire::
-    // build_message_send_body(text, id, None)` — the exact function
+    // build_message_send_body(text, id, None, None)` — the exact function
     // `aoide-client::commands::handle_node_spawn` calls — and a REAL ed25519
     // signature over it (`signed_request`, the same helper the P-P4 tests
     // above use), so this is a genuine client-body + real-crypto round trip,
@@ -5914,7 +5914,7 @@ mod tests {
         std::env::set_var("AOIDE_STATE_DIR", &root);
 
         let kp = setup_signed_node_with_allows("yomi-strix", &["read", "spawn"]);
-        let body = aoide_client::wire::build_message_send_body("status check please", "mid-spawn-1", None);
+        let body = aoide_client::wire::build_message_send_body("status check please", "mid-spawn-1", None, None);
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("admit"));
@@ -5967,7 +5967,7 @@ mod tests {
 
         // Paired, verified, spawn REVOKED — `allows` carries only "read".
         let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
-        let body = aoide_client::wire::build_message_send_body("status check please", "mid-spawn-2", None);
+        let body = aoide_client::wire::build_message_send_body("status check please", "mid-spawn-2", None, None);
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("revoked"));

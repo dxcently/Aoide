@@ -94,6 +94,14 @@
   capability-gated arm; a future third mail-shaped or capability-gated
   command follows this same shallow-local/deep-remote split rather than
   inventing a client-side `allows` check.
+- **The remote-parent claim (`metadata["aoide/from"]`) is resolved in ONE
+  place, `resolve_remote_parent`, and never from `AOIDE_SESSION_ID`.** An
+  ambient id is the Osaka wrong-ancestry failure; a live `--parent` wins,
+  else the daemon attestation, else no claim (a top-level remote spawn).
+  A `--parent` naming no live local record is refused, never replaced by
+  the attestation. `build_message_send_body` is the one writer of the key;
+  the claim rides inside the signed body, so never add it to headers or
+  the top-level `params.metadata`.
 - **Forwarded event text from `adapter` is untrusted data**, same as root
   `AGENTS.md` house rule 4 — an adapter never lets forwarded text execute as
   a command.

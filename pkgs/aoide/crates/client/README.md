@@ -264,11 +264,13 @@ never the inbound/serve half (that's `aoide-server`).
   (`aoide/pairRequest`/`pairReveal` in `run_pair_request`,
   `aoide/pairPoll` in `approve_outbound` — Design A, task #119, keyed off
   `entry.via` when the outbound entry recorded one) — keyed by the
-  ceremony's own local nickname. `spawn_on_node_via(node, text, via_override)` is
-  `spawn_on_node`'s own body plus an explicit override that beats
-  `node.via` (`node spawn --via`); `spawn_on_node` itself stays a thin
-  `via_override: None` wrapper so `aoide-conduct`'s existing call site
-  needs no change. `--via` (`ssh://[user@]host[:port]`,
+  ceremony's own local nickname. `spawn_on_node_via(node, text, via_override,
+  from_session)` is `spawn_on_node`'s own body plus an explicit override that
+  beats `node.via` (`node spawn --via`) and the caller's OWN session id as the
+  remote-parent claim (P-RSA S2, `metadata["aoide/from"]`); `spawn_on_node`
+  itself stays a thin `via_override: None, from_session: None` wrapper so
+  `aoide-conduct`'s existing call site needs no change and a manifest-summoned
+  spawn claims no parent. `--via` (`ssh://[user@]host[:port]`,
   `aoide_storage::tunnel::parse_via`) is a FLAG on `node.add`/
   `pair`/`node.spawn` — never a new command
   path — parsed by the shared `parse_via_flag` (absent is `None`,
@@ -895,7 +897,12 @@ never the inbound/serve half (that's `aoide-server`).
   -only requirement regardless), refusing with a taught error naming `node
   pair`, then confirms (`--yes` skips only this LOCAL `y`/`N`
   prompt, `confirm_spawn`, mirroring `confirm_invite`'s idiom) before calling
-  `spawn_on_node` and shaping the `Outcome`. **`aoide-conduct`'s manifest
+  `spawn_on_node_via` and shaping the `Outcome`. It resolves the caller-side
+  remote parent first (`resolve_remote_parent`: a live `--parent`, else the
+  daemon-attested caller, never `AOIDE_SESSION_ID`), sends it as
+  `metadata["aoide/from"]`, and on the ack appends the child to
+  `aoide_storage::remote_children` (`remote_child_row`, keyed on the node's
+  pubkey and the child's session id). **`aoide-conduct`'s manifest
   remote-summon path** (U4, command-defrag lane U — `graph::resurrect::
   summon_remote`, the `conduct` → `client` edge documented in `conduct`'s
   own `Cargo.toml`) calls `spawn_on_node` directly, no confirm: a manifest

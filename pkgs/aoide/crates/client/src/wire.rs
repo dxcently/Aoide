@@ -36,7 +36,19 @@ pub fn resolve_card_url(url: &str) -> String {
 /// it — see `crates/server/src/a2a.rs::decide_send_action`). Every OTHER
 /// caller (today: `node spawn`, addressing a node with no aoide sessionId
 /// to target) passes `None`.
-pub fn build_message_send_body(text: &str, message_id: &str, context_id: Option<&str>) -> Value {
+///
+/// `from_session` is this caller's OWN session id — the remote-parent claim
+/// the receiving door stamps onto the spawned record (P-RSA; CONTRACTS.md
+/// §6, [`aoide_protocol::wire::FROM_SESSION_KEY`]). It rides INSIDE the
+/// signed body, so the claim is bound to the key that signed it; the door
+/// ignores it on every rung but the signature one. `None` leaves `metadata`
+/// absent entirely — byte-identical to before this parameter existed.
+pub fn build_message_send_body(
+    text: &str,
+    message_id: &str,
+    context_id: Option<&str>,
+    from_session: Option<&str>,
+) -> Value {
     let params = MessageSendParams {
         message: Message {
             role: "user".to_string(),
@@ -47,7 +59,8 @@ pub fn build_message_send_body(text: &str, message_id: &str, context_id: Option<
             }],
             message_id: Some(message_id.to_string()),
             context_id: context_id.map(str::to_string),
-            metadata: None,
+            metadata: from_session
+                .map(|id| json!({ aoide_protocol::wire::FROM_SESSION_KEY: id })),
         },
     };
     let req = JsonRpcRequest {
@@ -91,7 +104,7 @@ mod tests {
 
     #[test]
     fn build_message_send_body_matches_the_jsonrpc_shape() {
-        let body = build_message_send_body("hello there", "mid-123", None);
+        let body = build_message_send_body("hello there", "mid-123", None, None);
         assert_eq!(body["jsonrpc"], "2.0");
         assert_eq!(body["id"], 1);
         assert_eq!(body["method"], "message/send");
@@ -109,7 +122,76 @@ mod tests {
     fn build_message_send_body_threads_a_context_id_when_given() {
         // P-C3: a node-targeted send carries the resolved remote sessionId
         // as `contextId` so the receiving node's Inject arm can find it.
-        let body = build_message_send_body("hello there", "mid-123", Some("sess-9"));
+        let body = build_message_send_body("hello there", "mid-123", Some("sess-9"), None);
         assert_eq!(body["params"]["message"]["contextId"], "sess-9");
+    }
+
+    #[test]
+    fn build_message_send_body_writes_the_caller_claim_under_one_key() {
+        // P-RSA S2: the caller's own session id rides INSIDE the body, so the
+        // receiving door's stamp is bound to the signature that covers it. No
+        // claim at all leaves `metadata` absent — not an empty object.
+        let claiming = build_message_send_body("hi", "mid-1", None, Some("conduct-17991-2"));
+        assert_eq!(
+            claiming["params"]["message"]["metadata"][aoide_protocol::wire::FROM_SESSION_KEY],
+            "conduct-17991-2"
+        );
+        assert_eq!(
+            claiming["params"]["message"]["metadata"].as_object().unwrap().len(),
+            1,
+            "the claim is the ONLY metadata key this builder writes"
+        );
+        let silent = build_message_send_body("hi", "mid-1", None, None);
+        assert!(
+            silent["params"]["message"].get("metadata").is_none(),
+            "no claim stays absent, not null-present"
+        );
+    }
+
+    #[test]
+    fn the_signed_body_digest_covers_the_caller_claim() {
+        // P-RSA S2: `sign_headers_for_node`'s digest is the WHOLE body bytes,
+        // so mutating `aoide/from` after signing must break verification —
+        // the property that makes the claim signed rather than decorative.
+        // Real ed25519, the same `aoide_storage::wire_auth` pair the server's
+        // own verifier uses. `mint_ephemeral` — no disk, no live identity.
+        let kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        let pubkey_hex = kp.info().pubkey_hex;
+        let signed = build_message_send_body("hi", "mid-7", None, Some("conduct-parent-1"));
+        let signed_bytes = serde_json::to_vec(&signed).unwrap();
+        let timestamp = aoide_storage::time::iso_utc_from_epoch(1_800_000_000);
+        let canonical = aoide_storage::wire_auth::canonical_string(
+            "POST",
+            "/",
+            &timestamp,
+            "nonce-claim-1",
+            &signed_bytes,
+        );
+        let signature = aoide_storage::wire_auth::sign_hex(&kp, canonical.as_bytes());
+        assert!(aoide_storage::wire_auth::verify_signature_hex(
+            &pubkey_hex,
+            canonical.as_bytes(),
+            &signature
+        ));
+
+        let mut tampered = signed.clone();
+        tampered["params"]["message"]["metadata"][aoide_protocol::wire::FROM_SESSION_KEY] =
+            serde_json::json!("conduct-parent-2");
+        let tampered_bytes = serde_json::to_vec(&tampered).unwrap();
+        let tampered_canonical = aoide_storage::wire_auth::canonical_string(
+            "POST",
+            "/",
+            &timestamp,
+            "nonce-claim-1",
+            &tampered_bytes,
+        );
+        assert!(
+            !aoide_storage::wire_auth::verify_signature_hex(
+                &pubkey_hex,
+                tampered_canonical.as_bytes(),
+                &signature
+            ),
+            "a swapped parent claim must not verify against the signature over the original body"
+        );
     }
 }

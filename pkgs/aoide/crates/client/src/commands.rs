@@ -1046,6 +1046,14 @@ pub fn pull_node_live(node: &aoide_storage::node_store::Node, timeout_secs: u64)
 /// does, see the crate's `Cargo.toml`/`AGENTS.md` on the `conduct → client`
 /// edge.
 ///
+/// `from_session` is the calling session's OWN id — the remote-parent claim
+/// the receiving door stamps onto the steered child (P-RSA §4.2; the claim
+/// half of the gate, whose match half lands with the door's Inject arm). It
+/// rides INSIDE the signed body, so the door can bind it to the verifying
+/// key. `None` (every caller that is not claiming a parent — today:
+/// `aoide-conduct`'s `send --to`, until S5 threads its attested sender
+/// through) leaves the body byte-identical to before this parameter.
+///
 /// Same `run_curl` transport and 15s timeout every other `message/send`
 /// call site in this file uses — this is a real delivery, not the roster
 /// core's short-timeout presence probe, so it does NOT reuse
@@ -1058,9 +1066,10 @@ pub fn send_message_to_node(
     node: &aoide_storage::node_store::Node,
     text: &str,
     context_id: &str,
+    from_session: Option<&str>,
 ) -> Result<Value, String> {
     let message_id = gen_message_id();
-    let body = crate::wire::build_message_send_body(text, &message_id, Some(context_id));
+    let body = crate::wire::build_message_send_body(text, &message_id, Some(context_id), from_session);
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let bearer = resolve_node_bearer(node)?;
     let extra_headers = sign_headers_for_node(node, &body_str)?;
@@ -1115,7 +1124,7 @@ fn confirm_spawn(name: &str, text: &str) -> Result<bool, String> {
 /// remote-chosen executable: which agent runs is the NODE's own configured
 /// `aoide.a2a.spawnAgent`, never client-supplied (`do_spawn`'s own doc
 /// comment on `SessionRef`'s security model). Built via
-/// `crate::wire::build_message_send_body(text, message_id, None)` — the
+/// `crate::wire::build_message_send_body(text, message_id, None, None)` — the
 /// SAME builder every other `message/send` call site in this file uses, so
 /// this is a proven shape, not a new invention.
 ///
@@ -1161,7 +1170,7 @@ pub fn spawn_on_node(
     node: &aoide_storage::node_store::Node,
     text: &str,
 ) -> Result<Value, SpawnNodeError> {
-    spawn_on_node_via(node, text, None)
+    spawn_on_node_via(node, text, None, None)
 }
 
 /// [`spawn_on_node`]'s own body, PLUS an optional `--via` OVERRIDE
@@ -1173,13 +1182,21 @@ pub fn spawn_on_node(
 /// before this override existed. Extracted rather than adding the
 /// parameter to `spawn_on_node` directly so `aoide-conduct`'s existing
 /// call site (`graph::resurrect.rs`) needs no change.
+///
+/// `from_session` (P-RSA S2) is the caller's OWN session id — the claim the
+/// receiving door stamps onto the child's record as its `remoteParent`.
+/// `handle_node_spawn` is the one caller that resolves it (attested caller,
+/// else `--parent`; never `AOIDE_SESSION_ID`); `spawn_on_node` above passes
+/// `None`, so a manifest remote-summon claims no parent — a `--task`-less,
+/// unattended summon has no calling session to name.
 pub fn spawn_on_node_via(
     node: &aoide_storage::node_store::Node,
     text: &str,
     via_override: Option<&aoide_storage::tunnel::Via>,
+    from_session: Option<&str>,
 ) -> Result<Value, SpawnNodeError> {
     let message_id = gen_message_id();
-    let body = crate::wire::build_message_send_body(text, &message_id, None);
+    let body = crate::wire::build_message_send_body(text, &message_id, None, from_session);
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let bearer =
         resolve_node_bearer(node).map_err(|e| SpawnNodeError::new("bearer-resolve-failed", e))?;
@@ -1239,9 +1256,93 @@ impl std::fmt::Display for SpawnNodeError {
     }
 }
 
+/// Is `id` a LIVE local session record — `node spawn --parent`'s acceptance
+/// check (P-RSA §4.1)? A record that has ended (`canonical_state` folds
+/// every producer's spelling onto the five-state vocabulary, so `done` is
+/// the one question) and an id naming no record at all are both refused:
+/// never adopt a stale id as a parent, the same ruling
+/// `conduct`'s `window.rs::resolve_registration_parent` made for the
+/// ambient-env case.
+fn live_local_session(id: &str) -> bool {
+    aoide_storage::stage::load_stage::<aoide_storage::records::SessionsFile>(
+        &aoide_storage::stage::sessions_path(),
+    )
+    .ok()
+    .is_some_and(|f| {
+        f.sessions.iter().any(|s| {
+            s.session_id == id && aoide_protocol::state::canonical_state(&s.state) != "done"
+        })
+    })
+}
+
+/// Resolve the caller-side remote parent for `node spawn` (P-RSA §4.1): an
+/// explicit `--parent` naming a live local record, else the KERNEL-ATTESTED
+/// caller when the daemon can prove one
+/// (`aoide_storage::attest::attested_caller` — needs the daemon's live seal
+/// key), else none. An explicit `--parent` wins because it is the operator's
+/// stated intent (spawning on behalf of another session on this node, the
+/// node being the trust unit); a `--parent` that names no live record is
+/// refused, never silently replaced by the attestation.
+///
+/// `AOIDE_SESSION_ID` is NEVER read here: an ambient id is exactly the Osaka
+/// failure the lane exists to close, and the daemon-side fix for it clears
+/// that var on every door-spawned child. With no parent resolvable the spawn
+/// still proceeds — it is simply a top-level remote spawn (`parent: none
+/// (unattested)`), never a spawn under a guessed session.
+fn resolve_remote_parent(explicit: Option<&str>) -> Result<Option<String>, String> {
+    let attested = aoide_storage::attest::attested_caller(std::process::id() as i32)
+        .map(|(id, _origin)| id);
+    resolve_remote_parent_from(attested, explicit)
+}
+
+/// [`resolve_remote_parent`]'s decision, over an ALREADY-RESOLVED attestation
+/// — pure, so the precedence (a live `--parent` first, the attestation as the
+/// fallback) and the live-record check are testable with no daemon, no seal
+/// key and no process ancestry in the picture.
+fn resolve_remote_parent_from(
+    attested: Option<String>,
+    explicit: Option<&str>,
+) -> Result<Option<String>, String> {
+    match explicit {
+        None => Ok(attested),
+        Some(id) if live_local_session(id) => Ok(Some(id.to_string())),
+        Some(id) => Err(format!(
+            "`--parent {id}` names no live local session — a remote parent must be a session \
+             this instance can still show on its roster; an ended or unknown id is refused \
+             rather than adopted as a stale parent"
+        )),
+    }
+}
+
+/// The ledger row for one acknowledged remote spawn (P-RSA §4.1) — keyed by
+/// the CHILD's verified identity (`node.pubkey` + `sessionId`) and carrying
+/// THIS node's own session as `parentSessionId`, so the entry stays
+/// attributable after a restart. `None` (nothing to write) when there is no
+/// parent to attribute, no child id came back, or the node carries no pubkey
+/// — with no key there is no identity to key the row on.
+fn remote_child_row(
+    node: &aoide_storage::node_store::Node,
+    parent_session_id: Option<&str>,
+    child_session_id: &str,
+) -> Option<aoide_storage::remote_children::RemoteChild> {
+    let key = node.pubkey.clone().filter(|k| !k.is_empty())?;
+    let parent = parent_session_id?;
+    if child_session_id.is_empty() {
+        return None;
+    }
+    Some(aoide_storage::remote_children::RemoteChild {
+        parent_session_id: parent.to_string(),
+        node: node.name.clone(),
+        key,
+        session_id: child_session_id.to_string(),
+        spawned_at: aoide_storage::time::now_iso_utc(),
+        lines_after: 0,
+    })
+}
+
 fn handle_node_spawn(inv: &Invocation) -> Outcome {
     let cmd = "node.spawn";
-    const USAGE: &str = "usage: aoide node spawn <name> [--yes] [--via ssh://[user@]host[:port]] -- <text…>";
+    const USAGE: &str = "usage: aoide node spawn <name> [--yes] [--via ssh://[user@]host[:port]] [--parent <id>] -- <text…>";
     let name = match inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         Some(n) => n.to_string(),
         None => return Outcome::usage(cmd, USAGE),
@@ -1255,6 +1356,14 @@ fn handle_node_spawn(inv: &Invocation) -> Outcome {
     // recorded marker (parse_via_flag's own stance).
     let via_override = match parse_via_flag(inv) {
         Ok(v) => v,
+        Err(e) => return Outcome::usage(cmd, format!("{USAGE} — {e}")),
+    };
+    // The remote-parent claim (P-RSA §4.1). An empty --parent is absent, the
+    // same read parse_via_flag gives an empty --via; a --parent naming no
+    // live local session is a usage error, never a silently-dropped claim.
+    let explicit_parent = inv.flags.get("parent").map(|s| s.trim()).filter(|s| !s.is_empty());
+    let parent = match resolve_remote_parent(explicit_parent) {
+        Ok(p) => p,
         Err(e) => return Outcome::usage(cmd, format!("{USAGE} — {e}")),
     };
 
@@ -1295,15 +1404,41 @@ fn handle_node_spawn(inv: &Invocation) -> Outcome {
         }
     }
 
-    match spawn_on_node_via(&node, &text, via_override.as_ref()) {
+    match spawn_on_node_via(&node, &text, via_override.as_ref(), parent.as_deref()) {
         Ok(parsed) => {
             let session_id = parsed
                 .get("result")
                 .and_then(|r| r.get("id"))
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            Outcome::ok(cmd, format!("spawned on `{}` — remote session `{session_id}`", node.name))
-                .with_data(json!({ "name": node.name, "url": node.url, "sessionId": session_id, "response": parsed }))
+            // The caller-side half of the parent link (P-RSA §4.1): one row
+            // keyed by the child's verified identity, written only once the
+            // door has acknowledged the spawn. Best-effort — the spawn itself
+            // already happened, so a ledger write that fails must not turn a
+            // successful spawn into an error; it is named on stderr instead.
+            if let Some(row) = remote_child_row(&node, parent.as_deref(), session_id) {
+                if let Err(e) = aoide_storage::remote_children::append_remote_child(&row) {
+                    eprintln!(
+                        "aoide node spawn: could not record remote child `{session_id}` on `{}` in the ledger: {e}",
+                        node.name
+                    );
+                }
+            }
+            let parent_note = match parent.as_deref() {
+                Some(p) => format!("parent `{p}`"),
+                None => "parent: none (unattested)".to_string(),
+            };
+            Outcome::ok(
+                cmd,
+                format!("spawned on `{}` — remote session `{session_id}` ({parent_note})", node.name),
+            )
+            .with_data(json!({
+                "name": node.name,
+                "url": node.url,
+                "sessionId": session_id,
+                "parentSessionId": parent,
+                "response": parsed,
+            }))
         }
         Err(e) => {
             let mut data = json!({ "reason": e.reason, "name": node.name, "url": node.url });
@@ -1474,6 +1609,7 @@ pub fn register_nodes(r: &mut Registry) {
         flags: [
             flag!("yes", "bool", "Skip the local y/N confirmation (scripted use) — a LOCAL UX gate only; the remote door's own gate is unaffected."),
             flag!("via", "string", "An ssh://[user@]host[:port] transport marker for THIS call, overriding any via recorded on the node. Absent = the node's own recorded via, if any (today's behavior when neither is set)."),
+            flag!("parent", "string", "The LOCAL session id to record as this child's parent, riding the signed body so the far door stamps it as the child's `remoteParent`. The kernel-attested caller wins when the daemon can prove one (this flag is then unused), and `AOIDE_SESSION_ID` is never read for it; a name that is not a live local session is refused rather than adopted as a stale parent. Absent = claim no parent (a top-level remote spawn)."),
         ],
         gated: false,
         implemented: true,
@@ -4970,7 +5106,7 @@ mod tests {
         with_node_state("spawn-signs", || {
             let mut node = fixture_node(None);
             node.verified = true;
-            let body = crate::wire::build_message_send_body("do the thing", &gen_message_id(), None);
+            let body = crate::wire::build_message_send_body("do the thing", &gen_message_id(), None, None);
             assert!(body["params"]["message"].get("contextId").is_none(), "spawn-shaped body carries no contextId");
             let body_str = serde_json::to_string(&body).unwrap();
             let headers = sign_headers_for_node(&node, &body_str).unwrap();
@@ -4984,6 +5120,273 @@ mod tests {
                 assert!(headers.iter().any(|(k, _)| k == name), "missing {name}: {headers:?}");
             }
         });
+    }
+
+    // ── the remote-parent claim on `node spawn` (P-RSA S2) ──────────────────
+
+    /// The process-global knobs a remote-parent test needs — a temp
+    /// `AOIDE_ROOT`/`AOIDE_STATE_DIR`/`AOIDE_STAGE_DIR` (the ledger,
+    /// `sessions.json` and the node registry all live under them, and NOTHING
+    /// may touch the operator's live `~/.aoide`), plus a
+    /// `AOIDE_DAEMON_SOCKET` that cannot exist so the ATTESTATION leg of
+    /// [`resolve_remote_parent`] can never reach a LIVE daemon from a test and
+    /// every box gets the same answer. Every knob is restored (and the temp
+    /// tree removed) on drop. The caller holds `env_lock` — this is the
+    /// lock-free half, so a test that needs `install_fake_curl` too does not
+    /// try to take the same lock twice.
+    struct ParentEnv {
+        dir: std::path::PathBuf,
+        saved: Vec<(&'static str, Option<String>)>,
+    }
+
+    impl ParentEnv {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "aoide-client-remote-parent-{tag}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let vars: [&'static str; 6] = [
+                "AOIDE_ROOT",
+                "AOIDE_STATE_DIR",
+                "AOIDE_STAGE_DIR",
+                "AOIDE_DAEMON_SOCKET",
+                "AOIDE_CONFIG",
+                "AOIDE_SESSION_ID",
+            ];
+            let saved = vars.iter().map(|v| (*v, std::env::var(v).ok())).collect();
+            std::env::set_var("AOIDE_ROOT", &dir);
+            std::env::set_var("AOIDE_STATE_DIR", dir.join("state"));
+            std::env::set_var("AOIDE_STAGE_DIR", dir.join("stage"));
+            std::env::set_var("AOIDE_DAEMON_SOCKET", dir.join("no-daemon.sock"));
+            std::env::remove_var("AOIDE_CONFIG");
+            std::env::remove_var("AOIDE_SESSION_ID");
+            Self { dir, saved }
+        }
+    }
+
+    impl Drop for ParentEnv {
+        fn drop(&mut self) {
+            for (var, saved) in &self.saved {
+                match saved {
+                    Some(v) => std::env::set_var(var, v),
+                    None => std::env::remove_var(var),
+                }
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// [`ParentEnv`] with the env lock — the shape every other test in this
+    /// module uses.
+    fn with_parent_env<T>(tag: &str, f: impl FnOnce() -> T) -> T {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = ParentEnv::new(tag);
+        f()
+    }
+
+    /// Write session records straight into the stage, the same
+    /// `sessions.json` shape `live_local_session` reads.
+    fn write_local_sessions(rows: &[(&str, &str)]) {
+        let file = aoide_storage::records::SessionsFile {
+            schema_version: "0".to_string(),
+            sessions: rows
+                .iter()
+                .map(|(id, state)| aoide_storage::records::SessionRecord {
+                    session_id: id.to_string(),
+                    state: state.to_string(),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let path = aoide_storage::stage::sessions_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, serde_json::to_string_pretty(&file).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn node_spawn_parent_must_name_a_live_local_session() {
+        with_parent_env("live-check", || {
+            // `done` is the one state the fold calls ENDED; every other
+            // spelling is a live phase (`stopped`/`idle` sessions are warm,
+            // not gone — `protocol::state`'s own vocabulary).
+            write_local_sessions(&[
+                ("live-1", "working"),
+                ("warm-1", "stopped"),
+                ("cold-1", "idle"),
+                ("done-1", "done"),
+            ]);
+            assert_eq!(
+                resolve_remote_parent_from(None, Some("live-1")).unwrap(),
+                Some("live-1".to_string())
+            );
+            assert_eq!(
+                resolve_remote_parent_from(None, Some("cold-1")).unwrap(),
+                Some("cold-1".to_string()),
+                "an idle-but-unended session is still a valid parent"
+            );
+            for refused in ["done-1", "ghost-1", ""] {
+                assert!(
+                    resolve_remote_parent_from(None, Some(refused)).is_err(),
+                    "`{refused}` must be refused, never adopted as a stale parent"
+                );
+            }
+            assert_eq!(
+                resolve_remote_parent_from(None, None).unwrap(),
+                None,
+                "no parent named and none attested = no claim, and the spawn still proceeds"
+            );
+        });
+    }
+
+    #[test]
+    fn node_spawn_explicit_parent_beats_the_attestation_and_never_reads_the_ambient_env() {
+        with_parent_env("attested", || {
+            write_local_sessions(&[("explicit-1", "working")]);
+            // A live explicit --parent wins over the attestation: it is the
+            // operator's stated intent, on a node that is one trust unit.
+            assert_eq!(
+                resolve_remote_parent_from(Some("attested-1".to_string()), Some("explicit-1")).unwrap(),
+                Some("explicit-1".to_string())
+            );
+            // With no --parent the attestation is the answer.
+            assert_eq!(
+                resolve_remote_parent_from(Some("attested-1".to_string()), None).unwrap(),
+                Some("attested-1".to_string())
+            );
+            // A dead --parent is refused even when an attestation exists —
+            // never silently replaced.
+            assert!(resolve_remote_parent_from(Some("attested-1".to_string()), Some("gone-9")).is_err());
+            // The real resolver with NO reachable daemon, while a decoy
+            // ambient id sits in the env: the decoy is never the answer.
+            std::env::set_var("AOIDE_SESSION_ID", "decoy-ambient");
+            assert_eq!(
+                resolve_remote_parent(None).unwrap(),
+                None,
+                "AOIDE_SESSION_ID must never be read as a remote parent"
+            );
+        });
+    }
+
+    #[test]
+    fn the_ledger_row_is_keyed_on_the_child_identity_and_needs_a_parent() {
+        let mut node = fixture_node(None);
+        node.verified = true;
+        node.pubkey = Some("aa11".to_string());
+        let row = remote_child_row(&node, Some("conduct-parent-1"), "a2a-4411-1790").unwrap();
+        assert_eq!(row.parent_session_id, "conduct-parent-1");
+        assert_eq!(row.node, "yomi-strix");
+        assert_eq!(row.key, "aa11");
+        assert_eq!(row.session_id, "a2a-4411-1790");
+        assert_eq!(row.lines_after, 0, "the pull cursor starts at the beginning of the ring");
+        assert!(!row.spawned_at.is_empty());
+
+        // Nothing to attribute, nothing to key on, or no child id back: no
+        // row — never a half-filled one.
+        assert!(remote_child_row(&node, None, "a2a-1").is_none());
+        assert!(remote_child_row(&node, Some("p1"), "").is_none());
+        let mut keyless = fixture_node(None);
+        keyless.verified = true;
+        assert!(remote_child_row(&keyless, Some("p1"), "a2a-1").is_none());
+    }
+
+    #[test]
+    fn node_spawn_refuses_a_parent_that_is_not_a_live_local_session() {
+        // The flag path, driven through the real handler: the refusal lands
+        // BEFORE any node lookup or confirmation, so it needs no paired node
+        // and never reaches the wire.
+        with_parent_env("spawn-parent-refused", || {
+            let mut inv = spawn_inv(&["yomi-strix", "hello"], true);
+            inv.flags.insert("parent".to_string(), "ghost-1".to_string());
+            let out = handle_node_spawn(&inv);
+            assert_eq!(out.status, aoide_protocol::output::Status::Usage);
+            assert!(
+                out.message.contains("live local session"),
+                "taught refusal naming why: {}",
+                out.message
+            );
+        });
+    }
+
+    #[test]
+    fn node_spawn_writes_the_ledger_row_for_its_parent_on_the_ack() {
+        // The real handler, a REAL signed body, and a fake `curl` standing in
+        // for the far door's `submitted` ack — so the ledger write is proven
+        // where it actually happens, not just in `remote_child_row`.
+        let ack = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": { "id": "a2a-4411-1790", "status": { "state": "submitted" } }
+        })
+        .to_string();
+        let script = format!("cat <<'JSONBODY'\n{ack}\nJSONBODY\nprintf '200'\n");
+
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = ParentEnv::new("spawn-ack");
+        write_local_sessions(&[("live-1", "working")]);
+        let mut node = fixture_node(None);
+        node.verified = true;
+        node.pubkey = Some("aa11".to_string());
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        let mut inv = spawn_inv(&["yomi-strix", "hello"], true);
+        inv.flags.insert("parent".to_string(), "live-1".to_string());
+        let (shim_dir, saved_path) = install_fake_curl("spawn-ack", &script);
+        let out = handle_node_spawn(&inv);
+        uninstall_fake_curl(&shim_dir, saved_path);
+
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+        assert_eq!(out.data.as_ref().unwrap()["parentSessionId"], "live-1");
+        assert!(
+            out.message.contains("parent `live-1`"),
+            "the outcome names the parent it claimed: {}",
+            out.message
+        );
+
+        let rows = aoide_storage::remote_children::load_remote_children();
+        assert_eq!(rows.len(), 1, "exactly one ledger row on the ack: {rows:?}");
+        let row = &rows[0];
+        assert_eq!(row.parent_session_id, "live-1");
+        assert_eq!(row.node, "yomi-strix");
+        assert_eq!(row.key, "aa11", "keyed on the node's own stored pubkey");
+        assert_eq!(row.session_id, "a2a-4411-1790", "the child id the door acked");
+        assert_eq!(row.lines_after, 0);
+    }
+
+    #[test]
+    fn node_spawn_writes_no_ledger_row_without_a_parent() {
+        // No parent to attribute (no attestation, no --parent): the spawn is
+        // still a spawn, and the outcome says so — but there is nothing to
+        // pull a ping-back for, so the ledger stays empty.
+        let ack = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": { "id": "a2a-4411-1791", "status": { "state": "submitted" } }
+        })
+        .to_string();
+        let script = format!("cat <<'JSONBODY'\n{ack}\nJSONBODY\nprintf '200'\n");
+
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = ParentEnv::new("spawn-no-parent");
+        let mut node = fixture_node(None);
+        node.verified = true;
+        node.pubkey = Some("aa11".to_string());
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        let (shim_dir, saved_path) = install_fake_curl("spawn-no-parent", &script);
+        let out = handle_node_spawn(&spawn_inv(&["yomi-strix", "hello"], true));
+        uninstall_fake_curl(&shim_dir, saved_path);
+
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+        assert!(out.data.as_ref().unwrap()["parentSessionId"].is_null());
+        assert!(
+            out.message.contains("parent: none (unattested)"),
+            "a top-level remote spawn says so: {}",
+            out.message
+        );
+        assert!(aoide_storage::remote_children::load_remote_children().is_empty());
     }
 
     // ── resolve_node_bearer — the no-secret-configured short circuit ────────
@@ -5470,6 +5873,19 @@ mod tests {
     /// caller's write into an EPIPE (`crates/AGENTS.md`).
     fn with_fake_curl<T>(tag: &str, script: &str, f: impl FnOnce() -> T) -> T {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (shim_dir, saved_path) = install_fake_curl(tag, script);
+        let out = f();
+        uninstall_fake_curl(&shim_dir, saved_path);
+        out
+    }
+
+    /// [`with_fake_curl`]'s two halves, split out for a test that ALREADY
+    /// holds `env_lock` (and cannot take it a second time): drop the shim at
+    /// the front of `PATH`, run the closure-free part between the two calls,
+    /// then restore. The shim's stdin drain is load-bearing — `post_json`
+    /// always writes to curl's stdin, and a shim that exits without reading
+    /// turns a descheduled caller's write into an EPIPE (`crates/AGENTS.md`).
+    fn install_fake_curl(tag: &str, script: &str) -> (std::path::PathBuf, Option<String>) {
         let shim_dir = std::env::temp_dir().join(format!(
             "aoide-client-curlshim-{tag}-{}-{}",
             std::process::id(),
@@ -5484,15 +5900,15 @@ mod tests {
         }
         let saved_path = std::env::var("PATH").ok();
         std::env::set_var("PATH", format!("{}:{}", shim_dir.display(), saved_path.clone().unwrap_or_default()));
+        (shim_dir, saved_path)
+    }
 
-        let out = f();
-
+    fn uninstall_fake_curl(shim_dir: &std::path::Path, saved_path: Option<String>) {
         match saved_path {
             Some(p) => std::env::set_var("PATH", p),
             None => std::env::remove_var("PATH"),
         }
-        let _ = std::fs::remove_dir_all(&shim_dir);
-        out
+        let _ = std::fs::remove_dir_all(shim_dir);
     }
 
     /// #114: an over-cap response refuses with the taught error, naming
@@ -5559,7 +5975,7 @@ mod tests {
         // `-w "\n%{http_code}"` status line.
         let script = format!("cat <<'JSONBODY'\n{body}\nJSONBODY\nprintf '200'\n");
         let node = fixture_node(None);
-        let result = with_fake_curl("spawn-refused", &script, || spawn_on_node_via(&node, "hello", None));
+        let result = with_fake_curl("spawn-refused", &script, || spawn_on_node_via(&node, "hello", None, None));
         let err = result.expect_err("a JSON-RPC error ack must surface as an Err, never as Ok");
         assert_eq!(err.reason, "node-refused");
         assert!(

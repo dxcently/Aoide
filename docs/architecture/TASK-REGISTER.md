@@ -2137,7 +2137,10 @@ project/parent inheritance across local/remote/app/subagents;
   so only the direction the spawn already proved is used.
 - Status: S1 LANDED on `eidolon/remote-sub` (`remoteParent` +
   `records::RemoteParent`, `aoide-storage::remote_children`,
-  `valid_claimed_session_id`); S2–S10 open, in the brief's order (S4 and S5
+  `valid_claimed_session_id`); S2 LANDED (the signed `aoide/from` claim on
+  spawn and inject, `node spawn --parent`, the caller-side ledger write on
+  the ack; a live `--parent` beats the attestation, the env is never read);
+  S3–S10 open, in the brief's order (S4 and S5
   may run in parallel after S3; cargo builds serialize).
 - Tests (`aoide-storage`, S1):
   `session_record_remote_parent_round_trips_and_stays_absent_when_unset`,

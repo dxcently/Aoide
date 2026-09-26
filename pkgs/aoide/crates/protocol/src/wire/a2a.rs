@@ -130,6 +130,13 @@ pub struct MessageSendParams {
     pub message: Message,
 }
 
+/// The `message.metadata` key carrying the caller's OWN session id on the
+/// node that signs the request (CONTRACTS.md §6; P-RSA). One const, read by
+/// the door that honours the claim and written by the client that makes it —
+/// the receiver qualifies the value with the KEY that verified the signature,
+/// never with a name taken from the body.
+pub const FROM_SESSION_KEY: &str = "aoide/from";
+
 /// One A2A `Message` (`message/send`'s `params.message`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Message {

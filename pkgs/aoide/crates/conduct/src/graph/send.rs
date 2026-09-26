@@ -1185,7 +1185,11 @@ fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, quer
 
     match resolve_remote_query(&node.name, query, &candidates) {
         Resolution::Local(remote_id) => {
-            match aoide_client::commands::send_message_to_node(node, &text, &remote_id) {
+            // No `aoide/from` claim on this path: the only reader of the
+            // claim is the door's Spawn arm (the remote-parent stamp on the
+            // child it just created), and nothing on the Inject arm consults
+            // it — naming the sender here would be a claim nothing reads.
+            match aoide_client::commands::send_message_to_node(node, &text, &remote_id, None) {
                 Ok(response) => {
                     let out = Outcome::ok(
                         cmd,

@@ -4700,6 +4700,20 @@ request (`a2a.rs::decide_send_action`, unit-tested for every branch):
   nothing, is a structured JSON-RPC error (`-32004`/`-32001` respectively) —
   never a silent fallback to spawning.
 
+**`metadata["aoide/from"]` — the caller's own session id.** A spawn- or
+inject-shaped `message/send` MAY name the calling session under
+`message.metadata["aoide/from"]` (`aoide_protocol::wire::FROM_SESSION_KEY`;
+CONTRACTS.md §4's `remote-children.json` and the `remoteParent` record field
+are its two sides). Only `message.metadata` counts — never the top-level
+`params.metadata` fallback `aoide/spawn` also accepts — because this is a
+claim about WHO is calling, and the client's outbound builder
+(`aoide_client::wire::build_message_send_body`) writes it in the one place.
+The value is a session id, `1..=128` bytes of `[A-Za-z0-9._:-]` with no `/`
+(`aoide_storage::remote_children::valid_claimed_session_id`, the same
+predicate both sides read); it rides INSIDE the signed body, so the claim is
+covered by the body digest along with the prompt. Absent means "claims no
+parent" — an empty or non-string value is not a third state.
+
 **The command a spawn runs is `aoide.a2a.spawnAgent`** — a nix option, off
 (`""`) by default, resolved once at `a2a serve` launch (`--spawn-agent` flag →
 `AOIDE_A2A_SPAWN_AGENT` env, set by the `aoide-a2a` systemd unit → the

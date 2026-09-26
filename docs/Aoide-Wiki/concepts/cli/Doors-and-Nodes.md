@@ -590,7 +590,7 @@ aoide node allow <name> <cap> on|off
 ### aoide node spawn
 
 ```
-aoide node spawn <name> [--yes] [--via ssh://[user@]host[:port]] -- <text…>
+aoide node spawn <name> [--yes] [--parent <session>] [--via ssh://[user@]host[:port]] -- <text…>
 ```
 
 - **Reads:** `state/nodes.json`; this instance's identity (the POST is
@@ -600,6 +600,12 @@ aoide node spawn <name> [--yes] [--via ssh://[user@]host[:port]] -- <text…>
   false`) name LOCALLY with a taught error naming `aoide pair`.
 - **Output:** POSTs a spawn-shaped `message/send` (no `contextId`) to the
   node's A2A door; `<text…>` becomes the spawned session's first turn.
+  The body carries the caller's own session id under
+  `metadata["aoide/from"]`, inside the signed digest: a live `--parent`
+  first, else the daemon-attested caller, never `AOIDE_SESSION_ID`. On
+  the ack the caller appends the child to `state/stage/remote-children.json`
+  (keyed on the node's pubkey and the child's session id), so the
+  parent can list the remote child it spawned.
   What actually runs is the NODE's configured `aoide.a2a.spawnAgent`,
   never a remote-chosen executable. Every other refusal — `allows`
   lacking `spawn`, an unsigned-but-paired caller, clock skew — is the
