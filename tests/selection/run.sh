@@ -73,6 +73,8 @@ songAvailableUnknown                throws  'nope2' is not in the songbook; disc
 songNoRice                          throws  song noshelf has no rice.nix
 songWithoutLyra                     throws  song.declared = "alpha" needs the lyra dendrite: select aggregations.aoideos (or dendrites.lyra) on this host
 songAvailableWithoutLyra            throws  song.available = ["alpha"] needs the lyra dendrite: select aggregations.aoideos (or dendrites.lyra) on this host
+songEscapeClean                     ok      ""
+songEscapeFound                     ok      "escaper/rice.nix"
 EOF
 )
 

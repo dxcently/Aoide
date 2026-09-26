@@ -267,6 +267,37 @@ let
     }
   ) songNames;
 
+  # ── A song folder names nothing outside itself ──────────────────────────────
+  # §7.4 constraint 1's enforcement half. A `../` path literal in any `.nix`
+  # under a song is the shape that makes a song un-shippable — the shelf or
+  # `rice.nix` reaching for `lib/song.nix` or another song's `_widgets/`, which
+  # is exactly what the injected `song`/`borrow` replaced. Scanned by reading the
+  # text, and `_widgets/` is NOT pruned here (the shelf is where those escapes
+  # lived), so this is the one walk that sees every `.nix` in a song.
+  walkNix =
+    { prefix, dir }:
+    let
+      entries = builtins.readDir dir;
+    in
+    lib.concatMap (
+      entry:
+      if entries.${entry} == "directory" then
+        walkNix {
+          prefix = "${prefix}/${entry}";
+          dir = dir + "/${entry}";
+        }
+      else
+        lib.optional (lib.hasSuffix ".nix" entry) "${prefix}/${entry}"
+    ) (builtins.attrNames entries);
+
+  escapingNixFiles = lib.concatMap (
+    name:
+    lib.filter (rel: lib.hasInfix "../" (builtins.readFile (songbook + "/${rel}"))) (walkNix {
+      prefix = name;
+      dir = songs.${name};
+    })
+  ) songNames;
+
   # ── Selection ───────────────────────────────────────────────────────────────
   # `song.declared` and `song.available` are HOST-RECORD fields: whether a song's
   # `rice.nix` is imported is decided in the gate pass, before any platform
@@ -372,6 +403,7 @@ in
     songNames
     songMeta
     strayNixFiles
+    escapingNixFiles
     selectionModule
     check
     builtIn

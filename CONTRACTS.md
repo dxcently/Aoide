@@ -4832,11 +4832,15 @@ the check.
 
 ### Enforcement
 
-`checks.song-shape` structurally asserts every walked songbook path is a
-`rice.nix` (a song's module entry) — catching a stray `.nix` that could set
-arbitrary host options. The **full** "only defines `aoide.livery`" invariant is
-a documented convention here (isolated per-module option-diffing is
-disproportionate for v0; see the `TODO(song-shape v1)` in `lib/checks.nix`).
+`checks.song-shape` structurally asserts three things about every discovered
+song: it carries its `rice.nix` and its `livery.json`; it holds no `.nix` outside
+`rice.nix` and its `_widgets/` shelf (`strayNixFiles`, which would join the
+module merge silently and could set arbitrary host options); and **nothing in it
+names a path outside its own folder** (`escapingNixFiles` — any `.nix` whose text
+carries a `../`, per "The shelf, and the two injected arguments" above). The
+**full** "only defines `aoide.livery`" invariant is a documented convention here
+(isolated per-module option-diffing is disproportionate for v0; see the
+`TODO(song-shape v1)` in `lib/checks.nix`).
 
 **Migration to v1:** the update playbook migrates `song/songbook/*/rice.nix`
 and `livery.json` from v0 to v1 with the livery schema (§1).

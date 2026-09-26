@@ -155,6 +155,7 @@ let
       songbook,
       songNames,
       strayNixFiles,
+      escapingNixFiles,
     }:
     let
       incomplete = builtins.filter (
@@ -163,10 +164,12 @@ let
         || !(builtins.pathExists (songbook + "/${name}/livery.json"))
       ) songNames;
     in
-    assertCheck "song-shape" (strayNixFiles == [ ] && incomplete == [ ])
+    assertCheck "song-shape" (strayNixFiles == [ ] && incomplete == [ ] && escapingNixFiles == [ ])
       "songbook shape is wrong — ${
         if strayNixFiles != [ ] then
           "stray .nix outside rice.nix/_widgets/: ${builtins.toString strayNixFiles}"
+        else if escapingNixFiles != [ ] then
+          "a song reaches outside its own folder (a `../` path literal, CONTRACTS.md §5): ${builtins.toString escapingNixFiles}"
         else
           "no rice.nix or no livery.json in: ${builtins.toString incomplete}"
       }";

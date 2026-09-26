@@ -226,7 +226,7 @@
           # the walker is gone). What a host builds in is the host's selection,
           # not this check's business.
           song-shape = checks.songShape {
-            inherit (songbookLib) songNames strayNixFiles;
+            inherit (songbookLib) songNames strayNixFiles escapingNixFiles;
             songbook = ./song/songbook;
           };
           # The two livery fan-outs (baked Stylix, stage seed) agree under an

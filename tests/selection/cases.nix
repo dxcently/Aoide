@@ -797,4 +797,16 @@ selectionCases
     };
     lyra = false;
   };
+
+  # ── A song names nothing outside its folder (CONTRACTS.md §5) ──────────────
+  # Paired: the fixture songbook the cases above use has no escaping `.nix`, and
+  # the escaper fixture's `../` is named by the same scan `checks.song-shape`
+  # runs over the real songbook.
+  songbookEscape = import ../../lib/songbook.nix {
+    inherit lib;
+    songbook = ./songbook-escape;
+  };
+
+  songEscapeClean = builtins.concatStringsSep "," songbook.escapingNixFiles;
+  songEscapeFound = builtins.concatStringsSep "," songbookEscape.escapingNixFiles;
 }
