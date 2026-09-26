@@ -12182,7 +12182,7 @@ mod tests {
             });
         write_stage(&sessions_path(), &file).unwrap();
         for i in 0..n {
-            aoide_storage::pingback_remote::spool_event(id, key, json!({ "exited": { "code": i } }));
+            aoide_storage::pingback_remote::spool_event(id, key, 1_790_313_000, json!({ "exited": { "code": i } }));
         }
     }
 
