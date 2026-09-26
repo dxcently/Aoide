@@ -501,5 +501,47 @@ pub fn register_mail_ring(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::session_kill,
     ));
-
+    // The workspace ↔ project binding (core-seams §B). Appended last: the
+    // registry's order is byte-stable, so a family that is not moving a
+    // binary lands at the tail and the sort slot is the golden test's own
+    // sorted list.
+    r.insert(cmd!(
+        path: ["workspace", "set"],
+        summary: "Bind a compositor workspace to a project: sessions BORN on that workspace join it. Omit the workspace to use the focused one.",
+        args: [
+            arg!("workspace", "integer", false, "Workspace id (an integer, the same value sessions.json holds). Omit it to use the FOCUSED workspace, resolved through the compositor adapter — a host with no adapter gets a taught refusal asking for the number."),
+            arg!("project", "string", true, "Registered project name to bind. A project may have no folder; with --new an unregistered name is created name-only and bound in one call."),
+        ],
+        flags: [
+            flag!("new", "bool", "Create the project (name-only, no folder) when the name is not registered, then bind it; on a name that IS registered it just binds — it never edits that project. Never implicit — a typo must refuse, not register."),
+        ],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::workspace_set,
+        examples: [
+            "workspace set 3 aoide",
+            "workspace set cadenza --new",
+            "workspace set aoide",
+        ],
+    ));
+    r.insert(cmd!(
+        path: ["workspace", "clear"],
+        summary: "Unbind a compositor workspace. Sessions already born on it keep the default project they were stamped with — the binding is a birth default, not a live link.",
+        args: [arg!("workspace", "integer", true, "Workspace id to unbind.")],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::workspace_clear,
+        examples: ["workspace clear 3"],
+    ));
+    r.insert(cmd!(
+        path: ["workspace", "list"],
+        summary: "Every workspace binding plus every workspace a session on this host reports, sorted by id; --json is the shape a widget pad reads.",
+        args: [],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::workspace_list,
+        examples: ["workspace list", "workspace list --json"],
+    ));
 }

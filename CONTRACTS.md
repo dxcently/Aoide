@@ -2348,8 +2348,7 @@ a hand-edited record whose `path` does not match `roots[0]` is read, not
 silently rewritten.
 
 **A project with no folder.** A project entry MAY carry neither `path` nor
-`roots` (`{"name":"cadenza","path":"","roots":[]}`): `aoide project add NAME`
-with no path at all registers a NAME-ONLY project — a name a workspace can be
+`roots` (`{"name":"cadenza","path":"","roots":[]}`): `aoide project add NAME`with no path at all registers a NAME-ONLY project — a name a workspace can be
 bound to and a session can name explicitly, but that can never anchor a
 session by cwd, because `Project::roots()` is empty and the anchoring rung
 matches by root prefix. The cwd is NEVER a default root: registering the
@@ -2358,6 +2357,25 @@ meant it to. A folder is added later with `project add NAME ROOT` and removed
 again with `project remove NAME ROOT`, which leaves the project name-only
 once more. Nothing else about the record changes — it keeps its
 `autoResume`/`hosts`/`lead` state and its workspace bindings.
+
+**Also additive in v0: `workspaces` — the workspaces that SHOW this project.**
+A project entry MAY carry an optional `workspaces` array of INTEGER compositor
+workspace ids (`"workspaces":[3,5]`), the same integer
+`SessionRecord.workspace` already holds (Hyprland's named and special
+workspaces carry negative ids; a future virtual-desktop adapter maps to the
+same integers). `#[serde(default, skip_serializing_if = "Vec::is_empty")]`
+keeps it off the wire for a project no binding has touched — the
+`hosts`/`autoResume` discipline, so every `projects.json` written before this
+field stays byte-identical. Written by `workspace set` (under the same stage
+lock local roots go through; daemon-owned, like every other `projects.json`
+mutation) and by `workspace clear`. ONE INVARIANT: a workspace id appears in AT
+MOST ONE project — `workspace set` MOVES it off whatever project held it —
+while two workspaces may show the same project. A binding is not a root: it
+anchors nothing by cwd, a rootless project may carry one, and `project remove
+NAME ROOT` leaves bindings alone; the bare `project remove NAME` takes them
+with the record. Read with `aoide workspace list [--json]`, which merges the
+bindings with every workspace a local session reports (`observed` is `false`
+by name on a host where no session reports one).
 
 **Additive in v0 (P-D8, `docs/architecture/AOIDED.md`'s "L5"/"Open
 knobs"):** a project entry MAY also carry an optional `autoResume` (bool,

@@ -56,6 +56,7 @@ start at [[aoide-cli]] and the group pages linked below.
   `song/declared/livery.json`; songbook and drafts trees.
 - [[Graph-and-Conduct|Graph-and-Conduct]] — the session DAG: bare
   `graph`/`graph link` (the read/analysis lens), `project add/list/remove`,
+  `workspace set/clear/list` (the compositor workspace ↔ project binding),
   `session start/phase/end/hook/undying/permit/pending list/approve/deny/
   prune/reap`, bare `session` (the undying picker), bare `send`/`spawn`/
   `resurrect` (bare `resurrect` also walks up to a `.aoide/project.json`

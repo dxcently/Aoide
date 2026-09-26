@@ -58,8 +58,8 @@ unit test in `registry.rs` pins the sorted set of every command path, so
 adding, removing, or renaming a leaf shows as a deliberate diff against that
 snapshot.
 
-The command surface holds **60 leaves across the groups this page tracks**;
-`aoide schema --json | jq '.commands | length'` reports 80, since further
+The command surface holds **63 leaves across the groups this page tracks**;
+`aoide schema --json | jq '.commands | length'` reports 102, since further
 commands exist that are not yet covered here: the `inbox` group, `who`,
 `events tail`, `identity` (the keypair read surface — [[Pairing-Ceremony]]),
 the `melete` group (`status`/`graph`/`call`),
@@ -83,6 +83,7 @@ the groups it documents.
 | `mcp serve`, `daemon` | 2 | real |
 | `graph`, `graph link` | 2 | real — the read/analysis lens the `graph` prefix kept |
 | `project add/remove/list` | 3 | real |
+| `workspace set/clear/list` | 3 | real — the compositor workspace ↔ project binding: a workspace carries its project |
 | `session start/phase/end/hook/undying/permit/pending list/approve/deny/prune/reap` | 11 | real — `start`/`phase`/`end`/`hook` are `internal` (hook plumbing, hidden from `aoide guide`) |
 | `session` (bare — the undying picker) | 1 | real — cli+tty only; non-interactive reach steers to `session undying` |
 | `send`, `spawn`, `resurrect` | 3 | real |

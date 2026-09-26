@@ -22,8 +22,10 @@ use serde_json::Value;
 /// `aoided`, because a remote request just landed there) takes the local
 /// path directly — `daemon_dispatch` itself short-circuits to `None` on
 /// `Door::Daemon` for exactly this reentrancy reason; every other door is
-/// refused as local-only.
-fn local_daemon(inv: &Invocation) -> Option<Outcome> {
+/// refused as local-only. `pub(in crate::graph)` for the second family of
+/// stage mutations under the same rule — `workspace set/clear`
+/// (`graph/workspace.rs`), which carry their own command texts.
+pub(in crate::graph) fn local_daemon(inv: &Invocation) -> Option<Outcome> {
     match inv.door {
         Door::Daemon => None,
         Door::Cli => Some(
@@ -371,6 +373,7 @@ fn add_roots(name: &str, paths: &[String], new: bool, auto_resume: bool, host: O
                     auto_resume,
                     hosts: Vec::new(),
                     lead: None,
+                    workspaces: Vec::new(),
                 });
                 changed.push(if first.is_empty() {
                     format!("registered project {name} (no folder)")

@@ -1437,6 +1437,21 @@
   binding or an explicit `session project NAME` alone, and a folder is
   added later with `project add NAME ROOT`. `project list` prints its name
   with no path column.
+- **A binding is stored on the project, and only one project may hold a
+  workspace.** `Project.workspaces` (`aoide-storage::records`, additive,
+  `skip_serializing_if` keeps it off the wire when empty — every
+  `projects.json` predating it stays byte-identical) is the whole store.
+  `workspace set` is the ONLY writer that adds: it MOVES the id off whatever
+  project held it, in the SAME `with_stage_lock` hold as the `--new`
+  existence check, so two racing calls can never both register a name and no
+  path can leave one id in two projects. `binding_for` (`graph/model.rs`) is
+  the ONE lookup — the binder, the lister and the resolver's workspace rung
+  all read it, so they cannot disagree about what "bound" means. A binding is
+  NOT a root: it anchors nothing by cwd (a rootless project may carry one),
+  `project remove NAME ROOT` leaves it alone, and only the bare `project
+  remove NAME` takes it — with the record it lives on, because that is where
+  it lives. `workspace list` merges bindings with the workspaces local
+  sessions report and never writes.
 - **`project add`/`project edit`/`project remove` are daemon-owned atomic
   mutations (`manage.rs`'s `local_daemon`)** — the same door-gated shape
   as `actions.rs`'s `assign_project`/`session_kill`: a `Door::Cli` caller

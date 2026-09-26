@@ -289,6 +289,12 @@ mod tests {
         // `status`): one row per registered policy, policy METADATA only,
         // read by the broker over the socket. Sort slot: between
         // `secrets.set-totp` and `secrets.watch`.
+        //
+        // Bumped by 3 for the workspace ↔ project binding
+        // (`workspace.set`/`workspace.clear`/`workspace.list`, core-seams
+        // design §B) — the binding that makes a workspace carry a project.
+        // Registered from `aoide-conduct`'s `commands/graph.rs`, appended at
+        // that `register()`'s tail; the sort slot falls after `usage`.
         let mut expected: Vec<&str> = vec![
             "a2a.serve",
             "adapter.melete",
@@ -389,6 +395,9 @@ mod tests {
             "spawn",
             "update",
             "usage",
+            "workspace.clear",
+            "workspace.list",
+            "workspace.set",
         ];
         expected.sort();
 

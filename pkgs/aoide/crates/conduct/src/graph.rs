@@ -251,7 +251,14 @@ pub use self::who::{glyph, session_roster};
 // (`node_list.rs`'s module doc) — `node status` (aoide-client) keeps the
 // deep per-node view.
 pub use self::node_list::node_list;
-pub use self::window::{focus_session, focus_window, run_hypr_window_listener, FocusError};
+pub use self::window::{focus_session, focus_window, focused_workspace, run_hypr_window_listener, FocusError};
+// `workspace set/clear/list` — the compositor workspace ↔ project binding
+// (`graph/workspace.rs`'s own module doc). Bindings live on the project
+// (`Project.workspaces`), so a removed project takes its own with it; the
+// one compositor-shaped fact (`focused_workspace`) is re-exported above
+// beside the other window-adapter reads.
+mod workspace;
+pub use self::workspace::{workspace_clear, workspace_list, workspace_set};
 
 // Storage/time passthroughs root's `a2a.rs` / `commands/{a2a,usage}.rs` still
 // reach at `crate::graph::{load_stage, now_iso_utc, sessions_path,

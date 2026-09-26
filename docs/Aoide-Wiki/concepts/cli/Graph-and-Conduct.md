@@ -168,6 +168,42 @@ aoide project list [--json]
   `data: {projects: [...]}`.
 - **Notes:** read-only.
 
+### aoide workspace set / clear / list
+
+```
+aoide workspace set [<workspace>] <project> [--new] [--json]
+aoide workspace clear <workspace> [--json]
+aoide workspace list [--json]
+```
+
+The binding between a compositor **workspace** (an integer id, exactly the
+value a session's `workspace` already holds) and a **project**: a workspace
+carries its project, so sessions born on a bound workspace join it.
+
+- `set` binds. `<workspace>` may be omitted, and then the FOCUSED workspace is
+  resolved through the compositor adapter (`hyprctl activeworkspace -j`) in the
+  caller's process; a host with no adapter gets a taught refusal asking for the
+  number (exit 2, `data.reason: "no-compositor"`). An unregistered project is
+  refused by name (exit 1, `data.reason: "unknown-project"`, nothing written) —
+  `--new` means it explicitly: it registers a NAME-ONLY project and binds it in
+  one call, and on a name that already exists it just binds (it never edits
+  that project).
+- ONE INVARIANT: a workspace id appears in at most one project. `set` MOVES it
+  off whatever project held it; two workspaces may show the same project; and
+  a binding is not a folder — a name-only project may carry one.
+- `clear` unbinds. Sessions already born on that workspace keep the default
+  project they were stamped with: the binding is a birth default, never a live
+  link.
+- **Where it lives:** `projects.json`'s `workspaces` array, on the project —
+  so removing a whole project takes its bindings with the record, while
+  removing a folder leaves them alone. Both mutations are DAEMON-OWNED, like
+  `project add/edit/remove` (`aoided must be running for project management`
+  when none answers).
+- `list` is a read (no lock, no daemon, no write): every binding plus every
+  workspace a local session reports, sorted by id, with `"observed": false` and
+  a named `reason` on a host where no session reports one. `--json` publishes
+  `data.workspaces[].{workspace, project}` — no `project` key on an unbound id.
+
 ### aoide graph link
 
 ```

@@ -109,6 +109,16 @@ pub fn lead_over<'a>(
         .filter(|l| ids.contains(l) && *l != session.session_id)
 }
 
+/// The project a compositor workspace is bound to ("workspace N shows
+/// project X"), or `None` when the workspace is unbound. The ONE binding
+/// lookup — `workspace set/clear/list`, the default-project stamp and the
+/// resolver's workspace rung all read it, so they cannot disagree about what
+/// "bound" means. A workspace id lives in at most one project, so the first
+/// match is the only match.
+pub fn binding_for(ws: i64, projects: &[Project]) -> Option<usize> {
+    projects.iter().position(|p| p.workspaces.contains(&ws))
+}
+
 /// The anchoring project for a cwd: the longest matching root wins across
 /// EVERY root of EVERY project, so nested projects and a project's own
 /// second root anchor correctly. Returns an index into `projects`.

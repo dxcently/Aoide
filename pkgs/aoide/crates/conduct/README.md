@@ -36,6 +36,33 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
 
 ## Named seams (what it exposes)
 
+- **The workspace ↔ project binding (§B)**: `graph/workspace.rs` implements
+  `workspace set [<workspace>] <project> [--new]`, `workspace clear
+  <workspace>` and `workspace list [--json]`, over `Project.workspaces`
+  (`aoide-storage`'s record, `CONTRACTS.md` §4). A **workspace** is the
+  compositor's own workspace id — an integer, exactly what
+  `SessionRecord.workspace` already holds — and a **binding** is "workspace N
+  shows project X", stored ON the project. One invariant, enforced in the one
+  mutation: a workspace id appears in at most one project, so `set` MOVES it
+  off whatever project held it, while two workspaces may show the same project.
+  `set` refuses an unregistered project by name; `--new` is the explicit way to
+  mean it and creates a NAME-ONLY project (a project may have no folder) and
+  binds it in one call. `clear` unbinds; sessions already born on that
+  workspace keep the default they were stamped with, because a binding is a
+  label plus a birth default and never a live link. Both mutations are
+  DAEMON-OWNED (`manage.rs::local_daemon`, the same door gate `project
+  add/edit/remove` hold): a `Door::Cli` caller forwards to `aoided` and errors
+  when none answers. The ONE compositor-shaped half is resolving an OMITTED
+  `<workspace>`: `window::focused_workspace` reads `hyprctl activeworkspace -j`
+  through the same `HYPRLAND_INSTANCE_SIGNATURE` gate as every other adapter
+  read, in the CALLER's process — `aoided` is a service with no compositor
+  environment — and the forwarded argv carries the resolved integer, never the
+  word "focused". With no adapter the caller gets a taught refusal asking for
+  the number (exit 2). `list` is a READ (no lock, no daemon, no write): the
+  bindings plus every workspace a local session reports, sorted by id, with
+  `"observed": false` and a named `reason` on a host where no session reports
+  one — §A's taught-refusal shape without a refusal.
+
 - `graph::session_bind` implements `session bind --id <session> --agent-id
   <key>` through aoided. Only local CLI/Daemon doors may bind; the CLI does
   not fall back when aoided is absent. The key uses `valid_node_name` grammar

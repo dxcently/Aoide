@@ -94,6 +94,31 @@ pub(crate) fn hyprctl_clients() -> Option<Vec<Value>> {
     }
 }
 
+/// The compositor's currently FOCUSED workspace id — the one fact an omitted
+/// `<workspace>` needs (`aoide workspace set <project>`, `aoide workspace root`).
+/// `hyprctl activeworkspace -j`'s `id`, read through the same
+/// `HYPRLAND_INSTANCE_SIGNATURE` gate as [`hyprctl_clients`]. `None` whenever
+/// the compositor cannot be consulted authoritatively — no signature, a
+/// missing/failed `hyprctl`, or JSON with no integer `id` — which the caller
+/// turns into a taught error asking for the number, never a guess. Note it is
+/// the CALLER's process that can answer this: `aoided` runs as a service with
+/// no compositor environment, so a forwarded invocation always carries a
+/// resolved integer.
+pub fn focused_workspace() -> Option<i64> {
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
+        return None;
+    }
+    let out = std::process::Command::new("hyprctl")
+        .args(["activeworkspace", "-j"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let v: Value = serde_json::from_slice(&out.stdout).ok()?;
+    v.get("id").and_then(Value::as_i64)
+}
+
 /// A structured failure from [`focus_window`]. `reason` is a stable machine
 /// code (`hyprctl-unavailable` / `hyprctl-failed` / `window-not-found` /
 /// `no-window-address`) reused verbatim by every focus-jump caller's own

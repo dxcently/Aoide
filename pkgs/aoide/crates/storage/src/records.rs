@@ -72,6 +72,16 @@ pub struct Project {
     /// until it is replaced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lead: Option<String>,
+    /// The compositor workspace ids bound to this project ("workspace N shows
+    /// project X"). Additive and v0-safe: written only when non-empty
+    /// (`skip_serializing_if = "Vec::is_empty"`, the `hosts` discipline), so
+    /// every `projects.json` predating the field stays byte-identical. A
+    /// workspace id appears in AT MOST ONE project — `workspace set` moves it
+    /// off any other — while two workspaces may show the same project. Bare
+    /// `project remove <name>` takes the bindings with the record; removing a
+    /// root does not touch them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<i64>,
 }
 
 /// One registered node a [`Project`] is ORGANIZATIONALLY a member of (P-14
@@ -946,6 +956,40 @@ mod tests {
             raw,
             "an existing projects.json round-trips byte-identical"
         );
+    }
+    #[test]
+    fn legacy_project_without_workspaces_is_byte_identical() {
+        // S1: `Project.workspaces` is additive and written only when non-empty
+        // (the `hosts` discipline), so a project that predates it — and a
+        // project the binder never touched — serializes byte-for-byte as
+        // before. No `"workspaces":[]` ever appears on the wire.
+        let raw = r#"{"name":"aoide","path":"/home/x/Aoide","roots":["/home/x/Aoide"]}"#;
+        let p: Project = serde_json::from_str(raw).unwrap();
+        assert!(p.workspaces.is_empty());
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(!json.contains("workspaces"), "serialised: {json}");
+        assert_eq!(json, raw, "an untouched legacy project round-trips byte-identical");
+    }
+    #[test]
+    fn a_projects_workspaces_round_trip_in_binding_order() {
+        // Bindings are a list of integer workspace ids; two workspaces may
+        // show one project, and the order they were bound in is what the
+        // record holds (the id-move invariant lives in the mutation, not in
+        // the field).
+        let p = Project {
+            name: "aoide".into(),
+            path: "/a".into(),
+            workspaces: vec![5, 3],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(json.contains(r#""workspaces":[5,3]"#), "serialised: {json}");
+        let back: Project = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.workspaces, vec![5, 3]);
+
+        // A LEGACY record reads as unbound — never a dangling default.
+        let legacy: Project = serde_json::from_str(r#"{"name":"a","path":"/a"}"#).unwrap();
+        assert!(legacy.workspaces.is_empty());
     }
     #[test]
     fn project_hosts_round_trip_and_stay_off_the_wire_when_empty() {
