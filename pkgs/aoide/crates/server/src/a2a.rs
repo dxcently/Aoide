@@ -865,9 +865,10 @@ fn claimable_caller<'a>(
 /// predicate the client refuses its own unruly claim with) and a bad value is
 /// `-32602` — never silently dropped, per CONTRACTS.md §6. Refusing is the
 /// CALLER's decision, not this function's: `message_send` applies that error
-/// on the spawn side only, since the Inject arm consumes the claim nowhere yet
-/// (S5 threads it) and a malformed one there is ignored exactly as an absent
-/// one is.
+/// on the spawn side only, since the Inject arm consumes the claim as
+/// [`remote_parent_match`]'s comparison against a target record — where a
+/// malformed value is false rather than refused, exactly as an absent one is
+/// (S5).
 fn claimed_remote_parent(
     caller: Option<SignedCaller<'_>>,
     claim: Option<&str>,
@@ -895,6 +896,62 @@ fn claimed_remote_parent(
         session_id: claim.to_string(),
         extra: Default::default(),
     }))
+}
+
+/// Does THIS door's target prove the caller is its remote parent (P-RSA S5,
+/// CONTRACTS.md §6)? Pure over exactly three values, all of them facts the door
+/// already holds: the caller [`verify_signed_request`] proved (or `None` on
+/// every weaker rung), the caller's own `aoide/from` claim, and the TARGET
+/// record's stored `remoteParent` ([`session_remote_parent`]).
+///
+/// True only for all three at once, and the two equalities are each load-bearing:
+///
+/// - **`key` equality** is the whole security argument. The stored key was
+///   written by this door's own spawn path from the key that verified THAT
+///   request ([`claimed_remote_parent`]), so a caller can only ever match a
+///   child stamped with its own key — no node can steer another node's
+///   children, and no header, body field or registry rename changes that. The
+///   stored `node` NAME is deliberately not consulted: it is a label that
+///   follows a rename (the reader resolves the current name from the key, §4),
+///   while the key is the identity.
+/// - **`sessionId` equality** pins it to the ONE session the caller claims to
+///   have spawned. Without it, any holder of the key — i.e. the node itself,
+///   on any request — could autogate into every child it ever stamped, not
+///   just the one it is naming.
+///
+/// A `None` on either side is `false`, never a wildcard: an unsigned caller has
+/// no verified key to compare ([`claimable_caller`] hands one over for the
+/// signature rung only), a request with no claim asks for nothing, and a target
+/// with no `remoteParent` — a local session, or one spawned by anyone else —
+/// has nothing to match. Pure, so the whole table is provable without a socket,
+/// a stage file or a live registry entry.
+fn remote_parent_match(
+    caller: Option<&SignedCaller<'_>>,
+    claim: Option<&str>,
+    target: Option<&RemoteParent>,
+) -> bool {
+    match (caller, claim, target) {
+        (Some(caller), Some(claim), Some(target)) => {
+            target.key == caller.key && target.session_id == claim
+        }
+        _ => false,
+    }
+}
+
+/// The `remoteParent` a session record carries, by id — the target-side input
+/// of [`remote_parent_match`], read off `sessions.json` exactly as
+/// [`session_ref_lookup`] reads its own fields (same stage file, same one-file
+/// read per resolved id). `None` covers an unknown id, a record with no such
+/// field, and an unreadable stage: all three are "this door can prove no remote
+/// parent for that target", i.e. the same non-match, never a refusal.
+///
+/// One extra read, paid ONLY where it can change an outcome — inside the Inject
+/// arm, and only for a request that both carried a claim and proved a
+/// signature. Every other inject (and every spawn) reads exactly what it read
+/// before this phase.
+fn session_remote_parent(id: &str) -> Option<RemoteParent> {
+    let sf: SessionsFile = load_stage(&sessions_path()).ok()?;
+    sf.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.remote_parent.clone())
 }
 
 fn unix_ts_now() -> u64 {
@@ -1633,10 +1690,14 @@ fn message_send(
     // a signed caller's malformed one, never a silent drop, since the value
     // rode inside the signature's own body digest and a caller that signed it
     // meant it. That refusal is applied on the SPAWN side only (below, after
-    // the uniform-response guard): the Inject arm consumes the claim nowhere
-    // until S5 threads it, so a malformed one there takes the same path an
-    // absent one does — and the client refuses its OWN unruly claim before
-    // signing it (`resolve_remote_parent_from`), so silence here hides no bug.
+    // the uniform-response guard), because the spawn is the arm that BUILDS a
+    // value out of it; the Inject arm consumes the claim as a COMPARISON
+    // instead (S5, in the Inject arm below), where a malformed one simply
+    // never matches — never a refusal, and never a new failure for a request
+    // that used to be answered. The client lets no unruly claim reach this door
+    // either way — `node spawn` refuses the call, `send` drops the claim and
+    // says so on one warning line (`resolve_remote_parent_from`, P-RSA S5) — so
+    // silence here hides no bug.
     let claimed_identity = claimable_caller(resolved_node, signed_caller);
     if claimed_identity.is_none() && claimed_from.is_some() {
         let _ = audit(
@@ -1697,7 +1758,9 @@ fn message_send(
     // context_id.is_none()`, the exact negation of the guard's inject one), so
     // a request can never classify "inject" for the guard and "spawn" here. An
     // inject-shaped request that carried a malformed claim proceeds exactly as
-    // one that carried none — the claim is not consumed on that arm yet.
+    // one that carried none: it reaches the Inject arm, whose
+    // `remote_parent_match` (S5) is false for either shape, so neither takes
+    // the remote-parent delivery.
     let spawn_side = spawn_asked || context_id.is_none();
     let remote_parent = match claim_build {
         Ok(parent) => parent,
@@ -1717,6 +1780,44 @@ fn message_send(
 
     match decide_send_action(context_id.as_deref(), spawn_asked, spawn_agent, session_ref_lookup) {
         SendAction::Inject { session_id } => {
+            // P-RSA S5: the `aoide/from` claim, CONSUMED here. The Spawn arm
+            // stamps it onto the child it creates; THIS arm asks the mirror
+            // question of the record it is about to write into — is this
+            // caller the remote parent of that one? `remote_parent_match` is
+            // the whole predicate (signature rung + stored `remoteParent.key`
+            // == the caller's verified key + stored `sessionId` == the claim),
+            // and the `is_some_and` around it is the third of those: with no
+            // claim there is nothing to match, and the stage read
+            // (`session_remote_parent`) is skipped entirely, so an ordinary
+            // inject pays nothing for this phase.
+            //
+            // A MALFORMED claim needs no separate handling: a value outside
+            // `valid_claimed_session_id` was never stamped as any record's
+            // `sessionId` by this door, so equality is false — the claim fails
+            // to match exactly as an absent one does, which is the Inject
+            // arm's one-and-only reading of a bad claim (§6: the `-32602`
+            // stays spawn-side, where the value is actually consumed).
+            let remote_parent_hit = claimed_from.as_deref().is_some_and(|claim| {
+                remote_parent_match(
+                    claimed_identity.as_ref(),
+                    Some(claim),
+                    session_remote_parent(&session_id).as_ref(),
+                )
+            });
+            if remote_parent_hit {
+                let _ = audit(
+                    audit_log,
+                    Door::A2a,
+                    EventClass::Audit,
+                    "a2a.message/send",
+                    "autogate-remote-parent",
+                    &format!(
+                        "delivering to `{session_id}` without pending — the caller proved the \
+                         remote parent of that session (remoteParent.sessionId `{}`)",
+                        claimed_from.as_deref().unwrap_or_default(),
+                    ),
+                );
+            }
             // `should_deliver_now(ConnOrigin::Unknown, _)` is unconditionally
             // `false` — it ignores `autogate_match` entirely (the SAME
             // fail-safe arm `effective_origin`'s own token coercion already
@@ -1729,11 +1830,27 @@ fn message_send(
             // like-for-like restoration `sig_autogate` exists for. A signed,
             // non-autogate node has no such exemption: it gets the downgrade
             // unconditionally, which is the narrowing itself.
+            //
+            // A REMOTE-PARENT MATCH (P-RSA S5) rides exactly the same two
+            // rails as `sig_autogate`, and needs BOTH of them: it exempts the
+            // downgrade here (otherwise the ssh `-L` shape — which classifies
+            // as Loopback, see `origin_for_inject` — would coerce to
+            // `Unknown`, where `autogate_match` is ignored outright and the
+            // match would count for nothing) and it joins `autogate_match`
+            // below (otherwise a genuinely non-loopback origin would take
+            // `ConnOrigin::Remote`'s `autogate_match` arm and pend). It
+            // overrides neither question: a door-wide bearer that does not
+            // classify `Valid` still coerces through `effective_origin`, and
+            // the node's own `autogate` flag never had to be on for a parent
+            // to steer the child it spawned — the same independence `send_gate`
+            // gives the LOCAL parent rule (`--yes` ▸ global switch ▸
+            // parent-of-target), which delivers without pending whether the
+            // box-wide autogate switch is on or off.
             let eff_origin = origin_for_inject(
                 effective_origin(origin, token_configured, token_state),
-                signed_caller.is_some() && !sig_autogate,
+                signed_caller.is_some() && !sig_autogate && !remote_parent_hit,
             );
-            let deliver_now = should_deliver_now(eff_origin, autogate_match);
+            let deliver_now = should_deliver_now(eff_origin, autogate_match || remote_parent_hit);
             // The `from` attribution rides ONLY the QUEUED path (P-P3
             // decision 7: "pending-queue entries a node's send creates").
             // `session_send`'s own `from` mechanism ALSO prefixes an
@@ -8131,6 +8248,369 @@ mod tests {
             Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
             None => std::env::remove_var("AOIDE_STATE_DIR"),
         }
+    }
+
+    // ── P-RSA S5: a remote parent steers its own child without pending ───────
+    //
+    // The claim `node spawn` stamped on the child (S3) is read BACK on the
+    // Inject arm: a caller whose verified key and claimed session id both equal
+    // the target record's `remoteParent` delivers WITHOUT pending — audited
+    // `autogate-remote-parent` — and every other shape is byte-for-byte today's
+    // result. The table below is the whole predicate: signed and unsigned, key
+    // match and mismatch, session match and mismatch, and the node's own
+    // `autogate` flag on and off.
+
+    const PARENT_KEY: &str = "aa11cc22dd33ff44";
+    const PARENT_SESSION: &str = "par-1";
+    const REMOTE_CHILD: &str = "remote-child-1";
+
+    /// Write the S5 fixture into an ALREADY-prepared `root`: one registered,
+    /// verified node (`node_name`, whose stored key is `key`), and one
+    /// conductable session ([`REMOTE_CHILD`]) whose `remoteParent` names that
+    /// node's key and `parent_session` — the exact shape S3's
+    /// `stamp_remote_parent` leaves behind. Points `AOIDE_STAGE_DIR`/
+    /// `AOIDE_STATE_DIR`/`XDG_RUNTIME_DIR` at the box and clears the ambient
+    /// autogate/session vars, so the caller must already hold `env_lock`.
+    ///
+    /// Returns `(stage, audit_log, listener)`: the listener sits at the child's
+    /// own control socket, so a delivery is observable as bytes arriving and a
+    /// held-pending send as nothing arriving (bound NONBLOCKING by the callers
+    /// that expect silence, like every other pending-path test here).
+    fn write_remote_parent_box(
+        root: &std::path::Path,
+        node_name: &str,
+        key: &str,
+        parent_session: &str,
+        autogate: bool,
+    ) -> (std::path::PathBuf, std::path::PathBuf, UnixListener) {
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", root);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        let mut node = fixture_node(node_name, "http://192.0.2.51:8710/", autogate);
+        node.verified = true;
+        node.pubkey = Some(key.to_string());
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        let socket = aoide_conduct::graph::conduct_socket_path(REMOTE_CHILD);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        let mut child = conductable_session(REMOTE_CHILD, &socket);
+        child.remote_parent = Some(RemoteParent {
+            node: node_name.to_string(),
+            key: key.to_string(),
+            session_id: parent_session.to_string(),
+            extra: Default::default(),
+        });
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".to_string(), sessions: vec![child] },
+        )
+        .unwrap();
+        (stage, root.join("log"), listener)
+    }
+
+    /// One inject-shaped `message/send` body for the S5 table, naming
+    /// [`REMOTE_CHILD`] and carrying `claim` as `metadata["aoide/from"]` when
+    /// given — the one place `parse_message_send_params` reads it.
+    fn remote_parent_body(claim: Option<&str>) -> Value {
+        let mut message = json!({
+            "parts": [{ "kind": "text", "text": "steer it" }],
+            "contextId": REMOTE_CHILD,
+        });
+        if let Some(claim) = claim {
+            message["metadata"] = json!({ aoide_protocol::wire::FROM_SESSION_KEY: claim });
+        }
+        json!({ "message": message })
+    }
+
+    fn remote_parent_box_root(tag: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    /// Restore the two stage/state env vars an S5 test saved on entry.
+    fn restore_stage_state(saved_stage: Option<String>, saved_state: Option<String>) {
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
+    /// The whole predicate, table-tested against plain values (no stage file,
+    /// no socket, no registry): every `None` is `false`, and of the two
+    /// equalities the KEY is the security argument while the session id pins it
+    /// to one child.
+    #[test]
+    fn remote_parent_match_needs_a_signed_caller_its_key_and_its_session() {
+        let target = RemoteParent {
+            node: "nodeb".to_string(),
+            key: PARENT_KEY.to_string(),
+            session_id: PARENT_SESSION.to_string(),
+            extra: Default::default(),
+        };
+        let key = PARENT_KEY.to_string();
+        let caller = SignedCaller { name: "nodeb", key: &key };
+
+        assert!(
+            remote_parent_match(Some(&caller), Some(PARENT_SESSION), Some(&target)),
+            "signed + key match + session match is the one true row"
+        );
+        assert!(!remote_parent_match(None, Some(PARENT_SESSION), Some(&target)), "unsigned: no verified key to compare");
+        assert!(
+            !remote_parent_match(Some(&SignedCaller { name: "nodeb", key: "ff99" }), Some(PARENT_SESSION), Some(&target)),
+            "another node's key never matches — a node steers only children stamped with its OWN key"
+        );
+        assert!(
+            !remote_parent_match(Some(&caller), Some("par-2"), Some(&target)),
+            "a claim naming some OTHER session of the same node is not this child"
+        );
+        assert!(
+            !remote_parent_match(Some(&caller), Some("not/a/session"), Some(&target)),
+            "a malformed claim matches nothing — no separate refusal on this arm (§6)"
+        );
+        assert!(!remote_parent_match(Some(&caller), None, Some(&target)), "no claim, nothing asked for");
+        assert!(!remote_parent_match(Some(&caller), Some(PARENT_SESSION), None), "a target with no remoteParent");
+        assert!(
+            remote_parent_match(Some(&SignedCaller { name: "renamed-nodeb", key: &key }), Some(PARENT_SESSION), Some(&target)),
+            "the stored NAME is a label, not the identity: a renamed record still matches on the key"
+        );
+    }
+
+    /// The slice's headline, with the node's own `autogate` flag OFF — the
+    /// shape a real pair is in. The origin is a genuine non-loopback address, so
+    /// nothing but the remote-parent match can deliver this: the caller is a
+    /// signed, NON-autogate node, which [`origin_for_inject`] would otherwise
+    /// coerce to `Unknown` (where `autogate_match` is ignored outright) and
+    /// which would pend even on `Remote`'s own arm.
+    #[test]
+    fn a_remote_parent_steers_its_child_without_pending_with_autogate_off() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = remote_parent_box_root("s5-parent-off");
+        let (stage, audit_log, listener) =
+            write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, false);
+
+        let acc = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            use std::io::Read as _;
+            let mut buf = Vec::new();
+            let _ = conn.read_to_end(&mut buf);
+            buf
+        });
+
+        let key = PARENT_KEY.to_string();
+        let result = message_send(
+            &remote_parent_body(Some(PARENT_SESSION)),
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Remote("192.0.2.51".parse().unwrap()),
+            "",
+            None,
+            Some(SignedCaller { name: "parent-node", key: &key }),
+        );
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert_eq!(
+            String::from_utf8(acc.join().unwrap()).unwrap(),
+            "steer it\r",
+            "the parent's steer is DELIVERED, not held pending"
+        );
+
+        let log = std::fs::read_to_string(&audit_log).unwrap();
+        assert!(log.contains("autogate-remote-parent"), "its own audit label: {log}");
+        assert!(
+            !stage.join("pending.json").exists(),
+            "a delivered send never queues"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    /// The same match with the node marked `autogate: true`: the setting the
+    /// existing door already honours must neither be required nor defeated —
+    /// a parent steers its child either way, exactly as the LOCAL parent rule
+    /// delivers regardless of the box-wide switch.
+    #[test]
+    fn a_remote_parent_steers_its_child_without_pending_with_autogate_on() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = remote_parent_box_root("s5-parent-on");
+        let (stage, audit_log, listener) =
+            write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, true);
+
+        let acc = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            use std::io::Read as _;
+            let mut buf = Vec::new();
+            let _ = conn.read_to_end(&mut buf);
+            buf
+        });
+
+        let key = PARENT_KEY.to_string();
+        let result = message_send(
+            &remote_parent_body(Some(PARENT_SESSION)),
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Remote("192.0.2.51".parse().unwrap()),
+            "",
+            None,
+            Some(SignedCaller { name: "parent-node", key: &key }),
+        );
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert_eq!(String::from_utf8(acc.join().unwrap()).unwrap(), "steer it\r");
+        assert!(std::fs::read_to_string(&audit_log).unwrap().contains("autogate-remote-parent"));
+        assert!(!stage.join("pending.json").exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    /// End to end through the REAL signature (not the [`caller`] shorthand): the
+    /// key the match reads is the one `verify_signed_request` PROVED, so a
+    /// genuinely signed node whose own key is the child's `remoteParent.key`
+    /// delivers — the same round trip S3's spawn-side tests drive, on the arm
+    /// that reads the claim back.
+    #[test]
+    fn a_genuinely_signed_remote_parent_steers_its_child_without_pending() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = remote_parent_box_root("s5-signed");
+        // The record's `remoteParent.key` must be the key that will VERIFY —
+        // `verify_signed_request` resolves by pubkey, so the fixture node takes
+        // the minted identity's own key before the request is built.
+        let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
+        let pubkey = kp.info().pubkey_hex.clone();
+        let (stage, audit_log, listener) =
+            write_remote_parent_box(&root, "yomi-strix", &pubkey, PARENT_SESSION, false);
+
+        let body = remote_parent_body(Some(PARENT_SESSION));
+        let body_bytes = serde_json::to_vec(&body).unwrap();
+        let now = 1_800_000_000_i64;
+        let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("s5-signed"));
+        let (signed_name, signed_key) = match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
+            other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
+        };
+
+        let acc = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            use std::io::Read as _;
+            let mut buf = Vec::new();
+            let _ = conn.read_to_end(&mut buf);
+            buf
+        });
+        let result = message_send(
+            &body,
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Remote("192.0.2.51".parse().unwrap()),
+            "",
+            None,
+            Some(SignedCaller { name: &signed_name, key: &signed_key }),
+        );
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert_eq!(
+            String::from_utf8(acc.join().unwrap()).unwrap(),
+            "steer it\r",
+            "the key that VERIFIED the signature matched the child's remoteParent.key"
+        );
+        assert!(std::fs::read_to_string(&audit_log).unwrap().contains("autogate-remote-parent"));
+        assert!(!stage.join("pending.json").exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    /// Every non-match is today's result, byte for byte: the same response a
+    /// request with NO claim gets (only the wall-clock stamp can differ between
+    /// any two calls), the same held-pending decision, and no
+    /// `autogate-remote-parent` line. One baseline and four non-matches: a
+    /// session mismatch, a key mismatch, a malformed claim (the §6 rule: a bad
+    /// value on this arm matches nothing and is never a refusal), and an
+    /// unsigned caller carrying a perfectly matching claim.
+    #[test]
+    fn a_remote_parent_mismatch_leaves_todays_result_byte_for_byte() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = remote_parent_box_root("s5-mismatch");
+        let (stage, audit_log, listener) =
+            write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, false);
+        listener.set_nonblocking(true).unwrap();
+
+        let origin = ConnOrigin::Remote("192.0.2.51".parse().unwrap());
+        let key = PARENT_KEY.to_string();
+        let send = |claim: Option<&str>, caller_key: Option<&str>| {
+            let caller = caller_key.map(|k| SignedCaller { name: "parent-node", key: k });
+            message_send(&remote_parent_body(claim), &audit_log, "", "", origin, "", None, caller)
+                .expect("every non-match is answered exactly as before this phase")
+        };
+        // The baseline IS today's shape: no claim at all.
+        let baseline = send(None, Some(&key));
+        // Only the seconds-resolution stamp can differ between two calls.
+        let undated = |v: &Value| {
+            let mut v = v.clone();
+            v["status"].as_object_mut().unwrap().remove("timestamp");
+            v
+        };
+
+        for (label, claim, caller_key) in [
+            ("a session mismatch", Some("par-2"), Some(&key)),
+            // Same node name, a DIFFERENT key: the record was stamped by
+            // another node's spawn, and only the key equality can tell.
+            ("a key mismatch", Some(PARENT_SESSION), Some(&"ff99".to_string())),
+            ("a malformed claim", Some("not/a/session"), Some(&key)),
+        ] {
+            let got = send(claim, caller_key.map(String::as_str));
+            assert_eq!(undated(&got), undated(&baseline), "{label}: response changed");
+        }
+        // The unsigned row needs its claim to MATCH the record, or the test
+        // would pass for the wrong reason: same key, same session id, no
+        // signature rung — and still nothing but the ignore audit.
+        let unsigned = send(Some(PARENT_SESSION), None);
+        assert_eq!(undated(&unsigned), undated(&baseline), "an unsigned caller's matching claim changes nothing");
+
+        assert!(listener.accept().is_err(), "every non-match is held pending, never delivered");
+        let pending: Value =
+            serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
+        let entries = pending["pending"].as_array().unwrap();
+        assert_eq!(entries.len(), 5, "the baseline and all four non-matches reached the queue, none was dropped");
+        for entry in entries {
+            assert_eq!(entry["sessionId"], REMOTE_CHILD);
+        }
+
+        let log = std::fs::read_to_string(&audit_log).unwrap();
+        assert!(
+            !log.contains("autogate-remote-parent"),
+            "no non-match may claim the remote-parent label: {log}"
+        );
+        assert!(
+            log.contains("ignored-unsigned-from"),
+            "the unsigned caller's claim is ignored, and said so: {log}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
     }
 
     // ── Uniform-response guard, #50 (CONTRACTS.md §6 amendment, 2026-08-20) ──

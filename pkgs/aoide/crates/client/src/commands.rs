@@ -1275,7 +1275,7 @@ fn live_local_session(id: &str) -> bool {
     })
 }
 
-/// Resolve the caller-side remote parent for `node spawn` (P-RSA §4.1): an
+/// Resolve the caller-side remote parent for a NODE call (P-RSA §4.1) — an
 /// explicit `--parent` naming a live local record, else the KERNEL-ATTESTED
 /// caller when the daemon can prove one
 /// (`aoide_storage::attest::attested_caller` — needs the daemon's live seal
@@ -1284,16 +1284,24 @@ fn live_local_session(id: &str) -> bool {
 /// node being the trust unit); a `--parent` that names no live record is
 /// refused, never silently replaced by the attestation.
 ///
+/// Two callers, ONE resolution: `node spawn --parent <id>` (the `remoteParent`
+/// stamp on the child it creates) and `send --to <node>/<query>` (P-RSA S5,
+/// which has no `--parent` flag and passes `None` — the parent that steers a
+/// child it spawned is the same caller the spawn path stamped, so both read
+/// this one function instead of re-deriving it). `pub` for exactly that
+/// reason: a second spelling of "which claim may this node make" is how the
+/// two sides of the wire drift apart.
+///
 /// `AOIDE_SESSION_ID` is NEVER read here: an ambient id is exactly the Osaka
 /// failure the lane exists to close, and the daemon-side fix for it clears
-/// that var on every door-spawned child. With no parent resolvable the spawn
-/// still proceeds — it is simply a top-level remote spawn (`parent: none
+/// that var on every door-spawned child. With no parent resolvable the call
+/// still proceeds — it is simply a top-level spawn (`parent: none
 /// (unattested)`), never a spawn under a guessed session.
 ///
 /// The one place this node decides what it will claim: whatever wins above
 /// must also BE a legal claim (`resolve_remote_parent_from` carries the rule),
 /// so no caller of this function can sign a value the far door would refuse.
-fn resolve_remote_parent(explicit: Option<&str>) -> Result<Option<String>, String> {
+pub fn resolve_remote_parent(explicit: Option<&str>) -> Result<Option<String>, String> {
     let attested = aoide_storage::attest::attested_caller(std::process::id() as i32)
         .map(|(id, _origin)| id);
     resolve_remote_parent_from(attested, explicit)
@@ -1311,9 +1319,13 @@ fn resolve_remote_parent(explicit: Option<&str>) -> Result<Option<String>, Strin
 /// session this node can show on its roster can still be an id the door
 /// cannot accept as a `remoteParent.sessionId` (over the length bound, a
 /// stray character), and shipping one only turns a local, immediately-fixable
-/// mistake into the door's `-32602` one round trip and one signature later.
+/// mistake into the door's own answer one round trip and one signature later —
+/// `-32602` on its spawn arm, a lost autogate on its inject one (P-RSA S5).
 /// So this node refuses its own unruly claim here, before anything is signed
-/// or sent; `None` (no parent at all) is still a legal answer.
+/// or sent; `None` (no parent at all) is still a legal answer, and `send` is
+/// the caller that TAKES it: it drops the claim and names the reason on one
+/// warning line rather than failing the send
+/// (`aoide_conduct::graph::send`'s `remote_parent_claim`).
 fn resolve_remote_parent_from(
     attested: Option<String>,
     explicit: Option<&str>,
@@ -1333,8 +1345,9 @@ fn resolve_remote_parent_from(
         Some(id) if !aoide_storage::remote_children::valid_claimed_session_id(&id) => Err(format!(
             "this node would claim `{id}` as the remote parent, and that is not a legal \
              `aoide/from` claim: {} bytes at most of [A-Za-z0-9._:-] with no `/` — the same rule \
-             the far door applies, so it would refuse this spawn `-32602`; spawn under a session \
-             whose id fits, or with no parent at all",
+             the far door applies, so a caller that signed this would be refused `-32602` on a \
+             spawn and simply matched by nothing on a send; claim a session whose id fits, or no \
+             parent at all",
             aoide_storage::remote_children::CLAIMED_SESSION_ID_MAX,
         )),
         other => Ok(other),

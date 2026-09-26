@@ -1127,6 +1127,10 @@ fn ignored_remote_flags(inv: &Invocation) -> Vec<&'static str> {
 /// LOCAL-SOCKET concept: they decide whether THIS process writes to a
 /// socket it owns. A remote send is always ATTEMPTED over the network,
 /// exactly like `node pull` already does unconditionally.
+/// It does resolve one identity — the `aoide/from` claim
+/// ([`remote_parent_claim`], P-RSA S5) — but that is a CLAIM the far door
+/// judges, not a gate here: this side only refuses to sign a value the far
+/// door would reject outright.
 /// The RECEIVING node's own `message_send` Inject arm
 /// (`aoide-server::a2a::message_send` → `do_inject`) is where the real gate
 /// lives: it decides deliver-now vs. hold-pending off ITS OWN node-trust
@@ -1145,6 +1149,44 @@ fn ignored_remote_flags(inv: &Invocation) -> Vec<&'static str> {
 /// for the same reason). Authenticated cross-host provenance is #51's
 /// scope, not this phase's (messaging plan, "Verified facts").
 fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, query: &str) -> Outcome {
+    deliver_remote_with(inv, node, query, remote_parent_claim)
+}
+
+/// The `aoide/from` claim a remote send carries (P-RSA S5) — the
+/// KERNEL-ATTESTED sender, i.e. `node spawn`'s own resolution with no
+/// `--parent` (`aoide_client::commands::resolve_remote_parent`), because `send`
+/// has no `--parent` flag and the parent steering a child it spawned is exactly
+/// the caller the spawn path stamped into that child's `remoteParent`. The
+/// receiving door reads the claim as `remote_parent_match`: a match delivers
+/// without pending (`autogate-remote-parent`), a mismatch changes nothing. The
+/// env is never read (an ambient `AOIDE_SESSION_ID` is the Osaka failure §4.1
+/// closes), so no daemon and no sealed ancestry simply means no claim.
+///
+/// `Err` is the resolver's own "this node would sign a claim the far door
+/// refuses" case, and the two callers answer it differently because they were
+/// asked for different things. `node spawn` REFUSES the call (a caller who named
+/// a parentage gets one or hears why). A `send` DROPS the claim and delivers
+/// anyway, naming the reason on one warning line: it was never asked for a
+/// parentage — the claim is an autogate shortcut, not the request — and the
+/// door's Inject arm reads a malformed claim as a non-match, never as a refusal
+/// (`a2a.rs`'s own `remote_parent_match`), so an unruly id costs this send the
+/// autogate and nothing else. Neither path lets one reach the wire: the one that
+/// refuses never signs, the other signs nothing.
+fn remote_parent_claim() -> Result<Option<String>, String> {
+    aoide_client::commands::resolve_remote_parent(None)
+}
+
+/// [`deliver_remote`]'s body, parameterized over the claim resolver for the
+/// same reason [`deliver_local_with`] is parameterized over the sender-identity
+/// resolver: the whole remote path stays testable with no daemon and no seal
+/// key in the picture. Production wires [`remote_parent_claim`]; the test
+/// injects a fixed one and reads the bytes the fake transport received.
+fn deliver_remote_with(
+    inv: &Invocation,
+    node: &aoide_storage::node_store::Node,
+    query: &str,
+    resolve_claim: impl Fn() -> Result<Option<String>, String>,
+) -> Outcome {
     let cmd = "send";
     let text = inv.args.join(" ");
     // `--submit`/`--yes` are accepted-but-unused for a remote send (see this
@@ -1185,15 +1227,25 @@ fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, quer
 
     match resolve_remote_query(&node.name, query, &candidates) {
         Resolution::Local(remote_id) => {
-            // No `aoide/from` claim on this path: the only reader of the
-            // claim is the door's Spawn arm (the remote-parent stamp on the
-            // child it just created), and nothing on the Inject arm consults
-            // it — naming the sender here would be a claim nothing reads.
-            match aoide_client::commands::send_message_to_node(node, &text, &remote_id, None) {
+            // The `aoide/from` claim (P-RSA S5): who this node PROVES it is,
+            // resolved before the body is built because the claim rides inside
+            // the signed body digest. An unruly claim never stops the send (see
+            // [`remote_parent_claim`]) — it is dropped here and reported on its
+            // own warning line in BOTH arms below, since the claim was equally
+            // absent whichever way the delivery went.
+            let (from, claim_note) = match resolve_claim() {
+                Ok(from) => (from, String::new()),
+                Err(e) => (None, format!("\nnot claiming parent: {e}")),
+            };
+            match aoide_client::commands::send_message_to_node(node, &text, &remote_id, from.as_deref())
+            {
                 Ok(response) => {
                     let out = Outcome::ok(
                         cmd,
-                        format!("delivered to `{remote_id}` on node `{}`{ignored_note}", node.name),
+                        format!(
+                            "delivered to `{remote_id}` on node `{}`{ignored_note}{claim_note}",
+                            node.name
+                        ),
                     )
                     .changed(vec![format!("sent to {}/{remote_id}", node.name)])
                     .with_data(json!({
@@ -1209,7 +1261,7 @@ fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, quer
                 Err(e) => {
                     let out = Outcome::error(
                         cmd,
-                        format!("delivering to `{remote_id}` on node `{}`: {e}{ignored_note}", node.name),
+                        format!("delivering to `{remote_id}` on node `{}`: {e}{ignored_note}{claim_note}", node.name),
                     )
                     .with_data(json!({
                         "reason": "node-send-failed", "node": node.name, "remoteSessionId": remote_id,
