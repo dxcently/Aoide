@@ -812,7 +812,7 @@ pub(crate) fn read_capped_line(
 /// (rather than merely failing closed) would touch `send.rs`'s gate
 /// itself — out of this phase's scope fence; see `CONTRACTS.md`'s identity
 /// section for the honest accounting.
-fn invocation_from_dispatch_request(req: &Value) -> Result<Invocation, String> {
+fn invocation_from_dispatch_request(req: &Value, door_pid: Option<i32>) -> Result<Invocation, String> {
     let path: Vec<String> = req
         .get("path")
         .and_then(Value::as_array)
@@ -842,6 +842,18 @@ fn invocation_from_dispatch_request(req: &Value) -> Result<Invocation, String> {
         Some(_) => return Err("dispatch request's `flags` must be an object".to_string()),
     }
     flags.entry("from".to_string()).or_insert_with(String::new);
+    // The door's OWN `SO_PEERCRED` pid — the one kernel fact this daemon holds
+    // about the connection, and the ONLY pid any hop-crossed command may use as
+    // evidence about its caller. Written UNCONDITIONALLY: a value the wire
+    // supplied under this key is discarded, never trusted (the same "ordinary
+    // same-uid input" boundary `cross_uid_gate`'s own doc draws, one level
+    // stronger — here the caller cannot name it at all). Empty when the peer
+    // read gave no pid; a reader treats that as "no pid, no claim"
+    // (`aoide_conduct::graph::DAEMON_PEER_PID_FLAG`'s own doc).
+    flags.insert(
+        aoide_conduct::graph::DAEMON_PEER_PID_FLAG.to_string(),
+        door_pid.map(|p| p.to_string()).unwrap_or_default(),
+    );
 
     Ok(Invocation { path, args, flags, door: Door::Daemon })
 }
@@ -878,11 +890,12 @@ pub fn serve_daemon(
 /// `aoide_secrets::broker::admin_gate` and `aoide_conduct::shellbridge::
 /// cross_uid_gate` exactly — the SAME decision restated at this third
 /// socket, not a fourth wording for it). `None` (admitted) only when the
-/// peer's kernel-attested uid equals `my_euid` — this daemon's OWN euid,
-/// since every legitimate connector (the CLI's `daemon_dispatch` proxy, a
-/// hook's `session hook`, the conductor) already runs as the SAME uid this
-/// process does. An unidentified peer (`SO_PEERCRED` read failed) is
-/// refused the same fail-closed way a mismatched uid is.
+/// peer's kernel-attested identity equals `my_user` — this daemon's OWN
+/// identity, since every legitimate connector (the CLI's `daemon_dispatch`
+/// proxy, a hook's `session hook`, the conductor) already runs as the SAME
+/// user this process does. An unidentified peer (no kernel-truth peer
+/// credential on this host, i.e. that read failed) is refused the same
+/// fail-closed way a mismatched identity is.
 ///
 /// **This closes a CROSS-uid gap only.** It does not, and was never meant
 /// to, stop a same-uid process from dispatching a request over this socket
@@ -916,6 +929,11 @@ fn accept_loop(
         match conn {
             Ok(stream) => {
                 let peer = aoide_secrets::peercred::peer_cred(&stream);
+                // The door's own peer pid, captured BEFORE the gate consumes
+                // `peer`: this is the pid every hop-crossed command sees as its
+                // caller's, and nothing on the wire can name it
+                // (`invocation_from_dispatch_request`'s own doc).
+                let door_pid = peer.as_ref().map(|p| p.pid);
                 if let Some(reason) = cross_uid_gate(peer, Some(&my_identity)) {
                     let _ = audit(
                         &aoide_protocol::default_audit_log(),
@@ -930,7 +948,7 @@ fn accept_loop(
                 let events_path = events_path.clone();
                 let watcher = Arc::clone(&watcher);
                 if let Err(e) = std::thread::Builder::new()
-                    .spawn(move || handle_conn(&events_path, stream, registry, dispatch, watcher))
+                    .spawn(move || handle_conn(&events_path, stream, registry, dispatch, watcher, door_pid))
                 {
                     eprintln!("[aoided] could not spawn a connection thread (dropping this connection): {e}");
                 }
@@ -956,6 +974,7 @@ fn handle_conn(
     registry: &'static Registry,
     dispatch: DispatchFn,
     watcher: SharedHandEditWatcher,
+    door_pid: Option<i32>,
 ) {
     // `registry` has no caller yet — no op resolves a tool name against it
     // the way MCP's `tools/call` does (module doc's "Framing": `dispatch`
@@ -1050,7 +1069,7 @@ fn handle_conn(
                 // Invocation LITERALLY from the wire and run it through the
                 // SAME injected `dispatch` fn every other door calls — no
                 // door-specific policy lives here (module doc).
-                match invocation_from_dispatch_request(&req) {
+                match invocation_from_dispatch_request(&req, door_pid) {
                     Ok(inv) => {
                         let outcome = dispatch(&inv);
                         // task #92: this handler may have just written stage
@@ -1208,7 +1227,35 @@ pub fn run_loop(
     // start). Runs ONCE here, at `run_loop` entry — never inside the tick
     // loop below — boot-epoch-guarded so a `Restart=on-failure` restart
     // within the same boot is a no-op; see `run_boot_auto_resume`'s own doc.
-    run_boot_auto_resume();
+    //
+    // OFF-THREAD, deliberately: a resume candidate's spawn now waits for its
+    // target to be READY before delivering a restore snapshot, so one
+    // never-ready candidate can cost `READY_BUDGET` (20s) — paid on this
+    // thread it would hold the tick's producers and the reaper for that long,
+    // times every candidate (4 stale candidates = 80s of stalled roster).
+    // The resumes themselves are independent of each other and of the tick:
+    // they proceed in parallel here, and the tick starts immediately.
+    if let Err(e) = std::thread::Builder::new()
+        .name("boot-auto-resume".to_string())
+        .spawn(|| {
+            // Reconcile FIRST: an opening turn stranded at `pending` belongs to
+            // the process that died before stamping its verdict, and this boot
+            // is the moment that is knowable (`unknown`, never a word that
+            // reads as "still waiting").
+            let settled = aoide_conduct::graph::settle_lost_opening_turns();
+            if settled > 0 {
+                eprintln!(
+                    "aoide aoided: settled {settled} stranded opening turn(s) to `unknown` (their worker died with a previous process)"
+                );
+            }
+            run_boot_auto_resume()
+        })
+    {
+        // No thread to run them on: the resumes are best-effort by design, and
+        // stalling the tick to attempt them synchronously would trade one
+        // degradation for a worse one. Say so and carry on.
+        eprintln!("aoide aoided: boot auto-resume could not be scheduled ({e}); the tick proceeds");
+    }
 
     // Tick (~1s): the two P-D3 producers (module doc's "The tick's two
     // producers"), constructed once here, outside the loop.
@@ -1379,7 +1426,7 @@ mod tests {
             "args": ["hello"],
             "flags": {"id": "target"},
         });
-        let inv = invocation_from_dispatch_request(&req).unwrap();
+        let inv = invocation_from_dispatch_request(&req, None).unwrap();
         assert_eq!(
             inv.flags.get("from").map(String::as_str),
             Some(""),
@@ -1396,7 +1443,7 @@ mod tests {
             "args": ["hello"],
             "flags": {"id": "target", "from": "node:someone"},
         });
-        let inv = invocation_from_dispatch_request(&req).unwrap();
+        let inv = invocation_from_dispatch_request(&req, None).unwrap();
         assert_eq!(
             inv.flags.get("from").map(String::as_str),
             Some("node:someone"),
@@ -1415,8 +1462,42 @@ mod tests {
             "path": ["send"],
             "flags": {"from": ""},
         });
-        let inv = invocation_from_dispatch_request(&req).unwrap();
+        let inv = invocation_from_dispatch_request(&req, None).unwrap();
         assert_eq!(inv.flags.get("from").map(String::as_str), Some(""));
+    }
+
+    /// The door's own pid is NOT the caller's to name (review M1). `from` is
+    /// preserved from the wire on purpose; `DAEMON_PEER_PID_FLAG` is the exact
+    /// opposite — a value the wire supplies under it is overwritten with the
+    /// pid this daemon read off the connection's `SO_PEERCRED`, and an absent
+    /// peer pid stamps an explicit EMPTY (never a fallback to some other pid:
+    /// a reader treats empty as "no pid", which is the fail-closed direction).
+    #[test]
+    fn invocation_from_dispatch_request_overwrites_any_wire_supplied_door_pid() {
+        let key = aoide_conduct::graph::DAEMON_PEER_PID_FLAG;
+        assert_eq!(key, "__daemon-peer-pid", "the wire spelling this test forges");
+        let forged = json!({
+            "op": "dispatch",
+            "path": ["session", "hook"],
+            "flags": { "__daemon-peer-pid": "4242" },
+        });
+        let inv = invocation_from_dispatch_request(&forged, Some(99)).unwrap();
+        assert_eq!(
+            inv.flags.get(key).map(String::as_str),
+            Some("99"),
+            "a caller-supplied door pid must be discarded, never trusted"
+        );
+
+        let unidentified = invocation_from_dispatch_request(&forged, None).unwrap();
+        assert_eq!(
+            unidentified.flags.get(key).map(String::as_str),
+            Some(""),
+            "no peer pid is stamped as NO pid — never as the forged value"
+        );
+        assert!(
+            unidentified.flags.get(key).unwrap().parse::<i32>().is_err(),
+            "the empty stamp must not parse as a pid"
+        );
     }
 
     /// `serve_daemon` over a tempdir socket: `ping` round-trips with the

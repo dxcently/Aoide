@@ -36,6 +36,52 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
 
 ## Named seams (what it exposes)
 
+- **The workspace ↔ project binding (§B)**: `graph/workspace.rs` implements
+  `workspace set [<workspace>] <project> [--new]`, `workspace clear
+  <workspace>`, `workspace list [--json]` and `workspace root [<workspace>]`
+  — the last one prints the bound project's FIRST folder as a bare path on
+  stdout (one value, nothing else; a refusal prints nothing on stdout at all),
+  because a launcher substitutes it straight into an argv:
+  `kitty --directory "$(aoide workspace root 2>/dev/null || echo "$HOME")"`.
+  The rest is
+  over `Project.workspaces`
+  (`aoide-storage`'s record, `CONTRACTS.md` §4). A **workspace** is the
+  compositor's own workspace id — an integer, exactly what
+  `SessionRecord.workspace` already holds — and a **binding** is "workspace N
+  shows project X", stored ON the project. One invariant, enforced in the one
+  mutation: a workspace id appears in at most one project, so `set` MOVES it
+  off whatever project held it, while two workspaces may show the same project.
+  `set` refuses an unregistered project by name; `--new` is the explicit way to
+  mean it and creates a NAME-ONLY project (a project may have no folder) and
+  binds it in one call. `clear` unbinds; sessions already born on that
+  workspace keep the default they were stamped with, because a binding is a
+  label plus a birth default and never a live link. Both mutations are
+  DAEMON-OWNED (`manage.rs::local_daemon`, the same door gate `project
+  add/edit/remove` hold): a `Door::Cli` caller forwards to `aoided` and errors
+  when none answers. The ONE compositor-shaped half is resolving an OMITTED
+  `<workspace>`: `window::focused_workspace` reads `hyprctl activeworkspace -j`
+  through the same `HYPRLAND_INSTANCE_SIGNATURE` gate as every other adapter
+  read, in the CALLER's process — `aoided` is a service with no compositor
+  environment — and the forwarded argv carries the resolved integer, never the
+  word "focused". With no adapter the caller gets a taught refusal asking for
+  the number (exit 2). `list` is a READ (no lock, no daemon, no write): the
+  bindings plus every workspace a local session reports, sorted by id, with
+  `"observed": false` and a named `reason` on a host where no session reports
+  one — §A's taught-refusal shape without a refusal.
+
+  A binding is a BIRTH DEFAULT, and the seam that applies it is
+  `graph/model.rs::observe_workspace`: it writes `SessionRecord.workspace`
+  (and its `workspaceProject` default) for all three compositor stamp sites in
+  `window.rs`, stamping the default exactly once — the moment a session's
+  `workspace` first goes from absent to present on a bound workspace — and
+  never again on a move (once per BIRTH: an observation that lapsed, because a
+  window's client reported no workspace, counts as a new one when it returns). So a session born on a bound workspace joins it, a
+  window dragged elsewhere keeps the project it was born with, an explicit
+  `session project` is never overridden by a default, and a host with no
+  compositor adapter resolves exactly the ladder it did before. The ladder,
+  top to bottom: explicit `project` > the owner (nearest ancestor whose own
+  claim resolves) > the workspace default > the cwd anchor.
+
 - `graph::session_bind` implements `session bind --id <session> --agent-id
   <key>` through aoided. Only local CLI/Daemon doors may bind; the CLI does
   not fall back when aoided is absent. The key uses `valid_node_name` grammar
@@ -69,7 +115,15 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   `foot sh -c '{cmd}'`) — pure, unit-tested, never a real terminal spawned in
   a test. Taught errors, no process ever touched: no `$AOIDE_TERMINAL` set,
   or neither `$WAYLAND_DISPLAY` nor `$DISPLAY` present (a headless host,
-  steered back to plain `spawn`). `--undying` (P-C3, durable-sessions
+  steered back to plain `spawn`). `--prompt` is typed only once the target is
+  READY to take a turn (`wait_ready`, a per-harness fact: `Hook` reads THIS
+  launch's timestamped `SessionStart`; `OutputSettled` claims no fact at all,
+  so its deliveries are unverified — the same gate
+  `resurrect`'s restore delivery and `aoide-server`'s
+  `a2a::spawn_inject_prompt` pass). The result says which it was:
+  `delivered`, `delivered-unverified` (no declared fact for that name — the
+  text went out once output settled and whether it submitted is unknown), or
+  `not-ready` (nothing typed). `--undying` (P-C3, durable-sessions
   plan) marks the spawned id in `state/undying.json` once — and only once —
   the registration wait actually succeeds; an id that never registers has no
   live session behind it, so nothing is marked.
@@ -77,6 +131,37 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   harness_session_id` (P-D7) from the raw hook payload's own `session_id`
   on every event that carries one, mapped-to-an-action or not — see
   `CONTRACTS.md`'s `sessions.json` entry for the full field contract.
+- **The hook door's two self-reported facts, and the ONE rule that resolves
+  them.** A hook process is the only process that can read what a harness
+  reports about itself, so it reads its parent claim once
+  (`HOOK_PARENT_FLAG`) and sends it along; the PID is not its to send — the door
+  stamps its own `SO_PEERCRED` peer pid (`DAEMON_PEER_PID_FLAG`, written
+  unconditionally by `aoided`, so a wire-supplied value is discarded), because a
+  caller-supplied pid plus a caller-supplied claim is one caller's word twice
+  and verifies nothing. Whichever arm runs the action — the daemon's, or the
+  local no-daemon fallback — the parent resolves by the same order: the attested
+  wrap (`real_attested_wrap(door_pid)`, kernel-verified) first, then the claim,
+  which is itself CHECKED before use (`resolve_parent_claim`) against that
+  pid's real `/proc` ancestry. A claim naming a record that carries a pid this
+  hook process does not run under is contradicted: dropped, registered
+  parentless, and reported (`data.parentClaim`, plus the outcome's own message —
+  the text the door's audit record is written from); a claim that STOOD is
+  reported there too when it crossed the hop, so every cross-process claim
+  leaves a trace. `aoided`'s own ambient `AOIDE_SESSION_ID` is never a source,
+  the same accounting `server/README.md`'s G8 line holds for `send`, and a
+  daemon that stamps no pid means NO parent claim and NO ancestry stamp — never
+  `std::process::id()`, which daemon-side is `aoided`, and systemd's tree is not
+  the agent's. `hookAncestry` is stamped from `pid_ancestry(door_pid)` for the
+  same reason.
+- **An `aoided` older than this build silently registers hook sessions
+  parentless: restart `aoided` after upgrading.** Both keys this door reads are
+  ignored by an older daemon — it never overwrites `DAEMON_PEER_PID_FLAG` and
+  never forwards `HOOK_PARENT_FLAG` — so it falls back to its own env and the
+  record keeps no parent, which reads downstream as `spawn --prompt`'s "not
+  ready" after the full budget, with no error (that was this door's original
+  defect, verbatim). There is no version handshake to refuse it: `ping` reports
+  `AOIDE_VERSION` and no client compares it, daemon restarts are user-gated
+  (house rule 2), and the wire is otherwise compatible in both directions.
 - **The check lane (task #139), wired into `session hook`'s three lifecycle
   triggers — Stop records, the next context-reaching event speaks.**
   `hook_for_profile`'s `HookAction::Start` arm reads the STORED `hooks.json`
@@ -789,7 +874,9 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   `graph` uses — longest-prefix across EVERY root of the project, not just
   its first, since a project is a set of anchor roots (`project add`
   appends to that set, `project edit` replaces it outright, `project
-  remove` drops one root or the whole project; see `Project::roots()`,
+  remove` drops one root — leaving a name-only project when that was the
+  last one — or, with no root at all, the whole project; see
+  `Project::roots()`,
   `aoide-storage`'s own docs). Selection then branches on the flags: `--all` widens to every
   anchored entry, `--id` narrows to one specific `sessionId`, and bare
   (neither flag) resumes the project's WHOLE undying set

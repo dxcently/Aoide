@@ -151,6 +151,28 @@ pub fn run_cli(argv: &[String]) -> i32 {
             });
         }
 
+        // `workspace root` prints ONE VALUE and nothing else — the first folder
+        // of a bound workspace's project — because a launcher substitutes it
+        // straight into an argv:
+        // `kitty --directory "$(aoide workspace root 2>/dev/null || echo "$HOME")"`.
+        // The generic envelope (`[ok] workspace.root: /path`) would land in that
+        // substitution, so text mode bypasses the renderer entirely: the bare
+        // path on stdout, and on a refusal NOTHING on stdout — the exit code and
+        // the line on stderr are the whole report, which is what makes the
+        // `||` fallback fire (the same reason `secrets exec`/`enroll` above are
+        // special-cased). `--json` keeps the envelope, for every other door and
+        // for a tool that wants the structure.
+        if inv.path == ["workspace", "root"] && !json {
+            let outcome = dispatch::dispatch(inv);
+            let code = outcome.status.exit_code();
+            if code == output::exit::OK {
+                println!("{}", outcome.message);
+            } else {
+                eprintln!("{}", outcome.message);
+            }
+            return Some(code);
+        }
+
         // `secrets serve` is a long-running broker, launched at the entry point
         // exactly like `a2a serve`/`conductor`/`mcp serve --stdio`: dispatch
         // FIRST (records the launch through the single audit log, and gives a

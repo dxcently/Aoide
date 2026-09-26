@@ -815,7 +815,7 @@
   don't invent a `down` lookup in the door to satisfy the spec line early —
   `aoide node allow <node> message off` is the quarantine that exists.
   **`mail_poll` writes nothing at all.** Its whole body is
-  `aoide_storage::outbox::poll_entries` (the ONE place the offer rule lives:
+  `aoide_storage::outbox::poll_payloads` (the ONE place the offer rule lives:
   held always, `now` only when its own attempts have been failing) plus a
   self-audit under `a2a.aoide/mailPoll` carrying the handed-over count. No
   `tries` stamp, no bookmark, no "already handed over" flag may be added

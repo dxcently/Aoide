@@ -143,10 +143,17 @@ sitting at a terminal — or be a terminal at all — to launch `conduct`.
   forked. A failed exec inside the re-exec'd `conduct` registers no ghost
   session (spawn-first, same as `wrap`/`conduct`): the socket simply never
   appears and `spawn` reports `registered: false` honestly. An optional
-  `--prompt` is injected only AFTER registration succeeds, through the one
-  gated injection door (`send --yes --submit`, in-process) — never a
-  direct socket write — the same re-drive shape `session pending approve`
-  uses to replay a held entry.
+  `--prompt` is injected only AFTER the target is READY to take a turn —
+  registration is the wrapper being steerable, readiness is a per-harness fact
+  (its own `SessionStart` stamped for THIS launch, or nothing at all). The
+  result says which: `delivered`,
+  `delivered-unverified` (no declared fact existed for that harness name — the
+  text went out once output settled, and whether it submitted is not known),
+  `not-ready` (nothing typed; a hook harness needs its hooks installed, and its
+  `--agent` name must match the program actually launched), or `failed: …` —
+  through the one gated injection door (`send --yes --submit`, in-process),
+  never a direct socket write, and never an early one — the same re-drive
+  shape `session pending approve` uses to replay a held entry.
 
 Proven across all three registered agent profiles ([[Agent-Hooking]]): a
 headless `claude` answered a prompt into its log with its own

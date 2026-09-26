@@ -72,6 +72,16 @@ pub struct Project {
     /// until it is replaced.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lead: Option<String>,
+    /// The compositor workspace ids bound to this project ("workspace N shows
+    /// project X"). Additive and v0-safe: written only when non-empty
+    /// (`skip_serializing_if = "Vec::is_empty"`, the `hosts` discipline), so
+    /// every `projects.json` predating the field stays byte-identical. A
+    /// workspace id appears in AT MOST ONE project — `workspace set` moves it
+    /// off any other — while two workspaces may show the same project. Bare
+    /// `project remove <name>` takes the bindings with the record; removing a
+    /// root does not touch them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<i64>,
 }
 
 /// One registered node a [`Project`] is ORGANIZATIONALLY a member of (P-14
@@ -97,6 +107,13 @@ impl Project {
     /// because `path` always equals the first root. A hand-edited record
     /// whose `roots[0]` differs from `path`, or that repeats `path` inside
     /// `roots`, is READ this way and never rewritten on read.
+    ///
+    /// EMPTY is a legal answer: a NAME-ONLY project (`project add <name>`
+    /// with no folder) has neither `path` nor `roots`, and every reader
+    /// tolerates the empty list — [`crate::records::Project`]'s only
+    /// cwd-anchoring consumer matches by root prefix, so a rootless project
+    /// can never anchor a session and is reached by name (a workspace
+    /// binding, or an explicit `session project`) instead.
     pub fn roots(&self) -> Vec<&str> {
         let mut out: Vec<&str> = Vec::new();
         if !self.path.is_empty() {
@@ -270,6 +287,25 @@ pub struct SessionRecord {
     /// on hover (concepts/Terminal-Commander) — a pure-data bridge, no dispatch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<i64>,
+    /// The default project this session was stamped with when its `workspace`
+    /// FIRST went from absent to present on a BOUND workspace — a birth
+    /// default, never a live link. Distinct from `project`, which stays the
+    /// explicit choice: the resolver reads explicit > this > cwd anchor, and
+    /// nothing re-stamps or clears it when the window moves. Written only
+    /// through the one seam `graph::observe_workspace` (the two compositor
+    /// stamp sites and the synthetic bare-terminal publisher call it), which
+    /// is also why it never lands on a session with an explicit `project`.
+    /// Additive and v0-safe: absent on every record predating it (and on every
+    /// record on a host with no compositor), and a record without it
+    /// serialises byte-identical to before. A default naming a project that
+    /// has since been removed falls through to the cwd anchor, because it is a
+    /// default and not a choice.
+    #[serde(
+        rename = "workspaceProject",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub workspace_project: Option<String>,
     /// The live "current command / current tool" for this session: for a
     /// conducted SHELL it is the foreground command (`cargo test`, `vim …`),
     /// captured by conduct's PTY tick and cleared at the bare prompt; for an
@@ -525,6 +561,58 @@ pub struct SessionRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub harness_session_id: Option<String>,
+    /// WHEN the harness's own `SessionStart` hook was recorded for this
+    /// session (ISO-8601 UTC). One fact, one writer: the hook door's
+    /// `SessionStart` arm stamps it as it registers the harness's session,
+    /// so a later reader can tell "the harness said hello, just now" from
+    /// "a record exists, from some earlier run" — which is the whole
+    /// difference between a first-turn injection that waits for the target
+    /// and one that types into a TUI that has not started
+    /// (`aoide_conduct::graph::wait_ready`). A resume re-fires
+    /// `SessionStart` and re-stamps it. Additive/v0-safe: absent on a legacy
+    /// record and on any record this harness's hooks never claimed, and
+    /// absent is exactly how such a record reads — *not* a readiness fact.
+    #[serde(
+        rename = "sessionStartAt",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub session_start_at: Option<String>,
+    /// The OPENING TURN of a session the A2A door spawned: what became of the
+    /// first turn a remote peer asked for. Writers, in order: the door's ack
+    /// path stamps `pending` before the worker is scheduled, the worker stamps
+    /// `pending` again as its own first write, and then — same thread, so this
+    /// order is a property of the code and not a race — its verdict. No other
+    /// path writes this field, which is what keeps a verdict from being
+    /// clobbered back to `pending`. The vocabulary, complete:
+    ///
+    /// - `pending` — accepted, the worker is waiting for the target;
+    /// - `delivered` / `delivered-unverified` — the turn went out (the second
+    ///   when the target declared no readiness fact, so whether it submitted
+    ///   is not known);
+    /// - `not-ready` — the budget ran out and NOTHING was typed;
+    /// - `busy` — the door's opening-turn worker pool was full (nothing was
+    ///   typed; ask again);
+    /// - `no-worker` — no worker thread could be started (nothing was typed);
+    /// - `skipped-empty` / `skipped-shell` — nothing to type, or a shell may
+    ///   not be typed at;
+    /// - `no-socket` / `write-failed` — the target's control socket never
+    ///   answered, or the write failed (no receipt filed in either case);
+    /// - `unknown` — the process that owed a verdict died before it could
+    ///   stamp one (a boot pass reconciles a stranded `pending` to this).
+    ///
+    /// It is a HISTORICAL fact, not live state: it is stamped once and never
+    /// cleared, so a `tasks/get` long after the fact reports what happened to
+    /// the OPENING turn even though the session has moved on (its own `state`
+    /// is the live word). One reader: `tasks/get`, as the task's
+    /// `status.message`. Additive/v0-safe: absent on every locally-spawned
+    /// session and every legacy record.
+    #[serde(
+        rename = "openingTurn",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub opening_turn: Option<String>,
     /// Additive/v0-safe (P-D8, `docs/architecture/AOIDED.md`'s "L5"): names
     /// the durable ledger entry's own `sessionId` this record was REVIVED
     /// from by `graph resurrect` — never a live lookup key (the named
@@ -703,6 +791,35 @@ mod tests {
         assert_eq!(legacy.workspace, None);
     }
     #[test]
+    fn session_record_workspace_project_round_trips_and_stays_absent_when_unset() {
+        // serde: `workspaceProject` serialises as a string when set and is
+        // skipped (skip_serializing_if) when None — additive/v0-safe on the
+        // wire, the same contract `workspace` above holds for the id beside it.
+        let mut rec = SessionRecord {
+            session_id: "s".into(),
+            ..Default::default()
+        };
+        rec.workspace = Some(3);
+        rec.workspace_project = Some("aoide".into());
+        let json = serde_json::to_string(&rec).unwrap();
+        assert!(json.contains("\"workspaceProject\":\"aoide\""), "serialised: {json}");
+        let back: SessionRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.workspace_project.as_deref(), Some("aoide"));
+
+        // Unbound/uncomposited: the key is absent entirely, and a legacy record
+        // with no `workspaceProject` reads as no default.
+        let bare = SessionRecord {
+            session_id: "s".into(),
+            workspace: Some(3),
+            ..Default::default()
+        };
+        let bare_json = serde_json::to_string(&bare).unwrap();
+        assert!(!bare_json.contains("workspaceProject"), "serialised: {bare_json}");
+        let legacy: SessionRecord =
+            serde_json::from_str(r#"{ "sessionId": "s", "workspace": 3 }"#).unwrap();
+        assert_eq!(legacy.workspace_project, None);
+    }
+    #[test]
     fn session_record_hook_ancestry_round_trips_and_stays_empty_when_unset() {
         // serde: `hookAncestry` serialises as an int array when non-empty, and
         // is skipped (skip_serializing_if = "Vec::is_empty") when empty —
@@ -800,6 +917,23 @@ mod tests {
         assert_eq!(p.roots(), vec!["/b"]);
     }
     #[test]
+    fn a_project_with_no_folder_has_no_roots_at_all() {
+        // A NAME-ONLY project (`project add <name>`, no folder — a rootless
+        // project) carries neither `path` nor `roots`; `roots()` answers the
+        // empty list rather than a `[""]` that would prefix-match nothing but
+        // still read as "one root".
+        let p = Project { name: "cadenza".into(), ..Default::default() };
+        assert!(p.roots().is_empty(), "a rootless project has no roots: {:?}", p.roots());
+        assert_eq!(p.path, "");
+
+        // Absent keys on the wire read the same way as empty ones.
+        let legacy: Project = serde_json::from_str(r#"{"name":"cadenza"}"#).unwrap();
+        assert!(legacy.roots().is_empty());
+        let explicit: Project =
+            serde_json::from_str(r#"{"name":"cadenza","path":"","roots":[]}"#).unwrap();
+        assert!(explicit.roots().is_empty());
+    }
+    #[test]
     fn a_project_with_extra_roots_round_trips_the_full_list_always_on_the_wire() {
         // ROOTS SERIALIZED COMPLETE: `roots` has no `skip_serializing_if`
         // any more, and the new-code shape is the FULL ordered root list
@@ -855,6 +989,55 @@ mod tests {
         let json = serde_json::to_string(&p).unwrap();
         assert!(!json.contains("hosts"), "serialised: {json}");
         assert_eq!(json, raw, "an untouched legacy record round-trips byte-identical");
+    }
+    #[test]
+    fn a_legacy_projects_file_round_trips_byte_identical() {
+        // A rootless project is a NEW kind of record, never a rewrite of an old
+        // one: a whole `projects.json` written before it existed (rooted,
+        // no `hosts`/`lead`/`workspaces`) still serializes byte-for-byte.
+        let raw = r#"{"schemaVersion":"0","projects":[{"name":"aoide","path":"/home/x/Aoide","roots":["/home/x/Aoide"]},{"name":"docs","path":"/home/x/docs","roots":["/home/x/docs"],"autoResume":true}]}"#;
+        let file: ProjectsFile = serde_json::from_str(raw).unwrap();
+        assert_eq!(file.projects.len(), 2);
+        assert!(file.projects.iter().all(|p| p.roots() == vec![p.path.as_str()]));
+        assert_eq!(
+            serde_json::to_string(&file).unwrap(),
+            raw,
+            "an existing projects.json round-trips byte-identical"
+        );
+    }
+    #[test]
+    fn legacy_project_without_workspaces_is_byte_identical() {
+        // S1: `Project.workspaces` is additive and written only when non-empty
+        // (the `hosts` discipline), so a project that predates it — and a
+        // project the binder never touched — serializes byte-for-byte as
+        // before. No `"workspaces":[]` ever appears on the wire.
+        let raw = r#"{"name":"aoide","path":"/home/x/Aoide","roots":["/home/x/Aoide"]}"#;
+        let p: Project = serde_json::from_str(raw).unwrap();
+        assert!(p.workspaces.is_empty());
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(!json.contains("workspaces"), "serialised: {json}");
+        assert_eq!(json, raw, "an untouched legacy project round-trips byte-identical");
+    }
+    #[test]
+    fn a_projects_workspaces_round_trip_in_binding_order() {
+        // Bindings are a list of integer workspace ids; two workspaces may
+        // show one project, and the order they were bound in is what the
+        // record holds (the id-move invariant lives in the mutation, not in
+        // the field).
+        let p = Project {
+            name: "aoide".into(),
+            path: "/a".into(),
+            workspaces: vec![5, 3],
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(json.contains(r#""workspaces":[5,3]"#), "serialised: {json}");
+        let back: Project = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.workspaces, vec![5, 3]);
+
+        // A LEGACY record reads as unbound — never a dangling default.
+        let legacy: Project = serde_json::from_str(r#"{"name":"a","path":"/a"}"#).unwrap();
+        assert!(legacy.workspaces.is_empty());
     }
     #[test]
     fn project_hosts_round_trip_and_stay_off_the_wire_when_empty() {

@@ -1532,9 +1532,11 @@ below for the hard rule this establishes going forward.
   onto `fetch_value`/`store_value`/`has_value` without multiplying the
   spawn logic itself, and that discipline is exactly why bounding it was a
   one-function fix. A future backend-adjacent addition (a new template
-  kind, a new per-backend probe) that spawns its own `Command::new("sh")`
-  instead of calling `run_backend_command` silently reopens the unbounded-
-  hang gap this note exists to keep closed — don't. The timeout wait
+  kind, a new per-backend probe) that spawns its own shell instead of calling
+  `run_backend_command` silently reopens the unbounded-
+  hang gap this note exists to keep closed — don't. (Its interpreter is the
+  shared `aoide_protocol::host_shell` seam: `sh -c`, or `cmd /C` on native
+  Windows, in ONE place rather than a `cfg` at each call site.) The timeout wait
   itself is wall-clock via polling `Child::try_wait`, never a per-child
   watchdog thread and never `SIGALRM` (`run_backend_command`'s own doc) —
   a future change to the wait mechanism holds the same restriction.

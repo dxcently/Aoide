@@ -24,6 +24,29 @@
 
 ## Invariants
 
+- **The workspace default is stamped ONCE, through ONE seam, at THREE
+  sites.** `SessionRecord.workspaceProject` (additive, `skip_serializing_if`)
+  is written only by `graph/model.rs::observe_workspace` — the same seam
+  `SessionRecord.workspace` is written through — and every site that observes
+  a workspace calls it: `window.rs::ensure_session_window` (the lazy
+  hook-time backfill), the event-driven `resolve_pending_session_windows`
+  sweep (both its pending-resolution and its move branches) and
+  `reconcile_untracked_terminals` (the synthetic `win:` record a bare tty
+  gets — a terminal on a bound workspace joins the project exactly as an
+  agent's session does, so that publisher builds its record with
+  `workspace: None` and lets the seam do the observation). A NEW adapter
+  calls the seam; it never writes either field itself. The seam's rules are
+  load-bearing: the default is stamped only when `workspace` goes from absent
+  to present, only when the record has no explicit `project` and no default
+  yet, and only when the workspace is BOUND — so a move never re-stamps,
+  movement never clears it, an explicit choice is never stamped over, and
+  binding a workspace adopts no session already sitting on it. An observed
+  `None` DOES clear `workspace` (a window whose client reports no workspace
+  has none) and never touches the default. The ladder itself —
+  `project_for` = explicit > default > cwd, `effective_project_for` =
+  explicit > owner > default > cwd — lives in the same file, with
+  `workspace_default` the ONE reader of the stored name (a name that no
+  longer resolves falls through; it is a default, not a choice).
 - **Every grouping surface that can see a non-root session calls
   `graph::effective_project_for`, never bare `project_for`, for that
   session (ownership-graph lane, P-OWN S-A).** `project_for` stays the
@@ -606,6 +629,22 @@
   hook chatter into a channel nobody reads on that event — `on_stop`'s
   delivery is the pending-note relay through `on_prompt_submit`/
   `on_session_start`, never a wrapper change.
+- **The hook door reads the hook's OWN claim exactly once, and never takes a
+  pid from the wire.** `session_hook` is the only place that may read
+  `AOIDE_SESSION_ID` for a parent (`own_parent_claim`), because it is the only
+  place that knows whether this process IS the hook; the daemon arm takes the
+  claim off `HOOK_PARENT_FLAG` and its pid off `DAEMON_PEER_PID_FLAG` — stamped
+  by the door from `SO_PEERCRED`, never sent by a caller — and both arms resolve
+  through ONE `resolve_parent_claim` (attested wrap first, then the claim, which
+  is dropped when the claimed record carries a pid the hook process cannot be
+  found under). Do NOT re-add a
+  `std::env::var("AOIDE_SESSION_ID")` inside `hook_for_profile_gated`,
+  `hook_ensure_session_with`, or either action arm: daemon-side that variable
+  belongs to `aoided`, and a daemon launched from inside a conducted session
+  would hand every hook-registered child that session as its parent. Do not
+  stamp `hookAncestry` from `std::process::id()` either — use
+  `hook_ancestry(door_pid)`, for the same reason — and do not give a
+  `hook_pid: None` arm a fallback pid: no pid means `Unclaimed` and no stamp.
 - **The undying transfer is one `save_undying` call, never two.**
   `resurrect.rs`'s `resurrect_one` adds the new id and drops the old one in
   the SAME in-memory `Vec<UndyingSession>` before writing — the new id goes
@@ -1420,10 +1459,38 @@
   touches the name or `autoResume` — `add`/`remove` stay the only ways a
   project appears or disappears. `project remove NAME [PATH]` drops one
   root, promoting the next remaining one into `path` so `path` always
-  equals the first root, or with no `PATH` drops the whole project.
+  equals the first root, or with no `PATH` drops the whole project — as do
+  the project's workspace bindings, which live on the record. Removing a
+  project's LAST root is the one root removal that does NOT delete the
+  project: it is left standing with no folder (a NAME-ONLY project).
   `project add` and `project edit` both validate EVERY given path
   (absolute, an existing directory) BEFORE mutating anything — one bad
   path in a multi-path call writes nothing.
+- **A project may have NO folder — `project add NAME` with no path
+  registers a name-only project, never the cwd.** The cwd is not a
+  default root: registering the directory you happen to stand in is how a
+  project anchors sessions nobody meant it to. A rootless project has an
+  empty `Project::roots()`, so `anchor_for` skips it structurally — its
+  per-project root scan finds nothing to match, with no special case and
+  no `cfg`; it is reached by a workspace
+  binding or an explicit `session project NAME` alone, and a folder is
+  added later with `project add NAME ROOT`. `project list` prints its name
+  with no path column.
+- **A binding is stored on the project, and only one project may hold a
+  workspace.** `Project.workspaces` (`aoide-storage::records`, additive,
+  `skip_serializing_if` keeps it off the wire when empty — every
+  `projects.json` predating it stays byte-identical) is the whole store.
+  `workspace set` is the ONLY writer that adds: it MOVES the id off whatever
+  project held it, in the SAME `with_stage_lock` hold as the `--new`
+  existence check, so two racing calls can never both register a name and no
+  path can leave one id in two projects. `binding_for` (`graph/model.rs`) is
+  the ONE lookup — the binder, the lister and the resolver's workspace rung
+  all read it, so they cannot disagree about what "bound" means. A binding is
+  NOT a root: it anchors nothing by cwd (a rootless project may carry one),
+  `project remove NAME ROOT` leaves it alone, and only the bare `project
+  remove NAME` takes it — with the record it lives on, because that is where
+  it lives. `workspace list` merges bindings with the workspaces local
+  sessions report and never writes.
 - **`project add`/`project edit`/`project remove` are daemon-owned atomic
   mutations (`manage.rs`'s `local_daemon`)** — the same door-gated shape
   as `actions.rs`'s `assign_project`/`session_kill`: a `Door::Cli` caller
@@ -1572,10 +1639,33 @@
   function too, so a call there would double-file every A2A message
   delivered into an existing session. The OTHER of these two lives OUTSIDE
   this crate, in `aoide-server`'s `spawn_inject_prompt` (`a2a.rs`) — a
-  brand-new A2A-spawned session's first turn is typed before that session
+  brand-new A2A-spawned session's first turn is typed only once that session
+  is READY (`aoide_conduct::graph::wait_ready`, the same gate `spawn
+  --prompt` and `resurrect`'s restore delivery pass), never at the instant its
+  socket appears: a bound socket is a wrapper that registered, not a harness
+  that started — and with no readiness within the budget it is typed at by
+  nothing and files no receipt, so the sender's letter stays unacknowledged
+  rather than acknowledged by a turn that never ran. That readiness fact is
+  per-harness and two-valued (`Readiness`): `Hook` reads THIS launch's
+  harness `SessionStart` (its `sessionStartAt` stamp on a child record of the
+  wrapper, at or after the launch instant — a leftover record from an earlier
+  run under a reused id is not readiness), and `OutputSettled` claims no
+  fact at all: it types once output settles and reports the delivery
+  `delivered-unverified`. (A third value, a prompt-pattern marker, was tried
+  here and withdrawn as unanchorable — branch re-review N1: a banner
+  containing the label bought a false `Verified` plus an early inject.) It is
+  typed before that session
   has a `SessionRecord` at all, so it can never reach
   `deliver_local`/`session_send` and has to file itself (see
-  `aoide_storage::mail`'s module doc for the full two-writer reasoning).
+  `aoide_storage::mail`'s module doc for the full two-writer reasoning). The
+  door runs that wait-and-type on its OWN WORKER, never on its connection
+  handler. That budget (20s) plus the socket retry would otherwise park a
+  `MAX_CONN` slot and hand `503 server busy` to every other RPC — read
+  commands included. The worker
+  stamps the outcome on the record (`stamp_opening_turn`), which is what
+  `tasks/get` reports as `status.message` and what the door's own audit line
+  carries, so a peer whose opening turn never ran is told `not-ready` rather
+  than reading a bare `submitted`.
   **A THIRD, orthogonal filing call exists since P-M2** — `aoide-server`'s
   `mail_deposit` (`a2a.rs`) calls `aoide_storage::mail::deposit` directly
   for a letter/receipt arriving over the wire FROM a peer node. It never

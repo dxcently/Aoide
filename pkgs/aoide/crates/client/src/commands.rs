@@ -750,15 +750,12 @@ fn build_signed_pair_poll_body(id: &str) -> Result<String, String> {
     Ok(serde_json::to_string(&body).unwrap_or_default())
 }
 
-/// A unique `messageId` for one outbound `message/send` (pid + wall-clock
-/// nanos — never reused within a process).
-fn gen_message_id() -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("aoide-{}-{}", std::process::id(), nanos)
-}
+/// A unique `messageId` for one outbound `message/send`. One home
+/// (`aoide_protocol::wire::gen_message_id`, re-exported here so this module's
+/// callers are unchanged): the server's outbound A2A `status.message` mints
+/// ids the same way, and the binding marks `messageId` required on a
+/// `Message`.
+pub use aoide_protocol::wire::gen_message_id;
 
 // ── The seven `node` commands (CONTRACTS.md §7: same-network federation) ───────
 //
@@ -937,9 +934,21 @@ fn handle_node_remove(inv: &Invocation) -> Outcome {
             .with_data(json!({ "reason": "registry-write-failed" }));
     }
     let _ = std::fs::remove_file(aoide_storage::node_store::node_cache_path(&name));
+    // M2 (the branch review): the stored age binding goes with the record. A
+    // binding keyed by node NAME that outlives its node is exactly the residue
+    // that wedged a re-paired peer — `binding_for` re-verifies on every read,
+    // so it was inert rather than trusted, but leaving it means a re-added node
+    // under the same name inherits a comparison it should never be measured
+    // against. The removal is reported, not silent.
+    let binding_forgotten = aoide_storage::seal::forget_binding(&name).unwrap_or(false);
     Outcome::ok(cmd, format!("removed node `{name}` ({} remaining)", nodes.len()))
         .changed(vec![aoide_storage::node_store::nodes_path().to_string_lossy().into_owned()])
-        .with_data(json!({ "removed": true, "name": name, "count": nodes.len() }))
+        .with_data(json!({
+            "removed": true,
+            "name": name,
+            "count": nodes.len(),
+            "bindingForgotten": binding_forgotten,
+        }))
 }
 
 /// `node hub <name> [--clear]` — designate `name` as THE hub (at most one;
@@ -1722,9 +1731,30 @@ fn handle_node_spawn(inv: &Invocation) -> Outcome {
                 Some(p) => format!("parent `{p}`"),
                 None => "parent: none (unattested)".to_string(),
             };
+            // What became of the opening turn, straight off the ack Task's
+            // `status.message` — a proper A2A `Message` (role + parts), so the
+            // text is its first part's `text`. The spawn ack carries `pending`
+            // (the door's worker is still waiting for the target); a later
+            // `tasks/get` carries the verdict, and this line is where the
+            // operator sees that the opening turn has NOT run yet rather than
+            // assuming it did.
+            let opening_note = parsed
+                .get("result")
+                .and_then(|r| r.get("status"))
+                .and_then(|s| s.get("message"))
+                .and_then(|m| m.get("parts"))
+                .and_then(Value::as_array)
+                .and_then(|parts| parts.first())
+                .and_then(|part| part.get("text"))
+                .and_then(Value::as_str)
+                .map(|text| format!(" — {text}"))
+                .unwrap_or_default();
             Outcome::ok(
                 cmd,
-                format!("spawned on `{}` — remote session `{session_id}` ({parent_note})", node.name),
+                format!(
+                    "spawned on `{}` — remote session `{session_id}` ({parent_note}){opening_note}",
+                    node.name
+                ),
             )
             .with_data(json!({
                 "name": node.name,
@@ -2497,7 +2527,14 @@ pub(crate) fn run_pair_request(
     // file the requester under the requester's-nickname-for-the-approver
     // (the live yomi↔sakaki ceremony's phantom-node defect, 2026-08-26).
     let self_name = aoide_storage::display::local_host_name();
-    let body = crate::node::build_pair_request_body(&own_pubkey, &self_name, &commit, &self_url, self_via);
+    let body = crate::node::build_pair_request_body(
+        &own_pubkey,
+        &self_name,
+        &commit,
+        &self_url,
+        self_via,
+        aoide_storage::seal::publish_binding().ok().as_ref(),
+    );
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let (code, resp_body) = match post_json_via(url, dial_via, name, &body_str, None, &[], 15) {
         Ok(v) => v,
@@ -2549,6 +2586,7 @@ pub(crate) fn run_pair_request(
     let sas = aoide_storage::pairing::derive_sas(&own_pubkey, &ack.pubkey_hex, &own_nonce, &ack.nonce_hex);
     let requested_at = aoide_storage::time::now_iso_utc();
     let outbound = aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
         id: ack.id.clone(),
         url: url.to_string(),
         name: name.to_string(),
@@ -3112,6 +3150,16 @@ pub(crate) fn approve_inbound(
     if let Err(e) = aoide_storage::node_store::save_nodes(&nodes) {
         return Outcome::error(cmd, format!("writing the node registry: {e}"));
     }
+    // P-SEAL: the ceremony's binding carriage, approver side. The requester's
+    // binding was verified under its own claimed key at park time
+    // (`pair_request`), and `learn_binding` re-verifies it against the key
+    // now on record. Best-effort and deliberately non-fatal: a refused learn
+    // means this instance already holds an equal or newer generation, which
+    // is exactly the "never downgrade" rule, and a pairing must not fail
+    // over an age key either way.
+    if let Some(binding) = &entry.binding {
+        let _ = aoide_storage::seal::learn_binding(&entry.name, binding);
+    }
     // Design A: mark approved, never take — the entry stays parked for the
     // requester's own poll to find (module doc above).
     let _ = aoide_storage::pairing::mark_inbound_approved(id, now_epoch);
@@ -3261,10 +3309,16 @@ pub(crate) fn poll_outbound_once(cmd: &str, id: &str, entry: &aoide_storage::pai
         Ok(s) => s,
         Err(e) => return PollOutcome::Refused(Outcome::error(cmd, e).with_data(json!({ "reason": "poll-refused", "id": id }))),
     };
-    let polled_pubkey = match status {
+    let (polled_pubkey, released_binding) = match status {
         crate::node::PairPollStatus::Pending => return PollOutcome::Pending,
-        crate::node::PairPollStatus::Approved { pubkey_hex } => pubkey_hex,
+        crate::node::PairPollStatus::Approved { pubkey_hex, binding } => (pubkey_hex, binding),
     };
+    // P-SEAL: park the released binding beside the entry, best-effort. A
+    // release that carries none (an older approver) leaves the entry as it
+    // was, and the ceremony is unaffected either way.
+    if let Some(binding) = &released_binding {
+        let _ = aoide_storage::pairing::set_outbound_binding(id, binding);
+    }
     // The SAS/transcript binding (review-bounce Finding 2, preserved):
     // a released pubkey that does not match what THIS instance learned
     // at request time is refused here, entry untouched — the SAME
@@ -3414,7 +3468,24 @@ pub(crate) fn commit_outbound(
     if let Err(e) = aoide_storage::node_store::save_nodes(&nodes) {
         return Outcome::error(cmd, format!("writing the node registry: {e}"));
     }
+    // P-SEAL: the ceremony's binding carriage, requester side. The binding
+    // rode the approver's `aoide/pairPoll` release and was parked on this
+    // outbound entry by `poll_outbound_once`. Captured BEFORE the entry is
+    // taken (below), applied after: `learn_binding` re-verifies it against
+    // the key now on record and refuses `stale-binding`. Best-effort and
+    // never fatal, exactly as on the approver's leg — a pairing must not
+    // fail over an age key, and a refused learn means this instance already
+    // holds an equal or newer generation, which is the rule working.
+    //
+    // This half was missing at first, and a live two-daemon pairing is what
+    // caught it: the approver stored the requester's binding out of the
+    // request, the requester stored nothing, and the pair sealed
+    // one-directionally until the first `aoide/binding` exchange.
+    let released_binding = entry.binding.clone();
     let _ = aoide_storage::pairing::take_outbound(id, now_epoch);
+    if let Some(binding) = released_binding {
+        let _ = aoide_storage::seal::learn_binding(&entry.name, &binding);
+    }
 
     use aoide_storage::node_store::PairChange;
     let word = match change {
@@ -4695,11 +4766,14 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
         Err(e) => return Outcome::error(cmd, format!("state/mail: {e}")),
     };
     let msgid = envelope.msgid.clone();
-    let entry = if hold {
-        aoide_storage::outbox::OutboxEntry::held(envelope.clone())
-    } else {
-        aoide_storage::outbox::OutboxEntry::fresh(envelope.clone())
+    // P-SEAL: the entry is built at MINT — sealed to the destination's
+    // binding when one is held, plaintext when none is, parked when the one
+    // held is not usable now (`mail_wire::spool_entry`).
+    let entry = match crate::mail_wire::spool_entry(node, envelope.clone(), hold) {
+        Ok(entry) => entry,
+        Err(e) => return Outcome::error(cmd, format!("state/outbox: {e}")),
     };
+    let sealed = entry.is_sealed();
     if let Err(e) = aoide_storage::outbox::write_entry(node, &entry) {
         return Outcome::error(cmd, format!("state/outbox: {e}"));
     }
@@ -4718,12 +4792,27 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
         obj.insert("delivery".to_string(), delivery);
     }
 
+    // L11 (the branch review): three states, not two. `!is_sealed()` was
+    // reported as "plaintext" even for the PARKED arm — an entry waiting on a
+    // binding that is not usable yet and which will never be sent as plaintext
+    // at all. The delivery status said `refused` while the sentence said
+    // "plaintext", which reads as the leak the parking exists to prevent.
+    let disposition = if sealed {
+        "sealed"
+    } else if entry.refused {
+        "parked (the destination holds a binding that is not usable now — not sent in the clear)"
+    } else {
+        "plaintext (the destination has published no binding)"
+    };
+
     Outcome::ok(
         cmd,
         if hold {
-            format!("held for {node}/{name} (msgid {msgid}) — a drain never dials it; it leaves when {node} polls")
+            format!(
+                "held for {node}/{name} (msgid {msgid}, {disposition}) — a drain never dials it; it leaves when {node} polls"
+            )
         } else {
-            format!("spooled to {node}/{name} (msgid {msgid})")
+            format!("spooled to {node}/{name} (msgid {msgid}, {disposition})")
         },
     )
     .changed(vec![format!(
@@ -4849,6 +4938,21 @@ fn handle_mail_export(inv: &Invocation) -> Outcome {
 /// receipts sitting at `tries=0`) is invisible in the row-by-row listing
 /// alone — a summary is the shape an operator actually needs to notice
 /// that before it happens again.
+/// One spooled entry's destination address, as the outbox renders it.
+///
+/// A **sealed** entry's spooled envelope has no mailbox name — the P-SEAL
+/// outbox rule strips it, because a mailbox name is a letter byte the spool
+/// must not hold — so `node/name` would render a bare trailing slash and
+/// read as a bug. This says `node` and nothing more, and the caller marks
+/// the entry sealed beside it; the name is not lost, it is inside `ct`.
+fn sealed_address(to: &aoide_storage::mail::Address) -> String {
+    if to.name.is_empty() {
+        to.node.clone()
+    } else {
+        format!("{}/{}", to.node, to.name)
+    }
+}
+
 fn outbox_node_summary(entries: &[aoide_storage::outbox::OutboxEntry]) -> Value {
     let depth = entries.len();
     let now = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc());
@@ -4922,7 +5026,6 @@ fn handle_mail_outbox(inv: &Invocation) -> Outcome {
         }
         let link = aoide_storage::outbox::read_link_state(node);
         for e in &entries {
-            let to = &e.envelope.header.to;
             let delivery = match &link {
                 Ok(l) => delivery_projection(&base, node, e, l.as_ref()),
                 Err(err) => delivery_status_unavailable(err),
@@ -4930,8 +5033,9 @@ fn handle_mail_outbox(inv: &Invocation) -> Outcome {
             rows.push(json!({
                 "node": node,
                 "msgid": e.envelope.msgid,
-                "to": format!("{}/{}", to.node, to.name),
+                "to": sealed_address(&e.envelope.header.to),
                 "flavor": e.flavor,
+                "sealed": e.is_sealed(),
                 "tries": e.tries,
                 "lastTryAt": e.last_try_at,
                 "lastOutcome": e.last_outcome,
@@ -4953,6 +5057,13 @@ fn handle_mail_outbox(inv: &Invocation) -> Outcome {
                     r["to"].as_str().unwrap_or(""),
                     r["tries"],
                 );
+                if r["sealed"].as_bool() == Some(true) {
+                    // A sealed entry's spool holds no mailbox name — that is
+                    // the P-SEAL outbox rule, not a gap — so the line says
+                    // what the entry IS rather than printing the blank the
+                    // redaction legitimately left behind.
+                    line.push_str("  sealed (the letter is inside ct; open it with this node's age key)");
+                }
                 if r["flavor"].as_str() == Some(aoide_storage::outbox::FLAVOR_HOLD) {
                     line.push_str("  hold (leaves only when its node polls)");
                 }
@@ -6993,6 +7104,7 @@ mod tests {
         // expired before the poll ever runs.
         let now = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap();
         aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
             id: id.to_string(),
             url: url.to_string(),
             name: "box-b".to_string(),
@@ -8509,7 +8621,17 @@ mod tests {
         let rows = out.data.as_ref().unwrap()["nodes"].as_array().unwrap().clone();
         assert_eq!(rows.iter().find(|r| r["node"] == "relay").unwrap()["status"], "polled");
         assert_eq!(rows.iter().find(|r| r["node"] == me.as_str()).unwrap()["status"], "unreachable");
-        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1, "the hub was asked exactly once");
+        // Two requests reach the hub, not one: P-SEAL adds the binding
+        // exchange (`aoide/binding`, published and learned on the drain's
+        // own session) ahead of the poll. The poll proper ran exactly once —
+        // which is what the filed count and the single base entry below
+        // prove; a second poll of the same held letter would be a duplicate,
+        // not a second filing.
+        assert_eq!(
+            hits.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "the hub was asked twice: the binding exchange, then the poll"
+        );
 
         let base = aoide_storage::mail::read_base().unwrap();
         assert_eq!(base.len(), 1, "the hand-over is filed: {base:?}");
@@ -9597,5 +9719,73 @@ printf 'HTTP/1.1 200 OK\r\nMcp-Session-Id: reply-id\r\n\r\n{{"jsonrpc":"2.0","id
         assert_eq!(response.headers[0].1, "reply-id");
         assert!(request_json_with_headers("POST", "https://mneme.invalid/mcp", "{}", "token\nInjected: value", &[], 1).is_err());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// H2, the third path (the re-review): `mail outbox retry --refused`
+    /// un-parks an entry and immediately drains it, so a letter parked
+    /// *because* its destination's binding was unusable was walked straight
+    /// into a plaintext deposit. It must re-park instead, and nothing must be
+    /// dialed at all.
+    #[test]
+    fn retry_refused_re_parks_a_letter_whose_binding_is_unusable() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("outbox-retry-unusable");
+
+        // A destination with a binding on record that is expired.
+        let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
+        let now = aoide_storage::time::now_iso_utc();
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        aoide_storage::node_store::upsert_paired_node(
+            &mut nodes,
+            "liveb",
+            "http://127.0.0.1:1/",
+            &kp.info().pubkey_hex,
+            &now,
+            &["message".to_string()],
+        );
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+        let expired = aoide_storage::seal::mint_binding(
+            &kp,
+            "age1expired",
+            1,
+            &aoide_storage::time::shift_iso_utc(&now, -7200),
+            &aoide_storage::time::shift_iso_utc(&now, -3600),
+        )
+        .unwrap();
+        aoide_storage::seal::learn_binding("liveb", &expired).unwrap();
+
+        // A plaintext letter, already parked for exactly that reason.
+        let canary = "CANARY-H2-RETRY-UNUSABLE";
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "liveb", "bob", canary).unwrap();
+        let mut parked = aoide_storage::outbox::OutboxEntry::fresh(envelope);
+        parked.refused = true;
+        parked.last_outcome = "parked: the destination holds a binding that is not usable now".to_string();
+        aoide_storage::outbox::write_entry("liveb", &parked).unwrap();
+
+        let mut inv = aoide_test_support::inv(&["mail", "outbox", "retry"], &[]);
+        inv.flags.insert("refused".to_string(), String::new());
+        let out = handle_mail_outbox_retry(&inv);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+
+        let after = aoide_storage::outbox::list_entries("liveb").unwrap();
+        assert_eq!(after.len(), 1, "the letter is still spooled");
+        assert!(after[0].refused, "and re-parked, not left dialable");
+        assert!(
+            after[0].last_outcome.starts_with("parked:"),
+            "with the reason it was parked for: {}",
+            after[0].last_outcome
+        );
+        // The spool still holds the body, and that is correct: this entry was
+        // never sealed, so there is no container to hold it instead —
+        // redaction happens when an entry IS sealed. What matters is that the
+        // retry did not put it on a wire, which the link check below proves.
+        // Nothing was dialed: a dead port that had been tried would have left
+        // the link backed off.
+        assert!(
+            aoide_storage::outbox::read_link_state("liveb").unwrap().is_none(),
+            "no attempt reached the link at all"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

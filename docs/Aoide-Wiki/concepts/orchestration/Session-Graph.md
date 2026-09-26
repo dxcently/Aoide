@@ -40,7 +40,13 @@ full node id or the bare id.
   instead resolves one automatically: its self-first `/proc` ancestry
   (`hookAncestry`, stamped once at registration) is intersected against
   every live agent-kind session's own `hookAncestry`, and the closest
-  matching ancestor wins as parent (CONTRACTS.md §4).
+  matching ancestor wins as parent (CONTRACTS.md §4). A harness that reports
+  itself through the hook door is launched by a wrap, so its parent is usually
+  that wrap directly, and the door resolves it the same way whichever door
+  serves the hook: the claim in the hook process's own `AOIDE_SESSION_ID`
+  (checked — a claim whose record carries a pid the hook process is not
+  running under is dropped and reported, never linked) with the attested
+  conducted ancestor as the kernel-verified path ahead of it.
 - **`leads`** (session → session): a project that names a **lead**
   (`aoide project lead <name> <session>`, CONTRACTS.md §4's
   `projects.json`) hangs its other parentless sessions off that one
@@ -58,6 +64,35 @@ itself; the lead is anchored to the project it leads. Sessions matching no
 project group under a synthetic `(unanchored)` root. Each session's live
 state is the latest hook phase from `hooks.json` merged over its raw roster
 state ([[shellbridge]] writes both files).
+
+**The project ladder** — which project a session belongs to, derived and never
+stored (`CONTRACTS.md` §4, "stored-vs-effective"):
+
+```
+project_for(s)            explicit project > s's workspace default > s's cwd anchor
+effective_project_for(s)  explicit project > owner (nearest ancestor whose OWN
+                          claim resolves) > s's workspace default > s's cwd anchor
+```
+
+The **workspace default** is `workspaceProject`: the project the session's
+compositor workspace was bound to (`workspace set`, `CONTRACTS.md` §4's
+`projects.json`) at the moment its `workspace` first went from absent to
+present. It is stamped ONCE, through one seam
+(`aoide-conduct::graph::observe_workspace`), so a window dragged to another
+workspace keeps the project it was born with, and binding a workspace never
+adopts the sessions already sitting on it. The owner sits ABOVE the default —
+a child an agent spawns belongs to the agent's work wherever its window lands —
+and the default sits above the cwd anchor because binding a workspace is an act
+an operator performed while a cwd is incidental. A default naming a project
+that has since been removed falls through to the next rung; an observation that
+LAPSED — a `workspace` cleared because its window's client reported none —
+counts as a new birth when the workspace is observed again on a binding. The
+ladder is LIVE membership only: ledger-driven views are not re-run through it —
+`resurrect --project <name>` and the conductor's history label match an entry
+by its explicit project or its cwd, so a session whose membership comes from
+its workspace default is not offered by those views. On a host with no
+compositor no session carries a default at all, and the ladder is exactly the
+two rungs it was before.
 
 ## The viewer — bare `graph`
 

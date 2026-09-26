@@ -148,7 +148,17 @@ other crate in this workspace sits above.
   where verified, the argv that resumes a prior session of it by its own
   id — P-D7 — and, where a harness offers one, the argv that delivers a
   message to a live session WITHOUT the pty composer at all —
-  `native_send`, P-EIDOLON) keyed by harness name. `on_path` (P-I2,
+  `native_send`, P-EIDOLON — plus the two launch-time facts a first turn
+  needs: `readiness`, WHICH signal says a just-started process of this
+  harness can take a turn (`Hook` — its own `SessionStart`, stamped
+  `sessionStartAt` for the launch that waits on it; `OutputSettled`, which
+  claims no fact and makes the delivery `delivered-unverified`; a
+  prompt-pattern value was tried and withdrawn as unanchorable), and
+  `session_env_markers`, the variables this harness injects into the
+  processes it launches that mean "you are inside a `<harness>` session";
+  the union of every profile's list is `session_env_markers()`, the one list
+  a launch path drops from a child's environment before exec) keyed by
+  harness name. `on_path` (P-I2,
   ONBOARD.md decision 7) is the `AgentProfile`-shaped wrapper over
   `bin::on_path`, over the profile's own `launch` program name — onboard's
   harness-picker preselection. The table gains a fourth row for `eidolon`,

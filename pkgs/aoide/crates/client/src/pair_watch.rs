@@ -1469,6 +1469,7 @@ mod tests {
         with_node_state("awaiting-approval", || {
             let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap();
             aoide_storage::pairing::park_outbound(aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
                 id: "deadbeef".to_string(),
                 url: "http://box-b/".to_string(),
                 name: "box-b".to_string(),
@@ -1717,6 +1718,7 @@ mod tests {
             let url = format!("http://127.0.0.1:{port}/");
             let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap();
             aoide_storage::pairing::park_outbound(aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
                 id: "deadbeef".to_string(),
                 url,
                 name: "box-b".to_string(),
@@ -1774,6 +1776,7 @@ mod tests {
             // with a `Refused` (`poll-unreachable`) every single call —
             // this test is not exercising a lucky race, EVERY attempt fails.
             aoide_storage::pairing::park_outbound(aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
                 id: "deadbeef".to_string(),
                 url: "http://127.0.0.1:1/".to_string(),
                 name: "box-b".to_string(),
@@ -1815,6 +1818,7 @@ mod tests {
             let url = format!("http://127.0.0.1:{port}/");
             let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap();
             aoide_storage::pairing::park_outbound(aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
                 id: "deadbeef".to_string(),
                 url,
                 name: "box-b".to_string(),
@@ -2289,6 +2293,7 @@ mod tests {
             let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap();
             let pubkey_b = "b".repeat(64);
             aoide_storage::pairing::park_outbound(aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
                 id: "deadbeef".to_string(),
                 url: "http://box-b/".to_string(),
                 name: "box-b".to_string(),
@@ -2336,6 +2341,7 @@ mod tests {
         with_node_state("commit-approval-outbound-wrong-code", || {
             let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap();
             aoide_storage::pairing::park_outbound(aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
                 id: "deadbeef".to_string(),
                 url: "http://box-b/".to_string(),
                 name: "box-b".to_string(),
@@ -2373,6 +2379,7 @@ mod tests {
         with_node_state("outbound-reject-and-ignore-untouched", || {
             let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap();
             aoide_storage::pairing::park_outbound(aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
                 id: "deadbeef".to_string(),
                 url: "http://box-b/".to_string(),
                 name: "box-b".to_string(),

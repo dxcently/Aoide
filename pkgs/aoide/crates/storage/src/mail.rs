@@ -4,11 +4,11 @@
 //! (`conduct/graph/send.rs`, `server/a2a.rs`) file a `receipt` entry here,
 //! and `mail send` files a `letter` — locally via [`file_letter`] for
 //! `self/<name>`, or over the wire for a direct paired edge (P-M2): the
-//! sender mints with [`mint_outbound_letter`] and spools the sealed
+//! sender mints with [`mint_outbound_letter`] and spools the signed
 //! [`Envelope`] into [`crate::outbox`]; the far door's `aoide/mailDeposit`
 //! arm calls [`deposit`] here to verify and file it, ONLY ever via a
 //! [`file_received_entry`] (never re-minted — the envelope arrives already
-//! sealed). **No transit, no zones, no `--hold`** — those are P-M3/P-M4
+//! signed). **No transit, no zones, no `--hold`** — those are P-M3/P-M4
 //! (MAIL.md's own Phases section); nothing here reads a mesh declaration.
 //! The doorbell's own latch and its targeting queries ([`arms`],
 //! [`ring_targets`], [`stamp_rung`], [`armed_names_for_reader`],
@@ -312,7 +312,12 @@ fn hex_decode(s: &str) -> Option<Vec<u8>> {
 /// can change the case of a name without breaking the signature. The ONLY
 /// place this order is defined; [`seal`] and [`compute_msgid`] both go
 /// through here rather than assembling the string twice.
-fn canonical_header_bytes(h: &Header) -> Vec<u8> {
+///
+/// `pub(crate)` since P-SEAL: `crate::seal` frames this exact byte string
+/// as the inner envelope's `header` field, so the sealed plaintext carries
+/// the signed bytes themselves rather than an unpinned JSON rendering
+/// (crates/AGENTS.md: widen a symbol a consumer needs, never fork it).
+pub(crate) fn canonical_header_bytes(h: &Header) -> Vec<u8> {
     [
         h.version.as_str(),
         h.from.node.as_str(),
@@ -327,13 +332,38 @@ fn canonical_header_bytes(h: &Header) -> Vec<u8> {
     .into_bytes()
 }
 
+/// [`canonical_header_bytes`]'s exact inverse: split the eight NUL-joined
+/// fields back into a [`Header`], or `None` when the bytes are not eight
+/// NUL-free fields. Lossless in both directions — [`canonical_header_bytes`]
+/// of the result is the input byte for byte — so a receiver can frame the
+/// signed bytes and still recover the fields it must file.
+pub(crate) fn header_from_canonical_bytes(bytes: &[u8]) -> Option<Header> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let parts: Vec<&str> = text.split('\0').collect();
+    if parts.len() != 8 {
+        return None;
+    }
+    Some(Header {
+        version: parts[0].to_string(),
+        from: Address { node: parts[1].to_string(), name: parts[2].to_string() },
+        to: Address { node: parts[3].to_string(), name: parts[4].to_string() },
+        kind: parts[5].to_string(),
+        minted_at: parts[6].to_string(),
+        origin_mesh: parts[7].to_string(),
+    })
+}
+
 /// Recompute `msgid` from a (possibly tampered) header/text/sig triple —
 /// `hex sha256 over sig ‖ header ‖ 0x00 ‖ text`, no separator before
 /// `header`, one before `text` (MAIL.md "The envelope"). `None` only when
 /// `sig_hex` itself doesn't decode; a bad/tampered `header` or `text` still
 /// recomputes cleanly, just to a DIFFERENT `msgid` — that mismatch is the
 /// tamper-evidence this function exists to make checkable.
-fn compute_msgid(header: &Header, text: &str, sig_hex: &str) -> Option<String> {
+///
+/// `pub(crate)` since P-SEAL: `crate::seal` recomputes the inner envelope's
+/// id from the opened plaintext, through this same function rather than a
+/// second copy of the formula.
+pub(crate) fn compute_msgid(header: &Header, text: &str, sig_hex: &str) -> Option<String> {
     let sig_bytes = hex_decode(sig_hex)?;
     let header_bytes = canonical_header_bytes(header);
     let mut input = Vec::with_capacity(sig_bytes.len() + header_bytes.len() + 1 + text.len());
@@ -345,7 +375,7 @@ fn compute_msgid(header: &Header, text: &str, sig_hex: &str) -> Option<String> {
 }
 
 /// Sign `header ‖ 0x00 ‖ text` with `kp` and derive `msgid` from the result
-/// — the one place a fresh envelope is sealed. Origin-signed only (ruling
+/// — the one place a fresh envelope is signed. Origin-signed only (ruling
 /// 6): P-M1 never verifies anyone else's signature, since there is no one
 /// else yet.
 fn seal(header: &Header, text: &str, kp: &identity::Keypair) -> (String, String) {
@@ -644,11 +674,11 @@ fn reader_id(name: &str, reader_session: Option<&str>) -> String {
     }
 }
 
-/// Mint + seal + file one entry (letter or receipt) ORIGINATING on this box
+/// Mint + sign + file one entry (letter or receipt) ORIGINATING on this box
 /// — `via` names the hop that deposited it, `"self"` for everything this
 /// box mints for itself (P-M1's every caller; a remotely-deposited envelope
 /// is filed by [`file_received_entry`] instead, which skips minting
-/// entirely since the envelope already arrived sealed). The one place
+/// entirely since the envelope already arrived signed). The one place
 /// [`append_base_line`] and [`append_seen_line`] are called together, in
 /// that order. Raw — called only from inside [`with_lock`]'s closure
 /// (`file_letter`/`file_receipt`/[`migrate_if_needed`]'s own inline copy of
@@ -733,10 +763,10 @@ pub fn file_letter(from_name: &str, to_name: &str, text: &str) -> Result<Entry, 
     with_lock(move || file_entry(ENTRY_TYPE_LETTER, from_addr, to_addr, &text, "self"))
 }
 
-/// File a letter ADDRESSED TO A REMOTE NODE — mints and seals exactly like
+/// File a letter ADDRESSED TO A REMOTE NODE — mints and signs exactly like
 /// [`file_letter`] (this box IS the origin), but the caller supplies
 /// `to_node` directly rather than this box's own name, since the whole
-/// point is a `to` that names somewhere else. Returns the sealed
+/// point is a `to` that names somewhere else. Returns the signed
 /// [`Envelope`] (not an [`Entry`] — nothing is filed into THIS box's own
 /// mailbase; a letter to another node is never also a local copy) for the
 /// caller to hand to the outbox. `mail send`'s command layer is what
@@ -828,6 +858,23 @@ pub enum DepositOutcome {
     BadMsgid,
     /// [`verify_origin_signature`] returned `false`.
     UnverifiedOrigin,
+}
+
+// L2 (the branch review): there was a `Refused { reason, detail }` variant
+// here, "carrying the taught word a container refusal names". Nothing ever
+// constructed it — a plaintext envelope has no shape to carry a refusal word,
+// and the container path answers `seal::ContainerOutcome::Refused`, a
+// different type entirely — so it and its two match arms were dead. A
+// variant that cannot be built is worse than no variant: it reads as a
+// reachable branch to every later reader.
+
+/// The `kind` of the entry filed under `msgid`, if one is filed — the
+/// **filed record** is the truth about filing, never a gate's own memory.
+/// A duplicate container consults this so its answer survives a crash
+/// between the filing and any dedup write (MAIL.md, "A crash between base
+/// and seen re-accepts exactly once").
+pub fn filed_kind(msgid: &str) -> Option<String> {
+    show(msgid).ok().flatten().map(|entry| entry.kind)
 }
 
 /// `aoide/mailDeposit`'s policy chain from "msgid recomputes" onward (spec
@@ -1972,7 +2019,7 @@ mod tests {
 
         assert!(
             crate::wire_auth::verify_signature_hex(&kp.info().pubkey_hex, &sig_input, &sig),
-            "a correctly-sealed envelope's signature must verify against its own signer's pubkey"
+            "a correctly-signed envelope's signature must verify against its own signer's pubkey"
         );
 
         let other = identity::mint_ephemeral().unwrap();

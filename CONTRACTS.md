@@ -546,8 +546,10 @@ count.
   (P-C5) marks it a conducted shell, so it spawns windowed running its
   own login shell (`$SHELL` → passwd → `/bin/sh`, `-l`) instead. A
   candidate neither arm resolves is skipped with a taught message naming it,
-  never a guessed invocation. Once a terminal candidate's spawn registers,
-  its `restore` snapshot drives one more step, in-process through `send`,
+  never a guessed invocation. Once a terminal candidate's spawn registers AND
+  its target becomes READY (`aoide_conduct::graph::wait_ready`; a target that
+  never does is reported `not-ready` and typed at by nothing), its `restore`
+  snapshot drives one more step, in-process through `send`,
   never a direct socket write: a foreground command it was demonstrably
   running re-execs with `--yes --submit` (never for a recorded `sudo …`,
   which only restores the cwd); an idle session's clean unsubmitted
@@ -1000,8 +1002,12 @@ automatic anchoring without changing cwd. The exit ledger retains the value
 as `project` (null when absent), and resurrection restores it when registered.
 That stored project is distinct from the *effective* project a session
 renders under: `aoide-conduct::graph::effective_project_for` derives the
-latter (own explicit project, else the nearest owning ancestor's own explicit
-project or cwd anchor, else the session's own cwd anchor) and never writes it.
+latter (own explicit project, else the nearest owning ancestor's own claim,
+else the session's own workspace default, else its own cwd anchor) and never
+writes it. Ledger-driven views do NOT run that ladder: `resurrect --project
+<name>` and the conductor's history label match a ledger entry by its explicit
+`project` or its cwd only, so live membership can name a project those views
+will not offer for that session.
 `SessionRecord.project` and the graph node's `project` keep publishing the
 stored value only; `aoide session`'s bucket names and the conductor's
 per-project counts read the derived view. An additive `effectiveProject`
@@ -1015,6 +1021,34 @@ rows do not carry it either. The same rows carry `nativeRole` under the
 record rule above (present only when the record carries one); a row built
 from a remote node's graph document relays that node's own published
 `nativeRole` and never synthesizes one.
+
+**`workspaceProject` — the workspace's default project, stamped at birth.**
+A session record MAY carry an optional `workspaceProject` (string), naming
+the project its compositor workspace was BOUND to when the session's
+`workspace` first went from absent to present. It is a DEFAULT, never a
+choice: `SessionRecord.project` stays the explicit member and always outranks
+it, the owner rung sits between them (a child an agent spawns belongs to the
+agent's work wherever its window lands, and the owner's own default is visible
+to that walk), and the workspace default outranks the cwd anchor because
+binding a workspace is an act an operator performed while a cwd is incidental.
+`workspaceProject` is written ONLY by
+`aoide-conduct::graph::observe_workspace` — the one seam `workspace` itself is
+written through, called by all three compositor stamp sites (the hook-time
+window backfill, the event-driven sweep, and the synthetic bare-terminal
+publisher) — and only when the record has no explicit `project`, no
+`workspaceProject` yet, and its workspace carries a binding. It is therefore
+STAMPED ONCE: never re-stamped when a window moves, never cleared by movement,
+never adopted retroactively (binding a workspace affects new births, not the
+sessions already sitting on it). An observation that LAPSED counts as a NEW
+BIRTH: a record whose `workspace` was cleared — a window whose client reported
+no workspace — and later re-observed on a now-bound workspace IS stamped. The
+seam's rule is that state transition, not a permanent ever-stamped flag. A
+session whose default names a project that has since been removed falls
+THROUGH to the next rung — a default naming nothing is not a choice, and the
+stored field is left as it is; re-registering that name later RE-FORMS every
+membership the field still spells. Additive/v0-safe: absent on every record predating it and on every record whose host
+has no compositor adapter, `skip_serializing_if` keeping a record without it
+byte-identical on the wire.
 `session kill --id ID` is a local daemon-only SIGTERM request for an exclusively
 owned, conducted process verified against the daemon seal and pinned by Linux
 pidfd. Its successful response confirms signaling, never process exit.
@@ -1167,7 +1201,7 @@ sakaki = "ssh://khoa@192.168.1.202"
   takes no attribute fragment, so scoping is only expressible as a build of
   the check derivations.
 - `mesh.<name>` (task #135 P4, zero or more, keyed by the operator's own
-  mesh name) — a declared roster this instance believes it belongs to,
+  mesh name) — a declared mesh this instance believes it belongs to,
   compared against the live node registry by `aoide mesh`
   (`aoide_client::mesh`, see §3's CLI ledger). `mesh.<name>.nodes` is a
   `name -> ssh hop` map (`aoide_storage::tunnel::parse_via`'s own
@@ -1196,14 +1230,15 @@ sakaki = "ssh://khoa@192.168.1.202"
   the mesh is operated by the same human. It is declared and NOT acted on:
   `aoide mesh pair` converges a mesh declaring it identically to one that
   does not — every node paired with both codes typed — and says so in one
-  note on its report. Whether a converge may ever act on the claim touches
-  the mutual-code pairing invariant (`docs/architecture/PAIRING.md`'s "Mesh
-  declaration" section) and is not decided. This section is validated the
-  same as the two above it — an invalid mesh/node name, an out-of-
-  vocabulary `grant` element, an unparseable hop, or a node declared twice
-  is a LOUD error naming the offence — but it is declared, never settable:
-  its keys are the operator's own names, not a fixed table `aoide config
-  set` could walk, so `aoide config set mesh.*` is always
+  note on its report. The question it asks is answered by the signed charter
+  (`docs/architecture/HTTPS-MESH-API.md`, "Charters"): one operator is one
+  charter signer, so the key is never acted on and retires with P-CHARTER.
+  This section is validated the same as the two above it — an invalid
+  mesh/node name, an out-of-vocabulary `grant` element, an unparseable
+  hop, or a node declared twice is a LOUD error naming the offence — but
+  it is declared, never settable: its keys are the operator's own names,
+  not a fixed table `aoide config set` could walk, so
+  `aoide config set mesh.*` is always
   `SetRefusal::UnknownKey`, the same refusal an unknown key anywhere else
   gets. Writing a mesh is a text edit to this file; `aoide mesh` is the
   read-only comparison against `state/nodes.json` and `aoide mesh pair` is
@@ -1751,6 +1786,40 @@ deliberately the opposite of `undying`'s own post-mortem posture below,
 because an exemption has nothing to mean once there is no record to hold it.
 Absent means "not exempt, or a legacy record"; readers must tolerate both
 forms and round-trip fields they do not know.
+
+**Additive in v0 (spawn readiness, 2026-09-26):** a session record MAY also
+carry an optional `sessionStartAt` (string, ISO-8601 UTC) — WHEN that
+harness's own `SessionStart` hook was recorded for this record. One writer:
+the hook door's `SessionStart` arm (`send.rs`), on every SessionStart a
+resume included. It exists so a launch can tell "this harness said hello, to
+THIS launch" from "a record exists, from some earlier run": `aoide spawn
+--prompt`, `resurrect`'s restore delivery and the A2A door's opening turn all
+wait on a child record of their wrapper carrying a stamp at or after their
+own start instant, and an unstamped (or older-stamped) leftover under a
+reused id is not readiness. Absent means "this harness's hooks never claimed
+this record" — never a readiness fact; readers must tolerate both forms and
+round-trip fields they do not know.
+
+**Additive in v0 (A2A opening turn, 2026-09-26):** a session record MAY also
+carry an optional `openingTurn` (string) — what became of the first turn the
+A2A door asked a spawned session to run. The vocabulary is complete and
+closed, and its home is the field's own doc in `storage/src/records.rs`:
+`pending` (accepted; a worker is waiting for the target), `delivered` /
+`delivered-unverified` (the turn went out; the second when the target
+declared no readiness fact), `not-ready` (the budget ran out, nothing typed),
+`busy` (the door's opening-turn worker pool was full — nothing typed, ask
+again), `no-worker` (no worker thread could be started), `skipped-empty` /
+`skipped-shell` (nothing to type, or a shell may not be typed at),
+`no-socket` / `write-failed` (the control socket never answered, or the write
+failed — no receipt filed either way), and `unknown` (the process that owed
+the verdict died; a boot pass reconciles a stranded `pending` to this). It is
+a HISTORICAL fact: stamped once, never cleared by a later turn, so a
+`tasks/get` days later reports the opening turn while the record's own
+`state` carries the live word. Its one reader is `tasks/get`, which reports
+it as the task's `status.message` — an A2A `Message` object (`role: "agent"`,
+one text part reading `opening turn: <verdict>`), which is what this binding
+types that field as (CONTRACTS.md §6). Absent on every locally
+spawned session.
 
 **Additive in v0 (P-D7, `docs/architecture/AOIDED.md`'s "L5"):** a session
 record MAY also carry an optional `harnessSessionId` (string) — the
@@ -2303,10 +2372,43 @@ outright, first path becoming `path`, the rest folded into the same
 `roots` list — the name stays immutable and `autoResume` is untouched.
 `project remove NAME [PATH]` drops one root (promoting the next into
 `path` when `path` itself was removed) or, with no `PATH`, the whole
-project. Every reader enumerates roots through `Project::roots()`
+project — and a deleted project's workspace bindings go with its record.
+Removing a project's LAST root does NOT delete it: the project is left
+standing with no folder, a NAME-ONLY project ("A project with no folder"
+below). Every reader enumerates roots through `Project::roots()`
 (`path` first, then `roots`, deduplicated) rather than the raw fields —
 a hand-edited record whose `path` does not match `roots[0]` is read, not
 silently rewritten.
+
+**A project with no folder.** A project entry MAY carry neither `path` nor
+`roots` (`{"name":"cadenza","path":"","roots":[]}`): `aoide project add NAME`with no path at all registers a NAME-ONLY project — a name a workspace can be
+bound to and a session can name explicitly, but that can never anchor a
+session by cwd, because `Project::roots()` is empty and the anchoring rung
+matches by root prefix. The cwd is NEVER a default root: registering the
+directory you happen to stand in is how a project anchors sessions nobody
+meant it to. A folder is added later with `project add NAME ROOT` and removed
+again with `project remove NAME ROOT`, which leaves the project name-only
+once more. Nothing else about the record changes — it keeps its
+`autoResume`/`hosts`/`lead` state and its workspace bindings.
+
+**Also additive in v0: `workspaces` — the workspaces that SHOW this project.**
+A project entry MAY carry an optional `workspaces` array of INTEGER compositor
+workspace ids (`"workspaces":[3,5]`), the same integer
+`SessionRecord.workspace` already holds (Hyprland's named and special
+workspaces carry negative ids; a future virtual-desktop adapter maps to the
+same integers). `#[serde(default, skip_serializing_if = "Vec::is_empty")]`
+keeps it off the wire for a project no binding has touched — the
+`hosts`/`autoResume` discipline, so every `projects.json` written before this
+field stays byte-identical. Written by `workspace set` (under the same stage
+lock local roots go through; daemon-owned, like every other `projects.json`
+mutation) and by `workspace clear`. ONE INVARIANT: a workspace id appears in AT
+MOST ONE project — `workspace set` MOVES it off whatever project held it —
+while two workspaces may show the same project. A binding is not a root: it
+anchors nothing by cwd, a rootless project may carry one, and `project remove
+NAME ROOT` leaves bindings alone; the bare `project remove NAME` takes them
+with the record. Read with `aoide workspace list [--json]`, which merges the
+bindings with every workspace a local session reports (`observed` is `false`
+by name on a host where no session reports one).
 
 **Additive in v0 (P-D8, `docs/architecture/AOIDED.md`'s "L5"/"Open
 knobs"):** a project entry MAY also carry an optional `autoResume` (bool,
@@ -2347,8 +2449,9 @@ skip_serializing_if = "Vec::is_empty")]` keeps `hosts` off the wire for a
 project no `--host` invocation has touched, the discipline `autoResume`
 set. Set through the SAME three commands as local roots, scoped by a
 `--host <node>` flag: `project add NAME [PATH…] --host NODE` adds `NODE` as
-a member (membership-only when no path follows — `--host` never defaults
-to the cwd the way a bare `project add` does) and appends any given paths
+a member (membership-only when no path follows — a path is explicit for
+every command now, and a bare `project add NAME` registers a name-only
+project) and appends any given paths
 to that host's own root list, idempotently; `project edit NAME PATH… --host
 NODE` REPLACES that host's root list exactly (local roots and every other
 host untouched); `project remove NAME --host NODE` drops the whole
@@ -2908,7 +3011,7 @@ all) file receipts through the same `mail::file_receipt`, the ONE seam
 covering every route a delivered message takes to land in a local
 session — `do_inject` files no entry of its own, see its doc comment. An
 OUTBOUND `--to node/<x>` send (P-M2) files nothing into THIS box's own
-`base.jsonl` at send time — it mints a sealed envelope and spools it into
+`base.jsonl` at send time — it mints a signed envelope and spools it into
 `state/outbox/` instead (below), delivered over `aoide/mailDeposit` by a
 best-effort drain right after the write, the daemon's own periodic sweep,
 or a door's post-heard drain of that node. The letter lands in a
@@ -3021,7 +3124,7 @@ check, the ack re-spooled. A tool that moves or archives entries out of
 
 ```json
 {
-  "envelope": { "...": "the sealed Envelope, byte-identical to mint time" },
+  "envelope": { "...": "the signed Envelope, byte-identical to mint time" },
   "flavor": "hold",
   "tries": 2,
   "lastTryAt": "2026-09-07T14:03:10Z",
@@ -3641,6 +3744,104 @@ short display label, distinct from P-P2's SAS (short authentication
 string), which is derived from BOTH sides' keys plus nonces at pairing
 time, not from one side's key alone. Nothing here is authenticated against
 a node until the pairing ceremony below runs.
+
+### `state/identity/age.key`, `state/identity/age-binding.json`, `state/identity/age-retired/` — **v0** (P-SEAL, `docs/architecture/HTTPS-MESH-API.md`)
+
+This instance's **age X25519 key** and the self-signed binding that
+publishes it (`aoide-storage::seal`, the one module in the tree that
+touches the `age` crate). The key is minted independently of the identity
+key and is never derived from its seed, in either direction.
+
+- `age.key` — the private key as the stock `AGE-SECRET-KEY-1…` text an
+  `age-keygen` produces (trailing newline), `0600`, in the same `0700`
+  directory as `ed25519.key` and written through the same
+  `fs::secure_private_dir` / `fs::atomic_write_private` pair. Stored as the
+  stock text deliberately: a human with this file and the stock tooling can
+  open anything sealed to this node even if Aoide is gone, which is the
+  recovery property choosing age buys. **Never a JSON value, never inside a
+  `Serialize`/`Deserialize` type, never printed, never in an `Outcome`**
+  (`PAIRING.md`'s kill-list, held here by the same mechanical test
+  `identity.rs` runs on itself).
+- `age-binding.json` — the current self-signed binding: version, purpose
+  (`mail-sealing`), the age recipient and its fingerprint, the accepted
+  suite list, a monotonic `generation`, `rotatedAt` and the validity
+  window, and the identity key that signs all of it. Written by
+  `seal::publish_binding`, which is idempotent: a valid binding for the
+  current key is returned unchanged, so a door read costs one small file
+  read and rotates nothing.
+- `age-retired/<generation>.key`, `age-retired/<generation>.until` and
+  `age-retired/<generation>.recipient` — a superseded private key, the
+  deadline it may still open mail until (the binding it belonged to had that
+  `not_after`), and the age recipient it answered to. A container addressed
+  to it still opens while the deadline is ahead; once it passes, the
+  container is refused `key-retired` and the **private key** is deleted by
+  the next successful current-key open.
+  `.until` and `.recipient` are the **tombstone** and are never deleted: the
+  address a retired key stood at has to outlive the key, or the refusal
+  degrades to `open-failed` — which `age` returns just as readily for a
+  wrong recipient or a tampered `ct`, so an operator could not tell a
+  rotation from an attack and the origin's retry loop learned nothing
+  actionable. Three files, not one JSON record, for the same reason
+  `ed25519.key` is not JSON: no private key in a serializable shape.
+
+  **Rotation has no operator seam in P-SEAL.** `seal::rotate_age_key` mints
+  the new key, writes the tombstone and publishes the next-generation
+  binding, and is tested — but nothing in the CLI reaches it. That seam is
+  P-CHARTER's, where a node's keys are managed; until it lands, no age key
+  retires in the field and the grace/tombstone machinery above is reachable
+  only from tests.
+
+### `state/age-bindings/<node>.json` — **v0** (P-SEAL)
+
+A peer's accepted binding, one file per node name.
+
+A store of its own rather than a field on `nodes.json`'s record: the
+binding is one removable file per node, `nodes.json`'s shape stays what
+§7 says it is, and a node removed and re-added inherits no trust —
+`seal::binding_for` re-verifies the file against the key ON RECORD on every
+read, so a file left behind by a removed node simply fails to verify and is
+inert.
+
+The file IS the generation high-water mark: `seal::learn_binding` refuses a
+binding whose generation is not above the stored one (`stale-binding`), and
+refuses an equal generation carrying different bytes (a conflict nothing
+here can order). An equal generation with identical bytes is a replay of
+what is already in force and is a no-op. A binding whose signer is not the
+key this node has on record for that name is refused `binding-mismatch`, and
+**a node with no key on record at all accepts nothing** — an age key is
+accepted only inside a binding signed by a key that was itself pinned.
+
+The comparison is against a file that still verifies **under the key now on
+record**, because generations are per identity key: a re-pair with a fresh
+identity key writes a fresh generation 1, and a file left by the dead key
+must not be a predecessor it is measured against. `node remove` deletes the
+file, so a node re-added under the same name inherits nothing.
+
+### `state/mail/containers.jsonl` — **v0** (P-SEAL)
+
+The sealed container's own dedup gate, append-only, one JSON object per
+admitted **and filed** container: `originKey`, `toNode`, `msgid`, `digest`.
+
+Separate from `state/mail/seen.jsonl` because it answers a different
+question at a different time. `seen.jsonl` is consulted *after* an envelope
+is opened and has no way to decide anything before that; this gate runs
+before the open, which is what makes "a previously admitted duplicate
+returns `duplicate`" cost no decryption and no recipient key at all.
+
+The lookup key is the authenticated `(originKey, toNode, msgid)` tuple —
+never `msgid` alone, since a relay cannot verify the inner hash and one
+origin must not be able to reserve another origin's message id. The
+comparison within that tuple is `digest`, `sha256` over the frame of
+`ctx ‖ ct ‖ sig`: everything `ctx` covers plus the ciphertext and the
+origin signature, and nothing hop-mutable. A retry over another route is
+therefore a duplicate, and a `msgid` that reappears with different
+immutable bytes is a collision and refuses. A container is recorded only
+after its outer origin signature verifies AND it is filed — `seal::
+record_admitted` is the caller's write, made once `mail::deposit` returns
+`Filed` or `Duplicate`, never from inside `seal::deposit_container`. A
+malformed or unverified container is never recorded, and neither is one that
+refused after the gate: those re-run and re-answer on a retry rather than
+turning into a permanent `duplicate`.
 
 ### `state/node-pairing-inbound.json` / `state/node-pairing-outbound.json` — **v0** (P-P2, `docs/architecture/PAIRING.md`)
 
@@ -4849,6 +5050,19 @@ Server-Sent Events. The MVP door serves exactly:
 `tasks/cancel` remains an **additive** follow-on — v0 does not require it, and
 adding it later is not a version bump to this contract (same additive
 discipline as §1/§4's optional tiers).
+
+**Additive in v0 (spawn readiness, 2026-09-26):** a `TaskStatus` MAY carry
+`message` — A2A's own optional field, and typed as this binding has it: a
+`Message` OBJECT (`role` + `parts`, with a minted `messageId`: the binding
+marks that field required, so an outbound status message carries one —
+`aoide_protocol::wire::gen_message_id`, the same generator the client's
+`message/send` bodies use), never a string, so a strict A2A client
+parses `tasks/get` unchanged. aoide's use is one `agent` message whose single
+text part reads `opening turn: <verdict>` (the vocabulary is §4's
+`openingTurn`), so a remote peer whose opening turn has not run yet — or never
+will — reads that instead of assuming `submitted` meant the turn ran. Absent
+(and skipped on the wire) for every task whose record carries no
+`openingTurn`, so those responses stay byte-identical.
 
 ### Streaming: SSE (Phase C)
 
@@ -6603,11 +6817,75 @@ version bump to §1–§6 and needs no playbook migration entry.
 
 ### `aoide/mailDeposit` (P-M2, `docs/architecture/MAIL.md`)
 
+**P-SEAL (`docs/architecture/HTTPS-MESH-API.md`, §4's
+`state/identity/age.key`) adds a sealed arm to this same method.** `params`
+carries either the plaintext `envelope` above — which P-SEAL keeps exactly
+as it is, for the one remaining plaintext path, the direct SSH lane to a
+destination that has published no binding — or a `container`, the outer
+object of `seal::Container`. The two are mutually exclusive and the
+container is preferred when both are present; admission (the `-32010`
+ladder above) is identical for either.
+
+A container takes a longer path than an envelope, and every step of it is
+still a REFUSED RESULT rather than a JSON-RPC error, because what became of
+a well-formed container is the same kind of answer as what became of a
+well-formed envelope. In order: `ctx` is recomputed from the outer fields;
+`purpose` and the `board`/`epoch` fields must agree (`purpose-mismatch`);
+`suite` must be one this build implements (`unsupported-suite`) and `v` must be a container version this build knows (`unsupported-container-version`, its own word so an operator debugging a v2 container is not sent hunting a board/epoch bug); the outer
+origin signature is verified under the key on record for `origin.node`
+(`unverified-origin`); the container is deduped against
+`state/mail/containers.jsonl` (§4) — a duplicate answers `"duplicate"`
+WITHOUT opening anything, and a same-`msgid` collision with different
+immutable bytes answers `context-mismatch`; and only then is `ct` opened.
+Past the open, the inner `ctx` must equal the recomputed outer one
+(`context-mismatch`), the inner `msgid` must recompute to the container's
+(`bad-msgid`), the inner addressing must agree with the outer
+(`addressing-mismatch`), the inner envelope signature must verify
+(`unverified-origin`), and the full hop chain must walk from `msgid` to
+this node with entry 1 named by and signed under `origin.key`
+(`broken-chain`). A ciphertext that opens under no identity this node holds
+is `open-failed`; one addressed to a retired key past its grace window is
+`key-retired`.
+
+A container that passes all of it is handed to the SAME
+`aoide_storage::mail::deposit` an envelope is, so filing, `seen.jsonl` and
+the pending-receipt rule have one implementation. `aoide/mailPoll`'s answer
+becomes two lists, `containers` and `envelopes`: a sealed entry hands over
+its container and NO plaintext, and only an entry spooled before the
+destination published a binding appears in `envelopes`.
+
+### `aoide/binding` (P-SEAL, `docs/architecture/HTTPS-MESH-API.md`)
+
+`params` may carry the caller's own signed age binding; the result always
+carries this node's. `{ "binding": <Binding> }` either way:
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "method": "aoide/binding",
+  "params": { "binding": { "v": 1, "purpose": "mail-sealing", "...": "..." } } }
+```
+
+A signed read of the node's own current binding, and — when the caller
+includes its own — the moment this node stores the caller's. One
+authenticated round trip upgrades both ends, which is what a direct lane
+wants and what the per-peer upgrade needs before the first sealed letter
+can go anywhere. Admission is `mailDeposit`'s own question (a verified
+caller holding `message`): the binding is what a peer needs before it can
+seal anything TO this node, so refusing it to a node that may already
+deposit mail would gate two halves of one exchange differently.
+
+A caller's binding that is not accepted as current is an ERROR, not a
+result — the caller has to know before it starts sealing:
+`stale-binding` (not above the stored generation) or `binding-mismatch`
+(its signer is not the key on record for the caller). Audits under
+`a2a.aoide/binding`, unconditionally, in the door's audit-name whitelist.
+
+The rest of this section describes the plaintext arm, unchanged:
+
 One new method on the SAME existing A2A JSON-RPC/HTTP door (§6) — no new
 transport, no new server, no new port; the SECOND capability-gated method
 after Spawn (`message/send`'s Spawn arm, above), and the first not gated
 on `spawn`. A registered node's own outbox drain (`state/outbox/`, §4)
-POSTs this to deposit one sealed letter or receipt into the target's
+POSTs this to deposit one signed letter or receipt into the target's
 mailbase:
 
 ```json

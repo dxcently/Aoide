@@ -126,8 +126,16 @@ pub use self::doorbell::{mail_ring, ring, RingReport};
 // post-lock collector block — so this stays `pub(crate)`, never crossing the
 // crate boundary.
 pub(crate) use self::pingback::{pingback, pingback_pull};
+// The project ladder (`core-seams` §B): `project_for` (a session's own claim:
+// explicit > its workspace's default > cwd anchor) and `effective_project_for`
+// (what it RENDERS under: explicit > owner > workspace default > cwd anchor),
+// plus `observe_workspace` — the ONE seam `SessionRecord.workspace` and the
+// `workspaceProject` birth default are written through, called by all three
+// compositor stamp sites (`window.rs`) so a future adapter calls it too rather
+// than writing the field itself.
 pub use self::model::{
-    anchor_for, effective_project_for, lead_over, leads_project, project_for, canonical_state, merged_sessions, HookRecord, HooksFile, Project, ProjectsFile,
+    anchor_for, effective_project_for, lead_over, leads_project, observe_workspace, project_for,
+    canonical_state, merged_sessions, HookRecord, HooksFile, Project, ProjectsFile,
     SessionRecord, SessionsFile,
 };
 pub use self::pending::{pending_approve, pending_deny, pending_list};
@@ -149,7 +157,21 @@ pub use self::view::session_watch;
 // shape exists to drift from the rendered one.
 pub use self::view::{watch_frame, Frame, MailLine};
 pub use self::permit::{answer_summons, session_permit, summons_card_id};
+pub use self::send::DAEMON_PEER_PID_FLAG;
+// `session_hook`/`session_send`/`pending_path`: the hook door and the injection
+// door, both `pub` for the doors that live outside this crate (`aoide-cli`'s
+// registry, `aoide-server`'s dispatch).
 pub use self::send::{pending_path, session_hook, session_send};
+// The ONE keystroke shape a pty injection has — payload, flush, the gap, then
+// the target's own submit key ALONE (`write_delivery`), plus the profile
+// resolver that picks that key (`profile_for_agent`, claude's fallback for an
+// unregistered name) and the gap itself (`SUBMIT_KEYSTROKE_DELAY`). `pub` for
+// the third caller, in another crate: `aoide-server`'s
+// `a2a::spawn_inject_prompt` used to hand-roll `{prompt}\n` at a spawned
+// session's socket, which is a keystroke spelling of its own — and the wrong
+// one for every harness whose `submit_key` is `\r`.
+pub use self::send::{write_delivery, SUBMIT_KEYSTROKE_DELAY};
+pub use self::permit::profile_for_agent;
 pub use self::session_store::{session_bind, session_end, session_phase, session_start};
 // LANE IDENTITY P-ID0 (G16/G5): `aoide-server`'s `a2a::do_spawn` is the
 // authenticated-node-origin writer — it stamps `node:<name>` directly on
@@ -163,6 +185,17 @@ pub use self::session_store::stamp_origin;
 // crate/flag/env path may write it. `stamp_remote_parent`'s own doc has the
 // full argument.
 pub use self::session_store::stamp_remote_parent;
+// `stamp_opening_turn` — the A2A door's own record of what became of the
+// first turn a remote peer asked for (`pending` at the spawn ack, the worker's
+// conclusion after), so `tasks/get` can say `not-ready` instead of a bare
+// `submitted` over a session no turn ever reached. `pub` because the writer
+// lives in `aoide-server`, the authority that accepted the spawn.
+pub use self::session_store::stamp_opening_turn;
+// `settle_lost_opening_turns` — the boot pass that reconciles a `pending`
+// opening turn whose worker died with its process (`unknown`), so a peer
+// never reads "still waiting" for a verdict nobody will ever stamp. `pub` for
+// the daemon (`aoide-server`) at boot.
+pub use self::session_store::settle_lost_opening_turns;
 // LANE IDENTITY P-ID1: `aoide-server`'s daemon `dispatch` handler is the one
 // legitimate caller — it stamps a just-minted sealed credential directly
 // onto the record it just registered a pid for, the same "stamp from the
@@ -184,6 +217,22 @@ pub use self::spawn::build_conduct_args;
 // predicate (rather than writing a second copy of the message in the server)
 // is what closes that, and is why both are `pub`.
 pub use self::spawn::{live_run_for, live_run_refusal};
+// `wait_ready`/`READY_BUDGET` — WHEN a just-launched target may be typed at,
+// and for how long the tree waits for it (the per-harness fact is
+// `AgentProfile::readiness`). `pub` for the third first-turn caller outside
+// this crate: `aoide-server`'s `a2a::spawn_inject_prompt`, whose opening turn
+// would otherwise be the one injection path with no readiness gate at all.
+pub use self::spawn::{wait_ready, Ready, READY_BUDGET};
+// `harness_session_started` — the hook arm's readiness PREDICATE itself
+// (`wait_ready`'s `Readiness::Hook` clause), `pub` for the door-policy
+// integration proof that must assert "readiness opened" without restating the
+// predicate's own clauses (`crates/cli/tests/daemon_dispatch_door.rs`, the
+// daemon-served `session hook` arm). The one-writer/one-reader pair stays one
+// implementation — never a second copy of it in a test.
+pub use self::spawn::harness_session_started;
+// `command_basename` — the agent-name default a spawned command's own
+// `argv[0]` gives (spawn.rs's copy, widened for the `pub` caller below).
+pub use self::spawn::command_basename;
 // `clean_line` — the ONE sanitizer every surface that prints a peer's own
 // bytes uses, now including `aoide-server`'s A2A door (a slug echoed in a
 // refusal, P-RSA S10 review, L6). Never a second table of "unsafe" down there.
@@ -221,7 +270,14 @@ pub use self::who::{glyph, session_roster};
 // (`node_list.rs`'s module doc) — `node status` (aoide-client) keeps the
 // deep per-node view.
 pub use self::node_list::node_list;
-pub use self::window::{focus_session, focus_window, run_hypr_window_listener, FocusError};
+pub use self::window::{focus_session, focus_window, focused_workspace, run_hypr_window_listener, FocusError};
+// `workspace set/clear/list` — the compositor workspace ↔ project binding
+// (`graph/workspace.rs`'s own module doc). Bindings live on the project
+// (`Project.workspaces`), so a removed project takes its own with it; the
+// one compositor-shaped fact (`focused_workspace`) is re-exported above
+// beside the other window-adapter reads.
+mod workspace;
+pub use self::workspace::{workspace_clear, workspace_list, workspace_root, workspace_set};
 
 // Storage/time passthroughs root's `a2a.rs` / `commands/{a2a,usage}.rs` still
 // reach at `crate::graph::{load_stage, now_iso_utc, sessions_path,

@@ -100,6 +100,15 @@ and the staging/declarative/draft modes:
    an append. The decisioning and the change record belong in the log
    instead: the commit message, the changelog, the session ledger. Ledgers
    and logs themselves are exempt — they ARE the log, append-only.
+10. **Staging is never declarative.** A staged song hot-loads from the
+    runtime root alone (`$AOIDE_ROOT/song/songbook/<song>`): its palette,
+    cover, widget bodies AND its slot-owner map all come from what was
+    staged, never from the git checkout or a `nix eval` of it. A
+    declarative build may seed or load a song into staging, but staging
+    never waits on a commit, a merge or a rebuild. The staged song is
+    always the last one staged: every way back into staging (the RICE
+    toggle, a bare `rice mode stage`, a reboot) restores it, never the
+    declared song.
 
 ## Docs layering (dsh/Cordis convention, P-A10)
 
