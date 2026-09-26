@@ -55,3 +55,15 @@ in git; `git log --follow -- song/songbook/default/` finds it.
   half-cell top inset.
 - **Measured at rest, live:** quickshell 1.4% CPU over 10s and 266 MB RSS
   with tier-0 glow on, under a 99%-busy machine (noisy). Glow stays on.
+- **Derived ties are empty on a normal desktop.** Deriving jack links from
+  `graph.json` + `sessions.json` `windowAddress` works, but most spawned
+  children are windowless subagents, so no edge joins two jacks. The
+  switchboard stays bare live until an agent spawns a windowed session on
+  another workspace or core publishes `ties`; prove the derivation with
+  edges added in the preview root, and say so.
+- **A wallpaper is a cover until song wallpaper slots are hosted.**
+  Generate it with a helper in the preview (fixed seed, exact viewport
+  size), commit the PNG, and `lyra cover set` the runtime songbook's copy.
+- **An inner glow lit from the resting rule colour is invisible.** At
+  0.10 alpha of `dim` on CRT black the edge rose by ~6/255. Light the glow
+  from `title` and let alpha, not colour, carry rest vs focus.
