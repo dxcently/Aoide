@@ -74,6 +74,34 @@ rustPlatform.buildRustPackage {
   # reading: the package build runs the whole suite.
   cargoTestFlags = [ "--workspace" ];
 
+  # ...and these five tests are SKIPPED BY NAME in the sandbox, because this
+  # package's source tree is `pkgs/aoide` alone: the outer AoideOS repo's
+  # top-level `song/` (whose committed `songbook/sonata/widgets/*.qml` they
+  # parse) is deliberately NOT part of the self-flaked core (its own
+  # `flake.nix` header, "Topology (b)"), so the fixtures have nothing to read
+  # here — in the sandbox they would fail on a path that is empty by design.
+  # They run where the checkout exists: the outer repo's own
+  # `nix develop -c cargo test -p aoide-lyra`, which is part of every phase-5
+  # slice's gate.
+  #
+  # A NAME LIST, not a runtime skip: the helpers panic on an unreadable
+  # fixture (they used to `eprintln!("skipping: …")` and return, which is how
+  # their line numbers rotted unnoticed while the suite stayed green). If one
+  # of these is renamed, the sandbox runs it again and says so — the failure
+  # mode is a red build, never a silently skipped fixture.
+  checkFlags = [
+    "--skip"
+    "commands::preview_tools::tests::session_menu_qml_top_level_children_match_the_real_checkout"
+    "--skip"
+    "commands::preview_tools::tests::file_matched_node_children_resolve_positionally_against_the_real_session_menu_children"
+    "--skip"
+    "commands::preview_tools::tests::conductor_qml_registers_its_inline_session_card_component"
+    "--skip"
+    "commands::preview_tools::tests::file_matched_inline_component_children_resolve_positionally_against_conductors_real_session_card"
+    "--skip"
+    "commands::preview_tools::tests::conductor_qmls_repeater_delegate_is_a_real_child_never_the_repeaters_own_id"
+  ];
+
   # task #117 (resolved): the sandbox check runs parallel again. The
   # nondeterministic deploy-build cascade traced to aoide-conduct's hooks
   # tests taking a DIFFERENT env-lock mutex (aoide_test_support's) than the

@@ -663,6 +663,14 @@ mod tests {
     #[test]
     #[ignore = "shells to a real `nix eval`; same sandbox constraint as the eval tests above"]
     fn generated_file_imports_cleanly_into_a_real_module_eval() {
+        // The shipped option set comes from `$AOIDE_SONG_TEMPLATES`'s parent
+        // (or the exe sibling). Read it under the lock and RESTORE it, so a
+        // hand-run of this probe cannot leak an env rewrite into the rest of
+        // the suite — the same discipline every other env-touching test here
+        // holds. Run it by hand with `AOIDE_SONG_TEMPLATES` pointed at a built
+        // `lyra-songbook`'s `share/lyra/songbook`.
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_SONG_TEMPLATES", "AOIDE_FLAKE_ROOT"]);
         let checkout = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
             .nth(4)

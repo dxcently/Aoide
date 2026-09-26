@@ -3394,28 +3394,32 @@ exit 0
     /// declared INLINE inside `conductor.qml` (`component SessionCard:
     /// FocusScope { ... }`, no file of its own), so before part A it could
     /// never get a `"file"` match at all -- everything below it stayed
-    /// "none" regardless of the SessionMenu fix. Skips (never fails) when
-    /// this checkout doesn't have the song present.
-    /// The checkout is located from the crate's own manifest dir, never
-    /// `$AOIDE_FLAKE_ROOT`, which sibling tests repoint under a lock this
-    /// helper does not take.
-    fn read_conductor_qml() -> Option<(PathBuf, String)> {
+    /// "none" regardless of the SessionMenu fix.
+    ///
+    /// Located from this crate's own manifest dir, never `$AOIDE_FLAKE_ROOT`
+    /// (which sibling tests repoint under a lock this helper does not take),
+    /// and LOUD: an unreadable fixture PANICS. It used to `eprintln!` and
+    /// return `None`, so the three tests below silently became no-ops in any
+    /// tree without the outer repo's `song/` — which is exactly how their
+    /// expectations went stale. In the nix sandbox this whole group is
+    /// skipped BY NAME in `pkgs/aoide/default.nix`'s `checkFlags`, because
+    /// that source tree has no `song/` by design.
+    fn read_conductor_qml() -> (PathBuf, String) {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../../song/songbook/sonata/widgets/conductor.qml");
-        match std::fs::read_to_string(&path) {
-            Ok(text) => Some((path, text)),
-            Err(e) => {
-                eprintln!("skipping: {} unreadable ({e})", path.display());
-                None
-            }
-        }
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "the committed conductor.qml fixture is unreadable at {} ({e}) — this test reads \
+                 the OUTER repo's song, and an unreadable file is a failure, not a skip",
+                path.display()
+            )
+        });
+        (path, text)
     }
 
     #[test]
     fn conductor_qml_registers_its_inline_session_card_component() {
-        let Some((_, text)) = read_conductor_qml() else {
-            return;
-        };
+        let (_, text) = read_conductor_qml();
         let (_, inline) = parse_static_qml(&text);
         let card = inline
             .iter()
@@ -3432,9 +3436,7 @@ exit 0
     #[test]
     fn file_matched_inline_component_children_resolve_positionally_against_conductors_real_session_card(
     ) {
-        let Some((path, text)) = read_conductor_qml() else {
-            return;
-        };
+        let (path, text) = read_conductor_qml();
         let (_, inline) = parse_static_qml(&text);
         let card_node = inline
             .into_iter()
@@ -3520,9 +3522,7 @@ exit 0
     /// fails) when this checkout doesn't have the song present.
     #[test]
     fn conductor_qmls_repeater_delegate_is_a_real_child_never_the_repeaters_own_id() {
-        let Some((_, text)) = read_conductor_qml() else {
-            return;
-        };
+        let (_, text) = read_conductor_qml();
         let (roots, _) = parse_static_qml(&text);
         // The MOVEMENTS loop: the first `delegate: Column {` and the
         // `Repeater {` opening just above it -- located by content, since

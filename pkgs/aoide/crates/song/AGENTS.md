@@ -21,8 +21,9 @@
   survives for `rice declare`'s commit-in step only.
 - **§7.5's three cases, in order, and case 1 must stay nix-free.** Built in
   with no DIFFERING machine copy (absent counts, and so does a match over what
-  the seed SHIPS — `MACHINE_RUNTIME_DIRS`, the machine's own `takes/`/`drafts/`/
-  `elements/`, are NOT differences in the song, or a snapshot would disable
+  the seed SHIPS — `MACHINE_RUNTIME_DIRS`, the machine's own `takes/`/`drafts/`
+  (NOT `elements/`, which is song-authored input) — are NOT differences in the
+  song, or a snapshot would disable
   staging on a host with no nix and report a built-in song as not built in)
   stages from the baked baseline; everything else is the generator; no nix makes
   everything else a refusal.
