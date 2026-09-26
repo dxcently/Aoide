@@ -4875,7 +4875,10 @@ discipline as §1/§4's optional tiers).
 
 **Additive in v0 (spawn readiness, 2026-09-26):** a `TaskStatus` MAY carry
 `message` — A2A's own optional field, and typed as this binding has it: a
-`Message` OBJECT (`role` + `parts`), never a string, so a strict A2A client
+`Message` OBJECT (`role` + `parts`, with a minted `messageId`: the binding
+marks that field required, so an outbound status message carries one —
+`aoide_protocol::wire::gen_message_id`, the same generator the client's
+`message/send` bodies use), never a string, so a strict A2A client
 parses `tasks/get` unchanged. aoide's use is one `agent` message whose single
 text part reads `opening turn: <verdict>` (the vocabulary is §4's
 `openingTurn`), so a remote peer whose opening turn has not run yet — or never

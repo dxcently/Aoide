@@ -201,8 +201,10 @@ the inbound half of the two-door contract (the outbound half is
   wait runs on a WORKER, one per spawn, never on the connection handler — 20s
   of budget plus the socket retry against `MAX_CONN` would hand every other
   RPC a `503 server busy`. The worker's verdict lands on the record
-  (`stamp_opening_turn`: `pending` is stamped the moment the record registers,
-  then `delivered` / `delivered-unverified` / `not-ready` / `busy` /
+  (`stamp_opening_turn`: `pending` is stamped by the ack path and again as the
+  worker's own first write — the same thread that stamps the verdict
+  immediately after, so nothing can clobber a verdict back — then `delivered`
+  / `delivered-unverified` / `not-ready` / `busy` /
   `no-worker` / `skipped-shell` / `skipped-empty` / `no-socket` /
   `write-failed`, or `unknown` when a boot pass reconciles a verdict lost with
   the process that owed it — the complete list and its meaning live on the

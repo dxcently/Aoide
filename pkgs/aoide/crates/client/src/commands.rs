@@ -750,15 +750,12 @@ fn build_signed_pair_poll_body(id: &str) -> Result<String, String> {
     Ok(serde_json::to_string(&body).unwrap_or_default())
 }
 
-/// A unique `messageId` for one outbound `message/send` (pid + wall-clock
-/// nanos — never reused within a process).
-fn gen_message_id() -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("aoide-{}-{}", std::process::id(), nanos)
-}
+/// A unique `messageId` for one outbound `message/send`. One home
+/// (`aoide_protocol::wire::gen_message_id`, re-exported here so this module's
+/// callers are unchanged): the server's outbound A2A `status.message` mints
+/// ids the same way, and the binding marks `messageId` required on a
+/// `Message`.
+pub use aoide_protocol::wire::gen_message_id;
 
 // ── The seven `node` commands (CONTRACTS.md §7: same-network federation) ───────
 //

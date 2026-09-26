@@ -543,8 +543,12 @@ pub struct SessionRecord {
     )]
     pub session_start_at: Option<String>,
     /// The OPENING TURN of a session the A2A door spawned: what became of the
-    /// first turn a remote peer asked for. One writer: the A2A door's own
-    /// stamp (`a2a::do_spawn` + its worker). The vocabulary, complete:
+    /// first turn a remote peer asked for. Writers, in order: the door's ack
+    /// path stamps `pending` before the worker is scheduled, the worker stamps
+    /// `pending` again as its own first write, and then — same thread, so this
+    /// order is a property of the code and not a race — its verdict. No other
+    /// path writes this field, which is what keeps a verdict from being
+    /// clobbered back to `pending`. The vocabulary, complete:
     ///
     /// - `pending` — accepted, the worker is waiting for the target;
     /// - `delivered` / `delivered-unverified` — the turn went out (the second

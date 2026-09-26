@@ -260,6 +260,22 @@ pub struct Part {
     pub extra: serde_json::Map<String, Value>,
 }
 
+/// A unique `messageId` for one outbound A2A `Message` (pid + wall-clock nanos
+/// — never reused within a process). One home, both sides: the client's
+/// `message/send` bodies and the server's outbound `status.message` mint ids
+/// the same way, and the A2A v0.3.x binding marks `messageId` required on a
+/// `Message`, so an outbound message that omits it can be rejected by a
+/// schema-validating peer. (`Message::message_id` itself stays `Option`: this
+/// type also parses inbound messages, and a lenient parse is what keeps a
+/// mixed-version mesh working.)
+pub fn gen_message_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("aoide-{}-{}", std::process::id(), nanos)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

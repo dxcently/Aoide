@@ -67,7 +67,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, TcpListener, TcpStream};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -719,6 +719,42 @@ impl Drop for OpeningTurnSlot {
     }
 }
 
+/// The opening-turn worker's whole life, in ONE function so its write order is
+/// a property of the code rather than of a closure's shape: stamp `pending`,
+/// wait for readiness and type, stamp the verdict, audit it. `pending` and the
+/// verdict therefore come from the SAME thread in that order — nothing can
+/// land a verdict first and then be clobbered back to `pending` (branch
+/// re-review 2's L was a second writer of `pending`: the door's registration
+/// wait stamped it from its own thread, so a verdict that landed first was
+/// overwritten, and a verdict written before registration left a stranded
+/// `pending` behind). `slot` is held for this whole life, so the pool counts
+/// real waits.
+fn opening_turn_worker(
+    id: String,
+    agent_cmd: String,
+    prompt: String,
+    launch_at: String,
+    budget: Duration,
+    audit_log: PathBuf,
+    slot: OpeningTurnSlot,
+) {
+    let _slot = slot;
+    // The door's ack-path stamp can miss a record that registered after it;
+    // this one closes that window. A no-op when the value is already `pending`,
+    // and — being this thread's first write — always before the verdict below.
+    aoide_conduct::graph::stamp_opening_turn(&id, "pending");
+    let word = spawn_inject_prompt(&id, &agent_cmd, &prompt, &launch_at, budget);
+    aoide_conduct::graph::stamp_opening_turn(&id, word);
+    let _ = audit(
+        &audit_log,
+        Door::A2a,
+        EventClass::Audit,
+        "a2a.message/send",
+        word,
+        &format!("opening turn for `{id}`: {word}"),
+    );
+}
+
 /// One `status.message` for an opening-turn verdict — the A2A `Message` shape
 /// this binding types the field as, built in one place so the ack
 /// (`pending`), the record's own verdict and any future reader cannot drift.
@@ -730,7 +766,7 @@ fn opening_turn_status(id: &str, word: &str) -> Message {
             text: Some(format!("opening turn: {word}")),
             extra: Default::default(),
         }],
-        message_id: None,
+        message_id: Some(aoide_protocol::wire::gen_message_id()),
         context_id: Some(id.to_string()),
         metadata: None,
     }
@@ -1783,11 +1819,11 @@ fn stamp_spawn_provenance(id: &str, origin: &str, remote_parent: Option<RemotePa
             .map(|f: SessionsFile| f.sessions.iter().any(|s| s.session_id == id))
             .unwrap_or(false);
         if registered {
-            // `pending` goes on the record the instant it EXISTS (branch
-            // re-review N4's nit): this loop is already the door's
-            // wait-for-registration, so stamping here closes the window in
-            // which a fast peer's `tasks/get` saw no `openingTurn` at all.
-            aoide_conduct::graph::stamp_opening_turn(id, "pending");
+            // NOTE: no `pending` stamp here. The ack path stamps it before the
+            // worker is scheduled and the worker stamps it as its own first
+            // write, in one thread with its verdict — a third writer from THIS
+            // thread could land after a verdict and clobber it back (branch
+            // re-review 2's L, fixed).
             aoide_conduct::graph::stamp_origin(id, origin);
             if let Some(parent) = &remote_parent {
                 aoide_conduct::graph::stamp_remote_parent(id, parent);
@@ -2235,24 +2271,15 @@ fn do_spawn(
                     let scheduled = std::thread::Builder::new()
                         .name(format!("a2a-opening-turn-{worker_id}"))
                         .spawn(move || {
-                            // Hold the slot for the worker's whole life.
-                            let _slot = slot;
-                            let word = spawn_inject_prompt(
-                                &worker_id,
-                                &agent_cmd,
-                                &prompt,
-                                &launch_at,
+                            opening_turn_worker(
+                                worker_id,
+                                agent_cmd,
+                                prompt,
+                                launch_at,
                                 aoide_conduct::graph::READY_BUDGET,
-                            );
-                            aoide_conduct::graph::stamp_opening_turn(&worker_id, word);
-                            let _ = audit(
-                                &worker_audit,
-                                Door::A2a,
-                                EventClass::Audit,
-                                "a2a.message/send",
-                                word,
-                                &format!("opening turn for `{worker_id}`: {word}"),
-                            );
+                                worker_audit,
+                                slot,
+                            )
                         })
                         .is_ok();
                     if !scheduled {
@@ -9295,6 +9322,115 @@ mod tests {
     /// fits, the ninth is refused (`busy`), and a released slot is reusable.
     /// Without it the wait the M4 fix moved off the handler is bounded by
     /// nothing at all.
+    /// The L of the second re-review, at the ordering itself: the worker
+    /// stamps `pending` and then its verdict, from one thread, so the record
+    /// can never be left reading `pending` after the worker is done — not even
+    /// when a verdict was already there.
+    #[test]
+    fn the_opening_turn_worker_ends_on_its_verdict_never_on_pending() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-worker-order-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        let audit_log = root.join("log");
+
+        let id = "worker-order";
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".to_string(),
+                sessions: vec![fixture_session(id, "idle", None)],
+            },
+        )
+        .unwrap();
+
+        let read_word = || -> Option<String> {
+            let f: SessionsFile = load_stage(&sessions_path()).unwrap();
+            f.sessions.iter().find(|s| s.session_id == id).and_then(|s| s.opening_turn.clone())
+        };
+
+        // A target with no readiness fact and no log settles at the deadline —
+        // the verdict is `not-ready`, and that is what the record ends on.
+        opening_turn_worker(
+            id.to_string(),
+            "no-such-agent".to_string(),
+            "hi".to_string(),
+            now_iso_utc(),
+            Duration::from_millis(50),
+            audit_log.clone(),
+            OpeningTurnSlot::acquire().expect("a slot"),
+        );
+        assert_eq!(read_word().as_deref(), Some("not-ready"), "the verdict, never `pending`");
+
+        // And a verdict already on the record is replaced by THIS worker's own
+        // — the pending write in between is the same thread's, so nothing can
+        // strand it.
+        aoide_conduct::graph::stamp_opening_turn(id, "delivered");
+        opening_turn_worker(
+            id.to_string(),
+            "no-such-agent".to_string(),
+            "hi".to_string(),
+            now_iso_utc(),
+            Duration::from_millis(50),
+            audit_log,
+            OpeningTurnSlot::acquire().expect("a slot"),
+        );
+        assert_eq!(read_word().as_deref(), Some("not-ready"), "still ends on its own verdict");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
+    /// The exact regression the second re-review found: the door's
+    /// registration wait must NOT write `pending` from its own thread any more,
+    /// because a verdict that landed first would be clobbered back to it.
+    #[test]
+    fn the_registration_wait_never_writes_pending_over_a_verdict() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-prov-order-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("stage")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+
+        let id = "prov-order";
+        let mut rec = fixture_session(id, "idle", None);
+        rec.opening_turn = Some("not-ready".to_string());
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".to_string(), sessions: vec![rec] },
+        )
+        .unwrap();
+
+        stamp_spawn_provenance(id, "node:remote-1", None);
+
+        let f: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = f.sessions.iter().find(|s| s.session_id == id).unwrap();
+        assert_eq!(
+            rec.opening_turn.as_deref(),
+            Some("not-ready"),
+            "the registration wait must not touch the verdict"
+        );
+        assert_eq!(rec.origin.as_deref(), Some("node:remote-1"), "it still stamps the origin");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
     #[test]
     fn the_opening_turn_worker_pool_refuses_past_its_cap() {
         let mut held: Vec<OpeningTurnSlot> = Vec::new();
