@@ -355,13 +355,17 @@ fn bind_socket(socket_path: &Path) -> std::io::Result<UnixListener> {
     }
     let _ = std::fs::remove_file(socket_path);
     // **The socket's policy is the DIRECTORY's on native Windows**, and it is
-    // attached BEFORE the bind: a Windows `AF_UNIX` socket file is a reparse
-    // point the object system will not hand a policy handle for, so there is
-    // no `chmod`-after-bind here to mirror the Unix arm's. What governs who
-    // can reach the socket is therefore the parent directory's DACL — which
-    // is exactly what `owner_only::ensure_private_dir` pins to this user,
-    // before the name exists. See `CORE-POSIX.md`'s unix-socket row for what
-    // that does and does not prove.
+    // attached BEFORE the bind: a Windows `AF_UNIX` socket file is a REPARSE
+    // POINT (tag `0x80000023`, `IO_REPARSE_TAG_AF_UNIX` — measured), and this
+    // crate's own policy reader refuses a reparse point by name, so there is no
+    // `chmod`-after-bind here to mirror the Unix arm's. What governs who can
+    // reach the socket is therefore the parent directory's DACL — which is
+    // exactly what `owner_only::ensure_private_dir` pins to this user, before
+    // the name exists. The row that holds this answer, and says what it does
+    // and does not prove (the parent read back owner-only, the socket file
+    // reading back as that reparse refusal; NOT a cross-account connect
+    // refusal, which this host cannot arrange), is
+    // `docs/architecture/CORE-POSIX.md`'s unix-socket-addressing row.
     #[cfg(unix)]
     {
         let listener = UnixListener::bind(socket_path)?;
@@ -1237,10 +1241,21 @@ fn admin_gate(peer_uid: Option<&PeerUser>, secrets_home: &Path, subcommand: &str
     let broker_euid = broker_identity.as_ref();
     match (peer_uid, broker_euid) {
         (Some(uid), Some(broker)) => crate::home::admin_identity_error(uid, broker, secrets_home, subcommand),
+        // Two different unidentifieds, and they are NOT the same lie: the peer
+        // may be the one nobody can name, or THIS BROKER may be the one whose
+        // own identity it cannot read. The decision is the same refusal either
+        // way (fail closed), but the message says which half is missing —
+        // blaming the peer for a broker that cannot read its own token would
+        // send an operator looking in the wrong place.
+        (_, None) => Some(format!(
+            "secrets {subcommand} over the broker socket must come from an IDENTIFIED connection, and this broker \
+             cannot read its OWN user identity, so nothing can be compared — refused the same way a mismatched \
+             identity would be. Run: sudo -u aoide-secrets aoide secrets {subcommand} ..."
+        )),
         _ => Some(format!(
             "secrets {subcommand} over the broker socket must come from an IDENTIFIED connection — this connection's \
-             peer uid could not be determined (SO_PEERCRED read failed), so it is refused the same way a \
-             mismatched uid would be. Run: sudo -u aoide-secrets aoide secrets {subcommand} ..."
+             peer identity could not be determined (no kernel-truth peer credential on this host), so it is refused \
+             the same way a mismatched identity would be. Run: sudo -u aoide-secrets aoide secrets {subcommand} ..."
         )),
     }
 }

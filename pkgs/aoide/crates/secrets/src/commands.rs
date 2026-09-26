@@ -1602,8 +1602,11 @@ mod tests {
     /// REAL broker + socket round trip, the same shape as `tests/e2e.rs`'s
     /// own requireTotp coverage, but seeded through the actual CLI handler
     /// under test here rather than a hand-built `Policy`.
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
+    // cfg(unix): the policy this test seeds names the POSIX `pass` preset, and
+    // that preset's GET template is REFUSED BY NAME on native Windows (a
+    // built-in POSIX command line has no `cmd` arm — see `backend::
+    // run_backend_command`), so the resolve half of this test has no backend to
+    // run there. The gate is the preset, not the mechanism.
     #[cfg(unix)]
     #[test]
     fn require_totp_on_add_births_a_gated_policy_denied_without_a_code() {
@@ -2004,8 +2007,12 @@ mod tests {
     /// `home.rs`'s own pure unit tests. Skipped under a root test runner
     /// (root would own `/` too, so the mismatch this test depends on
     /// wouldn't exist).
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
+    // cfg(unix): the fixture is a UID MISMATCH — a `policy.json` this process's
+    // own identity does not own — which needs an ownership the test can
+    // arrange and a gate that compares uids; on native Windows the same
+    // question is asked of a SID, and a fresh temporary object there is owned
+    // by `BUILTIN\Administrators` rather than by a second identity this test
+    // could name.
     #[cfg(unix)]
     #[test]
     fn automate_and_expose_refuse_a_mismatched_euid_before_touching_policy_json() {

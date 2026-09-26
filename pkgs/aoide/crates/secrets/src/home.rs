@@ -491,14 +491,17 @@ mod tests {
         }
     }
 
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
-    #[cfg(unix)]
+    /// The ordinary single-user shape: the home this process just made is
+    /// owned by this process, so `admin_identity_check` has nothing to report.
+    /// PINNED first, because that ownership is not a property of "just made a
+    /// directory" on native Windows — an elevated token's fresh directory is
+    /// owned by `BUILTIN\Administrators` until the owner-only policy is
+    /// attached (`secure_dir`), which is the same pinning the crate's own
+    /// creation path does.
     #[test]
     fn admin_identity_check_is_none_when_this_process_owns_the_home() {
-        // A tmpdir this test process just created is owned by this
-        // process's own euid — the ordinary single-user dev/CI shape.
         let dir = tmp_dir("identity-owned");
+        crate::home::secure_dir(&dir).unwrap();
         assert_eq!(admin_identity_check(&dir, "add"), None);
         std::fs::remove_dir_all(&dir).ok();
     }

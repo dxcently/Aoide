@@ -2450,13 +2450,16 @@ mod tests {
     /// that was already parked before this watcher process started, using
     /// nothing but a fake broker answering ONE `pending` request — the exact
     /// call `reconcile_once` makes, never the tail/events-feed path at all.
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
-    #[cfg(unix)]
     #[test]
     fn reconcile_once_surfaces_an_ask_already_pending_at_startup() {
+        // A SHORT, deliberate path, never a descriptive tag: an `AF_UNIX` path
+        // is capped at 107 bytes (108 with the terminator) on native Windows,
+        // and `%TEMP%` alone is ~35 of them — the descriptive name this fixture
+        // used first measured 110 and was refused BY NAME by the transport
+        // (`win_unix`'s budget check) before it ever reached the code under
+        // test.
         let dir = std::env::temp_dir().join(format!(
-            "aoide-secrets-watch-reconcile-startup-{}-{}",
+            "as-reconcile-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         ));
@@ -2643,8 +2646,12 @@ mod tests {
     /// ignores file permissions, so this skips under a root test runner —
     /// same precedent `an_unreadable_policy_json_teaches_the_chown_
     /// reference_fix_on_both_gates` (`broker.rs`) sets.
-    // cfg(unix): the fixture is a POSIX shell template or a `#!/bin/sh` shim
-    // (the module note above names the class; the code under test is portable).
+    // cfg(unix): the fixture is a MODE, not a shim — `set_mode(path, 0o000)`
+    // makes the file unreadable to its own owner on Unix, and that is the
+    // permission error `wait_for_follower` must fail fast on. The native
+    // Windows arm of `set_mode` is a documented no-op for a LOOSENING mode
+    // (there is no world-writable policy to attach and no "unreadable by its
+    // owner" state to arrange), so this host has no such fixture to build.
     #[cfg(unix)]
     #[test]
     fn wait_for_follower_fails_immediately_on_a_permission_error_never_waiting() {

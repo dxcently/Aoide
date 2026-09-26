@@ -300,9 +300,11 @@ fn resolve_backend(secrets_home: &Path, name: &str) -> Result<Backend, String> {
 /// rather than papered over: `cmd` still expands `%NAME%` INSIDE double
 /// quotes, so quoting cannot make a run carrying `%` literal. Nothing on this
 /// path substitutes a SECRET VALUE — the two placeholders take the operator's
-/// stored `key` name and the secrets-home path — so what could be rewritten
-/// is operator-authored text, and the template author who writes `%` sees it
-/// happen.
+/// stored `key` name and the secrets-home path — so what could be rewritten is
+/// operator-authored text. A value that actually carries `%` is not rewritten
+/// and not guessed at either: [`expand_template`] REFUSES it by name on this
+/// host, because a key whose expansion the template author cannot predict is a
+/// command line nobody wrote.
 #[cfg(unix)]
 fn shell_single_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
@@ -340,7 +342,24 @@ fn shell_single_quote(s: &str) -> String {
     }
 }
 
-fn expand_template(template: &str, secrets_home: &Path, key: &str) -> String {
+fn expand_template(template: &str, secrets_home: &Path, key: &str) -> Result<String, String> {
+    // **A placeholder value carrying `%` is refused by name on native
+    // Windows.** `cmd` expands `%NAME%` inside double quotes, so no quoting
+    // neutralizes it: a key or a home path with a `%` would reach the template
+    // as whatever variable happens to be set, which is a command line nobody
+    // wrote. Refused rather than escaped (there is nothing to escape it with)
+    // and rather than silently run. Unix's single quotes make the same value
+    // literal, so this refusal is this host's alone.
+    #[cfg(windows)]
+    for (what, value) in [("{name}", key), ("{home}", secrets_home.to_string_lossy().as_ref())] {
+        if value.contains('%') {
+            return Err(format!(
+                "the {what} placeholder carries a `%` ({value:?}), and `cmd` expands `%NAME%` even inside double \
+                 quotes — this template cannot be built literally on this host. Rename it without a `%`, or write \
+                 the backend's templates for a host whose shell quotes it literally"
+            ));
+        }
+    }
     let home_q = shell_single_quote(&secrets_home.to_string_lossy());
     let key_q = shell_single_quote(key);
     let mut out = String::with_capacity(template.len());
@@ -369,7 +388,7 @@ fn expand_template(template: &str, secrets_home: &Path, key: &str) -> String {
             rest = &rest[h + "{home}".len()..];
         }
     }
-    out
+    Ok(out)
 }
 
 /// Env override for how long ANY backend template execution (`get`/`set`/
@@ -805,7 +824,7 @@ pub fn fetch_value(secrets_home: &Path, backend_name: &str, key: &str) -> Result
     if backend_name == "age" && !secrets_home.join("age.key").exists() {
         return Err(missing_age_identity_hint(secrets_home));
     }
-    let command = expand_template(&backend.get, secrets_home, key);
+    let command = expand_template(&backend.get, secrets_home, key)?;
 
     let mut stdout = run_backend_command(backend_name, "get", &command, None)?;
     // Exactly ONE trailing line ending, in this host's own spelling: `\n` on
@@ -862,7 +881,13 @@ pub fn has_value(secrets_home: &Path, backend_name: &str, key: &str) -> bool {
 /// follows hits the SAME hang and correctly fails with a real timeout error
 /// there, so nothing gets silently overwritten on a mere probe timeout.
 fn run_has_template(secrets_home: &Path, backend_name: &str, key: &str, template: &str) -> bool {
-    let command = expand_template(template, secrets_home, key);
+    // A refusal here (the `%` one, on native Windows) reads as "no stored
+    // value": the same tolerant shape this probe holds for every other way a
+    // `has` template can fail, and `store_value`'s own SET attempt that follows
+    // surfaces the real reason.
+    let Ok(command) = expand_template(template, secrets_home, key) else {
+        return false;
+    };
     run_backend_command(backend_name, "has", &command, None).is_ok()
 }
 
@@ -879,7 +904,7 @@ pub fn store_value(secrets_home: &Path, backend_name: &str, key: &str, value: &s
     let Some(set_template) = &backend.set else {
         return Err(format!("backend `{backend_name}` has no `set` template"));
     };
-    let command = expand_template(set_template, secrets_home, key);
+    let command = expand_template(set_template, secrets_home, key)?;
 
     run_backend_command(backend_name, "set", &command, Some(value))?;
     Ok(())
@@ -1309,6 +1334,46 @@ fn run_age_keygen(args: &[&str]) -> Result<std::process::Output, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The `%` refusal, natively: a placeholder value the template author
+    /// cannot predict is a command line nobody wrote, and `cmd` expands
+    /// `%NAME%` even inside double quotes — so it is refused BY NAME rather
+    /// than handed to the shell as whatever variable happens to be set. Unix's
+    /// single quotes make the same value literal, asserted here in the same
+    /// test so the two hosts' answers are visible side by side.
+    #[test]
+    fn a_placeholder_carrying_a_percent_refuses_on_windows_and_expands_on_unix() {
+        let home = std::path::Path::new("/home/probe");
+        #[cfg(windows)]
+        {
+            let err = expand_template("type {home}\\{name}.txt", home, "50%off")
+                .expect_err("a key carrying % cannot be built literally on this host");
+            assert!(err.contains('{'), "the refusal names WHICH placeholder: {err}");
+            assert!(err.contains("%NAME%"), "and why quoting cannot fix it: {err}");
+            let err = expand_template("type {home}\\{name}.txt", std::path::Path::new("C:\\a%b"), "k")
+                .expect_err("a home path carrying % the same way");
+            assert!(err.contains("carries a `%`"), "{err}");
+        }
+        #[cfg(unix)]
+        {
+            let line = expand_template("cat {home}/{name}", home, "50%off").expect("unix quotes it literally");
+            assert_eq!(line, "cat '/home/probe'/'50%off'");
+        }
+    }
+
+    /// The Windows arm of [`shell_single_quote`], asserted where it runs: a
+    /// bare run stays bare (the ordinary shape of a backend key), and anything
+    /// else gets `cmd`'s only quoting character with an embedded `"` doubled.
+    /// Unix's arm is exercised by every template test in this module; this is
+    /// the host that had none of its own.
+    #[cfg(windows)]
+    #[test]
+    fn the_native_quoting_is_bare_where_it_can_be_and_doubles_a_quote() {
+        assert_eq!(shell_single_quote("db-prod"), "db-prod", "an ordinary key needs no quoting");
+        assert_eq!(shell_single_quote(r"C:\Users\me\.secrets"), r"C:\Users\me\.secrets");
+        assert_eq!(shell_single_quote("two words"), "\"two words\"");
+        assert_eq!(shell_single_quote("say \"hi\""), "\"say \"\"hi\"\"\"");
+    }
 
     // ── the POSIX-shell fixture class (gated, with the reason) ───────────
     //

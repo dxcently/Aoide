@@ -394,7 +394,10 @@ impl UnixStream {
             )
         };
         if ok == 0 {
-            return Err(last_error());
+            // `DuplicateHandle` is Win32, not Winsock: its failure belongs to
+            // `GetLastError`, and the thread-local Winsock error would report a
+            // stale code from some earlier socket call instead.
+            return Err(io::Error::last_os_error());
         }
         Ok(UnixStream { sock: dup as usize })
     }
@@ -903,6 +906,44 @@ mod tests {
     /// a pair really does rendezvous inside one rather than trusting the
     /// helper's name — and the directory is this test's OWN, so nothing else
     /// running in parallel can be attaching its policy underneath the read.
+    /// The SOCKET FILE's own policy — the question `bind_socket`'s Windows
+    /// comment answers in prose ("the object system will not hand a policy
+    /// handle for it"), measured here instead. The contract the callers rely on
+    /// is the one pinned: whatever that read says, a bound socket must never
+    /// come back as an object that is NOT owner-only. `Err` means the parent
+    /// directory's DACL is the only gate; `Ok(None)` means the file carries the
+    /// same owner-only policy. `Ok(Some(..))` would mean a socket somebody the
+    /// owner-only directory does not admit can be detected as admitted, and
+    /// this fails on that.
+    #[test]
+    fn a_bound_socket_adds_no_policy_wider_than_the_owner_only_directory() {
+        let dir = scratch("socket-policy");
+        let path = dir.join("s.sock");
+        let _listener = UnixListener::bind(&path).expect("bind");
+        assert_eq!(
+            crate::owner_only::dir_privacy(&dir).expect("read the parent directory's policy back"),
+            None,
+            "the parent directory is the gate here, and it must read back owner-only"
+        );
+        match crate::owner_only::file_privacy(&path) {
+            // It carries the same owner-only policy, or it draws the ONE
+            // refusal a Windows `AF_UNIX` socket file draws — MEASURED: the
+            // object is a reparse point (tag `0x80000023`,
+            // `IO_REPARSE_TAG_AF_UNIX`), which this policy reader refuses by
+            // name. That is precisely why `bind_socket` has no
+            // `chmod`-after-bind on this host and pins the PARENT directory
+            // instead, and why the socket file may never read back as
+            // detectably NOT owner-only.
+            Ok(None) => {}
+            Ok(Some(reason)) => assert!(
+                reason.contains("reparse point"),
+                "the only thing a bound socket may read back as is the reparse-point refusal, got: {reason}"
+            ),
+            Err(e) => panic!("reading a bound socket's own policy failed outright: {e}"),
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn a_pair_rendezvouses_inside_an_owner_only_directory() {
         let dir = std::env::temp_dir().join(super::unique_rendezvous_name("pair-test"));

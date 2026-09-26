@@ -214,10 +214,22 @@ pub fn current_user_sid() -> io::Result<String> {
 /// core holds process handles, and this is the honest limit of a pid-based
 /// lookup.
 fn sid_of_pid(pid: u32) -> io::Result<String> {
-    let before = start_time(pid)
+    sid_of_pid_with(pid, start_time)
+}
+
+/// [`sid_of_pid`] with the creation-time reads INJECTED — the production pair
+/// (`start_time` before the token read, `start_time` after it) is what this is
+/// called with, and everything else is the same body. The seam exists because
+/// the refusal below cannot be reached by waiting: it needs a pid whose
+/// creation time MOVED between two reads microseconds apart, and no test can
+/// arrange for a real process to die and have its name reused inside that
+/// window. Injecting the reads is the only way the branch is exercised at all,
+/// and the token read it brackets stays the real one.
+fn sid_of_pid_with(pid: u32, mut read_start_time: impl FnMut(u32) -> Option<u64>) -> io::Result<String> {
+    let before = read_start_time(pid)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("no process with pid {pid}")))?;
     let sid = crate::owner_only::TokenUserSid::of_process(pid)?.to_string_sid()?;
-    let after = start_time(pid)
+    let after = read_start_time(pid)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("no process with pid {pid}")))?;
     if before != after {
         return Err(io::Error::new(
@@ -355,5 +367,59 @@ mod tests {
 
         assert_eq!(process_user_sid(0).expect_err("pid 0 is refused").kind(), io::ErrorKind::InvalidInput);
         assert!(process_user_sid(u32::MAX).is_err(), "a pid above the real range names nobody");
+    }
+
+    /// The REFUSAL branch, which a happy path, a constant or a `None` cannot
+    /// cover: a pid whose creation time moved between the two reads is never
+    /// reported as the process the caller asked about. Driven through the
+    /// injected reads (see [`sid_of_pid_with`]) — no test can make a real
+    /// process die and be renamed inside that window — and the agreeing pair
+    /// asserted alongside it so the seam cannot pass by refusing everything.
+    #[test]
+    fn a_pid_that_changes_identity_between_the_two_reads_is_refused() {
+        let me = std::process::id();
+        let mut call = 0;
+        let err = super::sid_of_pid_with(me, |_| {
+            call += 1;
+            Some(if call == 1 { 1 } else { 2 })
+        })
+        .expect_err("a changed creation time must refuse, not return a SID");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("reused"), "{err}");
+
+        assert_eq!(
+            super::sid_of_pid_with(me, |_| Some(7)).expect("two agreeing reads"),
+            current_user_sid().expect("this process's own token user")
+        );
+    }
+
+    /// A peer that EXITED before the read — and the answer here is NOT the
+    /// Unix one: MEASURED on this host, a just-reaped pid still resolves
+    /// (`OpenProcess` on the exiting object succeeds long enough to name its
+    /// token user), so "the peer is gone" is not a refusal a pid-based lookup
+    /// gets for free. The case is still worth pinning, because what a reaped
+    /// pid must never do is name a DIFFERENT user than the one that process
+    /// ran as — that is the pid-reuse hazard, and the two bracketing
+    /// creation-time reads (`sid_of_pid_with`) are what close it rather than
+    /// this function's pid check. A pid that never existed is the refusal that
+    /// does fire, asserted in `a_child_process_runs_as_the_same_user...`.
+    #[test]
+    fn a_peer_that_exits_before_the_read_names_our_own_user_or_nothing() {
+        let mut child = std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("exit 0")
+            .spawn()
+            .expect("spawn a short-lived child");
+        let pid = child.id();
+        let _ = child.wait();
+
+        match process_user_sid(pid) {
+            Ok(sid) => assert_eq!(
+                sid,
+                current_user_sid().expect("ours"),
+                "a reaped pid {pid} must never name somebody else's user"
+            ),
+            Err(_) => {}
+        }
     }
 }

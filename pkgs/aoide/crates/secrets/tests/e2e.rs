@@ -692,34 +692,14 @@ fn watch_follower_sees_a_parked_event_within_about_a_second_through_the_real_eve
 /// This object's privacy as the mode a reader would recognise — the
 /// integration-test twin of the lib's own `home::mode_of` (an integration test
 /// can only see the crate's public API, so the helper is not reachable here).
-/// Unix: the actual bits. Native Windows: `0o600`/`0o700` for an object whose
-/// policy reads back owner-only, `0o644` for one that does not.
+/// Unix only, because mode BITS are: it is called solely by the `cfg(unix)`
+/// fixtures below, and the owner-only contract those fixtures assert on native
+/// Windows is read back through `aoide_protocol::owner_only` by the native
+/// tests instead of being folded into a mode this host has no numbers for.
 #[cfg(unix)]
 fn mode_of(path: &std::path::Path) -> u32 {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::metadata(path).expect("stat").permissions().mode() & 0o777
-    }
-    #[cfg(windows)]
-    {
-        let is_dir = std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false);
-        let reason = if is_dir {
-            aoide_protocol::owner_only::dir_privacy(path)
-        } else {
-            aoide_protocol::owner_only::file_privacy(path)
-        };
-        match reason.expect("read the object's own policy back") {
-            None => {
-                if is_dir {
-                    0o700
-                } else {
-                    0o600
-                }
-            }
-            Some(_) => 0o644,
-        }
-    }
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).expect("stat").permissions().mode() & 0o777
 }
 
 /// The gated POSIX fixtures' contract, exercised NATIVELY: a real

@@ -906,7 +906,7 @@ fn cross_uid_gate(peer: Option<aoide_secrets::peercred::PeerCred>, my_user: Opti
     match peer.as_ref().and_then(|p| p.user()) {
         Some(uid) if Some(&uid) == my_user => None,
         Some(uid) => Some(format!(
-            "aoided dispatch connection refused: peer identity {uid} does not match this daemon'''s own ({})",
+            "aoided dispatch connection refused: peer identity {uid} does not match this daemon's own ({})",
             my_user.map(|u| u.to_string()).unwrap_or_else(|| "unidentified".to_string())
         )),
         None => Some(

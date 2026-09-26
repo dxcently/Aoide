@@ -1613,6 +1613,29 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// The WINDOWS spelling of "nothing is listening", pinned against a real
+    /// connect rather than asserted in prose: an `AF_UNIX` connect to a path
+    /// whose own DIRECTORY is absent reports `WSAENETDOWN` (10050), a code Rust
+    /// has no `ErrorKind` for. If that mapping ever stops holding, an absent
+    /// broker on native Windows becomes a hard failure instead of the
+    /// direct-write fallback — which is exactly what
+    /// [`nothing_is_listening`] exists to prevent.
+    #[cfg(windows)]
+    #[test]
+    fn a_connect_under_a_missing_parent_directory_reads_as_nothing_listening() {
+        let dir = std::env::temp_dir().join(format!("aoide-no-such-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("broker.sock");
+
+        let err = connect_bounded(&path, Duration::from_secs(5)).expect_err("nothing is listening there");
+        assert_eq!(
+            err.raw_os_error(),
+            Some(10050),
+            "the code this host reports for a missing parent directory: {err:?}"
+        );
+        assert!(nothing_is_listening(&err), "and it must read as nothing-listening: {err}");
+    }
+
     /// Hand-rolled listener + a single unaccepted connection, exactly the
     /// reviewer's own reproduction recipe (review-bounce fix, this
     /// commit): `crate::test_net::UnixListener::bind` hardcodes a
