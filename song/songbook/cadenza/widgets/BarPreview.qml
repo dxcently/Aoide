@@ -8,7 +8,7 @@
 //
 // What pane is open is steered from the preview ROOT, never a fixture path:
 // `$AOIDE_ROOT/bar-preview.json` (optional; absent = no pane)
-//     { "pane": "vol"|"bt"|"net"|"bat"|"tray"|"clock"|"jack"|"patch"|"",
+//     { "pane": "sound"|"net"|"bat"|"tray"|"clock"|"jack"|"",
 //       "jack": 2,            // with pane "jack": whose insight pane
 //       "lampMs": 600 }       // slow the lamp down to catch one mid-run
 // Everything else the bar reads, it reads itself (the root's stage files,
@@ -30,6 +30,13 @@ Item {
     required property var bridge
     property var shared: null
     property var stagingEngine: null
+    // the canvas hands every slot's extras; accepted here so none warns, and
+    // not forwarded (the bar gets powermenu/dock null, see barLoader)
+    property var dock: null
+    property var powermenu: null
+    property var clipboard: null
+    property var ledger: null
+    property var stagePath: null
 
     implicitWidth: 1080
     implicitHeight: 28 + 420
