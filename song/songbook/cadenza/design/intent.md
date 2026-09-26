@@ -88,23 +88,19 @@ Conductor Channel).
 ### Glyphs (the icon set)
 Icons are **Nerd Font glyphs** from the one face: text, one cell wide, on
 the grid. Never an image, never an icon theme, never a tinted picture.
-- A glyph takes the colour of the thing it labels (its value's role, or
-  `dim` beside a dim label). It never introduces a colour job of its own.
-- Bar cells drop their word labels for a glyph: `󰚩 3/13`, `󰍛 23%`,
-  `$ 4.20`, `󰂚 2`, `󰕾 62%` (`󰖁` muted), `󰂯` (`󰂲` off), `󰈀` wired,
-  `󰖩` wifi (`󰖪` none), `󰁹 88%` (the battery glyph follows the level),
-  `󰏘 stg` for RICE, `󰥔 14:02`. `⏻` stays. Pane titles keep their words.
-- Launcher rows: `[n]`, then an app glyph chosen by the desktop entry's
-  `Categories` (terminal ``, browser `󰈹`, editor ``, files `󰉋`, chat
-  `󰭹`, media `󰎆`, settings `󰒓`, games `󰊗`; else `󰘔`), then the name. Clip
-  rows: text `󰅍`, image `󰋩`. Ledger rows use the app glyph.
-- Herald: an app glyph after `herald ▸`, from the same Categories map where
-  the app resolves to a desktop entry, else `󰂚`. A summons is `󰀦`.
-- Board: tabs keep words. Pane rows lead with their kind: an agent's state
-  lamp stays (it IS the glyph), a terminal ``, a project `󰉋`, a mail
-  thread `󰇮`.
-- The glyph → meaning table lives in ONE place, the kit (`Kit.js`
-  `glyph.*`), so every surface draws the same icon for the same thing.
+- A glyph stands in for a word label, and only where a label is needed to
+  say what a value is. A value that reads on its own stays bare: the
+  clock, the `$` figure, the tray, and every list row (launcher, clip,
+  ledger, herald, board).
+- It takes the colour of the value it labels. It never introduces a colour
+  job of its own.
+- The glyphed bar cells: agents `󰚩 3/13`, CPU `󰍛 23%`, notifications
+  `󰂚 2`, volume `󰕾 62%` (`󰖁` muted), Bluetooth `󰂯` (`󰂲` off), network
+  `󰈀` wired, `󰖩` wifi, `󰖪` none, battery `󰁹 88%` (the glyph follows the
+  level), and the rice mode `󰏘 stg`. `⏻` stays. Pane titles keep their
+  words.
+- The glyph table lives in ONE place, the kit (`Kit.js`), so every surface
+  draws the same icon for the same thing.
 
 ### Colour — roles and highlights (hexes in `rice.nix`)
 The ground and the ramp are phosphor; each highlight colour has ONE job, so
@@ -218,11 +214,11 @@ One 28px line in the tmux/termui idiom, left to right:
 - `[⏻]` — the power key (opens `powermenu`).
 - the **switchboard** (§3.2), the widest element.
 - the active window title, dim, truncated.
-- right cells, each `glyph value` on the grid (§2 Glyphs): `󰚩 3/5`,
+- right cells on the grid, glyphed per §2 Glyphs: `󰚩 3/5`,
   `󰍛 23%`, `$ 4.20`, `󰂚 2` — each opens the board on its tab (OVERVIEW,
   SYS, SYS, NOTIF); then `󰕾 62%` · `󰂯` · `󰈀` (their own small panes),
   `󰁹 88%`, the tray, `󰏘 stg` (the rice-mode toggle), and the clock
-  `󰥔 14:02:31` (the calendar pane).
+  `14:02:31` (the calendar pane).
 - The bar's bottom rule is the **trunk**.
 
 ### 3.2 The switchboard (inside the bar)
@@ -379,3 +375,6 @@ reads a fixture path.
 - 2026-09-26 — approved and staged live. khoa asked for icons: Nerd Font
   glyphs from the one face, coloured by what they label, one table in the
   kit (§2 Glyphs). Bar cells trade their word labels for glyphs.
+- 2026-09-26 — khoa: not everything needs an icon. Glyphs only replace a
+  needed word label (status cells, board cells, RICE); the clock, `$`, the
+  tray and every list row stay bare.
