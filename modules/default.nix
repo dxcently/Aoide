@@ -22,6 +22,11 @@
     claude-code = ./dendrites/claude-code.nix;
     cli = ./dendrites/cli.nix;
     clipboard = ./dendrites/clipboard.nix;
+    # The compositor capability: a provider registry, not a lane record. Its
+    # `hyprland` provider is the LOOK; the BEHAVIOUR is the `hyprland` entry
+    # below, which keeps that name because `aoide.hyprland.*` stays a
+    # host-facing option.
+    compositor = ./dendrites/compositor;
     devtools = ./dendrites/devtools.nix;
     dunst = ./dendrites/dunst.nix;
     eidolon = ./dendrites/eidolon.nix;
@@ -29,10 +34,12 @@
     firefox = ./dendrites/firefox.nix;
     fonts = ./dendrites/fonts.nix;
     git = ./dendrites/git.nix;
-    hyprland = ./dendrites/hyprland.nix;
+    greeter = ./dendrites/greeter.nix;
+    hyprland = ./dendrites/compositor/hyprland/behaviour.nix;
     inference = ./dendrites/inference.nix;
     kimi-code = ./dendrites/kimi-code.nix;
     kitty = ./dendrites/kitty.nix;
+    lyra = ./dendrites/lyra;
     mcfly = ./dendrites/mcfly.nix;
     melete = ./dendrites/melete.nix;
     mneme = ./dendrites/mneme.nix;
@@ -45,6 +52,7 @@
     qbittorrent = ./dendrites/qbittorrent.nix;
     screenshot = ./dendrites/screenshot.nix;
     starship = ./dendrites/starship.nix;
+    stylix = ./dendrites/stylix.nix;
     vision = ./dendrites/vision.nix;
     yazi = ./dendrites/yazi.nix;
   };

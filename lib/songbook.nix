@@ -1,8 +1,8 @@
 # lib/songbook.nix — the songbook manifest/registry generator, factored out
-# of `modules/facets/quickshell/default.nix` (W3a/W3b) so it exists in
+# of `modules/dendrites/lyra/default.nix` (W3a/W3b) so it exists in
 # exactly ONE place (C4/W3's "one generator" requirement). Two callers:
 #
-#   - `modules/facets/quickshell/default.nix`'s `quickshellConfig` derivation
+#   - `modules/dendrites/lyra/default.nix`'s `quickshellConfig` derivation
 #     imports this at BUILD time to emit `manifest.json`/`registry.json` into
 #     the deployed QML tree.
 #   - The `songbookManifest` flake output (flake.nix) wraps this so
@@ -37,7 +37,7 @@ let
   # etude, nocturne today) — synthesize straight from the scan: owner is
   # always the song itself, `file` is always "<slot>.qml"; the registry
   # falls back to `livery.json`'s `.widgets // {}`, unjudged. See
-  # `modules/facets/quickshell/default.nix`'s original comment (git history,
+  # `modules/dendrites/lyra/default.nix`'s original comment (git history,
   # W3a/W3b) for the full reasoning; this file keeps only what the
   # computation itself needs.
   #

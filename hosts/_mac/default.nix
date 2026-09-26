@@ -14,7 +14,7 @@
 #   4. pkgs/aoide/flake.nix: add aarch64-darwin to its systems
 # See docs/architecture/PACKAGE-LAYOUT.md — "NixOS optional, never required."
 #
-# The shape once that lands — Aoide core only (facets are Linux: Quickshell,
+# The shape once that lands — Aoide core only (the paint lanes are Linux:
 # Hyprland); songs still RESOLVE (a rice.nix only sets aoide.livery.*, our own
 # option namespace) but nothing renders them on macOS. NOTE: no
 # `imports = [ ../common ]` here on purpose — common carries NixOS-only
@@ -39,9 +39,9 @@
   #   aoide.audio       (services.pipewire)        aoide.clipboard (systemd service)
   #   aoide.screenshot  (hyprshot/grim, wayland)   aoide.vision    (grim/slurp)
   #   aoide.obsidian    (systemd service)          aoide.firefox   (broken on nixpkgs-darwin)
-  #   aoide.hyprland + every aoide.facets.*        (the AoideOS desktop is Linux)
+  #   aoide.hyprland + every paint lane            (the AoideOS desktop is Linux)
 
-  # No aoide.facets.* — the desktop is AoideOS-on-Linux. What a mac host runs:
+  # No paint lane — the desktop is AoideOS-on-Linux. What a mac host runs:
   # aoided, the session graph, conduct, agent hooks — the headless profile,
   # same as _server.
   #

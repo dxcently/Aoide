@@ -7,7 +7,7 @@
 # hosts.
 { config, lib, ... }:
 {
-  # Turn the framework on everywhere. Individual facets/dendrites still gate on
+  # Turn the framework on everywhere. Individual dendrites still gate on
   # their own `aoide.<name>.enable` flags (flipped per host).
   aoide.enable = lib.mkDefault true;
 
@@ -20,7 +20,7 @@
   system.stateVersion = lib.mkDefault "25.11";
   nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
 
-  # The aoide user: a normal account every facet/service hangs off (user
+  # The aoide user: a normal account every lane/service hangs off (user
   # services, home-manager files, the greeter session). Hosts override freely.
   users.users.${config.aoide.user} = {
     isNormalUser = lib.mkDefault true;
@@ -32,7 +32,7 @@
     ];
   };
 
-  # The aoide user's home-manager baseline (facets write into this user's home:
+  # The aoide user's home-manager baseline (paint lanes write into this user's home:
   # QML tree, hyprland.conf). stateVersion pins HM's compat behaviour.
   home-manager.users.${config.aoide.user}.home.stateVersion = lib.mkDefault "25.11";
 

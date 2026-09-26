@@ -2,7 +2,7 @@
 # lane, docs/architecture/ONBOARD.md "The vars-file generator"). Feeds `lyra
 # onboard`'s `aoide.nix` generator: `nix eval --json <checkout>#aoideOptions`
 # returns every VISIBLE, non-internal `aoide.*` option declared across
-# modules/{nucleus,facets} and the dendrite bodies the registry catalogues,
+# modules/nucleus and the dendrite bodies the registry catalogues,
 # narrowed to exactly what the generator needs to render one commented line —
 # name, description, and the default already rendered as nix SOURCE TEXT
 # (nixpkgs' own doc renderer does the quoting/escaping; the generator pastes
@@ -47,11 +47,23 @@ let
   # declarations and the guard live on `body`, and the lane is the module the
   # constructor imports for a host that selected it. Only `body` is read here —
   # a lane that nothing selected must not be evaluated to render a doc line.
-  bodies = map (path: (import path).body) (lib.attrValues registry.catalogue);
+  #
+  # A capability with alternatives is a provider registry instead
+  # (`{ providers.<p> = <path>; }`, e.g. `compositor`), and each provider is a
+  # lane record of its own; the doc list needs every alternative's options, so
+  # every provider body is read. Same rule as
+  # `modules/dendrites/default.nix`'s whole-tree derivation.
+  bodyOf =
+    path:
+    let
+      entry = import path;
+    in
+    if entry ? body then [ entry.body ] else map (p: (import p).body) (lib.attrValues entry.providers);
+
+  bodies = lib.concatMap bodyOf (lib.attrValues registry.catalogue);
 
   evaled = lib.evalModules {
     modules = bodies ++ [
-      ../modules/facets
       ../modules/nucleus
       { config._module.check = false; }
     ];

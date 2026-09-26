@@ -1,10 +1,11 @@
 # lib/mkHost.nix — assemble one host's nixosSystem.
 #
-# A host is: the module tree (each of modules/{dendrites,facets,nucleus} names
-# its own files; modules/default.nix is the registry the constructor reads, not
-# a module) + every committed song (still discovered by lib/walk.nix) + the
-# host's own dir + home-manager + stylix. This only wires the fixed inputs and
-# passes `specialArgs` every module can rely on.
+# A host is: the module tree (each of modules/{dendrites,nucleus} names its own
+# files; modules/default.nix is the registry the constructor reads, not a
+# module) + every committed song (still discovered by lib/walk.nix) + the host's
+# own dir + home-manager. Each dendrite carries its own dependencies — the
+# stylix lane imports the Stylix module itself — so this only wires the fixed
+# inputs and passes `specialArgs` every module can rely on.
 #
 # `hosts/` knows dendrites; dendrites never know hosts (dxflake separation,
 # verbatim). A host `default.nix` only flips `aoide.*` flags and imports its
@@ -32,6 +33,12 @@ let
   # home-manager and stylix ride as NixOS modules when their inputs are present.
   # Kept tolerant: if an input is absent (minimal eval), we simply omit it so
   # `nix flake check` still evaluates.
+  #
+  # The stylix module is normally the stylix LANE's own dependency
+  # (`modules/dendrites/stylix.nix`'s `nixos` half), which is what the
+  # constructor imports. This whole-tree path imports bodies instead, so until
+  # it goes (S7) the module has to be added here as well — one copy per path,
+  # never both at once.
   optionalModule = attr: path: lib.optional (inputs ? ${attr}) path;
   hmModule = optionalModule "home-manager" (inputs.home-manager.nixosModules.home-manager or { });
   stylixModule = optionalModule "stylix" (inputs.stylix.nixosModules.stylix or { });
@@ -47,12 +54,11 @@ inputs.nixpkgs.lib.nixosSystem {
       ;
   };
   modules = [
-    # The three aggregates, in the order the module system merges them:
-    # dendrites (opt-in), facets (render surfaces), nucleus (unconditional
-    # core). `modules/default.nix` is the registry — data the constructor
-    # reads — so a host imports the directories directly.
+    # The two aggregates, in the order the module system merges them:
+    # dendrites (opt-in), nucleus (unconditional core).
+    # `modules/default.nix` is the registry — data the constructor reads — so a
+    # host imports the directories directly.
     ../modules/dendrites
-    ../modules/facets
     ../modules/nucleus
   ]
   ++ songbook

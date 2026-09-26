@@ -8,14 +8,14 @@
 # What this dendrite does:
 #   - programs.firefox via home-manager, installing the browser and letting
 #     home-manager own its profile/settings management.
-#   - Theming (GTK/colours) is left to the Stylix facet (aoide.facets.stylix),
+#   - Theming (GTK/colours) is left to the stylix lane (aoide.stylix.enable),
 #     same posture as kitty.nix — no colours hard-coded here.
 
 let
   body =
     { config, lib, ... }:
     {
-      options.aoide.firefox.enable = lib.mkEnableOption "the Firefox browser (colours/theme deferred to the Stylix facet)";
+      options.aoide.firefox.enable = lib.mkEnableOption "the Firefox browser (colours/theme deferred to the stylix lane)";
 
       config = lib.mkIf config.aoide.firefox.enable {
         home-manager.users.${config.aoide.user} = {

@@ -7,33 +7,33 @@
 # Exercises the module tree (same assembly as mkHost), the aoide
 # package, greeter wiring, the aoided user service, and the graph commands —
 # without real hardware or external network access.  shellbridge is NOT
-# exercised: its module gates on the quickshell + lyra enable facts (it
-# exists to feed the painted shell), and this VM disables the facet that sets
-# them — see the trims below.
+# exercised: its module gates on the lyra enable fact (it exists to feed the
+# painted shell), and this VM leaves that fact off — see the trims below.
 #
 # Wired in flake.nix as:
 #   checks.<system>.vm-boot = import ./tests/vm-boot.nix { inherit pkgs inputs lib; };
 #
 # ── Trims applied (headless VM) ───────────────────────────────────────────────
-#   aoide.facets.stylix.enable = false
+#   aoide.stylix.enable = false
 #     Reason: Stylix builds a wallpaper with ImageMagick and imports a large
 #     theme-target set; the closure is expensive and adds no value for a boot
 #     test.
 #
-#   aoide.facets.quickshell.enable = false
+#   aoide.quickshell.enable = false, aoide.lyra.enable = false
 #     Reason: Quickshell sources an upstream flake input with a significant
 #     NixOS Wayland closure; its autostart (`quickshell -c shell.qml`) cannot
-#     render on the virtual GPU.  The compositor facet is KEPT because it wires
-#     the ly greeter + programs.hyprland.  This also removes shellbridge.service
-#     entirely: shellbridge.nix gates on the quickshell + lyra facts this
-#     facet sets, so the test neither starts nor asserts it.
+#     render on the virtual GPU.  The compositor lane is KEPT because it wires
+#     programs.hyprland, and the greeter lane because the test asserts the ly
+#     unit.  Leaving lyra off also removes shellbridge.service entirely:
+#     shellbridge.nix gates on the lyra fact, so the test neither starts nor
+#     asserts it.
 #
 #   ly: will attempt to spawn Hyprland on the virtual GPU and loop.
 #     Mitigation: the test asserts the unit exists and is enabled rather than
 #     asserting active state, so a respawn loop does not fail the test.
 #
 #   The aoided user service anchors on a target that never fires in this VM
-#     (graphical-session or default, facet-dependent).  The test enables-linger
+#     (graphical-session or default, lane-dependent).  The test enables-linger
 #     and starts it explicitly via `systemctl --user`.
 #
 # ── Stage-dir note ────────────────────────────────────────────────────────────
@@ -59,7 +59,9 @@ let
   # Committed songs (same as mkHost).
   songbook = walk ../song/songbook;
 
-  # Optional modules — same tolerance guard as mkHost.
+  # Optional modules — same tolerance guard as mkHost. stylix rides here for
+  # the whole-tree path only: the stylix LANE carries it for the constructor
+  # (see lib/mkHost.nix).
   optionalModule = attr: path: lib.optional (inputs ? ${attr}) path;
   hmModule = optionalModule "home-manager" (inputs.home-manager.nixosModules.home-manager or { });
   stylixModule = optionalModule "stylix" (inputs.stylix.nixosModules.stylix or { });
@@ -71,7 +73,7 @@ let
   # aggregate — it arrives via `inputs.aoide.nixosModules.default`, imported
   # by `modules/nucleus/options.nix` and carrying `overlays.default` with it,
   # the same way mkHost's own node picks it up (this VM imports the same
-  # modules/{dendrites,facets,nucleus} aggregates).
+  # modules/{dendrites,nucleus} aggregates).
   overlayModule = _: {
     nixpkgs.overlays = [
       (import ../lib/pkgs.nix { inherit lib; }).overlay
@@ -87,7 +89,7 @@ let
     };
 
   # specialArgs mirror what mkHost passes (host/inputs/username/system).
-  # Modules that reference these args (e.g. quickshell facet uses `inputs`)
+  # Modules that reference these args (e.g. the lyra lane uses `inputs`)
   # receive the real values; the VM node is named "vm-test".
   testSpecialArgs = {
     host = "vm-test";
@@ -117,10 +119,9 @@ pkgs.testers.runNixOSTest {
     }:
     {
       imports = [
-        # The same three aggregates lib/mkHost.nix imports: modules/default.nix
+        # The same two aggregates lib/mkHost.nix imports: modules/default.nix
         # is the registry data the constructor reads, not a module.
         ../modules/dendrites
-        ../modules/facets
         ../modules/nucleus
       ]
       ++ songbook
@@ -130,7 +131,7 @@ pkgs.testers.runNixOSTest {
         overlayModule
         hmDefaultsModule
         # ── Aoide VM configuration ──────────────────────────────────────
-        # Mirrors yomi-strix but without real hardware + trimmed facet set.
+        # Mirrors yomi-strix but without real hardware + a trimmed lane set.
         (
           { lib, ... }:
           {
@@ -139,12 +140,15 @@ pkgs.testers.runNixOSTest {
             aoide.user = "khoa";
             aoide.song = "sonata";
 
-            # Compositor kept: wires the ly greeter so the unit exists + is enabled.
-            aoide.facets.compositor.enable = true;
-            # Quickshell omitted: heavy closure + cannot render headless.
-            aoide.facets.quickshell.enable = false;
+            # Compositor + greeter kept: wires programs.hyprland and the ly unit
+            # the test asserts exists and is enabled.
+            aoide.compositor.enable = true;
+            aoide.greeter.enable = true;
+            # Quickshell/lyra omitted: heavy closure + cannot render headless.
+            aoide.quickshell.enable = false;
+            aoide.lyra.enable = false;
             # Stylix omitted: ImageMagick wallpaper + large target set.
-            aoide.facets.stylix.enable = false;
+            aoide.stylix.enable = false;
             # Obsidian off (same as yomi-strix).
             aoide.obsidian.enable = false;
 
@@ -225,7 +229,7 @@ pkgs.testers.runNixOSTest {
     # asserting active/activating, so a respawn loop does not fail the test.
     machine.succeed("systemctl is-enabled display-manager.service")
 
-    # The rice half. The greeter's colours are a livery read (compositor facet,
+    # The rice half. The greeter's colours are a livery read (the greeter lane,
     # `lyPlain`/`lyBold`), so assert the generated config carries palette-shaped
     # values AND that they are not ly's stock ones. Shape plus "not stock"
     # rather than a specific hex: pinning the song's palette here would turn
@@ -261,10 +265,10 @@ pkgs.testers.runNixOSTest {
 
     # ── 4. User service: aoided ──────────────────────────────────────────────
     # shellbridge.service does not exist in this VM at all: shellbridge.nix
-    # gates the whole module on the quickshell + lyra enable facts (it exists
-    # to feed the painted shell), and this VM disables the facet that sets
-    # them — so only aoided is started and asserted here, and the stage files
-    # shellbridge would seed are not expected either.
+    # gates the whole module on the lyra enable fact (it exists to feed the
+    # painted shell), and this VM leaves that fact off — so only aoided is
+    # started and asserted here, and the stage files shellbridge would seed are
+    # not expected either.
     # Enable linger so the user slice persists, then start it explicitly.
     machine.succeed("loginctl enable-linger khoa")
 

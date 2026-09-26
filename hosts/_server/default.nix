@@ -1,7 +1,7 @@
 # hosts/_server/default.nix — TEMPLATE: headless server skeleton.
 #
 # Shelved (the `_` prefix): not registered in flake.nix. Aoide-the-core only —
-# aoided, the session graph, conduct, hooks — with NO desktop: no facets, no
+# aoided, the session graph, conduct, hooks — with NO desktop: no paint lane, no
 # hyprland, nothing renders a song here. Every terminal is still a conducted,
 # tracked session; the reaper's liveness is pid-based, so no compositor is
 # needed for dead sessions to be swept. To adopt:
@@ -28,8 +28,9 @@
   # a headless box has no use for a terminal emulator:
   aoide.kitty.enable = false;
 
-  # No aoide.facets.* / aoide.hyprland here — that is the AoideOS desktop and
-  # this box performs no song. The core (graph/conduct/aoided) is what you get.
+  # No paint lane here (compositor, greeter, stylix, quickshell, lyra) and no
+  # aoide.hyprland: that is the AoideOS desktop, and this box performs no song.
+  # The core (graph/conduct/aoided) is what you get.
 
   # Headless is where the integrated agent + knowledge server earn their keep.
   # Both services are guarded (ConditionPathExists on their runtime binaries),

@@ -15,6 +15,23 @@
 #
 # This aggregate is on its way out (S7): once hosts select through the
 # constructor, nothing imports a whole tree, and this file goes with them.
+let
+  # A catalogue entry is either a lane record or a provider registry
+  # (`{ providers.<p> = <path>; }`) — a capability with alternatives, each
+  # provider a lane record of its own. Taking the whole tree means taking every
+  # alternative: the constructor is where exactly one is chosen, and there is no
+  # default provider to guess. Each provider body self-gates on its own fact, so
+  # merging them all changes nothing a host did not already enable.
+  bodiesOf =
+    path:
+    let
+      entry = import path;
+    in
+    if entry ? body then
+      [ entry.body ]
+    else
+      map (p: (import p).body) (builtins.attrValues entry.providers);
+in
 {
-  imports = map (p: (import p).body) (builtins.attrValues (import ../default.nix).catalogue);
+  imports = builtins.concatMap bodiesOf (builtins.attrValues (import ../default.nix).catalogue);
 }

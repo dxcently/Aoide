@@ -30,9 +30,11 @@
   aoide.song = "sonata";
 
   # The whole desktop, one line each:
-  aoide.facets.quickshell.enable = true;
-  aoide.facets.compositor.enable = true;
-  aoide.facets.stylix.enable = true;
+  aoide.compositor.enable = true;
+  aoide.greeter.enable = true;
+  aoide.stylix.enable = true;
+  aoide.quickshell.enable = true;
+  aoide.lyra.enable = true;
   aoide.hyprland.enable = true;
 
   aoide.screenshot.enable = true;

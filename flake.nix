@@ -109,7 +109,7 @@
       );
 
       # ── Songbook manifest/registry (C4/W3) ──────────────────────────────────
-      # The SAME generator `modules/facets/quickshell/default.nix`'s
+      # The SAME generator `modules/dendrites/lyra/default.nix`'s
       # `quickshellConfig` derivation uses at build time
       # (`lib/songbook.nix`), exposed as a lean flake output so
       # `pkgs/aoide/crates/song/src/widgets.rs` can shell out to `nix eval
@@ -132,8 +132,8 @@
         };
 
       # ── aoide.* option derivation (P-I3, onboarding lane) ───────────────────
-      # Every `aoide.*` option declared across modules/{nucleus,facets,
-      # dendrites}, narrowed to {name, description, default} for `lyra
+      # Every `aoide.*` option declared across modules/{nucleus,dendrites},
+      # narrowed to {name, description, default} for `lyra
       # onboard`'s `aoide.nix` generator (docs/architecture/ONBOARD.md "The
       # vars-file generator"; lib/options.nix does the evalModules walk).
       # Deliberately NOT per-system like `packages`/`checks` below —
@@ -167,8 +167,8 @@
 
       # ── Checks ─────────────────────────────────────────────────────────────
       # The contractual coupling discipline (lib/checks.nix). They pass
-      # trivially now (no facets declare surface owners yet) and become real as
-      # Wave-1 facets populate `aoide.surfaces`. Also builds EVERY package as
+      # trivially now (no lane declares surface owners yet) and become real as
+      # the paint lanes populate `aoide.surfaces`. Also builds EVERY package as
       # `pkg-<name>` — one per DISCOVERED package (lib/pkgs.nix; whatever
       # currently lives under pkgs/ — no fixed list here to go stale) plus
       # `pkg-aoide` explicit from the `aoide` input, since the core is

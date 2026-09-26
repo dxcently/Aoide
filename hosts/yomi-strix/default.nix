@@ -31,7 +31,7 @@
     "ttm.pages_limit=6291456" # 24 GiB in 4 KiB pages, matches gttsize
   ];
 
-  # RDNA 3.5 iGPU: kernel driver + userspace graphics for the Hyprland facet.
+  # RDNA 3.5 iGPU: kernel driver + userspace graphics for the compositor.
   services.xserver.videoDrivers = [ "amdgpu" ];
   hardware.graphics = {
     enable = true;
@@ -41,7 +41,7 @@
   # 32 GB is modest while the iGPU eats RAM — compressed in-RAM swap cushion.
   zramSwap.enable = true;
 
-  # Aoide flags for this box. Facets/dendrites (Wave 1) read these; this line
+  # Aoide flags for this box. Dendrites read these; this line
   # is the entire host-side wiring for the desktop.
   aoide.enable = true;
   aoide.user = "khoa";
@@ -50,19 +50,24 @@
   # line — e.g. `aoide.song = "moonlight";` swaps the whole livery fan-out with
   # zero other edits (song/songbook/<name>/). REQUIRED, not decorative:
   # `aoide.song` defaults to null, and a host that names no song deploys no
-  # QML and runs no shell service — the paint facets only activate once a
+  # QML and runs no shell service — the paint lanes only activate once a
   # song is named. `sonata` is the shipped standard, the guaranteed-present
   # baseline this host opts into by name. "sonata": the light glass key drawn
   # from its own cover.
   aoide.song = "sonata";
 
-  # Wave-1 facets — the whole desktop, one line each.
-  aoide.facets.quickshell.enable = true;
-  aoide.facets.compositor.enable = true;
-  aoide.facets.stylix.enable = true;
+  # Wave-1 paint lanes — the whole desktop, one line each. These are the
+  # cross-lane FACTS (declared once in modules/nucleus/options.nix): the
+  # compositor look (its `hyprland` provider), the greeter, Stylix, the
+  # Quickshell surface and lyra.
+  aoide.compositor.enable = true;
+  aoide.greeter.enable = true;
+  aoide.stylix.enable = true;
+  aoide.quickshell.enable = true;
+  aoide.lyra.enable = true;
 
   # Host-invariant Hyprland behaviour (keybinds, input, layout, window rules).
-  # Paired with the compositor facet above: that one owns the look, this one
+  # Paired with the compositor above: that one owns the look, this one
   # owns everything a re-rice must not touch.
   aoide.hyprland.enable = true;
 
@@ -140,8 +145,8 @@
   # The pairing popup (task #135). An inbound request otherwise waits in
   # `aoide pair`'s own terminal for someone to go looking; with this on,
   # `aoide-pair-watch` runs beside the session and raises the typed-code
-  # dialog the moment a request parks. Opt-in on top of the desktop-facet
-  # gate by design (`aoided.nix`: a2a + quickshell are not enough), and this
+  # dialog the moment a request parks. Opt-in on top of the desktop
+  # gate by design (`aoided.nix`: a2a alone is not enough), and this
   # is the deployment flip that turns it on for this box — the User's call,
   # made 2026-09-02. It grants nothing: the dialog still demands the code
   # read off the requester's own screen, and a rejection is one click.

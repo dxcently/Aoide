@@ -64,7 +64,7 @@
 #       `stagePatch` is the identity with no override set.
 #
 # 1–3 and 5 are written so they PASS TRIVIALLY where nothing populates the
-# registry they inspect yet (1) and become real as Wave-1 facets/packages
+# registry they inspect yet (1) and become real as Wave-1 lanes/packages
 # land. Each resolves to a trivial derivation: it either builds (assertion
 # held) or the eval fails with a readable message (assertion broken). 10 is
 # the same eval-time-assert shape against a fixed fixture instead of a
@@ -140,7 +140,7 @@ let
   # A committed song under song/songbook/<name>/ carries ONLY notes: its
   # rice.nix sets aoide.notes (palette + component tiers) and — later —
   # cover/chime references inside song/. It must NEVER set host options
-  # (monitors, hardware, services) or enable facets/dendrites: the VENUE (host)
+  # (monitors, hardware, services) or enable dendrites: the VENUE (host)
   # decides its instruments, the SONG carries only the notes (CONTRACTS.md §5).
   #
   # A cheap STRUCTURAL slice of that discipline is enforced here: every walked

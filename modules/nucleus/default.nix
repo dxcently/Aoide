@@ -12,6 +12,5 @@
     ./options.nix
     ./packages.nix
     ./secrets.nix
-    ./shellbridge.nix
   ];
 }

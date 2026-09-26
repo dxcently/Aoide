@@ -1,4 +1,4 @@
-# modules/nucleus/shellbridge.nix — shell integration bridge service.
+# modules/dendrites/lyra/shellbridge.nix — shell integration bridge service.
 #
 # shellbridge is the bidirectional bridge between the daemon / agents and the
 # live desktop (entities/shellbridge.md, concepts/Desktop-Architecture.md):
@@ -39,35 +39,31 @@
 }:
 
 let
-  # The same Quickshell package the facet installs (its default.nix) — the
+  # The same Quickshell package the lyra lane installs — the
   # daemon's rice-toggle path re-execs `aoide rice …`, whose widget-sync half
   # shells out to `quickshell ipc call shell reload`; the client binary must
   # be the build the live shell actually runs.
   quickshellPkg = inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 in
 
-# Gated on two enable facts and the master switch — `aoide.enable &&
-# aoide.quickshell.enable && aoide.lyra.enable` — not on bare aoide.enable:
-# everything in this file is graphical-session machinery (the bridge serves the
-# painted shell; the reap units are wantedBy/partOf graphical-session.target and
-# never fire headless). Both facts are set `mkDefault true` by the lane that owns
-# them, so an unconfigured painting box is unchanged; this file reads the FACTS,
-# never that lane's own option (root AGENTS.md house rule 5). On a headless
-# aoide box (aoide.enable + the doors only) these units would sit inert while
-# their PATH entries (quickshell, hyprland, hyprlock) drag the whole Qt/Wayland
-# stack into the closure — found live on sakaki, whose only aoide duty is the A2A
-# door. `aoide.quickshell.enable` is what keeps that shut: lyra alone (an
-# operator's own `lyra rice compose`, no shell) brings no bridge, and the shell
-# fact is the one that answers "is there a shell here".
+# Gated on the master switch and the lyra fact — `aoide.enable &&
+# aoide.lyra.enable` — not on bare aoide.enable: everything in this file is
+# graphical-session machinery (the bridge serves the painted shell; the reap
+# units are wantedBy/partOf graphical-session.target and never fire headless).
+# Both facts are set `mkDefault true` by the lane that owns them, so an
+# unconfigured painting box is unchanged; this file reads the FACTS, never that
+# lane's own option (root AGENTS.md house rule 5). On a headless aoide box
+# (aoide.enable + the doors only) these units would sit inert while their PATH
+# entries (quickshell, hyprland, hyprlock) drag the whole Qt/Wayland stack into
+# the closure — found live on sakaki, whose only aoide duty is the A2A door.
 #
-# `aoide.lyra.enable` carries the second half of the gate (P-A8 of the
-# binary-split workstream): ExecStart below execs lyra out of `pkgs.aoide.rice`,
-# a SEPARATE, droppable output — so without that fact a host that left a shell
-# on and explicitly flipped `aoide.lyra.enable` off would still start this unit
-# and exec a binary no longer in its closure. Least-surprise pick: gate the unit
-# rather than assert the combination is an error, since "a shell without lyra"
-# is a legitimate (if unusual) configuration this option exists to allow.
-lib.mkIf (config.aoide.enable && config.aoide.quickshell.enable && config.aoide.lyra.enable) {
+# `aoide.lyra.enable` is the gate because lyra OWNS this bridge
+# (docs/architecture/PACKAGE-LAYOUT.md): ExecStart below execs lyra out of
+# `pkgs.aoide.rice`, a SEPARATE, droppable output — so a host that leaves the
+# fact off must not start a unit that execs a binary its closure does not carry.
+# A shell with no lyra is a legitimate (if unusual) configuration; it simply has
+# no bridge.
+lib.mkIf (config.aoide.enable && config.aoide.lyra.enable) {
 
   # ── Runtime directories ──────────────────────────────────────────────────
   # song/stage/ is shared with aoided.nix's tmpfiles rules; systemd-tmpfiles
@@ -169,7 +165,7 @@ lib.mkIf (config.aoide.enable && config.aoide.quickshell.enable && config.aoide.
         "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
       ]
       # Nix-declared baseline song — same env-baked-into-the-service
-      # precedent as quickshell's AOIDE_WALLPAPER (modules/facets/quickshell/
+      # precedent as quickshell's AOIDE_WALLPAPER (modules/dendrites/lyra/
       # default.nix). Read by dispatch_rice_mode_toggle's declarative-
       # direction re-exec (shellbridge.rs) so the bar's rice-mode toggle
       # re-pins to the shipped baseline instead of whatever song happens to

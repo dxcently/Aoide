@@ -16,7 +16,7 @@
 # WHY A PLAIN FUNCTION AND NOT A MODULE FRAGMENT. A fragment is only reachable
 # through the merged config, and a song's `rice.nix` self-gates on
 # `aoide.song == "<name>"`. The quickshell derivation walks EVERY song in the
-# songbook (see modules/facets/quickshell/default.nix's songs loop and its note
+# songbook (see modules/dendrites/lyra/default.nix's songs loop and its note
 # on why the registry cannot come from `config`), so a fragment-based record
 # would be invisible for every song the host is not currently performing —
 # nine songs out of ten, silently. A plain function is importable by the
@@ -200,8 +200,8 @@ let
       {
         # NOT named `instruments`. In this tree an instrument is what the VENUE
         # sounds — `docs/Aoide-Wiki/concepts/song/Song-Vocabulary.md:57` defines
-        # a venue's instruments as "which facets and dendrites are enabled", and
-        # :49 lists widgets themselves among the quickshell facet's instruments.
+        # a venue's instruments as "which dendrites are enabled", and
+        # :49 lists widgets themselves among the lyra lane's instruments.
         # A song-side field by that name would also read as the song choosing
         # them, which `CONTRACTS.md:807` forbids outright. This field is the
         # narrower, song-owned thing: the packages providing the executables a

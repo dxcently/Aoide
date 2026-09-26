@@ -8,7 +8,7 @@
 # What this dendrite does (ported from dxflake modules/dendrites/kitty.nix):
 #   - programs.kitty with the dxflake settings (scrollback, padding, powerline
 #     tab bar, no audio bell) and its alt-key window/tab keybindings.
-#   - Font/colours are left to the Stylix facet (aoide.facets.stylix), exactly
+#   - Font/colours are left to the stylix lane (aoide.stylix.enable), exactly
 #     as dxflake left them to its stylix layer — so no colours are hard-coded
 #     here.
 #
@@ -29,7 +29,7 @@ let
   body =
     { config, lib, ... }:
     {
-      options.aoide.kitty.enable = lib.mkEnableOption "the Kitty terminal (colours/fonts deferred to the Stylix facet)";
+      options.aoide.kitty.enable = lib.mkEnableOption "the Kitty terminal (colours/fonts deferred to the stylix lane)";
 
       config = lib.mkIf config.aoide.kitty.enable {
         # The venue's terminal, offered to whoever needs to open one: `spawn
@@ -91,7 +91,7 @@ let
             programs.kitty = lib.mkForce {
               enable = true;
               package = pkgs.kitty;
-              # font.name / font.size and colours are set by the Stylix facet.
+              # font.name / font.size and colours are set by the stylix lane.
               settings = {
                 # Conduct-by-default: every window's shell is the wrapper above.
                 shell = "${aoide-shell}/bin/aoide-shell";
@@ -105,7 +105,7 @@ let
                 # the TEXT stays fully opaque and crisp (background_opacity fades only
                 # the cell background, not the glyphs). Hyprland owns the blur pass —
                 # it blurs behind any translucent surface when decoration:blur is on
-                # (compositor facet, global) — so kitty's own background_blur (a
+                # (compositor lane, global) — so kitty's own background_blur (a
                 # macOS/KDE-only path, inert under Hyprland) is turned off here and
                 # the compositor does the frosting instead. The kitty window class is
                 # additionally pinned in the compositor's Aero window rules.

@@ -1,8 +1,9 @@
-# modules/dendrites/hyprland.nix — host-invariant Hyprland behaviour.
+# modules/dendrites/compositor/hyprland/behaviour.nix — host-invariant
+# Hyprland behaviour.
 #
 # Dendrite shape v1 (CONTRACTS.md §2):
 #   - Guarded on aoide.hyprland.enable (default false — shipped but off;
-#     enabled per host beside the compositor facet).
+#     enabled per host beside the compositor).
 #   - Reads no other module: it writes only the stock home-manager option
 #     `wayland.windowManager.hyprland.extraConfig`, plus the shared
 #     `config.aoide.user` from the nucleus option contract.
@@ -11,38 +12,40 @@
 # Hyprland config divides cleanly in two, and the halves change for completely
 # different reasons:
 #
-#   LOOK / SHAPE  → modules/facets/compositor/default.nix
+#   LOOK / SHAPE  → default.nix beside this file (the `hyprland` provider of
+#     the `compositor` capability)
 #     Anything derived from `aoide.livery`: border colours, gaps, rounding,
 #     blur, the aoide-* layerrules, hyprglass, the kitty opacity/rounding
 #     rules. Re-riced whenever the song changes. That file also owns the
 #     session plumbing (programs.hyprland, the systemd/Wayland env handoff,
-#     hyprpolkitagent, xdg.portal, the ly greeter).
+#     hyprpolkitagent, xdg.portal).
 #
 #   BEHAVIOUR     → THIS FILE
 #     What you want no matter what the desktop looks like: keybinds, input
 #     devices, tiling layout, misc quality-of-life, and behavioural window
 #     rules (float/workspace-assignment/idle — as opposed to the *appearance*
-#     window rules, which are livery's business and stay in the facet).
+#     window rules, which are livery's business and stay in the look).
 #     Swapping songs must never disturb any of it.
 #
-# A facet MAY read `aoide.livery` and is a render surface (CONTRACTS.md §2);
-# this module reads no livery and renders nothing, so it is a dendrite — the
+# The look reads `aoide.livery` and is a paint dendrite (CONTRACTS.md §2); this
+# module reads no livery and renders nothing, so its own options stay a
+# host-facing surface (`aoide.hyprland.*` — monitors, scrollingMonitor) — the
 # same shape these binds had in dxflake before the port.
 #
 # ── Ordering inside hyprland.conf ─────────────────────────────────────────────
 # Several modules contribute to one `extraConfig` (a `lines` option, so they
 # concatenate by merge order, NOT by import order):
-#   500  mkBefore  compositor facet    — livery values first
+#   500  mkBefore  the compositor look — livery values first
 #   1000 (default) THIS FILE           — behaviour
 #   1000 (default) screenshot dendrite — its own SUPER+S binds
 # Plain (unordered) is deliberate: the livery block must land first so these
-# behaviour keys are never overwritten by it. (The quickshell facet is NOT a
-# writer here — it autostarts the shell as a systemd user service, not an
-# exec-once, so nothing of its lands in hyprland.conf.)
+# behaviour keys are never overwritten by it. (The lyra lane is NOT a writer
+# here — it autostarts the shell as a systemd user service, not an exec-once,
+# so nothing of its lands in hyprland.conf.)
 #
-# Enabling this without the compositor facet is harmless: home-manager only
-# writes hyprland.conf when its own hyprland module is enabled, so the text
-# below is simply never emitted.
+# Enabling this without the compositor is harmless: home-manager only writes
+# hyprland.conf when its own hyprland module is enabled, so the text below is
+# simply never emitted.
 
 let
   body =
