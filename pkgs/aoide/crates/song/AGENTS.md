@@ -20,10 +20,23 @@
   `flake_root()` check, never a `#<flake output>` argv. `$AOIDE_FLAKE_ROOT`
   survives for `rice declare`'s commit-in step only.
 - **§7.5's three cases, in order, and case 1 must stay nix-free.** Built in
-  with no DIFFERING machine copy (absent counts, and so does byte-identical —
-  a seeded copy is the same song, and a mode comparison would call every
-  seeded song "differing") stages from the baked baseline; everything else is
-  the generator; no nix makes everything else a refusal.
+  with no DIFFERING machine copy (absent counts, and so does a match over what
+  the seed SHIPS — `MACHINE_RUNTIME_DIRS`, the machine's own `takes/`/`drafts/`/
+  `elements/`, are NOT differences in the song, or a snapshot would disable
+  staging on a host with no nix and report a built-in song as not built in)
+  stages from the baked baseline; everything else is the generator; no nix makes
+  everything else a refusal.
+- **A staged song's LENDERS come with it.** `widget_owners` reads the owners its
+  manifest entry names and `sync_song_widgets` carries each lender's `widgets/`
+  into `run/qml/songs/<owner>/` — a borrowed slot resolves to
+  `songs/<owner>/<file>`, so carrying only the borrower leaves a dead slot with
+  no error anywhere. A lender with no `widgets/` in the songbook is an ERROR
+  naming it, never a skip.
+- **The gate runs in the CALLER, before the caller's first write.** Every
+  staging caller (`rice stage`, `rice mode stage`, `rice back` — whose first
+  write is its drift snapshot — `reload`) calls `plan_stage` before writing
+  anything, and an in-crate test pins the `back` case (§9(d) only covers
+  `stage`). Don't move the gate down into a sync.
 - **`baseline_songbook` only ever resolves a NO-`_widgets/`-shelf song's own
   entry — it must skip the patch, not guess, when `name` has one.** Borrowed
   ownership resolves only in `composeSong`, and for a built-in song the baked

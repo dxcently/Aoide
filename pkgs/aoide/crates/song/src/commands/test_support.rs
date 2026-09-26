@@ -47,8 +47,24 @@ pub(crate) fn ensure_default_songbook_fixture() {
 /// root consumes it, so it cannot leak into another test (which is what an env
 /// var here would do, and what would silently disable the gate for every test
 /// that ran afterwards).
-pub(crate) fn require_the_real_songbook_path() {
-    std::fs::write(real_path_marker(), "").unwrap();
+///
+/// Returns a guard: if the test panics between arming and consuming, the
+/// marker would otherwise survive and the NEXT test's staging root would stand
+/// down instead — so `Drop` clears it. Bind it (`let _armed = …;`) or the
+/// guard's own scope is the statement, and the marker is gone before the
+/// staging root is built.
+#[must_use = "the guard is what consumes the marker on the happy path; drop it immediately and the next staging root stands down"]
+pub(crate) fn require_the_real_songbook_path() -> RealSongbookPath {
+    let _ = std::fs::write(real_path_marker(), "");
+    RealSongbookPath
+}
+
+pub(crate) struct RealSongbookPath;
+
+impl Drop for RealSongbookPath {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(real_path_marker());
+    }
 }
 
 fn real_path_marker() -> std::path::PathBuf {

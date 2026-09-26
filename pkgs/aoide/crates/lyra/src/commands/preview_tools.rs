@@ -3234,25 +3234,46 @@ exit 0
     /// The real fixture behind the `join_level`/`parse_static_qml` fixes
     /// above: a live run against `song/songbook/sonata/widgets/
     /// SessionMenu.qml` found every child below a `"file"` match reading
-    /// "none" (1054 none vs 34 resolved). Skips (never fails) when this
-    /// checkout doesn't have the song present.
-    fn read_session_menu_qml() -> Option<String> {
+    /// "none" (1054 none vs 34 resolved).
+    ///
+    /// HERMETIC and LOUD. `$AOIDE_FLAKE_ROOT` is pinned to THIS checkout
+    /// (found from this crate's own manifest dir — never from the operator's
+    /// environment, and never `~/.aoide/Aoide`, which is how these numbers
+    /// went stale unnoticed), and an unreadable file PANICS: a skip would let
+    /// the fixture rot into a no-op the day the song moves.
+    fn read_session_menu_qml() -> String {
         let path =
             aoide_storage::fs::flake_root().join("song/songbook/sonata/widgets/SessionMenu.qml");
-        match std::fs::read_to_string(&path) {
-            Ok(text) => Some(text),
-            Err(e) => {
-                eprintln!("skipping: {} unreadable ({e})", path.display());
-                None
-            }
-        }
+        std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "the committed SessionMenu.qml fixture is unreadable at {} ({e}) — this test reads \
+                 THIS checkout's song (pinned via $AOIDE_FLAKE_ROOT), and an unreadable file is a \
+                 failure, not a skip",
+                path.display()
+            )
+        })
+    }
+
+    /// `$AOIDE_FLAKE_ROOT` pinned at this checkout for the whole test, restored
+    /// on drop — held as a binding (`let _pin = pin_checkout();`) by every test
+    /// that reads a committed song.
+    struct PinnedCheckout(#[allow(dead_code)] aoide_test_support::EnvSaver);
+
+    fn pin_checkout() -> PinnedCheckout {
+        let saver = aoide_test_support::EnvSaver::capture(&["AOIDE_FLAKE_ROOT"]);
+        let checkout = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(4)
+            .expect("crates/lyra -> crates -> aoide -> pkgs -> the checkout");
+        std::env::set_var("AOIDE_FLAKE_ROOT", checkout);
+        PinnedCheckout(saver)
     }
 
     #[test]
     fn session_menu_qml_top_level_children_match_the_real_checkout() {
-        let Some(text) = read_session_menu_qml() else {
-            return;
-        };
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _pin = pin_checkout();
+        let text = read_session_menu_qml();
         let (roots, _) = parse_static_qml(&text);
         assert_eq!(
             roots.len(),
@@ -3268,16 +3289,23 @@ exit 0
             .collect();
         assert_eq!(
             got,
-            vec![("TextEdit", 67), ("FolderDialog", 134), ("FileView", 165), ("FileView", 179), ("MouseArea", 186), ("Rectangle", 187)],
-            "the inline `component Action: Rectangle {{ ... }}` at line 275 (and its own nested Text/MouseArea) must never appear here -- it's a type declaration, not a child instance"
+            vec![
+                ("TextEdit", 138),
+                ("FolderDialog", 205),
+                ("FileView", 236),
+                ("FileView", 250),
+                ("MouseArea", 257),
+                ("Rectangle", 258)
+            ],
+            "the inline `component Action: Rectangle {{ ... }}` (and its own nested Text/MouseArea) must never appear here -- it's a type declaration, not a child instance"
         );
     }
 
     #[test]
     fn file_matched_node_children_resolve_positionally_against_the_real_session_menu_children() {
-        let Some(text) = read_session_menu_qml() else {
-            return;
-        };
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _pin = pin_checkout();
+        let text = read_session_menu_qml();
         let path =
             aoide_storage::fs::flake_root().join("song/songbook/sonata/widgets/SessionMenu.qml");
         let mut components = ComponentMap::new();
@@ -3348,17 +3376,17 @@ exit 0
         assert_eq!(menu.children[0].match_kind, "positional");
         assert_eq!(
             menu.children[0].source.as_deref(),
-            Some(format!("{}:67", path.display())).as_deref()
+            Some(format!("{}:138", path.display())).as_deref()
         );
         assert_eq!(menu.children[1].match_kind, "positional");
         assert_eq!(
             menu.children[1].source.as_deref(),
-            Some(format!("{}:186", path.display())).as_deref()
+            Some(format!("{}:257", path.display())).as_deref()
         );
         assert_eq!(menu.children[2].match_kind, "positional");
         assert_eq!(
             menu.children[2].source.as_deref(),
-            Some(format!("{}:187", path.display())).as_deref()
+            Some(format!("{}:258", path.display())).as_deref()
         );
     }
 

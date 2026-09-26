@@ -665,8 +665,8 @@ mod tests {
     fn generated_file_imports_cleanly_into_a_real_module_eval() {
         let checkout = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
-            .nth(3)
-            .expect("crates/lyra -> pkgs/aoide -> the checkout")
+            .nth(4)
+            .expect("crates/lyra -> crates -> aoide -> pkgs -> the checkout")
             .to_path_buf();
         let options = read_aoide_options().expect("the shipped option set must resolve");
 

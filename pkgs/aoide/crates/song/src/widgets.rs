@@ -9,18 +9,20 @@
 //! read once at startup — a brand-new slot still needs THIS module's own
 //! manifest regeneration (below) to appear in it, but no service restart.
 //!
-//! **C4/W3 (the manifest/registry generator, unified):** `manifest.json` and
-//! `registry.json` are no longer derived by scanning THIS song's own
-//! `widgets/` directory and patching one entry. A scan cannot answer "who
-//! owns this slot" once a composition borrows another song's widget body —
-//! only `composeSong` (`lib/song.nix`, run inside `lib/songbook.nix`)
-//! resolves ownership, and it runs in the nix evaluator, nowhere else. So
-//! both files are regenerated WHOLE, for every committed song at once, by
-//! shelling out to `nix eval --json` against the `songbookManifest` flake
-//! output (`flake.nix`) — the exact same generator the lyra lane's
-//! `quickshellConfig` derivation calls at build time. One generator, two
-//! callers: [`eval_songbook`] is that shell-out, invoked once from the
-//! manifest path
+//! **The generator is SHIPPED, and it runs offline.** `manifest.json` and
+//! `registry.json` are not derived by scanning a song's own `widgets/`
+//! directory: a scan cannot answer "who owns this slot" once a composition
+//! borrows another song's body — only `composeSong` (`lib/song.nix`) resolves
+//! ownership, and it runs in the nix evaluator, nowhere else. So both files are
+//! regenerated WHOLE, for every song this machine's songbook holds, by one
+//! plain `nix-instantiate --eval --strict --json` over `share/lyra/nix/
+//! manifest.nix` — a file SHIPPED by `pkgs/lyra-songbook`, a thin entry over
+//! copies of `lib/songbook.nix`/`lib/song.nix`, pointed at this machine's own
+//! `$AOIDE_ROOT/song/songbook`. No flake, no network, no checkout, no
+//! `--impure`: `flake_root()` is not read here at all, and the flake's
+//! `#songbookManifest` output is a build-time convenience, never a runtime
+//! dependency. [`plan_stage`] is that shell-out and §7.5's gate in one
+//! decision, invoked once from the manifest path
 //! ([`sync_song_widgets`]) and once from the registry path
 //! ([`sync_song_registry`]) — see each function's own doc.
 //!
@@ -31,42 +33,37 @@
 //! silently rewrite the STAGED song's own entry back to the old bare-list
 //! shape — a shape `StagingEngine.qml`'s `has()` cannot look up, so every
 //! widget for that one song would render nothing, no error anywhere.
-//! Whole-file regeneration from nix can't reproduce that failure mode: every
-//! song's entry, staged or not, comes from the same eval every time (a
-//! CHECKOUT host's committed songbook is stable across calls, so "every
-//! song" and "every committed song nix can see" are the same set).
+//! Whole-file regeneration can't reproduce that failure mode: every song's
+//! entry, staged or not, comes from one eval of one songbook.
 //!
-//! Mirrors the nix build's own per-song widget carry (the quickshell
-//! lane's `quickshellConfig` derivation) as closely as possible for the
-//! BODY copy: the WHOLE `widgets/` tree is copied unfiltered (helper
-//! components, asset subdirs,
-//! `.gitkeep`, everything), while the manifest only ever lists top-level
-//! lowercase-kebab `.qml` files as slots.
+//! Mirrors the nix build's own per-song widget carry (the lyra lane's
+//! `quickshellConfig` derivation) for the BODY copy: the WHOLE `widgets/` tree
+//! is copied unfiltered (helper components, asset subdirs, `.gitkeep`,
+//! everything), while the manifest only ever lists top-level lowercase-kebab
+//! `.qml` files as slots.
 //!
-//! **L-C3 (repo-less hosts, lyra-carrier lane, task #107):** the `nix eval`
-//! shell-out above needs a real flake checkout at `flake_root()` — a host
-//! with no `~/Aoide` clone has none. [`eval_songbook`] checks for
-//! `flake_root()/flake.nix` first and, when absent, never shells to `nix` at
-//! all: it reads the SHIPPED, prebaked `manifest.json`/`registry.json` from
-//! [`aoide_storage::fs::song_templates_dir`] (`pkgs/lyra-songbook`, baked at
-//! nix build time by the SAME `lib/songbook.nix` generator) as the BASELINE.
-//! Unlike a checkout host, a repo-less host's OTHER composed songs are not
-//! inside that baseline at all (they live only in the runtime songbook, and
-//! the baked templates freeze whatever the package build saw) — a bare
-//! baseline-plus-current-song write would silently drop every OTHER
-//! previously-staged song's entry on the very next `rice stage` call. So
-//! [`baseline_songbook`] OVERLAYS the EXISTING on-disk manifest/
-//! registry's entries for any song that still has a directory in the host
-//! songbook (a composed song survives a regen it isn't part of; a song
-//! whose directory was removed is pruned — never an immortal stale key) on
-//! top of the baked baseline, THEN patches in the CURRENTLY-staged song's
-//! own entry from a direct, nix-free directory scan ([`scan_own_entry`]) —
-//! the only shape `rice compose` can ever produce (it never writes a
-//! `_widgets/` shelf, so there is no borrowed-ownership case to resolve
-//! without nix). This self-heals the staged song on every call and
-//! preserves every other still-live song's entry in between — not the
-//! checkout path's "every song, every call" (there is no whole-songbook
-//! eval to lean on here).
+//! **§7.5's three cases, and a refusal stages NOTHING.** [`plan_stage`] is the
+//! whole policy, and it runs in the CALLER before that caller's first write:
+//!
+//!   1. **Built in, with no differing machine copy** — the shipped templates'
+//!      baked `manifest.json`/`registry.json` are the answer and `nix` is never
+//!      invoked. "No differing copy" compares CONTENT over what the SEED ships;
+//!      the machine's own runtime dirs (`takes/`, `drafts/`, `elements/` —
+//!      [`MACHINE_RUNTIME_DIRS`]) are not differences in the song, so taking a
+//!      snapshot does not disable staging on a host with no nix.
+//!   2. **Otherwise, on a host with `nix-instantiate`** — the shipped generator
+//!      ([`eval_generator`]) over this machine's songbook, whose answer WINS
+//!      over the baked baseline for any song both carry: a machine owns its
+//!      songbook, so the machine copy is what gets staged.
+//!   3. **Otherwise** — refused with [`refusal_no_nix`] or
+//!      [`refusal_rebuild_needed`], and nothing is staged.
+//!
+//! One decision and one evaluation per stage: the callers (`rice stage`,
+//! `rice mode stage`, `rice back`, `reload`) hand the same [`StageSongbook`] to
+//! both syncs rather than asking twice. The widget BODY carry follows the same
+//! ownership the manifest records — the staged song AND every LENDER its entry
+//! names ([`widget_owners`]), because a borrowed slot resolves to
+//! `songs/<owner>/<file>`.
 
 use std::path::Path;
 
@@ -710,8 +707,27 @@ fn read_baked(templates: &Path, file: &str) -> Result<serde_json::Value, WidgetS
     Ok(parsed)
 }
 
+/// The directories a MACHINE's song folder carries that the seed NEVER ships —
+/// its runtime scratch, each named where it is written:
+///
+///   `takes/`     the take store (`aoide-storage::takes` — `rice take`,
+///                `rice back`'s drift snapshot, `cover set`'s archive)
+///   `drafts/`    `aoide-storage::fs::drafts_dir` — `rice draft save`
+///   `elements/`  `aoide-song::elements::seed_song` — `rice element seed`
+///
+/// [`machine_copy_differs`] ignores these and only these. A snapshot is not a
+/// difference in the SONG: comparing them would let `rice take` — an ordinary,
+/// reversible operation — turn a built-in song into a "differing" machine copy,
+/// and on a host with no nix that makes the song unstageable while reporting
+/// `is not built into this system`, which is false on its face. The seed ships
+/// none of the three, so every name here is a machine's own scratch rather than
+/// content; a fourth runtime writer belongs in this list, and a song that ever
+/// SHIPS one of these names needs this list revisited.
+const MACHINE_RUNTIME_DIRS: &[&str] = &["takes", "drafts", "elements"];
+
 /// §7.5 case 1's "no differing machine copy": the machine's folder for `name`
-/// is absent, or byte-for-byte the shipped one.
+/// is absent, or matches the shipped one everywhere the SEED puts content
+/// ([`MACHINE_RUNTIME_DIRS`] excepted).
 ///
 /// CONTENT only, never permissions: the shipped copy comes out of the nix store
 /// (0444/0555) while a machine copy was `cp -r`ed into `$AOIDE_ROOT`
@@ -727,9 +743,10 @@ fn machine_copy_differs(name: &str, templates: &Path) -> bool {
     !trees_equal(&machine, &templates.join(name))
 }
 
-/// Recursive byte-equality of two directories: same relative file set, same
-/// bytes. Directories are compared by what they hold, not by their mtimes, and
-/// symlinks are followed (a song folder holds none).
+/// Recursive content equality of two directories: same relative file set, same
+/// bytes — [`MACHINE_RUNTIME_DIRS`] excepted on both sides. Directories are
+/// compared by what they hold, not by their mtimes, and symlinks are followed
+/// (a song folder holds none).
 fn trees_equal(a: &Path, b: &Path) -> bool {
     let (Ok(a_entries), Ok(b_entries)) = (std::fs::read_dir(a), std::fs::read_dir(b)) else {
         return false;
@@ -738,6 +755,7 @@ fn trees_equal(a: &Path, b: &Path) -> bool {
         let mut names: Vec<String> = entries
             .filter_map(|e| e.ok())
             .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| !MACHINE_RUNTIME_DIRS.contains(&name.as_str()))
             .collect();
         names.sort();
         names
@@ -864,6 +882,32 @@ fn capture_tree(
     Ok(())
 }
 
+/// The songs whose `widgets/` this stage must carry into `run/qml/songs/`:
+/// `name`, plus every owner its manifest entry names.
+///
+/// A borrowed slot's BODY lives in its owner's `widgets/` (`lib/song.nix`'s
+/// `composeSong`; CONTRACTS.md §5) and `StagingEngine.qml` resolves a slot to
+/// `songs/<owner>/<file>` — so carrying only the staged song's own folder
+/// leaves a borrower's lender absent from `run/qml` and the borrowed slot
+/// renders NOTHING, with no error anywhere. The set is read off the entry
+/// [`plan_stage`] already resolved (the generator's own answer for a
+/// machine-authored composition, the baked baseline's for a built-in song)
+/// rather than recomputed here: one source of ownership, in the place that
+/// resolved it.
+fn widget_owners(songbook: &StageSongbook, name: &str) -> Vec<String> {
+    let mut owners = vec![name.to_string()];
+    if let Some(entry) = songbook.manifest.get(name).and_then(|entry| entry.as_object()) {
+        for slot in entry.values() {
+            if let Some(owner) = slot.get("owner").and_then(|owner| owner.as_str()) {
+                if !owners.iter().any(|seen| seen == owner) {
+                    owners.push(owner.to_string());
+                }
+            }
+        }
+    }
+    owners
+}
+
 /// Sync `<song>/songbook/<name>/widgets/` into `run/qml/songs/<name>/` and
 /// regenerate `manifest.json` WHOLE (every committed song, via
 /// [`eval_songbook`]) — the live-desktop half of `rice stage`.
@@ -877,17 +921,14 @@ fn capture_tree(
 /// runtime tree exists, regardless of whether the ACTIVE song has bodies to
 /// carry.
 ///
-/// Pre-existing scope limit, not introduced here: the BODY copy is still
-/// per-STAGED-song only, `name`'s own `widgets/` tree. Once a borrow exists
-/// (W5+), editing the OWNING song's widget body and running `rice stage` on
-/// the BORROWING song does not carry that edit into
-/// `run/qml/songs/<owner>/` — only staging the owner directly does.
-/// manifest.json/registry.json stay correct regardless (whole regen, every
-/// call), so this is a live-preview body-freshness papercut, not a
-/// correctness bug, and it self-resolves on the owner's own next stage or on
-/// a rebuild. Whoever lands the first borrow should re-check whether this is
-/// still an acceptable seam or worth widening to "sync every song the
-/// active one's manifest entries resolve through."
+/// Pre-existing scope limit, now WIDENED (S9 review, M4): the staged song's
+/// own bodies are carried, AND so are its LENDERS' — every owner its manifest
+/// entry names ([`widget_owners`]), because a borrowed slot resolves to
+/// `songs/<owner>/<file>` and would otherwise render nothing, silently. A
+/// lender with no `widgets/` in the songbook is an error naming it, not a
+/// skip. Still out of scope: a lender whose bodies were EDITED without
+/// staging the lender (`rice stage <borrower>` carries the lender's bodies as
+/// they are on disk, which is the same freshness every other body copy has).
 pub fn sync_song_widgets(
     name: &str,
     songbook: &StageSongbook,
@@ -911,6 +952,31 @@ pub fn sync_song_widgets(
     } else {
         Vec::new()
     };
+
+    // The runtime half of the borrow closure: every LENDER the staged song's
+    // entry names must have its bodies under `run/qml/songs/<owner>/` too, or
+    // the borrowed slot resolves to nothing (see [`widget_owners`]).
+    let mut lenders: Vec<String> = Vec::new();
+    for owner in widget_owners(songbook, name) {
+        if owner == name {
+            continue;
+        }
+        let lender_src = aoide_storage::fs::songbook_dir(&owner).join("widgets");
+        if !lender_src.is_dir() {
+            return Err(WidgetSyncErr {
+                error: format!(
+                    "`{name}` borrows a slot owned by `{owner}`, whose widget bodies are not in \
+                     the songbook at {} — a borrowed slot cannot render without its lender's \
+                     bodies",
+                    lender_src.display()
+                ),
+                target: lender_src.to_string_lossy().into_owned(),
+            });
+        }
+        copy_tree_atomic(&lender_src, &run_qml.join("songs").join(&owner), &mut changed)?;
+        lenders.push(owner);
+    }
+
     let body_file_count = changed.len();
     let bodies_changed = body_file_count > 0;
 
@@ -918,8 +984,14 @@ pub fn sync_song_widgets(
 
     let note = if !bodies_changed {
         "widget bodies already current".to_string()
-    } else {
+    } else if lenders.is_empty() {
         format!("synced {body_file_count} widget file(s) into run/qml/songs/{name}")
+    } else {
+        format!(
+            "synced {body_file_count} widget file(s) into run/qml/songs/{name} (borrowed bodies \
+             carried from {})",
+            lenders.join(", ")
+        )
     };
     Ok(WidgetSyncOk { changed, slots: local_slots, bodies_changed, note })
 }

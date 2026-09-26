@@ -1473,6 +1473,18 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
     let target_record =
         takes::load_take(&song, draft.as_deref(), target).expect("existence just confirmed above");
 
+    // §7.5's gate, at the HEAD of the back path — above the drift snapshot
+    // below, which is itself a write (it mints a take). A refusal here leaves
+    // the desktop exactly where it was: no drift take, no reverted livery, no
+    // geometry re-applied to the compositor, no cover rewrite, no cursor move.
+    // The revert itself needs no nix; only the registry sync does — and
+    // refusing the whole operation BEFORE its first write is what makes that
+    // sync's refusal safe to inherit.
+    let songbook = crate::widgets::plan_stage(&song).map_err(|e| {
+        Outcome::error(cmd, e.error)
+            .with_data(json!({ "reason": "stage-refused", "target": e.target }))
+    })?;
+
     let head_before = takes::load_head(&song, draft.as_deref());
 
     // The rail that makes "nothing is destroyed" literally true even for
@@ -1552,11 +1564,9 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
     // ONLY for dynamically `Qt.createComponent`-loaded widget BODIES, which
     // a revert never touches by design (widget bodies are git's substrate,
     // §5.2) — so that call is never reached from here, deliberately, not by
-    // omission.
-    let songbook = crate::widgets::plan_stage(&song).map_err(|e| {
-        Outcome::error(cmd, e.error)
-            .with_data(json!({ "reason": "stage-refused", "target": e.target }))
-    })?;
+    // omission. The gate that approves this songbook ran at the HEAD of this
+    // function, above the drift snapshot — that is what makes a refusal here
+    // cost the operator nothing.
     let registry_sync = crate::widgets::sync_song_registry(&song, &songbook).map_err(|e| {
         Outcome::error(cmd, format!("failed to sync widget-type registry: {}", e.error))
             .with_data(json!({ "reason": "registry-sync-failed", "target": e.target }))
@@ -1798,6 +1808,7 @@ mod tests {
         let root = unique_tmp(tag);
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let song = "sonata".to_string();
         let draft = "neon-night".to_string();
@@ -1859,6 +1870,7 @@ mod tests {
         let root = unique_tmp("take-not-staged-or-drafted");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         // No marker at all IS declarative (the safe default) — refused:
@@ -1887,6 +1899,7 @@ mod tests {
         let root = unique_tmp("take-staging-routing");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         save_mode_marker(&ModeMarker {
@@ -1925,6 +1938,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("take-cmd-thread-snapshot");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         // No marker at all IS declarative — refused before this even reaches
@@ -1940,6 +1954,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("take-cmd-thread-drift");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let err = snapshot_if_drifted_unlocked("cover.set", "cover-set").unwrap_err();
@@ -2052,6 +2067,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("take-handler-not-draft");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_rice_take(&inv(&["rice", "take"], &[]));
@@ -2205,6 +2221,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("mark-not-draft");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_rice_take_mark(&inv(&["rice", "take", "mark"], &["A"]));
@@ -2274,6 +2291,7 @@ mod tests {
         let root = unique_tmp(tag);
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let song = "sonata".to_string();
         let draft = "neon-night".to_string();
@@ -2570,6 +2588,7 @@ mod tests {
         let root = unique_tmp("back-routing-broken");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let song = "sonata".to_string();
         let draft = "neon-night".to_string();
@@ -2670,6 +2689,110 @@ mod tests {
     }
 
     #[test]
+    fn back_refuses_before_its_first_write_when_the_gate_refuses() {
+        // H1: the §7.5 gate runs at the HEAD of the back path — above the
+        // drift snapshot, which is itself a write (it mints a take). A refusal
+        // must therefore cost the operator NOTHING: no drift take, no reverted
+        // livery, no geometry re-applied to the compositor, no cover rewrite,
+        // no cursor move. This is the case §9(d) never reached, because it
+        // tests `rice stage`.
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_SONG_TEMPLATES",
+            "PATH",
+            crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR,
+        ]);
+        std::env::remove_var(crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR);
+        let _armed = crate::commands::test_support::require_the_real_songbook_path();
+        std::env::remove_var("AOIDE_SONG_TEMPLATES");
+
+        let root = unique_tmp("back-gate-refused");
+        let stage = root.join("aoide").join("song").join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        let templates = root.join("templates");
+        std::fs::create_dir_all(&templates).unwrap();
+        std::fs::write(templates.join("manifest.json"), r#"{"sonata":{}}"#).unwrap();
+        std::fs::write(templates.join("registry.json"), r#"{"sonata":{}}"#).unwrap();
+        // Built in, but its machine copy DIFFERS (the templates carry no
+        // `sonata/` folder at all), so case 2 applies — and the generator
+        // answers that this song needs a package the system does not carry.
+        std::fs::write(
+            templates.join("builtin.json"),
+            r#"{"declared":"sonata","songs":["sonata"],"packages":[]}"#,
+        )
+        .unwrap();
+        crate::commands::test_support::nix_instantiate_recorder(
+            &root,
+            r#"{"manifest":{"sonata":{"bar":{"owner":"sonata","file":"bar.qml"}}},"registry":{"sonata":{}},"packages":{"sonata":["not-installed-pkg"]}}"#,
+        );
+        crate::commands::test_support::prepend_path(&root.join("fake-bin"));
+
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_SONG_TEMPLATES", &templates);
+        std::env::remove_var(crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR);
+
+        std::fs::write(stage.join("livery.json"), VALID_NOTES).unwrap();
+        let song_dir = shellbridge::songbook_dir("sonata");
+        std::fs::create_dir_all(song_dir.join("widgets")).unwrap();
+        std::fs::write(song_dir.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(song_dir.join("widgets").join("bar.qml"), "// bar\n").unwrap();
+        // Unlocked staging mode: `rice back` refuses while declarative, and
+        // takes only exist while unlocked — a mode refusal would mask the gate.
+        save_mode_marker(&ModeMarker {
+            mode: RiceMode::Staging,
+            song: Some("sonata".to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+        takes::save_take(
+            "sonata",
+            None,
+            &TakeRecord {
+                take: 1,
+                parent: None,
+                at: "2026-08-18T00:00:00Z".to_string(),
+                session_id: None,
+                cause: "explicit".to_string(),
+                livery: serde_json::json!({ "schemaVersion": "0" }),
+                cover: None,
+                widgets: serde_json::json!({}),
+            },
+        )
+        .unwrap();
+
+        // The stage lock file, pre-created: `with_stage_lock` creates it on the
+        // way in (the call's own doing, before any policy runs), so it must
+        // exist before the snapshot or it would read as a difference.
+        std::fs::write(stage.join(".stage.lock"), "").unwrap();
+
+        let head_before = takes::load_head("sonata", None);
+        let before = crate::commands::test_support::tree_snapshot(&[&stage, &song_dir]);
+        let out = handle_rice_back(&inv_back(None, Some(1)));
+
+        assert_eq!(out.status, Status::Error, "{:?}", out.data);
+        assert!(
+            out.message.contains(
+                "rebuild needed: sonata needs not-installed-pkg (not in this system)"
+            ),
+            "the taught refusal, not a half-revert: {}",
+            out.message
+        );
+        assert_eq!(
+            crate::commands::test_support::tree_snapshot(&[&stage, &song_dir]),
+            before,
+            "a refused `rice back` writes nothing: stage/ and the song dir are byte-unchanged"
+        );
+        assert_eq!(
+            takes::load_head("sonata", None),
+            head_before,
+            "and the head cursor never moved (it is `Some(1)` here — the max-take \
+             fallback for a song with no `head.json`)"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn back_invalid_take_and_mark_flags_are_rejected_before_anything_else() {
         // Malformed-flag shape — the bare (neither flag) form is covered by
         // `back_bare_invocation_refuses_without_reading_stdin_or_writing_anything`.
@@ -2757,6 +2880,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("back-not-draft");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_rice_back(&inv_back(None, Some(1)));
@@ -2948,6 +3072,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("take-list-not-draft");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_rice_take_list(&inv(&["rice", "take", "list"], &[]));
@@ -3410,6 +3535,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("diff-not-draft");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_rice_take_diff(&inv_diff(None, None));
@@ -3843,6 +3969,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("prune-not-draft");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_rice_take_prune(&inv_prune(None, None, true, false));
