@@ -199,6 +199,13 @@ mod tests {
     /// logic of its own — shaped on `require_cli_tty_refuses_every_non_cli_
     /// door` (`crates/conduct/src/graph/grant.rs`), which loops the same
     /// three doors.
+    /// GATED on Unix with its reason: the fixture installs a `#!/bin/sh` shim
+    /// on `PATH` and makes it executable by a mode — `CreateProcess`
+    /// understands neither a shebang nor an extension-less name — and the
+    /// subject is external-subcommand discovery, which on native Windows would
+    /// need a real `.exe` to fake. The same gate and reason every shim-driven
+    /// group in this tree carries; no native twin exists for it.
+    #[cfg(unix)]
     #[test]
     fn an_unregistered_path_on_a_non_cli_door_is_still_unknown_command() {
         let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());

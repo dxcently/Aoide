@@ -5,6 +5,14 @@
 //! nothing else registers a live session — a session harness (or a Claude
 //! Code hook) upserts its own record here, and every mutation re-stages
 //! graph.json so the read path lights up immediately.
+//!
+//! **`allow(dead_code)` on native Windows, stated once.** The `stamp_*` helpers
+//! below (shell/headless/spawned/task/exit/log-path) are written by the
+//! conducted session's own registration and exit path, whose every caller sits
+//! in `graph/conduct.rs`'s refused PTY capability — so nothing on that host can
+//! reach them, and `#[cfg(unix)]` item-by-item is churn the ConPTY slice (W5)
+//! un-does. Scoped to `cfg(windows)`; Unix keeps every warning it had.
+#![cfg_attr(windows, allow(dead_code))]
 
 use super::common::{require_flag, stage_error};
 use super::doc::{

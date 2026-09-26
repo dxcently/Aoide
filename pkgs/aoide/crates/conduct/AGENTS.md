@@ -1,5 +1,39 @@
 # AGENTS.md — aoide-conduct
 
+## Native Windows: what the seams are, and what is refused by name
+
+Everything this crate needs from a host lives behind a seam, and no call site
+spells a platform of its own: the socket TYPE (`aoide_protocol::win_unix`), the
+process facts Unix reads out of `/proc` (`aoide_protocol::win_proc` —
+`proc_argv`, `proc_comm`, `proc_has_children` answer through it, while `proc_cwd`
+has NO arm and says so, falling back to the record's stamped `cwd`), the peer
+identity (`win_unix::peer_pid` + `win_proc::process_user_sid`), and
+`aoide_storage::fs`'s `path_is_under` (the project-prefix question, component-wise
+and verbatim-stripped), `detach`, `link_dir`, `lock_exclusive` family and
+`create_new_private`.
+
+**The PTY capability is refused BY NAME on native Windows**, never stubbed:
+`spawn_on_pty`, the raw-mode guard, the winsize ioctls, the poll multiplexer and
+`session_conduct` itself are `#[cfg(unix)]`, and the Windows arm of
+`session_conduct` returns a taught refusal naming ConPTY
+(`CreatePseudoConsole`) as the missing capability — interactive and `--headless`
+alike. **Fifteen** tests in `graph/conduct.rs` are gated for it (all fifteen gate
+texts cite `session_conduct`/the PTY), and **53 tests crate-wide** are gated on
+this host; the arithmetic is `974 − 53 + 1 = 922` — 974 defined on Linux, minus
+53 that only run where a PTY exists, plus the one Windows-only test that proves
+the refusal itself
+(`conduct_refuses_by_name_and_registers_no_session_on_a_host_without_a_pty`),
+which is the measured 922 of a chiyo run. The DETACHED, non-PTY spawn is native
+(`aoide_storage::fs::detach`), and its four green tests are named in the gate
+text of the tests that do need a conducted child.
+
+A fixture that pastes a path into hand-built JSON or creates a file/dir with
+`std::fs` defaults is a bug on this host, not a flake: Windows paths carry `\`
+(escape them — `send`'s `jp`, or build with `serde_json`), a feed's DACL must be
+owner-only, and a socket path must fit `sun_path` (use
+`aoide_test_support::short_tmp`). Each of those three cost real diagnosis time
+once; none of them is a style preference.
+
 - **Session actions preserve identity and scope.** Project assignment changes
   `project`, never `cwd` or ancestry. Termination is local daemon-only:
   `kill_target` first resolves the requested id to the nearest

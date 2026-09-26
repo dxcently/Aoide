@@ -31,7 +31,10 @@ use serde_json::{json, Value};
 // CLI's own caller-side resolution uses, and speaks the CLI's own words).
 use crate::graph::{focused_workspace, NO_COMPOSITOR};
 use std::io::{BufRead, BufReader};
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(windows)]
+use aoide_protocol::win_unix::{UnixListener, UnixStream};
 use std::path::PathBuf;
 
 /// The shellbridge socket path — **contract**: never computed independently.
@@ -2038,18 +2041,20 @@ pub fn send_line(line: &str) -> std::io::Result<()> {
     stream.flush()
 }
 
-/// LANE IDENTITY P-ID3 (G7) — the shellbridge socket's CROSS-UID floor, pure
-/// and unit-tested without a real different-uid connection (same shape
-/// `aoide_secrets::broker::admin_gate` already holds: a plain `Option<u32>`
-/// in, an `Option<String>` refusal reason out). `None` (admitted) only when
-/// the peer's kernel-attested uid equals `my_euid` — this process's OWN
-/// euid, since shellbridge always runs as the operator's own uid, the SAME
-/// uid every legitimate connector already runs as (the QML herald/bar
-/// widgets, `aoide herald push` off dunst's script hook, `session permit`
-/// raising its own summons — every one of them same-uid, none of them a
-/// DIFFERENT uid). An unidentified peer (`SO_PEERCRED` read failed) is
-/// refused the same fail-closed way a mismatched uid is, never treated as
-/// benign.
+/// LANE IDENTITY P-ID3 (G7) — the shellbridge socket's CROSS-USER floor, pure
+/// and unit-tested without a real different-user connection (same shape
+/// `aoide_secrets::broker::admin_gate` already holds: a peer credential in, an
+/// `Option<String>` refusal reason out). `None` (admitted) only when the
+/// peer's kernel-attested user equals THIS process's own — a uid on Unix, this
+/// token's user SID on native Windows (`graph::identity::own_user`, ONE seam
+/// for both sides of the comparison). shellbridge always runs as the
+/// operator's own user, the SAME user every legitimate connector already runs
+/// as (the QML herald/bar widgets, `aoide herald push` off dunst's script
+/// hook, `session permit` raising its own summons — every one of them
+/// same-user, none of them a DIFFERENT one). An unidentified peer — no
+/// peer-credential mechanism, a failed read, or a peer whose pid was reused
+/// mid-read — is refused the same fail-closed way a mismatched user is, never
+/// treated as benign.
 ///
 /// **This closes a CROSS-uid gap only — it does NOT stop a same-uid
 /// attacker.** Under OQ1-A (LANE IDENTITY's thesis) every legitimate
@@ -2058,29 +2063,33 @@ pub fn send_line(line: &str) -> std::io::Result<()> {
 /// `{"cmd":"heraldverdict",...}` is an OQ1-A-INHERENT residual this floor
 /// does not close — see `CONTRACTS.md`'s identity section for the honest
 /// statement of what remains open on the verdict door specifically.
-fn cross_uid_gate(peer: Option<crate::graph::identity::PeerCred>, my_euid: u32) -> Option<String> {
-    match peer {
-        Some(p) if p.uid == my_euid => None,
-        Some(p) => Some(format!(
-            "shellbridge connection refused: peer uid {} does not match this process's own uid {my_euid}",
-            p.uid
+fn cross_uid_gate(peer: Option<crate::graph::identity::PeerCred>) -> Option<String> {
+    let own = crate::graph::identity::own_user();
+    match (peer.and_then(|p| p.user()), own) {
+        (Some(peer), Some(own)) if peer == own => None,
+        (Some(peer), Some(own)) => Some(format!(
+            "shellbridge connection refused: peer {} does not match this process's own {}",
+            peer.label(),
+            own.label()
         )),
-        None => Some(
-            "shellbridge connection refused: peer uid could not be determined (SO_PEERCRED read failed)"
+        (_, None) => Some(
+            "shellbridge connection refused: this process's own user could not be determined"
+                .to_string(),
+        ),
+        (None, _) => Some(
+            "shellbridge connection refused: the peer's user could not be determined (the kernel \
+             identity read failed)"
                 .to_string(),
         ),
     }
 }
 
 fn serve(listener: &UnixListener) {
-    // SAFETY: `geteuid()` takes no arguments and cannot fail — the same
-    // call `identity.rs`'s own test makes.
-    let my_euid = unsafe { libc::geteuid() };
     for conn in listener.incoming() {
         match conn {
             Ok(stream) => {
                 let peer = crate::graph::identity::peer_cred(&stream);
-                if let Some(reason) = cross_uid_gate(peer, my_euid) {
+                if let Some(reason) = cross_uid_gate(peer) {
                     let _ = daemon::audit(
                         &daemon::default_audit_log(),
                         daemon::Door::Daemon,
@@ -2426,38 +2435,44 @@ mod tests {
     // ── cross_uid_gate (LANE IDENTITY P-ID3, G7) ────────────────────────
 
     #[test]
-    fn cross_uid_gate_admits_a_matching_euid() {
-        assert_eq!(
-            cross_uid_gate(Some(crate::graph::identity::PeerCred { uid: 1000, pid: 42 }), 1000),
-            None
-        );
+    fn cross_uid_gate_admits_a_matching_user() {
+        let own = crate::graph::identity::own_user().expect("this process's own user");
+        let peer = crate::graph::identity::PeerCred::for_user(&own);
+        assert_eq!(cross_uid_gate(Some(peer)), None);
     }
 
     #[test]
-    fn cross_uid_gate_refuses_a_mismatched_uid() {
-        assert!(cross_uid_gate(Some(crate::graph::identity::PeerCred { uid: 1001, pid: 42 }), 1000).is_some());
+    fn cross_uid_gate_refuses_a_mismatched_user() {
+        let other = match crate::graph::identity::own_user().expect("this process's own user") {
+            crate::graph::identity::PeerUser::Uid(uid) => crate::graph::identity::PeerUser::Uid(uid + 1),
+            crate::graph::identity::PeerUser::Sid(sid) => {
+                crate::graph::identity::PeerUser::Sid(format!("{sid}-not-this-user"))
+            }
+        };
+        let peer = crate::graph::identity::PeerCred::for_user(&other);
+        assert!(cross_uid_gate(Some(peer)).is_some());
     }
 
     #[test]
     fn cross_uid_gate_refuses_an_unidentified_peer() {
         // Fail-closed, never a benign default — the same posture
-        // `admin_gate` holds for a `SO_PEERCRED` read that failed.
-        assert!(cross_uid_gate(None, 1000).is_some());
+        // `admin_gate` holds for a peer-identity read that failed.
+        assert!(cross_uid_gate(None).is_some());
     }
 
     /// End-to-end against a REAL socketpair (mirrors `identity.rs`'s own
     /// `peer_cred_on_a_scratch_socketpair_matches_this_processs_own_identity`):
     /// a connection entirely local to this process reports THIS process's
-    /// own euid, which `cross_uid_gate` then admits — proving the floor
-    /// does not refuse the legitimate same-uid caller (the desktop QML, the
+    /// own user, which `cross_uid_gate` then admits — proving the floor
+    /// does not refuse the legitimate same-user caller (the desktop QML, the
     /// dunst hook, `session permit`'s own raise — every real connector Phase
-    /// 0 identified) it must never touch.
+    /// 0 identified) it must never touch. Both hosts run this one: the
+    /// socketpair is the socket-type seam, the identity is the peer-cred seam.
     #[test]
     fn a_real_same_process_socketpair_is_admitted() {
-        let (a, _b) = std::os::unix::net::UnixStream::pair().expect("socketpair");
+        let (a, _b) = UnixStream::pair().expect("socketpair");
         let peer = crate::graph::identity::peer_cred(&a);
-        let my_euid = unsafe { libc::geteuid() };
-        assert_eq!(cross_uid_gate(peer, my_euid), None);
+        assert_eq!(cross_uid_gate(peer), None);
     }
 
     #[test]
@@ -2735,6 +2750,11 @@ mod tests {
     /// (`AOIDE_CORE_BIN`): the argv the daemon builds is asserted by the stub
     /// itself echoing its positional parameters, so this also pins that the
     /// session id travels as ONE argv element with no shell involved.
+    /// GATED on Unix with its reason: the stub is a `#!/bin/sh` script
+    /// `CreateProcess` cannot launch (no shebang, no extension), and this test
+    /// asserts the argv the shim echoed — the same gate the client crate's
+    /// shim groups carry.
+    #[cfg(unix)]
     #[test]
     fn dispatch_session_trace_carries_the_clis_answer_verbatim() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2774,6 +2794,10 @@ printf '{"status":"ok","command":"session.trace","message":"1 record(s)","data":
     /// A refusal is the CLI's OWN taught refusal, verbatim, with its machine
     /// `reason` beside it and no `steps` — so a card can tell a refusal from a
     /// session that emitted nothing.
+    /// GATED on Unix with its reason: the stub is a `#!/bin/sh` script
+    /// `CreateProcess` cannot launch (no shebang, no extension) — the same
+    /// gate the client crate's shim groups carry.
+    #[cfg(unix)]
     #[test]
     fn dispatch_session_trace_passes_a_refusal_through_verbatim() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2814,6 +2838,12 @@ exit 1
     /// its own pid (the stub `exec`s the sleeper, so the pid it writes IS the
     /// child) is gone from `/proc` afterwards, so no query leaves a process
     /// behind.
+    /// GATED on Unix with its reason: the fixture is a `#!/bin/sh` stub whose
+    /// `exec sleep` is what gives the bound something to kill, and the
+    /// descendant's liveness is read off `/proc` — neither exists on native
+    /// Windows (`CreateProcess` runs no script, and the pid's end there is
+    /// uncatchable `TerminateProcess`).
+    #[cfg(unix)]
     #[test]
     fn a_slow_child_is_killed_and_reaped_at_the_wall_clock_bound() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2858,6 +2888,11 @@ exit 1
     /// open. An unconditional `join()` on the reader would block for the
     /// descendant's whole lifetime, defeating the wall clock; here the read is
     /// DISCARDED after the grace and the caller returns promptly.
+    /// GATED on Unix with its reason: the fixture is a `#!/bin/sh` stub whose
+    /// `sleep 30 &` descendant holds the pipe open, and the cleanup SIGKILLs
+    /// that pid — `CreateProcess` runs no script there, and no shell builtin
+    /// spawns the descendant this test needs.
+    #[cfg(unix)]
     #[test]
     fn a_descendant_holding_the_pipe_open_never_defeats_the_bound() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3766,6 +3801,12 @@ exit 1
     /// first) that answers with a CLI-shaped `ok` envelope quoting the WHOLE
     /// argv it was handed, so a dispatch test asserts both the planned argv
     /// and the reply shaping with no daemon and no stage write.
+    ///
+    /// GATED on Unix with its reason (its callers are gated with it): the stub
+    /// is a `#!/bin/sh` SCRIPT made executable by a mode, and `CreateProcess`
+    /// understands neither a shebang nor an extension-less name — the same
+    /// gate the client crate's own shim groups carry.
+    #[cfg(unix)]
     fn stub_workspace_core(tag: &str) -> (aoide_test_support::EnvSaver, PathBuf) {
         let root = aoide_test_support::unique_tmp(tag);
         std::fs::create_dir_all(&root).unwrap();
@@ -3808,6 +3849,9 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
         assert_eq!(spaced.plan(1), sv(&["workspace", "set", "1", "My Project"]));
     }
 
+    /// GATED on Unix with its reason (see [`stub_workspace_core`]): the
+    /// fixture is a `#!/bin/sh` shim `CreateProcess` cannot launch.
+    #[cfg(unix)]
     #[test]
     fn dispatch_workspace_action_runs_the_planned_argv_and_keys_the_reply() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3852,6 +3896,10 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// GATED on Unix with its reason (see `testutil::fake_hyprctl`): the
+    /// fixture is a `#!/bin/sh` shim `CreateProcess` cannot launch, over a
+    /// compositor native Windows does not run.
+    #[cfg(unix)]
     #[test]
     fn dispatch_workspace_action_resolves_an_omitted_workspace_through_the_adapter() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -4043,6 +4091,17 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
 
     // ── the accept loop (§3b): idleness must never starve another connection ──
 
+    /// A socket path SHORT enough for this host's `sun_path` budget. The three
+    /// fixtures below bind a REAL socket, and native Windows caps an AF_UNIX
+    /// path at 107 bytes (`sun_path` is 108 with its terminator) — measured, on
+    /// the per-test `unique_tmp` dir plus a descriptive file name: "AF_UNIX
+    /// path is 122 bytes". The socket does not need to live in the fixture's
+    /// own dir to be the fixture's socket; the system temp dir plus a short tag
+    /// keeps the three tests distinct and the name bounded on BOTH hosts.
+    fn short_sock(tag: &str) -> PathBuf {
+        aoide_test_support::short_tmp(&format!("sb-{tag}")).join("s.sock")
+    }
+
     /// The §0 corollary's own test for the newest arm: a `workspaceaction`
     /// line that the whitelist REFUSES over a REAL socket is dropped, audited
     /// (`unparseable`, a byte count, never the payload), and — because the
@@ -4071,7 +4130,7 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
         // be unmistakable if the gate ever let this through.
         std::env::set_var("AOIDE_CORE_BIN", "/nonexistent/aoide");
 
-        let sock = root.join("test-shellbridge-ws.sock");
+        let sock = short_sock("ws-refused");
         let listener = UnixListener::bind(&sock).unwrap();
         std::thread::spawn(move || serve(&listener)); // never joined
 
@@ -4151,7 +4210,7 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
         std::env::set_var("AOIDE_STAGE_DIR", &root);
         std::env::set_var("XDG_RUNTIME_DIR", &root);
 
-        let sock = root.join("test-shellbridge.sock");
+        let sock = short_sock("idle");
         let listener = UnixListener::bind(&sock).unwrap();
         std::thread::spawn(move || serve(&listener)); // never joined
 
@@ -4215,7 +4274,7 @@ printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"works
         std::env::set_var("AOIDE_STAGE_DIR", &root);
         std::env::set_var("XDG_RUNTIME_DIR", &root);
 
-        let sock = root.join("test-shellbridge-herald.sock");
+        let sock = short_sock("herald");
         let listener = UnixListener::bind(&sock).unwrap();
         std::thread::spawn(move || serve(&listener)); // never joined, own listener
 

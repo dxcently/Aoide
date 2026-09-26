@@ -1565,7 +1565,10 @@ mod tests {
     use crate::graph::session_store::{do_session_start, stamp_headless};
     use crate::graph::testutil::*;
     use std::io::Read as _;
+    #[cfg(unix)]
     use std::os::unix::net::UnixListener;
+    #[cfg(windows)]
+    use aoide_protocol::win_unix::UnixListener;
 
     // The design doc's own sample lines, verbatim (EIDOLON-TRACE.md's "Line"
     // block) — the same fixtures `protocol/agents.rs`, `graph/eidolon.rs` and
@@ -1980,12 +1983,26 @@ mod tests {
 
         let presence = root.join("eidolon").join(id);
         std::fs::create_dir_all(&presence).unwrap();
+        // The presence meta is built with `serde_json`, NEVER by pasting the
+        // path into a raw `format!` string: a Windows path carries `\`, and a
+        // raw paste makes the file invalid JSON there (`"C:\Users\…"` — `\U`
+        // is not an escape), which reads as a presence with no trace at all.
+        // That failure is silent — every gather then finds no lines, so
+        // `delivered` and `skipped` both stay empty and a reader thread waiting
+        // on the socket hangs. One JSON writer, both hosts.
         std::fs::write(
             presence.join("meta.json"),
-            format!(
-                r#"{{"id":"{id}","pid":4242,"log":"{id}.eid","cwd":"/w","model":"ollama:x","title":"t","busy":false,"trace":"{}"}}"#,
-                trace.display()
-            ),
+            serde_json::json!({
+                "id": id,
+                "pid": 4242,
+                "log": format!("{id}.eid"),
+                "cwd": "/w",
+                "model": "ollama:x",
+                "title": "t",
+                "busy": false,
+                "trace": trace.display().to_string(),
+            })
+            .to_string(),
         )
         .unwrap();
 
@@ -2250,6 +2267,15 @@ mod tests {
     /// `shell-parent` by the very predicate the delivery lane calls. The
     /// record's `agent` is a registered harness profile throughout — the label
     /// the old `agent`-only arm trusted.
+    ///
+    /// GATED on Unix, with its reason: the fixture's first half is a REAL
+    /// conducted child, and conducting needs a controlling tty — refused by
+    /// name on native Windows (ConPTY; see `conduct`'s own module note). The
+    /// CONTRACT this test covers is not lost there: its sibling
+    /// `a_harness_parent_is_unreceptive_when_either_read_says_shell` drives the
+    /// identical predicate over a record fixture with no PTY in it, and that
+    /// one runs and passes on ThinkChiyo.
+    #[cfg(unix)]
     #[test]
     fn a_harness_labelled_shell_parent_is_unreceptive_end_to_end() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

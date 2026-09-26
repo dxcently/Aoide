@@ -1,13 +1,19 @@
 # aoide core · POSIX portability
 
-> **Status: the required baseline is NOT met yet.** This page records, per
-> capability, where core (`aoide`/`aoided` and their dependency closure)
-> stands against POSIX.1-2008. It is deliberately *not* a certification, and
-> not a claim that the whole closure runs on either host: Linux runs every
-> crate's tests, and native Windows runs five of them — `aoide-protocol`,
-> `aoide-storage`, `aoide-secrets`, `aoide-upkeep` and `aoide-client` — with
-> the rest measured as still failing to compile there. Every number below
-> names the run it rests on (see "Evidence and limits").
+> **Status: the required baseline is NOT met yet, but the layer is nearly
+> closed.** This page records, per capability, where core (`aoide`/`aoided` and
+> their dependency closure) stands against POSIX.1-2008. It is deliberately
+> *not* a certification, and not a claim that the whole closure runs on either
+> host: Linux runs every crate's tests, and native Windows now compiles ALL of
+> the core closure — `aoide-protocol`, `aoide-storage`, `aoide-secrets`,
+> `aoide-upkeep`, `aoide-client`, `aoide-conduct`, `aoide-server` and
+> `aoide-cli`, whose `aoide` binary builds there too. What still fails natively
+> is a RUNTIME layer, not a compile one: `aoide-server`'s lib is green there
+> (266 passed / 0 failed / 5 ignored with reasons), `aoide-conduct` is green
+> (922 / 0 / 0), and `aoide-cli`'s targets are green; one `graph_residency_p_d6`
+> binary is contention-sensitive under full parallelism (recorded under "Next
+> layer"). Every number below names the run it rests on (see "Evidence and
+> limits").
 
 ## Targets
 
@@ -71,11 +77,58 @@ Two classes follow from that, and every row below is one of them:
 | the `ssh` client this box runs | `client/src/tunnel.rs::ssh_program` (the ONE place the binary is chosen), `local_login`/`resolve_login` (the login half); the argv read it is guarded by is `looks_like_our_ssh` → `process_argv` | required, **named difference per host** — Unix runs the bare name `ssh` through `PATH` (the operator's own client); native Windows runs the OpenSSH client that ships with the OS, `%SystemRoot%\System32\OpenSSH\ssh.exe`, by FULL PATH (there `ssh` is not a name `PATH` is guaranteed to carry, and OpenSSH installs outside any standard directory) — refused by name when `%SystemRoot%` is unset, never a guessed `C:\Windows`. The login chain differs for the same reason: `$USER` → `$LOGNAME` on Unix, and `%USERNAME%` last on Windows, where the other two are not variables the OS sets. The identity read differs too — `/proc/<pid>/cmdline` (NUL-split) versus `win_proc::command_argv` (`ProcessCommandLineInformation` + this host's own `CommandLineToArgvW`) — and argv[0] is `ssh` on one host and `ssh.exe` (folded, either separator) on the other. Evidence: a native `ssh_program` assertion against this host's own file, and the tunnel tests that run a REAL `ssh.exe` against a loopback banner listener. **Two differences that do NOT follow from choosing the system binary, stated rather than implied**: (1) the path is the NATIVE one, so a 32-bit (WOW64) build would be redirected to `SysWOW64`, where OpenSSH is not installed — only `x86_64-pc-windows-msvc` is targeted today, so nothing here builds that way yet, and a future i686 target would have to answer it; (2) Win32-OpenSSH is still OpenSSH — it reads `%USERPROFILE%\.ssh\config`, its `known_hosts` and the ssh-agent pipe exactly as any other build does, so `BatchMode=yes`, the `-L` spec and the `authorized_keys` teaching all behave as the Unix arm documents; only the BINARY's location differs |
 | a node name this box gives itself | `storage/src/display.rs::local_node_name`, used by `storage/src/mail.rs` (`file_letter`/`file_receipt`/`mint_outbound_letter`/`mint_ack`/legacy migration), `storage/src/seal.rs` (the "is this container for me" and last-hop comparisons), `client/src/{letter_send,mail_wire}.rs` and `client/src/commands.rs`'s signed-header and pair-request names | required, **host-split by an OS fact rather than an API**: a node name in an address is grammar-lowercase (`^[a-z0-9][a-z0-9-]*$`) while an OS host name is case-PRESERVED and native Windows' DNS name is conventionally upper-case (`ThinkChiyo`, measured), so `local_host_name()` folded is the one name this box mints, declares and is looked up under. The raw name stays what a human is shown and what an ssh target spells. The limit is stated, not papered over: a host name carrying anything outside `[a-z0-9-]` still cannot BE a node name — refused by grammar, never mangled. NOT folded, deliberately: the mesh-charter and discovery self-name comparisons (`client/src/mesh.rs`, and the `is_self_target` callers in `client/src/commands.rs`) and `conductor`'s mailbox targets (`conductor/src/app.rs`, `conductor/src/lib.rs`'s `{local_host_name()}/{petname}`), each of which reads `local_host_name()` on BOTH sides — a peer-fed advertisement or an operator's charter names a box the same way this side does, so folding one side alone would break the comparison it exists for; the conductor sites are outside this slice's crates, and pre-existing on a host whose name differs in case. Evidence: `display::tests::local_node_name_is_the_local_host_name_folded` plus the mail/seal suites on ThinkChiyo, where the raw name is upper-case |
 
+## The seams this slice added, and what each one answers
+
+One row per seam, because these are the primitives every other row's mappings
+now go through — a mapping that does not name one of these is a mapping that
+re-derives a host fact at its own call site, which is what the slice existed to
+remove.
+
+| seam | home | one answer per host, and why it is one seam |
+| --- | --- | --- |
+| `fs::path_is_under(path, root)` | `aoide-storage` | Is `cwd` inside a project root? A COMPONENT comparison (`Path::starts_with`), so this host's own separator rules decide, with a dunce-style strip of `canonicalize`'s `\\?\` verbatim prefix first. The defect it closes was a hard-coded `/`: `cwd.starts_with("{root}/")` matched nothing on native Windows, so the roster silently lost every `project:… → session:…` `anchors` edge there while every Linux run was green. Asked by `conduct`'s `model::cwd_under`. **Two limits stated, not hidden**: the comparison is case-SENSITIVE even on native Windows (nothing canonicalises a registered root, so a case-differing cwd/root pair does not anchor there), and a root of `/` now matches every absolute path where the old string prefix would not have — the documented "absolute path prefix" meaning, and reachable only if an operator registers `/` as a root. |
+| `fs::looks_absolute_any_host(path)` | `aoide-storage` | Is this path absolute in SOME host's grammar? A remote node's host root is validated by the grammar of the node it names, never by `Path::is_absolute()` (which on Windows says no to `/srv/x` and on Unix says no to `C:\x`). Accepts a leading `/`, a drive-qualified `X:\`/`X:/`/bare `X:`, and `\\`-rooted UNC; `X:foo` is drive-RELATIVE and refused. Asked by `conduct`'s `manage::validate_host_root`. |
+| `fs::link_dir(source, link)` | `aoide-storage` | Point a link at a directory. Unix's `symlink(2)` is kind-agnostic; Windows has two calls and asks the creator, so this host gets `symlink_dir`. A refused creation (no `SeCreateSymbolicLinkPrivilege`) surfaces its own error. Asked by `conduct`'s `hooks install` and `cli`'s `onboard`. |
+| `fs::detach(&mut Command)` | `aoide-storage` | The detached-spawn posture: `setsid(2)` in a `pre_exec` hook, or `DETACHED_PROCESS \| CREATE_NEW_PROCESS_GROUP` as a property of the spawn call. Asked by `conduct`'s `spawn_detached` and `a2a`'s handler spawn — the same pair in both, never two copies. |
+| `fs::create_new_private(path)` | `aoide-storage` | A write-once private file: `mode(0o600)` at creation on Unix; `owner_only::create_new` (policy attached by the creating call, read back before the first byte) on Windows, with `AlreadyExists` preserved. Asked by `conduct`'s instruction sidecar. |
+| `fs::{lock_exclusive, try_lock_exclusive, unlock}` | `aoide-storage` | The file lock, `flock` or `LockFileEx`. Widened from `pub(crate)` so `conduct`'s own probe (`codex_app::lock_is_held`) asks it rather than carrying a second `flock` call — that crate's `#[cfg(not(unix))] → None` refusal is deleted, not kept beside the seam. |
+| `win_unix::{UnixStream, UnixListener}` | `aoide-protocol` | The socket TYPE is the seam: every caller writes `use`-pairs keyed on `cfg(unix)`/`cfg(windows)` and no call site spells a platform. This slice added the missing surface the call sites needed: `set_nonblocking` on the listener (not only the stream), `try_clone` on the listener, `write_timeout` (the read-back half of `set_write_timeout`), and `impl AsRef<Path>` on `connect`/`bind` so an argument moves between hosts untouched. |
+| `win_proc::{processes, parent_chain, command_argv, process_user_sid, current_user_sid}` | `aoide-protocol` | The process-table facts — parent, argv, exe name, token user — that Unix reads out of `/proc`. `conduct`'s `proc_argv`, `proc_comm` and `proc_has_children` answer through it; `proc_cwd` is the one fact with NO arm (a working directory needs the target's PEB) and says so by name, falling back to the record's stamped `cwd`. |
+| `test_support::{short_tmp, built_aoide_bin}` | `aoide-test-support` | Two fixture facts that are HOST facts. A socket path must fit `sun_path` (107 bytes on native Windows, against a ~36-byte temp prefix), so the tag is hashed rather than spelled; and a built binary's name carries this host's `EXE_SUFFIX`. Both were wrong in three separate copies before this slice — the bare-name one made the cli door fixture never launch a hook at all, which silently left the daemon's peer-pid verification UNEXERCISED on that host. |
+
+### What the daemon's peer-pid verification answers on native Windows
+
+The security property is live there, not skipped: the accept loop reads the
+connecting pid through `WSAIoctl(SIO_AF_UNIX_GETPEERPID)`
+(`win_unix::UnixStream::peer_pid`), stamps it as the door's own peer pid, and
+resolves the peer's user from THAT pid's token
+(`win_proc::process_user_sid`, which re-reads the process's creation time around
+the token read and refuses a pid reused between the two). A hook's
+`AOIDE_SESSION_ID` claim is then verified against the real ancestry of that pid
+(`win_proc::parent_chain`), so a contradicted claim is dropped exactly as it is
+on Linux. Evidence: `aoide-cli`'s `daemon_dispatch_door` — 8 passed / 0 failed
+on ThinkChiyo, the two tests that guard this being
+`a_daemon_served_session_hook_links_the_hook_processs_own_parent` and
+`a_daemon_served_hook_drops_a_contradicted_parent_claim`.
+
+### Where a reader could ever wait forever
+
+Every production `accept()` in the closure is either a server's own loop
+(`shellbridge`, `a2a`, `daemon`, `mcp` — a door waiting for its next client by
+design) or sits on a NON-blocking listener with EAGAIN handling
+(`conduct.rs`'s injection door); the production connect side a fixture's reader
+waits on is bounded (`doorbell::connect_for_ring`'s 2 s write timeout). Every
+`accept()` that waits for a peer that may never come is in a `#[cfg(test)]`
+fixture — where an unparseable fixture (a Windows path pasted into hand-built
+JSON, which this slice fixed in `pingback`, `trace` and `send`) or a skipped
+delivery turns into a hang rather than a failure, which is why those fixtures
+now build their JSON with `serde_json`.
+
 ## Evidence and limits
 
 - **Run**: Linux tests on `x86_64-unknown-linux-gnu` for every crate in the
-  closure — 177 (protocol) + 485 (storage) + 449 (+7 e2e) (secrets) + 31
-  (upkeep) + 338 (client) + 272 (server) + 75 (cli) + 957 (conduct) + 191
+  closure — 177 (protocol) + 486 (storage) + 449 (+7 e2e) (secrets) + 31
+  (upkeep) + 338 (client) + 272 (server) + 75 (cli) + 974 (conduct) + 191
   (conductor) + 213 (lyra), every one 0 failed, and `cargo test
   --workspace --no-run` clean. The same tree on `x86_64-unknown-linux-gnu` is
   the ONLY place the crates that do not build natively yet are exercised at
@@ -109,16 +162,20 @@ Two classes follow from that, and every row below is one of them:
   secrets backend template's own exit-status discipline, and the check lane's
   exit-code verdict. This is four crates' evidence, not a working native core
   deployment — see the next bullet for what is still behind it.
-- **Run**: `aoide-protocol`, `aoide-storage`, `aoide-secrets`,
-  `aoide-upkeep` **and `aoide-client`** build AND test on ThinkChiyo with
-  native `x86_64-pc-windows-msvc` (Rust 1.98.1): `cargo check -p aoide-client
-  --all-targets` is 0 errors, and `cargo test` per crate is 199 (protocol) +
-  488 (storage) + 366 (secrets lib) + 2 (secrets e2e) + 32 (upkeep) +
-  313 (client) passed / 0 failed. The five crates are 177 + 485 + 449 (+7 e2e)
-  + 31 + 338 on `x86_64-unknown-linux-gnu`, also 0 failed. **The client's own
-  count is LOWER on Windows by design, not by omission**: 340 tests are defined
-  in that crate, 27 of them are gated there with their reasons in-file, and the
-  2 this slice added are Windows-only — so 340 − 27 = 313 runs on ThinkChiyo.
+- **Run**: the WHOLE core closure — `aoide-protocol`, `aoide-storage`,
+  `aoide-secrets`, `aoide-upkeep`, `aoide-client`, `aoide-conduct`,
+  `aoide-server` and `aoide-cli` — builds on ThinkChiyo with native
+  `x86_64-pc-windows-msvc` (Rust 1.98.1): `cargo check -p aoide-conduct
+  -p aoide-server -p aoide-cli --all-targets` is **0 errors and 0 warnings**,
+  and `cargo build --bin aoide` produces the `aoide` binary there. Runtime, per
+  crate on that host: **922** (conduct, 0 failed) + **266** (server lib, 0
+  failed, 5 ignored with reasons) + 42/8/6 across cli's targets (0 failed), on
+  top of the five earlier crates' 199 + 488 + 366 + 2 + 32 + 313 passed / 0
+  failed. The same tree on `x86_64-unknown-linux-gnu` is 177 + 486 + 456 + 31 +
+  338 + 272 + 75 + 974 + 191 + 213, also 0 failed. **Where a native count is
+  lower, the gates are in-file with their reasons** — this file's seam table and
+  the PTY row name each one, and the two counts that moved during this slice
+  moved only by the tests it added (storage +1 `path_is_under`, conduct +3 net).
   The gate is the fixture: a POSIX `#!/bin/sh` script made executable with a
   mode (`CreateProcess` understands neither a shebang nor an extension-less
   name) — the gated groups are the `curl`-shim transport (14), the
@@ -145,28 +202,49 @@ Two classes follow from that, and every row below is one of them:
 
 ## Next layer
 
-Measured on ThinkChiyo (Rust 1.98.1/MSVC), `cargo check -p aoide-conduct
--p aoide-server -p aoide-cli --all-targets --keep-going`, after this slice's
-client fix:
+Measured on ThinkChiyo (Rust 1.98.1/MSVC) after this slice, with the whole core
+closure compiling there:
 
-| crate | config | errors | where |
-| --- | --- | --- | --- |
-| `aoide-client` | `--all-targets` | **0** | — (this slice) |
-| `aoide-conduct` | lib | 108 | `graph/conduct.rs`, `reap.rs`, `shellbridge.rs`, `graph/{codex_app,window,spawn,send,eidolon,hooks,resurrect}`, `graph/{doorbell,identity,pending,pingback,trace,view,workspace,codex_capture}` |
-| `aoide-conduct` | lib test | 227 | the same files plus their fixtures, `graph/conduct.rs` alone 133 |
-| `aoide-server` | `--all-targets` | **not independently measured** | blocked: it depends on `aoide-conduct`, so cargo cannot build it while that crate fails |
-| `aoide-cli` | `--all-targets` | **not independently measured** | same block |
+| crate | config | errors |
+| --- | --- | --- |
+| `aoide-protocol`, `aoide-storage`, `aoide-secrets`, `aoide-upkeep`, `aoide-client` | `--all-targets` | **0** (the five W2/W3 crates) |
+| `aoide-conduct` | `--all-targets` | **0** (was 108 lib + 228 lib test) |
+| `aoide-server` | `--all-targets` | **0** (was 11 lib + 26 lib test) |
+| `aoide-cli` | `--all-targets` | **0** (first measurement of this crate) |
+| `aoide` binary | `cargo build --bin aoide` | **builds** (`target\debug\aoide.exe`) |
 
-**ConPTY / PTY, named separately from the rest**: the PTY sites are
+Runtime, native, measured the same day:
+
+| crate | run | passed / failed / ignored |
+| --- | --- | --- |
+| `aoide-conduct` | `cargo test` | **922 / 0 / 0** |
+| `aoide-server` | `cargo test --lib` | **266 / 0 / 5** |
+| `aoide-cli` | `cargo test` | 42 (lib) · 8 (`daemon_dispatch_door`) · 6 (`graph_residency_p_d6`, single-threaded) — **0 failed** |
+
+The five `ignored` on `aoide-server` are two proven host facts, not omissions:
+three `run_boot_auto_resume_*` tests (this file's own boot-epoch row: `boot_epoch`
+is `None` off Linux) and one a2a spawn test whose probe needs `/bin/sh` +
+`printf`'s byte-exact output. One further test is ignored on the **cli** side for
+the same class of reason: the door fixture there stores through the built-in
+`file` backend, whose template is the POSIX preset `cat …` — refused BY NAME on
+native Windows, with native cover in `aoide-secrets`' own `cmd /C` template
+tests.
+
+**ConPTY / PTY remains the one named capability gap.** The PTY sites are
 `conduct/src/graph/conduct.rs`'s `spawn_on_pty` (`libc::openpty` + `setsid` +
-`TIOCSCTTY` + `dup2`) and `conduct/src/graph/spawn.rs`'s detached-spawn
-`pre_exec` — 2 of the 227 error lines mention that vocabulary directly, and the
-interactive-parity arm (ConPTY, `CreatePseudoConsole`) remains absent: no
-`CreatePseudoConsole` call exists anywhere in the tree, so what is missing
-there is a capability, not a `cfg` branch. `aoide-conduct` is the whole of the
-next layer: it is the only crate in the remaining closure that fails to
-compile, and it fails on the Unix-only vocabulary this file's rows above have
-already mapped for the crates below it.
+`TIOCSCTTY` + `dup2`) and `conduct/src/graph/spawn.rs`'s detached spawn — the
+latter now host-split through `aoide_storage::fs::detach` (which `a2a`'s handler
+spawn shares). No `CreatePseudoConsole` call exists anywhere in the tree, so
+what is missing is a capability, not a `cfg` branch: `aoide conduct` answers a
+taught refusal on native Windows naming ConPTY, and the detached, NON-PTY spawn
+is native (four green tests cover it, named in their own gate).
+
+**One measured limit worth stating**: `aoide-cli`'s
+`graph_residency_p_d6` binary passes single-threaded (6/0/1) and passes each test
+alone, but a fully PARALLEL run of that binary left one test red — six resident
+daemon children on one box, against the daemon hop's own 2 s reply bound. The
+tests already serialize on `aoide_test_support::env_lock`, so this is contention,
+not a code defect; it is recorded rather than papered over.
 
 - **Not run**: macOS/FreeBSD runtime checks, and the rest of the core's
   closure on native Windows (the "Next layer" table above is the measured

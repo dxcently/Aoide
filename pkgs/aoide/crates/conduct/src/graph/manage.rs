@@ -110,12 +110,12 @@ fn validate_host(cmd: &str, host: &str) -> Result<(), Outcome> {
 /// a NODE this instance cannot see, so existence is that host's problem,
 /// never checked here. `ProjectHost.roots` stores it verbatim.
 fn validate_host_root(cmd: &str, host: &str, path: &str) -> Result<(), Outcome> {
-    let p = std::path::Path::new(path);
-    let ok = !path.is_empty() && p.is_absolute() && !path.chars().any(char::is_control);
+    let ok = aoide_storage::fs::looks_absolute_any_host(path)
+        && !path.chars().any(char::is_control);
     if !ok {
         let why = if path.is_empty() {
             "empty"
-        } else if !p.is_absolute() {
+        } else if !aoide_storage::fs::looks_absolute_any_host(path) {
             "not an absolute path"
         } else {
             "contains control characters"
@@ -2096,6 +2096,63 @@ mod tests {
         if let Some(c) = saved_cwd {
             std::env::set_current_dir(c).unwrap();
         }
+        let _ = std::fs::remove_dir_all(&stage);
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    /// A HOST root is judged in the REMOTE node's grammar, never this
+    /// process's. Both spellings must be accepted on BOTH hosts — a Windows
+    /// node recording a POSIX node's `/srv/n1/proj`, and a POSIX node
+    /// recording a Windows node's `C:\proj` — because the validator's question
+    /// is "is this absolute somewhere", not "is this absolute here". A
+    /// RELATIVE path is refused by both grammars, which is the only line this
+    /// predicate has to draw. Runs wherever the suite runs, so neither grammar
+    /// is the only one exercised.
+    #[test]
+    fn a_host_root_is_absolute_in_its_own_nodes_grammar_not_this_hosts() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR"]);
+        let stage = unique_stage("host-root-cross-grammar");
+        let state = unique_stage("host-root-cross-grammar-state");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        aoide_storage::node_store::save_nodes(&[synthetic_node("n1")]).unwrap();
+
+        // A POSIX node's root, recorded from wherever this test is running.
+        let out = project_add(&project_invocation(
+            &["project", "add"],
+            &["cross", "/srv/n1/proj"],
+            &[("host", "n1")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+
+        // A Windows node's root — a drive-qualified path — same node, grown.
+        let out = project_add(&project_invocation(
+            &["project", "add"],
+            &["cross", r"C:\proj"],
+            &[("host", "n1")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+
+        let file: ProjectsFile = load_stage(&projects_path()).unwrap();
+        let p = file.projects.iter().find(|p| p.name == "cross").unwrap();
+        assert_eq!(
+            p.hosts,
+            vec![ProjectHost {
+                name: "n1".into(),
+                roots: vec!["/srv/n1/proj".into(), r"C:\proj".into()],
+            }]
+        );
+
+        // Neither grammar calls this absolute: still the same taught refusal.
+        let out = project_add(&project_invocation(
+            &["project", "add"],
+            &["cross", "relative/path"],
+            &[("host", "n1")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Usage);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "invalid-host-root");
+
         let _ = std::fs::remove_dir_all(&stage);
         let _ = std::fs::remove_dir_all(&state);
     }

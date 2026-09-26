@@ -219,7 +219,13 @@ impl UnixStream {
     /// Connect to the socket file at `path`. An unbounded blocking connect is
     /// the local-socket default: `AF_UNIX` connects to a listener on this
     /// host, so there is no network path to wait on.
-    pub fn connect(path: &Path) -> io::Result<UnixStream> {
+    ///
+    /// `impl AsRef<Path>`, not `&Path`: this is the SAME shape `std`'s
+    /// `UnixStream::connect` has on Unix, so a call site moves between the two
+    /// hosts without touching its arguments (`path.as_ref()` inside is the
+    /// whole cost).
+    pub fn connect(path: impl AsRef<Path>) -> io::Result<UnixStream> {
+        let path = path.as_ref();
         startup()?;
         let (addr, len) = sockaddr(path)?;
         let sock = unsafe { socket(AF_UNIX as i32, SOCK_STREAM, 0) };
@@ -416,6 +422,30 @@ impl UnixStream {
         self.set_timeout(SO_SNDTIMEO, timeout)
     }
 
+    /// `write_timeout` — the read-back half of [`UnixStream::set_write_timeout`],
+    /// the same getter `std`'s `UnixStream` offers: `SO_SNDTIMEO` as the
+    /// `DWORD` of milliseconds the setter wrote, with `0` meaning "no timeout"
+    /// (`None`). A caller that arms a bound at connect time and later asserts
+    /// it (`conduct`'s ring-write bound) asks the SOCKET, on either host,
+    /// rather than remembering what it passed.
+    pub fn write_timeout(&self) -> io::Result<Option<Duration>> {
+        let mut millis: u32 = 0;
+        let mut len = std::mem::size_of::<u32>() as i32;
+        let rc = unsafe {
+            getsockopt(
+                self.sock,
+                SOL_SOCKET,
+                SO_SNDTIMEO,
+                &mut millis as *mut u32 as *mut u8,
+                &mut len,
+            )
+        };
+        if rc == SOCKET_ERROR {
+            return Err(last_error());
+        }
+        Ok((millis != 0).then(|| Duration::from_millis(u64::from(millis))))
+    }
+
     fn set_timeout(&self, optname: i32, timeout: Option<Duration>) -> io::Result<()> {
         let millis: u32 = match timeout {
             None => 0,
@@ -455,7 +485,13 @@ impl UnixStream {
         Ok(())
     }
 
-    fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
+    /// `set_nonblocking` — `FIONBIO` on the socket handle, which is Winsock's
+    /// spelling of the same flag `std`'s `UnixStream::set_nonblocking` sets.
+    /// `pub` because callers that accept-loop with a deadline arm it on the
+    /// LISTENER and on their accepted STREAMS exactly as they do on Unix
+    /// (`conduct`'s control-socket drains, `send`/`pingback`'s inject doors) —
+    /// one method per host, not a second discovery path per call site.
+    pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
         use windows_sys::Win32::Networking::WinSock::{ioctlsocket, FIONBIO};
         let mut mode: u32 = u32::from(nonblocking);
         if unsafe { ioctlsocket(self.sock, FIONBIO, &mut mode) } == SOCKET_ERROR {
@@ -592,7 +628,11 @@ impl UnixListener {
     /// kernel's; it is NOT removed on drop (`std`'s Unix listener does not
     /// either — a caller that owns the path removes the stale file before
     /// binding, which is what makes a restart work).
-    pub fn bind(path: &Path) -> io::Result<UnixListener> {
+    ///
+    /// `impl AsRef<Path>`: the same shape `std`'s `UnixListener::bind` has, so
+    /// no call site has to spell its argument differently per host.
+    pub fn bind(path: impl AsRef<Path>) -> io::Result<UnixListener> {
+        let path = path.as_ref();
         startup()?;
         let (addr, len) = sockaddr(path)?;
         let sock = unsafe { socket(AF_UNIX as i32, SOCK_STREAM, 0) };
@@ -636,6 +676,44 @@ impl UnixListener {
     /// error's connection only, never the loop (`std` reports it the same way).
     pub fn incoming(&self) -> Incoming<'_> {
         Incoming { listener: self }
+    }
+
+    /// `try_clone` on the LISTENING socket — `DuplicateHandle` of the same
+    /// handle, exactly as [`UnixStream::try_clone`] does it, and the same
+    /// surface `std`'s `UnixListener` offers on Unix. A caller that hands a
+    /// second handle to another thread (or to a child process) needs it there
+    /// as much as on a connected stream.
+    pub fn try_clone(&self) -> io::Result<UnixListener> {
+        let mut dup: HANDLE = std::ptr::null_mut();
+        let ok = unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                self.sock as HANDLE,
+                GetCurrentProcess(),
+                &mut dup,
+                0,
+                0,
+                DUPLICATE_SAME_ACCESS,
+            )
+        };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(UnixListener { sock: dup as usize })
+    }
+
+    /// `set_nonblocking` on the LISTENING socket — the listener half of
+    /// [`UnixStream::set_nonblocking`] (same `FIONBIO` call). A caller that
+    /// polls its accept door on a deadline arms this and then treats
+    /// `WSAEWOULDBLOCK` as "no connection pending yet", exactly as it treats
+    /// `EAGAIN` on Unix.
+    pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
+        use windows_sys::Win32::Networking::WinSock::{ioctlsocket, FIONBIO};
+        let mut mode: u32 = u32::from(nonblocking);
+        if unsafe { ioctlsocket(self.sock, FIONBIO, &mut mode) } == SOCKET_ERROR {
+            return Err(last_error());
+        }
+        Ok(())
     }
 }
 

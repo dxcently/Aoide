@@ -4,25 +4,54 @@
 //! here is confined to `spawn_on_pty`, the raw-mode guard, the winsize
 //! ioctls, and the multiplexer; each is documented where the ordering
 //! matters.
+//!
+//! **`allow(dead_code)` on native Windows, stated once instead of marked
+//! item-by-item.** The refused PTY capability (see "the PTY capability" below)
+//! leaves its whole support cluster unreachable on that host — the `proc_*`
+//! readers, the shell snapshot/restore pair, the typed-line buffer, the
+//! session-stamp helpers this file no longer calls — and `#[cfg(unix)]` on each
+//! of them would be churn the ConPTY slice (W5) un-does the moment it lands.
+//! The allowance is therefore scoped to `cfg(windows)` on THIS module: there, a
+//! dead-code warning is a fact about a refused capability, not about the code —
+//! the PTY cluster is unreachable because the capability is refused BY NAME, so
+//! nothing genuinely dead can hide behind this on Unix, which keeps every
+//! warning it had.
+#![cfg_attr(windows, allow(dead_code))]
 
 use super::doc::restage_graph;
 use super::model::{
     canonical_state, load_stage, sessions_path, write_stage, RestoreSnapshot, SessionRecord,
     SessionsFile, STAGE_GRAPH_VERSION,
 };
+// The PTY capability's own imports, `#[cfg(unix)]` with it: each names
+// something only the conducted session's Unix arm calls — the `UnixStream`
+// peer read, the registration stamps, phase-② window discovery, the session
+// log's directory and clock, the node-origin gate `session_conduct` applies,
+// and the `json!` bodies it builds. Marked rather than left as
+// `allow(unused_imports)` so the Unix build keeps every warning it had.
+#[cfg(unix)]
 use super::identity::peer_cred;
+#[cfg(unix)]
 use super::session_store::{
     do_session_end, do_session_start, set_session_log_path, stamp_headless, stamp_origin,
     stamp_session_exit, stamp_shell, stamp_spawned, stamp_task,
 };
+#[cfg(unix)]
 use super::window::{discover_window_address, resolve_registration_parent};
 use aoide_protocol::Invocation;
 use aoide_protocol::output::Outcome;
+#[cfg(unix)]
 use aoide_storage::attest::is_node_origin;
-use aoide_storage::fs::{session_logs_dir, with_stage_lock};
+#[cfg(unix)]
+use aoide_storage::fs::session_logs_dir;
+use aoide_storage::fs::with_stage_lock;
+#[cfg(unix)]
 use aoide_storage::time::now_iso_utc;
+#[cfg(unix)]
 use serde_json::json;
+#[cfg(unix)]
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+#[cfg(unix)]
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 
@@ -290,15 +319,32 @@ pub fn channel_socket_path(id: &str) -> PathBuf {
     aoide_storage::runtime_dir::socket_dir().join(format!("channel-{id}.sock"))
 }
 
+// ── the PTY capability: Unix only, and that is a REFUSAL on native Windows ──
+//
+// Everything from here to `session_conduct`'s own `#[cfg(not(unix))]` twin is
+// the interactive/headless conduct channel, and all of it is built on a
+// CONTROLLING TTY: `openpty` + `setsid` + `TIOCSCTTY` + `dup2` to spawn, a raw
+// `poll()` loop over the master fd and two injection sockets to multiplex, and
+// termios/winsize ioctls to keep the wrapped TUI honest. Native Windows has no
+// such object; the equivalent is ConPTY (`CreatePseudoConsole`), which no call
+// in this tree makes — so this is a missing CAPABILITY, not a `cfg` branch, and
+// the honest answer there is the named refusal below rather than a silent
+// stub, a pipes-only pretend-tty, or an unverified second discovery path.
+// `docs/architecture/CORE-POSIX.md`'s "PTY / controlling tty" row carries the
+// reasoning and the next layer.
+
 // SIGWINCH latch: the handler only flips a flag (async-signal-safe); the poll
 // loop services it (re-reading the real tty size and pushing it to the master).
+#[cfg(unix)]
 static WINCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(unix)]
 extern "C" fn on_winch(_sig: libc::c_int) {
     WINCH.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 /// Install the SIGWINCH handler WITHOUT `SA_RESTART`, so a resize interrupts
 /// `poll()` (returns `EINTR`) and the loop can propagate the new size promptly.
+#[cfg(unix)]
 fn install_winch_handler() {
     unsafe {
         let mut sa: libc::sigaction = std::mem::zeroed();
@@ -311,6 +357,7 @@ fn install_winch_handler() {
 
 /// The current window size of a tty fd, or `None` when it is not a terminal
 /// (a pipe / redirected stdin in a test) or reports a zero geometry.
+#[cfg(unix)]
 fn tty_winsize(fd: RawFd) -> Option<libc::winsize> {
     let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
     let rc = unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws as *mut libc::winsize) };
@@ -322,6 +369,7 @@ fn tty_winsize(fd: RawFd) -> Option<libc::winsize> {
 }
 
 /// Push a window size onto the pty master (TIOCSWINSZ → the child sees SIGWINCH).
+#[cfg(unix)]
 fn set_winsize(master: RawFd, ws: &libc::winsize) {
     unsafe {
         libc::ioctl(master, libc::TIOCSWINSZ, ws as *const libc::winsize);
@@ -334,11 +382,13 @@ fn set_winsize(master: RawFd, ws: &libc::winsize) {
 /// which runs on normal return AND on unwind (panic=unwind) — restores it, so no
 /// exit path can leave a wedged terminal. When the fd is not a tty (a test / a
 /// pipe) the guard is inert: conduct still runs, it just touches no terminal.
+#[cfg(unix)]
 struct TtyRaw {
     fd: RawFd,
     saved: libc::termios,
     active: bool,
 }
+#[cfg(unix)]
 impl TtyRaw {
     fn enter(fd: RawFd) -> Self {
         unsafe {
@@ -369,6 +419,7 @@ impl TtyRaw {
         }
     }
 }
+#[cfg(unix)]
 impl Drop for TtyRaw {
     fn drop(&mut self) {
         self.restore();
@@ -431,6 +482,7 @@ fn scrub_session_markers(cmd: &mut std::process::Command) {
     }
 }
 
+#[cfg(unix)]
 fn spawn_on_pty(
     program: &str,
     args: &[String],
@@ -501,6 +553,7 @@ fn spawn_on_pty(
     Ok((child, master_owned))
 }
 
+#[cfg(unix)]
 fn pollfd(fd: RawFd, events: libc::c_short) -> libc::pollfd {
     libc::pollfd {
         fd,
@@ -511,6 +564,7 @@ fn pollfd(fd: RawFd, events: libc::c_short) -> libc::pollfd {
 
 /// Write every byte of `data` to `fd`, retrying on `EINTR`. A best-effort mirror
 /// helper for the multiplexer (a torn write on abrupt child exit is tolerated).
+#[cfg(unix)]
 fn write_all_fd(fd: RawFd, mut data: &[u8]) {
     while !data.is_empty() {
         let n = unsafe { libc::write(fd, data.as_ptr() as *const libc::c_void, data.len()) };
@@ -533,11 +587,13 @@ fn write_all_fd(fd: RawFd, mut data: &[u8]) {
 /// `StdoutAndLog` is interactive conduct (task #15, "everything tees"):
 /// the real stdout, unchanged, PLUS the same master-read bytes mirrored
 /// into the per-session log.
+#[cfg(unix)]
 enum OutputSink {
     Stdout,
     Log(std::fs::File),
     StdoutAndLog(std::fs::File),
 }
+#[cfg(unix)]
 impl OutputSink {
     /// Mirror `bytes` to the sink. The `Stdout` arm is exactly today's
     /// `write_all_fd(stdout_fd, …)` call. The `Log`/`StdoutAndLog` log
@@ -584,6 +640,7 @@ impl OutputSink {
 /// state dir, a permissions call that errors, …) — the caller degrades to
 /// `OutputSink::Stdout` on `None`, same best-effort posture as every other
 /// side-channel write in this file.
+#[cfg(unix)]
 fn open_session_log(id: &str) -> Option<(std::fs::File, PathBuf)> {
     use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let dir = session_logs_dir();
@@ -599,11 +656,27 @@ fn open_session_log(id: &str) -> Option<(std::fs::File, PathBuf)> {
     Some((f, log_path))
 }
 
-/// Read `/proc/<pid>/cwd` — the live working directory (follows the shell's `cd`).
+/// Read a process's live working directory — `/proc/<pid>/cwd` on Unix, which
+/// follows the shell's `cd`.
+///
+/// **No native-Windows arm, and this is a taught refusal by NAME**: the
+/// process-table seam (`aoide_protocol::win_proc`) answers a pid's parent, its
+/// start time, its liveness, its argv and its token user — the working
+/// DIRECTORY is none of those, and reaching it needs the target's own PEB,
+/// which no seam in this tree exposes. So the Windows arm answers the same
+/// "unknown" a refused `/proc` read gives, and the caller's own fallback (the
+/// `cwd` its session record stamped at registration) is what a roster refresh
+/// shows there.
+#[cfg(unix)]
 pub(in crate::graph) fn proc_cwd(pid: i32) -> Option<String> {
     std::fs::read_link(format!("/proc/{pid}/cwd"))
         .ok()
         .and_then(|p| p.to_str().map(str::to_string))
+}
+
+#[cfg(windows)]
+pub(in crate::graph) fn proc_cwd(_pid: i32) -> Option<String> {
+    None
 }
 
 /// Known interactive text-editor binaries whose activity display should read
@@ -672,11 +745,12 @@ fn generic_command_label(argv: &[String]) -> Option<String> {
 }
 
 /// A short one-line label for a process's command: a known editor shows as
-/// `"<editor> <file>"` ([`friendly_editor_command`]); anything else shows
-/// `/proc/<pid>/cmdline` argv joined with `argv[0]` collapsed to its basename
+/// `"<editor> <file>"` ([`friendly_editor_command`]); anything else shows the
+/// process's own argv joined with `argv[0]` collapsed to its basename
 /// ([`generic_command_label`], e.g. `cargo test`), falling back to `comm`.
 /// Clipped to a roster-friendly width. Used as a conducted shell's live
-/// `activity`.
+/// `activity`. Both facts come from the one process-table reader pair below
+/// ([`proc_argv`]/[`proc_comm`]), never from a `/proc` path spelled here.
 fn proc_command(pid: i32) -> Option<String> {
     let clip = |s: &str| -> String {
         let one = s.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -687,8 +761,7 @@ fn proc_command(pid: i32) -> Option<String> {
             format!("{head}…")
         }
     };
-    if let Ok(raw) = std::fs::read(format!("/proc/{pid}/cmdline")) {
-        let argv = parse_cmdline(&raw);
+    if let Some(argv) = proc_argv(pid) {
         if let Some(friendly) = friendly_editor_command(&argv) {
             return Some(clip(&friendly));
         }
@@ -696,10 +769,7 @@ fn proc_command(pid: i32) -> Option<String> {
             return Some(clip(&label));
         }
     }
-    std::fs::read_to_string(format!("/proc/{pid}/comm"))
-        .ok()
-        .map(|c| clip(c.trim()))
-        .filter(|c| !c.is_empty())
+    proc_comm(pid).map(|c| clip(&c)).filter(|c| !c.is_empty())
 }
 
 /// Pure NUL-split of a raw `/proc/<pid>/cmdline` buffer into argv — split out
@@ -713,41 +783,93 @@ fn parse_cmdline(raw: &[u8]) -> Vec<String> {
         .collect()
 }
 
-/// RAW `argv` off `/proc/<pid>/cmdline` — the actual invocation, uncollapsed
+/// RAW `argv` for a pid — the actual invocation, uncollapsed
 /// and UNCLIPPED, unlike [`proc_command`]'s DISPLAY label (basename-collapsed
 /// `argv[0]`, 48-char-truncated). A restore snapshot's `argv` must be an
 /// exact re-exec candidate, not a shortened label — reusing `proc_command`
-/// here would re-exec the wrong binary or a truncated one. `None` when
-/// `/proc/<pid>/cmdline` is unreadable (the process already gone, a
-/// permissions edge case) or empty.
+/// here would re-exec the wrong binary or a truncated one. `None` when the
+/// argv is unreadable (the process already gone, a permissions edge case) or
+/// empty.
+///
+/// **Host-split, one fact**: Unix reads `/proc/<pid>/cmdline` and NUL-splits
+/// it; native Windows asks the process-table seam for the same invocation
+/// (`aoide_protocol::win_proc::command_argv`, which reads
+/// `ProcessCommandLineInformation` and re-splits it with this host's own
+/// `CommandLineToArgvW`). Both arms answer the same list-or-`None`, and the
+/// pure splitter above stays the Unix arm's alone — nothing about the Windows
+/// answer is inferred from a `/proc` shape.
 pub(in crate::graph) fn proc_argv(pid: i32) -> Option<Vec<String>> {
-    let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
-    let argv = parse_cmdline(&raw);
-    if argv.is_empty() {
-        None
-    } else {
-        Some(argv)
+    #[cfg(unix)]
+    {
+        let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+        let argv = parse_cmdline(&raw);
+        if argv.is_empty() {
+            None
+        } else {
+            Some(argv)
+        }
+    }
+    #[cfg(windows)]
+    {
+        let pid = u32::try_from(pid).ok()?;
+        aoide_protocol::win_proc::command_argv(pid).ok().filter(|a| !a.is_empty())
     }
 }
 
-/// Just the process's `comm` (e.g. `bash`) — the label for an idle shell sitting
-/// at its bare prompt (no foreground command), so the roster still reads as the
-/// shell PROCESS rather than going blank.
+/// Just the process's own executable name (Unix's `comm`, e.g. `bash`) — the
+/// label for an idle shell sitting at its bare prompt (no foreground command),
+/// so the roster still reads as the shell PROCESS rather than going blank.
+/// Native Windows answers out of the same process-table snapshot
+/// (`win_proc::processes`), where the name carries that host's own `.exe`
+/// suffix — left attached, exactly as `win_proc::Proc`'s own doc says folding
+/// it is the asking caller's policy and not the reader's. `None` for a pid
+/// this host cannot see.
 fn proc_comm(pid: i32) -> Option<String> {
-    std::fs::read_to_string(format!("/proc/{pid}/comm"))
-        .ok()
-        .map(|c| c.trim().to_string())
-        .filter(|c| !c.is_empty())
+    #[cfg(unix)]
+    {
+        std::fs::read_to_string(format!("/proc/{pid}/comm"))
+            .ok()
+            .map(|c| c.trim().to_string())
+            .filter(|c| !c.is_empty())
+    }
+    #[cfg(windows)]
+    {
+        let want = u32::try_from(pid).ok()?;
+        aoide_protocol::win_proc::processes()
+            .ok()?
+            .into_iter()
+            .find(|p| p.pid == want)
+            .map(|p| p.exe)
+            .filter(|e| !e.is_empty())
+    }
 }
 
-/// Whether `/proc/<pid>/task/<pid>/children` lists any child pid.
-/// `Some(true)` = has children, `Some(false)` = none, `None` = unreadable.
+/// Whether a pid has any child process right now. `Some(true)` = has children,
+/// `Some(false)` = none, `None` = this host cannot answer (a pid that is not
+/// in the table at all — the same "unreadable" a missing `/proc/<pid>` is).
 /// A conducting `sudo` at its password prompt has NO children yet (it forks
 /// the command/monitor only after auth); once it has forked, auth is done.
+///
+/// Unix reads `/proc/<pid>/task/<pid>/children`; native Windows asks the same
+/// ToolHelp snapshot `win_proc` takes once per call, for any row whose parent
+/// is this pid — the same question with the same three verdicts, so the
+/// `sudo`-gate logic above needs no second reader.
 fn proc_has_children(pid: i32) -> Option<bool> {
-    std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/children"))
-        .ok()
-        .map(|s| !s.trim().is_empty())
+    #[cfg(unix)]
+    {
+        std::fs::read_to_string(format!("/proc/{pid}/task/{pid}/children"))
+            .ok()
+            .map(|s| !s.trim().is_empty())
+    }
+    #[cfg(windows)]
+    {
+        let want = u32::try_from(pid).ok()?;
+        let table = aoide_protocol::win_proc::processes().ok()?;
+        if !table.iter().any(|p| p.pid == want) {
+            return None;
+        }
+        Some(table.iter().any(|p| p.parent == want))
+    }
 }
 
 /// Is a conducted SHELL currently blocked on a `sudo` password prompt? A
@@ -925,6 +1047,12 @@ fn restore_snapshot(
 /// via [`restore_snapshot`]. `typed` comes from `conduct_multiplex`'s own
 /// typed-line buffer (`None` for a headless session, which never reads
 /// stdin) — this function has no access to the keystroke stream itself.
+///
+/// Unix only with the rest of the PTY capability: its first fact is
+/// `tcgetpgrp(2)` on a pty MASTER fd, which is the foreground process group of
+/// a controlling tty — an object native Windows does not have (see the module's
+/// own "the PTY capability" note).
+#[cfg(unix)]
 fn conduct_refresh_shell(
     id: &str,
     master: RawFd,
@@ -1054,6 +1182,7 @@ fn typed_capture_active(is_shell: bool, read_stdin: bool) -> bool {
 
 /// The signal that killed a status, off `ExitStatusExt` (Unix). A status with
 /// no signal has `None` — that is the honest "no exit code" case.
+#[cfg(unix)]
 fn signal_number(status: &std::process::ExitStatus) -> Option<i32> {
     use std::os::unix::process::ExitStatusExt;
     status.signal()
@@ -1062,6 +1191,7 @@ fn signal_number(status: &std::process::ExitStatus) -> Option<i32> {
 /// A signal's conventional name, for the outcome vocabulary's `signal` field
 /// (`"TERM"`, `"KILL"`, …). An unmapped number keeps its number rather than
 /// guessing a name.
+#[cfg(unix)]
 fn signal_name(signo: i32) -> String {
     match signo {
         libc::SIGHUP => "HUP",
@@ -1087,6 +1217,7 @@ fn signal_name(signo: i32) -> String {
 /// or killed outside the wrapper). Pure, so every row is a table test. Nothing
 /// here reads a harness trace, which is what makes the wrapper's
 /// error/timeout/completion reporting independent of the ping-back path.
+#[cfg(unix)]
 fn classify_end(
     timed_out: bool,
     status: Option<&std::process::ExitStatus>,
@@ -1112,6 +1243,7 @@ fn classify_end(
 /// Whether the master reports ANY readable byte right now (a zero-timeout
 /// `poll`) — used to drain what a just-exited child already wrote before the
 /// loop stops.
+#[cfg(unix)]
 fn master_has_data(master: RawFd) -> bool {
     let mut fds = [pollfd(master, libc::POLLIN)];
     let rc = unsafe { libc::poll(fds.as_mut_ptr(), 1, 0) };
@@ -1122,6 +1254,7 @@ fn master_has_data(master: RawFd) -> bool {
 /// the last slave fd closes and nothing else — which is exactly the "no
 /// descendant is holding the terminal" fact, recorded when a child exits while
 /// a descendant still owns the slave.
+#[cfg(unix)]
 fn pty_hung_up(master: RawFd) -> bool {
     let mut fds = [pollfd(master, libc::POLLIN)];
     let rc = unsafe { libc::poll(fds.as_mut_ptr(), 1, 0) };
@@ -1134,6 +1267,7 @@ fn pty_hung_up(master: RawFd) -> bool {
 /// only — the post-kill status as SECONDARY evidence (`killedWith`), never
 /// presented as the child's result.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(unix)]
 struct MultiplexEnd {
     timed_out: bool,
     killed_with: Option<String>,
@@ -1145,6 +1279,7 @@ struct MultiplexEnd {
 /// injection connection → master (INJECTION). A pending SIGWINCH re-sizes the
 /// master. Returns HOW it ended ([`MultiplexEnd`]); the caller reads the
 /// child's real status off the cached `ExitStatus`.
+#[cfg(unix)]
 fn conduct_multiplex(
     master: RawFd,
     listener: Option<&UnixListener>,
@@ -1500,6 +1635,10 @@ fn conduct_multiplex(
 /// `conductable`/`socket` fields on the record so `graph send` can steer it, and
 /// a best-effort `windowAddress` (phase ② discovery) so the focus jump
 /// (`focus_session`) can reach it.
+///
+/// Unix only: see the module's own "the PTY capability" note and the
+/// `#[cfg(not(unix))]` twin below.
+#[cfg(unix)]
 pub fn session_conduct(inv: &Invocation) -> Outcome {
     let cmd = "conduct";
     if inv.args.is_empty() {
@@ -1884,6 +2023,30 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     }
 }
 
+/// Native Windows: the honest answer to `aoide conduct`, and it names the
+/// missing CAPABILITY rather than a missing `cfg` branch. The channel this
+/// command IS — a live view of a managed task run's transcript, and a socket
+/// `send` types into — is a CONTROLLING TTY, which native Windows builds with
+/// ConPTY (`CreatePseudoConsole`) and this tree does not build at all. The two
+/// honest ways forward are both next-layer work and are named here so nobody
+/// reads this refusal as "unimplemented plumbing": ConPTY for interactive
+/// parity, or a pipes-only transport for headless parity (no controlling tty,
+/// so `send`-injection and windowed launch stay refused by name too).
+///
+/// What this arm does NOT do: spawn anything, register a session record, or
+/// write a log. A refused command leaves no ghost to reap — the same posture
+/// the Unix arm takes when its spawn fails.
+#[cfg(not(unix))]
+pub fn session_conduct(_inv: &Invocation) -> Outcome {
+    Outcome::error(
+        "conduct",
+        "aoide conduct needs a controlling tty: native Windows builds one with ConPTY \
+         (`CreatePseudoConsole`), which this build has no call for — so the PTY-backed \
+         conducted session (interactive or --headless) is unavailable here, not silently \
+         degraded. Run the command directly, or use a host with a PTY.",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1948,6 +2111,10 @@ mod tests {
     /// Command it built for the purpose cannot catch `spawn_on_pty` dropping
     /// the call. This reads the real child's own environment back out of
     /// `/proc`, so the invariant holds where the agent actually starts.
+    /// GATED on Unix with its reason: the subject is `spawn_on_pty`'s own
+    /// `pre_exec` environment, and `spawn_on_pty` is the PTY capability (see
+    /// the module note) — the fixture spawns `sh` on a real pty.
+    #[cfg(unix)]
     #[test]
     fn spawn_on_pty_execs_the_agent_with_the_markers_actually_gone() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2052,6 +2219,14 @@ mod tests {
     /// hold. The grandchild retries its OWN connect in a raw poll loop (no
     /// `std::thread`, no channel) since the socket may not exist yet the
     /// instant this returns.
+    ///
+    /// GATED on Unix, with its reason: the fixture IS the `fork(2)` +
+    /// `sockaddr_un` dance — "a process that is genuinely not this process's
+    /// descendant" is a kernel-ancestry fact proven by double-forking, and
+    /// native Windows has neither `fork` nor an equivalent that orphans a
+    /// grandchild away from the tree it was made in. Its callers are gated
+    /// with it.
+    #[cfg(unix)]
     fn spawn_unrelated_writer(socket_path: &std::path::Path, payload: &[u8]) {
         use std::os::unix::ffi::OsStrExt;
         let path_bytes = socket_path.as_os_str().as_bytes();
@@ -2108,6 +2283,10 @@ mod tests {
         }
     }
 
+    /// GATED on Unix with its reason: `OutputSink` is the pty-master's own
+    /// output router (module note) — it exists only where there is a master fd
+    /// to route, and its `Stdout` arm writes to `STDOUT_FILENO` by number.
+    #[cfg(unix)]
     #[test]
     fn output_sink_log_appends_bytes_and_they_read_back() {
         let dir = unique_stage("output-sink-log");
@@ -2613,6 +2792,11 @@ mod tests {
         let tb = TypedLineBuffer::new();
         assert_eq!(tb.typed(), None);
     }
+    /// GATED on Unix with its reason: the fixture writes to the injection
+    /// socket from a DOUBLE-FORKED process (`spawn_unrelated_writer`), whose
+    /// whole point is a caller that is genuinely not this process's
+    /// descendant — a `fork(2)` fact native Windows has no equivalent for.
+    #[cfg(unix)]
     #[test]
     fn conduct_injects_socket_bytes_into_the_child() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2677,6 +2861,11 @@ mod tests {
     /// binary dependency — plain POSIX job control) so the test terminates
     /// whether or not anything ever arrives on stdin; the proof file staying
     /// EMPTY is the refusal, not a hang.
+    /// GATED on Unix with its reason: the fixture forks a `sh -c` writer that
+    /// speaks to the injection socket with raw `sockaddr_un`/`connect(2)`
+    /// syscalls — no `fork`, no `sockaddr_un` and no `sh` script on native
+    /// Windows (see `spawn_unrelated_writer`'s own gate).
+    #[cfg(unix)]
     #[test]
     fn accept_refuses_a_connection_from_within_its_own_session_subtree() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2765,6 +2954,11 @@ mod tests {
     /// is_self_originated`'s nearest-first resolution finds ITS OWN
     /// session first, never the target's, even though the target genuinely
     /// sits one level up in its real `/proc` ancestry.
+    /// GATED on Unix with its reason: the fixture forks a `sh -c` writer
+    /// speaking raw `sockaddr_un`/`connect(2)` — no `fork`, no `sockaddr_un`
+    /// and no `sh` script on native Windows (see `spawn_unrelated_writer`'s
+    /// own gate).
+    #[cfg(unix)]
     #[test]
     fn accept_delivers_from_a_distinct_child_session_that_is_a_real_os_descendant() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2857,6 +3051,12 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&root);
     }
+    /// GATED on Unix with its reason: this drives `session_conduct`, i.e. the
+    /// PTY-backed channel, which native Windows refuses BY NAME (it builds a
+    /// controlling tty with ConPTY, and no call in this tree makes one). The
+    /// refusal's own contract is covered natively by
+    /// `conduct_refuses_by_name_and_registers_no_session_on_a_host_without_a_pty`.
+    #[cfg(unix)]
     #[test]
     fn conduct_mirrors_a_nonzero_child_exit() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2894,6 +3094,9 @@ mod tests {
     /// where the door acked `submitted` before this synchronous failure —
     /// running one process removed, as a detached child — was ever visible
     /// to it.
+    /// GATED on Unix with its reason: the PTY-backed conduct channel, refused
+    /// by name on native Windows (see `conduct_mirrors_a_nonzero_child_exit`).
+    #[cfg(unix)]
     #[test]
     fn conduct_of_a_nonexistent_binary_registers_no_session_at_all() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2935,6 +3138,9 @@ mod tests {
     /// session mirrors its pty output into the SAME per-session log a
     /// headless session always has, IN ADDITION to stdout, and stamps
     /// `logPath` exactly the same way.
+    /// GATED on Unix with its reason: the PTY-backed conduct channel, refused
+    /// by name on native Windows (see `conduct_mirrors_a_nonzero_child_exit`).
+    #[cfg(unix)]
     #[test]
     fn conduct_interactive_also_mirrors_pty_output_to_the_log_and_stamps_log_path() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2968,6 +3174,13 @@ mod tests {
     /// Structural, not umask luck (task #15): the log lands `0600` and its
     /// `state/sessions/` parent `0700`, regardless of whatever umask the
     /// test process happens to run under.
+    /// GATED on Unix with its reason: the test drives `session_conduct`, which
+    /// is the refused PTY capability on native Windows, and the fact it asserts
+    /// is a POSIX MODE (`0600`/`0700` as bits). The policy itself is not left
+    /// uncovered there — that host's spelling of the same policy is read back
+    /// by `owner_only::file_privacy`/`dir_privacy`, which `aoide-storage`'s own
+    /// tests exercise on ThinkChiyo.
+    #[cfg(unix)]
     #[test]
     fn session_log_and_its_directory_are_created_with_private_permissions() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3000,6 +3213,47 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&root);
     }
+    /// Native Windows, the PTY capability's contract THERE: the refusal is the
+    /// capability's answer, so this pins it — `conduct` refuses BY NAME (the
+    /// missing capability is ConPTY, never "unimplemented" and never a silent
+    /// degradation), and it registers no session record, exactly as the Unix
+    /// arm leaves no ghost when its spawn fails. Runs on the host whose build
+    /// has no `spawn_on_pty` at all, so it also proves the refusal is reachable
+    /// with the whole PTY cluster compiled out.
+    #[cfg(windows)]
+    #[test]
+    fn conduct_refuses_by_name_and_registers_no_session_on_a_host_without_a_pty() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR"]);
+
+        let root = unique_stage("conduct-no-pty");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+
+        let out = session_conduct(&conduct_invocation(
+            &["cmd", "/C", "echo never-runs"],
+            &[("id", "conduct-no-pty")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "msg: {}", out.message);
+        assert!(
+            out.message.contains("ConPTY"),
+            "the refusal must NAME the missing capability (ConPTY), not read as unimplemented \
+             plumbing: {}",
+            out.message
+        );
+
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        assert!(
+            s.sessions.iter().all(|r| r.session_id != "conduct-no-pty"),
+            "a refused conduct must register no ghost session — found one: {:?}",
+            s.sessions.iter().find(|r| r.session_id == "conduct-no-pty")
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// The task #100 defect, end to end: `spawn --agent soak-a -- bash` (the
     /// P-C7 soak's live shape) conducts a REAL shell under a caller-chosen
     /// agent label that is not the literal string `"shell"`. Under the old
@@ -3008,6 +3262,9 @@ mod tests {
     /// nothing beyond a default cwd. The gate now reads the wrapped
     /// command's own basename, so this session gets captured regardless of
     /// what it is labelled.
+    /// GATED on Unix with its reason: the PTY-backed conduct channel, refused
+    /// by name on native Windows (see `conduct_mirrors_a_nonzero_child_exit`).
+    #[cfg(unix)]
     #[test]
     fn a_shell_conducted_under_a_non_shell_agent_label_still_gets_captured() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3041,6 +3298,9 @@ mod tests {
     /// wrapped command a shell", launcher and all, without waiting for a tick
     /// and without reading `agent`. `env sh -c …` is the launcher shape the
     /// 4-name basename read used to miss entirely.
+    /// GATED on Unix with its reason: the PTY-backed conduct channel, refused
+    /// by name on native Windows (see `conduct_mirrors_a_nonzero_child_exit`).
+    #[cfg(unix)]
     #[test]
     fn registration_stamps_shell_from_the_argv_it_conducts() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3078,6 +3338,9 @@ mod tests {
     /// same id CLEARS it. The other direction leaves a record claiming a shell
     /// forever, which is a silently dead lane rather than a hole — but it is
     /// still wrong, and this is the test that says so.
+    /// GATED on Unix with its reason: the PTY-backed conduct channel, refused
+    /// by name on native Windows (see `conduct_mirrors_a_nonzero_child_exit`).
+    #[cfg(unix)]
     #[test]
     fn re_registering_an_id_flips_the_shell_stamp_both_ways() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3109,6 +3372,9 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&root);
     }
+    /// GATED on Unix with its reason: the PTY-backed conduct channel, refused
+    /// by name on native Windows (see `conduct_mirrors_a_nonzero_child_exit`).
+    #[cfg(unix)]
     #[test]
     fn conduct_headless_mirrors_pty_output_to_the_log_and_stamps_log_path() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3149,6 +3415,9 @@ mod tests {
     /// that IS honestly observable without a live compositor: the stamped
     /// `headless` flag, which is what makes the wrap's windowlessness
     /// permanent regardless of what any discovery path does or doesn't find.
+    /// GATED on Unix with its reason: the PTY-backed conduct channel, refused
+    /// by name on native Windows (see `conduct_mirrors_a_nonzero_child_exit`).
+    #[cfg(unix)]
     #[test]
     fn headless_conduct_registration_stamps_the_permanent_headless_marker() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3198,6 +3467,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// GATED on Unix with its reason: this asserts `session_conduct`'s
+    /// node-origin REFUSAL, which is reached only after the command can run at
+    /// all — on native Windows the whole command is refused earlier, by name,
+    /// for want of a controlling tty (see `conduct_mirrors_a_nonzero_child_exit`).
+    #[cfg(unix)]
     #[test]
     fn conduct_registration_refuses_a_node_origin_from_the_env_var() {
         // LANE IDENTITY P-ID0 (G16/G5): `AOIDE_SESSION_ORIGIN` is inherited

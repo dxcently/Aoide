@@ -738,6 +738,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&stage);
     }
 
+    /// GATED on Unix with its reason (see `testutil::fake_hyprctl`): the
+    /// fixture is a `#!/bin/sh` shim `CreateProcess` cannot launch, over a
+    /// compositor native Windows does not run. The socket TYPE is the seam
+    /// either way — what keeps this off Windows is the shim, not the socket.
+    #[cfg(unix)]
     #[test]
     fn the_forwarded_argv_carries_the_resolved_workspace_not_the_word_focused() {
         // ONE positional is the PROJECT: the workspace comes from the

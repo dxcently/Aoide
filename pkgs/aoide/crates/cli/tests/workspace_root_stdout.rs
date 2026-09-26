@@ -79,13 +79,21 @@ fn root_prints_one_bare_path_on_stdout_and_nothing_at_all_when_it_refuses() {
     let folder = demo.root.join("proj");
     std::fs::create_dir_all(&folder).unwrap();
     let folder = folder.to_string_lossy().into_owned();
-    write_projects(
-        &demo.stage,
-        &format!(
-            r#"{{"name":"aoide","path":"{folder}","roots":["{folder}"],"workspaces":[3]}},
-               {{"name":"cadenza","path":"","roots":[],"workspaces":[5]}}"#
-        ),
-    );
+    // Built with `serde_json`, never by pasting the path into a raw template: a
+    // Windows path carries `\`, and a raw paste makes the stage file invalid
+    // JSON there ("invalid escape at line 1 column N"), which the binary then
+    // reports as an unreadable store. The same one-writer rule `conduct`'s
+    // fixtures follow. `write_projects` takes the OBJECTS, not an array — it
+    // supplies the `projects` wrapper — so these are joined.
+    let projects = [
+        serde_json::json!({"name": "aoide", "path": folder.clone(), "roots": [folder.clone()], "workspaces": [3]}),
+        serde_json::json!({"name": "cadenza", "path": "", "roots": [], "workspaces": [5]}),
+    ]
+    .iter()
+    .map(|v| v.to_string())
+    .collect::<Vec<_>>()
+    .join(",");
+    write_projects(&demo.stage, &projects);
 
     // Bound with a folder: exactly the path, newline-terminated, exit 0.
     let (out, err, code) = demo.aoide(&["workspace", "root", "3"]);

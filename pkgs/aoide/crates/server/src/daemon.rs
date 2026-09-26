@@ -195,8 +195,12 @@ use aoide_storage::sealed_id::{self, SealedIdentity};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(windows)]
+use aoide_protocol::win_unix::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -684,8 +688,34 @@ fn bind_socket(socket_path: &Path) -> std::io::Result<UnixListener> {
     }
     let _ = std::fs::remove_file(socket_path);
     let listener = UnixListener::bind(socket_path)?;
-    std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600))?;
+    tighten_socket(socket_path)?;
     Ok(listener)
+}
+
+/// Make a bound control socket unreachable by anyone but its owner — the
+/// POLICY half of [`bind_socket`], and the one place either host spells it
+/// (`mcp`'s channel socket calls this too, rather than a second chmod).
+///
+/// Unix: `chmod 0600` on the socket FILE. Native Windows cannot do that, and
+/// does not need to: a bound `AF_UNIX` socket there is a REPARSE POINT
+/// (`IO_REPARSE_TAG_AF_UNIX`, measured), and this tree's owner-only policy
+/// reader REFUSES such an object by name rather than reading its DACL — so what
+/// gates access is the DIRECTORY the socket sits in, which this arm pins to the
+/// current user through the same `owner_only::ensure_private_dir` seam the
+/// runtime dir already uses. Nothing is silently weakened: on Unix the file's
+/// mode adds to its directory's; on Windows the directory IS the policy, as
+/// `CORE-POSIX.md`'s "unix socket addressing" row states.
+#[cfg(unix)]
+pub(crate) fn tighten_socket(path: &Path) -> std::io::Result<()> {
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+}
+
+#[cfg(windows)]
+pub(crate) fn tighten_socket(path: &Path) -> std::io::Result<()> {
+    match path.parent() {
+        Some(dir) => aoide_protocol::owner_only::ensure_private_dir(dir),
+        None => Ok(()),
+    }
 }
 
 /// Write one JSON value as a newline-terminated wire line — the ONE place
@@ -923,8 +953,16 @@ fn accept_loop(
     dispatch: DispatchFn,
     watcher: SharedHandEditWatcher,
 ) {
+    // This process's own identity, in the host's own terms: a uid on Unix,
+    // this token's user SID on native Windows (`win_proc::current_user_sid`,
+    // the same reader the peer side goes through). `None` when the host cannot
+    // answer — and the gate REFUSES then, rather than admitting by default.
+    #[cfg(unix)]
     // SAFETY: `geteuid()` takes no arguments and cannot fail.
-    let my_identity = aoide_secrets::peercred::PeerUser::Uid(unsafe { libc::geteuid() });
+    let my_identity = Some(aoide_secrets::peercred::PeerUser::Uid(unsafe { libc::geteuid() }));
+    #[cfg(windows)]
+    let my_identity =
+        aoide_protocol::win_proc::current_user_sid().ok().map(aoide_secrets::peercred::PeerUser::Sid);
     for conn in listener.incoming() {
         match conn {
             Ok(stream) => {
@@ -934,7 +972,7 @@ fn accept_loop(
                 // caller's, and nothing on the wire can name it
                 // (`invocation_from_dispatch_request`'s own doc).
                 let door_pid = peer.as_ref().map(|p| p.pid);
-                if let Some(reason) = cross_uid_gate(peer, Some(&my_identity)) {
+                if let Some(reason) = cross_uid_gate(peer, my_identity.as_ref()) {
                     let _ = audit(
                         &aoide_protocol::default_audit_log(),
                         Door::Daemon,
@@ -1371,8 +1409,28 @@ mod tests {
     fn bind_socket_chmods_the_socket_file_to_0600() {
         let socket_path = short_tmp("bind").with_extension("sock");
         let listener = bind_socket(&socket_path).unwrap();
-        let mode = std::fs::metadata(&socket_path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "expected the daemon socket to be user-private, got {mode:o}");
+        // Same claim, per host: the file's mode on Unix, the parent
+        // directory's owner-only policy on native Windows (where a bound
+        // socket is a reparse point, and the directory IS the gate).
+        #[cfg(unix)]
+        {
+            let mode = std::fs::metadata(&socket_path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "expected the daemon socket to be user-private, got {mode:o}");
+        }
+        #[cfg(windows)]
+        {
+            assert_eq!(
+                aoide_protocol::owner_only::dir_privacy(socket_path.parent().unwrap()).unwrap(),
+                None,
+                "the socket's directory must be owner-only on this host — the FILE itself carries no \
+                 readable policy there (a bound socket is a reparse point the policy reader refuses \
+                 by name), so the directory IS the gate"
+            );
+            // What this does NOT check, and cannot check here: reachability from
+            // a DIFFERENT local account. This box has no second account, so the
+            // cross-user refusal is unmeasured — the same limit
+            // `CORE-POSIX.md`'s "unix socket addressing" row records.
+        }
         drop(listener);
         std::fs::remove_file(&socket_path).ok();
     }
@@ -1412,7 +1470,12 @@ mod tests {
     fn a_real_same_process_socketpair_is_admitted() {
         let (a, _b) = UnixStream::pair().expect("socketpair");
         let peer = aoide_secrets::peercred::peer_cred(&a);
+        #[cfg(unix)]
         let my_identity = aoide_secrets::peercred::PeerUser::Uid(unsafe { libc::geteuid() });
+        #[cfg(windows)]
+        let my_identity = aoide_secrets::peercred::PeerUser::Sid(
+            aoide_protocol::win_proc::current_user_sid().expect("this token's user SID"),
+        );
         assert_eq!(cross_uid_gate(peer, Some(&my_identity)), None);
     }
 
@@ -1549,7 +1612,7 @@ mod tests {
         // already includes the injected line, silently skipping it
         // (`Follower::open_at_end`'s own contract: history before open is
         // never read).
-        std::fs::write(&events_path, b"").unwrap();
+        aoide_test_support::owner_only_file(&events_path);
 
         let sp = socket_path.clone();
         let ep = events_path.clone();
@@ -1788,6 +1851,12 @@ mod tests {
         let socket_path = short_tmp("loop").with_extension("sock");
         let events_path = short_tmp("loop-events").with_extension("jsonl");
         let log_path = short_tmp("loop-log");
+        // The feed file is created through the POLICY seam: native Windows reads
+        // a feed's policy back from the object and refuses one whose DACL still
+        // carries inherited ACEs, while `std::fs::write` makes exactly such a
+        // file — so the daemon's own writes would be refused and this test's
+        // deadline would expire with the real cause invisible.
+        aoide_test_support::owner_only_file(&events_path);
         std::fs::write(&events_path, vec![b'x'; (EVENTS_CAP_BYTES + 1) as usize]).unwrap();
 
         let sp = socket_path.clone();
@@ -2263,6 +2332,10 @@ mod tests {
     /// `auto_resume_marker_path()` and writes a value `epoch_already_fired`
     /// can read back, not just that the pure predicate is correct in
     /// isolation.
+    /// GATED on native Windows with its PROVEN reason: see
+    /// `run_boot_auto_resume_fires_for_a_project_with_one_live_and_one_undying_dead_session`
+    /// — `boot_epoch` is `None` off Linux, so no epoch can be recorded.
+    #[cfg_attr(windows, ignore = "boot_epoch is `None` off Linux (`/proc/stat` btime; CORE-POSIX.md's boot-epoch row)")]
     #[test]
     fn run_boot_auto_resume_records_the_current_boot_epoch_on_a_fresh_marker() {
         let (_guard, stage, state, saved_stage, saved_state) = isolated_stage_and_state();
@@ -2290,6 +2363,10 @@ mod tests {
     /// marker byte-identical to what it found (an early return never
     /// reaches the rewrite at the function's tail) and must never panic
     /// walking a real (if minimal) `projects.json`/`sessions.json` pair.
+    /// GATED on native Windows with its PROVEN reason: see
+    /// `run_boot_auto_resume_fires_for_a_project_with_one_live_and_one_undying_dead_session`
+    /// — `boot_epoch` is `None` off Linux, so there is no boot marker to match.
+    #[cfg_attr(windows, ignore = "boot_epoch is `None` off Linux (`/proc/stat` btime; CORE-POSIX.md's boot-epoch row)")]
     #[test]
     fn run_boot_auto_resume_is_a_no_op_once_the_marker_matches_the_current_boot() {
         let (_guard, stage, state, saved_stage, saved_state) = isolated_stage_and_state();
@@ -2331,6 +2408,13 @@ mod tests {
     /// old id — if `run_boot_auto_resume` had skipped this project (the old
     /// behaviour), the mark would still be sitting on `carried-dead`
     /// afterward.
+    /// GATED on native Windows with its PROVEN reason: this is
+    /// `conduct::reap::boot_epoch`'s consumer, and `boot_epoch` reads
+    /// `/proc/stat`'s `btime` — `CORE-POSIX.md`'s own "boot epoch" row records
+    /// that off Linux it answers `None`, so the boot-epoch-guarded auto-resume
+    /// never fires there. Refusing BY NAME rather than asserting a fact that
+    /// host cannot have.
+    #[cfg_attr(windows, ignore = "boot_epoch is `None` off Linux (`/proc/stat` btime; CORE-POSIX.md's boot-epoch row)")]
     #[test]
     fn run_boot_auto_resume_fires_for_a_project_with_one_live_and_one_undying_dead_session() {
         let (_guard, stage, state, saved_stage, saved_state) = isolated_stage_and_state();
