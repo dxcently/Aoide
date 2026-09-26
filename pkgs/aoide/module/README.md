@@ -24,7 +24,7 @@ package build from the same one-line input.
   through, since this file may not read a lane's option directly. The lane
   that brings a graphical session up sets that option (the lane that ships
   the session's shell today), so this bundle never learns which lane it was.
- `modules/nucleus/aoided.nix` carries the
+  `modules/nucleus/aoided.nix` carries the
   lyra-gated `AOIDE_SONG_TEMPLATES` variable plus every door
   (mcp/a2a/pair-watch), the discovery firewall carve, and the usage
   poller — all still AoideOS-side deployment.

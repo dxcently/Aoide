@@ -1544,28 +1544,42 @@ fn stage_song_copies(checkout: &Path, run_qml_songs: &Path) -> Result<(), String
 }
 
 /// `src -> dst` for every `watch` entry that has a copy under `ROOT/run/
-/// qml/` (a songbook widget file: `CHECKOUT/song/songbook/<s>/widgets/<rest>`
-/// -> `ROOT/run/qml/songs/<s>/<rest>`). The canvas rewrites each `dst` from
-/// its `src` before a reload; a watched file with no copy (a foreign path
-/// the canvas loads verbatim) has no entry.
+/// qml/`: a songbook widget file (`CHECKOUT/song/songbook/<s>/widgets/<rest>`
+/// -> `ROOT/run/qml/songs/<s>/<rest>`) or a shell file
+/// (`CHECKOUT/<LYRA_SHELL_SRC>/qml/<f>` -> `ROOT/run/qml/<f>`, the flat
+/// one-copy-per-`*.qml` [`stage_qml_copies`] writes — a watch entry nested
+/// deeper than the shell's qml dir has no copy and so no entry). The canvas
+/// rewrites each `dst` from its `src` before a reload; a watched file with no
+/// copy (a foreign path the canvas loads verbatim) has no entry.
 fn compute_stage_map(checkout: &Path, root: &Path, watch: &[String]) -> Map<String, Value> {
     let songbook = checkout.join("song").join("songbook");
+    let shell_qml = checkout.join(LYRA_SHELL_SRC).join("qml");
+    let run_qml = root.join("run").join("qml");
+    let comps_of = |rel: &Path| -> Vec<String> {
+        rel.components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect()
+    };
     let mut out = Map::new();
     for src in watch {
-        let Ok(rel) = Path::new(src).strip_prefix(&songbook) else {
+        let p = Path::new(src);
+        if let Ok(rel) = p.strip_prefix(&songbook) {
+            let comps = comps_of(rel);
+            if comps.len() >= 3 && comps[1] == "widgets" {
+                let dst = run_qml
+                    .join("songs")
+                    .join(&comps[0])
+                    .join(comps[2..].join("/"));
+                out.insert(src.clone(), json!(dst.to_string_lossy()));
+            }
+            continue;
+        }
+        let Ok(rel) = p.strip_prefix(&shell_qml) else {
             continue;
         };
-        let comps: Vec<String> = rel
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy().into_owned())
-            .collect();
-        if comps.len() >= 3 && comps[1] == "widgets" {
-            let dst = root
-                .join("run")
-                .join("qml")
-                .join("songs")
-                .join(&comps[0])
-                .join(comps[2..].join("/"));
+        let comps = comps_of(rel);
+        if comps.len() == 1 && rel.extension().and_then(|e| e.to_str()) == Some("qml") {
+            let dst = run_qml.join(&comps[0]);
             out.insert(src.clone(), json!(dst.to_string_lossy()));
         }
     }
@@ -3219,7 +3233,7 @@ mod tests {
     }
 
     #[test]
-    fn compute_stage_map_pairs_each_songbook_watch_entry_with_its_run_qml_copy() {
+    fn compute_stage_map_pairs_each_watch_entry_with_its_run_qml_copy() {
         let checkout = Path::new("/c");
         let root = Path::new("/r");
         let watch = vec![
@@ -3234,8 +3248,45 @@ mod tests {
             json!({
                 "/c/song/songbook/sonata/widgets/conductor.qml": "/r/run/qml/songs/sonata/conductor.qml",
                 "/c/song/songbook/etude/widgets/parts/Knob.qml": "/r/run/qml/songs/etude/parts/Knob.qml",
+                "/c/pkgs/lyra-shell/qml/ShellBridge.qml": "/r/run/qml/ShellBridge.qml",
             })
         );
+    }
+
+    /// The shell arm's `src` set is the shell's qml dir's OWN direct children
+    /// — nothing else may enter, and the songbook arm keeps claiming every
+    /// songbook path (a songbook path that contains the shell prefix still
+    /// belongs to the songbook arm; `stage_song_copies` mirrors it under
+    /// `songs/`, which is where its own `import "../.."` expects to be).
+    #[test]
+    fn compute_stage_map_songbook_arm_is_unaffected_by_the_shell_arm() {
+        let checkout = Path::new("/c");
+        let root = Path::new("/r");
+        let songbook_widget = "/c/song/songbook/sonata/widgets/conductor.qml";
+        let songbook_lookalike =
+            format!("/c/song/songbook/sonata/widgets/{LYRA_SHELL_SRC}/qml/ShellBridge.qml");
+        let nested_shell = format!("/c/{LYRA_SHELL_SRC}/qml/songs/etude/widgets/Knob.qml");
+        let not_qml = format!("/c/{LYRA_SHELL_SRC}/qml/slots.md");
+        let watch = vec![
+            songbook_widget.to_string(),
+            songbook_lookalike.clone(),
+            nested_shell.clone(),
+            not_qml.clone(),
+        ];
+        let map = compute_stage_map(checkout, root, &watch);
+        assert_eq!(map.len(), 2);
+        assert_eq!(
+            map.get(songbook_widget),
+            Some(&json!("/r/run/qml/songs/sonata/conductor.qml"))
+        );
+        assert_eq!(
+            map.get(&songbook_lookalike),
+            Some(&json!(
+                "/r/run/qml/songs/sonata/pkgs/lyra-shell/qml/ShellBridge.qml"
+            ))
+        );
+        assert!(!map.contains_key(&nested_shell));
+        assert!(!map.contains_key(&not_qml));
     }
 
     #[test]

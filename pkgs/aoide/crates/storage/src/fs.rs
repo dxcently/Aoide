@@ -531,12 +531,14 @@ pub fn flake_root() -> std::path::PathBuf {
 /// preview}` from, so the path a checkout is READ from and the path the
 /// package is BUILT from cannot drift apart.
 ///
-/// Named ONCE, here, and joined onto [`flake_root`] by every reader
-/// (`aoide-lyra`'s `commands::preview` stages the tree into an isolated
-/// preview root; `aoide-song`'s `compose` writes the scaffold doc that points
-/// a new song's author at `qml/slots.md`). A second checkout-relative tree
-/// earns its own const beside this one rather than a literal at the call site
-/// — the rename this exists to survive is exactly the one that leaves a
+/// Named ONCE, here. Every site that CONSTRUCTS the shell path joins the const
+/// onto [`flake_root`] (`aoide-lyra`'s `commands::preview` stages the tree into
+/// an isolated preview root; `aoide-song`'s `compose` interpolates the const
+/// into the scaffold doc that points a new song's author at `qml/slots.md`) —
+/// prose and doc comments, and that scaffold text, may name the literal
+/// `"pkgs/lyra-shell"`, which nothing resolves. A second checkout-relative
+/// tree earns its own const beside this one rather than a literal at the call
+/// site — the rename this exists to survive is exactly the one that leaves a
 /// string behind in a crate nobody thought to grep.
 pub const LYRA_SHELL_SRC: &str = "pkgs/lyra-shell";
 

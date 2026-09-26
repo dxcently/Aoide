@@ -112,9 +112,9 @@ The terminal test above decides **bridge vs QML**. This second test decides
 where a file that already passed it lives: the facet keeps agnostic bridges and
 APIs, the song keeps everything that paints (§5). **The facet is not a component
 library** — a shared visual component's home is the song's `widgets/` dir under
-an uppercase name, not `modules/facets/quickshell/qml/`.
+an uppercase name, not `pkgs/lyra-shell/qml/`.
 
-> A file stays in `modules/facets/quickshell/qml/` **iff all three are YES**:
+> A file stays in `pkgs/lyra-shell/qml/` **iff all three are YES**:
 >
 > 1. **Song-blind.** Does the file name zero aesthetic decisions? Reading
 >    `livery.paletteFg` is fine — that is picking up an API. *Deciding* that a
@@ -150,7 +150,7 @@ an uppercase name, not `modules/facets/quickshell/qml/`.
 
 Question 3 is the load-bearing one, and it is where every genuine argument in
 this tree lives. The same text sits in
-`modules/facets/quickshell/qml/slots.md` — one wording, two homes, because a
+`pkgs/lyra-shell/qml/slots.md` — one wording, two homes, because a
 ricing agent reading about where to put a helper is exactly the agent who needs
 the rule.
 

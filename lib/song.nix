@@ -4,7 +4,7 @@
 # `song/songbook/<song>/_widgets/<slot>.nix`. A sibling `default.nix` roll-up
 # binds the owner and the slot name to each function; the song's `rice.nix`
 # composes the result. This file is the song-blind mechanism both halves call —
-# the nix analogue of `modules/facets/quickshell/qml/WidgetSlot.qml`, which
+# the nix analogue of `pkgs/lyra-shell/qml/WidgetSlot.qml`, which
 # hosts a widget without knowing which song wrote it.
 #
 # Two exports:

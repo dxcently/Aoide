@@ -30,9 +30,9 @@
 // left-drag pan too and shows the hand, masking — never changing — the
 // annotation tool in use; Ctrl+wheel
 // zooms about the pointer; plain wheel reaches the widget. The toolbar's
-// glyphs are the facet's `lyra icon resolve` output (`modules/facets/
-// quickshell/icons/`), copied by `lyra preview` to `run/qml/icons/` beside
-// this file and tinted from the chrome — no network, no icon font.
+// glyphs are the shell source's `lyra icon resolve` output
+// (`pkgs/lyra-shell/icons/`), copied by `lyra preview` to `run/qml/icons/`
+// beside this file and tinted from the chrome — no network, no icon font.
 //
 // ── Isolation: one env var, no socket ──────────────────────────────────────
 // Every read a widget performs is already rooted at $AOIDE_ROOT — LiveryState

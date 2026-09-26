@@ -82,7 +82,12 @@
   `stage_qml_copies`/`stage_song_copies`; `remove_stale` replaces a link
   left by an older root). The checkout is edited in the checkout; the
   root's copies are refreshed by the canvas from `preview.json`'s `stage`
-  map before every reload and by a `--no-launch` rebuild. Nothing in
+  map before every reload and by a `--no-launch` rebuild — one entry per
+  watched file that HAS a copy: a songbook widget mapped under
+  `songs/<s>/<rest>`, a shell qml file mapped flat to its own
+  `run/qml/<f>`; a watched file with no copy (a nested path under the
+  shell's qml dir, a foreign path) gets none, since the canvas rewrites
+  each `dst` from its `src`. Nothing in
   `commands::preview_tools` writes under `run/qml/`, and no code path may
   reintroduce a link there: a live incident during this crate's own P6
   phase wrote through such a link and truncated `pkgs/lyra-shell/
