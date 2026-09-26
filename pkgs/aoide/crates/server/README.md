@@ -397,6 +397,23 @@ the inbound half of the two-door contract (the outbound half is
   immediately-delivered payload's bytes stay untouched, so an
   already-autogated node's delivery is byte-identical to before this
   phase).
+  **`tasks/get` reads a session's watch frame (P-RSA S6, CONTRACTS.md §6).**
+  `params.metadata["aoide/frame"]` asks for the frame the local
+  `session watch` renders; it rides as one `data` artifact, and is answered
+  only for a caller that resolved through the SIGNATURE rung to a `verified`
+  node whose `allows` include `read` (`output_read_admitted`, with
+  `node_may_read` as `node_may_spawn`'s twin one capability over). Unsigned,
+  bearer and address rungs are refused with the SAME text whether the session
+  exists or not — the gate is no existence oracle — while the remote-parent
+  KEY match is deliberately not required to READ (steering without pending and
+  the ping-back history still need it). `watch_frame` is conduct's existing
+  `gather` with `raw = false`; the frame leaves through `Frame::for_wire`
+  (this box's paths and the suggested command struck) and the door clamps the
+  tail to 200 lines, each letter's body to 40 lines and the frame to 256 KiB,
+  shedding the oldest letter then the oldest output line and setting
+  `truncated`. A frame read audits under its own label, `a2a.tasks/get.frame`.
+  The refusal code is shared with `verify_signed_request` — that one is
+  decided BEFORE this arm runs, and the two texts never match.
   **`aoide/mailDeposit` (P-M2, `docs/architecture/MAIL.md`, CONTRACTS.md
   §6's new subsection) is the SECOND capability-gated method, after
   Spawn, and the first one not gated on `spawn`.** `mail_deposit` resolves

@@ -157,6 +157,20 @@ Refusals are taught, never an empty view: an unknown id, a `sub:` card (which
 shares its executor's process and keeps no PTY of its own), and a record that
 keeps no conduct-owned PTY.
 
+**Across a node, the same frame rides `tasks/get`.** A paired node whose
+`allows` include `read` asks this box for a run's frame over the A2A door
+(`params.metadata["aoide/frame"]`, CONTRACTS.md §6) and gets the frame above as
+one `data` artifact — the same `render` draws it, so a remote frame reads like a
+local one, with `logPath`/`instructionsPath`/`socket`/`suggested` struck because
+they name paths and a command on the box that wrote them. The door bounds it:
+`tail` to 200 lines, each letter's body to 40 lines, the whole frame to 256 KiB
+(that cap sheds the oldest letter first, then the oldest output line, and says
+`truncated`), and an instruction block it never sheds. The suggested follow-up
+is the reader's own — `aoide send --to <node>/<id> --submit -- "<text>"` — and
+the frame is still read-only: no cursor moves here, and raw PTY bytes exist on
+no wire. Unsigned, bearer and address callers are refused, as is a signed node
+never granted `read`.
+
 ## The end: a closed vocabulary, and a deadline that is not inactivity
 
 `--timeout <secs>` is the **supervisor's wall clock**, on both shapes of the

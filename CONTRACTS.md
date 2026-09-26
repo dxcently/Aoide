@@ -4846,6 +4846,44 @@ one is DROPPED — the send goes out with no claim and one warning line
 way either way. `node spawn` still refuses the call outright, its caller having
 named a parentage.
 
+**A signed reader reads ANY session's output: `tasks/get` carries the watch
+frame.** `tasks/get` accepts `params.metadata["aoide/frame"]`
+(`aoide_protocol::wire::FRAME_KEY`), whose optional `tail` is the output-line
+window, and answers with the SAME status read plus the session's watch frame as
+one `data` artifact (`artifactId: "frame"`, the frame under the part's `data`).
+It is the frame `aoide session watch` renders — conduct's `watch_frame` is the
+existing `gather` with `raw = false`, one definition, so the wire frame and the
+rendered one cannot drift. `Task.artifacts`/`Task.history` are the envelope's
+two optional fields (A2A's own names), both omitted when absent, so a request
+without the frame key is answered byte-identically to before. The frame leaves
+this host through `Frame::for_wire`, which nulls `logPath`, `instructionsPath`,
+`socket` and `suggested` — paths and a command that name THIS box — and the door
+bounds what it sends: `tail` clamped to `1..=200`, each letter's body to 40
+lines, and the frame to 256 KiB, shedding the OLDEST mail letter first and then
+the OLDEST output line, with `truncated: true` whenever that byte cap cut
+anything. The instruction block is never shed — it is the text the frame exists
+to show — and is bound only by its own block caps, so a frame may exceed 256 KiB
+by that block alone.
+
+**The output-read gate is `output_read_admitted`: `read_ok` (the door-wide
+bearer rule every read arm already carries) AND a caller resolved through the
+SIGNATURE rung AND that node record `verified` with `read` in its `allows`
+(`node_may_read`, [`node_may_spawn`]'s twin one capability over).** The
+remote-parent key match is deliberately NOT required to read: a signed,
+verified node holding `read` reads any session's frame on this node, while
+steering without pending (above) and the ping-back history (`aoide/linesAfter`)
+still need the remote-parent key. Unsigned, bearer-token and bare-address rungs
+are refused — `-32007`, ONE text for every refusal and the same text whether the
+named session exists or not, so the gate reveals no more about the roster than
+the status read it shares the method with. `-32007` is also
+[`verify_signed_request`]'s own code; the two refusals never share a text, and a
+signature refusal is decided before the frame arm runs at all. A frame read
+audits under its own label, `a2a.tasks/get.frame`, so an operator can tell which
+`tasks/get` calls read output from which were status polls. A session that has
+no frame to read — an unknown id, a `sub:` card, a record that keeps no
+conduct-owned PTY — answers with `session watch`'s own taught refusal under
+`-32001`, after the gate.
+
 **The command a spawn runs is `aoide.a2a.spawnAgent`** — a nix option, off
 (`""`) by default, resolved once at `a2a serve` launch (`--spawn-agent` flag →
 `AOIDE_A2A_SPAWN_AGENT` env, set by the `aoide-a2a` systemd unit → the

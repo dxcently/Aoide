@@ -49,7 +49,8 @@ there is no "this node may spawn, that one may not."
    ends; the popup is sugar.
 5. **Per-node permissions: a closed `allows` set.** Capabilities
    today: `"spawn"` (create a session via the A2A spawn arm),
-   `"read"` (graph/who summaries over A2A), and `"message"` (deposit a
+   `"read"` (graph/who summaries over A2A; `read` also admits output reads
+   (the watch frame) of any session on this node), and `"message"` (deposit a
    mail envelope via `aoide/mailDeposit` — data a reader pulls, never
    an instruction; it grants nothing on the spawn or conduct arms).
    Commands:

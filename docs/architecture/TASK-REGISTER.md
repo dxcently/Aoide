@@ -2193,7 +2193,29 @@ project/parent inheritance across local/remote/app/subagents;
   claim but DROPS an unruly one — it sends unclaimed and names the reason on one
   warning line (`not claiming parent: <reason>`) instead of refusing, the S5
   ruling on the previous executor's Q3 (`node spawn` still refuses the call
-  outright); S6–S10 open, in the brief's order (cargo builds serialize).
+  outright); S6 LANDED — `tasks/get` with `params.metadata["aoide/frame"]`
+  answers with the session's watch frame as one `data` artifact, gated by
+  `output_read_admitted` = `read_ok` ∧ signature-rung ∧ the record `verified`
+  with `allows∋read` (`node_may_read`, `node_may_spawn`'s twin), so a signed
+  reader holding `read` reads ANY session's frame while the remote-parent key
+  match stays required for steering (S5) and for S8's history; the refusal is
+  `-32007` — the code `verify_signed_request` already owns, decided before this
+  arm runs and never sharing its text — with ONE message whether the session
+  exists or not, and the read audits under its own label
+  `a2a.tasks/get.frame`. `Task.artifacts`/`Task.history` are optional and
+  omitted when absent (a status read stays byte-identical); `watch_frame` is
+  `gather` with `raw = false`, `Frame` is now pub with `Deserialize` and
+  `for_wire` (nulling `logPath`/`socket`/`instructionsPath`/`suggested`), the
+  door clamps tail to `1..=200`, a letter body to 40 lines and the frame to
+  256 KiB (oldest letter first, then the oldest output line, `truncated: true`),
+  and the `Cf` strip — every format character, not just the bidi marks, now
+  including the zero-width set — moved into the shared `clean_line`/
+  `clean_block`, so it applies to the local view too (one spec gap found: the
+  brief's §10 test list asks for a `linesAfter` refusal case that belongs to
+  S8's history ring, which does not exist yet; S6 keeps the Do's own table).
+  Tests: aoide-protocol 174, aoide-conduct 881, aoide-server 238 — all pass,
+  `cargo test --workspace --no-run` clean. S7–S10 open, in the brief's order
+  (cargo builds serialize).
 - Review pass over S1–S3 (same branch, `8236675` onward): the caller now
   holds its own winning claim to `valid_claimed_session_id` and refuses
   locally before signing (the "one predicate, both sides" line was
