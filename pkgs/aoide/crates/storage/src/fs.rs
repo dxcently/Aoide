@@ -1296,9 +1296,9 @@ mod tests {
     /// against a side effect).
     struct RootEnvGuard(Option<String>);
     impl RootEnvGuard {
-        fn set(scratch: &std::path::Path) -> Self {
+        fn set(root: &std::path::Path) -> Self {
             let saved = std::env::var("AOIDE_ROOT").ok();
-            std::env::set_var("AOIDE_ROOT", scratch);
+            std::env::set_var("AOIDE_ROOT", root);
             RootEnvGuard(saved)
         }
     }
@@ -1309,6 +1309,19 @@ mod tests {
                 None => std::env::remove_var("AOIDE_ROOT"),
             }
         }
+    }
+
+    /// A scratch path that IS absolute on THIS host, as a `String` for the
+    /// env-override APIs. The Unix literals these tests used to write
+    /// (`/tmp/...`) are not absolute on Windows — `Path::is_absolute` there
+    /// wants a drive or UNC prefix — so the override-resolution code would
+    /// silently ignore the value under test and the assertion would then
+    /// compare against the FALLBACK path instead of the override.
+    /// `temp_dir()` is absolute and writable on every host, so the same
+    /// assertion still proves the same thing: an absolute override wins and
+    /// a relative one is declined.
+    fn scratch(name: &str) -> String {
+        std::env::temp_dir().join(name).to_string_lossy().to_string()
     }
 
     #[test]
@@ -1361,24 +1374,24 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
 
-        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-test-stage");
-        assert_eq!(stage_dir(), std::path::PathBuf::from("/tmp/aoide-test-stage"));
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-test-stage"));
+        assert_eq!(stage_dir(), std::path::PathBuf::from(scratch("aoide-test-stage")));
 
         // Empty and relative values are ignored — we fall back, never resolve a
         // runtime path against an arbitrary cwd. `AOIDE_ROOT` pinned to a
         // scratch dir (see `RootEnvGuard`'s doc) so the assertion below is
         // deterministic across machines rather than depending on this box's
         // actual `$HOME`.
-        let _root = RootEnvGuard::set(std::path::Path::new("/tmp/aoide-test-root"));
+        let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-test-root")));
         std::env::set_var("AOIDE_STAGE_DIR", "");
         assert!(stage_dir().is_absolute());
-        assert_eq!(stage_dir(), std::path::PathBuf::from("/tmp/aoide-test-root/song/stage"));
+        assert_eq!(stage_dir(), std::path::PathBuf::from(scratch("aoide-test-root/song/stage")));
         std::env::set_var("AOIDE_STAGE_DIR", "relative/stage");
-        assert_eq!(stage_dir(), std::path::PathBuf::from("/tmp/aoide-test-root/song/stage"));
+        assert_eq!(stage_dir(), std::path::PathBuf::from(scratch("aoide-test-root/song/stage")));
 
         // Absent → falls back to `$AOIDE_ROOT/song/stage`.
         std::env::remove_var("AOIDE_STAGE_DIR");
-        assert_eq!(stage_dir(), std::path::PathBuf::from("/tmp/aoide-test-root/song/stage"));
+        assert_eq!(stage_dir(), std::path::PathBuf::from(scratch("aoide-test-root/song/stage")));
 
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
@@ -1393,22 +1406,22 @@ mod tests {
 
         // Point the stage at `<tmp>/stage`; the song tree is its parent, so
         // the songbook resolves as a sibling of `stage/`.
-        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-song-test/stage");
-        assert_eq!(song_dir(), std::path::PathBuf::from("/tmp/aoide-song-test"));
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-song-test/stage"));
+        assert_eq!(song_dir(), std::path::PathBuf::from(scratch("aoide-song-test")));
         assert_eq!(
             songbook_notes("moonlight"),
-            std::path::PathBuf::from("/tmp/aoide-song-test/songbook/moonlight/livery.json")
+            std::path::PathBuf::from(scratch("aoide-song-test/songbook/moonlight/livery.json"))
         );
 
         // With `AOIDE_STAGE_DIR` absent, the song tree composes off
         // `$AOIDE_ROOT/song` (`RootEnvGuard` keeps this off `root()`'s real
         // fallback — see its doc).
-        let _root = RootEnvGuard::set(std::path::Path::new("/tmp/aoide-song-test-root"));
+        let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-song-test-root")));
         std::env::remove_var("AOIDE_STAGE_DIR");
-        assert_eq!(song_dir(), std::path::PathBuf::from("/tmp/aoide-song-test-root/song"));
+        assert_eq!(song_dir(), std::path::PathBuf::from(scratch("aoide-song-test-root/song")));
         assert_eq!(
             songbook_notes("x"),
-            std::path::PathBuf::from("/tmp/aoide-song-test-root/song/songbook/x/livery.json")
+            std::path::PathBuf::from(scratch("aoide-song-test-root/song/songbook/x/livery.json"))
         );
 
         match saved {
@@ -1425,29 +1438,29 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
 
-        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-drafts-test/stage");
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-drafts-test/stage"));
         assert_eq!(
             song_drafts_dir("sonata"),
-            std::path::PathBuf::from("/tmp/aoide-drafts-test/songbook/sonata/drafts")
+            std::path::PathBuf::from(scratch("aoide-drafts-test/songbook/sonata/drafts"))
         );
         assert_eq!(
             draft_dir("sonata", "neon-night"),
-            std::path::PathBuf::from("/tmp/aoide-drafts-test/songbook/sonata/drafts/neon-night")
+            std::path::PathBuf::from(scratch("aoide-drafts-test/songbook/sonata/drafts/neon-night"))
         );
 
         // With `AOIDE_STAGE_DIR` absent: `$AOIDE_ROOT/song/stage` →
         // songbook_dir("x") = `$AOIDE_ROOT/song/songbook/x` →
         // song_drafts_dir("x") = `$AOIDE_ROOT/song/songbook/x/drafts`
         // (`RootEnvGuard` keeps this off `root()`'s real fallback).
-        let _root = RootEnvGuard::set(std::path::Path::new("/tmp/aoide-drafts-test-root"));
+        let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-drafts-test-root")));
         std::env::remove_var("AOIDE_STAGE_DIR");
         assert_eq!(
             song_drafts_dir("x"),
-            std::path::PathBuf::from("/tmp/aoide-drafts-test-root/song/songbook/x/drafts")
+            std::path::PathBuf::from(scratch("aoide-drafts-test-root/song/songbook/x/drafts"))
         );
         assert_eq!(
             draft_dir("x", "y"),
-            std::path::PathBuf::from("/tmp/aoide-drafts-test-root/song/songbook/x/drafts/y")
+            std::path::PathBuf::from(scratch("aoide-drafts-test-root/song/songbook/x/drafts/y"))
         );
 
         match saved {
@@ -1465,10 +1478,10 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
 
-        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-run-qml-test/stage");
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-run-qml-test/stage"));
         assert_eq!(
             run_qml_dir(),
-            std::path::PathBuf::from("/tmp/run/qml"),
+            std::path::PathBuf::from(scratch("run/qml")),
             "run/qml is a sibling of song_dir(), not under stage/"
         );
 
@@ -1476,9 +1489,9 @@ mod tests {
         // song_dir() = `$AOIDE_ROOT/song` → run_qml_dir() =
         // `$AOIDE_ROOT/run/qml` (`RootEnvGuard` keeps this off `root()`'s
         // real fallback).
-        let _root = RootEnvGuard::set(std::path::Path::new("/tmp/aoide-run-qml-test-root"));
+        let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-run-qml-test-root")));
         std::env::remove_var("AOIDE_STAGE_DIR");
-        assert_eq!(run_qml_dir(), std::path::PathBuf::from("/tmp/aoide-run-qml-test-root/run/qml"));
+        assert_eq!(run_qml_dir(), std::path::PathBuf::from(scratch("aoide-run-qml-test-root/run/qml")));
 
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
@@ -1493,10 +1506,10 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
 
-        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-run-elements-test/stage");
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-run-elements-test/stage"));
         assert_eq!(
             run_elements_dir(),
-            std::path::PathBuf::from("/tmp/run/elements"),
+            std::path::PathBuf::from(scratch("run/elements")),
             "run/elements is a sibling of song_dir(), not under stage/"
         );
 
@@ -1504,11 +1517,11 @@ mod tests {
         // song_dir() = `$AOIDE_ROOT/song` → run_elements_dir() =
         // `$AOIDE_ROOT/run/elements` (`RootEnvGuard` keeps this off `root()`'s
         // real fallback).
-        let _root = RootEnvGuard::set(std::path::Path::new("/tmp/aoide-run-elements-test-root"));
+        let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-run-elements-test-root")));
         std::env::remove_var("AOIDE_STAGE_DIR");
         assert_eq!(
             run_elements_dir(),
-            std::path::PathBuf::from("/tmp/aoide-run-elements-test-root/run/elements")
+            std::path::PathBuf::from(scratch("aoide-run-elements-test-root/run/elements"))
         );
 
         match saved {
@@ -1527,19 +1540,19 @@ mod tests {
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let saved_flake = std::env::var("AOIDE_FLAKE_ROOT").ok();
 
-        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-flake-root-test/song/stage");
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-flake-root-test/song/stage"));
         std::env::remove_var("AOIDE_FLAKE_ROOT");
         assert!(
-            !flake_root().starts_with("/tmp/aoide-flake-root-test"),
+            !flake_root().starts_with(scratch("aoide-flake-root-test")),
             "an AOIDE_STAGE_DIR relocation must not move flake_root: {:?}",
             flake_root()
         );
         assert!(flake_root().ends_with("Aoide"));
 
-        std::env::set_var("AOIDE_FLAKE_ROOT", "/tmp/aoide-flake-root-test/fixture-flake");
+        std::env::set_var("AOIDE_FLAKE_ROOT", scratch("aoide-flake-root-test/fixture-flake"));
         assert_eq!(
             flake_root(),
-            std::path::PathBuf::from("/tmp/aoide-flake-root-test/fixture-flake"),
+            std::path::PathBuf::from(scratch("aoide-flake-root-test/fixture-flake")),
             "an explicit AOIDE_FLAKE_ROOT wins outright"
         );
 
@@ -1614,10 +1627,10 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_SONG_TEMPLATES").ok();
 
-        std::env::set_var("AOIDE_SONG_TEMPLATES", "/tmp/aoide-song-templates-test");
+        std::env::set_var("AOIDE_SONG_TEMPLATES", scratch("aoide-song-templates-test"));
         assert_eq!(
             song_templates_dir(),
-            Some(std::path::PathBuf::from("/tmp/aoide-song-templates-test"))
+            Some(std::path::PathBuf::from(scratch("aoide-song-templates-test")))
         );
 
         // Empty/relative values are ignored, same discipline as every other
@@ -2048,18 +2061,18 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
 
-        std::env::set_var("AOIDE_STATE_DIR", "/tmp/aoide-captures-test/state");
+        std::env::set_var("AOIDE_STATE_DIR", scratch("aoide-captures-test/state"));
         assert_eq!(
             captures_dir(),
-            std::path::PathBuf::from("/tmp/aoide-captures-test/state/captures")
+            std::path::PathBuf::from(scratch("aoide-captures-test/state/captures"))
         );
 
         // With `AOIDE_STATE_DIR` absent: `$AOIDE_ROOT/state` →
         // captures_dir() = `$AOIDE_ROOT/state/captures` (`RootEnvGuard` keeps
         // this deterministic across machines, see its doc).
-        let _root = RootEnvGuard::set(std::path::Path::new("/tmp/aoide-captures-test-root"));
+        let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-captures-test-root")));
         std::env::remove_var("AOIDE_STATE_DIR");
-        assert_eq!(captures_dir(), std::path::PathBuf::from("/tmp/aoide-captures-test-root/state/captures"));
+        assert_eq!(captures_dir(), std::path::PathBuf::from(scratch("aoide-captures-test-root/state/captures")));
 
         match saved {
             Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
@@ -2072,19 +2085,19 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STATE_DIR").ok();
 
-        std::env::set_var("AOIDE_STATE_DIR", "/tmp/aoide-pointer-test/state");
+        std::env::set_var("AOIDE_STATE_DIR", scratch("aoide-pointer-test/state"));
         assert_eq!(
             pointer_state_file(),
-            std::path::PathBuf::from("/tmp/aoide-pointer-test/state/pointer-pos.json")
+            std::path::PathBuf::from(scratch("aoide-pointer-test/state/pointer-pos.json"))
         );
 
         // `RootEnvGuard` keeps this deterministic across machines — see its
         // doc.
-        let _root = RootEnvGuard::set(std::path::Path::new("/tmp/aoide-pointer-test-root"));
+        let _root = RootEnvGuard::set(std::path::Path::new(&scratch("aoide-pointer-test-root")));
         std::env::remove_var("AOIDE_STATE_DIR");
         assert_eq!(
             pointer_state_file(),
-            std::path::PathBuf::from("/tmp/aoide-pointer-test-root/state/pointer-pos.json")
+            std::path::PathBuf::from(scratch("aoide-pointer-test-root/state/pointer-pos.json"))
         );
 
         match saved {
@@ -2330,8 +2343,8 @@ mod tests {
         let saved_home = std::env::var("HOME").ok();
         let saved_user = std::env::var("AOIDE_USER").ok();
 
-        std::env::set_var("AOIDE_ROOT", "/tmp/aoide-root-test");
-        assert_eq!(root(), std::path::PathBuf::from("/tmp/aoide-root-test"));
+        std::env::set_var("AOIDE_ROOT", scratch("aoide-root-test"));
+        assert_eq!(root(), std::path::PathBuf::from(scratch("aoide-root-test")));
 
         // Empty and relative values are ignored — falls back to the default,
         // same discipline every other override in this module holds.
@@ -2470,7 +2483,7 @@ mod tests {
         let home = std::env::temp_dir().join(format!("aoide-migrate-root-piecewise-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::env::set_var("HOME", &home);
-        std::env::set_var("AOIDE_STAGE_DIR", "/tmp/aoide-migrate-root-piecewise-elsewhere");
+        std::env::set_var("AOIDE_STAGE_DIR", scratch("aoide-migrate-root-piecewise-elsewhere"));
 
         let old_stage = home.join("Aoide").join("song").join("stage");
         let old_state = home.join("Aoide").join("state");

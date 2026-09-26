@@ -82,10 +82,17 @@ pub const OWNER_ONLY_MASK: u32 =
 
 /// What a READ-ONLY policy grants its owner: the bits needed to list the
 /// directory, read the file, and read its policy — and nothing that adds,
-/// writes, deletes or re-labels an entry. This is the native stand-in for
-/// `0o500`, used where a test needs a directory this process cannot write to.
+/// writes, deletes or inherits. This is the native stand-in for `0o500`, used
+/// where a test needs a directory this process cannot write to.
+///
+/// `WRITE_DAC` is in the mask on purpose, and it is not a data-write right: it
+/// is the owner's ability to RE-LABEL the object, which `0o500` also leaves
+/// intact on Unix (a mode is not ownership, and the owner may always `chmod`
+/// it back). Without it the very state the caller arranged could not be
+/// undone through this module — which is exactly how the first version of
+/// this mask failed its own test.
 pub const READ_ONLY_MASK: u32 =
-    FILE_READ_DATA | FILE_READ_EA | FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE;
+    FILE_READ_DATA | FILE_READ_EA | FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC | SYNCHRONIZE;
 
 /// What an existing object's DACL must cover before this module calls it
 /// owner-only: the whole [`OWNER_ONLY_MASK`], so an object this module
@@ -372,17 +379,28 @@ pub fn set_dir_access(path: &Path, access: u32) -> io::Result<()> {
 /// attached — never refused, because refusing would regress the Unix
 /// contract, which locks an existing directory down.
 ///
+/// **Absence is a state, not a failure.** The policy of an object that is not
+/// there cannot be read, so a directory that does not exist yet is created
+/// with the policy attached rather than opened-and-checked first — asking
+/// `dir_privacy` about a missing path is a `NotFound` error, and treating it
+/// as one would make "create it" unreachable.
+///
 /// The policy is read back before returning, so a filesystem that accepts the
 /// descriptor and ignores it is reported as the failure it is rather than
 /// leaving a directory entries can be listed from.
 pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
-    match dir_privacy(path)? {
-        None => return Ok(()),
-        Some(_) => {
-            if path.exists() {
+    match std::fs::symlink_metadata(path) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => create_dir(path, OWNER_ONLY_MASK)?,
+        Err(e) => return Err(e),
+        Ok(meta) if !meta.is_dir() => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{} exists and is not a directory", path.display()),
+            ))
+        }
+        Ok(_) => {
+            if dir_privacy(path)?.is_some() {
                 set_dir_access(path, OWNER_ONLY_MASK)?;
-            } else {
-                create_dir(path, OWNER_ONLY_MASK)?;
             }
         }
     }
