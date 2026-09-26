@@ -1556,13 +1556,66 @@ Item {
     }
 
     // ── the active window's title, dim, truncated ───────────────────────────
+    // An agent's terminal title leads with the harness's own spinner glyph
+    // (✳ ◑ ⠂ …), which animates in the title itself. The bar strips it and
+    // paints its own lamp in a reserved cell: the window's session state from
+    // hooks.json (sessions.json `windowAddress` → the active toplevel), a hard
+    // blink in and out while working, steady otherwise, the cell empty for a
+    // window with no session. The blink Timer runs only while it is shown.
+    readonly property string activeAddr:
+        Hyprland.activeToplevel && Hyprland.activeToplevel.address
+            ? root.normAddr(Hyprland.activeToplevel.address) : ""
+    readonly property string activeState: {
+        if (!root.activeAddr) return ""
+        var a = root.sessionRows
+        for (var i = 0; i < a.length; i++) {
+            var s = a[i]
+            if (!s || root.normAddr(s.windowAddress) !== root.activeAddr) continue
+            var ph = root.hookPhase["" + (s.sessionId || s.id || "")]
+            return root.normState(ph ? ph : s.state)
+        }
+        return ""
+    }
+    function stripSpinner(t) {
+        // one or two leading symbol glyphs, then a space: the harness spinner
+        // (a glyph is a code point that is no letter/digit in any case and
+        // no path or bracket start; astral glyphs are two UTF-16 units)
+        var cps = Array.from(t)
+        var n = 0
+        while (n < 2 && n < cps.length) {
+            var c = cps[n]
+            if (/\s/.test(c) || /[0-9~\/.\[(]/.test(c) || c.toUpperCase() !== c.toLowerCase()) break
+            n++
+        }
+        if (n === 0 || n >= cps.length || !/\s/.test(cps[n])) return t
+        return cps.slice(n + 1).join("").replace(/^\s+/, "")
+    }
+    property bool titleBlinkOn: true
+    Timer {
+        interval: 500; repeat: true
+        running: root.activeState === "working" && titleText.visible
+        onRunningChanged: root.titleBlinkOn = true
+        onTriggered: root.titleBlinkOn = !root.titleBlinkOn
+    }
+    Text {
+        id: titleLamp
+        y: root.textY
+        x: board.x + board.width + root.kit.cells(2)
+        visible: titleText.visible && root.activeState !== ""
+        opacity: root.activeState === "working" && !root.titleBlinkOn ? 0 : 1
+        text: root.kit.lampGlyph(root.activeState)
+        color: root.kit.lampColor(root.activeState)
+        font: root.kit.font
+        textFormat: Text.PlainText
+    }
     Text {
         id: titleText
         y: root.textY
-        x: board.x + board.width + root.kit.cells(2)
+        x: board.x + board.width + root.kit.cells(2) + (root.activeState !== "" ? root.kit.cells(2) : 0)
         width: Math.max(0, right.x - root.kit.cells(2) - x)
-        visible: width >= root.kit.cells(6)
-        text: (Hyprland.activeToplevel && Hyprland.activeToplevel.title) ? "" + Hyprland.activeToplevel.title : ""
+        visible: right.x - root.kit.cells(2) - board.x - board.width - root.kit.cells(2) >= root.kit.cells(8)
+        text: (Hyprland.activeToplevel && Hyprland.activeToplevel.title)
+            ? root.stripSpinner("" + Hyprland.activeToplevel.title) : ""
         color: root.kit.dim
         font: root.kit.font
         textFormat: Text.PlainText
