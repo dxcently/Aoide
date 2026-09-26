@@ -34,14 +34,15 @@ pub use aoide_storage::stage::{load_stage, sessions_path, write_stage};
 
 // ── The DAG computation (pure; shared by view / emit / render) ──────────────
 
-/// Is `cwd` inside the project rooted at `root`? (path-component-aware).
+/// Is `cwd` inside the project rooted at `root`? The boundary test lives in
+/// ONE seam, `aoide_storage::fs::path_is_under`, because it is a fact about
+/// this host's path grammar rather than about projects: it accepts either
+/// separator, strips a `\\?\` verbatim prefix, and compares on a DIRECTORY
+/// boundary. The `/` this used to hard-code was a real defect — on native
+/// Windows no cwd ever matched a root, so the roster silently lost every
+/// `project:… → session:… "anchors"` edge.
 fn cwd_under(cwd: &str, root: &str) -> bool {
-    let root = if root.len() > 1 {
-        root.trim_end_matches('/')
-    } else {
-        root
-    };
-    cwd == root || cwd.starts_with(&format!("{}/", root))
+    aoide_storage::fs::path_is_under(cwd, root)
 }
 
 /// The project a session's own `workspaceProject` default names, when it

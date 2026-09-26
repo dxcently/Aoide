@@ -384,12 +384,25 @@ fn link_one_skill(link: &Path, source: &Path) -> Result<SkillOutcome, String> {
                 std::fs::create_dir_all(parent)
                     .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
             }
-            std::os::unix::fs::symlink(source, link).map_err(|e| {
+            link_dir(source, link).map_err(|e| {
                 format!("cannot link {} -> {}: {e}", link.display(), source.display())
             })?;
             Ok(SkillOutcome::Linked(link.to_path_buf(), source.to_path_buf()))
         }
     }
+}
+
+/// Point `link` at the repo skill directory `source` — the symlink itself now
+/// lives in ONE seam, `aoide_storage::fs::link_dir`, because the two hosts
+/// differ on whether the target's KIND is part of the call (Unix's
+/// `symlink(2)` is kind-agnostic; Windows has two calls and asks the creator),
+/// and `cli`'s `onboard` needs the identical capability. This name stays so
+/// every call site in this module is unchanged; the body is the seam's, never a
+/// second copy. A refused creation (a native Windows process without the
+/// developer-mode privilege has no `SeCreateSymbolicLinkPrivilege`) surfaces
+/// its own error to the caller through the `map_err` above, never swallowed.
+fn link_dir(source: &Path, link: &Path) -> std::io::Result<()> {
+    aoide_storage::fs::link_dir(source, link)
 }
 
 /// One skill's link outcome as `--json` detail (`skills` array).
@@ -857,6 +870,14 @@ mod tests {
         }
     }
 
+    /// GATED on Unix with its reason: the skill link itself. `hooks install`
+    /// links a repo skill with a symlink, and on native Windows that call needs
+    /// `SeCreateSymbolicLinkPrivilege` (developer mode or an elevated token) —
+    /// measured: the link is refused, so this idempotence contract cannot be
+    /// exercised there. The refusal is not swallowed by the code; it surfaces
+    /// through `link_dir`'s own `map_err`. No native twin exists for the
+    /// idempotence contract, and that is stated rather than implied.
+    #[cfg(unix)]
     #[test]
     fn kimi_install_creates_merges_and_is_idempotent() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1226,7 +1247,7 @@ mod tests {
             "fixture assumes the repo ships at least two skills (aoide, memory-handoff)"
         );
         for (name, source) in &repo_skills_list {
-            std::os::unix::fs::symlink(source, skills.join(name)).unwrap();
+            link_dir(source, &skills.join(name)).unwrap();
         }
 
         let out = hooks_install(&install_inv("claude", false));
@@ -1424,6 +1445,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// GATED on Unix with its reason: the conflict it stages is a symlink the
+    /// fixture itself creates (the second target), and native Windows refuses
+    /// that call without `SeCreateSymbolicLinkPrivilege` — see
+    /// `kimi_install_creates_merges_and_is_idempotent`'s own gate for the
+    /// measurement. No native twin for this refusal shape.
+    #[cfg(unix)]
     #[test]
     fn claude_skill_conflict_is_a_taught_refusal_never_an_overwrite() {
         if skill_source().is_none() {
@@ -1464,7 +1491,7 @@ mod tests {
         std::fs::remove_file(&link).unwrap();
         let elsewhere = root.join("elsewhere");
         std::fs::create_dir_all(&elsewhere).unwrap();
-        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        link_dir(&elsewhere, &link).unwrap();
         let out2 = hooks_install(&install_inv("claude", false));
         assert_eq!(out2.status, aoide_protocol::output::Status::Error);
         assert!(out2.message.contains("already a symlink to"), "msg: {}", out2.message);

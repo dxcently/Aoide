@@ -424,7 +424,10 @@ mod tests {
     use crate::graph::send::session_send;
     use crate::graph::session_store::do_session_start;
     use crate::graph::testutil::*;
+    #[cfg(unix)]
     use std::os::unix::net::UnixListener;
+    #[cfg(windows)]
+    use aoide_protocol::win_unix::UnixListener;
 
     fn pending_invocation(path: &[&str], args: &[&str]) -> Invocation {
         Invocation {

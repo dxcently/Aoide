@@ -60,9 +60,14 @@ use aoide_storage::fs::{conducting_stage_dir, with_stage_lock};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashSet;
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
-#[cfg(test)]
+#[cfg(windows)]
+use aoide_protocol::win_unix::UnixStream;
+#[cfg(all(test, unix))]
 use std::os::unix::net::UnixListener;
+#[cfg(all(test, windows))]
+use aoide_protocol::win_unix::UnixListener;
 use std::path::{Path, PathBuf};
 
 /// The gap between the text payload write and the trailing submit-keystroke
@@ -4891,6 +4896,13 @@ mod tests {
     /// body to curl's stdin (`--data-binary @-`), so a shim that exits without
     /// reading turns a descheduled caller's write into an EPIPE
     /// (`crates/AGENTS.md`) — and the captured copy IS the assertion.
+    ///
+    /// GATED on Unix with its reason (its callers are gated with it): the shim
+    /// is a `#!/bin/sh` SCRIPT made executable by a mode, and `CreateProcess`
+    /// understands neither a shebang nor an extension-less name — the same
+    /// gate and the same reason the client crate's own curl-shim group
+    /// carries. What keeps this off Windows is the FIXTURE, not the subject.
+    #[cfg(unix)]
     fn install_capturing_curl(
         tag: &str,
         capture: &Path,
@@ -4923,6 +4935,9 @@ mod tests {
         (shim_dir, saved_path)
     }
 
+    /// GATED on Unix with its reason (see [`install_capturing_curl`]): the
+    /// teardown half of the curl-shim fixture, gated with the shim it serves.
+    #[cfg(unix)]
     fn uninstall_capturing_curl(shim_dir: &Path, saved_path: Option<String>) {
         match saved_path {
             Some(p) => std::env::set_var("PATH", p),
@@ -4931,13 +4946,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(shim_dir);
     }
 
-    /// The fixture both claim tests share: isolated stage/state, a VERIFIED
+    /// The fixture both claim tests share — GATED on Unix with its reason (see
+    /// [`install_capturing_curl`]): isolated stage/state, a VERIFIED
     /// node record and that node's cached graph naming one session. Isolation
     /// is what makes the verified node signable with no daemon anywhere —
     /// `sign_headers_for_node` mints its identity under `AOIDE_STATE_DIR`,
     /// which is this temp dir. Straight at `deliver_remote_with`, so no node
     /// registry is involved (the record is passed in) and `--to` resolution
     /// reads only the cache written here.
+    /// GATED on Unix with its reason (see [`install_capturing_curl`]): the two
+    /// claim tests it serves are gated with it.
+    #[cfg(unix)]
     fn remote_claim_fixture(tag: &str) -> (PathBuf, aoide_storage::node_store::Node) {
         let root = unique_stage(tag);
         let stage = root.join("stage");
@@ -4968,6 +4987,10 @@ mod tests {
     /// daemon, no seal key in the picture); the captured stdin is the proof
     /// the value actually rides the wire, on an ordinary inject to the
     /// resolved remote session.
+    /// GATED on Unix with its reason (see [`install_capturing_curl`]): the
+    /// fixture is a `#!/bin/sh` shim `CreateProcess` cannot launch — the
+    /// subject (the signed `from` claim on the wire) is host-neutral.
+    #[cfg(unix)]
     #[test]
     fn send_to_carries_the_attested_parent_as_its_from_claim() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -5007,6 +5030,10 @@ mod tests {
     /// NO claim (the same delivery it gets today with no daemon to attest
     /// against) and names the reason on one warning line, rather than failing
     /// a send that works.
+    /// GATED on Unix with its reason (see [`install_capturing_curl`]): the
+    /// fixture is a `#!/bin/sh` shim `CreateProcess` cannot launch — the
+    /// subject (an unruly claim degrades to no claim) is host-neutral.
+    #[cfg(unix)]
     #[test]
     fn an_unruly_claim_still_sends_without_claiming_a_parent() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -5433,6 +5460,16 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&stage);
     }
+    /// A path, ESCAPED for embedding inside a hand-built JSON string literal.
+    /// A Windows path carries `\`, and `format!`-ing it raw into a `r#"…
+    /// "cwd": "{}" …"#` template makes the payload invalid JSON there (measured:
+    /// the hook answers `no-op (empty-or-malformed-stdin)`, and a transcript
+    /// refresh resolves no model at all) — the same fixture defect the eidolon
+    /// presence files carried. Every payload in this module goes through here.
+    fn jp(p: &std::path::Path) -> String {
+        p.display().to_string().replace('\\', r"\\")
+    }
+
     #[test]
     fn check_lane_note_flows_from_a_configured_verify_command_through_the_hook_outcome() {
         // Task #139: proves the WIRING — that `aoide_upkeep::checklane`'s note
@@ -5450,7 +5487,11 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let config_root = unique_stage("check-lane-wiring-config");
         std::env::set_var("AOIDE_ROOT", &config_root);
-        aoide_storage::config::set("upkeep.verifyCommand", "false").unwrap();
+        // An always-failing command, spelled in BOTH hosts' shell language:
+        // `sh -c "exit 1"` and `cmd /C "exit 1"` are the same verdict, where
+        // the literal `false` is a POSIX program native Windows does not have
+        // (the lane hands this string to `protocol::host_shell`).
+        aoide_storage::config::set("upkeep.verifyCommand", "exit 1").unwrap();
 
         // A real git repo the lane can actually scan (unlike this file's other
         // hook tests, which use a fictional, nonexistent `cwd` since they
@@ -5473,7 +5514,7 @@ mod tests {
         // whatever `do_session_start` already said.
         let out = hook_from_str(&format!(
             r#"{{ "session_id": "wire1", "hook_event_name": "SessionStart", "cwd": "{}" }}"#,
-            tree.display()
+            jp(&tree)
         ));
         assert_eq!(out.status, aoide_protocol::output::Status::Ok);
         assert!(out.message.contains("already red"), "{}", out.message);
@@ -5490,7 +5531,7 @@ mod tests {
         // as they would with the lane off.
         let out2 = hook_from_str(&format!(
             r#"{{ "session_id": "wire1", "hook_event_name": "Stop", "cwd": "{}" }}"#,
-            tree.display()
+            jp(&tree)
         ));
         assert!(!out2.message.contains("check lane"), "{}", out2.message);
         assert!(out2.data.unwrap()["checkLane"].is_null());
@@ -5513,7 +5554,12 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let config_root = unique_stage("check-lane-delivery-config");
         std::env::set_var("AOIDE_ROOT", &config_root);
-        aoide_storage::config::set("upkeep.verifyCommand", "true").unwrap();
+        // A GREEN baseline, spelled in BOTH hosts' shell language: the POSIX
+        // `true` builtin does not exist as a program on native Windows, where
+        // `cmd /C true` exits 1 — which reads as an already-RED verify command
+        // and makes a settled start speak when this test asserts it stays
+        // silent. `exit 0` is the same verdict under `sh -c` and `cmd /C`.
+        aoide_storage::config::set("upkeep.verifyCommand", "exit 0").unwrap();
 
         let tree = unique_stage("check-lane-delivery-tree");
         let run_git = |args: &[&str]| {
@@ -5531,7 +5577,7 @@ mod tests {
         // Settled start: green baseline, nothing to flag.
         let start = hook_from_str(&format!(
             r#"{{ "session_id": "wire2", "hook_event_name": "SessionStart", "cwd": "{}" }}"#,
-            tree.display()
+            jp(&tree)
         ));
         assert!(!start.message.contains("check lane"), "{}", start.message);
 
@@ -5548,7 +5594,7 @@ mod tests {
         // `check lane` text, no `checkLane` data.
         let stop = hook_from_str(&format!(
             r#"{{ "session_id": "wire2", "hook_event_name": "Stop", "cwd": "{}" }}"#,
-            tree.display()
+            jp(&tree)
         ));
         assert!(!stop.message.contains("check lane"), "{}", stop.message);
         assert!(stop.data.unwrap()["checkLane"].is_null());
@@ -5593,7 +5639,11 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         let config_root = unique_stage("check-lane-midturn-config");
         std::env::set_var("AOIDE_ROOT", &config_root);
-        aoide_storage::config::set("upkeep.verifyCommand", "false").unwrap();
+        // An always-failing command, spelled in BOTH hosts' shell language:
+        // `sh -c "exit 1"` and `cmd /C "exit 1"` are the same verdict, where
+        // the literal `false` is a POSIX program native Windows does not have
+        // (the lane hands this string to `protocol::host_shell`).
+        aoide_storage::config::set("upkeep.verifyCommand", "exit 1").unwrap();
 
         let tree = unique_stage("check-lane-midturn-tree");
         std::fs::create_dir_all(&tree).unwrap();
@@ -5601,7 +5651,7 @@ mod tests {
         // Settled start: baseline is red, flagged and inherited.
         let start = hook_from_str(&format!(
             r#"{{ "session_id": "wire3", "hook_event_name": "SessionStart", "cwd": "{}" }}"#,
-            tree.display()
+            jp(&tree)
         ));
         assert!(start.message.contains("already red"), "{}", start.message);
 
@@ -5616,13 +5666,18 @@ mod tests {
 
         // Flip the command green — a fresh lane run would see this and go
         // quiet; the recorded baseline must not.
-        aoide_storage::config::set("upkeep.verifyCommand", "true").unwrap();
+        // A GREEN baseline, spelled in BOTH hosts' shell language: the POSIX
+        // `true` builtin does not exist as a program on native Windows, where
+        // `cmd /C true` exits 1 — which reads as an already-RED verify command
+        // and makes a settled start speak when this test asserts it stays
+        // silent. `exit 0` is the same verdict under `sh -c` and `cmd /C`.
+        aoide_storage::config::set("upkeep.verifyCommand", "exit 0").unwrap();
 
         // An auto-compact fires SessionStart mid-turn (stored phase is still
         // `working`).
         let midturn = hook_from_str(&format!(
             r#"{{ "session_id": "wire3", "hook_event_name": "SessionStart", "cwd": "{}" }}"#,
-            tree.display()
+            jp(&tree)
         ));
         assert!(
             midturn.message.contains("already red"),
@@ -6337,7 +6392,7 @@ mod tests {
         .unwrap();
         let pay = format!(
             r#"{{ "session_id": "pc1", "hook_event_name": "PostToolUse", "tool_name": "bash", "cwd": "/proj", "transcript_path": "{}", "context_ceiling": 1500000 }}"#,
-            tx.display()
+            jp(&tx)
         );
         hook_for_profile(pi, &pay);
         let f: SessionsFile = load_stage(&sessions_path()).unwrap();
@@ -6357,7 +6412,7 @@ mod tests {
         // (claude-haiku-4-5 → 200k).
         let pay = format!(
             r#"{{ "session_id": "pc1", "hook_event_name": "PostToolUse", "tool_name": "bash", "cwd": "/proj", "transcript_path": "{}" }}"#,
-            tx.display()
+            jp(&tx)
         );
         hook_for_profile(pi, &pay);
         assert_eq!(ceil(&load_stage(&sessions_path()).unwrap()), Some(200_000));

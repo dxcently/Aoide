@@ -3,6 +3,16 @@
 //! hyprctl seam, phase-② pid-ancestry window discovery, the authoritative
 //! `socket2` event listener, and the untracked-terminal (`win:*`)
 //! synthetic-record reconciler.
+//!
+//! **`allow(dead_code)` on native Windows, stated once.** Phase-② discovery
+//! (`discover_window_address`, `ancestry_parent`, `resolve_registration_parent`)
+//! is called ONLY from the conducted session's registration — the refused PTY
+//! capability on that host — so nothing there can reach it, and `#[cfg(unix)]`
+//! item-by-item is churn the ConPTY slice (W5) un-does. Scoped to `cfg(windows)`;
+//! Unix keeps every warning it had. The compositor adapter itself degrades on
+//! both hosts through its own "no adapter" path, which is untouched.
+
+#![cfg_attr(windows, allow(dead_code))]
 
 use super::codex_app::sync_codex_app_threads;
 use super::conduct::proc_cwd;
@@ -14,7 +24,10 @@ use super::model::{
 use aoide_storage::fs::with_stage_lock;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
+#[cfg(windows)]
+use aoide_protocol::win_unix::UnixStream;
 use std::path::PathBuf;
 
 /// Normalise a Hyprland window address for comparison: lowercased, with any
@@ -1772,6 +1785,10 @@ mod tests {
         assert_eq!(out[0].workspace_project, None);
     }
 
+    /// GATED on Unix with its reason (see `testutil::fake_hyprctl`): the
+    /// fixture is a `#!/bin/sh` shim `CreateProcess` cannot launch, over a
+    /// compositor native Windows does not run.
+    #[cfg(unix)]
     #[test]
     fn the_sweep_stamps_the_default_at_birth_and_never_on_a_move() {
         // The compositor stamp site, end to end: the sweep resolves our own
@@ -1834,8 +1851,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(&stage);
     }
 
+    /// The host WITHOUT a compositor — the arm native Windows runs, and the one
+    /// the adapter's whole "no adapter" posture rests on: an unset
+    /// `HYPRLAND_INSTANCE_SIGNATURE` means no guess is ever made.
     #[test]
-    fn focused_workspace_reads_the_compositor_and_refuses_a_host_without_one() {
+    fn focused_workspace_refuses_a_host_without_a_compositor() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_sig = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok();
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        assert_eq!(focused_workspace(), None, "off-Hyprland: no guess, ever");
+        match saved_sig {
+            Some(v) => std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", v),
+            None => std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE"),
+        }
+    }
+
+    /// The compositor-PRESENT half of that pair — GATED on Unix with its
+    /// reason: the fixture is a `#!/bin/sh` shim (`testutil::fake_hyprctl`)
+    /// that `CreateProcess` cannot launch at all (no shebang, no extension),
+    /// and the subject is a compositor native Windows does not have — the same
+    /// gate the client crate's shim-driven groups carry.
+    #[cfg(unix)]
+    #[test]
+    fn focused_workspace_reads_the_compositor() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_sig = std::env::var("HYPRLAND_INSTANCE_SIGNATURE").ok();
         std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");

@@ -42,7 +42,10 @@ use aoide_storage::fs::session_logs_dir;
 use aoide_storage::undying::{load_undying, save_undying, set_undying};
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::os::unix::process::CommandExt;
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
+#[cfg(windows)]
+use aoide_protocol::win_unix::UnixStream;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -215,23 +218,18 @@ fn read_instructions(spec: &str) -> Result<String, String> {
 
 /// Write a managed task run's INSTRUCTION SIDECAR once —
 /// `state/sessions/<id>.instructions.md`, the same directory and lifecycle
-/// as that session's PTY log (`session_logs_dir`). Mode `0600`, created
-/// exclusively (`create_new`): the file is write-once by construction, so a
-/// second write for the same session id is a taught error rather than a
-/// silent overwrite of the instructions a run was started with. Returns the
-/// absolute path.
+/// as that session's PTY log (`session_logs_dir`). Private (`0600`'s policy,
+/// attached AT creation by the ONE seam that owns that policy on each host —
+/// `aoide_storage::fs::create_new_private`), created exclusively: the file is
+/// write-once by construction, so a second write for the same session id is a
+/// taught error rather than a silent overwrite of the instructions a run was
+/// started with. Returns the absolute path.
 fn write_instructions_sidecar(id: &str, text: &str) -> Result<String, String> {
     use std::io::Write as _;
-    use std::os::unix::fs::OpenOptionsExt;
     let dir = session_logs_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let path = dir.join(format!("{id}.instructions.md"));
-    let mut file = match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&path)
-    {
+    let mut file = match aoide_storage::fs::create_new_private(&path) {
         Ok(f) => f,
         // Write-once, TAUGHT: a second write for one session id is not a raw
         // io error — it names the stale file and both ways out, because a
@@ -299,19 +297,21 @@ pub fn live_run_refusal(slug: &str, held_by: &str, started_at: &str) -> String {
     )
 }
 
-/// Spawn `argv0` with `args`, detached into its own session (`setsid`) with
-/// stdio nulled, so it outlives this call — the exact posture both the
-/// headless re-exec and the windowed terminal exec need; only WHAT gets
-/// exec'd differs between the two callers. `cwd`, when given, becomes the
-/// spawned process's own working directory (P-D8): for the windowed branch
-/// that is the TERMINAL EMULATOR's cwd, which every terminal this codebase
-/// targets starts its own shell/child in by default — the mechanism
-/// `resurrect` relies on to reopen a revived agent in its original project
-/// directory without a `--cwd` flag on `conduct`/`session_conduct` itself
-/// (that process derives its OWN `cwd` from `std::env::current_dir()` at
-/// registration, so setting the terminal's cwd here is sufficient). `None`
-/// (every pre-P-D8 caller) leaves the child on this process's own cwd,
-/// unchanged from before.
+/// Spawn `argv0` with `args`, DETACHED into its own session/process group with
+/// stdio nulled, so it outlives this call — the exact posture both the headless
+/// re-exec and the windowed terminal exec need; only WHAT gets exec'd differs
+/// between the two callers. `cwd`, when given, becomes the spawned process's
+/// own working directory (P-D8): for the windowed branch that is the TERMINAL
+/// EMULATOR's cwd, which every terminal this codebase targets starts its own
+/// shell/child in by default — the mechanism `resurrect` relies on to reopen a
+/// revived agent in its original project directory without a `--cwd` flag on
+/// `conduct`/`session_conduct` itself (that process derives its OWN `cwd` from
+/// `std::env::current_dir()` at registration, so setting the terminal's cwd
+/// here is sufficient). `None` (every pre-P-D8 caller) leaves the child on
+/// this process's own cwd, unchanged from before.
+///
+/// The detachment itself is `aoide_storage::fs::detach` — ONE seam, shared with
+/// `a2a`'s handler spawn rather than spelled twice (`crates/AGENTS.md`).
 fn spawn_detached(
     argv0: impl AsRef<std::ffi::OsStr>,
     args: &[String],
@@ -326,16 +326,12 @@ fn spawn_detached(
     if let Some(dir) = cwd.filter(|d| !d.is_empty()) {
         command.current_dir(dir);
     }
-    // SAFETY: `setsid()` is async-signal-safe and the only call made in this
-    // pre_exec hook (same discipline as the two call sites this helper
-    // replaces) — it detaches the child into its own session so it survives
-    // THIS call's own process lifetime.
-    unsafe {
-        command.pre_exec(|| {
-            let _ = libc::setsid();
-            Ok(())
-        });
-    }
+    // The detachment is ONE seam, `aoide_storage::fs::detach` — Unix's
+    // `setsid(2)` in a `pre_exec` hook, native Windows' `DETACHED_PROCESS |
+    // CREATE_NEW_PROCESS_GROUP` flags — called by `a2a`'s handler spawn too,
+    // never a second copy (`crates/AGENTS.md`). After it returns, the child is
+    // in its own group, owns no inherited console, and outlives this call.
+    aoide_storage::fs::detach(&mut command);
     command.spawn()
 }
 
@@ -495,7 +491,7 @@ fn resolve_windowed_argv(
 fn wait_for(path: &std::path::Path, budget: Duration) -> bool {
     let deadline = Instant::now() + budget;
     loop {
-        if std::os::unix::net::UnixStream::connect(path).is_ok() {
+        if UnixStream::connect(path).is_ok() {
             return true;
         }
         if Instant::now() >= deadline {
@@ -1058,6 +1054,11 @@ mod tests {
     // end-to-end tests need the identical fixture; glob-imported above via
     // `use crate::graph::testutil::*;`.
 
+    /// GATED on Unix with its reason: the child is `conduct --headless`, refused
+    /// BY NAME on a host without a PTY (see
+    /// `a_banner_containing_the_prompt_label_never_buys_a_verified_delivery`'s
+    /// gate).
+    #[cfg(unix)]
     #[test]
     fn spawn_registers_a_detached_headless_child_and_mirrors_its_log() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1174,6 +1175,11 @@ mod tests {
     /// actually registers, the spawned id lands in `state/undying.json` —
     /// the headless arm exercises this with no terminal needed, asserting on
     /// the undying store directly, never on a process.
+    /// GATED on Unix with its reason: the child is `conduct --headless`, refused
+    /// BY NAME on a host without a PTY (see
+    /// `a_banner_containing_the_prompt_label_never_buys_a_verified_delivery`'s
+    /// gate).
+    #[cfg(unix)]
     #[test]
     fn undying_flag_marks_the_spawned_id_once_registered() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1266,6 +1272,11 @@ mod tests {
     /// recorded under the wrapper — fired through the REAL hook door
     /// (`session hook`) from a process whose `AOIDE_SESSION_ID` is the
     /// wrapper's, exactly as a harness's own hook subprocess runs.
+    /// GATED on Unix with its reason: the child is `conduct --headless`, refused
+    /// BY NAME on a host without a PTY (see
+    /// `a_banner_containing_the_prompt_label_never_buys_a_verified_delivery`'s
+    /// gate).
+    #[cfg(unix)]
     #[test]
     fn prompt_is_injected_once_the_harness_reports_itself_ready() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1336,6 +1347,11 @@ mod tests {
     /// is typed into it and the result says so. The shim echoes whatever it is
     /// handed, so a prompt typed anyway would be visible in its log — this test
     /// fails on an early inject, not merely on a missing status string.
+    /// GATED on Unix with its reason: the child is `conduct --headless`, refused
+    /// BY NAME on a host without a PTY (see
+    /// `a_banner_containing_the_prompt_label_never_buys_a_verified_delivery`'s
+    /// gate).
+    #[cfg(unix)]
     #[test]
     fn prompt_is_reported_not_ready_and_nothing_is_typed_when_the_harness_never_starts() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1487,6 +1503,15 @@ mod tests {
     /// `delivered` in ~393ms — the strongest claim, plus an inject before the
     /// prompt existed. It must now be `delivered-unverified`, and the claim
     /// must survive the settle window rather than jumping the queue.
+    /// GATED on Unix with its reason: the child this spawns is `conduct
+    /// --headless`, refused BY NAME on a host without a PTY (ConPTY is absent —
+    /// `conduct`'s module note). The detached, NON-PTY spawn is native and
+    /// covered by `without_undying_flag_a_spawn_marks_nothing`,
+    /// `plain_spawn_without_windowed_never_checks_the_display_or_template`,
+    /// `spawn_of_a_nonexistent_binary_registers_no_ghost_session` and
+    /// `prompt_is_skipped_honestly_when_registration_never_happens`, all green
+    /// on ThinkChiyo.
+    #[cfg(unix)]
     #[test]
     fn a_banner_containing_the_prompt_label_never_buys_a_verified_delivery() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1528,6 +1553,11 @@ mod tests {
     /// prompt is reported `not-ready` and NOTHING is typed (the shim echoes
     /// whatever it is handed, so an early inject would show up in its log) —
     /// never the review's 357ms-`delivered`.
+    /// GATED on Unix with its reason: the child is `conduct --headless`,
+    /// refused BY NAME on a host without a PTY (see
+    /// `a_banner_containing_the_prompt_label_never_buys_a_verified_delivery`'s
+    /// gate for the native cover of the detached spawn itself).
+    #[cfg(unix)]
     #[test]
     fn a_leftover_child_record_under_a_reused_id_does_not_buy_an_early_inject() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1583,6 +1613,11 @@ mod tests {
     /// banner and then spends seconds before its prompt. The tree cannot know
     /// when it is ready, so it says exactly that — `delivered-unverified` —
     /// never `delivered`.
+    /// GATED on Unix with its reason: the child is `conduct --headless`, refused
+    /// BY NAME on a host without a PTY (see
+    /// `a_banner_containing_the_prompt_label_never_buys_a_verified_delivery`'s
+    /// gate).
+    #[cfg(unix)]
     #[test]
     fn an_unregistered_target_is_injected_unverified_and_says_so() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

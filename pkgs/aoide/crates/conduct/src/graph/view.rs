@@ -1397,7 +1397,11 @@ mod tests {
         let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (root, _env) = isolated("view-for-wire");
         let sock = root.join("run/run-1.sock");
-        let _listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        #[cfg(unix)]
+        use std::os::unix::net::UnixListener;
+        #[cfg(windows)]
+        use aoide_protocol::win_unix::UnixListener;
+        let _listener = UnixListener::bind(&sock).unwrap();
         let mut rec = crate::graph::testutil::session(
             "run-1",
             &root.to_string_lossy(),

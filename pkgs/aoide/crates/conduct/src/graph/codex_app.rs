@@ -311,41 +311,43 @@ pub(crate) fn live_thread_locks(dir: &Path) -> Result<Vec<PathBuf>, ScanFailure>
 }
 
 /// Is the thread-writer lock at `path` currently HELD by some process? The
-/// try-flock itself IS the liveness signal — never `/proc`, never a pid read
+/// try-lock itself IS the liveness signal — never `/proc`, never a pid read
 /// out of the file (the file is 0 bytes and carries no pid). A three-way
-/// answer: `Some(true)` — `LOCK_EX | LOCK_NB` failed (`EWOULDBLOCK`), so
-/// another open file description already holds it; `Some(false)` — the file
-/// is simply gone (`NotFound` on open), positively released, not merely
-/// unobserved; `None` — the open failed for any OTHER reason, which is not
-/// evidence either way. Opens `O_RDONLY` only, never `O_CREAT`, so a
-/// missing lock file is never brought into existence by asking, and a lock
-/// this probe DID acquire is released and the fd closed in the same breath
-/// (`file` drops at the end of this function) — the probe itself never
-/// leaves a lock held.
-#[cfg(unix)]
+/// answer: `Some(true)` — the exclusive non-blocking lock failed, so another
+/// open file description already holds it; `Some(false)` — the file is simply
+/// gone (`NotFound` on open), positively released, not merely unobserved;
+/// `None` — the open or the lock call failed for any OTHER reason, which is
+/// not evidence either way. Opens READ-ONLY and never creates, so a missing
+/// lock file is never brought into existence by asking, and a lock this probe
+/// DID acquire is released and the fd closed in the same breath (`file` drops
+/// at the end of this function) — the probe itself never leaves a lock held.
+///
+/// **The primitive is `aoide_storage::fs`'s, not a private one**: the same
+/// `flock(LOCK_EX | LOCK_NB)` / `LockFileEx(LOCKFILE_FAIL_IMMEDIATELY)` pair
+/// that crate's own lock files use (`pkgs/aoide/crates/AGENTS.md`, "no
+/// cross-crate copying" — widen the symbol, never fork it), so this probe's
+/// contract is identical on both hosts and there is no platform it cannot
+/// run on.
 pub(crate) fn lock_is_held(path: &Path) -> Option<bool> {
-    use std::os::unix::io::AsRawFd;
     let file = match std::fs::OpenOptions::new().read(true).open(path) {
         Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Some(false),
         Err(_) => return None,
     };
-    let fd = file.as_raw_fd();
-    let acquired = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } == 0;
-    if acquired {
-        unsafe {
-            libc::flock(fd, libc::LOCK_UN);
+    match aoide_storage::fs::try_lock_exclusive(&file) {
+        // We took it, so nobody else held it. The probe releases the lock and
+        // closes the fd in the same breath (the `File` drops at the end of
+        // this function) — it never leaves a lock held.
+        Ok(true) => {
+            aoide_storage::fs::unlock(&file);
+            Some(false)
         }
+        // The lock violation IS the positive answer: some other open file
+        // description holds it.
+        Ok(false) => Some(true),
+        // The probe could not run at all — not evidence either way.
+        Err(_) => None,
     }
-    Some(!acquired)
-}
-
-/// Unsupported on this platform: no probe runs, so the honest answer is
-/// unknown (`None`), never a positive release that would read as an
-/// all-released gather and drop enrolled records.
-#[cfg(not(unix))]
-pub(crate) fn lock_is_held(_path: &Path) -> Option<bool> {
-    None
 }
 
 /// The whole system's process table, `ps -axo pid=,ppid=,command=` — the
@@ -1427,22 +1429,23 @@ mod tests {
 
     #[test]
     fn a_lock_another_fd_holds_reads_as_live() {
-        use std::os::unix::io::AsRawFd;
         let dir = unique_stage("codex-lock-live");
         let path = dir.join("thread.lock");
         std::fs::write(&path, b"").unwrap();
-        // Hold the lock on a fd of its own, independent of the probe's.
+        // Hold the lock on a fd of its own, independent of the probe's — the
+        // same seam the probe itself calls, so this test asks one host-neutral
+        // question on both hosts.
         let held = std::fs::OpenOptions::new().read(true).open(&path).unwrap();
-        let rc = unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-        assert_eq!(rc, 0, "the test's own fd must acquire the lock first");
+        assert!(
+            aoide_storage::fs::lock_exclusive(&held),
+            "the test's own fd must acquire the lock first"
+        );
         assert_eq!(
             lock_is_held(&path),
             Some(true),
             "a lock another open file description holds must read as live"
         );
-        unsafe {
-            libc::flock(held.as_raw_fd(), libc::LOCK_UN);
-        }
+        aoide_storage::fs::unlock(&held);
         drop(held);
         std::fs::remove_dir_all(dir).ok();
     }
@@ -1695,7 +1698,6 @@ mod tests {
 
     #[test]
     fn held_lock_with_no_process_table_is_unknown() {
-        use std::os::unix::io::AsRawFd;
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env = EnvVars::save(&["CODEX_HOME", "HOME"]);
         let home = unique_stage("codex-threads-no-process-table");
@@ -1704,8 +1706,10 @@ mod tests {
         let lock = locks_dir.join("01a-held.lock");
         std::fs::write(&lock, b"").unwrap();
         let held = std::fs::OpenOptions::new().read(true).open(&lock).unwrap();
-        let rc = unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-        assert_eq!(rc, 0, "the test's own fd must acquire the lock first");
+        assert!(
+            aoide_storage::fs::lock_exclusive(&held),
+            "the test's own fd must acquire the lock first"
+        );
         std::env::set_var("CODEX_HOME", &home);
 
         let scan = codex_app_threads_with(&BTreeMap::new(), || None);
@@ -1717,9 +1721,7 @@ mod tests {
             "a held lock with no process table must read Unknown, never Observed(empty)"
         );
 
-        unsafe {
-            libc::flock(held.as_raw_fd(), libc::LOCK_UN);
-        }
+        aoide_storage::fs::unlock(&held);
         drop(held);
         std::fs::remove_dir_all(home).ok();
     }

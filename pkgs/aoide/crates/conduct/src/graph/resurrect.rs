@@ -219,10 +219,12 @@ fn resolve_candidate(entry: aoide_storage::ledger::LedgerEntry) -> Candidate {
 /// The login shell a resurrected terminal candidate re-opens with `-l` —
 /// reconstructing exactly what `modules/dendrites/kitty.nix`'s own wrapper
 /// execs (`:70,72`, `<login_shell> -l`), same three-step resolution order
-/// (`kitty.nix:49-55`): `$SHELL` if set and executable, else the passwd
-/// entry for this uid if executable, else `/bin/sh`. Not a pure function —
-/// it reads the environment, the passwd database, and the filesystem — so
-/// it stays a thin, unmocked helper the same way `spawn.rs`'s own
+/// (`kitty.nix:49-55`): `$SHELL` if set and executable, else this user's own
+/// stored shell if executable, else the host's conventional fallback
+/// (`/bin/sh`; `%COMSPEC%` on native Windows, which is the one command
+/// interpreter that OS guarantees is present). Not a pure function —
+/// it reads the environment, the user's own shell record, and the filesystem —
+/// so it stays a thin, unmocked helper the same way `spawn.rs`'s own
 /// `terminal_template`/`require_display` do; nothing downstream needs to
 /// know WHY a shell was chosen, only which one.
 fn login_shell() -> String {
@@ -231,28 +233,68 @@ fn login_shell() -> String {
             return shell;
         }
     }
-    if let Some(shell) = passwd_login_shell() {
+    if let Some(shell) = stored_login_shell() {
         if is_executable_file(&shell) {
             return shell;
         }
     }
-    "/bin/sh".to_string()
+    #[cfg(unix)]
+    {
+        "/bin/sh".to_string()
+    }
+    #[cfg(windows)]
+    {
+        std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+    }
 }
 
+/// Is `path` a program THIS host would run? One question, one answer per host,
+/// because the two hosts disagree on what makes a file launchable at all.
+/// Unix: a regular file carrying an execute bit. Native Windows: no mode bits
+/// exist — a file is launchable by its EXTENSION (`%PATHEXT%`'s own set,
+/// folded, which is exactly what `CreateProcess` acts on), so the extension IS
+/// the answer there. Same contract either way: `true` only for a path this
+/// process could actually exec, `false` for anything else (including a path
+/// that does not exist).
 fn is_executable_file(path: &str) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path)
+            .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+    }
+    #[cfg(windows)]
+    {
+        let path = std::path::Path::new(path);
+        let launchable = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "exe" | "bat" | "cmd" | "com"));
+        launchable && std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false)
+    }
 }
 
-/// The shell field of this uid's own passwd entry, via `getent` — the same
-/// lookup `kitty.nix`'s `getent passwd "$(id -u)" | cut -d: -f7` performs.
-fn passwd_login_shell() -> Option<String> {
+/// This user's own stored shell — the shell field of the passwd entry whose
+/// uid is this process's, read through `getent` exactly as `kitty.nix`'s
+/// `getent passwd "$(id -u)" | cut -d: -f7` reads it. Native Windows has no
+/// passwd database and no uid to look up: the same fact lives in the
+/// environment the OS itself maintains, and the caller above falls through to
+/// `%COMSPEC%` when it is absent, so this arm answers `None` by NAME rather
+/// than inventing a path (`None` is already the caller's "ask the next step").
+#[cfg(unix)]
+fn stored_login_shell() -> Option<String> {
     let uid = unsafe { libc::getuid() };
     let out = std::process::Command::new("getent").arg("passwd").arg(uid.to_string()).output().ok()?;
     if !out.status.success() {
         return None;
     }
     String::from_utf8(out.stdout).ok()?.trim_end().split(':').nth(6).map(str::to_string)
+}
+
+#[cfg(windows)]
+fn stored_login_shell() -> Option<String> {
+    None
 }
 
 /// The narrow, named check behind the sudo refusal (orchestrator ruling,
@@ -1455,6 +1497,10 @@ mod tests {
     /// spawn itself succeed (`Status::Ok`) without a real terminal — `true`
     /// exits 0 the instant it's exec'd; the point of this test is the undying
     /// transfer, not registration, which `resurrect_one` never gates it on.
+    /// GATED on Unix with its reason: the revived session is `conduct
+    /// --headless`, refused BY NAME on a host without a PTY (see
+    /// `a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect`'s gate).
+    #[cfg(unix)]
     #[test]
     fn a_successful_resurrect_transfers_the_undying_mark_from_old_to_new() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1546,6 +1592,11 @@ mod tests {
     /// restages_graph_json` — a real registered windowed spawn is the live
     /// gate's job, per this module's own doc (top of file), never this
     /// crate's.
+    /// GATED on Unix with its reason: a resurrect revives the session by
+    /// spawning `conduct --headless`, refused BY NAME on a host without a PTY
+    /// (ConPTY is absent). The detached, NON-PTY spawn is native, and its cover
+    /// is `spawn`'s four green tests, named in their own gate.
+    #[cfg(unix)]
     #[test]
     fn a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1621,6 +1672,10 @@ mod tests {
     /// mark the SECOND new id undying or touch the set again — the transfer step
     /// only fires when the old id is currently undying, and by the second
     /// call it no longer is.
+    /// GATED on Unix with its reason: the revived session is `conduct
+    /// --headless`, refused BY NAME on a host without a PTY (see
+    /// `a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect`'s gate).
+    #[cfg(unix)]
     #[test]
     fn transfer_is_idempotent_when_the_pair_has_already_transferred() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1991,6 +2046,10 @@ mod tests {
     /// child, same fixture `a_successful_resurrect_transfers_the_undying_
     /// mark_from_old_to_new` already uses) rather than needing any
     /// `projects.json` registration at all.
+    /// GATED on Unix with its reason: the revived session is `conduct
+    /// --headless`, refused BY NAME on a host without a PTY (see
+    /// `a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect`'s gate).
+    #[cfg(unix)]
     #[test]
     fn bare_mode_finds_the_manifest_and_clean_spawns_an_unmatched_spec() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2030,6 +2089,10 @@ mod tests {
     /// default — proven indirectly: an agent with NO registered profile
     /// (`no-such-harness`) would otherwise fail with no default launch, but
     /// a `command` on the spec still clean-spawns it.
+    /// GATED on Unix with its reason: the revived session is `conduct
+    /// --headless`, refused BY NAME on a host without a PTY (see
+    /// `a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect`'s gate).
+    #[cfg(unix)]
     #[test]
     fn bare_mode_clean_spawn_prefers_the_specs_own_command_over_a_default_launch() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2212,6 +2275,10 @@ mod tests {
     /// remote spec refused locally (unknown host) never poisons a sibling
     /// LOCAL spec's own clean-spawn in the same invocation, the same
     /// per-spec isolation every other row in this loop already holds.
+    /// GATED on Unix with its reason: the revived session is `conduct
+    /// --headless`, refused BY NAME on a host without a PTY (see
+    /// `a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect`'s gate).
+    #[cfg(unix)]
     #[test]
     fn bare_mode_local_and_remote_specs_isolate_in_one_manifest() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2297,6 +2364,10 @@ mod tests {
     /// One spec's containment rejection never aborts a sibling spec's own
     /// resolution — the same per-candidate isolation the flag-mode loop
     /// already holds, now proven at the per-SPEC level.
+    /// GATED on Unix with its reason: the revived session is `conduct
+    /// --headless`, refused BY NAME on a host without a PTY (see
+    /// `a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect`'s gate).
+    #[cfg(unix)]
     #[test]
     fn bare_mode_one_failing_spec_never_aborts_the_rest() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2416,6 +2487,10 @@ mod tests {
     /// `--id` would, and the resulting `resurrected` entry carries
     /// `disposition: "revived-from-ledger"` (never `"clean-spawned"`,
     /// proving enrichment — not a fresh launch — is what actually fired).
+    /// GATED on Unix with its reason: the revived session is `conduct
+    /// --headless`, refused BY NAME on a host without a PTY (see
+    /// `a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect`'s gate).
+    #[cfg(unix)]
     #[test]
     fn bare_mode_enrichment_revives_a_matched_restore_bearing_entry_via_the_terminal_arm() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2466,6 +2541,10 @@ mod tests {
     /// enrichment at all — the ordinary fresh-checkout case) still marks
     /// its freshly clean-spawned session undying, same as the enriched
     /// path above.
+    /// GATED on Unix with its reason: the revived session is `conduct
+    /// --headless`, refused BY NAME on a host without a PTY (see
+    /// `a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect`'s gate).
+    #[cfg(unix)]
     #[test]
     fn bare_mode_clean_spawn_marks_the_new_session_undying() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
