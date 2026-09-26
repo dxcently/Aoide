@@ -21,7 +21,7 @@ This README explains what Aoide/AoideOS *is* — architecture, features, the Mel
 
 ## 1. Architecture
 
-The repo is a **snowflake**: everything lives under `modules/`, and each layer (`nucleus/`, `dendrites/`, `facets/`) names its own files in one `default.nix` (`modules/default.nix` + `lib/mkHost.nix` assemble the tree). No import list above the directory that holds the file — drop a `.nix` file in the right directory and add its one line to that directory's `default.nix`. A `/_`-prefixed path (`_wip.nix`, `_scratch/`) is simply never listed there.
+The repo is a **snowflake**: everything lives under `modules/`, and a capability enters by one file plus one line — a dendrite by its line in `modules/default.nix`'s catalogue, a render surface or a core module by its line in that layer's own `default.nix` (`lib/mkHost.nix` imports the three layers; `lib/composition.nix` reads the catalogue and imports what selection kept). Drop a `.nix` file in the right directory, add its one line, done. A `/_`-prefixed path (`_wip.nix`, `_scratch/`) is never catalogued and never listed, so it is shelved without being deleted.
 
 ```
 ~/Aoide/
