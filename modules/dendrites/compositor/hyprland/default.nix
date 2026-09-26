@@ -129,7 +129,7 @@ let
       # The livery emitter (crates/song) re-runs hyprctl keyword dispatch
       # during rehearsal to live-patch these values without a rebuild.
       hyprNoteConfig = ''
-        # ── Aoide notes — compositor facet ───────────────────────────────────
+        # ── Aoide notes — compositor lane ───────────────────────────────────
         # Generated from aoide.livery at build time; live-patched by the livery
         # emitter during rice preview (hyprctl keyword).
 

@@ -98,8 +98,8 @@ let
       config = lib.mkIf cfg.enable {
         home-manager.users.${config.aoide.user} = {
           wayland.windowManager.hyprland.extraConfig = ''
-            # ── Aoide behaviour — hyprland dendrite ───────────────────────────────
-            # Look/shape lives in the compositor facet; everything here survives a
+            # ── Aoide behaviour — the hyprland lane ───────────────────────────────
+            # Look/shape lives in the compositor lane; everything here survives a
             # re-rice untouched.
 
             # ── Input devices ─────────────────────────────────────────────────────
@@ -129,7 +129,7 @@ let
             ${lib.concatMapStrings (m: "monitor = ${m}\n") cfg.monitors}
             # ── Tiling layout ─────────────────────────────────────────────────────
             # `layout` is behaviour, so it lives here — while the sibling
-            # general{} keys the facet writes (gaps, border_size, col.*_border) are
+            # general{} keys the look writes (gaps, border_size, col.*_border) are
             # livery-derived look. hyprlang merges repeated sections, so both
             # blocks coexist; keep the split by KEY, not by section name.
             general {
@@ -185,11 +185,11 @@ let
             # The seam for rules that are about BEHAVIOUR — float this dialog, pin
             # that app to a workspace, inhibit idle while fullscreen. Deliberately
             # empty: the rules currently shipped (kitty opacity/rounding) are
-            # APPEARANCE and correctly live in the compositor facet, and dxflake's
+            # APPEARANCE and correctly live in the compositor lane, and dxflake's
             # rules were workspace assignments for apps Aoide does not ship
             # (vesktop, steam, strawberry), so importing them would bind nothing.
             #
-            # Add them here, not in the facet — a re-rice must not move a window.
+            # Add them here, not in the look — a re-rice must not move a window.
             # Hyprland 0.56 matches with the `match:<prop> <value>` form; the old
             # `class:^(foo)$` form is rejected. Example:
             #   windowrule = float, match:class pavucontrol
@@ -230,7 +230,7 @@ let
             # (bare name resolves via PATH: modules/nucleus/packages.nix puts
             # `pkgs.aoide.rice` — lyra's own droppable output, P-A8 — on
             # systemPackages whenever `aoide.lyra.enable` is on, which defaults
-            # to the quickshell facet's enablement).
+            # to the lyra fact).
             bind = SUPER SHIFT, P, exec, lyra rice preview
             bind = SUPER SHIFT, A, exec, lyra rice adopt
 
