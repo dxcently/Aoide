@@ -1,29 +1,32 @@
 # tests/quickshell-seam/fixtures.nix — the seam's eval hosts, and the readings
 # run.sh checks them against.
 #
-# Each host is assembled the way a real one is: the real catalogue, the real
-# nucleus, the real constructor (`lib/composition.nix`), a Home Manager module.
-# The only fixture-shaped parts are the three host records under `./hosts`, the
-# fixture person, and the fixture config directory — nothing here stubs the
-# seam itself, which is the whole point: a stubbed seam proves nothing.
-#
-# `flake` is the checkout under test (`builtins.getFlake`), so the tree is read
-# once and every input comes from its own lock.
+# Everything under test is read out of `${flake}`: the constructor, the
+# catalogue, nucleus and the three host records all come from the ref's own
+# source, so a flakeref really freezes the tree. (A fixture imported from the
+# working directory would keep testing the tree you are standing in, whatever
+# ref was passed — a frozen ref has to name the commit whose files get read, or
+# it proves nothing about that commit.) The ref's source is the only input;
+# nothing here stubs the seam itself.
 { flake, system ? "x86_64-linux" }:
 let
   lib = flake.inputs.nixpkgs.lib;
   inputs = flake.inputs;
 
-  composition = import ../../lib/composition.nix { inherit lib; };
+  # The ref's source root. A commit ref cannot see uncommitted work; `path:`
+  # (the runner's default) sees exactly what is on disk.
+  src = flake.outPath;
+
+  composition = import (src + "/lib/composition.nix") { inherit lib; };
 
   host =
     name:
     (composition.mkNixosHost {
       nixpkgs = inputs.nixpkgs;
       hostName = name;
-      registry = import ../../modules;
-      hostModules = [ ./hosts/${name}.nix ];
-      nucleus = ../../modules/nucleus;
+      registry = import (src + "/modules");
+      hostModules = [ (src + "/tests/quickshell-seam/hosts/${name}.nix") ];
+      nucleus = src + "/modules/nucleus";
       homeManagerModule = inputs.home-manager.nixosModules.home-manager;
       specialArgs = { inherit inputs; username = "khoa"; };
       # `mkNixosHost` hands `system` to the modules but not to `nixosSystem`
@@ -39,6 +42,11 @@ let
   # `aoide-quickshell` unit exists and what it says, and which of the things a
   # lyra host would have brought are absent. Named explicitly rather than
   # counted, so a green run says what it checked.
+  #
+  # `systemServices` is the SYSTEM-level namespace and `systemdUserServices` is
+  # the NixOS-level USER one — two different namespaces, and shellbridge is
+  # declared in the second (`modules/dendrites/lyra/shellbridge.nix`), so a
+  # check that reads only the first would pass on a host that has the bridge.
   read =
     name:
     let
@@ -55,6 +63,7 @@ let
       userServices = builtins.attrNames userUnits;
       userTimers = builtins.attrNames (home.systemd.user.timers or { });
       systemServices = builtins.attrNames cfg.systemd.services;
+      systemdUserServices = builtins.attrNames cfg.systemd.user.services;
       activation = builtins.attrNames (home.home.activation or { });
       service =
         if userUnits ? aoide-quickshell then
@@ -64,9 +73,15 @@ let
           }
         else
           null;
-      songsDir =
-        cfg.aoide.quickshell.config != null
-        && builtins.pathExists (cfg.aoide.quickshell.config + "/songs");
+      # What is actually IN the directory the shell runs — the entry point and
+      # nothing else is the claim, so a `songs/` or `widgets/` tree landing
+      # there (what lyra deploys) would flip this. Null when no directory was
+      # named: the bare shape has nothing to read.
+      configEntries =
+        if cfg.aoide.quickshell.config != null then
+          builtins.attrNames (builtins.readDir cfg.aoide.quickshell.config)
+        else
+          null;
     };
 in
 {
@@ -78,4 +93,13 @@ in
   # platform's assertions (`lib/asserts.nix`'s `checkAssertWarn`), so this
   # attribute is the failure a user would meet, not a probe for one.
   songWithoutLyra = (host "test-song-without-lyra").config.system.build.toplevel.drvPath;
+
+  # The positive control for the absence checks: yomi runs lyra, so it HAS the
+  # shellbridge unit and the rice binary the two lyra-less fixtures must not
+  # have. Read off the ref's own `nixosConfigurations`, so it is the real host
+  # and not a fourth fixture.
+  yomi = {
+    systemdUserServices = builtins.attrNames flake.nixosConfigurations.yomi-strix.config.systemd.user.services;
+    packages = map (p: baseNameOf p.outPath) flake.nixosConfigurations.yomi-strix.config.environment.systemPackages;
+  };
 }

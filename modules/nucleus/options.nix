@@ -599,9 +599,10 @@ in
         default = false;
         description = ''
           A Quickshell shell surface exists on this host. Set `mkDefault true`
-          by the lane that renders it. This is the FACT, not that lane's own
-          option: a host whose shell is painted by something else leaves it
-          false while still having a graphical session.
+          by the lane that runs one (`dendrites/quickshell.nix` — the package
+          and the `aoide-quickshell` service). This is the FACT, not that
+          lane's own option: a host whose shell is painted by something else
+          leaves it false while still having a graphical session.
         '';
       };
 
@@ -613,9 +614,8 @@ in
           directory, as a string. `null` (the default) is the bare case — the
           quickshell package is installed and no shell service runs. Set by
           the lane that supplies a config, read by the lane that installs the
-          package, so neither has to know the other by name. A lane that runs
-          a shell with no config to give leaves this null and keeps its own
-          service wiring.
+          package, so neither has to know the other by name. A lane with no
+          config to give leaves this null: nothing is wired.
         '';
       };
     };

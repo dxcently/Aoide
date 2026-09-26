@@ -50,8 +50,12 @@
   # line — e.g. `aoide.song = "moonlight";` swaps the whole livery fan-out with
   # zero other edits (song/songbook/<name>/). REQUIRED, not decorative:
   # `aoide.song` defaults to null, and a host that names no song deploys no
-  # QML and runs no shell service — the paint lanes only activate once a
-  # song is named. `sonata` is the shipped standard, the guaranteed-present
+  # QML — the song half of the paint (deploy, stage seed, restart) only
+  # activates once a song is named. The shell service itself rides
+  # `aoide.quickshell.config` and needs no song, and a song named WITHOUT
+  # `aoide.lyra.enable` is refused outright
+  # (`modules/nucleus/assertions.nix`) — this host has both. `sonata` is the
+  # shipped standard, the guaranteed-present
   # baseline this host opts into by name. "sonata": the light glass key drawn
   # from its own cover.
   aoide.song = "sonata";

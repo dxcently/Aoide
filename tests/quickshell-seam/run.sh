@@ -3,6 +3,11 @@
 #
 #   ./tests/quickshell-seam/run.sh                 # this checkout's working tree
 #   ./tests/quickshell-seam/run.sh path:/abs/dir      # some other checkout
+#   ./tests/quickshell-seam/run.sh git+file:///abs/dir?rev=<sha>   # a frozen commit
+#
+# The ref is the TREE under test, not just a source of inputs: `fixtures.nix`
+# reads the constructor, the catalogue, nucleus and the three host records out
+# of it, so a commit ref tests that commit. Every eval below carries the ref.
 #
 # `test-quickshell-only` — quickshell selected, `aoide.quickshell.config` = the
 # fixture directory, no lyra: the host's own shell runs (one `aoide-quickshell`
@@ -13,10 +18,12 @@
 # no service, no session anchor claimed.
 # `test-song-without-lyra` — a song and no performer: MUST fail, with the
 # platform assertion's own message.
+# `yomi-strix` — the positive control, from the same ref: the two absence
+# checks above are only worth anything against a host that HAS the things.
 #
 # A fixture that fails to evaluate is a failing test, not a skipped one; the
-# runner keeps the real stderr so a vague error cannot pass. Every reading is one
-# `nix eval` of one fixture, and stdout is JSON only (the flake-search-path
+# runner keeps the real stderr so a vague error cannot pass. Every reading is
+# one `nix eval` of one fixture, and stdout is JSON only (the flake-search-path
 # warning is not part of an answer).
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
@@ -70,11 +77,12 @@ else
   check "only: no rice binary installed"        "0" \
     "$(o '[.packages[] | select(test("-rice$"))] | length')"
   check "only: no song"                         "null" "$(o .song)"
-  check "only: no songs/ in the shell's config" "false" "$(o .songsDir)"
+  check "only: config holds only shell.qml"     "shell.qml" \
+    "$(o '.configEntries | join(",")')"
   check "only: no shellbridge unit"             "0" \
-    "$(o '[.userServices[], .systemServices[] | select(test("shellbridge"))] | length')"
+    "$(o '[.userServices[], .systemdUserServices[], .systemServices[] | select(test("shellbridge"))] | length')"
   check "only: no healthcheck unit or timer"    "0" \
-    "$(o '[.userServices[], .userTimers[], .systemServices[] | select(test("healthcheck"))] | length')"
+    "$(o '[.userServices[], .userTimers[], .systemdUserServices[], .systemServices[] | select(test("healthcheck"))] | length')"
   check "only: no lane activation"              "0" \
     "$(o '[.activation[] | select(test("^aoide"))] | length')"
 fi
@@ -91,10 +99,14 @@ else
   check "bare: no shell unit at all"            "0" \
     "$(b '[.userServices[] | select(test("quickshell"))] | length')"
   check "bare: no service recorded"             "null" "$(b .service)"
+  # No `songs/` check here: with `config` null there is no directory to read, so
+  # the reading would be false by construction. The `only` case above carries
+  # it — there the directory exists and holds exactly its entry point.
   check "bare: config stays null"               "null" "$(b .config)"
   check "bare: no graphical session claimed"    "default.target" "$(b .sessionTarget)"
   check "bare: no lyra fact"                    "false" "$(b .lyra)"
-  check "bare: no songs/ anywhere"              "false" "$(b .songsDir)"
+  check "bare: no shellbridge unit"             "0" \
+    "$(b '[.systemdUserServices[] | select(test("shellbridge"))] | length')"
 fi
 
 # ── test-song-without-lyra: the eval that must fail ──────────────────────────
@@ -109,6 +121,22 @@ else
   printf '%-46s FAIL (wrong error)\n' "song without lyra is refused"
   grep -v '^ *$' "$tmp/song.err" | tail -8 | sed 's/^/    | /'
   fail=$((fail+1))
+fi
+
+# ── yomi-strix: the positive control ─────────────────────────────────────────
+# Same ref, same namespaces. Without this, "no shellbridge" would stay green on
+# a tree where nothing declares shellbridge anywhere — a check that cannot fail
+# is not a check.
+if ! yomi=$(evalf yomi "$tmp/yomi.err"); then
+  printf '%-46s FAIL\n' "yomi-strix (control) evaluates"
+  grep -v '^ *$' "$tmp/yomi.err" | tail -12 | sed 's/^/    | /'
+  fail=$((fail+1))
+else
+  y() { printf '%s' "$yomi" | jq -r "$1"; }
+  check "control: yomi HAS the shellbridge unit" "1" \
+    "$(y '[.systemdUserServices[] | select(test("shellbridge"))] | length')"
+  check "control: yomi HAS the rice binary"     "1" \
+    "$(y '[.packages[] | select(test("-rice$"))] | length')"
 fi
 
 printf '%s\n' "-----------------------------------------------------------------"

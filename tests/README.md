@@ -42,9 +42,13 @@ what those checks actually test.
   and owes lyra nothing (no rice binary, no `songs/`, no shellbridge, no
   healthcheck); a host with no config gets the package and no service; and a
   song with no `lyra` lane fails its own evaluation with the taught message.
-  `fixtures.nix` holds the readings, `hosts/` the three host records. Unlike
-  `selection/` and `templates/`, its default ref is THIS checkout's working
-  tree (`path:`) — pass a flakeref to freeze it.
+  `fixtures.nix` holds the readings, `hosts/` the three host records. The ref
+  IS the tree under test — fixtures, host records, catalogue and nucleus are
+  all read out of it, so a commit ref tests that commit and `path:` (the
+  default: THIS checkout, uncommitted work included) tests what is on disk.
+  Its positive control is `yomi-strix` from the same ref: a real host that HAS
+  the shellbridge unit and the rice binary the lyra-less fixtures must not
+  have, so an absence check that could never fail is not one.
 - `distrobox.md` — manual container-based portability suite; not a gate.
 
 `selection/`, `templates/` and `quickshell-seam/` shell out to `nix eval` (and
