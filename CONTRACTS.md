@@ -72,7 +72,7 @@ defaults `false`; `aoide.quickshell.config` defaults `null`:
 
 | Fact | What it means | Set by |
 |---|---|---|
-| `aoide.quickshell.enable` | a Quickshell shell surface exists here | the lane that renders one (`dendrites/lyra`) |
+| `aoide.quickshell.enable` | a Quickshell shell surface exists here | the lane that runs one (`dendrites/quickshell.nix` — the package and the `aoide-quickshell` service) |
 | `aoide.quickshell.config` (`nullOr str`, `null`) | the directory a shell runs; `null` is the bare case — package installed, no shell service | whoever supplies one: a lane, or the host |
 | `aoide.lyra.enable` | the paint/rice binary is installed (`pkgs.aoide.rice`) | the lane that paints (`dendrites/lyra`) |
 | `aoide.stylix.enable` | the theme is baked at build time, painted by nix | the stylix lane (`dendrites/stylix.nix`) |

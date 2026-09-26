@@ -30,12 +30,19 @@ module builds against what nucleus declares.
   namespace declared elsewhere, in `config.nix` beside the rendering it
   exists for: its `settings` type comes from `pkgs.formats.toml`, so the
   option and the generator are one unit.
+- `assertions.nix` — the platform's invariant surface: the twin of the
+  constructor's gate pass (`lib/composition.nix`), for the failures only an
+  evaluated module graph can see. It reads the identity scalar `aoide.song`
+  and the lane facts and declares nothing, so it adds no option, no unit and
+  no package. Today: a song named with no `lyra` lane to paint it fails the
+  host's own evaluation with the taught fix.
 - `aoided.nix` — now carries only the AoideOS deltas for the `aoided` unit
   (`pkgs/aoide/module/aoided.nix` owns the unit itself, its tmpfiles
   rules, and the core session variables): the lyra-gated
   `AOIDE_SONG_TEMPLATES` session variable, and nothing else paint-shaped.
   `aoide.sessionTarget` is no longer set here but by the lane that brings a
-  graphical session up (the lyra lane), so this file reads no
+  graphical session up (the `quickshell` lane, which names the session when it
+  has a shell config to run), so this file reads no
   lane's option either. Below that, still here: every door (mcp, a2a,
   pair-watch) the daemon's event stream
   serves, the discovery-advertisement firewall carve, and the usage

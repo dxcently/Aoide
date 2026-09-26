@@ -264,14 +264,11 @@ let
         done
       '';
 
-      # Path used at runtime: $AOIDE_ROOT/run/qml/shell.qml is Quickshell's
-      # entry point — the rsync-deployed copy (see the home.activation entry
-      # below), not the repo's source tree. L-C2 (task #107): the runtime root
-      # moved off `~/Aoide` onto `aoide.root` (default `~/.aoide`).
-      shellQmlEntry = "${config.aoide.root}/run/qml/shell.qml";
-
-      # The Quickshell binary from the pre-declared flake input (flake.nix).
-      quickshellPkg = inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      # The runtime root this lane deploys into: $AOIDE_ROOT/run/qml — the
+      # rsync-deployed tree (see the home.activation entries below), never the
+      # repo's source tree. L-C2 (task #107): the runtime root moved off
+      # `~/Aoide` onto `aoide.root` (default `~/.aoide`).
+      qmlDir = "${config.aoide.root}/run/qml";
     in
     {
       # shellbridge is this capability's other half (lyra owns the bridge,
@@ -286,24 +283,18 @@ let
       config = lib.mkIf config.aoide.lyra.enable {
 
         # ── What this lane brings into existence ────────────────────────────────
-        # The cross-lane facts (declared once in modules/nucleus/options.nix) this
-        # lane owns. They are FACTS, not this lane's own option: no module reads
-        # another module (root AGENTS.md house rule 5), so anything that needs to
-        # know "is there a shell here" reads `aoide.quickshell.enable` instead of
-        # reaching in here. `mkDefault`, so a host that explicitly flips it off
-        # still wins: this shell is what lyra paints, and this lane is what knows
-        # that.
-        aoide.quickshell.enable = lib.mkDefault true;
-
-        # `aoide.sessionTarget` is the anchor rather than a fact: the core
-        # `aoided` unit is `wantedBy` the target named here, and PartOf ties its
-        # lifetime to it. A painting host names the graphical session, so the
-        # daemon comes up with the compositor instead of at boot — a manually
-        # started daemon left on `default.target` takes an immediate stop through
-        # PartOf, and BindsTo drags the a2a/mcp doors down with it (found live on
-        # sakaki). Not `mkDefault`: exactly one answer is right on this host, and
-        # a second one is a conflict worth failing on.
-        aoide.sessionTarget = "graphical-session.target";
+        # One thing, and it is a FACT rather than this lane's own option: the
+        # directory the shell runs. Quickshell itself is the `quickshell` lane's
+        # (package and the `aoide-quickshell` service); no module reads another
+        # module (root AGENTS.md house rule 5), so this lane NAMES the config it
+        # deploys into and the shell lane reads that name. Lyra paints a song —
+        # deploy the tree, seed the stage, restart the rice — and the shell lane
+        # is what knows how to run a shell on the result.
+        #
+        # The shell lane spells `<dir>/shell.qml` for quickshell's entry point,
+        # so `$AOIDE_ROOT/run/qml` here is the same command line as the day the
+        # service lived in this file.
+        aoide.quickshell.config = qmlDir;
 
         # ── Surface-ownership registry ──────────────────────────────────────────
         # Declare every Quickshell-owned surface. Stylix reads this registry and
@@ -328,11 +319,12 @@ let
           sessionGraph.owner = "quickshell";
         };
 
-        # ── Quickshell package ──────────────────────────────────────────────────
-        # The upstream Quickshell package lives in the pre-declared flake input
-        # (flake.nix wires inputs.quickshell for exactly this).
+        # ── What the shell needs to speak to hardware ───────────────────────────
+        # The Quickshell PACKAGE and its service belong to the `quickshell` lane
+        # (it is the lane that knows how to run a shell, with or without lyra);
+        # these two live here because it is THIS lane's widget that shells out to
+        # them.
         environment.systemPackages = [
-          quickshellPkg
           # The colonnade's `[ mixer ]` tag launches pavucontrol, and its bluetooth
           # bay writes the A2DP ↔ headset profile with `pactl set-card-profile`
           # (neither Quickshell.Bluetooth nor Quickshell.Services.Pipewire exposes
@@ -368,7 +360,7 @@ let
         # attrset — so `lib` here is home-manager's EXTENDED lib (carrying `lib.hm.dag`),
         # not the outer NixOS-module lib (which lacks `hm`). `config`/`pkgs`/`quickshellConfig`
         # still resolve lexically to the outer module scope, unshadowed by the pattern.
-        # ── No song, no service ──────────────────────────────────────────────────
+        # ── No song, nothing to paint ────────────────────────────────────────────
         # Every entry below reaches for the ACTIVE song (activeSongLivery,
         # seedStageScript's jq --arg, or a shell entry deployed FROM the song's
         # QML) — with `aoide.song` null there is no active song to bake, so this
@@ -377,8 +369,14 @@ let
         # when the condition is false (plain nix laziness, no module-system
         # merging involved at this attrset-literal level), so a null-song host's
         # eval never touches `${config.aoide.song}` here — no deployed QML, no
-        # seeded stage, no `aoide-quickshell` unit; not an empty surface, simply
+        # seeded stage, no restart of the rice; not an empty surface, simply
         # absent. A host that names a song gets exactly today's behaviour.
+        #
+        # The `aoide-quickshell` unit is NOT part of this gate: it belongs to the
+        # `quickshell` lane, which starts a shell on whatever config this lane
+        # deployed — or on a directory the host brought itself, song or no song.
+        # A null-song host with no such directory still runs no shell (that lane's
+        # own bare case).
         home-manager.users.${config.aoide.user} =
           { lib, ... }:
           lib.optionalAttrs (config.aoide.song != null) {
@@ -459,92 +457,6 @@ let
                   ${pkgs.aoide.rice}/bin/lyra quickshell healthcheck || true
               ''}
             '';
-
-            # ── Quickshell autostart via systemd user service ─────────────────────
-            # The shell surface (bar/dock/wallpaper/notifications/OSD) is started by
-            # a systemd user service rather than a Hyprland exec-once. A service is
-            # the stronger session-assembly seam:
-            #   - Restart=on-failure — a QML crash respawns the whole shell instead
-            #     of leaving the desktop bare until the next login.
-            #   - journald — `journalctl --user -u aoide-quickshell` gives real logs
-            #     (an exec-once child's stderr is lost).
-            #   - graphical-session.target ordering — it starts only once the
-            #     compositor lane's env handoff (hyprland-session.target →
-            #     graphical-session.target, WAYLAND_DISPLAY/HYPRLAND_INSTANCE_SIGNATURE
-            #     imported) has fired, so Quickshell inherits a valid Wayland env.
-            # ConditionPathExists guards the shell entry so the unit fails cleanly
-            # (not crash-loops) if the QML tree hasn't landed in the clone yet. That
-            # guard only checks *existence*, though — a shell.qml that exists but
-            # fails to load (a QML parse/load error, or an ExecStart pointed elsewhere
-            # by a stray drop-in) still exits 255 and, under Restart=on-failure, would
-            # respawn every RestartSec forever. StartLimit* is the backstop: after 5
-            # failures inside 60s systemd stops trying and parks the unit `failed`
-            # instead of thrashing the desktop (and journald) indefinitely. Five tries
-            # still absorbs a genuinely transient failure (e.g. Wayland not ready yet).
-            # The same condition doubles as the runtime-compose seam: a later lane
-            # phase that materializes `run/qml/shell.qml` straight from a staged
-            # rice (no rebuild) only has to write that file and start this unit —
-            # ConditionPathExists is already the gate that lets it, and with a
-            # declared song the rebuild path already satisfies it, so nothing
-            # about this unit needs to change to grow that second producer.
-            systemd.user.services.aoide-quickshell = {
-              Unit = {
-                Description = "Aoide Quickshell — shell surface (bar/dock/wallpaper/notifications)";
-                PartOf = [ "graphical-session.target" ];
-                After = [ "graphical-session.target" ];
-                ConditionEnvironment = "WAYLAND_DISPLAY";
-                ConditionPathExists = shellQmlEntry;
-                StartLimitIntervalSec = 60;
-                StartLimitBurst = 5;
-              };
-              Service = {
-                # `-p <path>` loads a config by PATH; `-c <name>` (used previously)
-                # treats the argument as a config NAME and fails on a path in
-                # quickshell 0.3.0.
-                ExecStart = "${quickshellPkg}/bin/quickshell -p ${shellQmlEntry}";
-                # Qt6's qtbase ships only jpeg/png/gif/ico imageformats plugins (plus
-                # qtsvg); webp/tiff/etc. live in a SEPARATE qtimageformats plugin the
-                # quickshell wrapper does not carry. A song cover may be any of those
-                # formats (sonata's is .webp), and AoideWallpaper renders it through a
-                # Qt Image — with no webp plugin the Image can't decode and the layer
-                # falls back to the solid palette colour (the "wallpaper didn't run
-                # after rebuild" symptom). The wrapper sets QT_PLUGIN_PATH via
-                # makeWrapper --prefix, which PRESERVES an inherited value, so this
-                # plugin dir is scanned alongside the wrapper's own. quickshell follows
-                # this flake's nixpkgs, so this qtimageformats is the exact Qt ABI.
-                Environment = [
-                  "QT_PLUGIN_PATH=${pkgs.qt6.qtimageformats}/lib/qt-6/plugins"
-                  # No Qt platform theme for this unit. quickshell follows this
-                  # flake's nixpkgs while the host's Qt style plugins come from the
-                  # system's, and a style plugin built against a different qtbase
-                  # PATCH release cannot load — Qt tags its private symbols per
-                  # patch (`Qt_6_PRIVATE_API`) precisely to forbid that mix. qt6ct
-                  # does not fall back when the load fails: QStyleFactory returns
-                  # null and the QApplication constructor deadlocks before the QML
-                  # engine starts, so the shell registers zero layer surfaces and
-                  # logs nothing past its startup banner (chiyo + osaka, blank
-                  # desktops, 2026-09-03). shell.qml's `UseQApplication` pragma is
-                  # what instantiates a QStyle at all, so this unit is exposed
-                  # where a QGuiApplication one is not. Nothing is lost: the livery
-                  # comes from song/stage/livery.json, never from Qt.
-                  "QT_QPA_PLATFORMTHEME="
-                  # Runtime root for every stage/state file the QML reads
-                  # (livery/cover/grimoire/sessions/usage) — the QML falls back to
-                  # ~/.aoide when unset, but a configured aoide.root must win.
-                  "AOIDE_ROOT=${config.aoide.root}"
-                ]
-                # Export the song's baked wallpaper (immutable store path) so
-                # AoideWallpaper always has the right cover on boot/rebuild — the live
-                # stage/cover.json overrides it, but nothing re-seeded it from the
-                # song before, so a rebuild lost the background. Null → no env.
-                ++ lib.optionals (config.aoide.livery.wallpaper != null) [
-                  "AOIDE_WALLPAPER=${config.aoide.livery.wallpaper}"
-                ];
-                Restart = "on-failure";
-                RestartSec = 3;
-              };
-              Install.WantedBy = [ "graphical-session.target" ];
-            };
 
             # ── Live mid-session watchdog: the placeholder-screen lockup ───────────
             # `aoideRestartRice` (above) only reasserts the paint on a REBUILD.

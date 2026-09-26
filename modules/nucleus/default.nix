@@ -6,6 +6,7 @@
 {
   imports = [
     ./aoided.nix
+    ./assertions.nix
     ./config.nix
     ./melete-adapter.nix
     ./nix.nix

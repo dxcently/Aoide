@@ -26,7 +26,11 @@
 #     programs.hyprland, and the greeter lane because the test asserts the ly
 #     unit.  Leaving lyra off also removes shellbridge.service entirely:
 #     shellbridge.nix gates on the lyra fact, so the test neither starts nor
-#     asserts it.
+#     asserts it. With lyra off the VM also names NO song: a song with no lyra
+#     lane to paint it is refused by the platform
+#     (`modules/nucleus/assertions.nix`), and the palette the greeter reads is
+#     then nucleus's own default — still palette-shaped and non-stock, which is
+#     all the ly assertion below claims.
 #
 #   ly: will attempt to spawn Hyprland on the virtual GPU and loop.
 #     Mitigation: the test asserts the unit exists and is enabled rather than
@@ -138,8 +142,11 @@ pkgs.testers.runNixOSTest {
             # ── Aoide flags ─────────────────────────────────────────────
             aoide.enable = true;
             aoide.user = "khoa";
-            aoide.song = "sonata";
-
+            # No song: the song half of the stack is lyra's (deploy, stage seed,
+            # restart), and a song named with no lyra lane is refused by the
+            # platform (`modules/nucleus/assertions.nix`). The livery the greeter
+            # reads is nucleus's default palette — palette-shaped and non-stock,
+            # which is all the ly assertion below claims.
             # Compositor + greeter kept: wires programs.hyprland and the ly unit
             # the test asserts exists and is enabled.
             aoide.compositor.enable = true;

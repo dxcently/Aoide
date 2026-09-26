@@ -4,7 +4,7 @@ The shell surface and the bridge that feeds it.
 
 ```
 modules/dendrites/lyra/
-├── default.nix        the lane: builds the QML tree, deploys it, runs the shell
+├── default.nix        the lane: builds the QML tree, deploys it, watches it
 └── shellbridge.nix    the bidirectional bridge (socket + stage files)
 ```
 
@@ -17,16 +17,45 @@ modules/dendrites/lyra/
   `$AOIDE_ROOT/run/qml` (`home.activation.aoideDeployQml` — an rsync, not a
   symlink tree, so live QML edits survive until the next switch). It declares
   the surfaces it owns in `aoide.surfaces` (stylix stands down for those),
-  anchors `aoided` with `aoide.sessionTarget = "graphical-session.target"`,
-  runs `aoide-quickshell` and its healthcheck timer, and installs `pkgs.aoide.
-  rice` — the lyra binary — as the `aoide.lyra.enable` fact. Guarded on that
-  fact; the lane sets it `mkDefault true`.
+  seeds the live stage from the active song, reasserts the paint on every
+  activation, runs the healthcheck timer, and installs `pkgs.aoide.rice` — the
+  lyra binary — as the `aoide.lyra.enable` fact. Guarded on that fact; the lane
+  sets it `mkDefault true`.
 - **`shellbridge.nix` — the bridge.** The bidirectional seam between the daemon
   / agents and the live desktop: OUT as atomic JSON under `state/stage/`, IN as
   unix-socket commands, and the only consumer of Hyprland's IPC (QML never
   speaks an agent protocol). Self-gated on `aoide.enable && aoide.lyra.enable`:
   lyra owns the bridge, and its `ExecStart` execs lyra out of `pkgs.aoide.rice`,
   a separate droppable output.
+
+## The seam with `quickshell`
+
+The shell RUNTIME is not this lane's: `modules/dendrites/quickshell.nix` holds
+the quickshell package and the one `aoide-quickshell` user service. What this
+lane holds is the surface — what gets painted, from which song, deployed where.
+
+The two meet on one fact and never name each other:
+
+```
+lyra      sets  aoide.quickshell.config = "$AOIDE_ROOT/run/qml"   (this lane's deploy target)
+quickshell reads it, installs the package, runs  quickshell -p <config>/shell.qml,
+          and anchors `aoided` at graphical-session.target
+```
+
+So a shell with no lyra is a supported host, in either of two shapes: **own
+config** — the host sets `aoide.quickshell.config` to a config directory of its
+own (a store path or a path in someone's home) and gets the package, the
+service, and the session anchor; or **bare** — nothing is set, and the host gets
+the package and nothing else. Neither shape builds a QML tree, installs the
+rice binary, runs shellbridge or the healthcheck: those are this lane's, and
+this lane is what a song needs.
+
+That is also why the song is gated here and not in the shell lane: `aoide.song`
+with no `lyra` is a host that says "perform this rice" with nothing to perform
+it, and the platform asserts on exactly that (`modules/nucleus/assertions.nix`).
+The service itself no longer cares — it starts on a config directory, song or
+no song.
+
 
 Beside this directory: `pkgs/lyra-shell` ships the QML, icons and preview
 fixtures; `pkgs/lyra-songbook` ships the built-in songs and their manifests.
@@ -49,10 +78,13 @@ song's committed livery with the venue's `aoide.livery.override` applied through
 ## How it composes
 
 Naming no song performs no song: `aoide.song` defaults to null, every committed
-`rice.nix` self-gates on `config.aoide.song == "<name>"`, and this lane's shell
-service is gated the same way — so a host that names nothing gets no QML tree
-and no shell service, rather than an empty surface. Shellbridge rides the lyra
-fact, not the song. QML is a render surface: state, policy, IPC and system
-access live behind bridges reachable with only a shell (CONTRACTS.md §0's paint
-test), so deleting every `.qml` leaves every capability reachable from a
+`rice.nix` self-gates on `config.aoide.song == "<name>"`, and this lane's
+deploy/seed/restart half is gated the same way — so a host that names nothing
+gets no QML tree and nothing deployed, rather than an empty surface. The shell
+service itself is the `quickshell` lane's and rides the config directory
+instead: it starts on whatever directory was named, so a host with its own
+config runs a shell and names no song. Shellbridge rides the lyra fact, not the
+song. QML is a render surface: state, policy, IPC and
+system access live behind bridges reachable with only a shell (CONTRACTS.md §0's
+paint test), so deleting every `.qml` leaves every capability reachable from a
 terminal.

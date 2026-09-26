@@ -8,11 +8,13 @@ mcfly, nh), agent and desktop AI tooling (claude-code, eidolon, kimi-code,
 pi-coding-agent, OpenAI Codex + ChatGPT), local model-serving tooling
 (inference: Ollama + llama.cpp), system services (dunst, networkmanager,
 audio), and **the paint lanes** — what makes a machine paint at all:
-`compositor` (with its `hyprland` provider), `greeter`, `stylix`, `lyra`
-(the Quickshell surface and its shellbridge). A paint lane reads only what root
-`AGENTS.md` house rule 5 lists; its `body` is guarded on a FACT that nucleus
-declares rather than on an option it declares itself, so a consumer can ask
-"is there a shell here?" without reading the lane that made one.
+`compositor` (with its `hyprland` provider), `greeter`, `stylix`, `quickshell`
+(the shell runtime: the package and the one `aoide-quickshell` service) and
+`lyra` (the Quickshell surface, its shellbridge, and the song-gated deploy
+half). A paint lane reads only what root `AGENTS.md` house rule 5 lists; its
+`body` is guarded on a FACT that nucleus declares rather than on an option it
+declares itself, so a consumer can ask "is there a shell here?" without reading
+the lane that made one.
 
 ## The shape (CONTRACTS.md §2, v1)
 
@@ -37,6 +39,38 @@ Every dendrite's lane is `nixos`, because each writes its Home Manager
 configuration from the NixOS side. A dendrite carries its OWN dependencies in
 the lane that needs them: the `stylix` lane imports the Stylix NixOS module,
 so no other file has to know the lane exists.
+
+## The shell lane (`quickshell.nix`) and the seam with `lyra`
+
+The shell runtime is two files, split by what each one knows:
+
+```
+quickshell.nix    the PACKAGE, and the one `aoide-quickshell` user service.
+                  Knows no song, deploys nothing: it starts a shell on the
+                  directory `aoide.quickshell.config` names and stops there.
+lyra/             the SURFACE. Builds the QML tree from `pkgs/lyra-shell` plus
+                  the built-in songs' `widgets/`, deploys it, seeds the stage,
+                  restarts the rice, watches it (healthcheck), owns shellbridge
+                  and the `aoide.surfaces` registry.
+```
+
+They never name each other. `lyra` sets the fact `aoide.quickshell.config` to
+its deployed runtime root (`$AOIDE_ROOT/run/qml`); the shell lane reads that
+fact, owns `aoide.quickshell.enable` and starts the service. Each side is
+removable without a trace on the other, and the shell keeps running the day a
+different lane (or a host) supplies the directory instead.
+
+**The two allowed shapes of Quickshell without lyra** — no song, no QML tree,
+no rice binary:
+
+| Shape | How | What runs |
+|---|---|---|
+| own config | the host sets `aoide.quickshell.config` to its own config directory (a store path or a host path) | the package, plus `aoide-quickshell` on that directory, plus the graphical-session anchor `aoided` needs |
+| bare | nothing sets it (`null`, the default) | the package only: no service, no session claim |
+
+The service is gated on the config, never on `aoide.song` — a shell that paints
+a host's own config has no song and starts exactly the same way. What is
+song-gated is `lyra`'s half: deploy, seed, restart.
 
 ## Named seams (what it exposes)
 
@@ -85,5 +119,7 @@ A host selects a dendrite by name — one line in `hosts/<host>/default.nix`
 aggregation's `members` once the constructor assembles the host. Dendrites
 know nothing about hosts; hosts know dendrites. A tool graduates from a shared
 file (e.g. `devtools.nix`) into its own dendrite the moment a host needs to
-toggle it independently. The paint lanes have their own directories with their
-own charters: `compositor/README.md`, `lyra/README.md`.
+toggle it independently. The paint lanes with more than one file carry their own
+directories and charters (`compositor/README.md`, `lyra/README.md`); the
+one-file lanes — `greeter.nix`, `stylix.nix`, `quickshell.nix` — are charted
+here, above.

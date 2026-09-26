@@ -35,10 +35,21 @@ what those checks actually test.
   `templates/`, parses every template, resolves two hosts against the real
   constructor, and checks that the files nobody selected stayed unread. It
   keeps `templates/` from drifting away from the constructor.
+- `quickshell-seam/` — `tests/quickshell-seam/run.sh` evaluates three fixture
+  hosts through the real constructor (`lib/composition.nix`) with the real
+  catalogue and nucleus, and checks the quickshell/lyra seam: a host with its
+  own `quickshell.config` runs the `aoide-quickshell` service on that directory
+  and owes lyra nothing (no rice binary, no `songs/`, no shellbridge, no
+  healthcheck); a host with no config gets the package and no service; and a
+  song with no `lyra` lane fails its own evaluation with the taught message.
+  `fixtures.nix` holds the readings, `hosts/` the three host records. Unlike
+  `selection/` and `templates/`, its default ref is THIS checkout's working
+  tree (`path:`) — pass a flakeref to freeze it.
 - `distrobox.md` — manual container-based portability suite; not a gate.
 
-`selection/` and `templates/` shell out to `nix eval` (and `getFlake` a
-nixpkgs rev), so they run where an evaluation can: a developer's shell, and
+`selection/`, `templates/` and `quickshell-seam/` shell out to `nix eval` (and
+`getFlake` a nixpkgs rev), so they run where an evaluation can: a developer's
+shell, and
 each phase-5 slice's gate. They are deliberately NOT `checks.*` — a check is a
 build, and a build sandbox has no nix daemon and no network (`nix eval` inside
 one fails creating `/nix/var/nix/profiles`), so a nested evaluation is not
