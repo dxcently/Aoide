@@ -1,7 +1,8 @@
 // bar.qml — cadenza's "bar" slot: the switchboard line (intent §3.1, §3.2).
 //
 //   [⏻] [1] [2]aoide [3]aoide [5] [7]melete [9]mneme   title…   AGT 6/10 CPU 23% $ 4.20 !3 │ VOL 62% BT off NET wifi │ TRAY 2 RICE stg │ 14:02:31
-//        └───┴────┴──────┘ ┆                                                  (ties hang in a 6px band under the jacks)
+//         ○──●─○──────○        ○                    (pads, a bus, a junction)
+//            ┆╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┆                    (a spawned wire on lane 0)
 //   ─────────────────────────────────────────────────────────────────────────── the trunk
 //
 // WidgetSlot-hosted, root Item. The facet's PanelWindow reads `implicitHeight`
@@ -41,15 +42,27 @@
 // only) draws the same pane component inside this item instead, under the
 // bar, because the canvas grabs an item, not a popup window.
 //
-// ── Ties and lamps (paint of core's `ties` + `activeAt`) ───────────────────
-// Lanes are allocated in jack-INDEX space (interval colouring, first fit, by
-// start), so geometry never feeds back into allocation. A project tie set
-// touching 3+ jacks is one bus lane; ≤3 lanes; what does not fit is a `+n`
-// badge (cyan) on its left jack. project = solid, spawned = dotted, both `mid`
-// (a step above the dim trunk they hang over, so the wiring reads as data).
-// Lamp: a 12px amber dash, 600ms linear, along the lane (tie) or up from the
-// trunk into the socket (jack), only when `activeAt` ADVANCES between two
-// reads; one in flight per line, later advances coalesce into it.
+// ── Ties and lamps (paint of core's `ties` + `activeAt`) — a schematic ─────
+// Drawn in the band between the socket rules and the trunk, every wire 2px
+// in `ink` (phosphor fg), never dim, so a tie reads at 1:1. Allocation is in
+// jack-INDEX space, so geometry never feeds back into it:
+//   pads      a tied jack gets a hollow 6px ring under its socket; no tie, no pad
+//   bus       a `project` tie set is ONE solid wire on the pad row through all
+//             its pads — when its span crosses no foreign pad and it shares no
+//             jack with another pad-row bus; otherwise it takes a lane
+//   lanes     ≤2 below the pad row (by end, best fit, closed intervals); a
+//             `spawned` tie drops from its pad, runs DASHED along its lane and
+//             rises into the other pad; what does not fit is a `+n` (cyan) on
+//             its left jack
+//   junctions a filled dot wherever a wire meets a wire: a lane wire leaving a
+//             pad that already carries a bus leaves the BUS beside the ring,
+//             dotted there; a lane bus's inner drops meet its run in a dotted T.
+//             A crossing without a dot is not a connection.
+// One Canvas draws it and repaints only when the schematic or the palette moves.
+// Lamp: a 12px amber dash (6px on a drop), 600ms linear, along the wire's own
+// path (drop, lane, rise) or up from the trunk into a jack's socket, only when
+// `activeAt` ADVANCES between two reads; one in flight per wire, later
+// advances coalesce into it.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -92,12 +105,19 @@ Item {
         }
     }
 
-    // ── geometry: one text row, the tie band, the trunk ──────────────────────
+    // ── geometry: one text row, the schematic band, the trunk ────────────────
+    // rows (px): glyphs 0..12 (lifted 2px) · socket rule 13 · pad 14..19 with
+    // the bus on 16..17 · lane 0 on 21..22 · lane 1 on 24..25 · a clear row · trunk 27
     readonly property int barH: 28
-    readonly property int socketY: 19          // a jack's socket rule
-    readonly property int bandTop: 20          // the 6px tie band: 20..25
+    readonly property int textY: -2            // every text on the line, lifted to free the band
+    readonly property int socketY: 13          // a jack's socket rule
+    readonly property int padTop: 14           // the pad ring: 6px, rows 14..19
+    readonly property int padS: 6
+    readonly property int busY: padTop + 2     // a bus on the pad row: rows 16..17
+    readonly property int wireW: 2             // every wire is 2px
     readonly property int trunkY: barH - 1
-    function laneY(l) { return bandTop + 1 + 2 * l }   // 21, 23, 25
+    readonly property int lanes: 2
+    function laneY(l) { return 21 + 3 * l }    // 21..22, 24..25
 
     implicitHeight: barH
     implicitWidth: kit.cells(138)
@@ -357,13 +377,39 @@ Item {
             routes.push(rr)
         }
         routes.sort(function (p, q) { return p.a !== q.a ? p.a - q.a : p.b - q.b })
-        var laneEnd = [-1, -1, -1]
+        // every jack some tie touches (a bus on the pad row may not pass one it
+        // does not join, or it would read as joining it)
+        var tied = {}
+        for (var r0 = 0; r0 < routes.length; r0++)
+            for (var mm = 0; mm < routes[r0].members.length; mm++) tied[routes[r0].members[mm]] = true
+        // 1. project buses onto the pad row: its span holds no foreign pad, and
+        //    it shares no jack with another pad-row bus (two buses meeting end to
+        //    end on one row would read as one bus)
+        var padRow = []
+        for (var r1 = 0; r1 < routes.length; r1++) {
+            var P = routes[r1]
+            P.onPads = false
+            if (P.kind !== "project") continue
+            var ok = true
+            for (var x = P.a + 1; x < P.b && ok; x++)
+                if (tied[x] && P.members.indexOf(x) < 0) ok = false
+            for (var q = 0; q < padRow.length && ok; q++)
+                if (!(padRow[q].b < P.a || padRow[q].a > P.b)) ok = false
+            if (ok) { P.onPads = true; padRow.push(P) }
+        }
+        // 2. everything else onto ≤2 lanes below: by END, each into the free
+        //    lane that ended latest (closed intervals) — the greedy that draws
+        //    the most wires; what does not fit is a `+n` on its left jack
+        var laneEnd = []
+        for (var l0 = 0; l0 < root.lanes; l0++) laneEnd.push(-1)
         var badges = {}
-        for (var r2 = 0; r2 < routes.length; r2++) {
-            var R = routes[r2]
-            for (var l = 0; l < 3; l++) {
-                if (laneEnd[l] < R.a) { R.lane = l; laneEnd[l] = R.b; break }
-            }
+        var rest = routes.filter(function (z) { return !z.onPads })
+        rest.sort(function (p, q) { return p.b !== q.b ? p.b - q.b : q.a - p.a })
+        for (var r2 = 0; r2 < rest.length; r2++) {
+            var R = rest[r2], best = -1
+            for (var l = 0; l < root.lanes; l++)
+                if (laneEnd[l] < R.a && (best < 0 || laneEnd[l] > laneEnd[best])) best = l
+            if (best >= 0) { R.lane = best; laneEnd[best] = R.b }
             if (R.lane < 0) {
                 var jid = J[R.a].id
                 badges[jid] = (badges[jid] || 0) + 1
@@ -408,8 +454,85 @@ Item {
         if (j.occupied) return root.kit.ink
         return root.kit.dim
     }
-    // a lane's drop sits a little off the socket centre so stacked lanes read apart
-    function dropX(idx, lane) { return root.jackModel[idx].cx + (lane - 1) * 2 }
+    // ── the schematic, in board pixels (integers; a wire is its top-left px) ──
+    //   pads[]  {cx}                          hollow ring, padS wide, under the socket
+    //   runs[]  {x, y, w, h, dashed}          wire rectangles (2px thick)
+    //   dots[]  {x, y}                        filled junction dot, centred on (x, y)
+    //   paths{} key → [{x, y}, …]             the polyline a lamp runs (wire px)
+    readonly property var schematic: {
+        var M = root.jackModel, rs = root.routing.routes
+        var W = root.wireW, pr = root.padS / 2           // pad spans cx-3 .. cx+2
+        var pads = {}, runs = [], dots = [], paths = {}
+        var busSide = {}                                 // idx → {l, r}: a pad-row bus leaves it that way
+        var taken = {}                                   // "idx:side" → departures already hung off that bus side
+        function padOf(i) { pads[i] = { cx: M[i].cx } }
+        // 1. pad-row buses: pad to pad through every member
+        for (var r = 0; r < rs.length; r++) {
+            var R = rs[r]
+            if (!R.onPads) continue
+            var pts = []
+            for (var k = 0; k < R.members.length; k++) {
+                var m = R.members[k]
+                padOf(m)
+                if (!busSide[m]) busSide[m] = { l: false, r: false }
+                if (k > 0) busSide[m].l = true
+                if (k < R.members.length - 1) busSide[m].r = true
+                if (k > 0) {
+                    var x0 = M[R.members[k - 1]].cx + pr, x1 = M[m].cx - pr
+                    runs.push({ x: x0, y: root.busY, w: Math.max(0, x1 - x0), h: W, dashed: false })
+                }
+                pts.push({ x: M[m].cx - 1, y: root.busY })
+            }
+            paths[R.key] = pts
+        }
+        // 2. lane wires: down from each end, along the lane, up into the other
+        for (var r2 = 0; r2 < rs.length; r2++) {
+            var L = rs[r2]
+            if (L.onPads || L.lane < 0) continue
+            var ly = root.laneY(L.lane)
+            var dashed = L.kind === "spawned"
+            var ends = L.kind === "spawned" ? [L.from, L.to] : L.members
+            var lo = L.a, hi = L.b
+            var drops = {}
+            for (var e = 0; e < ends.length; e++) {
+                var i = ends[e]
+                padOf(i)
+                var cx = M[i].cx, dx, top
+                var toward = (i === hi) ? -1 : 1        // which way this end's lane run goes
+                var bs = busSide[i]
+                if (bs && (bs.l || bs.r)) {
+                    // the pad already carries a bus: hang off the bus beside the
+                    // ring, with a junction dot where the wire leaves it
+                    var side = (toward > 0 ? bs.r : bs.l) ? toward : -toward
+                    var tk = i + ":" + side
+                    var n = taken[tk] || 0
+                    taken[tk] = n + 1
+                    dx = cx + side * (pr + 5 + 7 * n) - (side < 0 ? 2 : 0)   // mirrors about the ring
+                    top = root.busY
+                    dots.push({ x: dx + 1, y: root.busY + 1 })
+                } else {
+                    // a bare pad: drop straight out of its bottom (lane 0 left of
+                    // centre, lane 1 right of it, so two lanes never share a drop)
+                    dx = cx - 2 + 2 * L.lane
+                    top = root.padTop + root.padS
+                }
+                runs.push({ x: dx, y: top, w: W, h: ly - top, dashed: false })
+                drops[i] = { x: dx, top: top }
+            }
+            var xs = ends.map(function (q) { return drops[q].x })
+            var xa = Math.min.apply(null, xs), xb = Math.max.apply(null, xs)
+            runs.push({ x: xa, y: ly, w: xb - xa + W, h: W, dashed: dashed })
+            // a lane bus joining 3+ jacks: its inner drops meet the run in a T
+            for (var e2 = 0; e2 < ends.length; e2++) {
+                var d = drops[ends[e2]]
+                if (d.x > xa && d.x < xb) dots.push({ x: d.x + 1, y: ly + 1 })
+            }
+            var f = drops[L.kind === "spawned" ? L.from : lo], t = drops[L.kind === "spawned" ? L.to : hi]
+            paths[L.key] = [{ x: f.x, y: f.top }, { x: f.x, y: ly }, { x: t.x, y: ly }, { x: t.x, y: t.top }]
+        }
+        var padList = Object.keys(pads).map(function (q) { return pads[q] })
+        return { pads: padList, runs: runs, dots: dots, paths: paths }
+    }
 
     // ── lamps ────────────────────────────────────────────────────────────────
     property var _seen: ({})
@@ -442,48 +565,67 @@ Item {
     }
     function fireLamp(key) {
         if (root._lamps[key]) return                    // coalesce into the one in flight
-        var p = null
+        var pts = null
         if (key.indexOf("w:") === 0) {
+            // a jack's own lamp: up from the trunk into its socket, left of the pad
             var i = root.jackIndex(parseInt(key.slice(2)))
             if (i < 0) return
-            var cx = root.jackModel[i].cx
-            p = { x0: cx - 6, x1: cx - 6, y0: root.trunkY, y1: root.socketY }
+            var jx = Math.round(root.jackModel[i].x) + 2
+            pts = [{ x: jx, y: root.trunkY - 1 }, { x: jx, y: root.socketY }]
         } else {
-            var R = null, rs = root.routing.routes
-            for (var r = 0; r < rs.length; r++) if (rs[r].key === key) R = rs[r]
-            if (!R || R.lane < 0) return                // a badge carries no line to run
-            var a = R.a, b = R.b
-            if (R.kind === "spawned") { a = R.from; b = R.to }
-            var xa = root.dropX(a, R.lane), xb = root.dropX(b, R.lane)
-            var y = root.laneY(R.lane)
-            p = { x0: xa - 6, x1: xb - 6, y0: y, y1: y }
+            pts = root.schematic.paths[key] || null     // a badge carries no wire to run
+            if (!pts) return
         }
-        p.key = key
-        p.dur = root.lampMs
-        var o = lampComp.createObject(board, p)
+        var o = lampComp.createObject(board, { key: key, pts: pts, dur: root.lampMs })
         if (o) root._lamps[key] = o
     }
     function lampDone(key, o) {
         delete root._lamps[key]
         o.destroy()
     }
+    // the lamp: one Rectangle, one NumberAnimation on `t`, 0 → 1 along the wire's
+    // polyline (drop, lane, rise); 12px long on a run, 6px on a drop, 2px thick
     Component {
         id: lampComp
         Rectangle {
             id: lamp
             property string key: ""
-            property real x0: 0
-            property real x1: 0
-            property real y0: 0
-            property real y1: 0
+            property var pts: []
             property int dur: 600
-            x: x0; y: y0
-            width: 12; height: 1
+            property real t: 0
+            readonly property var segs: {
+                var out = [], total = 0
+                for (var i = 1; i < pts.length; i++) {
+                    var len = Math.abs(pts[i].x - pts[i - 1].x) + Math.abs(pts[i].y - pts[i - 1].y)
+                    out.push({ a: pts[i - 1], b: pts[i], s: total, len: len })
+                    total += len
+                }
+                return { list: out, total: total }
+            }
+            readonly property var at: {
+                var S = segs.list, d = t * segs.total
+                for (var i = 0; i < S.length; i++) {
+                    var g = S[i]
+                    if (d <= g.s + g.len || i === S.length - 1) {
+                        var u = g.len > 0 ? Math.min(1, Math.max(0, (d - g.s) / g.len)) : 0
+                        return { x: g.a.x + (g.b.x - g.a.x) * u, y: g.a.y + (g.b.y - g.a.y) * u,
+                                 horiz: g.a.y === g.b.y,
+                                 x0: Math.min(g.a.x, g.b.x), x1: Math.max(g.a.x, g.b.x),
+                                 y0: Math.min(g.a.y, g.b.y), y1: Math.max(g.a.y, g.b.y) }
+                    }
+                }
+                return { x: 0, y: 0, horiz: true, x0: 0, x1: 0, y0: 0, y1: 0 }
+            }
+            width: at.horiz ? 12 : root.wireW
+            height: at.horiz ? root.wireW : 6
+            // centred on the head, held inside the segment so it never overhangs a wire end
+            x: Math.round(at.horiz ? Math.max(at.x0, Math.min(at.x - 5, at.x1 + root.wireW - width)) : at.x)
+            y: Math.round(at.horiz ? at.y : Math.max(at.y0, Math.min(at.y - 3, at.y1 + root.wireW - height)))
             color: root.kit.hot
-            ParallelAnimation {
+            NumberAnimation on t {
                 id: run
-                NumberAnimation { target: lamp; property: "x"; from: lamp.x0; to: lamp.x1; duration: lamp.dur; easing.type: Easing.Linear }
-                NumberAnimation { target: lamp; property: "y"; from: lamp.y0; to: lamp.y1; duration: lamp.dur; easing.type: Easing.Linear }
+                running: false
+                from: 0; to: 1; duration: lamp.dur; easing.type: Easing.Linear
                 onFinished: root.lampDone(lamp.key, lamp)
             }
             Component.onCompleted: run.start()
@@ -547,11 +689,11 @@ Item {
         function onObjectInsertedPost(obj, index) { root.pwEpoch++ }
         function onObjectRemovedPost(obj, index) { root.pwEpoch++ }
     }
-    function nodeLabel(n) {
+    function audioLabel(n) {
         var s = "" + (n.nickname || n.description || n.name || "")
-        return s.length > 0 ? s : "node " + n.id
+        return s.length > 0 ? s : "device " + n.id
     }
-    function nodeGloss(n) {
+    function audioGloss(n) {
         var s = "" + (n.name || ""), dot = s.lastIndexOf(".")
         return dot >= 0 ? s.substring(dot + 1) : s
     }
@@ -566,21 +708,21 @@ Item {
             if (!n || n.isStream) continue
             if (!(n.type & PwNodeType.Audio)) continue
             if (n.isSink !== wantSink) continue
-            out.push({ key: "" + n.id, name: root.nodeLabel(n), gloss: root.nodeGloss(n),
+            out.push({ key: "" + n.id, name: root.audioLabel(n), gloss: root.audioGloss(n),
                        current: !!cur && cur.id === n.id })
         }
         return out
     }
     readonly property var sinkRoster: pwRoster(true)
     readonly property var sourceRoster: pwRoster(false)
-    function pwNode(key) {
+    function pwAudio(key) {
         var vals = (Pipewire.nodes && Pipewire.nodes.values) ? Pipewire.nodes.values : []
         for (var i = 0; i < vals.length; i++)
             if (vals[i] && ("" + vals[i].id) === ("" + key)) return vals[i]
         return null
     }
-    function pickSink(key) { var n = root.pwNode(key); if (n) Pipewire.preferredDefaultAudioSink = n }
-    function pickSource(key) { var n = root.pwNode(key); if (n) Pipewire.preferredDefaultAudioSource = n }
+    function pickSink(key) { var n = root.pwAudio(key); if (n) Pipewire.preferredDefaultAudioSink = n }
+    function pickSource(key) { var n = root.pwAudio(key); if (n) Pipewire.preferredDefaultAudioSource = n }
     function openMixer() { Quickshell.execDetached(["pavucontrol"]) }
 
     // ── Bluetooth (sonata's seam) ───────────────────────────────────────────
@@ -959,10 +1101,12 @@ Item {
         width: root.kit.cells(3)
         height: root.barH
         Text {
+            y: root.textY
             text: "["; color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
         }
         Text {
             x: root.kit.cellW
+            y: root.textY
             text: "⏻"
             color: powerMa.containsMouse ? root.kit.title : root.kit.ink
             font: root.kit.font
@@ -972,6 +1116,7 @@ Item {
         }
         Text {
             x: root.kit.cells(2)
+            y: root.textY
             text: "]"; color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
         }
         MouseArea {
@@ -986,7 +1131,7 @@ Item {
     // ── the switchboard ─────────────────────────────────────────────────────
     Item {
         id: board
-        x: powerKey.x + powerKey.width + root.kit.cellW
+        x: Math.round(powerKey.x + powerKey.width + root.kit.cellW)   // whole px: the schematic is pixel art
         height: root.barH
         width: Math.min(root.boardW, Math.max(0, right.x - x - root.kit.cells(2)))
         clip: root.boardW > width
@@ -996,25 +1141,42 @@ Item {
             id: ties
             width: Math.max(1, root.boardW)
             height: root.barH
-            readonly property var paintKey: [root.routing, root.jackModel, root.kit.mid]
+            readonly property var paintKey: [root.schematic, root.kit.ink]
             onPaintKeyChanged: requestPaint()
             Component.onCompleted: requestPaint()
             onPaint: {
                 var ctx = getContext("2d")
                 ctx.reset()
                 ctx.clearRect(0, 0, width, height)
-                ctx.fillStyle = "" + root.kit.mid
-                var rs = root.routing.routes
-                for (var r = 0; r < rs.length; r++) {
-                    var R = rs[r]
-                    if (R.lane < 0) continue
-                    var y = root.laneY(R.lane)
-                    var step = R.kind === "spawned" ? 2 : 1
-                    var xs = R.members.map(function (m) { return root.dropX(m, R.lane) })
-                    var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs)
-                    for (var x = x0; x <= x1; x += step) ctx.fillRect(x, y, 1, 1)
-                    for (var k = 0; k < xs.length; k++)
-                        for (var yy = root.bandTop; yy < y; yy += step) ctx.fillRect(xs[k], yy, 1, 1)
+                ctx.fillStyle = "" + root.kit.ink
+                var S = root.schematic
+                // wires: solid, or dashed 3 on / 2 off along their length
+                for (var i = 0; i < S.runs.length; i++) {
+                    var w = S.runs[i]
+                    if (w.w <= 0 || w.h <= 0) continue
+                    if (!w.dashed) { ctx.fillRect(w.x, w.y, w.w, w.h); continue }
+                    if (w.w >= w.h) {
+                        for (var x = w.x; x < w.x + w.w; x += 5) ctx.fillRect(x, w.y, Math.min(3, w.x + w.w - x), w.h)
+                    } else {
+                        for (var y = w.y; y < w.y + w.h; y += 5) ctx.fillRect(w.x, y, w.w, Math.min(3, w.y + w.h - y))
+                    }
+                }
+                // pads: a hollow 6px ring (corners cut), its inside cleared so a
+                // wire never shows through it
+                var t = root.padTop, n = root.padS
+                for (var p = 0; p < S.pads.length; p++) {
+                    var l = S.pads[p].cx - n / 2
+                    ctx.clearRect(l, t, n, n)
+                    ctx.fillRect(l + 1, t, n - 2, 1)
+                    ctx.fillRect(l + 1, t + n - 1, n - 2, 1)
+                    ctx.fillRect(l, t + 1, 1, n - 2)
+                    ctx.fillRect(l + n - 1, t + 1, 1, n - 2)
+                }
+                // junctions: a filled 6px dot (corners cut) where a wire meets a wire
+                for (var d = 0; d < S.dots.length; d++) {
+                    var c = S.dots[d]
+                    ctx.fillRect(c.x - 3, c.y - 2, 6, 4)
+                    ctx.fillRect(c.x - 2, c.y - 3, 4, 6)
                 }
             }
         }
@@ -1034,10 +1196,12 @@ Item {
                 // the board's terminal-row hover names this jack
                 Rectangle {
                     visible: jack.previewed
+                    y: root.textY
                     width: jack.modelData.sockW; height: root.kit.cellH
                     color: root.kit.select
                 }
                 Text {
+                    y: root.textY
                     text: jack.modelData.sock
                     color: jack.tone
                     font.family: root.kit.font.family
@@ -1048,7 +1212,7 @@ Item {
                     styleColor: root.kit.withA(color, 0.18)
                 }
                 Text {
-                    x: jack.modelData.sockW
+                    x: jack.modelData.sockW; y: root.textY
                     visible: jack.modelData.project.length > 0
                     text: jack.modelData.project
                     color: root.kit.path
@@ -1056,7 +1220,7 @@ Item {
                     textFormat: Text.PlainText
                 }
                 Text {
-                    x: root.kit.cells(jack.modelData.sock.length + jack.modelData.project.length)
+                    x: root.kit.cells(jack.modelData.sock.length + jack.modelData.project.length); y: root.textY
                     visible: jack.modelData.badge.length > 0
                     text: jack.modelData.badge
                     color: root.kit.number
@@ -1087,6 +1251,7 @@ Item {
     // ── the active window's title, dim, truncated ───────────────────────────
     Text {
         id: titleText
+        y: root.textY
         x: board.x + board.width + root.kit.cells(2)
         width: Math.max(0, right.x - root.kit.cells(2) - x)
         visible: width >= root.kit.cells(6)
@@ -1101,6 +1266,7 @@ Item {
     // ── the right cells ─────────────────────────────────────────────────────
     Row {
         id: right
+        y: root.textY
         anchors.right: parent.right
         anchors.rightMargin: root.kit.cellW
         height: root.barH
