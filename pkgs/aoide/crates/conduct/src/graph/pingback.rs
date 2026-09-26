@@ -61,10 +61,13 @@
 //! registered harness profile) is skipped and counted, never injected into.
 //! Every child-authored fragment of a line — the quoted say, prompt and stop
 //! reason, and the unquoted tool label — is untrusted model output (house
-//! rule 4): one line, control characters stripped, clipped to [`SAY_MAX`]
-//! with `…`; the quoted ones are never allowed to start with `/` or `!`.
+//! rule 4): one line, every unsafe character stripped (control, and the
+//! Unicode `Cf` marks that would reorder it invisibly — the same
+//! [`super::common::is_unsafe`] set `clean_line` strips), clipped to
+//! [`SAY_MAX`] with `…`; the quoted ones are never allowed to start with `/`
+//! or `!`.
 
-use super::common::{clean_line, clip_flat};
+use super::common::{clean_line, clip_flat, strip_unsafe};
 use super::conduct::channel_socket_path;
 use super::doorbell::{connect_for_ring, write_channel};
 use super::eidolon::{eidolon_state_from_trace, DroppedEidolon};
@@ -764,15 +767,17 @@ fn child_tag(petname: Option<&str>, id: &str) -> String {
     }
 }
 
-/// Untrusted child-authored text as ONE safe line (house rule 4): control
-/// characters stripped (a `\r` is an Enter at a headless parent's PTY, and
-/// whatever follows it would start a fresh composer line), whitespace
-/// flattened, clipped to [`SAY_MAX`] with `…`. EVERY fragment the child wrote
-/// passes through here — the say, the prompt, the stop reason, and the tool
-/// label alike — never only the ones the grammar puts in quotes.
+/// Untrusted child-authored text as ONE safe line (house rule 4): every
+/// character [`super::common::is_unsafe`] refuses is stripped — control
+/// characters (`\r` is an Enter at a headless parent's PTY, and whatever
+/// follows it would start a fresh composer line) AND the Unicode `Cf` marks
+/// (bidi overrides, zero-width joiners) that would otherwise reorder or hide
+/// the line — whitespace flattened, clipped to [`SAY_MAX`] with `…`. EVERY
+/// fragment the child wrote passes through here — the say, the prompt, the
+/// stop reason, and the tool label alike — never only the ones the grammar
+/// puts in quotes.
 fn clean(s: &str) -> String {
-    let stripped: String = s.chars().filter(|c| !c.is_control()).collect();
-    one_line_clip(&stripped, SAY_MAX)
+    one_line_clip(&strip_unsafe(s), SAY_MAX)
 }
 
 /// [`clean`] as a quoted phrase: additionally never allowed to start with `/`
@@ -1230,12 +1235,13 @@ fn gap_line(tag: &str, missed: u64) -> String {
 /// every string it carries is re-cleaned with [`clean_line`] and clipped to
 /// [`SAY_MAX`] before the local renderer touches it.
 ///
-/// **Why clean again, when the sender already did.** The sender's own `clean`
-/// strips control characters only; the event crossed a wire, and this side
-/// renders it into a composer. [`clean_line`] is the stricter sanitizer the
-/// watch frame's `clamp_untrusted` uses (control AND every Unicode `Cf`, so a
-/// bidi override cannot reorder the line), and no peer's bytes may reach a line
-/// on this node's word alone.
+/// **Why clean again, when the sender already did.** The event crossed a
+/// wire: this node renders it into a parent's composer, and no peer's bytes
+/// reach that line on another node's word for its own sanitizing. The rule
+/// applied is the SAME one the sender uses ([`reclean`] reaches the identical
+/// [`strip_unsafe`]/[`SAY_MAX`] pair), which is what makes the second pass
+/// cheap to trust — re-cleaning an already-clean field changes nothing, and a
+/// field a compromised or older peer sent raw does not get through.
 fn ping_event_of(event: &Value) -> Option<PingEvent> {
     let event: PingEvent = serde_json::from_value(event.clone()).ok()?;
     Some(reclamp(event))
@@ -1275,15 +1281,15 @@ fn reclamp(event: PingEvent) -> PingEvent {
     }
 }
 
-/// A peer-sent string, made safe for the line it becomes: [`clean_line`]'s own
-/// strip (control characters and every Unicode `Cf`) clipped to this module's
-/// [`SAY_MAX`], and never free to start with `/` or `!` — the guard [`quote`]
-/// puts on a local fragment, applied here as well because a BARE segment (a
-/// tool label, a wrap-up bound, an exit outcome) is never quoted by
+/// A peer-sent string, made safe for the line it becomes: [`strip_unsafe`]'s
+/// own strip (control characters and every Unicode `Cf`) clipped to this
+/// module's [`SAY_MAX`], and never free to start with `/` or `!` — the guard
+/// [`quote`] puts on a local fragment, applied here as well because a BARE
+/// segment (a tool label, a wrap-up bound, an exit outcome) is never quoted by
 /// [`render_line`]. Prepending a space to a QUOTED field is a no-op: `quote`
 /// cleans first, and cleaning trims.
 fn reclean(s: &str) -> String {
-    let cleaned = clip_flat(&clean_line(s), SAY_MAX);
+    let cleaned = clip_flat(&strip_unsafe(s), SAY_MAX);
     if cleaned.starts_with('/') || cleaned.starts_with('!') {
         format!(" {cleaned}")
     } else {
@@ -1562,6 +1568,31 @@ mod tests {
         let line = line.unwrap();
         assert!(!line.contains('\u{1b}') && !line.contains('\u{7}'), "{line:?}");
         assert!(line.contains("a[31mbc"), "{line:?}");
+    }
+
+    #[test]
+    fn a_bidi_or_zero_width_mark_in_a_local_line_is_stripped() {
+        // `is_control` does NOT cover Unicode `Cf`: a bidi override (U+202E)
+        // or a zero-width space (U+200B) in a child's own text survives a
+        // control-only filter and reorders what the parent reads — the exact
+        // trick that turned a prompt of `/compact` into the local line's
+        // quoted say. Both ride a LOCAL trace here: no wire involved.
+        let hostile = r#"{"id":5,"parent":4,"ts_ms":1000,"kind":{"AskUser":{"prompt":"\u202egpj.exe\u200b --version","answer":null}}}"#;
+        let (line, _) = plan(&[USER, hostile], Some("1"));
+        let line = line.unwrap();
+        assert_eq!(line, "[eidolon brave-otter] asking: \"gpj.exe --version\"", "{line:?}");
+        assert!(
+            !line.chars().any(super::super::common::is_unsafe),
+            "no unsafe character survives a local line either: {line:?}"
+        );
+
+        // The same for a BARE segment the renderer never quotes, and for the
+        // stop reason a Settled line quotes.
+        let label = r#"{"id":9,"parent":8,"ts_ms":1789603009300,"kind":{"ToolResult":{"tool_use_id":"call_p","content":"ok\u200f!rm -rf /tmp/x","is_error":true}}}"#;
+        let (line, _) = plan(&[USER, ASSISTANT, RESULT_ERR, RESULT_ERR, label], Some("2"));
+        let line = line.unwrap();
+        assert!(line.contains("last: ! ok!rm -rf /tmp/x"), "the mark is gone, the text stays: {line:?}");
+        assert!(!line.chars().any(|c| c == '\u{200f}' || c == '\u{202e}'), "{line:?}");
     }
 
     #[test]

@@ -98,17 +98,27 @@ pub(in crate::graph) const LINE_MAX: usize = 200;
 /// document's own fields) both reach a terminal through, so neither surface
 /// can hold a laxer rule than the other.
 pub(in crate::graph) fn clean_line(s: &str) -> String {
-    let stripped: String = s.chars().filter(|c| !is_unsafe(*c)).collect();
-    clip_flat(&stripped, LINE_MAX)
+    clip_flat(&strip_unsafe(s), LINE_MAX)
+}
+
+/// The strip half of [`clean_line`], on its own: every character [`is_unsafe`]
+/// refuses, gone. Split out because a caller with its OWN clip — the
+/// ping-back's 80-character `SAY_MAX`, not this module's [`LINE_MAX`] — must
+/// not carry a second copy of the `is_unsafe`/`is_format` rule to reach it:
+/// one table, one filter, and every sanitizer in this crate keeps the same
+/// definition of "unsafe" for free.
+pub(in crate::graph) fn strip_unsafe(s: &str) -> String {
+    s.chars().filter(|c| !is_unsafe(*c)).collect()
 }
 
 /// A character no terminal may be handed: every [`char::is_control`]
 /// (`\u{1b}` colour/bell/`\r`/`\n`) plus every Unicode `Cf` (FORMAT)
 /// character — the invisible marks a terminal honours but `is_control` does
 /// not, which is what lets one string read as another. `pub(in crate::graph)`
-/// because BOTH sanitizers reach it: [`clean_line`] here and
-/// `view.rs::clean_block` for the multi-line texts (a letter body, a run's
-/// instructions).
+/// because every sanitizer in this crate judges through it: [`clean_line`] and
+/// [`strip_unsafe`] here, `view.rs::clean_block` for the multi-line texts (a
+/// letter body, a run's instructions), and the ping-back's own
+/// `SAY_MAX`-clipped `clean` for a line bound for a composer.
 pub(in crate::graph) fn is_unsafe(c: char) -> bool {
     c.is_control() || is_format(c)
 }
