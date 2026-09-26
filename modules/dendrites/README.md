@@ -23,6 +23,11 @@ modules/dendrites/kitty.nix
 Why both: a host that takes the whole tree merges every `body` (through
 `modules/dendrites/default.nix`), and a host the constructor assembles
 (`lib/composition.nix`) imports only the `nixos` lane of what it selected.
+The two are MUTUALLY EXCLUSIVE in one module list — both import the same
+`body`, so `aoide.<name>.enable` would be declared twice and nixpkgs throws
+`already declared` rather than merging. Take the aggregate and select
+nothing, or select through the catalogue and leave the aggregate out;
+`mkNixosModules` refuses the pair by name.
 Every dendrite's lane is `nixos`, because each writes its Home Manager
 configuration from the NixOS side. A capability with alternatives is a
 provider registry instead — a directory whose `default.nix` is
@@ -32,11 +37,17 @@ provider registry instead — a directory whose `default.nix` is
 
 - One file per capability, each declaring `aoide.<name>.enable` (default
   `false`) and carrying its own package/service dependencies.
-- `default.nix` — this directory's own aggregate: one line per file,
-  importing that file's `body` into the full tree.
-- `_example.nix` — the checked-in template: shelved by its `_` prefix (never
-  listed in `default.nix` and never catalogued), showing the v1 lane record and
-  the enable-with-two-lines convention.
+- `default.nix` — this directory's whole-tree aggregate. It names no dendrite:
+  its imports are DERIVED from the catalogue
+  (`builtins.attrValues (import ../default.nix).catalogue`) in attribute-name
+  order — the `LC_ALL=C` order the catalogue is written in — so a dendrite added
+  or shelved by its catalogue line needs no edit here. Every catalogue entry it
+  derives over must answer with a `body`; a provider registry
+  (`{ providers.<p> = …; }`) has none and is reached only through the
+  constructor.
+- `_example.nix` — the checked-in template: shelved by its `_` prefix
+  (uncatalogued, so nothing imports it), showing the v1 lane record and the
+  enable-with-one-line convention.
 - A dendrite that draws (e.g. `dunst.nix`'s notification popups) hands off
   to a render surface via a bridge (a CLI command, a stage file) rather
   than drawing itself — `dunst.nix` pipes through `aoide herald push` into

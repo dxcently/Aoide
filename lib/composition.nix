@@ -561,6 +561,28 @@ rec {
       };
       inherit (selection) catalogue;
 
+      # `extraModules` and the gate-pass hook's answer, in that order: a module
+      # from the hook merges and outranks exactly as one the caller passed in.
+      # Resolved once — the collision check below and the platform pass read the
+      # same list.
+      extra = extraModules ++ extraModulesFor selection;
+
+      # The whole-tree aggregate and a SELECTED lane in one module list is not a
+      # merge: both import the same `body`, so `aoide.<name>.enable` is declared
+      # twice and nixpkgs throws. They are mutually exclusive — taking the
+      # aggregate means selecting nothing (CONTRACTS.md §2) — so the collision
+      # is named here, where the list is assembled, rather than surfacing later
+      # as that throw. A module that IS the dendrite directory is the whole tree.
+      wholeTree = lib.filter (
+        m:
+        builtins.isPath m
+        && lib.elem (toString m) (map (p: lib.dirOf (toString p)) (lib.attrValues catalogue))
+      ) extra;
+      chosenNames = lib.unique (
+        enabledNames selection.dendrites
+        ++ lib.concatMap (u: enabledNames u.dendrites) (lib.attrValues selection.users)
+      );
+
       systemLanes = lanesFor {
         inherit catalogue;
         selected = selection.dendrites;
@@ -645,11 +667,7 @@ rec {
       ++ accountLanes
       ++ systemLanes
       ++ lib.optional (hmUsers != { }) homeWiring
-      ++ extraModules
-      # The gate-pass answer turned into imports. Same position as
-      # `extraModules`, so a module from here merges and outranks exactly as one
-      # the caller passed in.
-      ++ extraModulesFor selection
+      ++ extra
       # A record outranks everything the constructor imported on its behalf; the
       # host's own module still outranks the record.
       ++ overrides.nixos
@@ -658,6 +676,8 @@ rec {
     in
     if strandedHome != [ ] then
       throw "host '${hostName}': ${lib.concatStringsSep "; " strandedHome}"
+    else if wholeTree != [ ] && chosenNames != [ ] then
+      throw "host '${hostName}': ${lib.concatStringsSep ", " (map toString wholeTree)} is the whole dendrite tree, which imports every dendrite's body, and ${lib.concatStringsSep ", " chosenNames} is selected, so its lane imports that same body — one module list, the same declarations twice, which nixpkgs throws on as `already declared'. Keep one: select through the catalogue and drop the aggregate, or take the aggregate and select nothing."
     else
       {
         inherit

@@ -12,6 +12,11 @@ covers only what's specific to dendrites.
   imports `body` and sets the flag `lib.mkDefault true`. Keep the options, the
   guard and the config on `body` — moving any of them into the lane makes the
   full tree and the constructor disagree about the same capability.
+- **The aggregate and a lane never share a module list.** Both import the same
+  `body`, so one of them is a second copy of the same declarations and nixpkgs
+  throws `already declared` rather than merging. Taking the whole tree means
+  selecting nothing; selecting through the catalogue means not importing the
+  aggregate. `lib/composition.nix`'s `mkNixosModules` refuses the pair by name.
 - **One enable toggle, default off.** `aoide.<name>.enable = false` is the
   shape every dendrite follows — shipped but inert until a host opts in.
 - **Carries its own dependencies; reads no other module.** Not another
@@ -27,9 +32,10 @@ covers only what's specific to dendrites.
 
 ## Extension points
 
-- **A new dendrite**: a new file here following the lane-record shape, one
-  line in `modules/default.nix`'s catalogue, and one line in this directory's
-  `default.nix`. Author it as `_name.nix` while work-in-progress — see
+- **A new dendrite**: a new file here following the lane-record shape, and one
+  line in `modules/default.nix`'s catalogue — the only place its file is named.
+  `modules/dendrites/default.nix` derives its imports from that catalogue, so
+  nothing else changes. Author it as `_name.nix` while work-in-progress — see
   `_example.nix`, the checked-in template.
 - **A capability with alternatives**: a directory here whose `default.nix` is
   `{ providers.<p> = <path>; }`; the catalogue entry is the DIRECTORY, and each

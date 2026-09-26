@@ -4,8 +4,9 @@
 # Aoide's lyre in compact form — three strings, curved arms, a soundbox, the
 # A·O·I·D·E ground and a "the song" tag). Redrawn small (13×7) so the info
 # column sits flush beside it and never wraps in a tiled/narrow terminal.
-# The walker registers every .nix under modules/dendrites/, so this default.nix
-# self-registers exactly like a flat dendrite (CONTRACTS.md §2).
+# The catalogue names this file — modules/dendrites/default.nix derives its
+# imports from it — so this default.nix registers exactly like a flat dendrite
+# (CONTRACTS.md §2).
 #
 # Dendrite shape v1:
 #   - Guarded on aoide.fastfetch.enable (default false — shipped but off).

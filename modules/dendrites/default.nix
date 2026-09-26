@@ -1,47 +1,20 @@
-# modules/dendrites/default.nix — every opt-in capability this tree ships.
+# modules/dendrites/default.nix — the whole-tree aggregate.
 #
-# One line per file, in directory order. A dendrite file is a lane record
-# (`{ body; nixos; }`, CONTRACTS.md §2): `modules/default.nix`'s catalogue
-# names it, the constructor (`lib/composition.nix`) imports the `nixos` lane of
-# the ones a host selected, and this aggregate imports each `body` so that a
-# host taking the whole tree still sees every `aoide.<name>.*` option and its
-# own guard.
+# Its imports are DERIVED from `modules/default.nix`'s catalogue: that record is
+# the one place a dendrite file is named (root `AGENTS.md` house rule 7), so
+# this file names no dendrite at all. Adding one is one catalogue line and
+# nothing here changes; deleting the line shelves it, file untouched.
 #
-# A new dendrite is a new file plus one line here and one in the catalogue;
-# deleting both removes it without a trace. A `_`-prefixed file is never
-# listed — that is what the prefix means.
+# A dendrite file is a lane record (`{ body; nixos; }`, CONTRACTS.md §2).
+# Taking this aggregate merges every `body`, so a host that takes the whole tree
+# still sees each `aoide.<name>.*` option and its own guard; a host the
+# constructor (`lib/composition.nix`) assembles imports only the `nixos` lane of
+# what it selected. The two are mutually exclusive in one module list — an
+# aggregate `body` and a selected lane's own `body` are the same declarations
+# twice, which nixpkgs throws on rather than merging.
+#
+# This aggregate is on its way out (S7): once hosts select through the
+# constructor, nothing imports a whole tree, and this file goes with them.
 {
-  imports = [
-    (import ./audio.nix).body
-    (import ./bash.nix).body
-    (import ./btop.nix).body
-    (import ./claude-code.nix).body
-    (import ./cli.nix).body
-    (import ./clipboard.nix).body
-    (import ./devtools.nix).body
-    (import ./dunst.nix).body
-    (import ./eidolon.nix).body
-    (import ./fastfetch).body
-    (import ./firefox.nix).body
-    (import ./fonts.nix).body
-    (import ./git.nix).body
-    (import ./hyprland.nix).body
-    (import ./inference.nix).body
-    (import ./kimi-code.nix).body
-    (import ./kitty.nix).body
-    (import ./mcfly.nix).body
-    (import ./melete.nix).body
-    (import ./mneme.nix).body
-    (import ./neovim.nix).body
-    (import ./networkmanager.nix).body
-    (import ./nh.nix).body
-    (import ./obsidian.nix).body
-    (import ./openai.nix).body
-    (import ./pi-coding-agent.nix).body
-    (import ./qbittorrent.nix).body
-    (import ./screenshot.nix).body
-    (import ./starship.nix).body
-    (import ./vision.nix).body
-    (import ./yazi.nix).body
-  ];
+  imports = map (p: (import p).body) (builtins.attrValues (import ../default.nix).catalogue);
 }

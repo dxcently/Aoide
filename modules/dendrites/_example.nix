@@ -1,9 +1,8 @@
 # modules/dendrites/_example.nix
 #
 # SHELVED — a `_`-prefixed file or directory is not a module: nothing imports
-# it, no `default.nix` lists it and the catalogue does not name it. Keep it in
-# place as a template or a work-in-progress; prefixing is the opt-out, so
-# nothing here has to be deleted.
+# it and the catalogue does not name it. Keep it in place as a template or a
+# work-in-progress; prefixing is the opt-out, so nothing here has to be deleted.
 #
 # ── Example dendrite shape (v1, CONTRACTS.md §2) ──────────────────────────
 #
@@ -12,9 +11,9 @@
 # that selected this dendrite, and that lane sets the flag `mkDefault true`.
 # The body's args belong to the body — the record itself is plain data.
 #
-# Two lines activate it (both inside this directory's tree):
+# One line activates it, in the catalogue — the same line that makes it
+# selectable is the only place its file is named:
 #   modules/default.nix             example = ./dendrites/example.nix;
-#   modules/dendrites/default.nix   (import ./example.nix).body
 #
 # hosts/ knows dendrites; dendrites never know hosts.
 let

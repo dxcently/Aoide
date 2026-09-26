@@ -281,8 +281,11 @@ and `livery.json` from v0 to v1 when the design-system workstream lands v1.
 
 A dendrite is one file (or a directory with `default.nix`) at
 `modules/dendrites/<name>`, named once in `modules/default.nix`'s catalogue.
-It evaluates to a **lane record** — a plain attribute set naming the evaluators
-this capability answers for:
+**v1 is the lane record**: the file evaluates to a plain attribute set naming the
+module that declares the capability (`body`) and the lanes it answers for
+(`nixos`, `homeManager`, `darwin`). v1 carries no migration note — this repo is
+the shape's only consumer, and dxflake pins its own revision rather than
+following this one.
 
 ```nix
 # modules/dendrites/<name>.nix
@@ -315,6 +318,12 @@ the dendrite for the system is what turns the capability on. The constructor
 else; `modules/dendrites/default.nix` imports every `body`, which is how a
 host taking the whole tree still sees each `aoide.<name>.*` option.
 
+Those two are **mutually exclusive in one module list**. An aggregate `body` and
+a selected lane's `body` are the same declarations arriving twice, which nixpkgs
+throws on (`already declared`) rather than merging; `mkNixosModules` refuses the
+pair by name before the platform pass runs. Take the whole tree and select
+nothing, or select through the catalogue and leave the aggregate out.
+
 Rules:
 
 - **Guard on `aoide.<name>.enable`** (per-feature) or an aggregation/role flag,
@@ -324,12 +333,13 @@ Rules:
   directory, not a provider file.
 - **A dendrite never reads another module** — only `config.aoide.*` options it
   declares itself, plus stock NixOS options.
-- **Growth is additive**: new dendrites are new files plus one catalogue line;
-  upstream merges stay conflict-free by construction.
+- **Growth is additive**: a new dendrite is a new file plus one catalogue line,
+  and that line is the only place the file is named — the whole-tree aggregate
+  derives its imports from it. Upstream merges stay conflict-free by
+  construction.
 - **Shelving opt-out**: prefix a filename with `_` (`_wip.nix`) — a
-  `_`-prefixed file is neither catalogued nor listed in `default.nix` and so is
-  not a module, shelved without being deleted. Any path containing `/_` is
-  skipped.
+  `_`-prefixed file is not catalogued and so is not a module, shelved without
+  being deleted. Any path containing `/_` is skipped.
 - Subfolders under `modules/dendrites/` are grouping only; a file inside one
   still needs its own catalogue line to be selectable.
 

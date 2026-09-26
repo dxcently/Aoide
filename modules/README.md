@@ -4,37 +4,58 @@ The AoideOS module tree: everything a host needs beyond the core flake's own
 `nixosModules.default`. Three layers, in the order the module system merges
 them — `dendrites/` (opt-in), `facets/` (render surfaces), `nucleus/`
 (unconditional core) — each with its own charter, in its own `README.md`, plus
-the registry that names what can be selected.
+the catalogue that names what can be selected.
 
 ## Named seams (what it exposes)
 
-- `modules/default.nix` — the registry. Plain data, not a module:
+- `modules/default.nix` — the catalogue. Plain data, not a module:
   `catalogue` names every dendrite once, by the name a host selects it with,
-  and points at the file (or directory) that answers it; `aggregations` and
-  `overrides` are the sibling discovery records. `lib/composition.nix` reads
-  this record before any module graph exists and imports only what selection
-  kept.
+  and points at the file (or directory) that answers it. It is the ONE place a
+  dendrite file is named. `aggregations` and `overrides` are the sibling
+  discovery records, read one level deep beside it and empty until
+  `modules/aggregations/` and `modules/overrides/` land. `lib/composition.nix`
+  reads this record before any module graph exists and imports only what
+  selection kept.
 - `dendrites/default.nix`, `facets/default.nix`, `nucleus/default.nix` —
-  one aggregate per layer, each naming only the files inside its own
-  directory. `lib/mkHost.nix` and `tests/vm-boot.nix` import the three
-  aggregates directly; nothing imports the registry as a module.
+  one aggregate per layer. `dendrites/default.nix` names no dendrite: it derives
+  its imports from the catalogue
+  (`builtins.attrValues (import ../default.nix).catalogue`). `facets/default.nix`
+  and `nucleus/default.nix` name only the files inside their own directory —
+  neither layer is selectable, so neither has a catalogue name to be found by.
+  `lib/mkHost.nix` and `tests/vm-boot.nix` import the three aggregates directly;
+  nothing imports the catalogue as a module.
 - A dendrite file is a lane record (`{ body; nixos; }`, CONTRACTS.md §2):
   `body` is the module this tree merges (its `aoide.<name>.*` options and its
   guard), `nixos` is the module the constructor imports for a host that
-  selected it. `dendrites/default.nix` imports every `body`.
+  selected it. `dendrites/default.nix` imports every `body`. That aggregate and
+  a SELECTED lane are mutually exclusive in one module list — both import the
+  same `body`, so `aoide.<name>.enable` arrives twice and nixpkgs throws
+  `already declared`; `mkNixosModules` refuses the pair by name.
 
 ## How the aggregates compose
 
-Every directory that holds modules carries exactly one `default.nix`,
-listing its own entries and nothing outside itself — one line per file (or
-subdirectory), in `LC_ALL=C` order, `_`-prefixed entries omitted. That order
-is a contract, not taste: list-typed NixOS options merge in definition order,
-so `[ ./dendrites ./facets ./nucleus ]` reproduces the same leaf order a
-reader gets from `ls -A | LC_ALL=C sort` inside each directory. A new file is
-a new line in its own directory's `default.nix`; deleting both removes the
-capability without a trace elsewhere in the tree. The catalogue line beside it
-is what makes the capability *selectable*; the aggregate line is what puts it
-in the full tree.
+Every directory that holds modules carries exactly one `default.nix`, listing
+its own entries and nothing outside itself — one line per file (or
+subdirectory), in `LC_ALL=C` order, `_`-prefixed entries omitted. The one
+exception is `dendrites/`, whose aggregate names nothing and derives its imports
+from the catalogue: a dendrite's ONE line is its catalogue line, and the full
+tree follows it.
+
+That order is a contract, not taste: list-typed NixOS options merge in
+definition order, so `[ ./dendrites ./facets ./nucleus ]` reproduces the same
+leaf order a reader gets from `ls -A | LC_ALL=C sort` inside each directory. The
+dendrite aggregate's order is the catalogue's attribute-name order instead —
+`LC_ALL=C` too, and the two agree for every name in the tree, but they diverge
+the day a name and its filename stop sorting alike (`foo.nix` beside
+`foo-bar.nix`). The catalogue is that layer's authority: the file that names a
+capability names its order with it.
+
+A new dendrite is a new file plus one catalogue line; a new facet or nucleus
+module is a new file plus one line in its own directory's `default.nix`.
+Deleting both removes it without a trace elsewhere in the tree. `_`-prefix
+shelving is the same act short of the deletion: a `_`-prefixed file is never
+catalogued and never listed, so nothing imports it, and the `_` marks it as
+parked rather than deleted.
 
 That guarantee is scoped to the leaves relative to each other: the three
 aggregates arrive as separate import paths, in that order, so a host,

@@ -58,12 +58,16 @@ four things are placeholders and will not work as shipped:
   record only for a problem you have actually verified.
 
 The generic names (`exampletool`, `examplewidget`, `workspace`, `exampleuser`)
-are meant to be renamed. The `services.example.*` / `programs.example.*`
-settings inside the lanes are stand-ins for real options.
+are meant to be renamed. The stand-in options beside them
+(`programs.example.fontSize` in the aggregation, `systemd.services.example` in
+the override record) are shapes to copy; a dendrite's own packages and services
+belong inside its `body`'s `aoide.<name>.enable` guard.
 
 ## Lanes, in one paragraph
 
-A dendrite names the evaluators it answers for. `nixos` is the host's NixOS
+A dendrite names the evaluators it answers for. `body` is not one of them: it is
+the module the lanes import, holding the capability's options and its guard. A
+lane is a module for one evaluator: `nixos` is the host's NixOS
 module — services, system packages, hardware. `homeManager` is one user's Home
 Manager module — dotfiles, user packages. `darwin` is nix-darwin; it is in the
 vocabulary and unused in this tree. Selecting a capability for the system
