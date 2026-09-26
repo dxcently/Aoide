@@ -128,7 +128,16 @@
               # instead of the wallpaper muddying it dim; hyprglass then glosses
               # the surface on top (compositor manage_window_blur). The cream +
               # dark-ink look is unchanged; only the surface got brighter.
+              #
+              # This is also the baked opacity a staged song with no
+              # `geometry.terminalOpacity` restores: aoide-song's
+              # `live::TERMINAL_OPACITY_BAKED` mirrors it (cargo cannot read
+              # nix), so change the two together. A song's own value arrives
+              # through the staged include below and, for open windows, over
+              # the control socket (`set-background-opacity --all`), which
+              # kitty refuses unless dynamic_background_opacity is on.
               background_opacity = "0.86";
+              dynamic_background_opacity = true;
               background_blur = 0;
               enable_audio_bell = false;
               tab_bar_style = "powerline";

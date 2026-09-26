@@ -113,7 +113,7 @@ no new crate, no Node toolchain. What moved, in place:
 - `resolve.rs` — the flat resolver: single-level `{group.key}` alias deref
   (cycle-guarded, replacing Style Dictionary's `exportPlatform`) + the
   component `null → palette` fallback.
-- `emit/{stage,hyprctl,osc,file}.rs` — four pure emitters behind one
+- `emit/{stage,hyprctl,osc,file,kitty}.rs` — five pure emitters behind one
   `Emitter` trait + registry; a new backend is one file + one registry line.
   `file` (arbitrary config-file template, `{{palette.bg}}` placeholders) is
   the generalization proof; `gtk`/`gsettings` host-mutating apply stays
@@ -141,9 +141,9 @@ CLI's `Invocation`/`Outcome` shell:
   lint` runs this engine natively — no binary locate, no shell-out.
 - **`lyra livery resolve [<song>|<path>]`** — print the fully-resolved,
   flattened livery set.
-- **`lyra livery emit <target> [<song>|<path>]`** — run one of the four
-  emitters (`stage` · `hyprctl` · `osc` · `file`); `--out PATH` writes
-  atomically, `--template` supplies the file backend's template.
+- **`lyra livery emit <target> [<song>|<path>]`** — run one of the five
+  emitters (`stage` · `hyprctl` · `osc` · `file` · `kitty`); `--out PATH`
+  writes atomically, `--template` supplies the file backend's template.
 
 No argument defaults to the staged livery. Exit codes align with the CLI
 convention: `0` ok · `2` usage · `1` error. [[Rice-and-Livery]] carries each
@@ -153,7 +153,7 @@ backs.
 
 ## The emitters
 
-All four consume the *same* fully-resolved livery set (from `resolve.rs`), so
+All five consume the *same* fully-resolved livery set (from `resolve.rs`), so
 the live targets can never disagree:
 
 1. **`stage`** → `song/stage/livery.json` for [[Quickshell]]. With `--out PATH` it
@@ -169,6 +169,10 @@ the live targets can never disagree:
 4. **`file`** → a caller-supplied template rendered through
    `{{group.key}}` placeholders (e.g. `{{palette.bg}}`, `{{window.border}}`);
    an unknown placeholder is a structured error, never a panic.
+5. **`kitty`** → `song/stage/terminal-colors.conf`, kitty's own colour syntax:
+   the tinted-kitty base16 template Stylix bakes, key for key. A note with no
+   base16 tier gets the scheme the Stylix facet synthesises from its palette,
+   so every slot is written either way (CONTRACTS.md §4).
 
 ## The livery schema v0
 

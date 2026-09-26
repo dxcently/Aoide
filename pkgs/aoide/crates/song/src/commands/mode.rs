@@ -786,7 +786,7 @@ mod tests {
         // The facet's activation seed published the DECLARED twin for sonata…
         std::fs::write(
             declared.join("livery.json"),
-            r##"{"palette":{"accent":"#ebbcba","bg":"#0b1021","fg":"#c8d3f5","urgent":"#ff757f"},"schemaVersion":"0","song":"sonata"}"##,
+            r##"{"geometry":{"terminalOpacity":0.7},"palette":{"accent":"#ebbcba","bg":"#0b1021","fg":"#c8d3f5","urgent":"#ff757f"},"schemaVersion":"0","song":"sonata"}"##,
         )
         .unwrap();
         // …while the stage is currently performing nocturne, and a prior
@@ -823,7 +823,9 @@ mod tests {
         // accent, not the committed sonata's or the staged nocturne's).
         let terminal = std::fs::read_to_string(stage.join("terminal-colors.conf")).unwrap();
         assert!(terminal.lines().any(|l| l == "background #0b1021"), "{terminal}");
-        assert!(terminal.lines().any(|l| l == "cursor #ebbcba"), "{terminal}");
+        assert!(terminal.lines().any(|l| l == "cursor #c8d3f5"), "{terminal}");
+        assert!(terminal.lines().any(|l| l == "color4 #ebbcba"), "{terminal}");
+        assert!(terminal.lines().any(|l| l == "background_opacity 0.7"), "{terminal}");
         assert!(out.changed.iter().any(|c| c.ends_with("stage/terminal-colors.conf")));
         let marker = load_mode_marker();
         assert_eq!(marker.mode, RiceMode::Declarative);

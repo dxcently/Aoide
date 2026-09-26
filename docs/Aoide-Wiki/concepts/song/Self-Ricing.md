@@ -248,22 +248,28 @@ The terminals and the compositor's glass follow the stage too, from the
 same staged notes and under the same gate. `rice stage` writes
 `$AOIDE_ROOT/song/stage/terminal-colors.conf` — the staged song's base16 in
 kitty's own colour syntax (the tinted-kitty template Stylix bakes, key for
-key; a song with no base16 tier gets its four palette anchors only), through
-the livery engine's `kitty` emitter. The kitty dendrite includes that file
+key; a song with no base16 tier gets the scheme the Stylix facet
+synthesises from its palette, so every slot is written either way and no
+slot of an earlier song survives), through the livery engine's `kitty`
+emitter, plus the song's `geometry.terminalOpacity` as kitty's
+`background_opacity` (the kitty dendrite's baked 0.86 when the song has
+none). The kitty dendrite includes that file
 after Stylix's baked colours, so every NEW window opens in the staged song;
 for the windows already open, `rice stage` runs `kitty @ set-colors --all
---configured <file>` over every kitty control socket
-(`$XDG_RUNTIME_DIR/kitty-<pid>`, the dendrite's `listen_on`) and reports how
-many windows it recoloured. Never a raw OSC write into a pty: that
+--configured <file>` and `kitty @ set-background-opacity --all <n>` over
+every kitty control socket (`$XDG_RUNTIME_DIR/kitty-<pid>`, the dendrite's
+`listen_on`) and reports how many windows it recoloured. Never a raw OSC write into a pty: that
 interleaves with whatever the program there is printing and gets eaten. `rice
 mode declarative` rewrites the file from the declared twin through the same
 re-pin, so leaving staging restores the declared colours the same live way;
 `rice back` and `lyra reload`'s draft sync write it too. On the compositor
-side, `geometry.blurEnabled` now switches hyprglass along with Hyprland's
+side, `geometry.blurEnabled` switches hyprglass along with Hyprland's
 blur: `plugin:hyprglass:enabled` and `plugin:hyprglass:layers:enabled` are
 live keywords, so a song with blur off (cadenza) turns the glass off without
 unloading the plugin, and a song with blur on turns it back on. A song with
-no `blurEnabled` opinion leaves both as they are.
+no `blurEnabled` opinion restores the baked default (both on,
+`live::HYPRGLASS_BAKED`), so a no-opinion song staged after cadenza gets its
+glass back.
 
 `lyra rice mode status` reports the current mode plus, in `staging`/
 `draft`, which song (and, in `draft`, which draft) it is pointed at and

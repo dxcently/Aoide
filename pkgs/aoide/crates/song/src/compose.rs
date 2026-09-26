@@ -60,6 +60,7 @@ pub fn nix_fixed_fields(obj: Option<&serde_json::Map<String, Value>>, keys: &[&s
 /// lists them.
 pub const GEOMETRY_KEYS: &[&str] = &[
     "gapsOut", "gapsIn", "borderSize", "rounding", "blurEnabled", "blurSize", "blurPasses",
+    "terminalOpacity",
 ];
 /// The window (border-colour) component tier's fixed key set.
 pub const WINDOW_KEYS: &[&str] = &["border", "borderInactive"];

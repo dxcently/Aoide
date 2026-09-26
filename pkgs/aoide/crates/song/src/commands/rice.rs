@@ -1036,7 +1036,7 @@ mod tests {
             .any(|c| c.ends_with("stage/livery.json")));
         // The terminal half: the staged colour file every new kitty window
         // includes, rendered from the same notes (VALID_NOTES has no base16,
-        // so the palette anchors), and the push reported in the envelope.
+        // so the synthesised scheme), and the push reported in the envelope.
         let terminal = std::fs::read_to_string(stage.join("terminal-colors.conf")).unwrap();
         assert!(terminal.lines().any(|l| l == "background #0b1021"), "{terminal}");
         assert!(out
@@ -1470,7 +1470,7 @@ mod tests {
     }
 
     #[test]
-    fn stage_with_no_window_or_geometry_reports_an_empty_batch() {
+    fn stage_with_no_window_or_geometry_still_sends_the_baked_glass() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "HYPRLAND_INSTANCE_SIGNATURE"]);
         std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
@@ -1484,9 +1484,11 @@ mod tests {
 
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
         assert_eq!(out.status, Status::Ok);
+        // No opinion is still a batch: the hyprglass switches go back to the
+        // baked default, so the only skip left is "not on Hyprland".
         assert_eq!(
             out.data.unwrap()["hyprctl"],
-            "skipped (no geometry/border keywords resolved)"
+            "skipped (HYPRLAND_INSTANCE_SIGNATURE unset)"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -2798,6 +2800,8 @@ mod tests {
         assert!(rice_nix.contains("blurEnabled = false;"));
         assert!(rice_nix.contains("blurSize = 5;"));
         assert!(rice_nix.contains("blurPasses = 2;"));
+        // The fixed key set: a field the source leaves unset is still listed.
+        assert!(rice_nix.contains("terminalOpacity = null;"));
         assert!(rice_nix.contains("border = \"#82aaff\";"));
         assert!(rice_nix.contains("borderInactive = \"#0b1021\";"));
         assert!(rice_nix.contains("inherited from song \"sonata\""));

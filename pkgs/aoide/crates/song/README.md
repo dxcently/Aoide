@@ -12,10 +12,14 @@ a config file). Paint-side — ships in `lyra`, not core.
 - `livery` — the design-token engine: schema, resolve, emit.
 - `live` — computes + (best-effort) applies the Hyprland geometry/border
   keyword list a staged notes document implies (`blurEnabled` also switches
-  hyprglass's two live enable keys), renders the staged terminal colour
+  hyprglass's two live enable keys; no opinion restores `HYPRGLASS_BAKED`),
+  renders the staged terminal colour
   file (`terminal_colors`, through the `kitty` emitter) and pushes a written
-  one to every open kitty over its control socket (`push_kitty_colors`:
-  `kitty @ set-colors --all --configured` per `$XDG_RUNTIME_DIR/kitty-<pid>`
+  one, with the song's `background_opacity` (`terminal_opacity`,
+  `TERMINAL_OPACITY_BAKED` when the song has none), to every open kitty over
+  its control socket (`push_kitty_colors`: `kitty @ set-colors --all
+  --configured` then `set-background-opacity --all` per
+  `$XDG_RUNTIME_DIR/kitty-<pid>`
   socket, bounded, best-effort). `commands::rice::stage_terminal_colors` is
   the one writer of `stage/terminal-colors.conf` (CONTRACTS.md §4), shared by
   `rice stage`, the `rice mode` re-pins, `rice back` and `lyra reload`'s

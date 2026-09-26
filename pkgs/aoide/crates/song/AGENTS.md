@@ -85,7 +85,28 @@
   `live::push_kitty_colors` with a stand-in `kitty` on `PATH`, as `live.rs`
   does. Every colour is hex-linted in the `kitty` emitter before it is
   written: the file is an `include` in kitty.conf, so a value carrying a
-  newline would be a config directive.
+  newline would be a config directive. **The file carries every slot,
+  base16 note or not** (`livery::emit::kitty::synthesised_base16`, the
+  Stylix facet's `synthesisedScheme` twin — change both together). The push
+  relies on it: `set-colors --reset` restores kitty's STARTUP colours, which
+  already include whatever staged file was on disk then, so a partial file
+  would leave an earlier song's slots behind and a reset could not clear
+  them. The same holds for its one `background_opacity` line: always
+  written (`live::terminal_opacity`, `live::TERMINAL_OPACITY_BAKED` when the
+  song has none). Keep that constant equal to the kitty dendrite's
+  `background_opacity` (cargo cannot read nix; each names the other).
+  `geometry.terminalOpacity` is linted in `livery::schema` as a plain
+  number in [0, 1] or null, through `schema::terminal_opacity_value`, the
+  same predicate the hot path uses to fall back.
+- **A song with no `blurEnabled` opinion restores the baked hyprglass
+  switches** (`live::HYPRGLASS_BAKED`, both on), so every
+  `geometry_keywords` batch carries the two hyprglass keywords. Keep the
+  constant equal to what the compositor facet bakes. `decoration:blur:*`
+  keeps the plain no-opinion rule (no keyword). **A test build never runs
+  `hyprctl`** (`cfg!(test)` in `live::apply_live`, after the
+  `HYPRLAND_INSTANCE_SIGNATURE` check): with a batch in every stage, a
+  handler test run from a Hyprland terminal would otherwise flip the
+  operator's live glass and borders.
 - **`song/declared/livery.json` (the declared twin, CONTRACTS.md §4) is
   READ-ONLY for this crate — only the nix facet writes it.** The quickshell
   facet's activation seed (`modules/facets/quickshell/default.nix`,
