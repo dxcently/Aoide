@@ -98,10 +98,37 @@ mod tests {
     #[test]
     fn local_host_name_never_panics_and_is_never_empty() {
         // No env/hostname assumptions in a test sandbox — just prove the
-        // full fallback chain (env -> gethostname -> "aoide") always lands
+        // full fallback chain (env -> hostname -> "aoide") always lands
         // on something non-empty without unwinding.
         let name = local_host_name();
         assert!(!name.is_empty());
+    }
+
+    /// Windows: the hostname arm is ASSERTED, not merely executed. The test
+    /// above passes whether `GetComputerNameExW` answers, answers `None`, or
+    /// is never reached — the `"aoide"` fallback satisfies "non-empty" too —
+    /// so this one asks for a fact only the real call can produce: the name
+    /// this host reports for ITSELF. `COMPUTERNAME` is the NetBIOS name and
+    /// the arm returns the DNS hostname, which on a stock host is the same
+    /// string in different case and on a joined host may carry a domain
+    /// suffix — hence the containment either way, case-folded. A regression
+    /// to a constant, to `None`, or to the fallback fails on both halves.
+    #[cfg(windows)]
+    #[test]
+    fn os_hostname_reports_this_host_and_not_a_constant() {
+        let got = os_hostname().expect("a named host has a hostname");
+        assert_ne!(got, "aoide", "the shared fallback is not this host's name");
+        if let Ok(netbios) = std::env::var("COMPUTERNAME") {
+            if !netbios.is_empty() {
+                let got_fold = got.to_ascii_uppercase();
+                let wanted_fold = netbios.to_ascii_uppercase();
+                assert!(
+                    got_fold.contains(&wanted_fold) || wanted_fold.contains(&got_fold),
+                    "the arm returned {got:?}, which is not this host's own name ({netbios:?}) — \
+                     a value no constant could satisfy"
+                );
+            }
+        }
     }
 
     #[test]

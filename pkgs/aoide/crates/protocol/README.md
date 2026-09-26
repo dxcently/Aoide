@@ -90,10 +90,13 @@ other crate in this workspace sits above.
 - `owner_only` (Windows only) — the owner-only policy a native-Windows core
   attaches to a private file or directory: an explicit, `SE_DACL_PROTECTED`,
   single-ACE DACL for the current token user, attached AT creation and read
-  back before the first payload byte, plus the native stand-in for `chmod`
-  and one idempotent `ensure_private_dir`. Two consumers, one implementation
-  (`AGENTS.md`: no cross-crate copying): `feed`'s Windows writer and
-  `aoide-storage`'s private-write / private-directory half.
+  back before the first payload byte BY BOTH CONSUMERS (the feed on the
+  handle it just created, `aoide-storage`'s private temp by path), with a
+  reparse point refused as itself and a `chmod` stand-in
+  (`set_dir_access`, owner pinned) plus one idempotent `ensure_private_dir`
+  that refuses a symbolic link or junction by name. Two consumers, one
+  implementation (`AGENTS.md`: no cross-crate copying): `feed`'s Windows
+  writer and `aoide-storage`'s private-write / private-directory half.
 - `win_proc` (Windows only) — the process table `/proc` would answer: one
   `Toolhelp32` snapshot (pid · parent · executable name), a creation-time
   start time for the pid-reuse defence, and the `kill(pid, 0)` liveness

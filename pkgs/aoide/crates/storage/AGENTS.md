@@ -857,7 +857,11 @@
   HOST's own answer (`mode` on Unix, the DACL on Windows). A privacy check
   is never skipped on a host where it is inconvenient; a test that asserts a
   Linux fact (`/proc`, a `umask`, a symlink fixture) is `cfg`-gated with the
-  reason in place.
+  reason in place. The readback obligation is not the test's alone:
+  `write_temp_file`'s Windows arm reads the private temp back through
+  `owner_only::file_privacy` BEFORE its first payload byte, because a
+  `SECURITY_ATTRIBUTES` descriptor is a request and a volume that ignores
+  ACLs would otherwise accept a private key at whatever policy it likes.
 
 ## Docs update required in the same commit
 

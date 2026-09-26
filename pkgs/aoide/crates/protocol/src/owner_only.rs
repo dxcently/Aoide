@@ -20,11 +20,16 @@
 //!
 //! **A creation is a request, not a fact.** A filesystem that does not
 //! persist ACLs accepts the descriptor and ignores it, so every caller reads
-//! the object back through [`file_privacy`]/[`dir_privacy`] before the first
-//! payload byte. [`ensure_private_dir`] is the one place that tightens after
-//! the fact, and it is only reached on a directory that already exists (its
-//! alternative — refuse a directory another run left world-readable — would
-//! regress the Unix contract, which locks an existing directory down).
+//! the object back before the first payload byte — the feed through
+//! [`file_refusal`] on the handle it just created, `aoide_storage::fs`'
+//! private temp through [`file_privacy`] by path — and a link at either path
+//! is refused AS ITSELF by the same readers ([`reject_reparse_point`]), never
+//! read or written as the target. [`ensure_private_dir`] is the one place
+//! that tightens after the fact, and it is only reached on a directory that
+//! already exists (its alternative — refuse a directory another run left
+//! world-readable — would regress the Unix contract, which locks an existing
+//! directory down); a symbolic link or junction at that path is refused by
+//! name, and the tightened directory's policy is read back before it returns.
 //!
 //! Who consumes it: `crate::feed`'s Windows writer (create-if-absent,
 //! validate-before-append) and `aoide_storage::fs`'s private-write and
@@ -371,6 +376,16 @@ fn create_dir(path: &Path, access: u32) -> io::Result<()> {
 /// through this module, and says so with an error rather than half a fix.
 pub fn set_dir_access(path: &Path, access: u32) -> io::Result<()> {
     let dir = open_existing(path, WRITE_DAC | WRITE_OWNER | READ_CONTROL, true)?;
+    // The same refusal the feed makes, for the same reason: the handle names
+    // the LINK, so writing its policy would report a repair on a junction
+    // while the directory every caller actually uses keeps the default it
+    // had. Refused by name, before anything is written.
+    if let Some(reason) = reject_reparse_point(&dir)? {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("refusing to set the policy of {}: {reason}", path.display()),
+        ));
+    }
     let sid = TokenUserSid::current()?;
     let mut sd = SECURITY_DESCRIPTOR::default();
     let _acl = owner_only_descriptor(&mut sd, &sid, access)?;
@@ -420,6 +435,23 @@ pub fn ensure_private_dir(path: &Path) -> io::Result<()> {
     match std::fs::symlink_metadata(path) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => create_dir(path, PRIVATE_DIR_MASK)?,
         Err(e) => return Err(e),
+        // A link is refused by NAME, before any policy is looked at or
+        // written, and the same goes for a directory JUNCTION: both are
+        // reparse points, and this module attaches a policy to the object a
+        // path NAMES, never to what a link points at. Windows is stricter
+        // than the Unix arm here on purpose — `set_permissions` would follow
+        // the link and repair the target — because the two are
+        // indistinguishable by the time a caller reads a "success" back.
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "refusing {}: it is a symbolic link or a directory junction, and the policy this module \
+                     attaches belongs to the object a path names rather than to what a link points at",
+                    path.display()
+                ),
+            ))
+        }
         Ok(meta) if !meta.is_dir() => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -628,9 +660,16 @@ pub(crate) fn file_refusal(file: &File) -> io::Result<Option<String>> {
 
 /// Is the file at `path` owner-only? `None` is the yes; a `Some` is the named
 /// reason, so a caller can report WHY rather than only that it refused. The
-/// object's own handle answers — never the path, never a second open.
+/// object's own handle answers — never the path, never a second open — and a
+/// reparse point is refused AS ITSELF: a link's own policy is not the target
+/// file's, and this module will not certify the one while the caller acts on
+/// the other.
 pub fn file_privacy(path: &Path) -> io::Result<Option<String>> {
-    refusal(&open_existing(path, PRIVACY_ACCESS, false)?, REQUIRED_ACCESS)
+    let file = open_existing(path, PRIVACY_ACCESS, false)?;
+    if let Some(reason) = reject_reparse_point(&file)? {
+        return Ok(Some(reason));
+    }
+    refusal(&file, REQUIRED_ACCESS)
 }
 
 /// The directory half of [`file_privacy`], opened with
@@ -638,8 +677,19 @@ pub fn file_privacy(path: &Path) -> io::Result<Option<String>> {
 /// directory) and read the same way: a protected, non-empty, current-user-only
 /// allow DACL whose mask covers the directory's own read/write/list/traverse
 /// bits, with the owner pinned to the current user.
+///
+/// A DIRECTORY JUNCTION (or any other reparse point) is refused by name, the
+/// same way the feed refuses one: `FILE_FLAG_OPEN_REPARSE_POINT` means the
+/// handle names the LINK, so the policy read back would be the link's own
+/// while every caller acts through the path — which resolves to the target.
+/// That asymmetry is exactly the kind of silent mis-answer this module is
+/// supposed to refuse instead of return.
 pub fn dir_privacy(path: &Path) -> io::Result<Option<String>> {
-    refusal(&open_existing(path, PRIVACY_ACCESS, true)?, PRIVATE_DIR_MASK)
+    let dir = open_existing(path, PRIVACY_ACCESS, true)?;
+    if let Some(reason) = reject_reparse_point(&dir)? {
+        return Ok(Some(reason));
+    }
+    refusal(&dir, PRIVATE_DIR_MASK)
 }
 
 /// Open an existing object with the given access: no creation, no

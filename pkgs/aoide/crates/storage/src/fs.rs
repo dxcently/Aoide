@@ -864,7 +864,30 @@ fn write_temp_file(
     // grants, which is the Windows spelling of "whatever the umask leaves".
     #[cfg(windows)]
     let mut f = match create_mode {
-        Some(0o600) => aoide_protocol::owner_only::create_truncating(tmp)?,
+        // The descriptor is a REQUEST, and a filesystem that accepts it
+        // without persisting it is not a private file: the object is read
+        // back through `owner_only::file_privacy` BEFORE the first payload
+        // byte, exactly as `feed_windows` reads its own creation back. The
+        // check is not a formality — `atomic_write_private` is the identity
+        // keypair, and "created at 0600" is worth nothing if nobody asked.
+        // A link at the temp path is refused by the same reader: this module
+        // will not write a key through a reparse point it cannot name.
+        Some(0o600) => {
+            let file = aoide_protocol::owner_only::create_truncating(tmp)?;
+            match aoide_protocol::owner_only::file_privacy(tmp)? {
+                None => file,
+                Some(reason) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        format!(
+                            "refusing the private temp {} this process just created: {reason} \
+                             (this filesystem may not persist ACLs, and nothing here writes a private file it cannot prove is owner-only)",
+                            tmp.display()
+                        ),
+                    ))
+                }
+            }
+        }
         Some(mode) => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
@@ -2089,6 +2112,97 @@ mod tests {
         assert_private_dir(&dir);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Windows, and the rule this crate's private path is built around,
+    /// asserted rather than assumed: **NT re-propagates a container's DACL
+    /// change to children whose ACEs are INHERITED.** A child created the
+    /// ordinary way has only inherited ACEs; the tighten writes a protected,
+    /// `NO_INHERITANCE` policy, so the child's inherited ACEs are stripped
+    /// and it ends up with none — unreadable, exactly as the first version of
+    /// `config`'s unwritable-directory fixture was.
+    ///
+    /// That is why nothing in this crate relies on inheritance for private
+    /// material: every private write attaches its OWN protected policy at
+    /// creation (`create_truncating`), and the second half of this test shows
+    /// such a child is untouched by a later tighten of its directory. The
+    /// Unix arm has no analogue — `chmod 0700` changes no child's mode — so
+    /// the asymmetry is the point of the assertion.
+    #[cfg(windows)]
+    #[test]
+    fn tightening_a_directory_strips_a_child_that_only_inherited_its_access() {
+        let dir = std::env::temp_dir().join(format!("aoide-secure-dir-repropagate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // The child the host wrote: inherited ACEs only.
+        let inherited = dir.join("inherited.json");
+        std::fs::write(&inherited, "payload").unwrap();
+        assert!(std::fs::read(&inherited).is_ok(), "the fixture must start readable");
+
+        secure_private_dir(&dir).unwrap();
+
+        let after = std::fs::read(&inherited);
+        assert!(
+            after.is_err(),
+            "NT should have stripped the child's inherited ACEs with the parent's policy: {after:?}"
+        );
+
+        // The child THIS crate wrote: its own protected policy, unaffected by
+        // any later change to its directory's.
+        let owned = dir.join("owned.json");
+        {
+            let mut f = aoide_protocol::owner_only::create_truncating(&owned).unwrap();
+            f.write_all(b"payload").unwrap();
+        }
+        secure_private_dir(&dir).unwrap();
+        assert_eq!(std::fs::read(&owned).unwrap(), b"payload", "a child with its own policy survives a tighten");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Windows: a directory JUNCTION is refused by name. A junction is the
+    /// one link kind a non-elevated process can create, and it is exactly
+    /// what a user does to redirect a state directory onto another volume —
+    /// so it is the shape that would silently make this function report a
+    /// repair of the link while the directory callers actually use kept the
+    /// default it had.
+    #[cfg(windows)]
+    #[test]
+    fn secure_private_dir_refuses_a_junction_by_name() {
+        use std::process::Stdio;
+        let base = std::env::temp_dir().join(format!("aoide-secure-dir-junction-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let target = base.join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        let link = base.join("link");
+        let made = std::process::Command::new("cmd.exe")
+            .args([
+                "/C",
+                "mklink",
+                "/J",
+                link.to_str().unwrap(),
+                target.to_str().unwrap(),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        assert!(made, "the fixture needs a junction, and `mklink /J` needs no privilege");
+
+        // The reader refuses it as itself, with a reason, and never reports
+        // the LINK's policy as the directory's.
+        let reason = aoide_protocol::owner_only::dir_privacy(&link).unwrap();
+        assert!(reason.is_some(), "a junction is not the object the path resolves to: {reason:?}");
+
+        let err = secure_private_dir(&link).expect_err("a junction must be refused, never repaired");
+        let text = err.to_string();
+        assert!(text.contains("junction") || text.contains("symbolic link"), "{text}");
+
+        let _ = std::fs::remove_dir(&link);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
