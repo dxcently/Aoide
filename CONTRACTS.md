@@ -1167,7 +1167,7 @@ sakaki = "ssh://khoa@192.168.1.202"
   takes no attribute fragment, so scoping is only expressible as a build of
   the check derivations.
 - `mesh.<name>` (task #135 P4, zero or more, keyed by the operator's own
-  mesh name) — a declared roster this instance believes it belongs to,
+  mesh name) — a declared mesh this instance believes it belongs to,
   compared against the live node registry by `aoide mesh`
   (`aoide_client::mesh`, see §3's CLI ledger). `mesh.<name>.nodes` is a
   `name -> ssh hop` map (`aoide_storage::tunnel::parse_via`'s own
@@ -1196,14 +1196,15 @@ sakaki = "ssh://khoa@192.168.1.202"
   the mesh is operated by the same human. It is declared and NOT acted on:
   `aoide mesh pair` converges a mesh declaring it identically to one that
   does not — every node paired with both codes typed — and says so in one
-  note on its report. Whether a converge may ever act on the claim touches
-  the mutual-code pairing invariant (`docs/architecture/PAIRING.md`'s "Mesh
-  declaration" section) and is not decided. This section is validated the
-  same as the two above it — an invalid mesh/node name, an out-of-
-  vocabulary `grant` element, an unparseable hop, or a node declared twice
-  is a LOUD error naming the offence — but it is declared, never settable:
-  its keys are the operator's own names, not a fixed table `aoide config
-  set` could walk, so `aoide config set mesh.*` is always
+  note on its report. The question it asks is answered by the signed charter
+  (`docs/architecture/HTTPS-MESH-API.md`, "Charters"): one operator is one
+  charter signer, so the key is never acted on and retires with P-CHARTER.
+  This section is validated the same as the two above it — an invalid
+  mesh/node name, an out-of-vocabulary `grant` element, an unparseable
+  hop, or a node declared twice is a LOUD error naming the offence — but
+  it is declared, never settable: its keys are the operator's own names,
+  not a fixed table `aoide config set` could walk, so
+  `aoide config set mesh.*` is always
   `SetRefusal::UnknownKey`, the same refusal an unknown key anywhere else
   gets. Writing a mesh is a text edit to this file; `aoide mesh` is the
   read-only comparison against `state/nodes.json` and `aoide mesh pair` is
@@ -2908,7 +2909,7 @@ all) file receipts through the same `mail::file_receipt`, the ONE seam
 covering every route a delivered message takes to land in a local
 session — `do_inject` files no entry of its own, see its doc comment. An
 OUTBOUND `--to node/<x>` send (P-M2) files nothing into THIS box's own
-`base.jsonl` at send time — it mints a sealed envelope and spools it into
+`base.jsonl` at send time — it mints a signed envelope and spools it into
 `state/outbox/` instead (below), delivered over `aoide/mailDeposit` by a
 best-effort drain right after the write, the daemon's own periodic sweep,
 or a door's post-heard drain of that node. The letter lands in a
@@ -3021,7 +3022,7 @@ check, the ack re-spooled. A tool that moves or archives entries out of
 
 ```json
 {
-  "envelope": { "...": "the sealed Envelope, byte-identical to mint time" },
+  "envelope": { "...": "the signed Envelope, byte-identical to mint time" },
   "flavor": "hold",
   "tries": 2,
   "lastTryAt": "2026-09-07T14:03:10Z",
@@ -6607,7 +6608,7 @@ One new method on the SAME existing A2A JSON-RPC/HTTP door (§6) — no new
 transport, no new server, no new port; the SECOND capability-gated method
 after Spawn (`message/send`'s Spawn arm, above), and the first not gated
 on `spawn`. A registered node's own outbox drain (`state/outbox/`, §4)
-POSTs this to deposit one sealed letter or receipt into the target's
+POSTs this to deposit one signed letter or receipt into the target's
 mailbase:
 
 ```json

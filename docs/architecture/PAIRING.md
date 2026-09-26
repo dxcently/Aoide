@@ -762,11 +762,11 @@ forward is a pipe, not a party to the protocol.
 
 A named mesh (`config.toml`'s `[mesh.<name>]`, task #135 P4, CONTRACTS.md
 §4) is intent, not a second identity model. It is an operator's own
-bookkeeping — "these are the boxes I expect to belong to this roster,
+bookkeeping — "these are the boxes I expect to belong to this mesh,
 reached at these hops" — recorded once, on one instance, never transmitted:
 nothing in the ceremony, the wire (§"Wire authentication" above), or any
 A2A payload carries a mesh name, and `node_store::Node` gains no field for
-it. The roster itself stays exactly what the Kill-list below already
+it. The mesh itself stays exactly what the Kill-list below already
 settled — the closure of pairwise, individually-verified records — and a
 declared mesh only ever describes a NAMED EXPECTATION over that same
 closure, never a new object standing in front of it. Declaring one changes
@@ -815,13 +815,18 @@ skips exactly as it skips the sweep's proceed-prompt on `aoide pair`. It is
 a convenience over the listing, never a substitute for a code: skipping it
 bypasses no gate, because the codes are the gate.
 
-**`sameOperator` is declared and not acted on.** Whether a converge may
-ever satisfy the far side's typed code on an operator's behalf — a claim of
-one human at both screens — touches the mutual-code invariant directly and
-is not decided. Until it is, a mesh declaring `sameOperator = true`
-converges byte-identically to one that does not, and the report carries a
-single note saying the flag was seen and not acted on. The note is a note:
-it changes no node's outcome, no count, and refuses nothing.
+**`sameOperator` is declared and not acted on.** A converge never
+satisfies the far side's typed code on an operator's behalf: a mesh
+declaring `sameOperator = true` converges byte-identically to one that
+does not, and the report carries a single note saying the flag was seen
+and not acted on. The note is a note: it changes no node's outcome, no
+count, and refuses nothing. The question the flag asks — one human
+operating both ends — is answered by the signed charter instead
+([HTTPS-MESH-API.md](HTTPS-MESH-API.md), "Charters"): same operator means
+same charter signer, one operator's machines join the charter rather than
+pairing with each other, and the flag retires when P-CHARTER lands. The
+ceremony, with both codes, stays the entry for machines of different
+owners.
 
 `mesh.<name>.grant` IS live: it is the capability set a converge stamps at a
 first verification, riding the ceremony exactly as a typed `--allow` does,
