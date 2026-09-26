@@ -1,6 +1,7 @@
 // bar.qml — cadenza's "bar" slot: the switchboard line (intent §3.1, §3.2).
 //
-//   [⏻] [1] [2]aoide [3]aoide [5] [7]melete [9]mneme   title…   <agents> 6/10 <cpu> 23% $ 4.20 <notif> 3 │ <vol> 62% <bt> <net> │ TRAY 2 <rice> stg │ 14:02:31
+//   [⏻] [1] [2]aoide [3]aoide [5] [7]melete [9]mneme   title…   <agents> 6/10 <cpu> 23% $ 4.20 <notif> 3 │ <vol> 62% <bt> <net> │ TRAY 2 <rice> stg │ 14:02:31 │ ●○●┐ patch
+//                                                                                                                                         ●─●  panel
 //   (<name> = the kit icon kit.glyph.<name>, intent §2 Glyphs; $, TRAY, the clock and ⏻ stay bare)
 //         ○──●─○──────○        ○                    (pads, a bus, a junction)
 //            ┆╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┆                    (a spawned wire on lane 0)
@@ -15,8 +16,13 @@
 //   Hyprland          workspaces (jack number, occupied, focused, urgent), active title
 //   state/stage/sessions.json + hooks.json   per-jack sessions, AGT, urgent jacks
 //   state/stage/graph.json  `workspaces[].project` (jack labels), `ties` (tie
-//                           lines), `activeAt` (lamps) — core-seams §E; absent
-//                           today, so no label, no tie, no lamp is drawn
+//                           lines), `activeAt` (lamps) — core-seams §E. Absent
+//                           today, so the bar DERIVES them (the "DERIVED TIES"
+//                           block, coverage.md's bend) from graph.json
+//                           `edges` + sessions.json `windowAddress` + Hyprland
+//                           toplevels, lamps from hooks.json `updatedAt`
+//   BarPatch.qml            the patch panel after the clock (intent §3.2a):
+//                           live agents, spawned wires, activity lamps
 //   state/usage/now.json    `by:"workspace"` rows → the jack insight pane —
 //                           core-seams §C; absent today → "no usage data"
 //   state/stage/herald.json the NOTIF cell count
@@ -28,11 +34,12 @@
 //
 // ── What it does ───────────────────────────────────────────────────────────
 //   [⏻] → powermenu.toggle()          jack click → workspace.activate()
-//   AGT / CPU / $ / NOTIF → dock.openTab("overview"|"sys"|"sys"|"notif"),
+//   AGT / CPU / $ / NOTIF / the patch panel → dock.openTab("overview"|"sys"|"sys"|"notif"|"overview"),
 //        falling back to dock.toggle() when the dock has no openTab
 //   RICE → bridge.toggleRiceMode()     session row → bridge.focusSession(id)
 //   VOL/BT/NET/BAT/TRAY/clock → their own pane (one open at a time, click
-//        the cell again to close); jack hover → the jack insight pane.
+//        the cell again to close); jack hover → the jack insight pane;
+//        patch panel hover → its AGENTS pane.
 //   Service writes are sonata's: sink/source volume + mute + default,
 //   adapter power + device connect, wifi on/off + connect/disconnect/forget,
 //   tray activate/menu, `pavucontrol`, and `aoide spawn --windowed -- btop`.
@@ -162,13 +169,36 @@ Item {
         onTextChanged: {
             var d = root.parseJson(hooksFile)
             if (!d) return
-            var m = {}
+            var m = {}, at = {}
             var a = Array.isArray(d.hooks) ? d.hooks : []
-            for (var i = 0; i < a.length; i++)
-                if (a[i] && a[i].sessionId) m[a[i].sessionId] = "" + (a[i].phase || "")
+            for (var i = 0; i < a.length; i++) {
+                if (!a[i] || !a[i].sessionId) continue
+                m[a[i].sessionId] = "" + (a[i].phase || "")
+                at[a[i].sessionId] = root._t(a[i].updatedAt)
+            }
             root.hookPhase = m
+            root.detectActivity(at)
         }
         onLoadFailed: root.hookPhase = ({})
+    }
+    // Activity = a session's `hooks.json` `updatedAt` ADVANCING between two
+    // reads (never on the first read, never for a session first seen). It
+    // lights the patch panel always, and the switchboard while it derives its
+    // ties (core's `activeAt` takes the switchboard over when S3 lands).
+    property var _hookAt: ({})
+    property bool _hookInit: false
+    function detectActivity(at) {
+        var prev = root._hookAt, fire = []
+        if (root._hookInit)
+            for (var k in at)
+                if (prev[k] !== undefined && at[k] > prev[k]) fire.push(k)
+        root._hookAt = at
+        root._hookInit = true
+        if (fire.length === 0) return
+        Qt.callLater(function () {
+            root.derivedActivity(fire)
+            if (patchLoader.item) patchLoader.item.activity(fire)
+        })
     }
     FileView {
         id: heraldFile
@@ -260,7 +290,8 @@ Item {
                 ws: (s.workspace === null || s.workspace === undefined) ? -1 : s.workspace,
                 kind: "" + (s.kind || ""),
                 name: "" + (s.petname || s.agent || id.slice(0, 8)),
-                agent: "" + (s.agent || "")
+                agent: "" + (s.agent || ""),
+                startedAt: "" + (s.startedAt || "")
             })
         }
         return out
@@ -286,15 +317,147 @@ Item {
     // ════════════════════════════════════════════════════════════════════════
     // THE SWITCHBOARD — jacks, routes, geometry
     // ════════════════════════════════════════════════════════════════════════
+    // core's fields when graph.json carries them; the derivation below until then
     readonly property var graphWs: {
         var m = {}
-        var a = (root.graphDoc && Array.isArray(root.graphDoc.workspaces)) ? root.graphDoc.workspaces : []
+        var a = root.coreTies
+            ? (Array.isArray(root.graphDoc.workspaces) ? root.graphDoc.workspaces : [])
+            : root.derived.workspaces
         for (var i = 0; i < a.length; i++)
             if (a[i] && typeof a[i].workspace === "number") m[a[i].workspace] = a[i]
         return m
     }
-    readonly property var graphTies:
-        (root.graphDoc && Array.isArray(root.graphDoc.ties)) ? root.graphDoc.ties : []
+    readonly property var graphTies: root.coreTies
+        ? (Array.isArray(root.graphDoc.ties) ? root.graphDoc.ties : [])
+        : root.derived.ties
+
+    // ════════════════════════════════════════════════════════════════════════
+    // DERIVED TIES — the bend (design/coverage.md, "The derivation bend";
+    // intent §3.2 "Where ties come from"). DELETE THIS BLOCK WHEN S3 LANDS:
+    // `coreTies` becomes always-true, and `derived`, `toplevelWs`, `normAddr`
+    // and `derivedActivity` go with it (the two `root.coreTies ? … : derived`
+    // switches above collapse to their core arm, and detectActivity's
+    // `derivedActivity` call goes).
+    //
+    // Until core publishes graph.json `workspaces`/`ties`/`activeAt`, the bar
+    // joins three published facts itself — paint over published data, never
+    // a new fact, and no edge is ever invented:
+    //   jack      a session's `sessions.json` `windowAddress` matched to the
+    //             Hyprland toplevel of that address → the toplevel's workspace.
+    //             No window (or no live toplevel for it) → no jack.
+    //   spawned   a graph.json `spawned` edge whose two sessions sit on
+    //             DIFFERENT jacks → one `spawned` tie, parent jack → child jack
+    //   project   sessions anchored to one project (`anchors` edges) on 2+
+    //             jacks → one bus per project (a chain; the routing unions it)
+    //   label     the project anchoring the most of a jack's sessions; an
+    //             even split labels nothing
+    //   activity  a session's `hooks.json` `updatedAt` advancing lights its
+    //             jack, and runs the spawned tie to its parent (child → parent)
+    // ════════════════════════════════════════════════════════════════════════
+    readonly property bool coreTies: !!root.graphDoc
+        && (Array.isArray(root.graphDoc.workspaces) || Array.isArray(root.graphDoc.ties))
+
+    // Hyprland addresses: IPC gives "5ae0cc967840" or "0x5ae0cc967840"
+    function normAddr(a) {
+        var s = ("" + (a || "")).trim().toLowerCase()
+        return s.indexOf("0x") === 0 ? s.slice(2) : s
+    }
+    // address → workspace id, from every live toplevel (the global list, and
+    // each workspace's own list as a fallback when a toplevel's workspace is unset)
+    readonly property var toplevelWs: {
+        var m = {}
+        var ws = (Hyprland.workspaces && Hyprland.workspaces.values) ? Hyprland.workspaces.values : []
+        for (var i = 0; i < ws.length; i++) {
+            var w = ws[i]
+            if (!w || !(w.id > 0)) continue
+            var tl = (w.toplevels && w.toplevels.values) ? w.toplevels.values : []
+            for (var j = 0; j < tl.length; j++)
+                if (tl[j] && tl[j].address) m[root.normAddr(tl[j].address)] = w.id
+        }
+        var all = (Hyprland.toplevels && Hyprland.toplevels.values) ? Hyprland.toplevels.values : []
+        for (var k = 0; k < all.length; k++) {
+            var t = all[k]
+            if (t && t.address && t.workspace && t.workspace.id > 0) m[root.normAddr(t.address)] = t.workspace.id
+        }
+        return m
+    }
+    readonly property var derived: {
+        var out = { workspaces: [], ties: [], sessionWs: {}, parentOf: {} }
+        if (root.coreTies) return out
+        // 1. session → jack, through its window only
+        var wsOf = {}, liveOn = {}
+        var rows = root.sessionRows
+        for (var i = 0; i < rows.length; i++) {
+            var s = rows[i]
+            if (!s) continue
+            var id = "" + (s.sessionId || s.id || "")
+            var addr = root.normAddr(s.windowAddress)
+            var w = addr ? root.toplevelWs[addr] : undefined
+            if (!id || !(w > 0)) continue
+            wsOf[id] = w
+            if (!s.endedAt) liveOn[w] = (liveOn[w] || 0) + 1
+        }
+        // 2. the published edges
+        var E = (root.graphDoc && Array.isArray(root.graphDoc.edges)) ? root.graphDoc.edges : []
+        function sid(ref) { var v = "" + (ref || ""); return v.indexOf("session:") === 0 ? v.slice(8) : "" }
+        var seen = {}, anchored = {}
+        for (var e = 0; e < E.length; e++) {
+            var g = E[e]
+            if (!g) continue
+            if (g.kind === "spawned") {
+                var p = sid(g.from), c = sid(g.to)
+                if (!p || !c) continue
+                out.parentOf[c] = p
+                var pw = wsOf[p], cw = wsOf[c]
+                if (pw > 0 && cw > 0 && pw !== cw && !seen[pw + ">" + cw]) {
+                    seen[pw + ">" + cw] = true
+                    out.ties.push({ from: pw, to: cw, kind: "spawned" })
+                }
+            } else if (g.kind === "anchors") {
+                var pj = "" + (g.from || ""), ss = sid(g.to)
+                if (pj.indexOf("project:") !== 0 || !ss) continue
+                pj = pj.slice(8)
+                if (!(wsOf[ss] > 0)) continue
+                if (!anchored[pj]) anchored[pj] = {}
+                anchored[pj][wsOf[ss]] = (anchored[pj][wsOf[ss]] || 0) + 1
+            }
+        }
+        // 3. a bus per project on 2+ jacks
+        var count = {}                                    // ws → project → sessions
+        for (var pr in anchored) {
+            var jw = Object.keys(anchored[pr]).map(function (x) { return parseInt(x) })
+            jw.sort(function (a, b) { return a - b })
+            for (var q = 0; q < jw.length; q++) {
+                if (!count[jw[q]]) count[jw[q]] = {}
+                count[jw[q]][pr] = anchored[pr][jw[q]]
+                if (q > 0) out.ties.push({ from: jw[q - 1], to: jw[q], kind: "project", project: pr })
+            }
+        }
+        // 4. labels: the most sessions wins; an even split shows none
+        for (var wk in count) {
+            var best = "", bestN = 0, even = false
+            for (var pn in count[wk]) {
+                var n = count[wk][pn]
+                if (n > bestN) { best = pn; bestN = n; even = false }
+                else if (n === bestN) even = true
+            }
+            if (best && !even) out.workspaces.push({ workspace: parseInt(wk), project: best, live: liveOn[wk] || 0 })
+        }
+        out.sessionWs = wsOf
+        return out
+    }
+    function derivedActivity(ids) {
+        if (root.coreTies) return
+        var D = root.derived
+        for (var i = 0; i < ids.length; i++) {
+            var w = D.sessionWs[ids[i]]
+            if (!(w > 0)) continue
+            root.fireLamp("w:" + w)
+            var p = D.parentOf[ids[i]], pw = p ? D.sessionWs[p] : undefined
+            if (pw > 0 && pw !== w) root.fireLamp("s:" + pw + ">" + w, true)
+        }
+    }
+    // ═══ end of the derivation bend ═════════════════════════════════════════
 
     readonly property var hyprWs: {
         var m = {}
@@ -564,7 +727,9 @@ Item {
             for (var f = 0; f < fire.length; f++) root.fireLamp(fire[f])
         })
     }
-    function fireLamp(key) {
+    // `upward`: run the wire backwards, child jack → parent jack (a derived
+    // activity is the child reporting in; core's `activeAt` runs from → to)
+    function fireLamp(key, upward) {
         if (root._lamps[key]) return                    // coalesce into the one in flight
         var pts = null
         if (key.indexOf("w:") === 0) {
@@ -576,6 +741,7 @@ Item {
         } else {
             pts = root.schematic.paths[key] || null     // a badge carries no wire to run
             if (!pts) return
+            if (upward) pts = pts.slice().reverse()
         }
         var o = lampComp.createObject(board, { key: key, pts: pts, dur: root.lampMs })
         if (o) root._lamps[key] = o
@@ -977,15 +1143,30 @@ Item {
         root.showPane("jack", jackAnchor, false)
     }
     function jackLeave() { root.jackHovered = false; hoverGrace.restart() }
+    // the patch panel's hover pane: same grace as a jack's, a latched pane wins
+    property bool patchHovered: false
+    function patchHover(on) {
+        root.patchHovered = on
+        if (!on) { hoverGrace.restart(); return }
+        hoverGrace.stop()
+        if (root.openPane === "patch") return
+        if (root.openPane !== "" && root.openPane !== "jack") return
+        root.showPane("patch", patchLoader, true)
+    }
     Timer {
         id: hoverGrace
         interval: 220
-        onTriggered: if (root.openPane === "jack" && !root.jackHovered && !root.paneHovered) root.closePane()
+        onTriggered: {
+            if (root.paneHovered) return
+            if (root.openPane === "jack" && !root.jackHovered) root.closePane()
+            else if (root.openPane === "patch" && !root.patchHovered) root.closePane()
+        }
     }
 
     // BarPreview hooks: open a named pane / a jack's insight pane without a pointer
     function previewPane(name) {
-        var c = ({ vol: volCell, bt: btCell, net: netCell, bat: batCell, tray: trayCell, clock: clockCell })[name]
+        var c = ({ vol: volCell, bt: btCell, net: netCell, bat: batCell, tray: trayCell, clock: clockCell,
+                   patch: patchLoader })[name]
         if (c) root.showPane(name, c, true)
     }
     function previewJack(id) { root.jackEnter(id); root.jackHovered = false }
@@ -999,6 +1180,7 @@ Item {
         case "tray": return trayPane
         case "clock": return clockPane
         case "jack": return jackPane
+        case "patch": return patchLoader.item ? patchLoader.item.paneComponent : null
         }
         return null
     }
@@ -1274,7 +1456,7 @@ Item {
     Row {
         id: right
         y: root.textY
-        anchors.right: parent.right
+        anchors.right: patchLoader.left
         anchors.rightMargin: root.kit.cellW
         height: root.barH
         spacing: root.kit.cellW
@@ -1374,6 +1556,27 @@ Item {
             valueColor: root.openPane === "clock" ? root.kit.title : root.kit.ink
             onActivated: root.togglePane("clock", clockCell, true)
         }
+        Sep { kit: root.kit }
+    }
+
+    // ── the patch panel (intent §3.2a): BarPatch.qml, by URL; placed here only
+    Loader {
+        id: patchLoader
+        anchors.right: parent.right
+        anchors.rightMargin: root.kit.cellW
+        width: item ? item.width : root.kit.cells(16)
+        height: root.barH
+        Component.onCompleted: setSource(root.kit.helper("BarPatch"), {
+            kit: Qt.binding(() => root.kit),
+            sessions: Qt.binding(() => root.sessions),
+            graphDoc: Qt.binding(() => root.graphDoc),
+            lampMs: Qt.binding(() => root.lampMs)
+        })
+    }
+    Connections {
+        target: patchLoader.item
+        function onActivated() { root.openBoard("overview") }
+        function onHoveredChanged() { root.patchHover(patchLoader.item.hovered) }
     }
 
     // ════════════════════════════════════════════════════════════════════════

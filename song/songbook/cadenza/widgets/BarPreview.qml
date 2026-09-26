@@ -8,7 +8,7 @@
 //
 // What pane is open is steered from the preview ROOT, never a fixture path:
 // `$AOIDE_ROOT/bar-preview.json` (optional; absent = no pane)
-//     { "pane": "vol"|"bt"|"net"|"bat"|"tray"|"clock"|"jack"|"",
+//     { "pane": "vol"|"bt"|"net"|"bat"|"tray"|"clock"|"jack"|"patch"|"",
 //       "jack": 2,            // with pane "jack": whose insight pane
 //       "lampMs": 600 }       // slow the lamp down to catch one mid-run
 // Everything else the bar reads, it reads itself (the root's stage files,
