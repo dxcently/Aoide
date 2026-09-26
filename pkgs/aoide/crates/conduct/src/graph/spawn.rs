@@ -92,7 +92,17 @@ fn spawn_exe() -> std::io::Result<PathBuf> {
 /// do NOT fork a second builder for the windowed path, or for the managed
 /// task mode: `--task` rides the SAME argv, so a windowed wrapper run and a
 /// headless one register identically.
-fn build_conduct_args(
+///
+/// `pub` for ONE caller outside this crate (P-RSA S10): `aoide-server`'s
+/// `a2a::do_spawn`, which used to hand-roll `["conduct", "--agent", "a2a",
+/// "--id", id, "--", <agent cmd>]` and so made every A2A child a session
+/// `spawn` had never seen the shape of — not headless, no task mode. The door
+/// now composes through HERE (`--spawned --headless` always, `--task` when its
+/// caller named one), so the remote child and the local one are the same
+/// wrapper by construction rather than by a second argv kept in step by hand.
+/// Everything a caller passes is its own decision — this function is the
+/// SHAPE, never the policy about which flags a door may set.
+pub fn build_conduct_args(
     headless: bool,
     agent: &str,
     id: &str,

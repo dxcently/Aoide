@@ -159,6 +159,21 @@ pub struct MessageSendParams {
 /// never with a name taken from the body.
 pub const FROM_SESSION_KEY: &str = "aoide/from";
 
+/// The `message/send` `message.metadata` key that names the task slug a
+/// SPAWNING request wants its child run under (CONTRACTS.md §6; P-RSA S10).
+/// Its presence is what makes the remote child a MANAGED run — the door turns
+/// it into the wrapper's own `--task <slug>` (the same flag a local `aoide
+/// spawn --task` passes), so the child gets the task mailbox, the exit report
+/// and `session watch`'s task view, while its absence leaves the spawn exactly
+/// the plain conducted session it was before. Read on the same two spots
+/// `aoide/spawn` is (`message` first, then top-level `params`), and held to the
+/// same slug predicate `spawn --task` and every mailbox name take
+/// (`^[a-z0-9][a-z0-9-]*$`), since the slug IS the mailbox name. Named here for
+/// the reason [`FROM_SESSION_KEY`] is: the key is a wire fact, and a second
+/// spelling on the reading side is how a writer and a reader silently stop
+/// agreeing.
+pub const TASK_KEY: &str = "aoide/task";
+
 /// The `tasks/get` `params.metadata` key that asks for a session's watch
 /// frame (CONTRACTS.md §6; P-RSA S6). Its value is an object whose optional
 /// `tail` is the output-line window; the whole key being present is what

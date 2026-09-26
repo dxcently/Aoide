@@ -164,6 +164,11 @@ pub use self::session_store::stamp_seal;
 // `conduct` that re-execs `conduct --headless` and returns without
 // waiting on the agent's own lifetime — see `graph/spawn.rs`'s module doc.
 pub use self::spawn::session_spawn;
+// `build_conduct_args` — the ONE `conduct` argv shape (P2's own builder),
+// used by `aoide-server`'s A2A door so a remote spawn's child is a wrapper of
+// the same shape a local `spawn` produces, never a second spelling of it
+// (P-RSA S10).
+pub use self::spawn::build_conduct_args;
 // `graph resurrect` (P-D8, `docs/architecture/AOIDED.md`'s "L5"): revives a
 // project's undying set (or `--all`/`--id`) off the durable ledger, via the
 // windowed spawn path, resolving each candidate through a harness or a

@@ -1142,10 +1142,60 @@ fn spawn_requested(message: &Value, params: &Value) -> bool {
     flagged(message) || flagged(params)
 }
 
+/// The task slug a spawning request names: `metadata["aoide/task"]`, read on
+/// the SAME two spots [`spawn_requested`] accepts (`message` first, then
+/// top-level `params`) — the two keys ride one request shape, and a caller
+/// that put `aoide/spawn` at the params level has its slug read there too,
+/// rather than quietly getting an unmanaged run. A blank value reads as
+/// "names no task", the same non-third state `aoide/from` gives an empty
+/// string and the one `spawn --task` gives an empty flag value: the door
+/// creates a managed run only for a slug somebody actually wrote. Pure; the
+/// slug's own legality is [`spawn_task_slug`]'s question, one layer down,
+/// where the refusal text and its audit line live.
+fn requested_task(message: &Value, params: &Value) -> Option<String> {
+    let named = |v: &Value| {
+        v.get("metadata")
+            .and_then(|m| m.get(aoide_protocol::wire::TASK_KEY))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    named(message).or_else(|| named(params))
+}
+
+/// Hold a caller's task slug to the ONE predicate every task slug and mailbox
+/// name takes — `^[a-z0-9][a-z0-9-]*$`
+/// (`aoide_storage::node_store::valid_node_name`, the same validator
+/// `spawn --task` applies to its flag and [`resolve_bounded_spawn_cwd`]'s
+/// sibling `--report-to` applies to a mail role; there is no separate
+/// task-slug predicate to reuse, because the slug IS the mailbox name and that
+/// one check is what guards the path join). `None` stays `None` — a spawn that
+/// named no task is not a malformed one.
+///
+/// The refusal is the door's `-32602` (invalid params), the same code S3 gives
+/// a malformed `aoide/from` claim and for the same reason: the value rode
+/// inside the body the caller signed, so a bad one is a client bug worth
+/// surfacing rather than a silent downgrade to an unmanaged run. It is applied
+/// on the SPAWN side only (`do_spawn`, after `spawn_admitted`) — an Inject
+/// request carrying the key builds nothing out of it and is answered exactly
+/// as before.
+fn spawn_task_slug(task: Option<&str>) -> Result<Option<&str>, String> {
+    match task {
+        Some(slug) if !aoide_storage::node_store::valid_node_name(slug) => Err(format!(
+            "metadata[\"{}\"] `{slug}` is not a legal task slug (^[a-z0-9][a-z0-9-]*$ — the \
+             same name a mailbox and `spawn --task`'s own slug take); send a legal slug, or \
+             omit the key for an unmanaged spawn",
+            aoide_protocol::wire::TASK_KEY,
+        )),
+        other => Ok(other),
+    }
+}
+
 /// Parse one `message/send` `params` object into (prompt text, contextId,
-/// spawn_asked, claimed parent session id) — pure, so the parsing itself is
-/// unit-testable independent of [`decide_send_action`] and the I/O that
-/// follows it.
+/// spawn_asked, claimed parent session id, named task slug) — pure, so the
+/// parsing itself is unit-testable independent of [`decide_send_action`] and
+/// the I/O that follows it.
 ///
 /// The fourth field is the caller's own session id, off
 /// `message.metadata["aoide/from"]`
@@ -1156,7 +1206,16 @@ fn spawn_requested(message: &Value, params: &Value) -> bool {
 /// non-string value is not a third state — it reads as "no claim". WHETHER a
 /// claim may be honoured is [`claimed_remote_parent`]'s question, one layer
 /// down, never this parser's.
-fn parse_message_send_params(params: &Value) -> (String, Option<String>, bool, Option<String>) {
+///
+/// The fifth is the task slug the request names, off `metadata["aoide/task"]`
+/// on BOTH the spots [`spawn_requested`] reads ([`requested_task`]) — a
+/// directive about what to DO, not an identity claim, so it takes that key's
+/// two-spot reading rather than `aoide/from`'s one-spot one. Whether the slug
+/// is legal is [`spawn_task_slug`]'s question, and only the Spawn arm consumes
+/// it.
+fn parse_message_send_params(
+    params: &Value,
+) -> (String, Option<String>, bool, Option<String>, Option<String>) {
     let message = params.get("message").cloned().unwrap_or(Value::Null);
     let prompt = extract_prompt_text(&message);
     let context_id = extract_context_id(&message, params);
@@ -1167,7 +1226,8 @@ fn parse_message_send_params(params: &Value) -> (String, Option<String>, bool, O
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .map(str::to_string);
-    (prompt, context_id, spawn_asked, claimed_from)
+    let task = requested_task(&message, params);
+    (prompt, context_id, spawn_asked, claimed_from, task)
 }
 
 /// The caller the `aoide/from` claim may be honoured for: the SIGNATURE rung's
@@ -1603,6 +1663,40 @@ fn spawn_died_immediately_message(agent_cmd: &str, status: std::process::ExitSta
     )
 }
 
+/// The door's own argv for one spawn (P-RSA S10): the SAME `conduct` wrapper
+/// a local `aoide spawn` builds, through the one builder that shape has
+/// (`aoide_conduct::graph::build_conduct_args` — never a second copy of it,
+/// which is what the pre-S10 hand-rolled argv was).
+///
+/// Two of that builder's flags are the door's own decision:
+/// `headless = true` always — this door has no terminal to hand a child, its
+/// stdio is nulled and it is `setsid`'d, so `--headless` is the honest mode
+/// (the log is the child's sink, the pty gets the conventional 80×24 fallback
+/// geometry, and `conduct` reads no stdin); and `--task <slug>` exactly when
+/// the caller named one, which is what makes the child a MANAGED run (task
+/// mailbox, `session watch`'s task view, the exit report, and a record the
+/// automatic prune retains). `--spawned` rides unconditionally, as it does for
+/// every spawn: it is the registration fact the reaper's abandoned-shell arm
+/// reads, and that arm's own shape test (`spawned && restore.is_some() &&
+/// idle`) cannot match an agent child at all, since `restore` is stamped only
+/// for a session whose wrapped program captures like a shell.
+///
+/// The other four flags have no source at this door and stay absent, each for
+/// a stated reason: `--parent` because `parentSessionId` is a LOCAL id and this
+/// door never writes one (CONTRACTS.md §4 — the remote parent is the RECORD
+/// field `stamp_spawn_provenance` stamps, not an argv fact); `--instructions-path`
+/// because a remote caller names no sidecar and the prompt is injected as the
+/// first turn instead; `--timeout` because the door has no deadline to impose
+/// and inventing one would kill a long remote run mid-flight; and
+/// `--report-to` because the run's own report stays on the child's node,
+/// addressed to its own slug (Q5's ruling). Pure — the split of the configured
+/// agent command is the same `split_whitespace` the pre-S10 argv did, so what
+/// runs is byte-identical.
+fn spawn_argv(id: &str, agent_cmd: &str, task: Option<&str>) -> Vec<String> {
+    let command: Vec<String> = agent_cmd.split_whitespace().map(str::to_string).collect();
+    aoide_conduct::graph::build_conduct_args(true, "a2a", id, None, task, None, None, None, &command)
+}
+
 /// Build the spawned child's `Command`, env-sanitized, cwd-bound (when
 /// `spawn_cwd` resolves), and detached — everything up to but NOT including
 /// `.spawn()`. Split out of [`do_spawn`] so the env-clearing shape here is
@@ -1735,6 +1829,17 @@ fn resolve_bounded_spawn_cwd(
 /// `remoteParent`; `parentSessionId` is never touched by this door, since every
 /// reader of that field treats it as a LOCAL id (CONTRACTS.md §4).
 ///
+/// `task` (P-RSA S10) is the slug the caller named under
+/// `metadata["aoide/task"]`, already trimmed to "absent or non-empty" by
+/// [`requested_task`] and validated HERE by [`spawn_task_slug`] — before
+/// `spawn_session_id()` mints an id, before `current_exe()` resolves, before
+/// any argv exists, so an illegal slug costs an RPC and nothing else. It is
+/// what makes the child a MANAGED run: the argv carries `--task <slug>`
+/// through [`spawn_argv`] and the CHILD stamps the fact on its own record at
+/// registration, exactly as a local `spawn --task` does. `None` is the whole
+/// pre-S10 shape: a plain conducted session, watchable through the log, with
+/// no mailbox and no exit report.
+///
 /// **Bounded liveness check (task #103).** `cmd.spawn()` below only proves
 /// the wrapper process itself launched — a caller was previously handed a
 /// `submitted` Task the instant that call returned, with no confirmation the
@@ -1752,20 +1857,29 @@ fn do_spawn(
     node_name: &str,
     spawn_cwd: &str,
     remote_parent: Option<RemoteParent>,
+    task: Option<&str>,
 ) -> Result<Value, (i64, String)> {
+    // Refused FIRST and for free: an unusable slug must cost one RPC, never a
+    // process — nothing below this line has run when it fires.
+    let task = match spawn_task_slug(task) {
+        Ok(task) => task,
+        Err(msg) => {
+            let _ = audit(
+                audit_log,
+                Door::A2a,
+                EventClass::Audit,
+                "a2a.message/send",
+                "error",
+                &msg,
+            );
+            return Err((-32602, msg));
+        }
+    };
     let id = spawn_session_id();
     let aoide_bin = std::env::current_exe()
         .map_err(|e| (-32603_i64, format!("resolving the aoide binary: {e}")))?;
 
-    let mut argv: Vec<String> = vec![
-        "conduct".to_string(),
-        "--agent".to_string(),
-        "a2a".to_string(),
-        "--id".to_string(),
-        id.clone(),
-        "--".to_string(),
-    ];
-    argv.extend(agent_cmd.split_whitespace().map(str::to_string));
+    let argv = spawn_argv(&id, agent_cmd, task);
 
     let origin = format!("node:{node_name}");
     // Project roots are already loaded the same way `session_ref_lookup`
@@ -1834,7 +1948,13 @@ fn do_spawn(
                 EventClass::Audit,
                 "a2a.message/send",
                 "ok",
-                &format!("spawned conducted session `{id}` (configured agent, {origin})"),
+                &format!(
+                    "spawned conducted session `{id}` (configured agent, {origin}{})",
+                    match task {
+                        Some(slug) => format!(", managed run on task `{slug}`"),
+                        None => String::new(),
+                    }
+                ),
             );
             let task = Task {
                 id: id.clone(),
@@ -1976,7 +2096,7 @@ fn message_send(
     presented_token: Option<&str>,
     signed_caller: Option<SignedCaller<'_>>,
 ) -> Result<Value, (i64, String)> {
-    let (prompt, context_id, spawn_asked, claimed_from) = parse_message_send_params(params);
+    let (prompt, context_id, spawn_asked, claimed_from, task) = parse_message_send_params(params);
     let token_configured = !expected_token.is_empty();
     let token_state = classify_token(expected_token, presented_token);
 
@@ -2216,7 +2336,7 @@ fn message_send(
         SendAction::Spawn { agent_cmd } => {
             if spawn_admitted(resolved_node) {
                 let node = resolved_node.expect("spawn_admitted only returns true when resolved_node is Some").0;
-                do_spawn(&agent_cmd, &prompt, audit_log, &node.name, spawn_cwd, remote_parent)
+                do_spawn(&agent_cmd, &prompt, audit_log, &node.name, spawn_cwd, remote_parent, task.as_deref())
             } else {
                 let (code, msg) = spawn_refusal(resolved_node);
                 let _ = audit(
@@ -4800,27 +4920,101 @@ mod tests {
     }
 
     #[test]
-    fn parse_message_send_params_extracts_all_four_fields_together() {
+    fn parse_message_send_params_extracts_all_five_fields_together() {
         let params = json!({
             "message": {
                 "role": "user",
                 "parts": [{ "kind": "text", "text": "do the thing" }],
                 "contextId": "sess-9",
-                "metadata": { "aoide/spawn": true, "aoide/from": "conduct-1-2" },
+                "metadata": {
+                    "aoide/spawn": true,
+                    "aoide/from": "conduct-1-2",
+                    "aoide/task": "fix-flaky"
+                },
             }
         });
-        let (prompt, context_id, spawn_asked, claimed_from) = parse_message_send_params(&params);
+        let (prompt, context_id, spawn_asked, claimed_from, task) =
+            parse_message_send_params(&params);
         assert_eq!(prompt, "do the thing");
         assert_eq!(context_id.as_deref(), Some("sess-9"));
         assert!(spawn_asked);
         assert_eq!(claimed_from.as_deref(), Some("conduct-1-2"));
+        assert_eq!(task.as_deref(), Some("fix-flaky"));
 
         // A minimal params with no `message` at all is tolerated, not a panic.
-        let (prompt2, context_id2, spawn_asked2, claimed_from2) = parse_message_send_params(&json!({}));
+        let (prompt2, context_id2, spawn_asked2, claimed_from2, task2) =
+            parse_message_send_params(&json!({}));
         assert_eq!(prompt2, "");
         assert_eq!(context_id2, None);
         assert!(!spawn_asked2);
         assert_eq!(claimed_from2, None);
+        assert_eq!(task2, None);
+    }
+
+    /// `aoide/task` takes the SAME two-spot reading `aoide/spawn` does (a
+    /// directive about what to do, unlike `aoide/from`'s identity claim), and a
+    /// blank or non-string value names no task at all — the non-third state
+    /// `spawn --task`'s own empty-flag read takes.
+    #[test]
+    fn requested_task_reads_the_aoide_task_key_where_spawn_is_read() {
+        assert_eq!(
+            requested_task(
+                &json!({ "metadata": { "aoide/task": "fix-flaky" } }),
+                &json!({}),
+            )
+            .as_deref(),
+            Some("fix-flaky")
+        );
+        assert_eq!(
+            requested_task(&json!({}), &json!({ "metadata": { "aoide/task": "from-params" } }))
+                .as_deref(),
+            Some("from-params")
+        );
+        // The message object wins when both carry one, the same precedence
+        // `extract_context_id` gives.
+        assert_eq!(
+            requested_task(
+                &json!({ "metadata": { "aoide/task": "from-message" } }),
+                &json!({ "metadata": { "aoide/task": "from-params" } }),
+            )
+            .as_deref(),
+            Some("from-message")
+        );
+        assert_eq!(
+            requested_task(&json!({ "metadata": { "aoide/task": "  fix-flaky  " } }), &json!({}))
+                .as_deref(),
+            Some("fix-flaky"),
+            "the same trim `spawn --task` applies to its flag value"
+        );
+        for empty_or_not_a_string in [json!(""), json!("   "), json!(null), json!(7)] {
+            let message = json!({ "metadata": { "aoide/task": empty_or_not_a_string } });
+            assert_eq!(requested_task(&message, &json!({})), None, "{empty_or_not_a_string}");
+        }
+    }
+
+    /// The slug is held to the ONE predicate every mailbox name takes, and the
+    /// refusal is taught: it quotes the value, states the shape and names the
+    /// way out (`-32602`, applied by `do_spawn` — the same spawn-side-only
+    /// discipline S3's malformed `aoide/from` claim holds).
+    #[test]
+    fn a_task_slug_off_the_shape_is_refused_with_a_taught_message() {
+        assert_eq!(spawn_task_slug(None), Ok(None), "naming no task is not a malformed one");
+        assert_eq!(spawn_task_slug(Some("fix-flaky")), Ok(Some("fix-flaky")));
+        assert_eq!(spawn_task_slug(Some("a1-b2")), Ok(Some("a1-b2")));
+
+        for bad in ["Upper", "-leading", "under_score", "a/b", "../evil", "a b", "fix-flaky "] {
+            let refusal = spawn_task_slug(Some(bad))
+                .expect_err(&format!("`{bad}` must not be accepted as a task slug"));
+            assert!(refusal.contains(bad), "quotes the offending value: {refusal}");
+            assert!(
+                refusal.contains("^[a-z0-9][a-z0-9-]*$"),
+                "states the predicate, so the caller can fix it: {refusal}"
+            );
+            assert!(
+                refusal.contains(aoide_protocol::wire::TASK_KEY),
+                "names the key it read: {refusal}"
+            );
+        }
     }
 
     /// The claim is read off `message.metadata` ONLY (CONTRACTS.md §6): a
@@ -5016,11 +5210,12 @@ mod tests {
     #[test]
     fn build_message_send_body_round_trips_through_the_inbound_parser() {
         let body = aoide_client::wire::build_message_send_body("hello there", "mid-123", None, None);
-        let (prompt, ctx, spawn, claimed_from) = parse_message_send_params(&body["params"]);
+        let (prompt, ctx, spawn, claimed_from, task) = parse_message_send_params(&body["params"]);
         assert_eq!(prompt, "hello there");
         assert_eq!(ctx, None);
         assert!(!spawn);
         assert_eq!(claimed_from, None, "no `--parent` claim on this body");
+        assert_eq!(task, None, "no `aoide/task` on a body the client builds today");
     }
 
     /// P-RSA S3: the claim the CLIENT signs (`aoide/from`) is the one the
@@ -5031,7 +5226,7 @@ mod tests {
     #[test]
     fn the_clients_from_claim_round_trips_through_the_inbound_parser() {
         let body = aoide_client::wire::build_message_send_body("hello there", "mid-789", None, Some("conduct-1-2"));
-        let (_, _, _, claimed_from) = parse_message_send_params(&body["params"]);
+        let (_, _, _, claimed_from, _) = parse_message_send_params(&body["params"]);
         assert_eq!(claimed_from.as_deref(), Some("conduct-1-2"));
     }
 
@@ -5046,7 +5241,7 @@ mod tests {
     #[test]
     fn build_message_send_body_routes_to_the_spawn_arm_exactly_as_do_spawn_expects() {
         let body = aoide_client::wire::build_message_send_body("status check please", "mid-456", None, None);
-        let (prompt, ctx, spawn_asked, _) = parse_message_send_params(&body["params"]);
+        let (prompt, ctx, spawn_asked, _, _) = parse_message_send_params(&body["params"]);
         assert_eq!(prompt, "status check please");
         assert_eq!(ctx, None, "no contextId — the Spawn signal `decide_send_action` reads");
         assert!(!spawn_asked, "spawn is signaled by the ABSENT contextId, not the metadata flag — `node spawn` never sets it");
@@ -5057,6 +5252,162 @@ mod tests {
             SendAction::Spawn { agent_cmd: "claude".to_string() },
             "routes to Spawn with `do_spawn`'s prompt arg equal to `prompt` above (\"status check please\")"
         );
+    }
+
+    // ── P-RSA S10: a remote spawn is a headless managed run ──────────────
+    //
+    // `spawn_argv` is `do_spawn`'s own argv half, factored out for exactly the
+    // reason `spawn_child_command` was: a `cargo test` binary's `current_exe()`
+    // is the harness, so no test here drives the real spawn — the SHAPE is what
+    // is provable, off a real `Command`'s `get_args()`/`get_envs()`.
+
+    /// S10: the door's argv IS the wrapper a local `spawn` builds —
+    /// `--spawned --headless` always (this door has no terminal to hand a
+    /// child), `--task <slug>` exactly when the caller named one — and an
+    /// ILLEGAL slug never reaches an argv at all, because `do_spawn` refuses it
+    /// before the id is minted or `current_exe()` is resolved (the refusal's
+    /// own test is `a_task_slug_off_the_shape_is_refused_with_a_taught_message`).
+    #[test]
+    fn a2a_spawn_argv_is_a_headless_managed_run_with_the_task_only_when_named() {
+        let audit = Path::new("/tmp/aoide-a2a-test-audit-does-not-need-to-exist.log");
+        let args_of = |argv: &[String]| -> Vec<String> {
+            spawn_child_command(Path::new("/bin/true"), argv, audit, None)
+                .get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect()
+        };
+
+        assert_eq!(
+            args_of(&spawn_argv("a2a-11-1790", "claude --dangerously-skip-permissions", None)),
+            vec![
+                "conduct",
+                "--spawned",
+                "--headless",
+                "--agent",
+                "a2a",
+                "--id",
+                "a2a-11-1790",
+                "--",
+                "claude",
+                "--dangerously-skip-permissions",
+            ],
+            "a no-task spawn is the plain headless wrapper, the configured agent's own argv \
+             untouched (still `split_whitespace`, never a shell)"
+        );
+        assert_eq!(
+            args_of(&spawn_argv("a2a-11-1791", "claude", Some("fix-flaky"))),
+            vec![
+                "conduct",
+                "--spawned",
+                "--headless",
+                "--agent",
+                "a2a",
+                "--id",
+                "a2a-11-1791",
+                "--task",
+                "fix-flaky",
+                "--",
+                "claude",
+            ],
+            "a named task rides the SAME argv a local `spawn --task` builds, before the `--` \
+             that ends the wrapper's own flags"
+        );
+
+        assert!(spawn_task_slug(Some("Upper")).is_err(), "and the illegal slug has no argv to read");
+    }
+
+    /// S10's no-regression pin: `--headless` and `--task` are ARGV facts, not
+    /// new environment. The child's `Command` carries exactly the three entries
+    /// the pre-S10 spawn carried — `AOIDE_AUDIT_LOG` set, `AOIDE_SESSION_ORIGIN`
+    /// and `AOIDE_SESSION_ID` explicitly REMOVED — with a task named or not.
+    /// Nothing else appears: `AOIDE_TASK`/`AOIDE_TASK_INSTRUCTIONS` are exported
+    /// by the child's own `conduct` to the AGENT it wraps (`spawn_on_pty`),
+    /// never by this door to the wrapper.
+    #[test]
+    fn a2a_spawn_env_is_unchanged_by_headless_and_task() {
+        let audit = Path::new("/tmp/aoide-a2a-test-audit-does-not-need-to-exist.log");
+        let env_of = |argv: &[String]| -> std::collections::BTreeMap<String, Option<String>> {
+            spawn_child_command(Path::new("/bin/true"), argv, audit, None)
+                .get_envs()
+                .map(|(k, v)| {
+                    (
+                        k.to_string_lossy().into_owned(),
+                        v.map(|v| v.to_string_lossy().into_owned()),
+                    )
+                })
+                .collect()
+        };
+        let expected: std::collections::BTreeMap<String, Option<String>> = [
+            (
+                "AOIDE_AUDIT_LOG".to_string(),
+                Some(audit.to_string_lossy().into_owned()),
+            ),
+            ("AOIDE_SESSION_ORIGIN".to_string(), None),
+            ("AOIDE_SESSION_ID".to_string(), None),
+        ]
+        .into_iter()
+        .collect();
+
+        assert_eq!(env_of(&spawn_argv("a2a-11-1", "claude", None)), expected);
+        assert_eq!(
+            env_of(&spawn_argv("a2a-11-2", "claude", Some("fix-flaky"))),
+            expected,
+            "S10 adds an argv flag and no environment at all"
+        );
+    }
+
+    /// S10 on the S3 side: a MANAGED remote child — a record that already
+    /// carries the task slug its own `conduct` stamped at registration — takes
+    /// the door's `origin`+`remoteParent` stamp exactly as a plain one does, and
+    /// keeps the slug. Two writers, two stage-lock sections, so the second
+    /// never clobbers the first's field.
+    #[test]
+    fn the_stamp_lands_on_a_managed_run_and_leaves_its_task_slug_alone() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = std::env::temp_dir().join(format!(
+            "aoide-server-a2a-stamp-task-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let mut rec = fixture_session("a2a-spawned-task", "working", None);
+        rec.task = Some("fix-flaky".to_string());
+        let sf = SessionsFile { schema_version: "0".to_string(), sessions: vec![rec] };
+        write_stage(&sessions_path(), &sf).unwrap();
+
+        stamp_spawn_provenance(
+            "a2a-spawned-task",
+            "node:yomi-strix",
+            Some(RemoteParent {
+                node: "yomi-strix".to_string(),
+                key: "cd".repeat(32),
+                session_id: "conduct-17991-1790312541".to_string(),
+                extra: Default::default(),
+            }),
+        );
+
+        let after: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = after.sessions.iter().find(|s| s.session_id == "a2a-spawned-task").unwrap();
+        assert_eq!(rec.origin.as_deref(), Some("node:yomi-strix"), "the origin still lands");
+        let rp = rec.remote_parent.as_ref().expect("the remoteParent stamp still lands");
+        assert_eq!(rp.node, "yomi-strix");
+        assert_eq!(rp.session_id, "conduct-17991-1790312541");
+        assert_eq!(
+            rec.task.as_deref(),
+            Some("fix-flaky"),
+            "the child's own task slug survives both stamps — the managed shape changes nothing \
+             about S3's two register-wait stamps"
+        );
+        assert_eq!(rec.parent_session_id, None, "still no foreign id in the LOCAL parent edge");
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
     }
 
     // ── `message/send` end-to-end via `handle_jsonrpc` — ERROR branches only.
