@@ -212,6 +212,19 @@ and `stage/cover.json` anywhere in the codebase (unaffected by which of
   for the full mechanism. `rice stage`/`cover set` still write normally —
   they carry zero awareness that routing exists.
 
+**Staging is never declarative** (house rule 10). Everything a staged song
+brings live comes from the runtime root: the notes, the cover, the widget
+bodies, and the song's slot-owner map and widget-type registry
+(`run/qml/songs/manifest.json`/`registry.json`). None of it is evaluated
+from the git checkout, so a song that exists only in the runtime songbook
+stages and hot-loads without a commit, a merge or a rebuild. The
+declarative path may seed staging (the activation seed, the baked
+templates), never gate it. The staged song is always the LAST one staged:
+`stage/mode.json` remembers it as `stagingSong`, and every way back into
+staging (the bar's RICE toggle, a bare `rice mode stage`, a reboot)
+restores that song, never the declared one. Register §33 tracks the one
+path that still evaluates the checkout for the owner map.
+
 `rice stage` doesn't only hot-load the palette/notes tier any more —
 it also syncs the song's widget QML **bodies**
 (the composed copy under `$AOIDE_ROOT/song/songbook/<name>/widgets/*.qml`,

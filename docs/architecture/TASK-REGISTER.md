@@ -2697,3 +2697,25 @@ project/parent inheritance across local/remote/app/subagents;
   aoide-storage 442, aoide-protocol 174, `cargo test --workspace --no-run`
   clean. The lane remains code-complete; acceptance runs 7a/7b are still the
   operator's, on two real nodes.
+
+## 33. Staging never reads the checkout (house rule 10; User, 2026-09-26)
+
+- Requirement (User, 2026-09-26): hot-load/staging is never declarative. A
+  staged song loads from the runtime songbook alone and never needs a commit,
+  a merge or a rebuild; the declarative path may seed staging, never gate it.
+  The staged song is always the last one staged, across the RICE toggle, a
+  bare `rice mode stage`, and a reboot.
+- Found: `song::widgets::eval_songbook` regenerates the WHOLE
+  `run/qml/songs/manifest.json`/`registry.json` from `nix eval
+  $AOIDE_FLAKE_ROOT#songbookManifest` on any host with a checkout, so a song
+  present only in the runtime songbook (or only on a worktree branch) loses
+  its slot owners on the next stage from a caller that does not set
+  `AOIDE_FLAKE_ROOT` — the daemon's `ricemode` toggle among them. The
+  repo-less path (`eval_songbook_from_templates`: baked baseline, host
+  songbook overlaid, the staged song's own scan last) already obeys the rule.
+- Fix, open (core, `crates/song`): take the staged song's owner-map and
+  registry entry from its runtime scan on every host, the way the repo-less
+  path does; nix evaluation stays the declarative seed only. Then drop the
+  checkout-evaluation sentence from Self-Ricing's staging invariant.
+- Workaround in place: `rice/cadenza` merged into local `main` so the
+  daemon's evaluation sees cadenza (not pushed).
