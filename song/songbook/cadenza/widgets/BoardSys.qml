@@ -20,7 +20,10 @@
 // `costUsd: null` mean UNKNOWN and draw `—`, never 0; `costPartial` draws
 // the figure orange with a `~`. ACCOUNT reads `state/usage.json` (real
 // today) through `livery.usagePath`; `[r]` asks the daemon to re-run the
-// poller (`bridge.refreshUsage`) — the file watch picks the answer up.
+// poller (`bridge.refreshUsage`) — the file watch picks the answer up. Its
+// opt-in `ollama` block ({ok, monthly.utilization} or {ok:false, error})
+// adds one OLLAMA month gauge (the track clamps at 100%, the figure goes
+// orange past it) or one dim `ollama: <error>` line; absent, nothing.
 import QtQuick
 import Quickshell.Io
 
@@ -137,6 +140,16 @@ Item {
         return out
     }
     readonly property bool credits: liveOk && !!live.extraUsage && live.extraUsage.isEnabled === true
+    // the opt-in ollama block: absent → nothing drawn; ok:false → one dim
+    // line; otherwise the month's share of included credits (0–100+, no
+    // reset date, no dollars — Ollama publishes neither)
+    readonly property var ollama: (acct && acct.ollama) ? acct.ollama : null
+    readonly property bool ollamaOk: !!ollama && ollama.ok === true
+    readonly property real ollamaPct: {
+        var u = ollamaOk && ollama.monthly ? Number(ollama.monthly.utilization) : NaN
+        return isNaN(u) ? 0 : Math.max(0, u)
+    }
+    readonly property int ollamaRows: ollama ? 1 : 0
     property bool refreshing: false
     Timer { id: refreshCool; interval: 4000; onTriggered: root.refreshing = false }
     onAcctChanged: { refreshing = false; refreshCool.stop() }
@@ -196,7 +209,7 @@ Item {
                 props: ({ title: "account", glow: "bloom",
                           stat: Qt.binding(() => root.refreshing ? "[r] …" : "[r] " + (root.acct && root.acct.fetchedAt ? root.board.age(root.acct.fetchedAt) : "—")),
                           statColor: root.kit.dim,
-                          rows: Qt.binding(() => !root.acct ? 1 : (root.liveOk ? root.caps.length : 1) + (root.credits ? 1 : 0) + (root.local ? 3 : 0)),
+                          rows: Qt.binding(() => !root.acct ? 1 : (root.liveOk ? root.caps.length : 1) + (root.credits ? 1 : 0) + root.ollamaRows + (root.local ? 3 : 0)),
                           content: accountBody })
                 MouseArea {
                     // the [r] cut into the rule
@@ -399,6 +412,33 @@ Item {
                     text: root.credits ? root.money(root.live.extraUsage.usedCredits) + " / " + root.money(root.live.extraUsage.monthlyLimit) : ""
                     color: root.kit.number; font: root.kit.font; textFormat: Text.PlainText
                 }
+            }
+            // ollama (opt-in): the track stops at 100%, the figure does not
+            Row {
+                visible: root.ollamaOk
+                Use {
+                    kit: root.kit; helper: "Gauge"
+                    props: ({ label: "OLLAMA", labelCells: 10, cells: 22, warnAt: 0.6, urgentAt: 0.85,
+                              showPct: false,
+                              value: Qt.binding(() => Math.min(1, root.ollamaPct / 100)) })
+                }
+                Text {
+                    text: root.kit.padL(Math.round(root.ollamaPct) + "%", 5)
+                    color: root.ollamaPct > 100 ? root.kit.warn : root.kit.number
+                    font: root.kit.font; textFormat: Text.PlainText
+                }
+                Text {
+                    text: "  month"
+                    color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
+                }
+            }
+            Text {
+                visible: !!root.ollama && !root.ollamaOk
+                width: parent.width; elide: Text.ElideRight
+                text: root.ollama && !root.ollamaOk
+                      ? "ollama: " + ("" + (root.ollama.error || "unavailable")).replace(/[\u0000-\u001f\u007f]+/g, " ")
+                      : ""
+                color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
             }
             Text {
                 visible: !!root.local

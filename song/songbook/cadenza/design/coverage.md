@@ -15,7 +15,7 @@ widget bodies for what each one reaches. Status: `design` → `preview` →
 | `dock` | SurfaceSlot · shell.qml (`aoide-dock`), extras `shared` `stagingEngine`; `toggle()` from the bar and `SUPER+G` | toggle contract; `openTab(tab)` from the bar cells | the tabbed board: OVERVIEW · project tabs · SYS · NOTIF (intent §3.3); closes by `[x]`, Escape, `SUPER+G`, the showing tab's bar cell, or a click off it (the `aoide-dock-scrim` catcher) | design |
 | `conductor` | WidgetSlot · sonata's dock | `stage/sessions.json` + `hooks.json`; `bridge.focusSession`, `sessionAction`, `traceSession`, `recheckSessions`, `heraldverdict` | not authored — the board OVERVIEW AGENTS pane + project rails draw agents | design |
 | `terminals` | WidgetSlot · sonata's dock | sessions.json (terminal sessions), `focusSession`, `focusWindow` | not authored — OVERVIEW TERMINALS pane + project rails | design |
-| `usage` | WidgetSlot · sonata's dock | `state/usage.json` (`livery.usagePath`), `bridge.refreshUsage` | not authored — the SYS tab ACCOUNT pane | design |
+| `usage` | WidgetSlot · sonata's dock | `state/usage.json` (`livery.usagePath`) incl. its opt-in `ollama` block, `bridge.refreshUsage` | not authored — the SYS tab ACCOUNT pane (Claude gauges + the `ollama` month gauge when present) | design |
 | `meters` | WidgetSlot · sonata's dock | CPU/mem (the paths sonata's meters reads) | not authored — the SYS tab MACHINE pane (`/proc/stat`, `/proc/meminfo`) | design |
 | `power` | WidgetSlot · sonata's dock | power vitals (sonata's `routePath` FileView), UPower | not authored — the bar `BAT` cell + its pane | design |
 | `herald-center` | WidgetSlot · sonata's dock | `stage/herald.json`, `heralddismiss`, `heraldverdict` | not authored — the NOTIF tab | design |

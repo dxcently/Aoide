@@ -328,7 +328,13 @@ own board; it mounts none of sonata's gadget slots.
   gauges (the kernel's `/proc/stat` and `/proc/meminfo`, read as sonata's
   meters reads them), the account block (`state/usage.json`), and, once
   `state/usage/now.json` is published, per-jack sparklines and
-  per-workspace/project token and cost totals.
+  per-workspace/project token and cost totals. The account block carries
+  the Claude limit gauges and, when the user has opted in, usage.json's
+  `ollama` block as one more gauge row, `OLLAMA … month`: the share of the
+  month's included credits, the track stopping at 100% while the figure
+  keeps counting in orange past it (no reset date, no dollars — Ollama
+  publishes neither). `ok: false` draws one dim `ollama: <error>` line; no
+  `ollama` key draws nothing.
 - **NOTIF** — the herald: toasts and summonses as borderless blocks, quoted
   plain text, `[y] approve [n] deny` on a summons (the existing
   `heraldverdict` / `heralddismiss` commands, nothing else).
@@ -361,7 +367,7 @@ harness (`BoardPreview.qml`) flips them to show the full board.
 | project feed | — | S8/S10 (`hasBoardFeed`) |
 | composer | — | S11 agents, S12 project (`hasBoardPost`); drawn disabled until `boardpost` exists |
 | SYS machine CPU/mem | `/proc/stat`, `/proc/meminfo` | — |
-| SYS account usage | `state/usage.json` | — |
+| SYS account usage | `state/usage.json` (its `ollama` block only when opted in) | — |
 | SYS per-jack CPU/mem/tokens/cost | — | S5/S6 (`hasJackUsage`) |
 | NOTIF | `stage/herald.json` | — |
 
