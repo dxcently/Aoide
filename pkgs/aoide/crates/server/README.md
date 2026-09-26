@@ -196,7 +196,15 @@ the inbound half of the two-door contract (the outbound half is
   at that call site) and files ITS OWN receipt right after a write that
   actually went out — a spawned session has no `SessionRecord`
   yet at that moment, so it cannot reach `session_send` at all (see
-  `spawn_inject_prompt`'s doc comment for the race that rules it out).
+  `spawn_inject_prompt`'s doc comment for the race that rules it out). That
+  write waits first: readiness is a per-harness fact (`Readiness`), and the
+  wait runs on a WORKER, one per spawn, never on the connection handler — 20s
+  of budget plus the socket retry against `MAX_CONN` would hand every other
+  RPC a `503 server busy`. The worker's verdict lands on the record
+  (`stamp_opening_turn`: `pending` is stamped as the spawn is acknowledged,
+  then `delivered` / `delivered-unverified` / `not-ready` / `skipped-shell`),
+  and `tasks/get` reports it as the task's `status.message` — so a peer whose
+  opening turn never ran is told so instead of reading a bare `submitted`.
   These were the only two mailbase-filing call sites until P-M2 added a
   third, unrelated to either: `mail_deposit`'s own call into
   `aoide_storage::mail::deposit` (below), which files a letter or receipt

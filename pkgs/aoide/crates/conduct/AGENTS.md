@@ -1590,8 +1590,9 @@
   `deliver_local`/`session_send` and has to file itself (see
   `aoide_storage::mail`'s module doc for the full two-writer reasoning). The
   door runs that wait-and-type on its OWN WORKER, never on its connection
-  handler: the budget (20s) plus the socket retry (3s) against `MAX_CONN` is
-  `503 server busy` for every other RPC — read commands included. The worker
+  handler. That budget (20s) plus the socket retry would otherwise park a
+  `MAX_CONN` slot and hand `503 server busy` to every other RPC — read
+  commands included. The worker
   stamps the outcome on the record (`stamp_opening_turn`), which is what
   `tasks/get` reports as `status.message` and what the door's own audit line
   carries, so a peer whose opening turn never ran is told `not-ready` rather

@@ -1765,8 +1765,11 @@ wait on a child record of their wrapper carrying a stamp at or after their
 own start instant, and an unstamped (or older-stamped) leftover under a
 reused id is not readiness. Absent means "this harness's hooks never claimed
 this record" — never a readiness fact; readers must tolerate both forms and
-round-trip fields they do not know, and a record MAY also carry an optional
-`openingTurn` (string) — what became of the first turn the A2A door asked a
+round-trip fields they do not know.
+
+**Additive in v0 (A2A opening turn, 2026-09-26):** a session record MAY also
+carry an optional `openingTurn` (string) — what became of the first turn the
+A2A door asked a
 spawned session to run (`pending` at the spawn acknowledgement, then the
 worker's `delivered`/`delivered-unverified`/`not-ready`/`skipped-shell`),
 written by `stamp_opening_turn` from the door that accepted the spawn and read
