@@ -561,8 +561,10 @@ rec {
       #
       # What lets the lane's value stand either way is `lib/pkgs.nix`'s overlay
       # stepping aside for a name `prev` already carries — see the yield there;
-      # it is load-bearing, not tidiness. That is how the lyra lane replaces
-      # `lyra-songbook` with the songs a host builds in.
+      # it is load-bearing, not tidiness, and it is granted only to a name in
+      # that file's `intentionalOverrides` list (any other overlay replacing a
+      # walker name is an evaluation error naming the package). That is how the
+      # lyra lane replaces `lyra-songbook` with the songs a host builds in.
       overlays ? [ ],
       selectionModules ? [ ],
       extraModulesFor ? (_: [ ]),

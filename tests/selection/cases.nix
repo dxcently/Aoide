@@ -848,4 +848,20 @@ selectionCases
       "all-resolve"
     else
       "unresolvable: ${builtins.concatStringsSep "," unresolvable}";
+
+  # ── The packages walker's override rule (lib/pkgs.nix) ─────────────────────
+  # The composition's other half: the base package set arrives through this
+  # walker's overlay, and a lane's replacement of a walker name stands because
+  # the walker steps aside — for a LISTED name only. Paired, so neither half
+  # can rot alone: the listed name yields (the lane's value survives whichever
+  # overlay was applied first, which is the whole point of the yield), and any
+  # OTHER walker name another overlay provides is refused by name, so a
+  # replacement nobody decided on cannot happen quietly.
+  walkerOverlay = (import ../../lib/pkgs.nix { inherit lib; }).overlay;
+
+  walkerYieldsListedOverride =
+    ((walkerOverlay { stock = { }; }) { } { lyra-songbook = "the lane's songbook"; }).lyra-songbook;
+
+  walkerRefusesUnlistedOverride =
+    ((walkerOverlay { stock = { }; }) { } { lyra-shell = "another overlay's shell"; }).lyra-shell;
 }

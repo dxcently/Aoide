@@ -27,10 +27,13 @@ what those checks actually test.
   with a message the runner greps for, so a vague error is a failing test
   rather than a passing one. The fixture registry, aggregations, users and
   override records sit beside it; several of them `throw` on import, which is
-  how "an unselected file stays unread" is proved instead of asserted. `lib`
-  comes from this flake's own lock, so the schema is tested against the lib
-  every host evaluates with. Portable: `nix eval` plus bash, no VM, no host
-  path.
+  how "an unselected file stays unread" is proved instead of asserted. Its last
+  two cases cover the composition's other half, the packages walker's overlay
+  (`lib/pkgs.nix`): a name in `intentionalOverrides` yields to the overlay that
+  replaced it, and any other walker name another overlay provides is refused by
+  name. `lib` comes from this flake's own lock, so the schema is tested against
+  the lib every host evaluates with. Portable: `nix eval` plus bash, no VM, no
+  host path.
 - `templates/` — `tests/templates/run.sh` assembles a whole tree out of
   `templates/`, parses every template, resolves two hosts against the real
   constructor, and checks that the files nobody selected stayed unread. It

@@ -77,6 +77,8 @@ songEscapeClean                     ok      ""
 songEscapeFound                     ok      "escaper/rice.nix"
 songBorrowClosure                   ok      "borrower lender"
 songBorrowOwnersResolve             ok      "all-resolve"
+walkerYieldsListedOverride          ok      "the lane's songbook"
+walkerRefusesUnlistedOverride       throws  listed in intentionalOverrides
 EOF
 )
 

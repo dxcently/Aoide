@@ -36,6 +36,15 @@
 # catch. Add a name here ONLY with that intent; the default for a new package is
 # to pick a non-colliding name.
 #
+# Intentional overrides — `intentionalOverrides`: a second overlay in
+# `nixpkgs.overlays` MAY deliberately replace what this walker supplies —
+# Aoide's lyra lane replaces `lyra-songbook` with the songs a host builds in.
+# Listing a name here is what lets the walker STEP ASIDE for it; an overlay
+# that replaces a walker name WITHOUT listing it is a loud evaluation error
+# naming the package and this rule, because a silent replacement is how one
+# overlay's package set quietly becomes another's without anyone deciding it.
+# Add a name here ONLY with that intent, never to silence the error.
+#
 # Special-args escape hatch: `callPackage` auto-fills standard nixpkgs args. A
 # package needing an arg `callPackage` cannot reach (a value the FLAKE computes,
 # like `lyra-songbook`'s `aoideOptions`) declares it by name, and the caller
@@ -70,6 +79,14 @@ let
   intentionalShadows = [
     "melete" # Aoide's AI harness vs nixpkgs' `melete` headline font — unrelated.
     "eidolon" # Aoide's coding harness vs nixpkgs' `eidolon` — a dead alias, throws "removed as unmaintained upstream".
+  ];
+
+  # Names another overlay in the same `nixpkgs.overlays` list is allowed to
+  # replace (see header). The walker supplies a default per discovered package,
+  # so stepping aside is the ONLY way a lane's replacement can stand — and it
+  # happens only for a name listed here.
+  intentionalOverrides = [
+    "lyra-songbook" # the lyra lane replaces the whole songbook with the songs THIS host builds in.
   ];
 
   # Directory entries under ../pkgs that are packages: type == "directory",
@@ -131,12 +148,14 @@ in
   # nixpkgs attribute, so it asks the STOCK set — not the running composition,
   # which also holds names ANOTHER overlay in the same list provided.
   #
-  # And a name another overlay already provides is that overlay's answer: the
-  # walker supplies a DEFAULT per discovered package, so it steps aside rather
-  # than overwriting one. That is what makes a lane's replacement work — the
+  # And a name another overlay already provides is that overlay's answer — but
+  # only for a name listed in `intentionalOverrides`: the walker supplies a
+  # DEFAULT per discovered package, so it steps aside rather than overwriting
+  # one, and a replacement nobody listed is an evaluation error naming the
+  # package and the rule. That is what keeps a lane's replacement work — the
   # lyra lane replaces `lyra-songbook` with the songs a host builds in, and two
-  # overlays writing one attribute is a race whose winner depends on the order
-  # `nixpkgs.overlays` happened to compose, not on either of them.
+  # overlays writing one attribute is otherwise a race whose winner depends on
+  # the order `nixpkgs.overlays` happened to compose, not on either of them.
   overlay =
     { stock }:
     final: prev:
@@ -145,16 +164,23 @@ in
       if stock ? ${name} && !(builtins.elem name intentionalShadows) then
         throw "pkgs/${name} collides with a nixpkgs attribute — rename it (or add it to intentionalShadows in lib/pkgs.nix if the shadow is deliberate)"
       else if prev ? ${name} && !(stock ? ${name}) then
-        # LOAD-BEARING, not tidiness. This yield is what makes a lane's
-        # replacement of a base package safe in either overlay application
-        # order: whichever of the two definitions is applied first supplies the
-        # name, and the other steps aside instead of overwriting it. Two
-        # overlays writing one attribute in one order is otherwise a race whose
-        # winner depends on how `nixpkgs.overlays` happened to compose — and
-        # `prev` inside a lane's own overlay is NOT guaranteed to carry the
-        # base's attributes (see lib/composition.nix's `overlays` argument),
-        # which is why a lane cannot simply `.override` what this supplies.
-        prev.${name}
+        if builtins.elem name intentionalOverrides then
+          # LOAD-BEARING, not tidiness. This yield is what makes a lane's
+          # replacement of a base package safe in either overlay application
+          # order: whichever of the two definitions is applied first supplies the
+          # name, and the other steps aside instead of overwriting it. Two
+          # overlays writing one attribute in one order is otherwise a race whose
+          # winner depends on how `nixpkgs.overlays` happened to compose — and
+          # `prev` inside a lane's own overlay is NOT guaranteed to carry the
+          # base's attributes (see lib/composition.nix's `overlays` argument),
+          # which is why a lane cannot simply `.override` what this supplies.
+          #
+          # The yield is not automatic: only a name in `intentionalOverrides`
+          # gets it (see the header). Anything else replacing a walker name is
+          # refused here, by name.
+          prev.${name}
+        else
+          throw "pkgs/${name}: another overlay in nixpkgs.overlays already provides '${name}', which this walker also supplies — the walker yields only to a name listed in intentionalOverrides (lib/pkgs.nix). List it there if replacing the walker's build is deliberate, or give the other overlay a name this walker does not supply."
       else
         final.callPackage (pkgsDir + "/${name}") (extra.${name} or { })
     );
