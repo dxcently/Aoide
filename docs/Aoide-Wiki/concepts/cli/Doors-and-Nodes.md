@@ -159,11 +159,30 @@ lyra shellbridge [--run] [--json]
   roots; `removehost` re-execs `aoide project remove <name> --host <host>`
   and is refused unless exactly one host is given; the same sequencer as
   `sessionaction`, generic over which subject owns the plan, so reply,
-  audit, and partial-failure shapes are identical). Also
+  audit, and partial-failure shapes are identical), and `workspaceaction`
+  (the bar's bind click, W-P5 — a closed two-action whitelist, `set` /
+  `clear`, that plans the exact argv the CLI takes: `aoide workspace set
+  <ws> <project> [--new]` / `aoide workspace clear <ws>`, so no second
+  binding exists anywhere. Zero-session like `projectaction`, and the one
+  acknowledged action that resolves a field itself: an omitted `workspace`
+  is the FOCUSED one, read in-process through the compositor adapter
+  (`focused_workspace`, the same function the CLI's own caller-side
+  resolution uses) because `workspace clear` takes an id — the child always
+  receives an integer. A host with no adapter is ANSWERED
+  (`reason: "no-compositor"`, the CLI's own sentence) rather than dropped,
+  because a click is parked on a reply. Its reply is `{ok, message, action,
+  workspace, project?, data?}` — the resolved workspace id is the key,
+  `project` rides only on `set` — and the file a bar reads to draw the
+  current bindings is `state/stage/projects.json`, `projects[].workspaces`).
+  Also
   spawns the Hyprland window→session listener thread at startup
   (`graph::run_hypr_window_listener`). A malformed or unknown line is
   audited (action `unparseable`, a byte count only, never the payload) and
-  dropped — nothing kills the accept loop.
+  dropped — nothing kills the accept loop. The two verbs whose caller is
+  PARKED on a reply (`sessiontrace`, `workspaceaction`) are the exceptions:
+  a line that names one of them and fails its own gate is answered with a
+  `bad-request` refusal instead of silence (`CONTRACTS.md` §4's
+  workspaceaction paragraph has the shapes).
 - **Notes:** not gated. The `--run` flag is registered in the schema but the
   handler (`conduct/src/commands/shellbridge.rs::handle_shellbridge`) never
   consults it — bare `lyra shellbridge` runs the blocking loop either way. The

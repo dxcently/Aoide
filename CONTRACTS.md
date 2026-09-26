@@ -2401,7 +2401,9 @@ keeps it off the wire for a project no binding has touched — the
 `hosts`/`autoResume` discipline, so every `projects.json` written before this
 field stays byte-identical. Written by `workspace set` (under the same stage
 lock local roots go through; daemon-owned, like every other `projects.json`
-mutation) and by `workspace clear`. ONE INVARIANT: a workspace id appears in AT
+mutation) and by `workspace clear` — and, from a desktop click, through the
+shellbridge socket's `workspaceaction` (W-P5), which re-execs those same two
+commands and writes nothing itself. ONE INVARIANT: a workspace id appears in AT
 MOST ONE project — `workspace set` MOVES it off whatever project held it —
 while two workspaces may show the same project. A binding is not a root: it
 anchors nothing by cwd, a rootless project may carry one, and `project remove
@@ -2409,6 +2411,24 @@ NAME ROOT` leaves bindings alone; the bare `project remove NAME` takes them
 with the record. Read with `aoide workspace list [--json]`, which merges the
 bindings with every workspace a local session reports (`observed` is `false`
 by name on a host where no session reports one).
+
+**The binding's desktop door and read path (W-P5).** The record is
+`$AOIDE_ROOT/state/stage/projects.json`, field `projects[].workspaces` (an
+integer array per project — invert it for a workspace → project map), and
+`aoide workspace list --json` is its read surface; the graph's own resolved
+`workspaces`/`ties` block is slice S3, which extends that same read (below). A
+click binds or unbinds by sending ONE line to
+shellbridge's socket: `{"cmd":"workspaceaction","action":"set|clear",
+"workspace":<int, omitted = the focused one>,"project":"<name>","new":<bool>}`,
+answered with one JSON reply — `{ok, message, action, workspace, project?,
+data?}`, the CLI's own `message`/`data` verbatim, `project` only on `set`.
+`workspace` is ABSENT only on the `no-compositor` refusal (`{ok:false, action,
+reason, message}` — nothing was resolved to name), and BOTH `workspace` and
+`action` are absent on a `bad-request` refusal (nothing parsed to echo back). A
+malformed line that NAMES this verb is answered rather than dropped, the same
+rule `sessiontrace` holds — one rule for every parked caller.
+The action re-execs `aoide workspace set|clear` and writes nothing itself, so
+the invariant above holds no matter which door the mutation came through.
 
 **Additive in v0 (P-D8, `docs/architecture/AOIDED.md`'s "L5"/"Open
 knobs"):** a project entry MAY also carry an optional `autoResume` (bool,

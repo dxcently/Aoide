@@ -24,6 +24,12 @@ use aoide_protocol as daemon;
 use aoide_storage::fs::{conducting_stage_dir, seed_if_absent};
 use aoide_storage::mode::{load_mode_marker, RiceMode};
 use serde_json::{json, Value};
+// The compositor adapter's focused-workspace read and the ONE sentence an
+// omitted `<workspace>` with no adapter to ask gets (`graph/workspace.rs`,
+// re-exported beside `focused_workspace` at `crate::graph` — the bridge
+// resolves an omitted `workspaceaction` workspace with the very function the
+// CLI's own caller-side resolution uses, and speaks the CLI's own words).
+use crate::graph::{focused_workspace, NO_COMPOSITOR};
 use std::io::{BufRead, BufReader};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
@@ -155,6 +161,106 @@ pub enum BridgeCommand {
     /// [`Self::FocusSession`]'s — it becomes one argv element, never a shell
     /// word.
     SessionTrace { session_id: String, lines: usize, clip: String },
+    /// `{ "cmd": "workspaceaction", "action": "set|clear", "workspace": <int>,
+    /// "project": "<name>", "new": <bool> }` — the bar's click that binds a
+    /// compositor workspace to a project, or unbinds it (W-P5). Modelled on
+    /// [`Self::ProjectAction`]: zero-session (no session id anywhere on the
+    /// wire, in the plan, the reply, or the audit line), a closed two-action
+    /// set ([`WorkspaceBinding`]), and no binding logic of its own — it plans
+    /// the same argv `aoide workspace set [<ws>] <project> [--new]` /
+    /// `aoide workspace clear <ws>` take and runs it through the same core
+    /// re-exec every acknowledged action uses.
+    ///
+    /// `workspace` is the compositor's own workspace id, omitted to mean the
+    /// FOCUSED one. Unlike a session or project action, one field is resolved
+    /// here rather than left to the child: [`dispatch_workspace_action`] asks
+    /// the compositor adapter ([`focused_workspace`]) and plans the RESOLVED
+    /// integer, because `workspace clear` takes an id and no wire caller can
+    /// be expected to know the focused one. A host with no adapter is
+    /// ANSWERED (`reason: "no-compositor"`), never dropped — the click is
+    /// parked on a reply.
+    WorkspaceAction { workspace: Option<i64>, binding: WorkspaceBinding },
+}
+
+/// The two things a `workspaceaction` line can ask for. A closed set: an
+/// unknown action word, a `clear` carrying a `project`, or a `project` that is
+/// not a name is refused at the wire (`parse_command` → `None`, no reply, like
+/// every other line the whitelists refuse), never dispatched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkspaceBinding {
+    /// Bind. `new` is `--new`: register the name when it is unregistered
+    /// (name-only, no folder) and bind it in one call — the CLI stays the one
+    /// authority on whether the name exists, the bridge never pre-checks.
+    Set { project: String, new: bool },
+    /// Unbind.
+    Clear,
+}
+
+impl WorkspaceBinding {
+    /// Parse one wire line's `action` and its own fields. SHAPE only, never
+    /// state — whether the project exists, and whether this workspace is
+    /// already bound, are the CLI's checks, not the bridge's.
+    fn from_wire(action: &str, fields: &Value) -> Option<Self> {
+        match action {
+            "set" => {
+                // A missing, `null`, or non-string `project` is refused
+                // outright: there is no "clear" reading of a malformed
+                // bind request.
+                let project = fields.get("project").and_then(Value::as_str)?.trim();
+                if !safe_action_value(project) {
+                    return None;
+                }
+                let new = match fields.get("new") {
+                    None | Some(Value::Null) => false,
+                    Some(Value::Bool(new)) => *new,
+                    // Present but not a bool: refused, never read as false.
+                    Some(_) => return None,
+                };
+                Some(Self::Set { project: project.to_string(), new })
+            }
+            // `clear` carries a workspace and nothing else: a `project` or a
+            // `new` beside it is a caller that meant `set`, and silently
+            // ignoring the field would let that mistake read as a successful
+            // unbind.
+            "clear" => {
+                if fields.get("project").is_some() || fields.get("new").is_some() {
+                    return None;
+                }
+                Some(Self::Clear)
+            }
+            _ => None,
+        }
+    }
+
+    /// The wire name back, for the reply and the audit line.
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Set { .. } => "set",
+            Self::Clear => "clear",
+        }
+    }
+
+    /// The ONE argv this binding plans for one RESOLVED workspace id — exactly
+    /// the argv the CLI takes, so `--new` is the only optional element and
+    /// nothing here re-implements a binding. `--json` is appended by the
+    /// runner ([`run_core_step`]), never planned here.
+    fn plan(&self, ws: i64) -> Vec<String> {
+        match self {
+            Self::Set { project, new } => {
+                let mut argv = vec![
+                    "workspace".to_string(),
+                    "set".to_string(),
+                    ws.to_string(),
+                    project.clone(),
+                ];
+                if *new {
+                    argv.push("--new".to_string());
+                }
+                argv
+            }
+            Self::Clear => vec!["workspace".to_string(), "clear".to_string(), ws.to_string()],
+        }
+    }
 }
 
 /// The six system actions the powermenu can request. A closed set — an unknown
@@ -231,6 +337,22 @@ pub fn parse_command(line: &str) -> Option<BridgeCommand> {
             // at the top level (§2d's wire shape), never nested.
             project_action_args(&name, &action, &v)?;
             Some(BridgeCommand::ProjectAction { name, action, fields: v })
+        }
+        "workspaceaction" => {
+            let action = v.get("action")?.as_str()?;
+            // `fields` here IS the whole wire object, the `projectaction`
+            // shape: `project`/`new` sit at the top level, never nested.
+            let binding = WorkspaceBinding::from_wire(action, &v)?;
+            // An INTEGER, the same value `SessionRecord.workspace` holds: a
+            // string or a float is refused (`as_i64`), a NEGATIVE is accepted
+            // — Hyprland's named/special workspaces carry negative ids, and
+            // the CLI's own `workspace_id` parses the same `i64`. Absent (or
+            // `null`) means "the focused one", resolved at dispatch.
+            let workspace = match v.get("workspace") {
+                None | Some(Value::Null) => None,
+                Some(raw) => Some(raw.as_i64()?),
+            };
+            Some(BridgeCommand::WorkspaceAction { workspace, binding })
         }
         "focuswindow" => {
             let address = v
@@ -936,12 +1058,16 @@ fn run_core_bounded(
 /// it)? The one question `handle_conn`'s refusal path asks of an unparseable
 /// line: a `sessiontrace` that failed its own gate must be answered, and every
 /// other unknown line keeps its plain drop-and-audit.
-fn wire_names_sessiontrace(line: &str) -> bool {
+/// One raw line's `cmd` word, whatever else is wrong with it — how a verb
+/// whose caller is PARKED on a reply recognises itself after `parse_command`
+/// has already dropped the line (`sessiontrace`, `workspaceaction`). Total:
+/// malformed JSON names nothing.
+fn wire_names(line: &str, cmd: &str) -> bool {
     serde_json::from_str::<Value>(line.trim())
         .ok()
         .and_then(|v| v.get("cmd").and_then(Value::as_str).map(str::to_string))
         .as_deref()
-        == Some("sessiontrace")
+        == Some(cmd)
 }
 
 /// The ONE JSON line a `sessiontrace` refusal answers with: the CLI's own
@@ -1384,28 +1510,29 @@ fn outcome_envelope(stream: &str) -> Option<(bool, String, Option<Value>)> {
     Some((ok, message, data))
 }
 
-/// Shape the ONE JSON reply line for an acknowledged bridge action — pure
-/// and total, mirroring [`classify_recheck`]'s own rule: success is the real
-/// output, not the exit status. `--json` puts its envelope on a DIFFERENT
-/// stream depending on where the command failed: a dispatched command
-/// prints it on stdout, but a usage error the parser refused BEFORE dispatch
-/// prints it on stderr with an empty stdout (`protocol/src/door.rs:800-814`)
-/// — exactly the path `createproject`/`editproject` take until slice A
-/// lands, so reading stdout alone would hand QML a raw JSON blob as its
-/// "message". `subject` is generic over `sessionaction`/`projectaction`
-/// (P-14 M1 §2d) — a session subject reproduces every field byte-identical
-/// to before that split.
-fn session_action_reply(
-    subject: ActionSubject,
+/// One step's CLI outcome as `(ok, message, data)` — pure and total, the ONE
+/// authority for reading a `--json` envelope into a reply, shared by every
+/// acknowledged bridge action ([`session_action_reply`],
+/// [`workspace_reply`]). Mirrors [`classify_recheck`]'s own rule: success is
+/// the real output, not the exit status alone.
+///
+/// `--json` puts its envelope on a DIFFERENT stream depending on where the
+/// command failed: a dispatched command prints it on stdout, but a usage
+/// error the parser refused BEFORE dispatch prints it on stderr with an
+/// empty stdout (`protocol/src/door.rs:800-814`), so reading stdout alone
+/// would hand QML a raw JSON blob as its "message". `noun` is the word a
+/// generated message uses when the envelope carries none of its own
+/// (`"session"`/`"project"`/`"workspace"`); `action` the wire action name.
+fn outcome_triple(
+    noun: &str,
     action: &str,
     exited_ok: bool,
     stdout: &str,
     stderr: &str,
-) -> Value {
-    let (ok, message, data) = match outcome_envelope(stdout).or_else(|| outcome_envelope(stderr)) {
+) -> (bool, String, Option<Value>) {
+    match outcome_envelope(stdout).or_else(|| outcome_envelope(stderr)) {
         Some((status_ok, msg, data)) => {
             let ok = exited_ok && status_ok;
-            let noun = subject.noun();
             let message = if !msg.is_empty() {
                 msg
             } else if ok {
@@ -1427,7 +1554,21 @@ fn session_action_reply(
             };
             (false, message, None)
         }
-    };
+    }
+}
+
+/// Shape the ONE JSON reply line for an acknowledged bridge action.
+/// `subject` is generic over `sessionaction`/`projectaction`
+/// (P-14 M1 §2d) — a session subject reproduces every field byte-identical
+/// to before that split.
+fn session_action_reply(
+    subject: ActionSubject,
+    action: &str,
+    exited_ok: bool,
+    stdout: &str,
+    stderr: &str,
+) -> Value {
+    let (ok, message, data) = outcome_triple(subject.noun(), action, exited_ok, stdout, stderr);
     let mut reply = json!({
         "ok": ok,
         "message": message,
@@ -1440,36 +1581,84 @@ fn session_action_reply(
     reply
 }
 
-/// One step, spawned: exec the core `aoide` binary
-/// (`daemon::bin::core_bin()`, protocol's sibling resolver — never a bare
-/// `"aoide"` relying on PATH alone) with `argv` plus `--json`, the exact
-/// pattern `dispatch_usage_refresh`/`dispatch_recheck_sessions` already use.
-/// This call is NOT inside `with_stage_lock` — see `protocol::bin`'s module
-/// doc for why that would matter if it ever were.
+/// The ONE reply line for a `workspaceaction` —
+/// `{ok, message, action, workspace, project?, data?}`. Same read as every
+/// other acknowledged action ([`outcome_triple`], the CLI's own `message`
+/// and `data` carried verbatim), keyed by the RESOLVED workspace id, so a
+/// caller that omitted the workspace learns which one it actually touched.
+/// `project` rides only on `set` — the one action that has one.
+fn workspace_reply(
+    binding: &WorkspaceBinding,
+    ws: i64,
+    exited_ok: bool,
+    stdout: &str,
+    stderr: &str,
+) -> Value {
+    let action = binding.as_str();
+    let (ok, message, data) = outcome_triple("workspace", action, exited_ok, stdout, stderr);
+    let mut reply = json!({
+        "ok": ok,
+        "message": message,
+        "action": action,
+        "workspace": ws,
+    });
+    if let WorkspaceBinding::Set { project, .. } = binding {
+        reply["project"] = json!(project);
+    }
+    if let Some(data) = data {
+        reply["data"] = data;
+    }
+    reply
+}
+
+/// One step, spawned: [`run_core_step`] the argv and shape the reply for
+/// whichever subject owns the action.
 fn run_session_step(subject: ActionSubject, action: &str, argv: &[String]) -> Value {
-    match std::process::Command::new(daemon::bin::core_bin())
-        .args(argv)
-        .arg("--json")
-        .output()
-    {
-        Ok(out) => session_action_reply(
-            subject,
-            action,
-            out.status.success(),
-            &String::from_utf8_lossy(&out.stdout),
-            &String::from_utf8_lossy(&out.stderr),
-        ),
-        // The first TWO argv elements only — always the command path, never
-        // a value — same discipline every audit line here holds.
-        Err(e) => {
+    match run_core_step(argv) {
+        Ok((exited_ok, stdout, stderr)) => {
+            session_action_reply(subject, action, exited_ok, &stdout, &stderr)
+        }
+        Err(message) => {
             let mut reply = json!({
                 "ok": false,
-                "message": format!("spawning `aoide {} {}`: {e}", argv[0], argv[1]),
+                "message": message,
                 "action": action,
             });
             reply[subject.key()] = json!(subject.value());
             reply
         }
+    }
+}
+
+/// Exec the core `aoide` binary (`daemon::bin::core_bin()`, protocol's
+/// sibling resolver — never a bare `"aoide"` relying on PATH alone) with
+/// `argv` plus `--json`, and WAIT for it: `Ok((exited_ok, stdout, stderr))`,
+/// or `Err(message)` when no child could be started at all. The failure
+/// message names the first two argv elements only — always the command path,
+/// never a value — the same discipline every audit line here holds.
+///
+/// UNBOUNDED, unlike [`run_core_bounded`]: this runs a mutation, one per
+/// human gesture, so there is no caller cadence to bound against and no
+/// partial answer worth discarding — killing a half-applied mutation to tidy
+/// up a slow one is worse than waiting. This call is NOT inside
+/// `with_stage_lock` — see `protocol::bin`'s module doc for why that would
+/// matter if it ever were.
+fn run_core_step(argv: &[String]) -> Result<(bool, String, String), String> {
+    match std::process::Command::new(daemon::bin::core_bin())
+        .args(argv)
+        .arg("--json")
+        .output()
+    {
+        Ok(out) => Ok((
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )),
+        Err(e) => Err(format!(
+            "spawning `aoide {} {}`: {e}",
+            argv.first().map(String::as_str).unwrap_or(""),
+            argv.get(1).map(String::as_str).unwrap_or("")
+        )),
     }
 }
 
@@ -1482,18 +1671,18 @@ fn run_session_step(subject: ActionSubject, action: &str, argv: &[String]) -> Va
 /// `partial` gets its own event name so an operator scanning the log can see
 /// a half-applied action without reading the message. The dispatched
 /// commands are separately audited by the child processes' own `dispatch`
-/// inside `aoided`; this line records only that the desk asked. `subject`'s
-/// noun (`"session"`/`"project"`) is the only thing that varies from the
-/// original `"session action …"` wording, so a session subject's message is
-/// byte-identical to before the `projectaction` split.
-fn audit_bridge_action(subject: ActionSubject, action: &str, event: &str, outcome: &str) {
+/// inside `aoided`; this line records only that the desk asked. `noun`
+/// (`"session"`/`"project"`/`"workspace"`) is the only thing that varies
+/// from the original `"session action …"` wording, so a session subject's
+/// message is byte-identical to before the `projectaction` split.
+fn audit_bridge_action(noun: &str, action: &str, event: &str, outcome: &str) {
     let _ = daemon::audit(
         &daemon::default_audit_log(),
         daemon::Door::Daemon,
         daemon::EventClass::Audit,
         "shellbridge",
         event,
-        &format!("{} action {action}: {outcome}", subject.noun()),
+        &format!("{noun} action {action}: {outcome}"),
     );
 }
 
@@ -1530,7 +1719,7 @@ fn dispatch_session_action(subject: ActionSubject, action: &str, fields: &Value)
         if !step_ok {
             if i == 0 {
                 audit_bridge_action(
-                    subject,
+                    subject.noun(),
                     action,
                     &format!("{}-failed", subject.event_prefix()),
                     "failed",
@@ -1539,7 +1728,7 @@ fn dispatch_session_action(subject: ActionSubject, action: &str, fields: &Value)
             }
             let cli_message = reply.get("message").and_then(Value::as_str).unwrap_or("");
             audit_bridge_action(
-                subject,
+                subject.noun(),
                 action,
                 &format!("{}-partial", subject.event_prefix()),
                 "partial",
@@ -1570,8 +1759,62 @@ fn dispatch_session_action(subject: ActionSubject, action: &str, fields: &Value)
         }
         last = reply;
     }
-    audit_bridge_action(subject, action, subject.event_prefix(), "ok");
+    audit_bridge_action(subject.noun(), action, subject.event_prefix(), "ok");
     last
+}
+
+/// Run ONE `workspaceaction` (W-P5): resolve an omitted workspace, plan the
+/// CLI argv and exec it. The one compositor-shaped half is that resolution,
+/// and it runs in THIS process — the bridge is the process that owns the
+/// compositor adapter (`graph/window.rs`) and already spawns `hyprctl` for a
+/// focus jump, and it resolves exactly what the CLI's own CALLER resolves when
+/// a `<workspace>` is omitted, so the child always receives an integer. Why
+/// here and not in the child: `aoide workspace clear` takes a workspace id, and
+/// no wire caller can be expected to know the focused one. Nothing else is
+/// resolved, folded or re-parsed — the CLI's binding, its refusals
+/// (`unknown-project`, and `--new` on a name that is taken) and its own
+/// message ARE the answer.
+///
+/// A host with no adapter is ANSWERED rather than dropped: `reason:
+/// "no-compositor"` and the same sentence the CLI's own taught refusal
+/// carries ([`NO_COMPOSITOR`], one authority for the text). A malformed LINE
+/// is still dropped with no reply, like every other whitelist refusal — but a
+/// well-formed click whose workspace merely cannot be resolved is parked on a
+/// reply and gets one.
+fn dispatch_workspace_action(workspace: Option<i64>, binding: &WorkspaceBinding) -> Value {
+    let action = binding.as_str();
+    let Some(ws) = workspace.or_else(focused_workspace) else {
+        audit_bridge_action("workspace", action, "workspaceaction-failed", "failed");
+        return json!({
+            "ok": false,
+            "action": action,
+            "reason": "no-compositor",
+            "message": NO_COMPOSITOR,
+        });
+    };
+    let argv = binding.plan(ws);
+    match run_core_step(&argv) {
+        Ok((exited_ok, stdout, stderr)) => {
+            let reply = workspace_reply(binding, ws, exited_ok, &stdout, &stderr);
+            let ok = reply.get("ok").and_then(Value::as_bool).unwrap_or(false);
+            audit_bridge_action(
+                "workspace",
+                action,
+                if ok { "workspaceaction" } else { "workspaceaction-failed" },
+                if ok { "ok" } else { "failed" },
+            );
+            reply
+        }
+        Err(message) => {
+            audit_bridge_action("workspace", action, "workspaceaction-failed", "failed");
+            json!({
+                "ok": false,
+                "message": message,
+                "action": action,
+                "workspace": ws,
+            })
+        }
+    }
 }
 
 /// Run shellbridge: seed the `sessions.json`/`hooks.json` stage files (v0
@@ -1922,6 +2165,27 @@ fn handle_conn(stream: UnixStream) {
                 });
                 return;
             }
+            Some(BridgeCommand::WorkspaceAction { workspace, binding }) => {
+                // Same one-shot-connection discipline as the two actions
+                // above: no reply channel means the action does not run.
+                let action = binding.as_str();
+                let Some(mut reply) = reply.take() else {
+                    let _ = daemon::audit(
+                        &daemon::default_audit_log(),
+                        daemon::Door::Daemon,
+                        daemon::EventClass::Audit,
+                        "shellbridge",
+                        "workspaceaction-noreply",
+                        &format!("workspace action {action}: no reply channel; not dispatched"),
+                    );
+                    return;
+                };
+                std::thread::spawn(move || {
+                    use std::io::Write;
+                    let _ = writeln!(reply, "{}", dispatch_workspace_action(workspace, &binding));
+                });
+                return;
+            }
             Some(BridgeCommand::Focus { address }) => match crate::graph::focus_window(&address) {
                 Ok(()) => {
                     let _ = daemon::audit(
@@ -2087,13 +2351,15 @@ fn handle_conn(stream: UnixStream) {
                     "unparseable",
                     &format!("dropped one unparseable or unknown command line ({} bytes)", line.len()),
                 );
-                // `sessiontrace` is the one verb whose caller is PARKED waiting
-                // for an answer, so a malformed one must not leave it there: a
-                // line that names this verb and fails its own gate is answered
-                // with the refusal instead of silence (the widget's own client
-                // normalises what it sends, so this is the door's honesty, not
-                // its fast path).
-                if wire_names_sessiontrace(&line) {
+                // The verbs whose caller is PARKED waiting for an answer —
+                // `sessiontrace`, `workspaceaction` — never leave it there on
+                // a malformed line: a line that NAMES one of them and fails
+                // its own gate is answered with a refusal instead of silence
+                // (the widgets' own clients normalise what they send, so this
+                // is the door's honesty, not its fast path). ONE rule for
+                // every parked caller; a fire-and-forget verb keeps the plain
+                // drop above.
+                if wire_names(&line, "sessiontrace") {
                     if let Some(mut reply) = reply.take() {
                         let answer = trace_refusal(
                             "",
@@ -2110,6 +2376,34 @@ fn handle_conn(stream: UnixStream) {
                             "shellbridge",
                             "sessiontrace-refused",
                             "trace query refused: bad-request",
+                        );
+                        std::thread::spawn(move || {
+                            use std::io::Write;
+                            let _ = writeln!(reply, "{answer}");
+                        });
+                        return;
+                    }
+                }
+                if wire_names(&line, "workspaceaction") {
+                    if let Some(mut reply) = reply.take() {
+                        // Nothing parsed, so the answer names nothing back:
+                        // no `workspace` (none was resolved), no `project`,
+                        // and no `action` word to echo — the same reason
+                        // `trace_refusal` echoes only what the CLI resolved.
+                        let answer = json!({
+                            "ok": false,
+                            "reason": "bad-request",
+                            "message": "a workspaceaction line takes action set|clear, an \
+                                        integer `workspace` (omitted = the focused one), and \
+                                        for set a project name with an optional bool `new`",
+                        });
+                        let _ = daemon::audit(
+                            &daemon::default_audit_log(),
+                            daemon::Door::Daemon,
+                            daemon::EventClass::Audit,
+                            "shellbridge",
+                            "workspaceaction-refused",
+                            "workspace action refused: bad-request",
                         );
                         std::thread::spawn(move || {
                             use std::io::Write;
@@ -2405,12 +2699,20 @@ mod tests {
         // A line that names the verb but fails its own gate is REFUSED by the
         // parser (never defaulted), and `handle_conn` still answers it — the
         // raw-line question that decision is made on is separate and pure.
-        assert!(wire_names_sessiontrace(
-            r#"{"cmd":"sessiontrace","sessionId":"s1","clip":"detials"}"#
+        assert!(wire_names(
+            r#"{"cmd":"sessiontrace","sessionId":"s1","clip":"detials"}"#,
+            "sessiontrace"
         ));
-        assert!(wire_names_sessiontrace(r#"{"cmd":"sessiontrace"}"#));
-        assert!(!wire_names_sessiontrace(r#"{"cmd":"focussession"}"#));
-        assert!(!wire_names_sessiontrace("{ not json"));
+        assert!(wire_names(r#"{"cmd":"sessiontrace"}"#, "sessiontrace"));
+        assert!(!wire_names(r#"{"cmd":"focussession"}"#, "sessiontrace"));
+        assert!(!wire_names("{ not json", "sessiontrace"));
+        // The same pure question, for the OTHER parked verb — a
+        // `workspaceaction` line names itself whatever else it got wrong.
+        assert!(wire_names(
+            r#"{"cmd":"workspaceaction","action":"clear","project":"aoide"}"#,
+            "workspaceaction"
+        ));
+        assert!(!wire_names(r#"{"cmd":"sessionaction"}"#, "workspaceaction"));
         for line in [
             r#"{"cmd":"sessiontrace"}"#,
             r#"{"cmd":"sessiontrace","sessionId":""}"#,
@@ -2905,6 +3207,162 @@ exit 1
         }
     }
 
+    #[test]
+    fn parse_command_accepts_every_workspaceaction_shape() {
+        // `set`, with an explicit workspace.
+        assert_eq!(
+            parse_command(r#"{"cmd":"workspaceaction","action":"set","workspace":3,"project":"aoide"}"#),
+            Some(BridgeCommand::WorkspaceAction {
+                workspace: Some(3),
+                binding: WorkspaceBinding::Set {
+                    project: "aoide".to_string(),
+                    new: false,
+                },
+            })
+        );
+        // `set --new`, with no workspace at all — "the focused one".
+        assert_eq!(
+            parse_command(r#"{"cmd":"workspaceaction","action":"set","project":"cadenza","new":true}"#),
+            Some(BridgeCommand::WorkspaceAction {
+                workspace: None,
+                binding: WorkspaceBinding::Set {
+                    project: "cadenza".to_string(),
+                    new: true,
+                },
+            })
+        );
+        // An explicit `false` is the same ask as an absent `new`.
+        assert_eq!(
+            parse_command(r#"{"cmd":"workspaceaction","action":"set","project":"aoide","new":false}"#),
+            Some(BridgeCommand::WorkspaceAction {
+                workspace: None,
+                binding: WorkspaceBinding::Set {
+                    project: "aoide".to_string(),
+                    new: false,
+                },
+            })
+        );
+        // `clear`, explicit workspace, and `clear` with an explicit `null`
+        // workspace — read as "no workspace" (the focused one), the same
+        // tolerance `sessiontrace`'s `lines` holds for a null.
+        assert_eq!(
+            parse_command(r#"{"cmd":"workspaceaction","action":"clear","workspace":3}"#),
+            Some(BridgeCommand::WorkspaceAction {
+                workspace: Some(3),
+                binding: WorkspaceBinding::Clear,
+            })
+        );
+        assert_eq!(
+            parse_command(r#"{"cmd":"workspaceaction","action":"clear","workspace":null}"#),
+            Some(BridgeCommand::WorkspaceAction {
+                workspace: None,
+                binding: WorkspaceBinding::Clear,
+            })
+        );
+        // A NEGATIVE id is a real workspace — Hyprland's named and special
+        // workspaces carry them, and the CLI's own `workspace_id` parses the
+        // same `i64` (the focused-workspace read surfaces one verbatim).
+        assert_eq!(
+            parse_command(r#"{"cmd":"workspaceaction","action":"set","workspace":-99,"project":"aoide"}"#),
+            Some(BridgeCommand::WorkspaceAction {
+                workspace: Some(-99),
+                binding: WorkspaceBinding::Set {
+                    project: "aoide".to_string(),
+                    new: false,
+                },
+            })
+        );
+        // Ordinary spaces and surrounding whitespace are legal in a name
+        // (`safe_action_value`); no session id appears anywhere.
+        match parse_command(
+            r#"  {"cmd":"workspaceaction","action":"set","workspace":1,"project":" My Project "}"#,
+        ) {
+            Some(BridgeCommand::WorkspaceAction { binding, .. }) => assert_eq!(
+                binding,
+                WorkspaceBinding::Set {
+                    project: "My Project".to_string(),
+                    new: false,
+                }
+            ),
+            other => panic!("expected a WorkspaceAction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_command_refuses_a_workspace_action_it_cannot_name() {
+        // A closed set of TWO: anything else — including a plausible synonym
+        // — is refused at the wire, never dispatched as a default.
+        for action in ["unset", "bind", "SET", "", "clearall"] {
+            assert_eq!(
+                parse_command(&format!(
+                    r#"{{"cmd":"workspaceaction","action":"{action}","project":"aoide"}}"#
+                )),
+                None,
+                "{action} must be refused"
+            );
+        }
+        // `set` needs a name that passes the existing name rule: a missing
+        // key, `null`, a non-string, an empty/blank string and a
+        // flag-shaped one are all refused — there is no reading of a
+        // malformed bind request as anything else.
+        for fields in [
+            r#""workspace":3"#,
+            r#""workspace":3,"project":null"#,
+            r#""workspace":3,"project":5"#,
+            r#""workspace":3,"project":"""#,
+            r#""workspace":3,"project":"   ""#,
+            r#""workspace":3,"project":"-rf""#,
+        ] {
+            assert_eq!(
+                parse_command(&format!(
+                    r#"{{"cmd":"workspaceaction","action":"set",{fields}}}"#
+                )),
+                None,
+                "{fields} must be refused"
+            );
+        }
+        // `new` must BE a bool — a string or a number is refused, never read
+        // as false.
+        for new in [r#""yes""#, r#"1"#, r#"{}"#] {
+            assert_eq!(
+                parse_command(&format!(
+                    r#"{{"cmd":"workspaceaction","action":"set","workspace":3,"project":"aoide","new":{new}}}"#
+                )),
+                None,
+                "new={new} must be refused"
+            );
+        }
+        // A `clear` carrying a binding field is a caller that meant `set`:
+        // refused by name, so the mistake can never read as a successful
+        // unbind.
+        assert_eq!(
+            parse_command(r#"{"cmd":"workspaceaction","action":"clear","workspace":3,"project":"aoide"}"#),
+            None
+        );
+        assert_eq!(
+            parse_command(r#"{"cmd":"workspaceaction","action":"clear","workspace":3,"new":true}"#),
+            None
+        );
+        // A workspace id is an INTEGER: a string, a bool and a float are all
+        // refused, never coerced.
+        for ws in [r#""3""#, r#"true"#, r#"3.5"#, r#"[3]"#] {
+            assert_eq!(
+                parse_command(&format!(
+                    r#"{{"cmd":"workspaceaction","action":"set","workspace":{ws},"project":"aoide"}}"#
+                )),
+                None,
+                "workspace={ws} must be refused"
+            );
+        }
+        // No action at all is refused too.
+        assert_eq!(
+            parse_command(r#"{"cmd":"workspaceaction","workspace":3,"project":"aoide"}"#),
+            None
+        );
+        // And a blank/absent `cmd` is not this command.
+        assert_eq!(parse_command(r#"{"cmd":"workspace","action":"set"}"#), None);
+    }
+
     // -- parse gate: rejection --
 
     #[test]
@@ -3302,6 +3760,196 @@ exit 1
         );
     }
 
+    // -- workspaceaction, the bar's bind click (W-P5) --
+
+    /// A stub `aoide` on `AOIDE_CORE_BIN` (the tier `bin::core_bin` resolves
+    /// first) that answers with a CLI-shaped `ok` envelope quoting the WHOLE
+    /// argv it was handed, so a dispatch test asserts both the planned argv
+    /// and the reply shaping with no daemon and no stage write.
+    fn stub_workspace_core(tag: &str) -> (aoide_test_support::EnvSaver, PathBuf) {
+        let root = aoide_test_support::unique_tmp(tag);
+        std::fs::create_dir_all(&root).unwrap();
+        let stub = root.join("stub-aoide");
+        std::fs::write(
+            &stub,
+            r#"#!/bin/sh
+printf '{"status":"ok","command":"workspace","message":"argv: %s","data":{"workspace":%s}}\n' "$*" "$3"
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let env = aoide_test_support::EnvSaver::capture(&["AOIDE_CORE_BIN"]);
+        std::env::set_var("AOIDE_CORE_BIN", &stub);
+        (env, root)
+    }
+
+    #[test]
+    fn workspace_binding_plans_the_exact_argv_for_each_shape() {
+        let set = WorkspaceBinding::Set {
+            project: "aoide".to_string(),
+            new: false,
+        };
+        assert_eq!(set.plan(3), sv(&["workspace", "set", "3", "aoide"]));
+        // `--new` rides LAST, exactly where the CLI's own examples put it,
+        // and ONLY when asked for.
+        let set_new = WorkspaceBinding::Set {
+            project: "cadenza".to_string(),
+            new: true,
+        };
+        assert_eq!(set_new.plan(3), sv(&["workspace", "set", "3", "cadenza", "--new"]));
+        assert_eq!(WorkspaceBinding::Clear.plan(3), sv(&["workspace", "clear", "3"]));
+        // A negative (special) workspace id goes through verbatim, and a name
+        // with a space stays ONE argv element — no shell anywhere.
+        assert_eq!(set.plan(-99), sv(&["workspace", "set", "-99", "aoide"]));
+        let spaced = WorkspaceBinding::Set {
+            project: "My Project".to_string(),
+            new: false,
+        };
+        assert_eq!(spaced.plan(1), sv(&["workspace", "set", "1", "My Project"]));
+    }
+
+    #[test]
+    fn dispatch_workspace_action_runs_the_planned_argv_and_keys_the_reply() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = stub_workspace_core("shellbridge-ws-set");
+
+        let reply = dispatch_workspace_action(
+            Some(3),
+            &WorkspaceBinding::Set {
+                project: "aoide".to_string(),
+                new: false,
+            },
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["action"], "set");
+        assert_eq!(reply["workspace"], 3);
+        assert_eq!(reply["project"], "aoide");
+        // The CLI's own message and `data` are carried verbatim, and the
+        // argv the child actually got is the plan plus `--json`.
+        assert_eq!(reply["message"], "argv: workspace set 3 aoide --json");
+        assert_eq!(reply["data"], json!({"workspace": 3}));
+
+        // `--new` is planned, and a clear carries no `project` key at all.
+        let reply = dispatch_workspace_action(
+            Some(5),
+            &WorkspaceBinding::Set {
+                project: "cadenza".to_string(),
+                new: true,
+            },
+        );
+        assert_eq!(reply["message"], "argv: workspace set 5 cadenza --new --json");
+
+        let reply = dispatch_workspace_action(Some(3), &WorkspaceBinding::Clear);
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["action"], "clear");
+        assert_eq!(reply["workspace"], 3);
+        assert_eq!(reply["message"], "argv: workspace clear 3 --json");
+        assert!(
+            reply.get("project").is_none(),
+            "a clear has no project to name: {reply}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dispatch_workspace_action_resolves_an_omitted_workspace_through_the_adapter() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = stub_workspace_core("shellbridge-ws-focused");
+        let (hypr, shim) = crate::graph::testutil::fake_hyprctl("ws-action-focused");
+        std::env::set_var("AOIDE_TEST_WS", "7");
+
+        // Both verbs resolve the FOCUSED workspace, so `clear` (which takes an
+        // id and no focused default of its own) is reachable from a click
+        // with no workspace on the wire.
+        let reply = dispatch_workspace_action(
+            None,
+            &WorkspaceBinding::Set {
+                project: "aoide".to_string(),
+                new: false,
+            },
+        );
+        assert_eq!(reply["workspace"], 7, "{reply}");
+        assert_eq!(reply["message"], "argv: workspace set 7 aoide --json");
+
+        let reply = dispatch_workspace_action(None, &WorkspaceBinding::Clear);
+        assert_eq!(reply["workspace"], 7, "{reply}");
+        assert_eq!(reply["message"], "argv: workspace clear 7 --json");
+
+        drop(hypr);
+        let _ = std::fs::remove_dir_all(&shim);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn dispatch_workspace_action_answers_a_host_with_no_compositor() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _sig = crate::graph::testutil::EnvVars::save(&["HYPRLAND_INSTANCE_SIGNATURE"]);
+        std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
+        // A core binary that cannot exist: if this refusal were ever a spawn
+        // attempt, the reply would say so instead.
+        let _bin = aoide_test_support::EnvSaver::capture(&["AOIDE_CORE_BIN"]);
+        std::env::set_var("AOIDE_CORE_BIN", "/nonexistent/aoide");
+
+        let reply = dispatch_workspace_action(None, &WorkspaceBinding::Clear);
+        assert_eq!(reply["ok"], false);
+        assert_eq!(reply["action"], "clear");
+        assert_eq!(reply["reason"], "no-compositor");
+        // The CLI's own sentence, verbatim — one authority for the text.
+        assert_eq!(reply["message"], NO_COMPOSITOR);
+        assert!(reply.get("workspace").is_none(), "nothing was resolved: {reply}");
+    }
+
+    #[test]
+    fn workspace_reply_carries_an_error_envelope_and_falls_back_honestly() {
+        let clear = WorkspaceBinding::Clear;
+        // An error envelope still makes a reply, not an ok.
+        let reply = workspace_reply(
+            &clear,
+            3,
+            false,
+            r#"{"status":"error","command":"workspace.clear","message":"aoided must be running for project management"}"#,
+            "",
+        );
+        assert_eq!(reply["ok"], false);
+        assert_eq!(reply["message"], "aoided must be running for project management");
+        assert_eq!(reply["action"], "clear");
+        assert_eq!(reply["workspace"], 3);
+
+        // A usage envelope lands on stderr when the parser refused the argv
+        // before dispatch — read there, never mistaken for gibberish.
+        let reply = workspace_reply(
+            &clear,
+            3,
+            false,
+            "",
+            r#"{"status":"usage","command":"workspace.clear","message":"`x` is not a workspace id"}"#,
+        );
+        assert_eq!(reply["ok"], false);
+        assert_eq!(reply["message"], "`x` is not a workspace id");
+
+        // Neither stream an envelope: the raw line is the message, and an
+        // empty outcome still says something true.
+        let reply = workspace_reply(&clear, 3, false, "boom", "");
+        assert_eq!(reply["message"], "boom");
+        let reply = workspace_reply(&clear, 3, false, "", "");
+        assert_ne!(reply["message"].as_str().unwrap_or(""), "");
+
+        // One wire line, always.
+        let reply = workspace_reply(
+            &WorkspaceBinding::Set {
+                project: "a\nb".to_string(),
+                new: false,
+            },
+            3,
+            true,
+            r#"{"status":"ok","command":"workspace.set","message":"a\nb"}"#,
+            "",
+        );
+        assert!(!reply.to_string().contains('\n'));
+        assert_eq!(reply["project"], "a\nb");
+    }
+
     // -- reply shaping --
 
     #[test]
@@ -3394,6 +4042,79 @@ exit 1
     }
 
     // ── the accept loop (§3b): idleness must never starve another connection ──
+
+    /// The §0 corollary's own test for the newest arm: a `workspaceaction`
+    /// line that the whitelist REFUSES over a REAL socket is dropped, audited
+    /// (`unparseable`, a byte count, never the payload), and — because the
+    /// click that sent it is parked on a reply — ANSWERED with a `bad-request`
+    /// refusal, the same rule `sessiontrace` holds. No child is spawned: one
+    /// refused line, whose reply is the whole observable.
+    #[test]
+    fn a_refused_workspaceaction_line_is_audited_and_answered_over_the_socket() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = aoide_test_support::EnvSaver::capture(&[
+            "AOIDE_ROOT",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_STATE_DIR",
+            "AOIDE_STAGE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_CORE_BIN",
+        ]);
+        let root = aoide_test_support::unique_tmp("shellbridge-ws-refused");
+        std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("AOIDE_STATE_DIR", &root);
+        std::env::set_var("AOIDE_STAGE_DIR", &root);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        // A `clear` carrying a `project` is refused by name at the gate; the
+        // core binary is pointed somewhere that cannot exist so a spawn would
+        // be unmistakable if the gate ever let this through.
+        std::env::set_var("AOIDE_CORE_BIN", "/nonexistent/aoide");
+
+        let sock = root.join("test-shellbridge-ws.sock");
+        let listener = UnixListener::bind(&sock).unwrap();
+        std::thread::spawn(move || serve(&listener)); // never joined
+
+        let mut client = UnixStream::connect(&sock).unwrap();
+        {
+            use std::io::Write;
+            client
+                .write_all(
+                    b"{\"cmd\":\"workspaceaction\",\"action\":\"clear\",\"workspace\":3,\"project\":\"aoide\"}\n",
+                )
+                .unwrap();
+            client.flush().unwrap();
+        }
+        // The parked caller is ANSWERED, once, on its own connection.
+        client
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let mut reader = BufReader::new(client);
+        let mut answer = String::new();
+        reader.read_line(&mut answer).unwrap();
+        let reply: Value = serde_json::from_str(answer.trim()).expect("one JSON reply line");
+        assert_eq!(reply["ok"], false, "{reply}");
+        assert_eq!(reply["reason"], "bad-request");
+        assert!(reply.get("workspace").is_none(), "nothing was resolved: {reply}");
+        assert!(reply.get("action").is_none(), "nothing parsed to echo: {reply}");
+
+        // And the drop is audited, with a byte count and no payload.
+        let log = root.join("log");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let mut text = String::new();
+        while std::time::Instant::now() < deadline {
+            text = std::fs::read_to_string(&log).unwrap_or_default();
+            if text.contains("unparseable") && text.contains("workspaceaction-refused") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(text.contains("unparseable"), "{text}");
+        assert!(text.contains("workspaceaction-refused"), "{text}");
+        assert!(!text.contains("aoide"), "no payload in the audit line: {text}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// Confirms `serve` spawns a thread per connection rather than serving
     /// serially: an idle, persistent client — exactly what Quickshell's own
