@@ -1,0 +1,435 @@
+{
+  "schemaVersion": "0",
+  "nodes": [
+    {
+      "id": "project:aoide",
+      "kind": "project",
+      "name": "aoide",
+      "path": "/home/user/Aoide",
+      "roots": [
+        "/home/user/Aoide"
+      ],
+      "lead": "f3000000-0000-4000-8000-000000000001"
+    },
+    {
+      "id": "project:melete",
+      "kind": "project",
+      "name": "melete",
+      "path": "/home/user/melete",
+      "roots": [
+        "/home/user/melete"
+      ],
+      "lead": null
+    },
+    {
+      "id": "project:mneme",
+      "kind": "project",
+      "name": "mneme",
+      "path": "/home/user/mneme",
+      "roots": [
+        "/home/user/mneme"
+      ],
+      "lead": null
+    },
+    {
+      "id": "session:f3000000-0000-4000-8000-000000000001",
+      "kind": "session",
+      "agent": "claude",
+      "role": "agent",
+      "state": "working",
+      "title": "phase 5 slice S8 — the board read op",
+      "model": "claude-opus-5-5",
+      "petname": "rook-lantern",
+      "cwd": "/home/user/Aoide",
+      "pid": 999101,
+      "windowAddress": "0x3000000a0000",
+      "startedAt": "2026-09-26T13:00:00Z",
+      "contextCeiling": 1000000,
+      "workspace": 2,
+      "effectiveProject": "aoide",
+      "activeAt": "2026-09-26T14:02:30Z"
+    },
+    {
+      "id": "session:f3000000-0000-4000-8000-000000000002",
+      "kind": "session",
+      "agent": "claude",
+      "role": "agent",
+      "state": "awaiting",
+      "title": "review: ties block in graph.json",
+      "model": "claude-opus-5-5",
+      "petname": "minerva-owl",
+      "cwd": "/home/user/Aoide/pkgs/aoide/crates/conduct",
+      "pid": 999102,
+      "windowAddress": "0x3000000a0001",
+      "startedAt": "2026-09-26T13:02:00Z",
+      "contextCeiling": 1000000,
+      "workspace": 3,
+      "effectiveProject": "aoide",
+      "activeAt": "2026-09-26T14:02:20Z"
+    },
+    {
+      "id": "session:f3000000-0000-4000-8000-000000000003",
+      "kind": "session",
+      "agent": "eidolon",
+      "role": "agent",
+      "state": "working",
+      "title": "executor: usage sampler",
+      "model": "ollama:deepseek-v4.1-flash",
+      "petname": "nimble-comet",
+      "cwd": "/home/user/Aoide",
+      "pid": 999103,
+      "windowAddress": "0x3000000a0002",
+      "startedAt": "2026-09-26T13:04:00Z",
+      "contextCeiling": 1000000,
+      "workspace": 5,
+      "effectiveProject": "aoide",
+      "activeAt": "2026-09-26T14:02:29Z"
+    },
+    {
+      "id": "session:f3000000-0000-4000-8000-000000000004",
+      "kind": "session",
+      "agent": "codex",
+      "role": "agent",
+      "state": "stopped",
+      "title": "codex: fixture audit",
+      "model": "claude-opus-5-5",
+      "petname": "book-fern",
+      "cwd": "/home/user/Aoide",
+      "pid": 999104,
+      "windowAddress": "0x3000000a0003",
+      "startedAt": "2026-09-26T13:06:00Z",
+      "contextCeiling": 1000000,
+      "workspace": 5,
+      "effectiveProject": "aoide",
+      "activeAt": "2026-09-26T13:06:00Z"
+    },
+    {
+      "id": "session:f3000000-0000-4000-8000-000000000005",
+      "kind": "session",
+      "agent": "claude",
+      "role": "agent",
+      "state": "idle",
+      "title": "melete: job harness docs",
+      "model": "claude-opus-5-5",
+      "petname": "quiet-loam",
+      "cwd": "/home/user/melete",
+      "pid": 999105,
+      "windowAddress": "0x3000000a0004",
+      "startedAt": "2026-09-26T13:08:00Z",
+      "contextCeiling": 1000000,
+      "workspace": 7,
+      "effectiveProject": "melete",
+      "activeAt": "2026-09-26T13:08:00Z"
+    },
+    {
+      "id": "session:f3000000-0000-4000-8000-000000000006",
+      "kind": "session",
+      "agent": "kimi",
+      "role": "agent",
+      "state": "working",
+      "title": "kimi lane",
+      "model": "claude-opus-5-5",
+      "petname": "moon-reed",
+      "cwd": "/home/user/melete",
+      "pid": 999106,
+      "windowAddress": "0x3000000a0005",
+      "startedAt": "2026-09-26T13:10:00Z",
+      "contextCeiling": 1000000,
+      "workspace": 7,
+      "effectiveProject": "melete",
+      "activeAt": "2026-09-26T14:01:30Z"
+    },
+    {
+      "id": "session:f3000000-0000-4000-8000-000000000007",
+      "kind": "session",
+      "agent": "shell",
+      "role": "shell",
+      "state": "idle",
+      "title": null,
+      "model": null,
+      "petname": "stout-oak",
+      "cwd": "/home/user",
+      "pid": 999107,
+      "windowAddress": "0x3000000a0006",
+      "startedAt": "2026-09-26T13:12:00Z",
+      "contextCeiling": null,
+      "workspace": 1,
+      "effectiveProject": null,
+      "activeAt": "2026-09-26T13:12:00Z"
+    },
+    {
+      "id": "session:f3000000-0000-4000-8000-000000000008",
+      "kind": "session",
+      "agent": "shell",
+      "role": "shell",
+      "state": "working",
+      "title": "cargo test -p aoide-conduct",
+      "model": null,
+      "petname": "brisk-tor",
+      "cwd": "/home/user/Aoide",
+      "pid": 999108,
+      "windowAddress": "0x3000000a0007",
+      "startedAt": "2026-09-26T13:14:00Z",
+      "contextCeiling": null,
+      "workspace": 2,
+      "effectiveProject": "aoide",
+      "activeAt": "2026-09-26T13:14:00Z"
+    },
+    {
+      "id": "session:f3000000-0000-4000-8000-000000000009",
+      "kind": "session",
+      "agent": "claude",
+      "role": "agent",
+      "state": "working",
+      "title": "mneme: vault index",
+      "model": "claude-opus-5-5",
+      "petname": "paper-crane",
+      "cwd": "/home/user/mneme",
+      "pid": 999109,
+      "windowAddress": "0x3000000a0008",
+      "startedAt": "2026-09-26T13:16:00Z",
+      "contextCeiling": 1000000,
+      "workspace": 9,
+      "effectiveProject": "mneme",
+      "activeAt": "2026-09-26T13:16:00Z"
+    },
+    {
+      "id": "session:sub:f300000000000a",
+      "kind": "session",
+      "agent": "general-purpose",
+      "role": "agent",
+      "state": "working",
+      "title": "subagent of rook: read the mail store",
+      "model": "claude-opus-5-5",
+      "petname": "shiny-kite",
+      "cwd": "",
+      "pid": null,
+      "windowAddress": "",
+      "startedAt": "2026-09-26T13:18:00Z",
+      "contextCeiling": 1000000,
+      "workspace": null,
+      "effectiveProject": null,
+      "activeAt": "2026-09-26T13:18:00Z"
+    },
+    {
+      "id": "session:f3000000-0000-4000-8000-000000000011",
+      "kind": "session",
+      "agent": "claude",
+      "role": "agent",
+      "state": "working",
+      "title": "spawned by rook onto ws 7",
+      "model": "claude-opus-5-5",
+      "petname": "silent-bay",
+      "cwd": "/home/user/melete",
+      "pid": 999111,
+      "windowAddress": "0x3000000a0010",
+      "startedAt": "2026-09-26T13:20:00Z",
+      "contextCeiling": 1000000,
+      "workspace": 7,
+      "effectiveProject": "melete",
+      "activeAt": "2026-09-26T14:02:31Z"
+    },
+    {
+      "id": "session:f3000000-0000-4000-8000-000000000012",
+      "kind": "session",
+      "agent": "pi",
+      "role": "agent",
+      "state": "idle",
+      "title": "pi thinks",
+      "model": "claude-opus-5-5",
+      "petname": "amber-pi",
+      "cwd": "/home/user/mneme",
+      "pid": 999112,
+      "windowAddress": "0x3000000a0011",
+      "startedAt": "2026-09-26T13:22:00Z",
+      "contextCeiling": 1000000,
+      "workspace": 9,
+      "effectiveProject": "mneme",
+      "activeAt": "2026-09-26T13:22:00Z"
+    }
+  ],
+  "edges": [
+    {
+      "from": "session:f3000000-0000-4000-8000-000000000001",
+      "kind": "spawned",
+      "to": "session:sub:f300000000000a"
+    },
+    {
+      "from": "session:f3000000-0000-4000-8000-000000000001",
+      "kind": "spawned",
+      "to": "session:f3000000-0000-4000-8000-000000000011"
+    },
+    {
+      "from": "session:f3000000-0000-4000-8000-000000000001",
+      "kind": "anchors",
+      "to": "project:aoide"
+    },
+    {
+      "from": "session:f3000000-0000-4000-8000-000000000002",
+      "kind": "anchors",
+      "to": "project:aoide"
+    },
+    {
+      "from": "session:f3000000-0000-4000-8000-000000000003",
+      "kind": "anchors",
+      "to": "project:aoide"
+    },
+    {
+      "from": "session:f3000000-0000-4000-8000-000000000004",
+      "kind": "anchors",
+      "to": "project:aoide"
+    },
+    {
+      "from": "session:f3000000-0000-4000-8000-000000000005",
+      "kind": "anchors",
+      "to": "project:melete"
+    },
+    {
+      "from": "session:f3000000-0000-4000-8000-000000000006",
+      "kind": "anchors",
+      "to": "project:melete"
+    },
+    {
+      "from": "session:f3000000-0000-4000-8000-000000000008",
+      "kind": "anchors",
+      "to": "project:aoide"
+    },
+    {
+      "from": "session:f3000000-0000-4000-8000-000000000009",
+      "kind": "anchors",
+      "to": "project:mneme"
+    },
+    {
+      "from": "session:f3000000-0000-4000-8000-000000000011",
+      "kind": "anchors",
+      "to": "project:melete"
+    },
+    {
+      "from": "session:f3000000-0000-4000-8000-000000000012",
+      "kind": "anchors",
+      "to": "project:mneme"
+    }
+  ],
+  "workspaces": [
+    {
+      "workspace": 1,
+      "projects": [],
+      "sessions": [
+        "f3000000-0000-4000-8000-000000000007"
+      ],
+      "live": 1,
+      "working": 0,
+      "awaiting": 0,
+      "activeAt": "2026-09-26T13:12:00Z"
+    },
+    {
+      "workspace": 2,
+      "project": "aoide",
+      "projects": [
+        "aoide"
+      ],
+      "sessions": [
+        "f3000000-0000-4000-8000-000000000001",
+        "f3000000-0000-4000-8000-000000000008"
+      ],
+      "live": 2,
+      "working": 2,
+      "awaiting": 0,
+      "activeAt": "2026-09-26T14:02:30Z"
+    },
+    {
+      "workspace": 3,
+      "project": "aoide",
+      "projects": [
+        "aoide"
+      ],
+      "sessions": [
+        "f3000000-0000-4000-8000-000000000002"
+      ],
+      "live": 1,
+      "working": 0,
+      "awaiting": 1,
+      "activeAt": "2026-09-26T14:02:20Z"
+    },
+    {
+      "workspace": 5,
+      "projects": [
+        "aoide"
+      ],
+      "sessions": [
+        "f3000000-0000-4000-8000-000000000003",
+        "f3000000-0000-4000-8000-000000000004"
+      ],
+      "live": 2,
+      "working": 1,
+      "awaiting": 0,
+      "activeAt": "2026-09-26T14:02:29Z"
+    },
+    {
+      "workspace": 7,
+      "project": "melete",
+      "projects": [
+        "melete"
+      ],
+      "sessions": [
+        "f3000000-0000-4000-8000-000000000005",
+        "f3000000-0000-4000-8000-000000000006",
+        "f3000000-0000-4000-8000-000000000011"
+      ],
+      "live": 3,
+      "working": 2,
+      "awaiting": 0,
+      "activeAt": "2026-09-26T14:02:31Z"
+    },
+    {
+      "workspace": 9,
+      "project": "mneme",
+      "projects": [
+        "mneme"
+      ],
+      "sessions": [
+        "f3000000-0000-4000-8000-000000000009",
+        "f3000000-0000-4000-8000-000000000012"
+      ],
+      "live": 2,
+      "working": 1,
+      "awaiting": 0,
+      "activeAt": "2026-09-26T13:22:00Z"
+    }
+  ],
+  "ties": [
+    {
+      "kind": "project",
+      "from": 2,
+      "to": 3,
+      "project": "aoide",
+      "activeAt": "2026-09-26T14:02:30Z"
+    },
+    {
+      "kind": "project",
+      "from": 2,
+      "to": 5,
+      "project": "aoide",
+      "activeAt": "2026-09-26T14:02:30Z"
+    },
+    {
+      "kind": "project",
+      "from": 3,
+      "to": 5,
+      "project": "aoide",
+      "activeAt": "2026-09-26T14:02:29Z"
+    },
+    {
+      "kind": "spawned",
+      "from": 2,
+      "to": 7,
+      "pairs": [
+        [
+          "f3000000-0000-4000-8000-000000000001",
+          "f3000000-0000-4000-8000-000000000011"
+        ]
+      ],
+      "activeAt": "2026-09-26T14:02:31Z"
+    }
+  ]
+}
