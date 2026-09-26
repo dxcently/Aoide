@@ -42,7 +42,8 @@ recolours them; their shapes are out of the song's reach.
 |---|---|---|---|
 | jack project labels | `graph.json` `workspaces[].project` | S1 (+S3 for the block) | derived: the project anchoring the jack's sessions |
 | tie lines | `graph.json` `ties[]` (`kind` `project` / `spawned`) | S3 | derived: `spawned`/`anchors` edges + session window → Hyprland workspace |
-| lamps + patch panel | `activeAt` on `workspaces[]` / `ties[]` | S3 | derived: `hooks.json` `updatedAt` advancing |
+| lamps | `activeAt` on `workspaces[]` / `ties[]` | S3 | derived: `hooks.json` `updatedAt` advancing |
+| live cover (agents lit on the board) | a song-owned `wallpaper` slot anchor in the facet | not scheduled — a core ask | the static cover; no agent map |
 | jack insight + SYS per-jack numbers | `state/usage/now.json` (`by: "workspace"`) | S5 tokens/cost, S6 CPU/mem, S7 history | honest empty |
 | board feed + OVERVIEW mail | `aoide project board` via a shellbridge read op | S8–S10 | honest empty |
 | composer → agent | `{cmd:"boardpost", to:{session}}` | S11 | disabled |

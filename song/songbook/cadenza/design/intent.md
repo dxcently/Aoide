@@ -43,9 +43,8 @@ At rest nothing moves.
 | **jack** | a workspace, drawn `[3]` on the switchboard | paint only; the data noun is core's *workspace* (an integer) |
 | **tie** | a real edge between two workspaces, kind `project` or `spawned` | core's noun (`graph.json` `ties`); the paint draws it as a tie line |
 | **trunk** | the bar's bottom rule; every tie line drops from it | paint only |
-| **pad** | the hollow ring under a tied jack where its tie lines meet it | paint only |
+| **pad** | the outline a jack's number sits in; on the cover, a copper ring | paint only |
 | **lamp** | the lit dash that runs a line when its activity advances | paint only; core publishes `activeAt` (until then, `hooks.json` `updatedAt`) |
-| **patch panel** | the bar-end map of agents, child wired to parent | paint only |
 | **track** | a copper line on the circuit-board cover | paint only |
 | **board** | the dock: the per-project message board | core's noun (`aoide project board`) |
 | **pane** | one termui box | paint only |
@@ -107,7 +106,7 @@ the grid. Never an image, never an icon theme, never a tinted picture.
   ledger, herald, board).
 - It takes the colour of the value it labels. It never introduces a colour
   job of its own.
-- The glyphed bar cells: agents `󰚩 3/13`, CPU `󰍛 23%`, notifications
+- The glyphed bar cells: agents `󰚩 3/13`, notifications
   `󰂚 2`, volume `󰕾 62%` (`󰖁` muted), Bluetooth `󰂯` (`󰂲` off), network
   `󰈀` wired, `󰖩` wifi, `󰖪` none, battery `󰁹 88%` (the glyph follows the
   level), and the rice mode `󰏘 stg`. `⏻` stays. Pane titles keep their
@@ -228,36 +227,50 @@ One 28px line in the tmux/termui idiom, left to right:
 - `[⏻]` — the power key (opens `powermenu`).
 - the **switchboard** (§3.2), the widest element.
 - the active window title, dim, truncated.
-- right cells on the grid, glyphed per §2 Glyphs: `󰚩 3/5`,
-  `󰍛 23%`, `$ 4.20`, `󰂚 2` — each opens the board on its tab (OVERVIEW,
-  SYS, SYS, NOTIF); then `󰕾 62%` · `󰂯` · `󰈀` (their own small panes),
+- right cells on the grid, glyphed per §2 Glyphs: `󰚩 3/5` and `󰂚 2`,
+  each opening the board on its tab (OVERVIEW, NOTIF); then `󰕾 62% 󰂯`
+  (one cell, one pane: sound and bluetooth), `󰈀` (the network pane),
   `󰁹 88%`, the tray, `󰏘 stg` (the rice-mode toggle), and the clock
-  `14:02:31` (the calendar pane).
+  `14:02:31` (the calendar pane). CPU and spend are not on the bar; they
+  live on the board's SYS tab.
+- **The sound + bluetooth pane.** One pane, two sections. SOUND: the output
+  and input with volume and mute (click toggles mute, wheel steps volume),
+  and the default device picker. BLUETOOTH: a power toggle `[on]`/`[off]`,
+  then the known devices, each row `󰂯 name  connected`/`paired` with a
+  click to connect or disconnect. With bluetooth off or no adapter, the
+  section says so in one dim line. The cell's `󰂯` is dim when bluetooth
+  is off, ink when on, title when a device is connected.
 - The bar's bottom rule is the **trunk**.
 
 ### 3.2 The switchboard (inside the bar)
-- Workspaces keep their numbers: jacks `[1] [2] [3] …`. Occupied jacks are
-  solid rule; empty jacks dim; the active jack accent; a jack with an
-  awaiting/blocked session red.
+- **Every jack is a pad.** Each workspace number sits inside a pad: a
+  square-cornered 1px outline hugging the number (one cell wide plus a
+  half-cell of padding each side, the bar's text height), drawn for every
+  jack whether or not it is tied, so the row reads as a line of pads on a
+  board. An occupied jack's pad is `ink` with the number `ink`; an empty
+  jack's pad and number are `dim`; the active jack's pad is filled `title`
+  with the number in `ground`; a jack with an awaiting/blocked session has
+  a red pad.
 - A bound jack carries its project after it, blue: `[2]aoide` (the core's
   `workspaces[].project`).
 - **Tie lines are a schematic**, drawn in the band between the jack row
   and the trunk (the bar's lower ~9px). Every line is 2px in phosphor fg
   (idle rule ink), never dim: a tie must read at 1:1.
-  - **Pads:** a tied jack gets a hollow pad `○` (a ~5px ring) centred
-    under its number. Untied jacks get none.
-  - **Bus:** a `project` tie is a solid wire on the pad row, joining the
-    pads directly. The core publishes a clique for a project shared by
+  - **Leads:** a tied jack's pad grows a short lead from the middle of its
+    bottom edge down into the band. Wires start and end on leads; an
+    untied jack's pad has none.
+  - **Bus:** a `project` tie is a solid wire on the first lane, joining
+    the leads directly. The core publishes a clique for a project shared by
     3+ jacks; the paint draws it as ONE bus through all of its pads, not
     n² lines.
-  - **Spawned wires:** a `spawned` tie drops from its pad, runs dashed on
-    a lower lane, and rises into the other pad — the schematic's
+  - **Spawned wires:** a `spawned` tie drops from its lead, runs dashed on
+    a lower lane, and rises into the other lead — the schematic's
     side-wire.
   - **Junctions:** a filled dot `●` marks every point where a wire meets
     another (a spawned wire leaving a bus, two buses meeting), the
     schematic convention; a plain crossing without a dot is not a
     connection.
-  - At most 2 lanes below the pad row; a further tie collapses into a
+  - At most 2 lanes below the jacks; a further tie collapses into a
     `+n` badge (cyan) on its left jack.
 - Lamps run on activity (§2 Motion).
 - Hovering a jack opens the **jack insight pane** (§3.4).
@@ -277,26 +290,6 @@ One 28px line in the tmux/termui idiom, left to right:
   The derivation lives in the bar until core publishes ties; it is paint
   over published facts, never a new fact (coverage.md records the bend).
   No edge is ever invented: no window, no jack; no edge, no tie.
-
-### 3.2a The patch panel (the bar's right end)
-A small live map of the agents, after the clock at the bar's right end,
-about 16 cells wide and the bar's full height.
-- Every live agent session (not shells) is a small **state lamp** dot
-  (§2 Instruments colours: working, awaiting, idle, stopped). Roots sit on
-  the upper row; a spawned child sits on the lower row under its parent;
-  2px `ink` wires join child to parent (`graph.json` `spawned` edges).
-- When a child's `hooks.json` `updatedAt` advances, a **lamp** (the same
-  amber dash as the switchboard's, shortened to fit) runs its wire from
-  child to parent: the agent reporting upward. A root's own activity
-  flashes its dot once. At most 6 lamps in flight at once; later ones
-  coalesce into the wire's lamp already running.
-- More agents than fit: the rightmost slot becomes `+n` (cyan).
-- Click opens the board on OVERVIEW. Hover shows a pane listing the
-  agents with their state, like the board's AGENTS pane.
-- This is activity, not message traffic: nothing published records one
-  agent sending another a message yet. When core's board feed lands
-  (S8–S10), a lamp can run per real message instead.
-- Nothing moves when no agent is active.
 
 ### 3.3 Dock → the board (`dock`, `aoide-dock`)
 A right-edge pane, full height under the bar, tabbed. The dock is cadenza's
@@ -389,9 +382,20 @@ The wallpaper is a still image of a circuit board under the tube.
   never a slot) renders it from the livery with a fixed seed, and the
   preview canvas shoots it at each monitor's size into
   `cover/pcb-<w>x<h>.png`. Regenerating after a palette change is one shot.
-- Static. Nothing moves on the wallpaper; the moving parts are the lamps.
+- Static today. Nothing moves on the wallpaper; the moving parts are the
+  lamps.
 - Live: `lyra cover set <abs path>` (a hot swap). Declaring it into
   `aoide.livery.wallpaper` for the rebuild is the User's to admit.
+- **The live board (waits on a core wallpaper slot).** The agent map
+  belongs on the cover, not the bar. Once the facet anchors a song-owned
+  `wallpaper` slot, cadenza's `wallpaper.qml` draws `CoverPcb` live with a
+  fresh seed at every shell start, and each live agent takes one pad near
+  the edge: its ring lit in its state colour, a spawned child's pad joined
+  to its parent's by a track. When a child's `hooks.json` `updatedAt`
+  advances, a lamp runs that track from child to parent; a root's own
+  activity flashes its pad. At most 6 lamps at once, coalescing. Nothing
+  moves when no agent is active. Until the slot lands there is no agent
+  map; the board's AGENTS pane is the list (coverage.md).
 
 ## 4. Preview fixtures
 
@@ -446,3 +450,9 @@ reads a fixture path.
   core does (§3.2); a patch panel of agents with lamps on activity at the
   bar's right end (§3.2a); a circuit-board cover (§3.9); and an inner
   border glow on every pane after a reference shot (`refs/ref-inner-glow.png`).
+- 2026-09-26 — khoa: the agent dots after the clock confused; the agent
+  map moves to a live cover once core anchors a wallpaper slot (§3.9), and
+  leaves the bar now. CPU and spend leave the bar for the board's SYS tab.
+  Every jack becomes a pad with its number inside, tied or not (§3.2).
+  Sound and bluetooth share one cell and one pane, with a bluetooth power
+  toggle and per-device connect (§3.1).
