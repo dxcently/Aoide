@@ -287,6 +287,25 @@ pub struct SessionRecord {
     /// on hover (concepts/Terminal-Commander) — a pure-data bridge, no dispatch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<i64>,
+    /// The default project this session was stamped with when its `workspace`
+    /// FIRST went from absent to present on a BOUND workspace — a birth
+    /// default, never a live link. Distinct from `project`, which stays the
+    /// explicit choice: the resolver reads explicit > this > cwd anchor, and
+    /// nothing re-stamps or clears it when the window moves. Written only
+    /// through the one seam `graph::observe_workspace` (the two compositor
+    /// stamp sites and the synthetic bare-terminal publisher call it), which
+    /// is also why it never lands on a session with an explicit `project`.
+    /// Additive and v0-safe: absent on every record predating it (and on every
+    /// record on a host with no compositor), and a record without it
+    /// serialises byte-identical to before. A default naming a project that
+    /// has since been removed falls through to the cwd anchor, because it is a
+    /// default and not a choice.
+    #[serde(
+        rename = "workspaceProject",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub workspace_project: Option<String>,
     /// The live "current command / current tool" for this session: for a
     /// conducted SHELL it is the foreground command (`cargo test`, `vim …`),
     /// captured by conduct's PTY tick and cleared at the bare prompt; for an
@@ -770,6 +789,35 @@ mod tests {
         let legacy: SessionRecord =
             serde_json::from_str(r#"{ "sessionId": "s", "windowAddress": "0x1" }"#).unwrap();
         assert_eq!(legacy.workspace, None);
+    }
+    #[test]
+    fn session_record_workspace_project_round_trips_and_stays_absent_when_unset() {
+        // serde: `workspaceProject` serialises as a string when set and is
+        // skipped (skip_serializing_if) when None — additive/v0-safe on the
+        // wire, the same contract `workspace` above holds for the id beside it.
+        let mut rec = SessionRecord {
+            session_id: "s".into(),
+            ..Default::default()
+        };
+        rec.workspace = Some(3);
+        rec.workspace_project = Some("aoide".into());
+        let json = serde_json::to_string(&rec).unwrap();
+        assert!(json.contains("\"workspaceProject\":\"aoide\""), "serialised: {json}");
+        let back: SessionRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.workspace_project.as_deref(), Some("aoide"));
+
+        // Unbound/uncomposited: the key is absent entirely, and a legacy record
+        // with no `workspaceProject` reads as no default.
+        let bare = SessionRecord {
+            session_id: "s".into(),
+            workspace: Some(3),
+            ..Default::default()
+        };
+        let bare_json = serde_json::to_string(&bare).unwrap();
+        assert!(!bare_json.contains("workspaceProject"), "serialised: {bare_json}");
+        let legacy: SessionRecord =
+            serde_json::from_str(r#"{ "sessionId": "s", "workspace": 3 }"#).unwrap();
+        assert_eq!(legacy.workspace_project, None);
     }
     #[test]
     fn session_record_hook_ancestry_round_trips_and_stays_empty_when_unset() {

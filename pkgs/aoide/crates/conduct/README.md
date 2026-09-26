@@ -63,6 +63,19 @@ every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
   `"observed": false` and a named `reason` on a host where no session reports
   one — §A's taught-refusal shape without a refusal.
 
+  A binding is a BIRTH DEFAULT, and the seam that applies it is
+  `graph/model.rs::observe_workspace`: it writes `SessionRecord.workspace`
+  (and its `workspaceProject` default) for all three compositor stamp sites in
+  `window.rs`, stamping the default exactly once — the moment a session's
+  `workspace` first goes from absent to present on a bound workspace — and
+  never again on a move (once per BIRTH: an observation that lapsed, because a
+  window's client reported no workspace, counts as a new one when it returns). So a session born on a bound workspace joins it, a
+  window dragged elsewhere keeps the project it was born with, an explicit
+  `session project` is never overridden by a default, and a host with no
+  compositor adapter resolves exactly the ladder it did before. The ladder,
+  top to bottom: explicit `project` > the owner (nearest ancestor whose own
+  claim resolves) > the workspace default > the cwd anchor.
+
 - `graph::session_bind` implements `session bind --id <session> --agent-id
   <key>` through aoided. Only local CLI/Daemon doors may bind; the CLI does
   not fall back when aoided is absent. The key uses `valid_node_name` grammar

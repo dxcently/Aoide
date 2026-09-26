@@ -485,9 +485,9 @@ pub fn register_mail_ring(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["session", "project"],
-        summary: "Assign a local session to a registered project without changing its cwd; --clear restores automatic path anchoring.",
+        summary: "Assign a local session to a registered project without changing its cwd; --clear drops the explicit choice, so the ladder applies again (the session's workspace default, else its cwd anchor).",
         args: [],
-        flags: [flag!("id", "string", "Exact local session id."), flag!("project", "string", "Registered project name."), flag!("clear", "bool", "Restore automatic cwd anchoring.")],
+        flags: [flag!("id", "string", "Exact local session id."), flag!("project", "string", "Registered project name."), flag!("clear", "bool", "Drop the explicit project: the session's saved workspace default (if it was born on a bound workspace) then its cwd anchoring applies again.")],
         gated: false,
         implemented: true,
         handler: crate::graph::session_project,

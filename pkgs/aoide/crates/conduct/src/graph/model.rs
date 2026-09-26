@@ -44,24 +44,50 @@ fn cwd_under(cwd: &str, root: &str) -> bool {
     cwd == root || cwd.starts_with(&format!("{}/", root))
 }
 
-/// Explicit membership takes precedence over automatic cwd anchoring.
+/// The project a session's own `workspaceProject` default names, when it
+/// still names a REGISTERED project — the workspace rung of the ladder. A
+/// default naming a project that has since been removed falls THROUGH
+/// (returns `None`), because it is a default and not a choice; nothing
+/// rewrites the stored field on the way past.
+fn workspace_default(session: &SessionRecord, projects: &[Project]) -> Option<usize> {
+    session
+        .workspace_project
+        .as_ref()
+        .and_then(|name| projects.iter().position(|p| &p.name == name))
+}
+
+/// A session's OWN claim: explicit `project` > its workspace's default project
+/// > automatic cwd anchoring.
 pub fn project_for(session: &SessionRecord, projects: &[Project]) -> Option<usize> {
-    session.project.as_ref().map_or_else(|| anchor_for(&session.cwd, projects), |name| projects.iter().position(|p| &p.name == name))
+    session.project.as_ref().map_or_else(
+        || {
+            workspace_default(session, projects)
+                .or_else(|| anchor_for(&session.cwd, projects))
+        },
+        |name| projects.iter().position(|p| &p.name == name),
+    )
 }
 
 /// The project a session RENDERS under: own explicit project > owner's
-/// effective project > own cwd anchor. Derived, never stored — see
-/// `CONTRACTS.md`'s stored-vs-effective distinction.
+/// effective project > own workspace default > own cwd anchor. Derived, never
+/// stored — see `CONTRACTS.md`'s stored-vs-effective distinction.
 /// An explicit `session.project` is never overridden — resolved or not
 /// (unregistered stops the walk right here, exactly [`project_for`]'s own
 /// behavior). Otherwise walks `parent_session_id` upward; the first
-/// ancestor whose OWN [`project_for`] resolves (explicit name or its own
-/// cwd anchor) wins — iterative, never a recursive re-entry into this
-/// function. Walk shape copied from `doorbell.rs`'s `conducted_ancestor` /
+/// ancestor whose OWN [`project_for`] resolves (explicit name, its workspace
+/// default, or its own cwd anchor) wins — iterative, never a recursive
+/// re-entry into this function. Walk shape copied from
+/// `doorbell.rs`'s `conducted_ancestor` /
 /// `window.rs`'s `windowless_by_lineage_from_parent`: `HashSet` cycle guard,
 /// a dangling or cyclic `parentSessionId` (or an exhausted chain) falls to
 /// [`anchor_for`] on the SUBJECT's own cwd, bounded at 32 hops
 /// (`actions.rs`'s `kill_target` walk).
+///
+/// The ladder's order is deliberate at both ends: the OWNER sits above the
+/// workspace default because a child an agent spawns belongs to the agent's
+/// work wherever its window lands, and the workspace default sits above the
+/// cwd anchor because binding a workspace is an act an operator performed
+/// while a cwd is incidental.
 pub fn effective_project_for(
     session: &SessionRecord,
     sessions: &[SessionRecord],
@@ -86,7 +112,37 @@ pub fn effective_project_for(
         }
         parent_id = parent.parent_session_id.as_deref();
     }
-    anchor_for(&session.cwd, projects)
+    workspace_default(session, projects).or_else(|| anchor_for(&session.cwd, projects))
+}
+
+/// Record the compositor's observation of ONE session's workspace — the ONE
+/// seam `workspace` is written through, and the ONE place a session picks up
+/// its workspace's default project.
+///
+/// `ws` is the observed id, `None` when the observation resolved to nothing:
+/// the stored id is CLEARED, exactly as the pending-window sweep did before
+/// this seam existed (a window whose client reports no workspace has no
+/// workspace). `workspaceProject` is stamped ONCE — the moment `workspace`
+/// first goes from absent to present on a bound workspace — and is thereafter
+/// never re-stamped by a move and never cleared by an observation: moving a
+/// window is not a birth, and a session keeps the default it was born with.
+/// A session with an explicit `project` is never stamped at all (an explicit
+/// choice outranks a default), and neither is one already stamped. Returns
+/// true iff the record changed.
+pub fn observe_workspace(rec: &mut SessionRecord, ws: Option<i64>, projects: &[Project]) -> bool {
+    let first = rec.workspace.is_none();
+    let mut changed = false;
+    if rec.workspace != ws {
+        rec.workspace = ws;
+        changed = true;
+    }
+    if first && rec.workspace_project.is_none() && rec.project.is_none() {
+        if let Some(i) = ws.and_then(|w| binding_for(w, projects)) {
+            rec.workspace_project = Some(projects[i].name.clone());
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// The project this session LEADS (`Project.lead`), if any — a lead hangs
@@ -282,6 +338,216 @@ mod tests {
         );
         assert_eq!(anchor_for("/srv/other", &p), None);
     }
+    // ── the workspace default (core-seams §B: store, stamp, ladder) ─────────
+
+    /// Two projects, `aoide` (rooted at /home/k/Aoide) and `cadenza` (rooted
+    /// at /srv/cadenza), with workspace 3 bound to `aoide`.
+    fn ws_projects() -> Vec<Project> {
+        vec![
+            Project {
+                name: "aoide".into(),
+                path: "/home/k/Aoide".into(),
+                workspaces: vec![3],
+                ..Default::default()
+            },
+            Project {
+                name: "cadenza".into(),
+                path: "/srv/cadenza".into(),
+                workspaces: vec![7],
+                ..Default::default()
+            },
+        ]
+    }
+
+    #[test]
+    fn stamped_once_at_first_workspace() {
+        let projects = ws_projects();
+        let mut s = session("s1", "/tmp/elsewhere", "working", "t", None);
+
+        // Absent → present on a BOUND workspace: stamped, and the id lands.
+        assert!(observe_workspace(&mut s, Some(3), &projects));
+        assert_eq!(s.workspace, Some(3));
+        assert_eq!(s.workspace_project.as_deref(), Some("aoide"));
+
+        // The observation is idempotent — nothing left to write.
+        assert!(!observe_workspace(&mut s, Some(3), &projects));
+
+        // An UNBOUND workspace is observed and stamps nothing.
+        let mut u = session("s2", "/tmp/elsewhere", "working", "t", None);
+        assert!(observe_workspace(&mut u, Some(9), &projects));
+        assert_eq!(u.workspace, Some(9));
+        assert_eq!(u.workspace_project, None);
+
+        // An explicit project is never stamped over.
+        let mut e = session("s3", "/tmp/elsewhere", "working", "t", None);
+        e.project = Some("cadenza".into());
+        observe_workspace(&mut e, Some(3), &projects);
+        assert_eq!(e.workspace_project, None);
+        assert_eq!(project_for(&e, &projects).map(|i| projects[i].name.as_str()), Some("cadenza"));
+
+        // `None` is an observation too: it clears a stale id (a window whose
+        // client reports no workspace), and never touches the birth default.
+        assert!(observe_workspace(&mut s, None, &projects));
+        assert_eq!(s.workspace, None);
+        assert_eq!(s.workspace_project.as_deref(), Some("aoide"), "movement is not a birth");
+        assert!(!observe_workspace(&mut s, None, &projects), "already clear");
+    }
+
+    #[test]
+    fn moving_the_window_never_restamps() {
+        let projects = ws_projects();
+        let mut s = session("s1", "/tmp/elsewhere", "working", "t", None);
+        observe_workspace(&mut s, Some(3), &projects);
+        assert_eq!(s.workspace_project.as_deref(), Some("aoide"));
+
+        // Dragged onto another BOUND workspace: the id follows, the default
+        // does not (the session keeps the project it was born with).
+        observe_workspace(&mut s, Some(7), &projects);
+        assert_eq!(s.workspace, Some(7));
+        assert_eq!(s.workspace_project.as_deref(), Some("aoide"));
+        assert_eq!(
+            effective_project_for(&s, &[s.clone()], &projects)
+                .map(|i| projects[i].name.as_str()),
+            Some("aoide"),
+            "…and the ladder still reads the birth default, not the new workspace"
+        );
+
+        // Dragged onto an unbound workspace: same.
+        observe_workspace(&mut s, Some(11), &projects);
+        assert_eq!(s.workspace_project.as_deref(), Some("aoide"));
+    }
+
+    #[test]
+    fn explicit_project_beats_the_default() {
+        let projects = ws_projects();
+        let mut s = session("s1", "/tmp/elsewhere", "working", "t", None);
+        observe_workspace(&mut s, Some(3), &projects);
+        s.project = Some("cadenza".into());
+        assert_eq!(project_for(&s, &projects).map(|i| projects[i].name.as_str()), Some("cadenza"));
+        assert_eq!(
+            effective_project_for(&s, &[s.clone()], &projects).map(|i| projects[i].name.as_str()),
+            Some("cadenza")
+        );
+    }
+
+    #[test]
+    fn owner_beats_the_default() {
+        let projects = ws_projects();
+        // The parent is on bound workspace 7 (`cadenza`); the child is on bound
+        // workspace 3 (`aoide`) but hangs off the parent, so the owner wins.
+        let mut parent = session("p", "/tmp/elsewhere", "working", "t", None);
+        observe_workspace(&mut parent, Some(7), &projects);
+        let mut child = session("c", "/tmp/elsewhere", "working", "t", Some("p"));
+        observe_workspace(&mut child, Some(3), &projects);
+        assert_eq!(child.workspace_project.as_deref(), Some("aoide"));
+
+        let all = vec![parent.clone(), child.clone()];
+        assert_eq!(
+            effective_project_for(&child, &all, &projects).map(|i| projects[i].name.as_str()),
+            Some("cadenza"),
+            "the owner's rung outranks the child's own workspace default"
+        );
+        // …and the child's OWN claim is still the workspace default.
+        assert_eq!(project_for(&child, &projects).map(|i| projects[i].name.as_str()), Some("aoide"));
+
+        // A parentless session on a bound workspace: the default decides.
+        assert_eq!(
+            effective_project_for(&child_without_parent(&child), &all, &projects)
+                .map(|i| projects[i].name.as_str()),
+            Some("aoide")
+        );
+    }
+
+    fn child_without_parent(child: &SessionRecord) -> SessionRecord {
+        let mut c = child.clone();
+        c.parent_session_id = None;
+        c
+    }
+
+    #[test]
+    fn default_beats_cwd_anchor() {
+        let projects = ws_projects();
+        // The session's cwd anchors it to `cadenza`; its workspace default says
+        // `aoide`. The default wins — binding a workspace is an operator's act,
+        // a cwd is incidental.
+        let mut s = session("s1", "/srv/cadenza/sub", "working", "t", None);
+        assert_eq!(anchor_for(&s.cwd, &projects).map(|i| projects[i].name.as_str()), Some("cadenza"));
+        observe_workspace(&mut s, Some(3), &projects);
+        assert_eq!(project_for(&s, &projects).map(|i| projects[i].name.as_str()), Some("aoide"));
+        assert_eq!(
+            effective_project_for(&s, &[s.clone()], &projects).map(|i| projects[i].name.as_str()),
+            Some("aoide")
+        );
+    }
+
+    #[test]
+    fn default_naming_a_removed_project_falls_through() {
+        let projects = ws_projects();
+        let mut s = session("s1", "/srv/cadenza/sub", "working", "t", None);
+        observe_workspace(&mut s, Some(3), &projects);
+        assert_eq!(project_for(&s, &projects).map(|i| projects[i].name.as_str()), Some("aoide"));
+
+        // `project remove aoide` — the default now names nothing. It is a
+        // DEFAULT, not a choice, so the ladder falls through to the cwd anchor
+        // rather than stopping on a dangling name.
+        let remaining: Vec<Project> = projects.into_iter().filter(|p| p.name != "aoide").collect();
+        assert_eq!(s.workspace_project.as_deref(), Some("aoide"), "the stored field is untouched");
+        assert_eq!(project_for(&s, &remaining).map(|i| remaining[i].name.as_str()), Some("cadenza"));
+        assert_eq!(
+            effective_project_for(&s, &[s.clone()], &remaining)
+                .map(|i| remaining[i].name.as_str()),
+            Some("cadenza")
+        );
+        // With no cwd match either, it resolves to nothing at all — never an
+        // invented index.
+        let elsewhere = session("s2", "/tmp/elsewhere", "working", "t", None);
+        let mut s = elsewhere;
+        s.workspace_project = Some("gone".into());
+        assert_eq!(project_for(&s, &remaining), None);
+    }
+
+    #[test]
+    fn no_binding_is_todays_ladder() {
+        // The pre-workspace ladder, byte for byte: explicit > owner > cwd, with
+        // no workspace anywhere in the picture.
+        let projects = vec![
+            Project {
+                name: "aoide".into(),
+                path: "/home/k/Aoide".into(),
+                ..Default::default()
+            },
+            Project {
+                name: "cadenza".into(),
+                path: "/srv/cadenza".into(),
+                workspaces: vec![3],
+                ..Default::default()
+            },
+        ];
+        let parent = session("p", "/home/k/Aoide", "working", "t", None);
+        let mut child = session("c", "/tmp/elsewhere", "working", "t", Some("p"));
+        observe_workspace(&mut child, Some(99), &projects);
+        assert_eq!(child.workspace_project, None, "workspace 99 is bound to nothing");
+        assert_eq!(project_for(&child, &projects), None, "own cwd anchors nowhere");
+
+        let all = vec![parent.clone(), child.clone()];
+        assert_eq!(
+            effective_project_for(&child, &all, &projects).map(|i| projects[i].name.as_str()),
+            Some("aoide"),
+            "the owner rung is unchanged"
+        );
+        // A session with NO binding and no owner falls to its own cwd anchor,
+        // exactly as before — the workspace rung is inert without a binding.
+        let alone = session("a", "/srv/cadenza/x", "working", "t", None);
+        assert_eq!(
+            effective_project_for(&alone, &[alone.clone()], &projects)
+                .map(|i| projects[i].name.as_str()),
+            Some("cadenza")
+        );
+        let unanchored = session("u", "/tmp/elsewhere", "working", "t", None);
+        assert_eq!(effective_project_for(&unanchored, &[unanchored.clone()], &projects), None);
+        assert_eq!(project_for(&unanchored, &projects), None);
+    }
+
     #[test]
     fn a_rootless_project_never_anchors_but_is_still_reachable_by_name() {
         // A name-only project (`project add <name>`, no folder) has no root to

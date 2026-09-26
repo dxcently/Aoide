@@ -59,6 +59,35 @@ project group under a synthetic `(unanchored)` root. Each session's live
 state is the latest hook phase from `hooks.json` merged over its raw roster
 state ([[shellbridge]] writes both files).
 
+**The project ladder** — which project a session belongs to, derived and never
+stored (`CONTRACTS.md` §4, "stored-vs-effective"):
+
+```
+project_for(s)            explicit project > s's workspace default > s's cwd anchor
+effective_project_for(s)  explicit project > owner (nearest ancestor whose OWN
+                          claim resolves) > s's workspace default > s's cwd anchor
+```
+
+The **workspace default** is `workspaceProject`: the project the session's
+compositor workspace was bound to (`workspace set`, `CONTRACTS.md` §4's
+`projects.json`) at the moment its `workspace` first went from absent to
+present. It is stamped ONCE, through one seam
+(`aoide-conduct::graph::observe_workspace`), so a window dragged to another
+workspace keeps the project it was born with, and binding a workspace never
+adopts the sessions already sitting on it. The owner sits ABOVE the default —
+a child an agent spawns belongs to the agent's work wherever its window lands —
+and the default sits above the cwd anchor because binding a workspace is an act
+an operator performed while a cwd is incidental. A default naming a project
+that has since been removed falls through to the next rung; an observation that
+LAPSED — a `workspace` cleared because its window's client reported none —
+counts as a new birth when the workspace is observed again on a binding. The
+ladder is LIVE membership only: ledger-driven views are not re-run through it —
+`resurrect --project <name>` and the conductor's history label match an entry
+by its explicit project or its cwd, so a session whose membership comes from
+its workspace default is not offered by those views. On a host with no
+compositor no session carries a default at all, and the ladder is exactly the
+two rungs it was before.
+
 ## The viewer — bare `graph`
 
 Bare `graph` renders the DAG as a Unicode box-drawing tree in the terminal;

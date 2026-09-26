@@ -1002,8 +1002,12 @@ automatic anchoring without changing cwd. The exit ledger retains the value
 as `project` (null when absent), and resurrection restores it when registered.
 That stored project is distinct from the *effective* project a session
 renders under: `aoide-conduct::graph::effective_project_for` derives the
-latter (own explicit project, else the nearest owning ancestor's own explicit
-project or cwd anchor, else the session's own cwd anchor) and never writes it.
+latter (own explicit project, else the nearest owning ancestor's own claim,
+else the session's own workspace default, else its own cwd anchor) and never
+writes it. Ledger-driven views do NOT run that ladder: `resurrect --project
+<name>` and the conductor's history label match a ledger entry by its explicit
+`project` or its cwd only, so live membership can name a project those views
+will not offer for that session.
 `SessionRecord.project` and the graph node's `project` keep publishing the
 stored value only; `aoide session`'s bucket names and the conductor's
 per-project counts read the derived view. An additive `effectiveProject`
@@ -1017,6 +1021,34 @@ rows do not carry it either. The same rows carry `nativeRole` under the
 record rule above (present only when the record carries one); a row built
 from a remote node's graph document relays that node's own published
 `nativeRole` and never synthesizes one.
+
+**`workspaceProject` — the workspace's default project, stamped at birth.**
+A session record MAY carry an optional `workspaceProject` (string), naming
+the project its compositor workspace was BOUND to when the session's
+`workspace` first went from absent to present. It is a DEFAULT, never a
+choice: `SessionRecord.project` stays the explicit member and always outranks
+it, the owner rung sits between them (a child an agent spawns belongs to the
+agent's work wherever its window lands, and the owner's own default is visible
+to that walk), and the workspace default outranks the cwd anchor because
+binding a workspace is an act an operator performed while a cwd is incidental.
+`workspaceProject` is written ONLY by
+`aoide-conduct::graph::observe_workspace` — the one seam `workspace` itself is
+written through, called by all three compositor stamp sites (the hook-time
+window backfill, the event-driven sweep, and the synthetic bare-terminal
+publisher) — and only when the record has no explicit `project`, no
+`workspaceProject` yet, and its workspace carries a binding. It is therefore
+STAMPED ONCE: never re-stamped when a window moves, never cleared by movement,
+never adopted retroactively (binding a workspace affects new births, not the
+sessions already sitting on it). An observation that LAPSED counts as a NEW
+BIRTH: a record whose `workspace` was cleared — a window whose client reported
+no workspace — and later re-observed on a now-bound workspace IS stamped. The
+seam's rule is that state transition, not a permanent ever-stamped flag. A
+session whose default names a project that has since been removed falls
+THROUGH to the next rung — a default naming nothing is not a choice, and the
+stored field is left as it is; re-registering that name later RE-FORMS every
+membership the field still spells. Additive/v0-safe: absent on every record predating it and on every record whose host
+has no compositor adapter, `skip_serializing_if` keeping a record without it
+byte-identical on the wire.
 `session kill --id ID` is a local daemon-only SIGTERM request for an exclusively
 owned, conducted process verified against the daemon seal and pinned by Linux
 pidfd. Its successful response confirms signaling, never process exit.

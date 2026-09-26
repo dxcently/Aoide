@@ -126,8 +126,16 @@ pub use self::doorbell::{mail_ring, ring, RingReport};
 // post-lock collector block — so this stays `pub(crate)`, never crossing the
 // crate boundary.
 pub(crate) use self::pingback::{pingback, pingback_pull};
+// The project ladder (`core-seams` §B): `project_for` (a session's own claim:
+// explicit > its workspace's default > cwd anchor) and `effective_project_for`
+// (what it RENDERS under: explicit > owner > workspace default > cwd anchor),
+// plus `observe_workspace` — the ONE seam `SessionRecord.workspace` and the
+// `workspaceProject` birth default are written through, called by all three
+// compositor stamp sites (`window.rs`) so a future adapter calls it too rather
+// than writing the field itself.
 pub use self::model::{
-    anchor_for, effective_project_for, lead_over, leads_project, project_for, canonical_state, merged_sessions, HookRecord, HooksFile, Project, ProjectsFile,
+    anchor_for, effective_project_for, lead_over, leads_project, observe_workspace, project_for,
+    canonical_state, merged_sessions, HookRecord, HooksFile, Project, ProjectsFile,
     SessionRecord, SessionsFile,
 };
 pub use self::pending::{pending_approve, pending_deny, pending_list};

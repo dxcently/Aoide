@@ -24,6 +24,29 @@
 
 ## Invariants
 
+- **The workspace default is stamped ONCE, through ONE seam, at THREE
+  sites.** `SessionRecord.workspaceProject` (additive, `skip_serializing_if`)
+  is written only by `graph/model.rs::observe_workspace` — the same seam
+  `SessionRecord.workspace` is written through — and every site that observes
+  a workspace calls it: `window.rs::ensure_session_window` (the lazy
+  hook-time backfill), the event-driven `resolve_pending_session_windows`
+  sweep (both its pending-resolution and its move branches) and
+  `reconcile_untracked_terminals` (the synthetic `win:` record a bare tty
+  gets — a terminal on a bound workspace joins the project exactly as an
+  agent's session does, so that publisher builds its record with
+  `workspace: None` and lets the seam do the observation). A NEW adapter
+  calls the seam; it never writes either field itself. The seam's rules are
+  load-bearing: the default is stamped only when `workspace` goes from absent
+  to present, only when the record has no explicit `project` and no default
+  yet, and only when the workspace is BOUND — so a move never re-stamps,
+  movement never clears it, an explicit choice is never stamped over, and
+  binding a workspace adopts no session already sitting on it. An observed
+  `None` DOES clear `workspace` (a window whose client reports no workspace
+  has none) and never touches the default. The ladder itself —
+  `project_for` = explicit > default > cwd, `effective_project_for` =
+  explicit > owner > default > cwd — lives in the same file, with
+  `workspace_default` the ONE reader of the stored name (a name that no
+  longer resolves falls through; it is a default, not a choice).
 - **Every grouping surface that can see a non-root session calls
   `graph::effective_project_for`, never bare `project_for`, for that
   session (ownership-graph lane, P-OWN S-A).** `project_for` stays the
