@@ -208,7 +208,7 @@
       "startedAt": "2026-09-26T13:18:00Z",
       "contextCeiling": 1000000,
       "workspace": null,
-      "effectiveProject": null,
+      "effectiveProject": "aoide",
       "activeAt": "2026-09-26T13:18:00Z"
     },
     {
@@ -226,7 +226,7 @@
       "startedAt": "2026-09-26T13:20:00Z",
       "contextCeiling": 1000000,
       "workspace": 7,
-      "effectiveProject": "melete",
+      "effectiveProject": "aoide",
       "activeAt": "2026-09-26T14:02:31Z"
     },
     {
@@ -246,9 +246,67 @@
       "workspace": 9,
       "effectiveProject": "mneme",
       "activeAt": "2026-09-26T13:22:00Z"
+    },
+    {
+      "id": "session:f3000000-0000-4000-8000-000000000013",
+      "kind": "session",
+      "agent": "claude",
+      "role": "agent",
+      "state": "idle",
+      "title": "scratch: vault notes",
+      "model": "claude-opus-5-5",
+      "petname": "grey-heron",
+      "cwd": "/home/user/mneme",
+      "pid": 999113,
+      "windowAddress": "0x3000000a0012",
+      "startedAt": "2026-09-26T13:24:00Z",
+      "contextCeiling": 1000000,
+      "workspace": -98,
+      "effectiveProject": "mneme",
+      "activeAt": "2026-09-26T13:24:00Z"
     }
   ],
   "edges": [
+    {
+      "from": "project:aoide",
+      "kind": "anchors",
+      "to": "session:f3000000-0000-4000-8000-000000000001"
+    },
+    {
+      "from": "session:f3000000-0000-4000-8000-000000000001",
+      "kind": "leads",
+      "to": "session:f3000000-0000-4000-8000-000000000002"
+    },
+    {
+      "from": "session:f3000000-0000-4000-8000-000000000001",
+      "kind": "leads",
+      "to": "session:f3000000-0000-4000-8000-000000000003"
+    },
+    {
+      "from": "session:f3000000-0000-4000-8000-000000000001",
+      "kind": "leads",
+      "to": "session:f3000000-0000-4000-8000-000000000004"
+    },
+    {
+      "from": "project:melete",
+      "kind": "anchors",
+      "to": "session:f3000000-0000-4000-8000-000000000005"
+    },
+    {
+      "from": "project:melete",
+      "kind": "anchors",
+      "to": "session:f3000000-0000-4000-8000-000000000006"
+    },
+    {
+      "from": "session:f3000000-0000-4000-8000-000000000001",
+      "kind": "leads",
+      "to": "session:f3000000-0000-4000-8000-000000000008"
+    },
+    {
+      "from": "project:mneme",
+      "kind": "anchors",
+      "to": "session:f3000000-0000-4000-8000-000000000009"
+    },
     {
       "from": "session:f3000000-0000-4000-8000-000000000001",
       "kind": "spawned",
@@ -260,57 +318,30 @@
       "to": "session:f3000000-0000-4000-8000-000000000011"
     },
     {
-      "from": "session:f3000000-0000-4000-8000-000000000001",
+      "from": "project:mneme",
       "kind": "anchors",
-      "to": "project:aoide"
+      "to": "session:f3000000-0000-4000-8000-000000000012"
     },
     {
-      "from": "session:f3000000-0000-4000-8000-000000000002",
+      "from": "project:mneme",
       "kind": "anchors",
-      "to": "project:aoide"
-    },
-    {
-      "from": "session:f3000000-0000-4000-8000-000000000003",
-      "kind": "anchors",
-      "to": "project:aoide"
-    },
-    {
-      "from": "session:f3000000-0000-4000-8000-000000000004",
-      "kind": "anchors",
-      "to": "project:aoide"
-    },
-    {
-      "from": "session:f3000000-0000-4000-8000-000000000005",
-      "kind": "anchors",
-      "to": "project:melete"
-    },
-    {
-      "from": "session:f3000000-0000-4000-8000-000000000006",
-      "kind": "anchors",
-      "to": "project:melete"
-    },
-    {
-      "from": "session:f3000000-0000-4000-8000-000000000008",
-      "kind": "anchors",
-      "to": "project:aoide"
-    },
-    {
-      "from": "session:f3000000-0000-4000-8000-000000000009",
-      "kind": "anchors",
-      "to": "project:mneme"
-    },
-    {
-      "from": "session:f3000000-0000-4000-8000-000000000011",
-      "kind": "anchors",
-      "to": "project:melete"
-    },
-    {
-      "from": "session:f3000000-0000-4000-8000-000000000012",
-      "kind": "anchors",
-      "to": "project:mneme"
+      "to": "session:f3000000-0000-4000-8000-000000000013"
     }
   ],
   "workspaces": [
+    {
+      "workspace": -98,
+      "projects": [
+        "mneme"
+      ],
+      "sessions": [
+        "f3000000-0000-4000-8000-000000000013"
+      ],
+      "live": 1,
+      "working": 0,
+      "awaiting": 0,
+      "activeAt": "2026-09-26T13:24:00Z"
+    },
     {
       "workspace": 1,
       "projects": [],
@@ -324,7 +355,6 @@
     },
     {
       "workspace": 2,
-      "project": "aoide",
       "projects": [
         "aoide"
       ],
@@ -335,11 +365,11 @@
       "live": 2,
       "working": 2,
       "awaiting": 0,
-      "activeAt": "2026-09-26T14:02:30Z"
+      "activeAt": "2026-09-26T14:02:30Z",
+      "project": "aoide"
     },
     {
       "workspace": 3,
-      "project": "aoide",
       "projects": [
         "aoide"
       ],
@@ -367,8 +397,8 @@
     },
     {
       "workspace": 7,
-      "project": "melete",
       "projects": [
+        "aoide",
         "melete"
       ],
       "sessions": [
@@ -379,11 +409,23 @@
       "live": 3,
       "working": 2,
       "awaiting": 0,
-      "activeAt": "2026-09-26T14:02:31Z"
+      "activeAt": "2026-09-26T14:02:31Z",
+      "project": "melete"
+    },
+    {
+      "workspace": 8,
+      "projects": [
+        "mneme"
+      ],
+      "sessions": [],
+      "live": 0,
+      "working": 0,
+      "awaiting": 0,
+      "activeAt": "",
+      "project": "mneme"
     },
     {
       "workspace": 9,
-      "project": "mneme",
       "projects": [
         "mneme"
       ],
@@ -414,10 +456,52 @@
     },
     {
       "kind": "project",
+      "from": 2,
+      "to": 7,
+      "project": "aoide",
+      "activeAt": "2026-09-26T14:02:31Z"
+    },
+    {
+      "kind": "project",
       "from": 3,
       "to": 5,
       "project": "aoide",
       "activeAt": "2026-09-26T14:02:29Z"
+    },
+    {
+      "kind": "project",
+      "from": 3,
+      "to": 7,
+      "project": "aoide",
+      "activeAt": "2026-09-26T14:02:31Z"
+    },
+    {
+      "kind": "project",
+      "from": 5,
+      "to": 7,
+      "project": "aoide",
+      "activeAt": "2026-09-26T14:02:31Z"
+    },
+    {
+      "kind": "project",
+      "from": -98,
+      "to": 8,
+      "project": "mneme",
+      "activeAt": "2026-09-26T13:24:00Z"
+    },
+    {
+      "kind": "project",
+      "from": -98,
+      "to": 9,
+      "project": "mneme",
+      "activeAt": "2026-09-26T13:24:00Z"
+    },
+    {
+      "kind": "project",
+      "from": 8,
+      "to": 9,
+      "project": "mneme",
+      "activeAt": "2026-09-26T13:22:00Z"
     },
     {
       "kind": "spawned",

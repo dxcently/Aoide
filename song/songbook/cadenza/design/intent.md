@@ -256,7 +256,11 @@ One 28px line in the tmux/termui idiom, left to right:
   with the number in `ground`; a jack with an awaiting/blocked session has
   a red pad.
 - A bound jack carries its project after it, blue: `[2]aoide` (the core's
-  `workspaces[].project`).
+  `workspaces[].project`, the binding; an unbound jack carries none).
+- **Special workspaces draw no pad.** A negative workspace (`-98` scratch,
+  `-99`) is never a jack, whether the row comes from core's `workspaces` or
+  from the derivation, and a tie with a negative end is dropped from the
+  drawing. Their sessions still count in the agents and notification cells.
 - **Tie lines are a schematic**, drawn in the band between the jack row
   and the trunk (the bar's lower ~9px). Every line is 2px in phosphor fg
   (idle rule ink), never dim: a tie must read at 1:1.
@@ -298,6 +302,35 @@ One 28px line in the tmux/termui idiom, left to right:
   one jack, or with one end on no jack, lights that jack's own lamp.
   Until core publishes `sends`, nothing runs.
 - Hovering a jack opens the **jack insight pane** (§3.4).
+- **Binding a jack to a project** happens in that pane, on its PROJECT row:
+  ```
+  ─ project ─────────────────────────
+  [aoide] [melete] [mneme] [clear]
+  [+ new]
+  name: scratch▏             ⏎ bind  esc
+  ✕ workspace 2 is not bound to any pr…
+  ```
+  One chip per registered project (`projects.json` order), the bound one lit
+  (a `title` band with `ground` text, the active pad's own fill), `[clear]`
+  while the jack is bound, and `[+ new]`. Every click sends ONE
+  `workspaceaction` line pinned to that pane's jack (`"workspace": N`), so
+  it binds the pad the pane belongs to, never the focused one: a chip is
+  `{action:"set", project, workspace}`, `[clear]` is `{action:"clear",
+  workspace}`, and `[+ new]` opens an inline `name:` field (Enter sends
+  `set` with `"new": true`, Escape or a click outside cancels; a name must be
+  non-empty, at most 40 characters, with no whitespace, no control
+  character and no leading `-`, and the field's hint says which rule a typed
+  name breaks). The bar layer never takes keys, so the field holds a
+  compositor focus grab on the pane's popup for exactly as long as it is
+  open. The clicked chip turns amber while the line is in flight; the lit
+  chip moves only when `graph.json` rewrites with the new `project`, and the
+  amber mark clears then or after 5s. When the bridge answers the line
+  (`bridge.workspaceAction`), an `ok: false` reply becomes one dim line with
+  core's own `message` (else `reason`), plain text. **Honest partial:** the
+  facet's bridge answers no `workspaceaction` today, so the line goes
+  fire-and-forget (`bridge.sendCommand`); success still shows through
+  `graph.json`, and a refusal says nothing: the amber mark just clears
+  after 5s.
 - **Where ties come from.** When `graph.json` carries the core's
   `workspaces`/`ties`/`activeAt`, the bar draws those. Until then it
   derives real ties from what is published today, and nothing else:
@@ -562,3 +595,8 @@ reads a fixture path.
 - 2026-09-26 — khoa: the board shows agents and subagents as cards, with
   the data sonata's conductor and terminals cards show, drawn in cadenza's
   theme, on OVERVIEW and every project tab (§3.3 "The cards").
+- 2026-09-26 — khoa: core's workspace binding is live, so a jack binds from
+  its insight pane (a PROJECT row of chips, `[clear]`, an inline `[+ new]`
+  name, one `workspaceaction` line pinned to that jack); special (negative)
+  workspaces draw no pad; the switchboard fixture follows core's project
+  rule (explicit > owner > workspace default > cwd) (§3.2).

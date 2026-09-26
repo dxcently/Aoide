@@ -16,14 +16,17 @@
 //   Hyprland          workspaces (jack number, occupied, focused, urgent), active title
 //   state/stage/sessions.json + hooks.json   per-jack sessions, AGT, urgent jacks
 //   state/stage/graph.json  `workspaces[].project` (jack labels), `ties` (tie
-//                           lines), `activeAt` (lamps) — core-seams §E. Absent
-//                           today, so the bar DERIVES them (the "DERIVED TIES"
+//                           lines), `activeAt` (lamps) — core-seams §E, built
+//                           in core; on a graph.json WITHOUT the block (no
+//                           compositor in play, an older core) the bar
+//                           DERIVES them (the "DERIVED TIES"
 //                           block, coverage.md's bend) from graph.json
 //                           `edges` + sessions.json `windowAddress` + Hyprland
 //                           toplevels, lamps from hooks.json `updatedAt`
 //   state/usage/now.json    `by:"workspace"` rows → the jack insight pane —
 //                           core-seams §C; absent today → "no usage data"
 //   state/stage/herald.json the NOTIF cell count
+//   state/stage/projects.json  the registered names → the jack pane's PROJECT chips
 //   livery.riceMode         the RICE cell
 //   /proc/meminfo, /proc/net/route   mem total (insight gauge), NET kind
 //                           (kernel files, sonata meters/bar precedent)
@@ -38,6 +41,18 @@
 //   SOUND+BT/NET/BAT/TRAY/clock → their own pane (one open at a time, click
 //        the cell again to close; wheel on the sound cell steps the volume);
 //        jack hover → the jack insight pane.
+//   PROJECT chips (the jack insight pane) → ONE `workspaceaction` line to
+//        shellbridge, pinned to THAT pane's jack (never the focused one):
+//        bind `{action:"set", project, workspace}`, create a name-only project
+//        and bind (`new: true`), unbind `{action:"clear", workspace}`. Through
+//        `bridge.workspaceAction(fields, cb)` when the bridge has it (its one
+//        reply line; `ok:false` → one dim line in the pane), else fire-and-
+//        forget `bridge.sendCommand` (no reply to show). Either way a pending
+//        mark rides the chip until graph.json shows the binding, or 5s pass.
+//        The lit chip is always graph.json's `workspaces[].project`.
+//   Special workspaces (negative ids: -98 scratch, -99) draw no pad, from
+//   either arm, and a tie with a negative end is dropped; their sessions
+//   still count in the agents/notif cells.
 //   Service writes are sonata's: sink/source volume + mute + default,
 //   adapter power (`enabled`) + device connect()/disconnect(), wifi on/off +
 //   connect/disconnect/forget, tray activate/menu, `pavucontrol`, and
@@ -233,6 +248,25 @@ Item {
         }
         onLoadFailed: root.heraldRows = []
     }
+    // projects.json: the registered names, in the file's order — the jack
+    // pane's PROJECT chips (the binding itself is graph.json's, never this)
+    property var projectNames: []
+    FileView {
+        id: projectsFile
+        path: root.aoideRoot + "/state/stage/projects.json"
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+        onTextChanged: {
+            var d = root.parseJson(projectsFile)
+            if (!d) return
+            var a = Array.isArray(d.projects) ? d.projects : [], out = []
+            for (var i = 0; i < a.length; i++)
+                if (a[i] && typeof a[i].name === "string" && a[i].name.length > 0) out.push(a[i].name)
+            root.projectNames = out
+        }
+        onLoadFailed: root.projectNames = []
+    }
     // graph.json: the ties block rides only when core writes it (core-seams §E)
     property bool graphOk: false
     FileView {
@@ -248,6 +282,7 @@ Item {
             root.graphDoc = d
             root.detectLamps(d)
             root.detectSends(d)
+            root.settleWsPending()
         }
         onLoadFailed: { root.graphOk = false; root.graphDoc = null; root._sendInit = false }
     }
@@ -323,19 +358,23 @@ Item {
     // ════════════════════════════════════════════════════════════════════════
     // THE SWITCHBOARD — jacks, routes, geometry
     // ════════════════════════════════════════════════════════════════════════
-    // core's fields when graph.json carries them; the derivation below until then
+    // core's fields when graph.json carries them; the derivation below until then.
+    // A SPECIAL workspace (a negative id: -98 scratch, -99) is never a jack,
+    // from either arm, and a tie with a negative end is dropped from the
+    // drawing; `wsReal` is the one test every join below uses.
+    function wsReal(w) { return typeof w === "number" && w > 0 }
     readonly property var graphWs: {
         var m = {}
         var a = root.coreTies
             ? (Array.isArray(root.graphDoc.workspaces) ? root.graphDoc.workspaces : [])
             : root.derived.workspaces
         for (var i = 0; i < a.length; i++)
-            if (a[i] && typeof a[i].workspace === "number") m[a[i].workspace] = a[i]
+            if (a[i] && root.wsReal(a[i].workspace)) m[a[i].workspace] = a[i]
         return m
     }
-    readonly property var graphTies: root.coreTies
+    readonly property var graphTies: (root.coreTies
         ? (Array.isArray(root.graphDoc.ties) ? root.graphDoc.ties : [])
-        : root.derived.ties
+        : root.derived.ties).filter(function (e) { return e && root.wsReal(e.from) && root.wsReal(e.to) })
 
     // ════════════════════════════════════════════════════════════════════════
     // DERIVED TIES — the bend (design/coverage.md, "The derivation bend";
@@ -535,6 +574,9 @@ Item {
                 urgent: urgent || !!(w && w.urgent),
                 occupied: tops > 0 || sess.length > 0 || !!(g && g.live > 0),
                 project: (g && typeof g.project === "string") ? g.project : "",
+                // the BINDING: core's `project` only — the derivation's label
+                // is a guess from anchors, never a binding a chip may light
+                bound: (root.coreTies && g && typeof g.project === "string") ? g.project : "",
                 live: g ? (g.live || 0) : sess.length,
                 sessions: sess
             })
@@ -628,7 +670,7 @@ Item {
             var padX = Math.floor((slotW - padW) / 2)
             out.push({
                 id: j.id, ws: j.ws, focused: j.focused, urgent: j.urgent,
-                occupied: j.occupied, project: j.project, live: j.live,
+                occupied: j.occupied, project: j.project, bound: j.bound, live: j.live,
                 sessions: j.sessions, num: num, badge: badge,
                 x: x,
                 w: root.kit.cells(n),
@@ -752,11 +794,12 @@ Item {
         var next = {}
         var ws = Array.isArray(doc.workspaces) ? doc.workspaces : []
         for (var i = 0; i < ws.length; i++)
-            if (ws[i] && ws[i].activeAt) next["w:" + ws[i].workspace] = root._t(ws[i].activeAt)
+            if (ws[i] && ws[i].activeAt && root.wsReal(ws[i].workspace))
+                next["w:" + ws[i].workspace] = root._t(ws[i].activeAt)
         var ties = Array.isArray(doc.ties) ? doc.ties : []
         for (var j = 0; j < ties.length; j++) {
             var e = ties[j]
-            if (!e || !e.activeAt) continue
+            if (!e || !e.activeAt || !root.wsReal(e.from) || !root.wsReal(e.to)) continue
             var key = e.kind === "spawned" ? "s:" + e.from + ">" + e.to : "p:" + (e.project || "?")
             next[key] = Math.max(next[key] || 0, root._t(e.activeAt))
         }
@@ -1192,7 +1235,7 @@ Item {
         root.rescanBt()
         root.rescanNet()
         root.recountTray()
-        for (var f of [sessionsFile, hooksFile, heraldFile, graphFile, nowFile]) f.reload()
+        for (var f of [sessionsFile, hooksFile, heraldFile, projectsFile, graphFile, nowFile]) f.reload()
     }
 
     // ── formatting ──────────────────────────────────────────────────────────
@@ -1217,6 +1260,105 @@ Item {
     }
     function launchBtop() {
         Quickshell.execDetached(["aoide", "spawn", "--windowed", "--agent", "btop", "--", "btop"])
+    }
+
+    // ── the workspace binding: the jack pane's PROJECT row ──────────────────
+    // ONE shellbridge line per click, always carrying the pane's own jack id
+    // (`workspace`), so it binds the pad the pane belongs to, never the
+    // focused one. The bar holds no binding of its own: the lit chip is
+    // graph.json's `workspaces[].project`, and `wsPending` is only a brief
+    // mark on the clicked chip until graph.json shows the result (or 5s pass).
+    property var wsPending: null        // {ws, action, project} — the click in flight
+    property string wsError: ""         // an ok:false reply's own words (PlainText)
+    property int wsErrorWs: -1          // …for this jack only
+    property bool wsNaming: false       // the `[+ new]` name field is open
+    property int wsNamingWs: -1         // …pinned to this jack when it opened
+    property string wsNameText: ""      // what is typed (mirrored for the hint)
+    // The line one click sends. `bridge.workspaceAction(fields, cb)` answers
+    // with core's one reply line {ok, message, action, workspace, project?,
+    // data?} (or {ok:false, reason}); `ok:false` becomes one dim line in the
+    // pane. A bridge without it (the facet's ShellBridge today) takes the
+    // same line fire-and-forget through `sendCommand`: no reply, so no error
+    // line — success shows when graph.json rewrites, and silence clears the
+    // pending mark after 5s with nothing said.
+    function wsSend(fields) {
+        var ws = fields.workspace
+        root.wsError = ""
+        root.wsErrorWs = -1
+        root.wsPending = { ws: ws, action: fields.action, project: fields.project || "" }
+        wsPendingTimer.restart()
+        var b = root.bridge
+        if (b && typeof b.workspaceAction === "function") {
+            b.workspaceAction(fields, function (reply) {
+                var r = reply || {}
+                if (r.ok !== false) return               // the chip moves with graph.json
+                if (root.wsPending && root.wsPending.ws === ws) {
+                    root.wsPending = null
+                    wsPendingTimer.stop()
+                }
+                root.wsError = ("" + (r.message || r.reason || "refused")).replace(/\s+/g, " ")
+                root.wsErrorWs = ws
+            })
+        } else if (b && typeof b.sendCommand === "function") {
+            var line = { cmd: "workspaceaction" }
+            for (var k in fields) line[k] = fields[k]
+            b.sendCommand(line)
+        } else {
+            root.wsPending = null
+            wsPendingTimer.stop()
+        }
+    }
+    function bindJack(ws, project, isNew) {
+        if (!root.wsReal(ws) || !project) return
+        var f = { action: "set", workspace: ws, project: "" + project }
+        if (isNew) f["new"] = true
+        root.wsSend(f)
+    }
+    function unbindJack(ws) {
+        if (root.wsReal(ws)) root.wsSend({ action: "clear", workspace: ws })
+    }
+    // graph.json rewrote: the pending mark goes once the binding shows
+    function settleWsPending() {
+        var p = root.wsPending
+        if (!p) return
+        var g = root.coreTies ? root.graphWs[p.ws] : null
+        var bound = (g && typeof g.project === "string") ? g.project : ""
+        if ((p.action === "set" && bound === p.project) || (p.action === "clear" && bound === "")) {
+            root.wsPending = null
+            wsPendingTimer.stop()
+        }
+    }
+    Timer { id: wsPendingTimer; interval: 5000; onTriggered: root.wsPending = null }
+    // a new project's name, checked before it is sent: the wire refuses a
+    // name that is blank, starts with `-`, or carries a control character
+    // WITHOUT a reply, so the field says so first; whitespace and >40 are
+    // this pane's own limits (one argv word, one chip)
+    function wsNameProblem(t) {
+        // each answer fits the field's 12-cell hint
+        if (t.length === 0) return "type a name"
+        if (t.length > 40) return "≤ 40 chars"
+        if (/[\u0000-\u001f\u007f]/.test(t)) return "no controls"
+        if (/\s/.test(t)) return "no spaces"
+        if (t.charAt(0) === "-") return "no leading -"
+        return ""
+    }
+    function openNaming() {
+        if (!root.insightJack) return
+        root.wsNamingWs = root.insightId
+        root.wsNameText = ""
+        root.wsNaming = true
+    }
+    function cancelNaming() {
+        root.wsNaming = false
+        root.wsNamingWs = -1
+        root.wsNameText = ""
+    }
+    function submitNaming(t) {
+        var name = "" + t
+        if (!root.wsNaming || root.wsNameProblem(name) !== "") return
+        var ws = root.wsNamingWs
+        root.cancelNaming()
+        root.bindJack(ws, name, true)
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -1252,6 +1394,7 @@ Item {
         root.openPane = ""
         root.paneCell = null
         root.paneHovered = false
+        root.cancelNaming()
     }
     function jackEnter(id) {
         root.jackHovered = true
@@ -1259,6 +1402,7 @@ Item {
         var i = root.jackIndex(id)
         if (i < 0) return
         if (root.openPane === "jack" && root.insightId === id) return
+        if (root.openPane === "jack" && root.wsNaming) return          // the name field holds its jack
         if (root.openPane !== "" && root.openPane !== "jack") return   // a latched pane wins
         root.insightId = id
         jackAnchor.x = root.jackModel[i].x
@@ -1270,7 +1414,7 @@ Item {
         id: hoverGrace
         interval: 220
         onTriggered: {
-            if (root.paneHovered) return
+            if (root.paneHovered || root.wsNaming) return   // a name being typed holds the pane
             if (root.openPane === "jack" && !root.jackHovered) root.closePane()
         }
     }
@@ -1281,6 +1425,15 @@ Item {
         if (c) root.showPane(name, c, true)
     }
     function previewJack(id) { root.jackEnter(id); root.jackHovered = false }
+    // …and the PROJECT row's states: the name field with `t` typed, a click
+    // (`{action, project?, new?}` on the open jack — through whatever bridge
+    // the harness handed in, the canvas stub or its reply stub)
+    function previewNaming(t) { root.openNaming(); root.wsNameText = "" + t }
+    function previewWsClick(c) {
+        if (!c || !root.insightJack) return
+        if (c.action === "clear") root.unbindJack(root.insightId)
+        else root.bindJack(root.insightId, c.project, c["new"] === true)
+    }
 
     function paneComponent(name) {
         switch (name) {
@@ -1316,6 +1469,15 @@ Item {
                 }
             }
         }
+    }
+    // Keyboard reaches an xdg_popup only under a compositor focus grab — the
+    // bar's layer surface never takes keys (sonata's bar PSK line is the
+    // mechanism reference). Grab exactly while the `[+ new]` name field is
+    // open; a click anywhere outside clears the grab, which cancels the field.
+    HyprlandFocusGrab {
+        windows: [ popup ]
+        active: root.wsNaming && popup.visible
+        onCleared: root.cancelNaming()
     }
     // preview only: the same pane drawn under the bar, inside this item
     Loader {
@@ -2224,8 +2386,39 @@ Item {
         var t = (r && r.total) ? r.total.tokens : null
         return t ? (t["in"] || 0) + (t.out || 0) : null
     }
+    // the PROJECT row's chips, packed onto lines of the pane's width (one
+    // cell between chips): every registered project in projects.json order
+    // (the bound one too, even before projects.json names it), then
+    // `[clear]` while the jack is bound, then `[+ new]`
+    readonly property var wsChipLines: {
+        var j = root.insightJack
+        if (!j) return []
+        var names = root.projectNames.slice()
+        if (j.bound && names.indexOf(j.bound) < 0) names.push(j.bound)
+        var items = []
+        for (var i = 0; i < names.length; i++) items.push({ kind: "proj", name: names[i] })
+        if (j.bound) items.push({ kind: "clear", name: "clear" })
+        items.push({ kind: "new", name: "+ new" })
+        var W = root.jackCols, lines = [], cur = [], used = 0
+        for (var k = 0; k < items.length; k++) {
+            var it = items[k]
+            var label = it.name
+            if (root.kit.cellLen(label) + 2 > W) label = label.slice(0, W - 3) + "…"
+            it.text = "[" + label + "]"
+            it.len = root.kit.cellLen(it.text)
+            if (cur.length > 0 && used + 1 + it.len > W) { lines.push(cur); cur = []; used = 0 }
+            it.col = used + (cur.length > 0 ? 1 : 0)
+            used = it.col + it.len
+            cur.push(it)
+        }
+        if (cur.length > 0) lines.push(cur)
+        return lines
+    }
+    readonly property bool wsNamingHere: root.wsNaming && root.wsNamingWs === root.insightId
+    readonly property bool wsErrorHere: root.wsError.length > 0 && root.wsErrorWs === root.insightId
+    readonly property int wsRows: 1 + wsChipLines.length + (wsNamingHere ? 1 : 0) + (wsErrorHere ? 1 : 0)
     readonly property int jackRows: (insightRow ? 4 : 1) + 1
-        + Math.max(1, insightJack ? insightJack.sessions.length : 0) + 1 + 1
+        + Math.max(1, insightJack ? insightJack.sessions.length : 0) + wsRows + 1 + 1
     Component {
         id: jackPane
         Use {
@@ -2315,6 +2508,108 @@ Item {
                     onActivated: root.bridge.focusSession(modelData.id)
                 }
             }
+            // ── PROJECT: bind this jack (the pane's own id rides every click)
+            //   [aoide] [melete] [mneme] [clear] [+ new]
+            // the bound chip is lit (a `title` band, `ground` text — the
+            // active pad's own fill); a click in flight marks its chip amber
+            // until graph.json shows it; `[clear]` only while bound
+            Rule { kit: root.kit; cols: root.jackCols; label: "project" }
+            Repeater {
+                model: root.wsChipLines
+                delegate: Item {
+                    id: chipLine
+                    required property var modelData
+                    width: root.kit.cells(root.jackCols); height: root.kit.cellH
+                    Repeater {
+                        model: chipLine.modelData
+                        delegate: Item {
+                            id: chip
+                            required property var modelData
+                            readonly property var j: root.insightJack
+                            readonly property var p: root.wsPending
+                            readonly property bool lit: modelData.kind === "proj" && !!j && modelData.name === j.bound
+                                || (modelData.kind === "new" && root.wsNamingHere)
+                            readonly property bool pending: !!p && !!j && p.ws === j.id && (
+                                (modelData.kind === "proj" && p.action === "set" && p.project === modelData.name)
+                                || (modelData.kind === "clear" && p.action === "clear")
+                                || (modelData.kind === "new" && p.action === "set"
+                                    && root.projectNames.indexOf(p.project) < 0))
+                            x: root.kit.cells(modelData.col)
+                            width: root.kit.cells(modelData.len); height: root.kit.cellH
+                            Rectangle {
+                                anchors.fill: parent
+                                color: chip.lit ? root.kit.title : root.kit.select
+                                visible: chip.lit || chipMa.containsMouse
+                            }
+                            Text {
+                                text: chip.modelData.text
+                                color: chip.pending ? root.kit.hot
+                                     : chip.lit ? root.kit.ground
+                                     : chipMa.containsMouse ? root.kit.match
+                                     : chip.modelData.kind === "proj" ? root.kit.path : root.kit.ink
+                                font: root.kit.font; textFormat: Text.PlainText
+                            }
+                            MouseArea {
+                                id: chipMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: chip.lit ? Qt.ArrowCursor : Qt.PointingHandCursor
+                                onClicked: {
+                                    var j = chip.j
+                                    if (!j) return
+                                    var k = chip.modelData.kind
+                                    if (k === "proj" && !chip.lit) { root.cancelNaming(); root.bindJack(j.id, chip.modelData.name, false) }
+                                    else if (k === "clear") { root.cancelNaming(); root.unbindJack(j.id) }
+                                    else if (k === "new") { if (root.wsNamingHere) root.cancelNaming(); else root.openNaming() }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // the `[+ new]` name field: Enter binds (creating the name), Escape
+            // cancels; the hint says why a name would be refused
+            Item {
+                id: nameLine
+                visible: root.wsNamingHere
+                width: root.kit.cells(root.jackCols); height: root.kit.cellH
+                readonly property string problem: root.wsNameProblem(root.wsNameText)
+                Text { text: "name:"; color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText }
+                TextInput {
+                    id: nameInput
+                    x: root.kit.cells(6)
+                    width: root.kit.cells(root.jackCols - 6 - 12)
+                    height: root.kit.cellH
+                    clip: true
+                    font: root.kit.font
+                    color: root.kit.bright
+                    selectionColor: root.kit.select
+                    selectedTextColor: root.kit.match
+                    maximumLength: 64
+                    cursorDelegate: Rectangle { width: 2; color: root.kit.hot; visible: nameInput.activeFocus }
+                    onTextChanged: if (root.wsNameText !== text) root.wsNameText = text
+                    onAccepted: root.submitNaming(text)
+                    Keys.onEscapePressed: root.cancelNaming()
+                    Connections {
+                        target: root
+                        function onWsNameTextChanged() { if (nameInput.text !== root.wsNameText) nameInput.text = root.wsNameText }
+                    }
+                    onVisibleChanged: if (visible) { text = root.wsNameText; forceActiveFocus() }
+                    Component.onCompleted: if (visible) { text = root.wsNameText; forceActiveFocus() }
+                }
+                Text {
+                    anchors.right: parent.right
+                    width: root.kit.cells(12)
+                    horizontalAlignment: Text.AlignRight
+                    elide: Text.ElideLeft
+                    text: root.wsNameText.length > 0 && nameLine.problem !== "" ? nameLine.problem : "⏎ bind  esc"
+                    color: root.kit.dim
+                    font: root.kit.font; textFormat: Text.PlainText
+                }
+            }
+            // core's refusal, verbatim and dim (a `workspaceAction` reply only)
+            Note { kit: root.kit; cols: root.jackCols; visible: root.wsErrorHere
+                   text: "✕ " + root.wsError }
             Rule { kit: root.kit; cols: root.jackCols }
             ListRow {
                 kit: root.kit; cols: root.jackCols
