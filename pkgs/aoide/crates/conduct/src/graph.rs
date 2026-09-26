@@ -126,6 +126,13 @@ pub use self::trace::session_trace;
 // like `session trace` above.
 mod view;
 pub use self::view::session_watch;
+// The remote sub-agents lane (P-RSA S6): `aoide-server`'s `tasks/get` frame
+// arm asks for the SAME frame `session watch --snapshot` prints, one gather
+// with raw off — `watch_frame`. `Frame`/`MailLine` cross the boundary with it
+// because the door holds that frame, strikes its host-local fields
+// (`Frame::for_wire`) and clamps it to the wire's own caps; no second wire
+// shape exists to drift from the rendered one.
+pub use self::view::{watch_frame, Frame, MailLine};
 pub use self::permit::{answer_summons, session_permit, summons_card_id};
 pub use self::send::{pending_path, session_hook, session_send};
 pub use self::session_store::{session_bind, session_end, session_phase, session_start};

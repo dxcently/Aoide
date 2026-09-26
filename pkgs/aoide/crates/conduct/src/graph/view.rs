@@ -45,7 +45,7 @@ use aoide_protocol::Door;
 use aoide_protocol::Invocation;
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
 use aoide_storage::mail::Entry;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -75,8 +75,12 @@ extern "C" fn on_sigint(_signum: libc::c_int) {
 
 /// One letter as the rail shows it: the untrusted fields already sanitized,
 /// plus which RUN of this task sent it. Attribution only — never a verdict.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub(in crate::graph) struct MailLine {
+///
+/// `pub` with [`Frame`]: an A2A caller reads the very same frame off
+/// `tasks/get` (CONTRACTS.md §6), so this is the one shape on the wire as
+/// well as on the terminal.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MailLine {
     pub seq: u64,
     #[serde(rename = "receivedAt")]
     pub received_at: String,
@@ -90,10 +94,19 @@ pub(in crate::graph) struct MailLine {
     pub body: Vec<String>,
 }
 
+/// `skip_serializing_if` helper for a plain (non-`Option`) `bool` field whose
+/// common case is `false` — the same one-liner `aoide_storage::records` uses,
+/// for the same reason: the common case stays off the wire.
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 /// One rendered frame of a run: everything the view shows, gathered without
-/// writing anything. Both modes render THIS.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub(in crate::graph) struct Frame {
+/// writing anything. Both modes render THIS — and so does `tasks/get`: an
+/// authorized A2A caller gets this same frame, minus the fields
+/// [`Frame::for_wire`] strikes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Frame {
     #[serde(rename = "sessionId")]
     pub session_id: String,
     pub label: String,
@@ -128,8 +141,11 @@ pub(in crate::graph) struct Frame {
     pub outcome: Option<String>,
     pub socket: Option<String>,
     pub conductable: bool,
-    #[serde(rename = "logPath")]
-    pub log_path: String,
+    /// The run's PTY transcript path — a path on the box that wrote it, so
+    /// [`Frame::for_wire`] strikes it before the frame leaves this host.
+    /// `None` only for a frame that has already been through `for_wire`.
+    #[serde(rename = "logPath", default)]
+    pub log_path: Option<String>,
     #[serde(rename = "instructionsPath")]
     pub instructions_path: Option<String>,
     pub instructions: Option<Vec<String>>,
@@ -144,6 +160,33 @@ pub(in crate::graph) struct Frame {
     pub wake: Option<String>,
     /// The operator's own next step, PRINTED and never executed.
     pub suggested: Option<String>,
+    /// Set by the A2A door alone, and only when a wire cap dropped something
+    /// from this frame (`a2a.rs::frame_artifact`): the local view always
+    /// shows every line of its own window, so a local frame never sets it —
+    /// hence `skip_serializing_if`, which keeps `--json` byte-identical.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub truncated: bool,
+}
+
+impl Frame {
+    /// The frame as another BOX may see it: the four fields that name or
+    /// command something on THIS host are struck —
+    /// * `logPath`/`instructionsPath`, paths in this box's filesystem
+    ///   (`instructions` itself stays: the sidecar's sanitized text is what
+    ///   the frame is FOR);
+    /// * `socket`, the live control socket's own path;
+    /// * `suggested`, an `aoide send --id …` line whose `id` is this box's
+    ///   namespace — the reader rebuilds its own
+    ///   (`aoide send --to <node>/<id> --submit -- …`).
+    ///
+    /// Nothing else changes: the same [`render`] draws both.
+    pub fn for_wire(mut self) -> Frame {
+        self.log_path = None;
+        self.socket = None;
+        self.instructions_path = None;
+        self.suggested = None;
+        self
+    }
 }
 
 /// `session watch <id> [--tail N] [--snapshot] [--json]` — see the module doc.
@@ -421,7 +464,7 @@ fn gather(
         outcome: rec.outcome.clone(),
         socket: rec.socket.clone(),
         conductable,
-        log_path,
+        log_path: Some(log_path),
         instructions_path: rec.instructions_path.clone(),
         instructions,
         output,
@@ -429,7 +472,26 @@ fn gather(
         report,
         wake: filed.and_then(|f| f.wake),
         suggested,
+        truncated: false,
     })
+}
+
+/// The same frame `session watch --snapshot` prints, with RAW always off — the
+/// public READ the A2A door serves (`tasks/get` with `metadata["aoide/frame"]`,
+/// CONTRACTS.md §6). The door has no terminal of its own, so the gate
+/// [`read_log_tail`] takes is never open on this path: every line is the
+/// sanitized form, and the bytes do not depend on the caller's stdout.
+///
+/// It is the EXISTING [`gather`] with `raw = false`, never a second gather —
+/// a frame served over the wire is the frame the local view renders, one
+/// definition, and the refusals (an unknown id, a `sub:` card, a record that
+/// keeps no conduct-owned PTY) are that function's own taught errors.
+pub fn watch_frame(id: &str, tail: usize) -> Result<Frame, Outcome> {
+    let file: SessionsFile = load_stage(&sessions_path())
+        .map_err(|e| stage_error("session.watch", e))?;
+    let host = aoide_storage::display::local_host_name();
+    let ids: HashSet<&str> = file.sessions.iter().map(|s| s.session_id.as_str()).collect();
+    gather(id, tail, false, &file.sessions, &host, &ids)
 }
 
 /// The task mailbox's letters, sanitized, each labelled with the run that
@@ -601,10 +663,10 @@ fn render(frame: &Frame) -> Vec<String> {
         "{} · {} · {} · started {}",
         frame.label, frame.agent, frame.status, frame.started_at
     ));
-    out.push(format!(
-        "session {} · log {}",
-        frame.session_id, frame.log_path
-    ));
+    out.push(match &frame.log_path {
+        Some(path) => format!("session {} · log {path}", frame.session_id),
+        None => format!("session {}", frame.session_id),
+    });
     match (&frame.task, &frame.socket, frame.conductable) {
         (Some(task), _, _) => out.push(format!("task {task} · mailbox self/{task}")),
         (None, _, _) => {}
@@ -750,9 +812,15 @@ fn follow(
     // tail is the live stream, so its offset is taken NOW: history was
     // already rendered above.
     let raw_output = stdout_is_terminal() && !json_mode;
-    let mut offset = std::fs::metadata(&first.log_path).map(|m| m.len()).unwrap_or(0);
+    // The transcript to follow: the opening frame's own `logPath`, which
+    // `gather` above already guaranteed (a record that keeps no conduct-owned
+    // PTY is refused there). A frame whose `logPath` was struck —
+    // `Frame::for_wire`, run by another box — leaves this empty, and an empty
+    // path reads as no growth: the same degradation this loop already
+    // tolerates for a transcript that went away mid-watch.
+    let path = PathBuf::from(first.log_path.clone().unwrap_or_default());
+    let mut offset = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     let mut child_mark = child_queue(id, first.task.as_deref()).0;
-    let path = PathBuf::from(&first.log_path);
     // Catch up after attaching, including letters filed since the opening
     // frame; the child's cursor and printed rail exclude old letters.
     let mut follower = None;
@@ -911,13 +979,14 @@ fn read_log_from(path: &Path, offset: u64) -> Option<Vec<u8>> {
     Some(buf)
 }
 
-/// A block of untrusted/operator text kept multi-line: control characters
-/// other than `\n` are stripped (a `\r`, an escape sequence, a bell none of
-/// them reach a terminal), each line is clipped, and the block is bounded to
-/// [`BLOCK_LINES_MAX`] lines.
+/// A block of untrusted/operator text kept multi-line: `\n` is kept, every
+/// other character [`common::is_unsafe`] refuses (a `\r`, an escape sequence,
+/// a bell, a zero-width or bidi `Cf` mark — none of them reach a terminal),
+/// each line is clipped, and the block is bounded to [`BLOCK_LINES_MAX`]
+/// lines.
 fn clean_block(s: &str) -> Vec<String> {
     s.chars()
-        .filter(|c| *c == '\n' || !c.is_control())
+        .filter(|c| *c == '\n' || !common::is_unsafe(*c))
         .collect::<String>()
         .split('\n')
         .take(BLOCK_LINES_MAX)
@@ -990,6 +1059,109 @@ mod tests {
             flags: BTreeMap::from([("snapshot".to_string(), "true".to_string())]),
             door: Door::Cli,
         }
+    }
+
+    /// `for_wire` is the ONE place a frame sheds what belongs to this box: the
+    /// two paths, the live socket, and the `aoide send` line whose id is a
+    /// local namespace. Everything the frame exists to SHOW stays — and the
+    /// struck fields are `null` on the wire, never absent, so a reader can
+    /// tell "this box kept its paths" from "there is no path".
+    #[test]
+    fn for_wire_strikes_the_four_fields_that_name_something_on_this_box() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = isolated("view-for-wire");
+        let sock = root.join("run/run-1.sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        let mut rec = crate::graph::testutil::session(
+            "run-1",
+            &root.to_string_lossy(),
+            "running",
+            "2026-09-21T05:00:00Z",
+            None,
+        );
+        let log = root.join("state/sessions/run-1.log");
+        std::fs::write(&log, "line one\nline two\n").unwrap();
+        let sidecar = root.join("state/sessions/run-1.instructions.md");
+        std::fs::write(&sidecar, "BRIEF: do the thing\n").unwrap();
+        rec.task = Some("fix-flaky".to_string());
+        rec.log_path = Some(log.to_string_lossy().into_owned());
+        rec.instructions_path = Some(sidecar.to_string_lossy().into_owned());
+        rec.socket = Some(sock.to_string_lossy().into_owned());
+        rec.conductable = Some(true);
+        write_roster(vec![rec]);
+
+        let frame = watch_frame("run-1", 5).unwrap();
+        // The local frame carries all four — otherwise the assertions below
+        // would pass on a frame that never had them.
+        assert!(frame.log_path.is_some(), "local frame: {frame:?}");
+        assert!(frame.socket.is_some(), "local frame: {frame:?}");
+        assert_eq!(
+            frame.suggested.as_deref(),
+            Some("aoide send --id run-1 --submit -- \"<text>\"   (prints nothing else; the gate is yours)"),
+        );
+
+        let wire = frame.clone().for_wire();
+        assert_eq!(wire.log_path, None);
+        assert_eq!(wire.socket, None);
+        assert_eq!(wire.instructions_path, None);
+        assert_eq!(wire.suggested, None);
+        // Everything the frame is FOR survives.
+        assert_eq!(wire.output, frame.output);
+        assert_eq!(wire.mail, frame.mail);
+        assert_eq!(wire.label, frame.label);
+        assert_eq!(wire.status, frame.status);
+        assert_eq!(wire.instructions, frame.instructions);
+        let v = serde_json::to_value(&wire).unwrap();
+        assert!(v["logPath"].is_null() && v["socket"].is_null(), "serialized: {v}");
+        assert!(v["instructionsPath"].is_null() && v["suggested"].is_null(), "serialized: {v}");
+        // The struck frame is still a frame: the same renderer draws it.
+        assert!(render(&wire).iter().any(|l| l.contains("run-1")), "rendered: {:?}", render(&wire));
+    }
+
+    /// The frame a wire reader gets round-trips back through `Deserialize`
+    /// into the same value — the client-side half of `for_wire` (the same
+    /// `render` on both sides, one shape).
+    #[test]
+    fn a_wire_frame_deserializes_back_into_the_frame_that_was_sent() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = isolated("view-for-wire-round-trip");
+        let rec = finished_run(&root, "run-1", "fix-flaky", Some(0));
+        write_roster(vec![rec]);
+
+        let wire = watch_frame("run-1", 5).unwrap().for_wire();
+        let json = serde_json::to_value(&wire).unwrap();
+        let back: Frame = serde_json::from_value(json).unwrap();
+        assert_eq!(back, wire);
+    }
+
+    /// A `--json` frame is the LOCAL view's own bytes: `truncated` — a wire
+    /// cap's flag, set by the door alone — is absent until something sets it.
+    #[test]
+    fn a_local_frame_serializes_without_the_wire_only_flag() {
+        let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, _env) = isolated("view-truncated-absent");
+        let rec = finished_run(&root, "run-1", "fix-flaky", Some(0));
+        write_roster(vec![rec]);
+
+        let frame = watch_frame("run-1", 5).unwrap();
+        assert!(!frame.truncated);
+        let v = serde_json::to_value(&frame).unwrap();
+        assert!(v.get("truncated").is_none(), "serialized: {v}");
+        let mut cut = frame;
+        cut.truncated = true;
+        assert_eq!(serde_json::to_value(&cut).unwrap()["truncated"], true);
+    }
+
+    /// `clean_block` keeps `\n` and drops every other character the one
+    /// sanitizer refuses — a zero-width or bidi `Cf` mark is an invisible
+    /// instruction inside an instructions sidecar or a letter body too.
+    #[test]
+    fn clean_block_strips_format_characters_and_keeps_its_newlines() {
+        assert_eq!(
+            clean_block("one\u{200b}\ntwo\u{202e}three\u{feff}\n"),
+            vec!["one".to_string(), "twothree".to_string(), String::new()],
+        );
+        assert_eq!(clean_block("a\rb"), vec!["ab".to_string()]);
     }
 
     /// The live rail attaches to the mailbase on the first tick that finds one,

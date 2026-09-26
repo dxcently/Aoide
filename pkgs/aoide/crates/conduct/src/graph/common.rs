@@ -90,8 +90,11 @@ pub(in crate::graph) const LINE_MAX: usize = 200;
 
 /// One line of text this process did not write, made safe to print: every
 /// control character stripped — `\r` included, it is an Enter at whoever
-/// pastes it — whitespace flattened, clipped to [`LINE_MAX`] with an ellipsis.
-/// The single sanitizer `view.rs` (mail fragments) and `who.rs` (a pulled node
+/// pastes it — every Unicode `Cf` mark stripped too ([`is_unsafe`], which
+/// includes the zero-width and bidi characters that would otherwise survive
+/// as an invisible instruction), whitespace flattened, clipped to
+/// [`LINE_MAX`] with an ellipsis. The single sanitizer `view.rs` (mail
+/// fragments, a run's own output lines) and `who.rs` (a pulled node
 /// document's own fields) both reach a terminal through, so neither surface
 /// can hold a laxer rule than the other.
 pub(in crate::graph) fn clean_line(s: &str) -> String {
@@ -99,13 +102,48 @@ pub(in crate::graph) fn clean_line(s: &str) -> String {
     clip_flat(&stripped, LINE_MAX)
 }
 
-/// A character no terminal may be handed: every [`char::is_control`] (`\u{1b}`
-/// colour/bell/`\r`/`\n`) plus the INVISIBLE formatting marks a terminal
-/// honours but `is_control` does not — the bidi overrides and embedding marks
-/// Trojan-Source uses to make one string read as another (Cf, not Cc).
-fn is_unsafe(c: char) -> bool {
-    c.is_control()
-        || matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+/// A character no terminal may be handed: every [`char::is_control`]
+/// (`\u{1b}` colour/bell/`\r`/`\n`) plus every Unicode `Cf` (FORMAT)
+/// character — the invisible marks a terminal honours but `is_control` does
+/// not, which is what lets one string read as another. `pub(in crate::graph)`
+/// because BOTH sanitizers reach it: [`clean_line`] here and
+/// `view.rs::clean_block` for the multi-line texts (a letter body, a run's
+/// instructions).
+pub(in crate::graph) fn is_unsafe(c: char) -> bool {
+    c.is_control() || is_format(c)
+}
+
+/// Unicode 15's `Cf` (FORMAT) category, enumerated — `char`'s stable API has
+/// no general-category test, so the ranges stand here instead. They are the
+/// marks that render as NOTHING and change how the text around them reads:
+/// the bidi embeddings/overrides/isolates Trojan Source reorders a line with,
+/// the zero-width space/joiners, the BOM, the soft hyphen, the Arabic
+/// letter/number marks, and the tag block. A range added by a later Unicode
+/// version is a one-line addition here; every reader is [`is_unsafe`].
+fn is_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00ad}'                  // soft hyphen
+        | '\u{0600}'..='\u{0605}'   // Arabic number signs
+        | '\u{061c}'                // Arabic letter mark
+        | '\u{06dd}'                // Arabic end of ayah
+        | '\u{070f}'                // Syriac abbreviation mark
+        | '\u{0890}'..='\u{0891}'   // Arabic pound/piastre marks
+        | '\u{08e2}'                // Arabic disputed end of ayah
+        | '\u{180e}'                // Mongolian vowel separator
+        | '\u{200b}'..='\u{200f}'   // ZWSP, ZWNJ, ZWJ, LRM, RLM
+        | '\u{202a}'..='\u{202e}'   // bidi embeddings and overrides
+        | '\u{2060}'..='\u{2064}'   // word joiner, invisible operators
+        | '\u{2066}'..='\u{206f}'   // bidi isolates + deprecated format chars
+        | '\u{feff}'                // BOM / zero-width no-break space
+        | '\u{fff9}'..='\u{fffb}'   // interlinear annotation
+        | '\u{110bd}' | '\u{110cd}' // Kaithi number signs
+        | '\u{13430}'..='\u{1343f}' // Egyptian hieroglyph format controls
+        | '\u{1bca0}'..='\u{1bca3}' // Shorthand format controls
+        | '\u{1d173}'..='\u{1d17a}' // musical symbol begin/end
+        | '\u{e0001}'               // language tag
+        | '\u{e0020}'..='\u{e007f}' // tag characters
+    )
 }
 
 /// Flatten runs of whitespace to single spaces and clip to `max` characters
@@ -135,6 +173,22 @@ mod tests {
     fn clean_line_strips_the_bidi_marks_that_reorder_a_line() {
         assert_eq!(clean_line("\u{202e}gpj.exe"), "gpj.exe");
         assert_eq!(clean_line("a\u{200f}b\u{2066}c\u{2069}d"), "abcd");
+    }
+
+    /// Every `Cf` mark, not just the bidi ones: the zero-width space/joiner
+    /// that hides a word boundary, the BOM, the soft hyphen, the tag block.
+    /// A terminal renders them as NOTHING, so a line that kept them would
+    /// read as text it is not — and they survive `is_control`, which is why
+    /// they need their own table.
+    #[test]
+    fn clean_line_strips_the_invisible_format_characters() {
+        assert_eq!(clean_line("hid\u{200b}den"), "hidden");
+        assert_eq!(clean_line("a\u{200d}b\u{2060}c\u{00ad}d\u{feff}e"), "abcde");
+        assert_eq!(clean_line("tag\u{e0041}\u{e007f}ged"), "tagged");
+        assert_eq!(clean_line("\u{061c}alm\u{180e}sep"), "almsep");
+        // Not a licence to strip everything exotic: an ordinary multi-byte
+        // glyph is text, and stays.
+        assert_eq!(clean_line("ünicode 漢字"), "ünicode 漢字");
     }
 
     #[test]

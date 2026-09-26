@@ -55,8 +55,8 @@ use aoide_conduct::graph::{
 use aoide_protocol::output::Status;
 use aoide_protocol::registry::{Command, Registry};
 use aoide_protocol::wire::{
-    AgentCapabilities, AgentCard, AgentSkill, JsonRpcResponse, Task, TaskStatus,
-    TaskStatusUpdateEvent,
+    AgentCapabilities, AgentCard, AgentSkill, Artifact, JsonRpcResponse, Part, Task, TaskStatus,
+    TaskStatusUpdateEvent, FRAME_ARTIFACT_ID, FRAME_KEY,
 };
 use aoide_protocol::{audit, Door, EventClass, Invocation};
 use aoide_storage::records::RemoteParent;
@@ -624,6 +624,14 @@ pub fn a2a_task_state_checked(dead: bool, canonical: &str, needs_sudo: bool) -> 
 /// work — `message/send` (Phase B2) landed the inject/spawn execution
 /// semantics but kept this MVP id-collapse.
 fn task_from_sessions(sessions: &[SessionRecord], id: &str) -> Result<Value, (i64, String)> {
+    Ok(serde_json::to_value(&build_task(sessions, id)?).expect("Task always serializes"))
+}
+
+/// The envelope itself, before serialization — [`task_from_sessions`]'s body,
+/// split out so the watch-frame arm (`tasks/get` with `aoide/frame`) can set
+/// `artifacts` on the SAME status read rather than build a second shape that
+/// could drift from it.
+fn build_task(sessions: &[SessionRecord], id: &str) -> Result<Task, (i64, String)> {
     let rec = sessions
         .iter()
         .find(|s| s.session_id == id)
@@ -654,15 +662,16 @@ fn task_from_sessions(sessions: &[SessionRecord], id: &str) -> Result<Value, (i6
         |_| None,
     );
     let state = a2a_task_state_checked(dead, canonical, needs_sudo);
-    let task = Task {
+    Ok(Task {
         id: rec.session_id.clone(),
         // MVP simplification: task id == sessionId, contextId == sessionId —
         // see the doc comment above.
         context_id: rec.session_id.clone(),
         status: TaskStatus { state: state.to_string(), timestamp: now_iso_utc() },
         kind: "task".to_string(),
-    };
-    Ok(serde_json::to_value(&task).expect("Task always serializes"))
+        artifacts: None,
+        history: None,
+    })
 }
 
 /// Load `sessions.json` off the stage and resolve one task by id.
@@ -671,6 +680,180 @@ fn task_get(task_id: &str) -> Result<Value, (i64, String)> {
     let sf: SessionsFile =
         load_stage(&path).map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
     task_from_sessions(&sf.sessions, task_id)
+}
+
+// ── `tasks/get` + `metadata["aoide/frame"]`: the watch frame ────────────────
+//
+// CONTRACTS.md §6 (P-RSA S6). The A2A extension that puts a session's watch
+// frame — the same frame `aoide session watch --snapshot` prints — on the
+// wire as ONE `data` artifact, behind [`output_read_admitted`]. Nothing else
+// about `tasks/get` moves: a request that does not ask for a frame is
+// answered by [`task_get`] exactly as before, and the two optional fields the
+// envelope grew (`artifacts`/`history`) are omitted when absent.
+
+/// The most output lines a frame request may ask for. The floor is 1 (a
+/// request for none still gets the last line — a frame with no output at all
+/// says nothing), the ceiling is this: a wire bound, not a UI preference.
+const FRAME_TAIL_MAX: u64 = 200;
+/// `session watch`'s own default window, for a request that names no `tail`.
+const FRAME_TAIL_DEFAULT: u64 = 50;
+/// How many lines of ONE letter's body a frame may carry — `clean_block`
+/// keeps up to `BLOCK_LINES_MAX` (400), which is a LOCAL render bound; the
+/// wire's own is this.
+const LETTER_BODY_LINES_MAX: usize = 40;
+/// The serialized frame's own bound, in bytes.
+const FRAME_MAX_BYTES: usize = 256 * 1024;
+/// The output-read refusal's code. Deliberately the SAME `-32007`
+/// `verify_signed_request` refuses a malformed/bad signature with — the
+/// brief's own number for this refusal (CONTRACTS.md §6). The two never
+/// share a TEXT, and they cannot be confused about what happened: a
+/// signature refusal is decided by [`verify_signed_request`] BEFORE this
+/// arm runs at all.
+const OUTPUT_READ_REFUSED_CODE: i64 = -32007;
+/// What a refused output read says. ONE text for every refusal, and it says
+/// NOTHING about the session asked for — the same message whether the id
+/// exists or not, so the read gate is not an existence oracle beyond the
+/// status `tasks/get` already reveals.
+const OUTPUT_READ_REFUSED: &str = "output read refused: reading a session's output needs a signed, \
+     verified node whose allows include `read` on this host";
+
+/// The output-read gate (CONTRACTS.md §6, P-RSA S6). True only when all three
+/// hold:
+/// - `read_ok` — the door's own bearer gate ([`token_authorized`]), the same
+///   one every other read arm carries. With no token configured it is true
+///   for everyone; that is exactly why this predicate exists;
+/// - the caller resolved through the SIGNATURE rung, i.e. a signature this
+///   door verified against some node record's stored pubkey;
+/// - that record is `verified` with `read` in its `allows` ([`node_may_read`]).
+///
+/// **Wider than the Inject arm on purpose** (User ruling, 2026-09-25): a
+/// signed, verified node holding `read` may read ANY session's frame on this
+/// host. The remote-parent key match is NOT required to read — reading is
+/// wider than writing, and steering a child without pending (S5) or pulling
+/// its ping-back history still needs the key. Pure, so the whole table is
+/// provable without a socket, a stage file or a live registry entry.
+fn output_read_admitted(
+    read_ok: bool,
+    caller: Option<(&aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)>,
+) -> bool {
+    read_ok
+        && matches!(
+            caller,
+            Some((node, aoide_storage::node_store::NodeRung::Signature)) if node_may_read(node)
+        )
+}
+
+/// The node-side half of the output-read gate — [`node_may_spawn`]'s twin,
+/// one capability over: a paired node whose `allows` contains `"read"`.
+/// Pure.
+fn node_may_read(node: &aoide_storage::node_store::Node) -> bool {
+    node.verified && node.allows.iter().any(|a| a == "read")
+}
+
+/// The caller as the frame gate judges it: the CURRENT record for the name
+/// [`verify_signed_request`] resolved, carrying the rung that proof IS. The
+/// rung is not a second lookup — a [`SignedCaller`] exists for the signature
+/// rung and for nothing else (`claimable_caller`'s own statement), and
+/// `signed?` is that fact: an unsigned, bearer or address caller has no
+/// proof, so this is `None` and [`output_read_admitted`] refuses it.
+fn resolved_caller<'a>(
+    nodes: &'a [aoide_storage::node_store::Node],
+    signed: Option<SignedCaller<'_>>,
+) -> Option<(&'a aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)> {
+    let caller = signed?;
+    nodes
+        .iter()
+        .find(|p| p.name == caller.name)
+        .map(|p| (p, aoide_storage::node_store::NodeRung::Signature))
+}
+
+/// The frame a `tasks/get` request asks for: `Some(tail)` when
+/// `params.metadata["aoide/frame"]` is present at all, `None` for a plain
+/// status read. Only `params.metadata` counts — never `message.metadata`, the
+/// `message/send` fallback `aoide/spawn` also accepts — because this is a
+/// request about a session, not a message.
+///
+/// The value's own `tail` is read if present and is CLAMPED here, at the
+/// edge, to `1..=FRAME_TAIL_MAX`: nothing downstream ever sees a window
+/// outside the bound. A missing, non-numeric or absent `tail` takes
+/// [`FRAME_TAIL_DEFAULT`]; the key's VALUE shape is otherwise not policed
+/// (`{"aoide/frame": true}` asks for the default window, which is the
+/// tolerant reading of "I want the frame").
+fn frame_tail(params: &Value) -> Option<u64> {
+    let asked = params.get("metadata")?.get(FRAME_KEY)?;
+    let tail = asked.get("tail").and_then(Value::as_u64).unwrap_or(FRAME_TAIL_DEFAULT);
+    Some(tail.min(FRAME_TAIL_MAX).max(1))
+}
+
+/// The watch frame as the wire artifact, inside the door's own caps.
+///
+/// Order of shedding, fixed and never mixed: the OLDEST mail letter first,
+/// then the OLDEST output line — the newest of each is what a watcher is
+/// looking at, and a letter is a whole run's worth of context against one
+/// line of output. `truncated: true` is set whenever anything went.
+///
+/// Two bounds are NOT this function's: the caller's `tail` (applied by
+/// [`aoide_conduct::graph::watch_frame`], which never returns more output
+/// lines than asked for) and each line's own length (`clean_line`'s
+/// `LINE_MAX`, character-counted). The instruction block is bound by that
+/// same per-line clip plus the block's line cap and is never dropped: it is
+/// the text the frame exists to show, so a frame can exceed
+/// [`FRAME_MAX_BYTES`] by at most that block — the door's bound is on what it
+/// may DISCARD, not a promise about the sidecar an operator wrote.
+fn frame_artifact(frame: aoide_conduct::graph::Frame) -> Artifact {
+    let mut frame = frame.for_wire();
+    for letter in frame.mail.iter_mut() {
+        letter.body.truncate(LETTER_BODY_LINES_MAX);
+    }
+    let over = |f: &aoide_conduct::graph::Frame| {
+        serde_json::to_vec(f).map(|bytes| bytes.len()).unwrap_or(0) > FRAME_MAX_BYTES
+    };
+    while over(&frame) && (!frame.mail.is_empty() || !frame.output.is_empty()) {
+        if !frame.mail.is_empty() {
+            frame.mail.remove(0);
+        } else {
+            frame.output.remove(0);
+        }
+        frame.truncated = true;
+    }
+    let mut part = Part { kind: "data".to_string(), text: None, extra: Default::default() };
+    part.extra.insert(
+        "data".to_string(),
+        serde_json::to_value(&frame).expect("a Frame always serializes"),
+    );
+    Artifact {
+        artifact_id: FRAME_ARTIFACT_ID.to_string(),
+        name: Some("session watch frame".to_string()),
+        parts: vec![part],
+    }
+}
+
+/// `tasks/get` with a frame asked for: the gate FIRST (so a refusal never
+/// depends on whether the id exists), then the SAME status read
+/// [`task_get`] answers, plus the frame as one artifact.
+///
+/// A session with no frame to read — an unknown id, a `sub:` card that keeps
+/// no PTY of its own, a record that keeps no conduct-owned PTY — answers with
+/// the watch's own taught refusal under `-32001`, the same code the unknown-id
+/// status read already uses; the message names the reason.
+fn task_get_frame(
+    task_id: &str,
+    tail: u64,
+    read_ok: bool,
+    signed_caller: Option<SignedCaller<'_>>,
+) -> Result<Value, (i64, String)> {
+    let nodes = aoide_storage::node_store::load_nodes();
+    if !output_read_admitted(read_ok, resolved_caller(&nodes, signed_caller)) {
+        return Err((OUTPUT_READ_REFUSED_CODE, OUTPUT_READ_REFUSED.to_string()));
+    }
+    let path = sessions_path();
+    let sf: SessionsFile =
+        load_stage(&path).map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
+    let mut task = build_task(&sf.sessions, task_id)?;
+    let frame = aoide_conduct::graph::watch_frame(task_id, tail as usize)
+        .map_err(|o| (-32001_i64, o.message))?;
+    task.artifacts = Some(vec![frame_artifact(frame)]);
+    Ok(serde_json::to_value(&task).expect("Task always serializes"))
 }
 
 // ── `message/send`: the inject-or-spawn execution door (Phase B2) ───────────
@@ -1027,6 +1210,8 @@ fn submitted_task(session_id: &str) -> Value {
         context_id: session_id.to_string(),
         status: TaskStatus { state: "submitted".to_string(), timestamp: now_iso_utc() },
         kind: "task".to_string(),
+        artifacts: None,
+        history: None,
     };
     serde_json::to_value(&task).expect("Task always serializes")
 }
@@ -1497,6 +1682,8 @@ fn do_spawn(
                     timestamp: now_iso_utc(),
                 },
                 kind: "task".to_string(),
+                artifacts: None,
+                history: None,
             };
             Ok(serde_json::to_value(&task).expect("Task always serializes"))
         }
@@ -2702,7 +2889,12 @@ fn handle_jsonrpc(req: &Value, ctx: &RequestCtx) -> Value {
         "tasks/get" if !read_ok => Err(unauthorized()),
         "tasks/get" => {
             let task_id = params.get("id").and_then(Value::as_str).unwrap_or("");
-            task_get(task_id)
+            // `metadata["aoide/frame"]` asks for the watch frame (CONTRACTS.md
+            // §6, P-RSA S6); a request without it is the untouched status read.
+            match frame_tail(&params) {
+                Some(tail) => task_get_frame(task_id, tail, read_ok, ctx.signed_caller),
+                None => task_get(task_id),
+            }
         }
         "message/send" => message_send(
             &params,
@@ -3559,10 +3751,21 @@ fn route(
                 // interpolating it verbatim, so a hostile body can't bloat
                 // the audit log or plant a misleading label (e.g.
                 // `a2a.graph.session delete`, or a multi-KB string).
-                let parsed_method = serde_json::from_slice::<Value>(&req.body)
-                    .ok()
+                let parsed = serde_json::from_slice::<Value>(&req.body).ok();
+                let parsed_method = parsed
+                    .as_ref()
                     .and_then(|v| v.get("method").and_then(Value::as_str).map(str::to_string));
+                // A frame read gets its OWN label, off the same already-parsed
+                // body: an operator scanning the audit log sees which
+                // `tasks/get` calls read a session's output, and which were
+                // only status polls (CONTRACTS.md §6, P-RSA S6).
+                let frame_asked = parsed
+                    .as_ref()
+                    .and_then(|v| v.get("params"))
+                    .and_then(frame_tail)
+                    .is_some();
                 let label = match parsed_method.as_deref() {
+                    Some("tasks/get") if frame_asked => "tasks/get.frame",
                     Some("tasks/get") => "tasks/get",
                     Some("message/send") => "message/send",
                     Some("aoide/graphSummary") => "aoide/graphSummary",
@@ -11322,5 +11525,373 @@ mod tests {
         assert!(aoide_storage::mail::read_base().unwrap().is_empty(), "a bad msgid is never filed");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    // ── P-RSA S6: the watch frame on `tasks/get` (CONTRACTS.md §6) ───────────
+
+    /// A stage holding ONE session with a real transcript, under temp
+    /// `AOIDE_STAGE_DIR`/`AOIDE_STATE_DIR` roots — BOTH, because the frame
+    /// path reads `sessions.json` off the stage and the mailbase and the
+    /// report cursor off the state root, and no test here may read the
+    /// operator's own tree. The returned guard restores both on drop, so a
+    /// temp root never leaks into the next test in this binary (the same
+    /// save/restore the file's older tests spell out inline).
+    struct Roots {
+        stage: Option<String>,
+        state: Option<String>,
+    }
+
+    impl Drop for Roots {
+        fn drop(&mut self) {
+            match &self.stage {
+                Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+                None => std::env::remove_var("AOIDE_STAGE_DIR"),
+            }
+            match &self.state {
+                Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+                None => std::env::remove_var("AOIDE_STATE_DIR"),
+            }
+        }
+    }
+
+    fn frame_stage(tag: &str, id: &str, state: &str) -> Roots {
+        let roots = Roots {
+            stage: std::env::var("AOIDE_STAGE_DIR").ok(),
+            state: std::env::var("AOIDE_STATE_DIR").ok(),
+        };
+        let root = std::env::temp_dir().join(format!(
+            "aoide-server-a2a-frame-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::create_dir_all(root.join("state/mail")).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        let log = stage.join(format!("{id}.log"));
+        std::fs::write(&log, "line one\nline two\n").unwrap();
+        let mut rec = fixture_session(id, state, None);
+        rec.log_path = Some(log.to_string_lossy().into_owned());
+        write_stage(
+            &sessions_path(),
+            &SessionsFile { schema_version: "0".to_string(), sessions: vec![rec] },
+        )
+        .unwrap();
+        roots
+    }
+
+    /// A `tasks/get` body asking for the frame, `tail` included when given.
+    fn frame_request(id: &str, tail: Option<u64>) -> Value {
+        let mut params = json!({ "id": id });
+        // The wire key is spelled out here, never taken from the const: a
+        // renamed const must fail this test, not silently move the wire.
+        params["metadata"] = match tail {
+            Some(t) => json!({ "aoide/frame": { "tail": t } }),
+            None => json!({ "aoide/frame": {} }),
+        };
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": params })
+    }
+
+    /// The `(resolved name, verified key)` `handle_connection` threads into
+    /// [`SignedCaller`] after [`verify_signed_request`] verified a real
+    /// signature — the same round trip, so the gate sees exactly what
+    /// production sees.
+    fn verified_caller(kp: &aoide_storage::identity::Keypair, body: &[u8]) -> (String, String) {
+        let now = 1_800_000_000_i64;
+        let req = signed_request(kp, "yomi-strix", "/", body, now, &unique_nonce("frame"));
+        match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
+            other => panic!("expected a real signature to verify, got {other:?}"),
+        }
+    }
+
+    /// The whole output-read table at the predicate (P-RSA S6, with the
+    /// 2026-09-25 ruling folded in): unsigned and the bearer/address rungs are
+    /// refused, a signature-rung node is admitted on `verified` + `read` and
+    /// on nothing else — the target's own `remoteParent` never enters into it.
+    #[test]
+    fn output_read_admitted_is_a_signed_verified_node_with_read() {
+        let mut reader = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        reader.verified = true;
+        reader.allows = vec!["read".to_string()];
+        fn sig(
+            node: &aoide_storage::node_store::Node,
+        ) -> Option<(&aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)> {
+            Some((node, aoide_storage::node_store::NodeRung::Signature))
+        }
+
+        assert!(output_read_admitted(true, sig(&reader)), "signed, verified, `read`: admitted");
+        assert!(!output_read_admitted(true, None), "unsigned with no door token (read_ok true): refused");
+        assert!(!output_read_admitted(false, sig(&reader)), "the bearer gate still runs first");
+        assert!(
+            !output_read_admitted(true, Some((&reader, aoide_storage::node_store::NodeRung::Token))),
+            "bearer rung: refused"
+        );
+        assert!(
+            !output_read_admitted(true, Some((&reader, aoide_storage::node_store::NodeRung::Addr))),
+            "address rung: refused"
+        );
+
+        let mut no_read = reader.clone();
+        no_read.allows = vec!["spawn".to_string()];
+        assert!(!output_read_admitted(true, sig(&no_read)), "signed but `read` was never granted");
+        let mut unverified = reader.clone();
+        unverified.verified = false;
+        assert!(!output_read_admitted(true, sig(&unverified)), "an allows set without a pairing grants nothing");
+    }
+
+    /// The rung comes from the PROOF, not from a second lookup: no
+    /// `SignedCaller` (unsigned, bearer, address) is `None` whatever the
+    /// registry holds, and a proof only names the record its KEY resolved to.
+    #[test]
+    fn resolved_caller_needs_a_proof_and_finds_its_own_record() {
+        let mut reader = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        reader.verified = true;
+        reader.allows = vec!["read".to_string()];
+        let nodes = vec![reader.clone()];
+
+        assert!(resolved_caller(&nodes, None).is_none(), "no signature headers, no rung");
+        let found = resolved_caller(&nodes, Some(caller("box-b"))).expect("the proved name resolves");
+        assert_eq!(found.0.name, "box-b");
+        assert_eq!(
+            found.1,
+            aoide_storage::node_store::NodeRung::Signature,
+            "a proof IS the signature rung"
+        );
+        assert!(
+            resolved_caller(&nodes, Some(caller("box-z"))).is_none(),
+            "a name this registry does not hold resolves to nothing"
+        );
+    }
+
+    /// `tail` is read off `params.metadata` only, clamped to `1..=200`, and
+    /// its absence is a plain status read.
+    #[test]
+    fn frame_tail_clamps_and_reads_only_params_metadata() {
+        assert_eq!(frame_tail(&json!({})), None, "no params at all");
+        assert_eq!(frame_tail(&json!({ "metadata": {} })), None, "no frame key: a status read");
+        assert_eq!(frame_tail(&frame_request("s", None)["params"]), Some(50), "absent tail takes the watch default");
+        assert_eq!(frame_tail(&frame_request("s", Some(5))["params"]), Some(5));
+        assert_eq!(frame_tail(&frame_request("s", Some(0))["params"]), Some(1), "the floor is one line");
+        assert_eq!(frame_tail(&frame_request("s", Some(10_000))["params"]), Some(200), "the ceiling is 200");
+        assert_eq!(frame_tail(&json!({ "metadata": { "aoide/frame": { "tail": "many" } } })), Some(50));
+        assert_eq!(frame_tail(&json!({ "metadata": { "aoide/frame": true } })), Some(50));
+        assert_eq!(
+            frame_tail(&json!({ "message": { "metadata": { "aoide/frame": { "tail": 5 } } } })),
+            None,
+            "`message.metadata` is message/send's own fallback, never tasks/get's"
+        );
+    }
+
+    /// A frame read with no signature at all — and no door token configured,
+    /// which is the shape that matters (`read_ok` is true for everyone) — is
+    /// refused, and the refusal says the SAME thing whether the session
+    /// exists or not.
+    #[test]
+    fn an_unsigned_frame_read_is_refused_and_is_no_existence_oracle() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _roots = frame_stage("unsigned", "sess-1", "working");
+        let ctx = test_ctx(Path::new("/dev/null"), "");
+
+        let known = handle_jsonrpc(&frame_request("sess-1", Some(5)), &ctx);
+        let unknown = handle_jsonrpc(&frame_request("ghost", Some(5)), &ctx);
+        assert_eq!(known["error"]["code"], -32007);
+        assert_eq!(unknown["error"]["code"], -32007);
+        assert_eq!(
+            known["error"]["message"], unknown["error"]["message"],
+            "one text for every refusal, or the gate is an existence oracle"
+        );
+        assert_eq!(known["error"]["message"], OUTPUT_READ_REFUSED);
+
+        // The SAME request without the frame key is the untouched status read
+        // — answered, ungated, and carrying neither optional field.
+        let status = handle_jsonrpc(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": "sess-1" } }), &ctx);
+        assert_eq!(status["result"]["status"]["state"], "working");
+        assert_eq!(status["result"]["kind"], "task");
+        assert!(status["result"].get("artifacts").is_none(), "{status}");
+        assert!(status["result"].get("history").is_none(), "{status}");
+
+        // And an unknown id on the STATUS path is still the same -32001 it
+        // always was.
+        let missing = handle_jsonrpc(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": "ghost" } }), &ctx);
+        assert_eq!(missing["error"]["code"], -32001);
+        assert_eq!(missing["error"]["message"], "task not found");
+
+    }
+
+    /// A genuinely signed caller whose node was never granted `read` is
+    /// refused with the same `-32007`.
+    #[test]
+    fn a_signed_node_without_read_is_refused() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _roots = frame_stage("no-read", "sess-1", "working");
+        let kp = setup_signed_node_with_allows("yomi-strix", &["spawn"]);
+        let body = serde_json::to_vec(&frame_request("sess-1", Some(5))).unwrap();
+        let (name, key) = verified_caller(&kp, &body);
+        let ctx = RequestCtx { signed_caller: Some(SignedCaller { name: &name, key: &key }), ..test_ctx(Path::new("/dev/null"), "") };
+        let parsed = serde_json::from_slice::<Value>(&body).unwrap();
+
+        let resp = handle_jsonrpc(&parsed, &ctx);
+        assert_eq!(resp["error"]["code"], -32007);
+        assert_eq!(resp["error"]["message"], OUTPUT_READ_REFUSED);
+
+    }
+
+    /// A signed, verified node holding `read` reads ANY session's frame on
+    /// this host — including one whose record carries no `remoteParent` at
+    /// all, which is the whole point of the 2026-09-25 ruling (reading is
+    /// wider than writing). The frame is the local one, minus the fields that
+    /// name this box.
+    #[test]
+    fn a_signed_reader_reads_any_sessions_frame() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _roots = frame_stage("admitted", "sess-1", "working");
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
+        let body = serde_json::to_vec(&frame_request("sess-1", Some(5))).unwrap();
+        let (name, key) = verified_caller(&kp, &body);
+        let ctx = RequestCtx { signed_caller: Some(SignedCaller { name: &name, key: &key }), ..test_ctx(Path::new("/dev/null"), "") };
+        let parsed = serde_json::from_slice::<Value>(&body).unwrap();
+
+        let resp = handle_jsonrpc(&parsed, &ctx);
+        assert!(resp.get("error").is_none(), "admitted: {resp}");
+        let task = &resp["result"];
+        assert_eq!(task["id"], "sess-1");
+        assert_eq!(task["status"]["state"], "working", "the status read is the same one");
+        assert_eq!(task["artifacts"][0]["artifactId"], "frame");
+        assert_eq!(task["artifacts"][0]["parts"][0]["kind"], "data");
+        let frame = &task["artifacts"][0]["parts"][0]["data"];
+        assert_eq!(frame["sessionId"], "sess-1");
+        assert_eq!(frame["output"], json!(["line one", "line two"]));
+        assert_eq!(frame["truncated"], Value::Null, "nothing was cut: the flag is absent");
+        assert!(frame["logPath"].is_null(), "a path on this box never rides the wire: {frame}");
+        assert!(frame["instructionsPath"].is_null(), "{frame}");
+        assert!(frame["socket"].is_null(), "{frame}");
+        assert!(task.get("history").is_none(), "{task}");
+
+    }
+
+    /// A signed reader asking for a session that keeps no frame gets the
+    /// watch's own taught refusal, under the unknown-id code — the gate came
+    /// first, so this is a per-session answer, not a refusal of the caller.
+    #[test]
+    fn a_frame_read_of_an_unknown_session_is_taught_after_the_gate() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _roots = frame_stage("unknown-after-gate", "sess-1", "working");
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
+        let body = serde_json::to_vec(&frame_request("ghost", Some(5))).unwrap();
+        let (name, key) = verified_caller(&kp, &body);
+        let ctx = RequestCtx { signed_caller: Some(SignedCaller { name: &name, key: &key }), ..test_ctx(Path::new("/dev/null"), "") };
+        let parsed = serde_json::from_slice::<Value>(&body).unwrap();
+
+        let resp = handle_jsonrpc(&parsed, &ctx);
+        assert_eq!(resp["error"]["code"], -32001);
+        assert_eq!(resp["error"]["message"], "task not found", "{resp}");
+
+    }
+
+    /// A frame whose letters alone blow the byte cap sheds the OLDEST letters
+    /// first — the newest is what a watcher is looking at — keeps the output
+    /// lines (they come second), and says `truncated`.
+    #[test]
+    fn the_frame_byte_cap_sheds_the_oldest_letters_first() {
+        let line = "x".repeat(600);
+        let letter = |seq: u64| aoide_conduct::graph::MailLine {
+            seq,
+            received_at: "2026-01-01T00:00:00Z".to_string(),
+            from: "child".to_string(),
+            subject: "s".to_string(),
+            run: "this run".to_string(),
+            body: vec![line.clone(); 40],
+        };
+        let frame = aoide_conduct::graph::Frame {
+            session_id: "sess-1".to_string(),
+            label: "run".to_string(),
+            agent: "claude".to_string(),
+            task: Some("fix-flaky".to_string()),
+            parent: None,
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            state: "running".to_string(),
+            presence: "running".to_string(),
+            status: "running".to_string(),
+            exit_code: None,
+            ended_at: None,
+            outcome: None,
+            socket: Some("/run/sess-1.sock".to_string()),
+            conductable: true,
+            log_path: Some("/state/sess-1.log".to_string()),
+            instructions_path: Some("/state/sess-1.md".to_string()),
+            instructions: None,
+            output: (0..200).map(|i| format!("{i:03}{}", "y".repeat(100))).collect(),
+            mail: (0..20).map(letter).collect(),
+            report: "not filed yet".to_string(),
+            wake: None,
+            suggested: Some("aoide send --id sess-1 --submit -- \"<text>\"".to_string()),
+            truncated: false,
+        };
+        let before = serde_json::to_vec(&frame).unwrap().len();
+        assert!(before > FRAME_MAX_BYTES, "the fixture must really be over the cap: {before}");
+
+        let artifact = frame_artifact(frame);
+        let data = &artifact.parts[0].extra["data"];
+        assert_eq!(data["truncated"], true, "the cap says so: {data}");
+        assert!(
+            serde_json::to_vec(data).unwrap().len() <= FRAME_MAX_BYTES,
+            "the frame is inside the cap once sheddable content went"
+        );
+        let mail = data["mail"].as_array().unwrap();
+        assert!(!mail.is_empty(), "the NEWEST letters survive");
+        assert_eq!(mail.last().unwrap()["seq"], 19, "the newest letter is the one kept");
+        assert!(mail[0]["seq"].as_u64().unwrap() > 0, "and the oldest are the ones gone: {mail:?}");
+        assert_eq!(
+            mail[0]["body"].as_array().unwrap().len(),
+            LETTER_BODY_LINES_MAX,
+            "every surviving letter's body is still clamped to 40 lines"
+        );
+        assert_eq!(data["output"].as_array().unwrap().len(), 200, "output is shed SECOND, so it is intact here");
+        assert!(data["logPath"].is_null(), "and the wire strike still happened: {data}");
+    }
+
+    /// A letter body over the per-letter cap is cut to 40 lines — a
+    /// per-letter bound, not the byte cap, so it does NOT set `truncated`.
+    #[test]
+    fn a_letter_body_is_capped_at_forty_lines_without_flagging_the_frame() {
+        let frame = aoide_conduct::graph::Frame {
+            session_id: "sess-1".to_string(),
+            label: "run".to_string(),
+            agent: "claude".to_string(),
+            task: Some("fix-flaky".to_string()),
+            parent: None,
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            state: "running".to_string(),
+            presence: "running".to_string(),
+            status: "running".to_string(),
+            exit_code: None,
+            ended_at: None,
+            outcome: None,
+            socket: None,
+            conductable: false,
+            log_path: Some("/state/sess-1.log".to_string()),
+            instructions_path: None,
+            instructions: None,
+            output: vec!["one line".to_string()],
+            mail: vec![aoide_conduct::graph::MailLine {
+                seq: 3,
+                received_at: "2026-01-01T00:00:00Z".to_string(),
+                from: "child".to_string(),
+                subject: "s".to_string(),
+                run: "this run".to_string(),
+                body: (0..100).map(|i| format!("line {i}")).collect(),
+            }],
+            report: "not filed yet".to_string(),
+            wake: None,
+            suggested: None,
+            truncated: false,
+        };
+        let artifact = frame_artifact(frame);
+        let data = &artifact.parts[0].extra["data"];
+        assert_eq!(data["mail"][0]["body"].as_array().unwrap().len(), 40);
+        assert_eq!(data["mail"][0]["body"][39], "line 39", "the FIRST 40 lines are the ones kept");
+        assert!(data.get("truncated").is_none(), "the byte cap is what raises the flag: {data}");
     }
 }
