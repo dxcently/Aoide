@@ -117,9 +117,22 @@ mod tests {
     use aoide_protocol::feed::FeedWriter;
 
     fn short_tmp(tag: &str) -> std::path::PathBuf {
-        let nanos =
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_nanos();
-        std::path::PathBuf::from(format!("/tmp/av-events-{tag}-{}-{nanos}", std::process::id()))
+        // ONE seam for a socket-shaped scratch path: `aoide-test-support`'s,
+        // which hashes the tag so the name fits `AF_UNIX`'s `sun_path` budget on
+        // every host (`/tmp` is not a path native Windows has at all).
+        aoide_test_support::short_tmp(&format!("events-{tag}"))
+    }
+
+    /// Create an EMPTY feed file in the shape THIS host's [`Follower`] will
+    /// read: Unix's mode bits have no such reader, so a plain write is the whole
+    /// fixture; native Windows refuses a feed whose DACL still carries inherited
+    /// ACEs, and `std::fs::write` creates exactly such a file there — so the
+    /// fixture creates it owner-only, through the same policy seam a real writer
+    /// uses. Without this the follower saw nothing and the polls below failed on
+    /// their deadline, which reads as a timing flake rather than the policy fact
+    /// it is.
+    fn empty_feed(path: &std::path::Path) {
+        aoide_test_support::owner_only_file(path)
     }
 
     // ── class_matches / render_line: pure ───────────────────────────────
@@ -171,7 +184,7 @@ mod tests {
     #[test]
     fn poll_once_returns_newly_appended_matching_lines() {
         let path = short_tmp("poll").with_extension("jsonl");
-        std::fs::write(&path, b"").unwrap();
+        empty_feed(&path);
         let mut follower = Follower::open_at_end(&path).unwrap();
         let feed = FeedWriter::new(path.clone(), 1024 * 1024, 0o600);
 
@@ -201,7 +214,7 @@ mod tests {
     #[test]
     fn poll_once_applies_the_class_filter() {
         let path = short_tmp("poll-filter").with_extension("jsonl");
-        std::fs::write(&path, b"").unwrap();
+        empty_feed(&path);
         let mut follower = Follower::open_at_end(&path).unwrap();
         let feed = FeedWriter::new(path.clone(), 1024 * 1024, 0o600);
 

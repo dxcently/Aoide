@@ -1,5 +1,31 @@
 # AGENTS.md — aoide-cli
 
+## Native Windows: what the tests may assume
+
+The `aoide` binary this crate builds IS the fixture several other crates' tests
+need, so a native build here is load-bearing beyond this crate: `cargo build --bin
+aoide` must succeed on the host, and the fixture that finds it
+(`aoide_test_support::built_aoide_bin`) spells its name with that host's
+`EXE_SUFFIX` — a bare `aoide` is a name Windows does not have, and a fixture that
+used it silently never launched the real hook process, leaving the daemon's
+peer-pid verification unexercised.
+
+The door integration tests (`daemon_dispatch_door`) exercise the real thing on
+this host: a real `aoide session hook` child, the daemon stamping `__daemon-peer-pid`
+from the connecting socket's own pid, and the hook's `AOIDE_SESSION_ID` claim
+verified against that pid's real ancestry. `graph_residency_p_d6` re-execs this
+test binary as a resident `run_loop` child; its readiness signal must be the
+daemon's own startup line in the events feed, not a successful connect —
+`listen()` happens inside the bind, so a connect proves only that the socket
+exists, and the first dispatch then sits past the hop's 2 s reply bound (measured
+on Windows as `WSAETIMEDOUT`). Those six tests serialize on
+`aoide_test_support::env_lock`; a fully parallel run of that binary is still
+contention-sensitive on a busy box, so read its result single-threaded.
+
+Gated with reasons, never stubbed: the two `#!/bin/sh` plugin-shim tests (a
+`CreateProcess`-invisible fixture) and the two symlink-privilege
+`register_clone` tests (`SeCreateSymbolicLinkPrivilege`).
+
 ## Invariants
 
 - **This is core. It never depends on `aoide-song`/`aoide-screen`.** Adding

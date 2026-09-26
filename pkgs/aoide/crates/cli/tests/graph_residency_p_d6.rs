@@ -18,7 +18,10 @@ use aoide::dispatch::{dispatch, registry};
 use aoide_protocol::{Door, Invocation};
 use aoide_server::daemon::{run_loop, serve_daemon};
 use std::collections::BTreeMap;
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
+#[cfg(windows)]
+use aoide_protocol::win_unix::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -152,16 +155,47 @@ impl RunLoopGuard {
         }
     }
 
-    /// Wait (bounded, same shape as [`connect_retrying`]) until the child's
-    /// socket accepts a connection.
+    /// Wait (bounded) until the resident child is READY TO ANSWER — not merely
+    /// listening.
+    ///
+    /// `listen()` happens inside the socket bind, so a successful connect
+    /// proves only that the socket exists: the daemon can still be in its own
+    /// startup (its events feed, the hand-edit sweep, the first resident tick)
+    /// with the caller's request sitting unread in the backlog. Measured on
+    /// native Windows: the first dispatch then outlived the hop's own 2 s reply
+    /// bound and the caller reported `WSAETIMEDOUT` (os error 10060) — "the
+    /// connected party did not properly respond after a period of time" — which
+    /// reads as a dead daemon rather than a slow one. The readiness signal is
+    /// therefore the daemon's OWN startup line in the events feed it was handed
+    /// at spawn, which `run_loop` writes as it comes up (the same fact the
+    /// server's `run_loop_creates_and_caps_the_events_feed` polls for).
     fn wait_accepting(&mut self) -> Result<(), std::io::Error> {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let mut connected = false;
         loop {
-            match UnixStream::connect(&self.socket_path) {
-                Ok(_) => return Ok(()),
-                Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
-                Err(e) => return Err(e),
+            if !connected {
+                match UnixStream::connect(&self.socket_path) {
+                    Ok(_) => connected = true,
+                    Err(_) if Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(10));
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                }
             }
+            let started = std::fs::read_to_string(&self.events_path)
+                .map(|c| c.contains("\"kind\":\"started\""))
+                .unwrap_or(false);
+            if started {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "the socket accepts, but the daemon never wrote its own startup line",
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(20));
         }
     }
 

@@ -29,6 +29,12 @@ libc = { workspace = true }
 aoide-secrets = { workspace = true }
 
 [dev-dependencies]
+# The SHORT scratch-path seam every socket-binding fixture asks
+# (`aoide_test_support::short_tmp`): `AF_UNIX`'s `sun_path` budget is 108 bytes
+# with its terminator and 107 on native Windows, so a fixture root that spells
+# its own tag does not fit once a socket name is appended. Test-only, like every
+# edge on this crate.
+aoide-test-support = { workspace = true }
 # Only the round-trip test that exercises `parse_message_send_params` (this
 # crate's server-side inbound parser) against `build_message_send_body` (the
 # CLIENT-side builder, `aoide-client`) needs this — a test-only edge, not a

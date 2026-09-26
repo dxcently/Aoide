@@ -237,6 +237,7 @@ dependencies = [
  "aoide-protocol",
  "aoide-secrets",
  "aoide-storage",
+ "aoide-test-support",
  "libc",
  "serde",
  "serde_json",
