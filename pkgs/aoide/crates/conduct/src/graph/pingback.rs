@@ -1170,17 +1170,40 @@ fn pingback_pull_with(
             }
         };
 
-        // The cursor moves FIRST, and it moves to whatever this answer
-        // CARRIED: the newest event in it, or — for a `gap` the ring cannot
-        // hand over an event for — the newest `seq` the child ever pushed.
-        // A write that fails leaves the cursor where it was (the next tick
-        // re-asks), and the delivery below still runs: a lost line is the
-        // safe direction.
-        let next = read.events.last().map(|e| e.seq).unwrap_or(read.last);
-        if next > entry.lines_after {
-            if let Err(e) =
-                aoide_storage::remote_children::advance_lines_after(&entry.key, &entry.session_id, next)
-            {
+        // The cursor advances FIRST, and the claim is ATOMIC with the read the
+        // events are then filtered against (M2): the value this pass may
+        // deliver from is whatever the ledger holds at claim time, so a second
+        // pass that fetched the same window — the daemon's loop and a
+        // `session reap` re-entering through a connection thread overlap by
+        // design — delivers nothing, rather than everything twice.
+        //
+        // It advances to whatever the answer CARRIED: the newest event in it,
+        // or — for a `gap` the ring cannot hand over an event for — the newest
+        // `seq` the child ever pushed. `last` is trusted only where the ring's
+        // own doc says it may be, i.e. under that `gap`: without one, an
+        // honest ring cannot report `last` beyond the events it sent, and
+        // believing a peer's number there would drive the cursor to a value no
+        // event can ever exceed — the child silent forever, the row never
+        // latched (M1).
+        let next = read
+            .events
+            .last()
+            .map(|e| e.seq)
+            .unwrap_or(if read.gap { read.last } else { entry.lines_after });
+        let from = match aoide_storage::remote_children::claim_lines_after(
+            &entry.key,
+            &entry.session_id,
+            next,
+        ) {
+            Ok(Some(from)) => from,
+            // The row left the ledger between this pass's read and its claim:
+            // there is nothing to deliver against, and nothing to say.
+            Ok(None) => continue,
+            // The advance could not be written, so nothing may be delivered:
+            // with the cursor where it was, the same events would come back
+            // next tick and the line would land twice. A lost line is this
+            // lane's safe direction.
+            Err(e) => {
                 eprintln!(
                     "[aoide/reap] remote ping-back cursor write failed for `{}`/{}: {e}",
                     node.name, entry.session_id
@@ -1190,21 +1213,37 @@ fn pingback_pull_with(
                     "cursor-failed",
                     &format!("remote ping-back cursor write failed for `{}`/{}", node.name, entry.session_id),
                 );
+                report.skipped.push((parent.to_string(), "cursor-failed".to_string()));
+                continue;
             }
-        }
+        };
 
         let tag = pull_tag(&node.name, &entry.session_id);
         let mut lines: Vec<String> = Vec::new();
-        if read.gap {
-            lines.push(gap_line(&tag, gap_missed(&read, entry.lines_after)));
-        }
         let mut exited = false;
-        for event in read.events.iter().filter_map(|e| ping_event_of(&e.event)) {
+        for carried in &read.events {
+            let Some(event) = ping_event_of(&carried.event) else {
+                continue;
+            };
+            // The exit is read off the WHOLE answer, not only the events this
+            // pass still owes: a ring keeps its closing event forever, and a
+            // pass that finds it already claimed (an overlapping pass took it)
+            // is exactly the pass that should latch the row.
             exited |= matches!(event, PingEvent::Exited { .. });
+            if carried.seq <= from {
+                continue;
+            }
             lines.push(render_line(&tag, &event));
         }
+        // One honest marker, and only when the claim left a hole to name: a
+        // `gap` whose events are all already claimed costs the parent nothing.
+        let missed = gap_missed(&read, from);
+        if read.gap && missed > 0 {
+            lines.insert(0, gap_line(&tag, missed));
+        }
         for line in lines {
-            match deliver(&line, parent, &roster, inv, "autogate-child remote") {                Ok(()) => {
+            match deliver(&line, parent, &roster, inv, "autogate-child remote") {
+                Ok(()) => {
                     eprintln!("[aoide/reap] ping-back (remote) → {parent}: {line}");
                     report.delivered.push((parent.to_string(), line));
                 }
@@ -2801,6 +2840,48 @@ mod tests {
         let log = std::fs::read_to_string(root.join("log")).unwrap();
         assert!(log.contains("pull-failed"), "{log}");
         assert!(!log.contains('\u{1b}') && !log.contains('\u{202e}'), "{log}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_overlapping_pass_owns_nothing_and_a_lying_last_moves_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = setup("pingback-pull-overlap");
+        register_far_node("nodeb");
+        let _listener = headless_parent("wrap-1", "claude");
+        ledger_row("wrap-1", "a2a-4411-1790");
+
+        // M1: no gap, no events, and a `last` no ring could justify. `last` is
+        // the resync a GAP needs, and nothing else — believing it here would
+        // drive the cursor past every seq the child can ever push, silencing
+        // it forever and making the row undrainable.
+        let report = pingback_pull_with(&daemon_inv(), |_, _, after, _| {
+            assert_eq!(after, 0);
+            Ok(RingRead { events: Vec::new(), gap: false, last: u64::MAX })
+        });
+        assert_eq!(report, PingbackReport::default(), "{report:?}");
+        assert_eq!(cursor_of("a2a-4411-1790"), 0, "a peer's own `last` is not a cursor");
+
+        // M2: a pass that fetched the same window as one that has since
+        // delivered it. The overlap is staged where it really happens — the
+        // claim section — by advancing the ledger inside the fetch, and the
+        // delivery owes nothing: the events are already spoken for.
+        let report = pingback_pull_with(&daemon_inv(), |_, _, after, _| {
+            assert_eq!(after, 0, "this pass fetched BEFORE the other one claimed");
+            aoide_storage::remote_children::advance_lines_after(&remote_key(), "a2a-4411-1790", 2)
+                .unwrap();
+            Ok(read_of(&[(1, settled("first")), (2, settled("second"))]))
+        });
+        assert_eq!(report, PingbackReport::default(), "no duplicate lines: {report:?}");
+        assert_eq!(cursor_of("a2a-4411-1790"), 2);
 
         let _ = std::fs::remove_dir_all(&root);
     }

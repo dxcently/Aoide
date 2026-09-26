@@ -192,6 +192,46 @@ pub fn advance_lines_after(key: &str, session_id: &str, seq: u64) -> Result<bool
     })
 }
 
+/// Claim one child's events up to `up_to` and return the cursor to deliver
+/// FROM, atomically with the advance (P-RSA S9 review M2) — the remote lane's
+/// twin of the local claim section, in the same shape: read, decide, write,
+/// inside one short `with_stage_lock` section.
+///
+/// **Why the read and the write must be one operation.** The pull fetches over
+/// a network (up to its own timeout) between reading the cursor and advancing
+/// it, so two passes — the daemon's loop and a `session reap` re-entering
+/// through a connection thread — would each hand over the same events and
+/// deliver every one of them twice. Here the caller brings only the `up_to` it
+/// means to claim; the cursor it may deliver from is whatever the file holds
+/// AT CLAIM TIME, and anything at or below that is already spoken for.
+///
+/// Forward only, like [`advance_lines_after`] (which this replaces at the pull
+/// site): a `up_to` at or below the stored cursor is not a write. `Ok(None)`
+/// means the row is gone (nothing to deliver against — it was
+/// [`retain_remote_children`]'d, or never there), and `Err` means the advance
+/// could not be written: the caller must then deliver NOTHING for this child,
+/// because without the new cursor the same events would come back next tick
+/// and the line would appear twice. Losing a line is this lane's safe
+/// direction; duplicating one is not.
+pub fn claim_lines_after(key: &str, session_id: &str, up_to: u64) -> Result<Option<u64>, String> {
+    with_stage_lock(|| {
+        let mut file: RemoteChildrenFile = load_stage(&remote_children_path()).unwrap_or_default();
+        let Some(entry) = file
+            .children
+            .iter_mut()
+            .find(|c| c.key == key && c.session_id == session_id)
+        else {
+            return Ok(None);
+        };
+        let stored = entry.lines_after;
+        if up_to > stored {
+            entry.lines_after = up_to;
+            save(&mut file)?;
+        }
+        Ok(Some(stored))
+    })
+}
+
 /// Latch one child's pull as DONE ([`RemoteChild::drained`]), under the stage
 /// lock; a row already latched is a no-op, and so is an unknown child. The
 /// latch is the row's last write: nothing ever clears it.
@@ -391,6 +431,29 @@ mod tests {
         assert_eq!(advance_lines_after("aa", "nope", 9).unwrap(), false);
         assert_eq!(advance_lines_after("bb", "c1", 9).unwrap(), false, "the key is half the identity");
         assert_eq!(load_remote_children()[0].lines_after, 7);
+    }
+
+    #[test]
+    fn claim_lines_after_is_atomic_with_the_advance() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = StageEnv::new("claim");
+        append_remote_child(&child("par1", "nodeb", "aa", "c1")).unwrap();
+
+        // The claim both reports where the caller may deliver from and moves
+        // the cursor there — one operation, so no second pass can hand over
+        // the same events.
+        assert_eq!(claim_lines_after("aa", "c1", 5).unwrap(), Some(0));
+        assert_eq!(load_remote_children()[0].lines_after, 5);
+        assert_eq!(claim_lines_after("aa", "c1", 5).unwrap(), Some(5), "the window is claimed");
+
+        // Forward only: a stale `up_to` reports the stored cursor and writes
+        // nothing.
+        assert_eq!(claim_lines_after("aa", "c1", 3).unwrap(), Some(5));
+        assert_eq!(load_remote_children()[0].lines_after, 5);
+
+        // A row that is not there has nothing to deliver against.
+        assert_eq!(claim_lines_after("aa", "nope", 9).unwrap(), None);
+        assert_eq!(claim_lines_after("bb", "c1", 9).unwrap(), None, "the key is half the identity");
     }
 
     #[test]
