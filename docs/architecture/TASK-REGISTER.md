@@ -2455,8 +2455,7 @@ project/parent inheritance across local/remote/app/subagents;
   Inject carrying the key is answered exactly as before; (3) `--timeout`,
   `--report-to`, `--instructions-path` and `--parent` have no source at this
   door and stay absent — the door has no deadline to impose (inventing one
-  would kill long remote runs mid-flight), the report is filed to the child's
-  own slug and stays on its node (Q5), a remote caller names no sidecar, and
+  would kill long remote runs mid-flight), the run is reported WITHOUT a letter and nothing is mailed cross-node, a remote caller names no sidecar, and
   `parentSessionId` stays a LOCAL field (§4: the remote parent is the
   `remoteParent` RECORD field S3 stamps). What S10 changes for the earlier
   slices, stated rather than implied: NOTHING for S3 — the door's env for the
@@ -2468,20 +2467,28 @@ project/parent inheritance across local/remote/app/subagents;
   too: `tracks()` keys on `agent == "eidolon" || remote_parent.is_some()`,
   which the managed shape does not touch, and the `exited` latch lives in the
   per-child cursor entry, which the record's longer life only keeps around.
-  What genuinely CHANGES is retention: with `--task`, a finished A2A child's
-  record is now retained by every AUTOMATIC sweep (`prune_done_scoped` keeps
-  every task-carrying `done` record, and an unfiled one survives even an
-  explicit prune), so a remote caller that names a task grows the roster by
-  one long-lived record per run — a consequence of the local wrapper's own
-  history rule, not a rule invented here. Two gaps left open, deliberately
-  and named: the door composes `conduct` directly, so `spawn --task`'s
-  ONE-LIVE-RUN-PER-SLUG check (`live_run_for`) and its child-reader enrolment
-  (`mail::enrol_reader`) do not run for a remote spawn — a slug a live run
-  already holds is not refused here, and the child reads its queue as an
-  unenrolled reader (mark 0, the same peek `session watch` prints). Neither
-  breaks a documented behaviour (the mailbox NAME is shared across runs by
-  design, and the view labels each run's letters), and neither is in S10's
-  row, so both are recorded as follow-ups rather than silently added. Tests
+  What CHANGES is retention, and the review BOUNDED it (H1 of the S10 review):
+  a door summon (`origin` `node:*`) used to join the local history rule and so
+  stay forever — one permanent, revocation-proof record per request, which no
+  unpairing would ever collect. It is now retained only while its report is
+  owed: `prune_done_scoped` keeps a task-carrying record when it is NOT a door
+  summon OR its report is not yet filed, so a FILED door run is swept by the
+  automatic sweep and by `session prune` alike, exactly like an untasked
+  session, while a local task run keeps the retention it always had (the
+  durable history — ledger line, transcript, sidecar, letters, cursor entry —
+  is untouched either way; the record alone goes). Two things the S10
+  paragraph above got WRONG, corrected here rather than left for the next
+  reader: (1) the child-reader enrolment was never missing — `session_conduct`'s
+  `--task` registration calls `mail::enrol_reader` for the child on EVERY path,
+  a direct `conduct --task` included, and `spawn`'s own enrol is the
+  redundancy (M3); and (2) the ONE-LIVE-RUN-PER-SLUG check now runs on BOTH
+  paths — `live_run_for`/`live_run_refusal` are `pub` and shared by
+  `spawn --task` and the door, which refuses a live-held slug `-32602`, so a
+  peer cannot squat the operator's task name (M2). Also corrected: a
+  door-summoned run is reported WITHOUT a letter (`no_mailbox`: no parent, no
+  `--report-to`, and the door clears `AOIDE_SESSION_ID`), its outcome riding
+  the report cursor entry, the record's own end facts and the audit line on
+  the child's node — nothing is mailed cross-node (M4). Tests
   (aoide-server 246 → 251): the argv via `Command::get_args()` for no task and
   a valid task (an illegal one has no argv at all — it is refused before one
   exists); the env unchanged by `--headless`/`--task`; the S3 stamp landing on
@@ -2627,3 +2634,66 @@ project/parent inheritance across local/remote/app/subagents;
   Conductor-Channel.md — `node remove` or the child ending are the levers, and
   `node allow <n> spawn off` stops only NEW children.
 - Owner: Eidolon executor. Depends on: §13's S-D design half, ruled here.
+- Review pass over S10 (`b814107`, `9021e71`; code and docs fixed in
+  `0928061`..): the lane's own HIGH finding, and its four smaller ones, all
+  fixed on the branch. **H1** — the door could mint permanent roster records
+  without bound (a paired `allows∋spawn` peer looping one `metadata["aoide/task"]`
+  spawn per request, each ending `done`, each retained forever; unpairing it
+  sweeps nothing), now bounded by PROVENANCE: `prune_done_scoped` keeps a
+  task-carrying `done` record when it is NOT a door summon OR its report is not
+  yet filed, so a filed door run leaves the roster exactly like an untasked
+  session while a local task run keeps its retention, and an owed report is
+  still the lane's own trigger either way. Tested through the REAL prune path
+  (`a_finished_door_summon_is_pruned_once_reported_while_a_local_task_run_is_kept`:
+  a filed door record ages out, an unreported one stays, a local run stays
+  filed or not). **M2** — the door was the one spawn path with no
+  one-live-run-per-slug admission, so a peer's child holding a slug denied the
+  OPERATOR that name for as long as the peer chose (the door imposes no
+  deadline by design): `live_run_for` + its refusal text are now `pub` and
+  shared (`graph::live_run_for`/`live_run_refusal`), the door refuses a
+  live-held slug `-32602` before an id or argv exists, and a local `spawn
+  --task` on a door-held slug is refused through the same predicate
+  (`a_local_spawn_is_refused_a_slug_a_door_child_holds_live`). **M3** — the
+  register's own "the child reads its queue as an unenrolled reader" was FALSE
+  (`session_conduct` enrols the child on every `--task` path; `spawn`'s enrol
+  is the redundancy) — corrected above, and it had hidden M2 in the same
+  sentence. **M4** — CONTRACTS §6 and this register promised a report LETTER
+  for a door-summoned run that does not exist (`report_destination` has no
+  parent and no `--report-to` to use, and the door clears `AOIDE_SESSION_ID`):
+  both now say what happens instead — reported WITHOUT a letter, `no_mailbox`,
+  the outcome on the cursor entry, the end facts and the audit line, nothing
+  mailed cross-node — which is still Q5 exactly. **L5** — `--spawned`/
+  `--headless` change more than the docs admitted: a SHELL `spawnAgent` is
+  reachable by the abandoned-shell arm (idle + stale + `spawned` + a captured
+  `restore`), and `--headless` is what makes the child a keystroke TARGET
+  (ping-back lines and mail-side doorbell writes land in a headless wrap where
+  a non-headless one with no channel is skipped as `interactive-composer`);
+  A2A-Door.md and the `spawn_argv` comment now say both, and the comment hedges
+  to "a non-shell child". **L6** — the refusal echoed a caller's raw slug:
+  it is now cleaned and capped by the ONE sanitizer
+  (`common::clean_line`, widened to `pub` and re-exported as
+  `graph::clean_line` — the client's own doc had claimed that reachability
+  since S7, so this makes an existing claim true), with the pinning test
+  asserting the sanitizer's own output and a bounded echo. **L7** — the slug
+  namespace is FLAT and the caller picks a roster label (the slug becomes the
+  run's session name): stated in CONTRACTS §6 and A2A-Door.md rather than
+  reserved away, since a reserved list would be a second undocumented rule and
+  a local `spawn --task` always had the same power. **L8** — nothing in the
+  tree could SEND the key: `aoide node spawn` gains `--task <slug>`
+  (`build_message_send_body` gains the one `task` parameter; the client holds
+  it to `valid_node_name` before signing, the door re-checks), so acceptance
+  7a/7b can exercise the managed spawn with aoide's own commands instead of a
+  hand-rolled signed POST. **L9** — house rule 8 IN LETTER: `b814107` changed
+  the `server/src/a2a.rs` and `conduct/src/graph/spawn.rs` seams and their
+  `AGENTS.md` updates landed in the follow-up `9021e71`; history is not
+  rewritten, so it is recorded here as a process defect of that lane (this pass
+  carries its docs in each commit). **L10** — the "slug check stays FIRST"
+  invariant had a false justification and no test:
+  `do_spawn_refuses_an_illegal_and_a_live_held_slug_through_its_own_boundary`
+  now drives `do_spawn` itself (safe precisely because both refusals return
+  before any process) and `server/AGENTS.md` says why that test is the one
+  that must not be "simplified" into a pure-function test. Final counts after
+  the pass: aoide-server 253, aoide-conduct 916, aoide-client 320,
+  aoide-storage 442, aoide-protocol 174, `cargo test --workspace --no-run`
+  clean. The lane remains code-complete; acceptance runs 7a/7b are still the
+  operator's, on two real nodes.
