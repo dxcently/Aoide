@@ -302,7 +302,7 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
     `idle→submitted`, `done→completed`. Unknown id → `-32001`.
   - `message/send` — inject into a known conductable session (`contextId`),
     or spawn when `metadata["aoide/spawn"] == true` or no contextId: re-execs
-    the aoide binary as `conduct --agent a2a --id a2a-<pid>-<ts> --
+    the aoide binary as `conduct --agent a2a --id a2a-<pid>-<secs>-<n> --
     <spawnAgent>` (`setsid`, stdio nulled, reaped on a parked thread,
     `$AOIDE_AUDIT_LOG` passed down), then types the prompt as its first turn
     over the conduct socket with a connect-retry budget. A loopback caller's
@@ -602,10 +602,15 @@ aoide node spawn <name> [--yes] [--parent <session>] [--via ssh://[user@]host[:p
   node's A2A door; `<text…>` becomes the spawned session's first turn.
   The body carries the caller's own session id under
   `metadata["aoide/from"]`, inside the signed digest: a live `--parent`
-  first, else the daemon-attested caller, never `AOIDE_SESSION_ID`. On
+  first, else the daemon-attested caller, never `AOIDE_SESSION_ID` — and
+  whichever id wins is held locally to the very shape the door accepts
+  (`valid_claimed_session_id`), so an id the far side would refuse
+  `-32602` is refused here first, before anything is signed. On
   the ack the caller appends the child to `state/stage/remote-children.json`
-  (keyed on the node's pubkey and the child's session id), so the
-  parent can list the remote child it spawned.
+  (keyed on the node's pubkey and the child's session id). Nothing reads
+  that ledger back yet — listing a parent's remote children is S4's roster
+  projection, so today the file is the record of what this node asked for,
+  not something any command displays.
   What actually runs is the NODE's configured `aoide.a2a.spawnAgent`,
   never a remote-chosen executable. Every other refusal — `allows`
   lacking `spawn`, an unsigned-but-paired caller, clock skew — is the

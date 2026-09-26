@@ -459,7 +459,7 @@ fn effective_origin(origin: ConnOrigin, token_configured: bool, token_state: Tok
 /// `signed_non_autogate` is `true` only when the caller both ran the request
 /// through [`verify_signed_request`] AND resolved it to a node the operator
 /// has NOT marked auto-deliver (`message_send` computes exactly
-/// `signed_node_name.is_some() && !sig_autogate`). Such a caller is a remote
+/// `signed_caller.is_some() && !sig_autogate`). Such a caller is a remote
 /// node by construction, so it loses `ConnOrigin::Loopback`'s free pass:
 /// coerced to [`ConnOrigin::Unknown`], reusing that variant's existing
 /// fail-safe arm rather than inventing a fourth origin kind — exactly the
@@ -825,35 +825,57 @@ fn parse_message_send_params(params: &Value) -> (String, Option<String>, bool, O
     (prompt, context_id, spawn_asked, claimed_from)
 }
 
+/// The caller the `aoide/from` claim may be honoured for: the SIGNATURE rung's
+/// identity, and nothing else. `resolved` is `message_send`'s own resolution
+/// (which also feeds autogate/allows off the CURRENT registry) and `signed` the
+/// identity [`verify_signed_request`] proved — they agree by construction, the
+/// rung literally IS "a signature verified", and this match states that
+/// agreement instead of assuming it. A weaker rung (no resolution at all,
+/// `NodeRung::Token`, `NodeRung::Addr`) has a `signed` of `None` to pass by
+/// then, so nothing to stamp.
+fn claimable_caller<'a>(
+    resolved: Option<(&aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)>,
+    signed: Option<SignedCaller<'a>>,
+) -> Option<SignedCaller<'a>> {
+    match resolved {
+        Some((_, aoide_storage::node_store::NodeRung::Signature)) => signed,
+        _ => None,
+    }
+}
+
 /// The remote parent to stamp on a spawn, or `Ok(None)` when there is nothing
 /// the door may stamp (P-RSA S3, CONTRACTS.md §4/§6).
 ///
-/// Two inputs only — the resolved caller and the wire claim — because the
-/// value must be built from what this door AUTHENTICATED, never from wire
-/// bytes: `node` and `key` come off the resolved [`aoide_storage::node_store::Node`]
-/// record, `sessionId` off the claim. A name taken from `X-Aoide-Node` or from
-/// the body would be exactly the forgery the key check exists to stop.
+/// Two inputs only — the caller this request PROVED itself to be and the wire
+/// claim — because the value must be built from what this door AUTHENTICATED,
+/// never from wire bytes: `node` and `key` come off the verified
+/// [`SignedCaller`] (the resolved record's name and the stored pubkey that
+/// verified), `sessionId` off the claim. A name taken from `X-Aoide-Node` or
+/// from the body would be exactly the forgery the key check exists to stop.
 ///
-/// **Honoured on the SIGNATURE rung only** (a `verified` node's stored pubkey
-/// verified this request's signature — `verify_signed_request`, one layer up).
-/// Every weaker shape — no resolution, the token rung, the address rung —
-/// ignores the claim entirely and returns `Ok(None)`: it can never reach the
-/// stamp, and the caller audits the ignore rather than refusing, since an
-/// unsigned caller has no claim to make. Pure, so that rung table is provable
-/// against plain `Node` fixtures without a real spawn.
+/// **Honoured on the SIGNATURE rung only** — [`claimable_caller`] is the whole
+/// rung table, and it hands over a [`SignedCaller`] only for that rung.
+/// Every weaker shape has nothing to pass, so it ignores the claim entirely
+/// and returns `Ok(None)`: it can never reach the stamp, and the caller audits
+/// the ignore rather than refusing, since an unsigned caller has no claim to
+/// make. Pure, so that table is provable without a real spawn.
 ///
 /// A claim that IS honoured is validated
 /// ([`aoide_storage::remote_children::valid_claimed_session_id`], the same
 /// predicate the client refuses its own unruly claim with) and a bad value is
-/// `-32602` — never silently dropped, per CONTRACTS.md §6.
+/// `-32602` — never silently dropped, per CONTRACTS.md §6. Refusing is the
+/// CALLER's decision, not this function's: `message_send` applies that error
+/// on the spawn side only, since the Inject arm consumes the claim nowhere yet
+/// (S5 threads it) and a malformed one there is ignored exactly as an absent
+/// one is.
 fn claimed_remote_parent(
-    resolved: Option<(&aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)>,
+    caller: Option<SignedCaller<'_>>,
     claim: Option<&str>,
 ) -> Result<Option<RemoteParent>, (i64, String)> {
     let Some(claim) = claim else {
         return Ok(None);
     };
-    let Some((node, aoide_storage::node_store::NodeRung::Signature)) = resolved else {
+    let Some(caller) = caller else {
         return Ok(None);
     };
     if !aoide_storage::remote_children::valid_claimed_session_id(claim) {
@@ -868,13 +890,10 @@ fn claimed_remote_parent(
         ));
     }
     Ok(Some(RemoteParent {
-        node: node.name.clone(),
-        // Never empty on this rung: `verify_signed_request` resolves only a
-        // record whose stored, non-empty pubkey verified the signature, so the
-        // rung cannot exist without one. The fallback is here because the
-        // field is `Option`, not because a keyless stamp is reachable.
-        key: node.pubkey.clone().unwrap_or_default(),
+        node: caller.name.to_string(),
+        key: caller.key.to_string(),
         session_id: claim.to_string(),
+        extra: Default::default(),
     }))
 }
 
@@ -883,6 +902,25 @@ fn unix_ts_now() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// The session id a spawn mints for its child (`a2a-<pid>-<secs>-<n>`) — the
+/// `--id` the wrapper's own `aoide conduct` registers under, and therefore the
+/// `contextId`/`sessionId` a later request addresses that child by.
+///
+/// The trailing counter is NOT decoration: pid + second alone collides for two
+/// spawns inside one second (`unix_ts_now` is whole seconds), and two children
+/// sharing one id share one `sessions.json` record — `upsert_session`'s update
+/// arm keeps a single row, so the two `stamp_spawn_provenance` stamps race on
+/// it and the LAST one decides the record's `remoteParent`. That is a parent
+/// stamping a run it did not ask for (and losing the one it did), plus one
+/// caller-side ledger row for two children. Process-local and monotonic, so
+/// back-to-back spawns can never mint the same id; the pid keeps it unique
+/// against another `aoided` on the same box, the second keeps it readable.
+fn spawn_session_id() -> String {
+    static SPAWN_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SPAWN_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("a2a-{}-{}-{}", std::process::id(), unix_ts_now(), seq)
 }
 
 /// `session_lookup` for [`decide_send_action`]: read `sessions.json` off the
@@ -1311,7 +1349,7 @@ fn do_spawn(
     spawn_cwd: &str,
     remote_parent: Option<RemoteParent>,
 ) -> Result<Value, (i64, String)> {
-    let id = format!("a2a-{}-{}", std::process::id(), unix_ts_now());
+    let id = spawn_session_id();
     let aoide_bin = std::env::current_exe()
         .map_err(|e| (-32603_i64, format!("resolving the aoide binary: {e}")))?;
 
@@ -1530,7 +1568,7 @@ fn message_send(
     origin: ConnOrigin,
     expected_token: &str,
     presented_token: Option<&str>,
-    signed_node_name: Option<&str>,
+    signed_caller: Option<SignedCaller<'_>>,
 ) -> Result<Value, (i64, String)> {
     let (prompt, context_id, spawn_asked, claimed_from) = parse_message_send_params(params);
     let token_configured = !expected_token.is_empty();
@@ -1563,65 +1601,58 @@ fn message_send(
         ConnOrigin::Loopback | ConnOrigin::Unknown => None,
     };
     // P-P4 (`docs/architecture/PAIRING.md` "Wire authentication"):
-    // `signed_node_name` arrives ALREADY VERIFIED — the caller
+    // `signed_caller` arrives ALREADY VERIFIED — the caller
     // (`handle_connection`, via `verify_signed_request`) checked the
     // ed25519 signature, the replay window, and the nonce cache BEFORE this
-    // function ever ran, and only threads a name through on success. The
-    // name it threads is the RESOLVED one (#63 P-ID5): the node record
-    // whose stored pubkey verified the signature, never the wire-claimed
+    // function ever ran, and only threads an identity through on success. The
+    // name it carries is the RESOLVED one (#63 P-ID5): the node record whose
+    // stored pubkey verified the signature, never the wire-claimed
     // `X-Aoide-Node` label — so the find-by-name below is a lookup of an
-    // already-key-authenticated record, not a trust decision. When
-    // present, it is the SOLE resolution: no fallthrough to the
-    // addr/token ladder for a request that presented signature headers
-    // (fail-closed discipline, #84's own "sentinel on resolve failure, no
-    // fallthrough to a weaker rung" precedent). `None` (no signature
-    // headers on this request at all) is the untouched, existing path.
-    let resolved_node = match signed_node_name {
-        Some(name) => nodes
+    // already-key-authenticated record, not a trust decision, and it exists
+    // only for the CURRENT registry's autogate/allows flags. When present, it
+    // is the SOLE resolution: no fallthrough to the addr/token ladder for a
+    // request that presented signature headers (fail-closed discipline, #84's
+    // own "sentinel on resolve failure, no fallthrough to a weaker rung"
+    // precedent). `None` (no signature headers on this request at all) is the
+    // untouched, existing path.
+    let resolved_node = match signed_caller {
+        Some(caller) => nodes
             .iter()
-            .find(|p| p.name == name)
+            .find(|p| p.name == caller.name)
             .map(|p| (p, aoide_storage::node_store::NodeRung::Signature)),
         None => aoide_storage::node_store::resolve_node(&nodes, addr, presented_token),
     };
 
-    // The caller's `aoide/from` claim (P-RSA S3), turned into the child's
-    // `remoteParent` — or refused. Honoured on the SIGNATURE rung only
-    // (`claimed_remote_parent`'s own doc carries the table); every weaker rung
-    // ignores it and gets one audit line, because an unsigned caller has no
-    // claim to make and a refusal there would be a new oracle where today
-    // there is only silence. `-32602` for a signed caller's malformed claim,
-    // never a silent drop: the value is inside the signature's own body
-    // digest, so a caller that signed it meant it.
-    let remote_parent = match claimed_remote_parent(resolved_node, claimed_from.as_deref()) {
-        Ok(parent) => {
-            if claimed_from.is_some() && parent.is_none() {
-                let _ = audit(
-                    audit_log,
-                    Door::A2a,
-                    EventClass::Audit,
-                    "a2a.message/send",
-                    "ignored-unsigned-from",
-                    &format!(
-                        "ignored metadata[\"{}\"] — a remote parent may only be claimed by a \
-                         request this door verified by a node's key (no signature rung on this request)",
-                        aoide_protocol::wire::FROM_SESSION_KEY,
-                    ),
-                );
-            }
-            parent
-        }
-        Err((code, msg)) => {
-            let _ = audit(
-                audit_log,
-                Door::A2a,
-                EventClass::Audit,
-                "a2a.message/send",
-                "error",
-                &msg,
-            );
-            return Err((code, msg));
-        }
-    };
+    // The caller's `aoide/from` claim (P-RSA S3): the spawned child's
+    // `remoteParent`. Two questions, asked separately. FIRST, may this request
+    // claim at all — `claimable_caller`'s rung table: the SIGNATURE rung's
+    // identity, or nothing; every weaker rung ignores the claim and gets one
+    // audit line, because an unsigned caller has no claim to make and a
+    // refusal there would be a new oracle where today there is only silence.
+    // SECOND, is the claim well formed — `claimed_remote_parent`'s `-32602` for
+    // a signed caller's malformed one, never a silent drop, since the value
+    // rode inside the signature's own body digest and a caller that signed it
+    // meant it. That refusal is applied on the SPAWN side only (below, after
+    // the uniform-response guard): the Inject arm consumes the claim nowhere
+    // until S5 threads it, so a malformed one there takes the same path an
+    // absent one does — and the client refuses its OWN unruly claim before
+    // signing it (`resolve_remote_parent_from`), so silence here hides no bug.
+    let claimed_identity = claimable_caller(resolved_node, signed_caller);
+    if claimed_identity.is_none() && claimed_from.is_some() {
+        let _ = audit(
+            audit_log,
+            Door::A2a,
+            EventClass::Audit,
+            "a2a.message/send",
+            "ignored-unsigned-from",
+            &format!(
+                "ignored metadata[\"{}\"] — a remote parent may only be claimed by a \
+                 request this door verified by a node's key (no signature rung on this request)",
+                aoide_protocol::wire::FROM_SESSION_KEY,
+            ),
+        );
+    }
+    let claim_build = claimed_remote_parent(claimed_identity, claimed_from.as_deref());
 
     // Autogate signals — computed AFTER `resolved_node` (P-S6) so the new
     // signature rung can join `ip_autogate`/`token_autogate` in the same
@@ -1661,6 +1692,29 @@ fn message_send(
         return Ok(submitted_task(id));
     }
 
+    // The SPAWN side of that same split, and the only place a malformed claim
+    // refuses: `decide_send_action`'s own spawn condition (`spawn_asked ||
+    // context_id.is_none()`, the exact negation of the guard's inject one), so
+    // a request can never classify "inject" for the guard and "spawn" here. An
+    // inject-shaped request that carried a malformed claim proceeds exactly as
+    // one that carried none — the claim is not consumed on that arm yet.
+    let spawn_side = spawn_asked || context_id.is_none();
+    let remote_parent = match claim_build {
+        Ok(parent) => parent,
+        Err((code, msg)) if spawn_side => {
+            let _ = audit(
+                audit_log,
+                Door::A2a,
+                EventClass::Audit,
+                "a2a.message/send",
+                "error",
+                &msg,
+            );
+            return Err((code, msg));
+        }
+        Err(_) => None,
+    };
+
     match decide_send_action(context_id.as_deref(), spawn_asked, spawn_agent, session_ref_lookup) {
         SendAction::Inject { session_id } => {
             // `should_deliver_now(ConnOrigin::Unknown, _)` is unconditionally
@@ -1677,7 +1731,7 @@ fn message_send(
             // unconditionally, which is the narrowing itself.
             let eff_origin = origin_for_inject(
                 effective_origin(origin, token_configured, token_state),
-                signed_node_name.is_some() && !sig_autogate,
+                signed_caller.is_some() && !sig_autogate,
             );
             let deliver_now = should_deliver_now(eff_origin, autogate_match);
             // The `from` attribution rides ONLY the QUEUED path (P-P3
@@ -1930,13 +1984,16 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
         };
 
     let nodes = aoide_storage::node_store::load_nodes();
-    let resolved = ctx.signed_node_name.and_then(|name| nodes.iter().find(|p| p.name == name));
+    let resolved = ctx.signed_caller.and_then(|c| nodes.iter().find(|p| p.name == c.name));
     if !deposit_admitted(resolved) {
         let (code, msg) = deposit_refusal(resolved);
         let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "unauthorized", &msg);
         return Err((code, msg));
     }
-    let hop_name = ctx.signed_node_name.expect("deposit_admitted only returns true when signed_node_name is Some");
+    let hop_name = ctx
+        .signed_caller
+        .map(|c| c.name)
+        .expect("deposit_admitted only returns true when a signed caller resolved");
 
     let outcome = aoide_storage::mail::deposit(envelope.clone(), hop_name).map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
 
@@ -2498,12 +2555,12 @@ struct RequestCtx<'a> {
     expected_token: &'a str,
     /// This request's `Authorization: Bearer <token>`, if any.
     presented_token: Option<&'a str>,
-    /// P-P4: `Some(name)` when [`verify_signed_request`] already verified
+    /// P-P4: `Some(caller)` when [`verify_signed_request`] already verified
     /// this request's signature headers against a paired node — computed
     /// exactly once, in `handle_connection`, before either dispatch path,
     /// never re-verified here. `None` covers both "no signature headers at
     /// all" and "this ctx predates P-P4 in a test fixture."
-    signed_node_name: Option<&'a str>,
+    signed_caller: Option<SignedCaller<'a>>,
 }
 
 /// Handle one parsed JSON-RPC 2.0 request `Value`, returning the response
@@ -2538,7 +2595,7 @@ fn handle_jsonrpc(req: &Value, ctx: &RequestCtx) -> Value {
             ctx.origin,
             ctx.expected_token,
             ctx.presented_token,
-            ctx.signed_node_name,
+            ctx.signed_caller,
         ),
         "aoide/graphSummary" if !read_ok => Err(unauthorized()),
         "aoide/graphSummary" => graph_summary(ctx.node_name, ctx.self_url),
@@ -2667,7 +2724,7 @@ fn stream_task<W: Write>(
     origin: ConnOrigin,
     expected_token: &str,
     presented_token: Option<&str>,
-    signed_node_name: Option<&str>,
+    signed_caller: Option<SignedCaller<'_>>,
 ) -> std::io::Result<()> {
     let rpc: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
     let rpc_id = rpc.get("id").cloned().unwrap_or(Value::Null);
@@ -2694,7 +2751,7 @@ fn stream_task<W: Write>(
     } else {
         match method {
             "message/stream" => {
-                message_send(&params, audit_log, spawn_agent, spawn_cwd, origin, expected_token, presented_token, signed_node_name)
+                message_send(&params, audit_log, spawn_agent, spawn_cwd, origin, expected_token, presented_token, signed_caller)
             }
             _ /* tasks/resubscribe */ => {
                 match params.get("id").and_then(Value::as_str).filter(|s| !s.is_empty()) {
@@ -3101,25 +3158,46 @@ fn nonce_is_replay(key: &str, nonce: &str) -> bool {
     false
 }
 
+/// The caller identity [`verify_signed_request`] PROVED for one request: the
+/// RESOLVED record's name (#63 P-ID5 — the record whose stored pubkey verified,
+/// never the `X-Aoide-Node` label) plus the stored key that did the verifying.
+/// ONE value, because they are one fact: `message_send` loads the registry
+/// again for its own autogate/allows questions, and a consumer that took the
+/// name from this outcome and the key from that second read could pair this
+/// request's name with a key that never verified anything (a hand-edited
+/// registry with two records sharing a name, or a same-uid edit of
+/// `nodes.json` between the two loads). The claim's `remoteParent.key` is
+/// built from `key` here, so the stamped key always IS the key that verified.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SignedCaller<'a> {
+    /// The resolved record's name — what every downstream consumer addresses
+    /// the caller by (allows lookup, `node:<name>` origin stamp, autogate).
+    name: &'a str,
+    /// The resolved record's stored public key, the one the signature was
+    /// verified against. Never empty: `verify_signed_request` resolves only a
+    /// record whose non-empty stored key verified.
+    key: &'a str,
+}
+
 /// [`verify_signed_request`]'s result — three shapes, not a `Result`,
 /// because "no signature headers at all" is a THIRD outcome distinct from
 /// both success and refusal (the untouched, pre-P-P4 path), and collapsing
 /// it into `Ok(None)`/`Err(())` would blur that distinction at every call
 /// site.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum SignedRequestOutcome {
     /// None of the four `HEADER_*` values were present — the existing
     /// addr/token resolution ladder applies exactly as before this phase.
     Unsigned,
     /// All four headers were present and verification succeeded. `resolved`
     /// is the name of the node RECORD whose stored pubkey verified the
-    /// signature (#63 P-ID5: identity is the key) — the name every
-    /// downstream consumer (allows lookup, `node:<name>` origin stamp,
-    /// autogate) uses. `claimed` is what the `X-Aoide-Node` header said —
+    /// signature (#63 P-ID5: identity is the key) and `key` the stored pubkey
+    /// that verified — together the [`SignedCaller`] the door threads
+    /// downstream. `claimed` is what the `X-Aoide-Node` header said —
     /// display/attribution only, carried so the caller can audit a
     /// claimed-vs-resolved mismatch as attribution drift; it is never
     /// trusted and never wins over `resolved` anywhere.
-    Verified { resolved: String, claimed: String },
+    Verified { resolved: String, key: String, claimed: String },
     /// Signature headers were present but verification failed somewhere —
     /// the JSON-RPC `(code, message)` the WHOLE request refuses with, no
     /// matter which method it named.
@@ -3268,6 +3346,12 @@ fn verify_signed_request(req: &HttpRequest, now_epoch: i64) -> SignedRequestOutc
 
     SignedRequestOutcome::Verified {
         resolved: resolved.name.clone(),
+        // The stored key that verified, verbatim from the SAME record
+        // `resolved` names — threaded out so the claim's `remoteParent.key` is
+        // this value and never a re-read of the registry (`SignedCaller`'s own
+        // doc says why). Non-empty by construction: the trial set above admits
+        // only records with a non-empty stored pubkey.
+        key: resolved.pubkey.clone().unwrap_or_default(),
         claimed: node_name.to_string(),
     }
 }
@@ -3303,12 +3387,13 @@ fn attribution_drift_detail(claimed: &str, resolved: &str) -> Option<String> {
 /// `url` when a token is configured and the bearer doesn't classify `Valid` —
 /// every other route is pure I/O-free routing over what's already in `req`,
 /// so it still unit-tests without a real socket, spawn, or audit-log write.
-/// `signed_node_name` is P-P4's own addition: `Some(name)` when
+/// `signed_caller` is P-P4's own addition: `Some(caller)` when
 /// [`verify_signed_request`] already verified this request's signature
-/// headers against a paired node — the KEY-resolved record's name
-/// (#63 P-ID5), never the wire-claimed label (never re-verified here — `handle_connection`
-/// runs that check exactly once, before EITHER dispatch path), threaded
-/// straight into [`RequestCtx`] for `message/send` to consume.
+/// headers against a paired node — the KEY-resolved record's name and the
+/// stored key that verified (#63 P-ID5), never the wire-claimed label (never
+/// re-verified here — `handle_connection` runs that check exactly once, before
+/// EITHER dispatch path), threaded straight into [`RequestCtx`] for
+/// `message/send` to consume.
 fn route(
     req: &HttpRequest,
     bind: &str,
@@ -3320,7 +3405,7 @@ fn route(
     origin: ConnOrigin,
     expected_token: &str,
     registry: &Registry,
-    signed_node_name: Option<&str>,
+    signed_caller: Option<SignedCaller<'_>>,
 ) -> (u16, Vec<u8>, String) {
     match req.path.as_str() {
         "/.well-known/agent-card.json" => {
@@ -3380,7 +3465,7 @@ fn route(
                     self_url: &self_url,
                     expected_token,
                     presented_token: req.bearer.as_deref(),
-                    signed_node_name,
+                    signed_caller,
                 };
                 let resp = handle_jsonrpc_bytes(&req.body, &ctx);
                 let body = serde_json::to_vec(&resp).unwrap_or_default();
@@ -3741,23 +3826,29 @@ fn handle_connection(
     // which JSON-RPC method it named, never reaching `stream_task` OR
     // `route`/`handle_jsonrpc_bytes`. A request carrying no signature
     // headers at all (`SignedRequestOutcome::Unsigned`) is completely
-    // untouched by this — `signed_node_name` stays `None`, and everything
+    // untouched by this — `signed_caller` stays `None`, and everything
     // below behaves exactly as it did before this phase.
     let now_epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let signed_node_name = match verify_signed_request(&req, now_epoch) {
+    // `resolved` AND `key` are threaded together (`SignedCaller`), both taken
+    // off the ONE record this verification produced: the name is what flows
+    // downstream as the caller's identity (allows lookup, `node:<name>` origin
+    // stamp, autogate), and the key is what the claim's `remoteParent.key` is
+    // built from — never a re-read of the registry, which `message_send` loads
+    // again for its own purposes. The claimed header name is attribution only;
+    // when it disagrees, the drift is audited and the resolved name still wins.
+    // Owned here, borrowed below: the outcome owns its two strings, and the
+    // borrowed `SignedCaller` is what this door threads through `route` and
+    // `stream_task`.
+    let verified: Option<(String, String)> = match verify_signed_request(&req, now_epoch) {
         SignedRequestOutcome::Unsigned => None,
-        // The RESOLVED name (the record whose key verified — #63 P-ID5) is
-        // what flows downstream: allows lookup, `node:<name>` origin stamp,
-        // autogate. The claimed header name is attribution only; when it
-        // disagrees, the drift is audited and the resolved name still wins.
-        SignedRequestOutcome::Verified { resolved, claimed } => {
+        SignedRequestOutcome::Verified { resolved, key, claimed } => {
             if let Some(detail) = attribution_drift_detail(&claimed, &resolved) {
                 let _ = audit(audit_log, Door::A2a, EventClass::Audit, "a2a.signed-request", "attribution-drift", &detail);
             }
-            Some(resolved)
+            Some((resolved, key))
         }
         SignedRequestOutcome::Refused(code, message) => {
             let body_val = jsonrpc_error_value(code, message.clone());
@@ -3773,6 +3864,9 @@ fn handle_connection(
             return write_http_response(&mut writer, 200, &body);
         }
     };
+    let signed_caller = verified
+        .as_ref()
+        .map(|(name, key)| SignedCaller { name: name.as_str(), key: key.as_str() });
 
     // Phase C: a `message/stream` / `tasks/resubscribe` POST takes over the
     // socket — headers-once + an SSE event loop in `stream_task` — instead of
@@ -3800,7 +3894,7 @@ fn handle_connection(
             origin,
             &expected_token,
             req.bearer.as_deref(),
-            signed_node_name.as_deref(),
+            signed_caller,
         );
     }
 
@@ -3815,7 +3909,7 @@ fn handle_connection(
         origin,
         &expected_token,
         registry,
-        signed_node_name.as_deref(),
+        signed_caller,
     );
 
     // Security/audit (CONTRACTS.md §6): every handled request routes through
@@ -3868,8 +3962,17 @@ mod tests {
             self_url: "http://127.0.0.1:8710/",
             expected_token: "",
             presented_token: None,
-            signed_node_name: None,
+            signed_caller: None,
         }
+    }
+
+    /// The caller identity a `message_send` test threads when it only cares
+    /// WHICH record resolved: those tests reach no stamp (no claim on their
+    /// bodies), so the key is never read off it. The tests that DO check the
+    /// stamped key take it from `verify_signed_request`'s own outcome — the
+    /// only thing that can produce a real one.
+    fn caller(name: &str) -> SignedCaller<'_> {
+        SignedCaller { name, key: "" }
     }
 
     /// A minimal `Node` fixture (P-P3) — unpaired/unautogated/no-token by
@@ -4262,69 +4365,100 @@ mod tests {
         }
     }
 
-    /// P-RSA S3: the claim is honoured on the SIGNATURE rung ONLY. Fed the
-    /// exact `(node, rung)` pairs `message_send`'s own resolution can build
-    /// (real crypto is `verify_signed_request`'s suite above), so the whole
-    /// rung table is provable against fixtures — no disk, no wire, no spawn.
+    /// P-RSA S3: the claim is honoured on the SIGNATURE rung ONLY.
+    /// [`claimable_caller`] is the entire rung table — it hands a caller over
+    /// for that rung and for no other — and [`claimed_remote_parent`] is
+    /// provable on top of it on fixtures alone: no disk, no wire, no spawn.
     #[test]
     fn claimed_remote_parent_is_honoured_on_the_signature_rung_only() {
-        let mut node = fixture_node("yomi-strix", "http://10.0.0.9:8710/", false);
-        node.verified = true;
-        node.pubkey = Some("ab".repeat(32));
+        let node = fixture_node("yomi-strix", "http://10.0.0.9:8710/", false);
+        let key = "ab".repeat(32);
+        let signed = SignedCaller { name: "yomi-strix", key: &key };
 
         for rung in [
             aoide_storage::node_store::NodeRung::Token,
             aoide_storage::node_store::NodeRung::Addr,
         ] {
             assert_eq!(
-                claimed_remote_parent(Some((&node, rung)), Some("conduct-1-2")),
-                Ok(None),
-                "a weaker rung ignores the claim entirely — it can never reach a stamp"
+                claimable_caller(Some((&node, rung)), Some(signed)),
+                None,
+                "a weaker rung hands over nothing — it can never reach a stamp"
             );
         }
         assert_eq!(
-            claimed_remote_parent(None, Some("conduct-1-2")),
-            Ok(None),
+            claimable_caller(None, Some(signed)),
+            None,
             "no resolution at all: nothing to attribute the claim to"
         );
         assert_eq!(
-            claimed_remote_parent(Some((&node, aoide_storage::node_store::NodeRung::Signature)), None),
+            claimable_caller(Some((&node, aoide_storage::node_store::NodeRung::Signature)), None),
+            None,
+            "the rung alone is nothing: the identity comes off the verified signature or not at all"
+        );
+
+        // The one honoured shape: the rung that verified, the name and key it
+        // verified, the claim for the session id, nothing else. The node
+        // fixture carries no key of its own — the stamp takes its key from the
+        // caller, which is the whole of LOW-1.
+        assert_eq!(
+            claimable_caller(Some((&node, aoide_storage::node_store::NodeRung::Signature)), Some(signed)),
+            Some(signed)
+        );
+        assert_eq!(
+            claimed_remote_parent(Some(signed), Some("conduct-1-2")),
+            Ok(Some(RemoteParent {
+                node: "yomi-strix".to_string(),
+                key: key.clone(),
+                session_id: "conduct-1-2".to_string(),
+                extra: Default::default(),
+            }))
+        );
+        assert_eq!(
+            claimed_remote_parent(Some(signed), None),
             Ok(None),
             "no claim on the wire: nothing stamped, the whole pre-S3 shape"
         );
 
-        // The one honoured shape: the resolved record's name and key, the
-        // claim for the session id, nothing else.
-        assert_eq!(
-            claimed_remote_parent(Some((&node, aoide_storage::node_store::NodeRung::Signature)), Some("conduct-1-2")),
-            Ok(Some(RemoteParent {
-                node: "yomi-strix".to_string(),
-                key: "ab".repeat(32),
-                session_id: "conduct-1-2".to_string(),
-            }))
-        );
-
-        // A malformed claim from a signed caller is refused, never dropped
-        // (CONTRACTS.md §6) — the same predicate the client refuses its own
-        // unruly claim with, `valid_claimed_session_id`'s table being that
-        // predicate's own unit test.
+        // A malformed claim from a signed caller is an error for the CALLER to
+        // apply, never a silent drop (CONTRACTS.md §6) — and the caller applies
+        // it on the spawn side only, so this table stops at the refusal value.
         for bad in ["", "a/b", "spaces not allowed", "😀"] {
-            let err = claimed_remote_parent(
-                Some((&node, aoide_storage::node_store::NodeRung::Signature)),
-                Some(bad),
-            )
-            .unwrap_err();
+            let err = claimed_remote_parent(Some(signed), Some(bad)).unwrap_err();
             assert_eq!(err.0, -32602, "malformed claim `{bad}`");
             assert!(err.1.contains("aoide/from"), "the refusal names the key: {}", err.1);
         }
 
-        // ...but a weaker rung never gets that far: the claim is ignored, so
-        // even a malformed one is not an error there.
+        // ...but a weaker rung never gets that far: it has no caller to
+        // validate the claim against, so the same bad claim is silence there,
+        // not -32602.
         assert_eq!(
-            claimed_remote_parent(Some((&node, aoide_storage::node_store::NodeRung::Token)), Some("a/b")),
+            claimed_remote_parent(
+                claimable_caller(Some((&node, aoide_storage::node_store::NodeRung::Token)), Some(signed)),
+                Some("a/b")
+            ),
             Ok(None),
             "an unsigned caller's bad claim is silence, not -32602 — there is no claim to validate"
         );
+    }
+
+    /// P-RSA S3 (MED-2): pid + second alone collides for two spawns inside one
+    /// second (`unix_ts_now` is whole seconds), and two children sharing one id
+    /// share one `sessions.json` record — so the LAST `stamp_spawn_provenance`
+    /// decides whose run it is, and one caller's ledger holds one row for two
+    /// children. Two ids in a tight loop IS that collision, made deterministic.
+    #[test]
+    fn spawn_ids_never_collide_within_a_second_and_stay_legal_session_ids() {
+        let a = spawn_session_id();
+        let b = spawn_session_id();
+        assert_ne!(a, b, "two spawns inside one second must not mint one id");
+        for id in [&a, &b] {
+            assert!(id.starts_with(&format!("a2a-{}-", std::process::id())), "{id}");
+            assert_eq!(id.split('-').count(), 4, "a2a-<pid>-<secs>-<n>: {id}");
+            assert!(
+                aoide_storage::remote_children::valid_claimed_session_id(id),
+                "a spawned child's id is what a later claim addresses it by: {id}"
+            );
+        }
     }
 
     /// P-RSA S3: the value stamped is the RESOLVED record's, key-authenticated
@@ -4352,22 +4486,33 @@ mod tests {
         // signature is the one registered key's.
         let req = signed_request(&kp, "sakaki-impostor", "/", &body_bytes, now, &unique_nonce("rp-resolved"));
 
-        let signed_node_name = match verify_signed_request(&req, now) {
-            SignedRequestOutcome::Verified { resolved, .. } => resolved,
+        let (signed_caller, signed_key) = match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
         assert_eq!(
-            signed_node_name, "yomi-strix",
+            signed_caller, "yomi-strix",
             "the KEY selects the record; the header label is a tie-break among records sharing a key, never a name"
         );
+        assert_eq!(
+            signed_key,
+            kp.info().pubkey_hex,
+            "the outcome carries the key that verified, not just the name"
+        );
 
-        // `message_send`'s own two-line resolution, verbatim.
+        // `message_send`'s own resolution + claim, verbatim: find by the
+        // verified identity's NAME (current registry, for autogate/allows),
+        // gate on the rung, stamp from the verified identity.
         let nodes = aoide_storage::node_store::load_nodes();
         let resolved = nodes
             .iter()
-            .find(|p| p.name == signed_node_name)
+            .find(|p| p.name == signed_caller)
             .map(|p| (p, aoide_storage::node_store::NodeRung::Signature));
-        let stamped = claimed_remote_parent(resolved, parse_message_send_params(&body["params"]).3.as_deref())
+        let caller = claimable_caller(
+            resolved,
+            Some(SignedCaller { name: &signed_caller, key: &signed_key }),
+        );
+        let stamped = claimed_remote_parent(caller, parse_message_send_params(&body["params"]).3.as_deref())
             .unwrap()
             .expect("a verified signature plus a valid claim stamps a parent");
         assert_eq!(stamped.node, "yomi-strix", "never the header's `sakaki-impostor`");
@@ -4543,6 +4688,7 @@ mod tests {
                 node: "yomi-strix".to_string(),
                 key: "ab".repeat(32),
                 session_id: "conduct-17991-1790312541".to_string(),
+                extra: Default::default(),
             }),
         );
 
@@ -4716,7 +4862,7 @@ mod tests {
             self_url: "http://127.0.0.1:8710/",
             expected_token: "s3cr3t",
             presented_token: presented,
-            signed_node_name: None,
+            signed_caller: None,
         };
         let get = json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": "s1" } });
         let sum = json!({ "jsonrpc": "2.0", "id": 2, "method": "aoide/graphSummary" });
@@ -5789,6 +5935,7 @@ mod tests {
             verify_signed_request(&req, now),
             SignedRequestOutcome::Verified {
                 resolved: "box-b".to_string(),
+                key: kp.info().pubkey_hex.clone(),
                 claimed: "box-b".to_string()
             }
         );
@@ -5964,6 +6111,7 @@ mod tests {
             verify_signed_request(&req, now),
             SignedRequestOutcome::Verified {
                 resolved: "box-b".to_string(),
+                key: kp.info().pubkey_hex.clone(),
                 claimed: "box-b".to_string()
             },
             "the FIRST use of this nonce must verify"
@@ -6015,7 +6163,7 @@ mod tests {
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "box-b", "/", b"{}", now, &unique_nonce("by-key"));
         match verify_signed_request(&req, now) {
-            SignedRequestOutcome::Verified { resolved, claimed } => {
+            SignedRequestOutcome::Verified { resolved, claimed, .. } => {
                 assert_eq!(resolved, "box-a", "the record whose stored key verifies IS the caller");
                 assert_eq!(claimed, "box-b", "the wire's claim rides along for attribution");
                 let detail = attribution_drift_detail(&claimed, &resolved).expect("a claimed-vs-resolved mismatch must produce a drift audit line");
@@ -6052,7 +6200,7 @@ mod tests {
         // registered nowhere.
         let req = signed_request(&kp, "old-name", "/", b"{}", now, &unique_nonce("renamed"));
         match verify_signed_request(&req, now) {
-            SignedRequestOutcome::Verified { resolved, claimed } => {
+            SignedRequestOutcome::Verified { resolved, claimed, .. } => {
                 assert_eq!(resolved, "renamed-node");
                 assert_eq!(claimed, "old-name");
             }
@@ -6097,7 +6245,7 @@ mod tests {
         // Claimed name matches one twin exactly — that one wins.
         let req = signed_request(&kp, "twin-b", "/", b"{}", now, &unique_nonce("twin-exact"));
         match verify_signed_request(&req, now) {
-            SignedRequestOutcome::Verified { resolved, claimed } => {
+            SignedRequestOutcome::Verified { resolved, claimed, .. } => {
                 assert_eq!(resolved, "twin-b");
                 assert_eq!(claimed, "twin-b");
             }
@@ -6207,7 +6355,7 @@ mod tests {
     /// wording) — proven up to, but never through, `do_spawn`'s real
     /// OS-level process spawn: `verify_signed_request` really verifies the
     /// signature, and `spawn_admitted` — fed the EXACT resolution
-    /// `message_send` itself performs when `signed_node_name` is `Some`
+    /// `message_send` itself performs when `signed_caller` is `Some`
     /// (the two-line `nodes.iter().find(name).map(|p| (p,
     /// NodeRung::Signature))`) — really admits it. This file's own
     /// established discipline (see the doc comment atop the "Spawn gate
@@ -6238,18 +6386,18 @@ mod tests {
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("admit"));
 
-        let signed_node_name = match verify_signed_request(&req, now) {
+        let signed_caller = match verify_signed_request(&req, now) {
             SignedRequestOutcome::Verified { resolved, .. } => resolved,
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
-        assert_eq!(signed_node_name, "yomi-strix");
+        assert_eq!(signed_caller, "yomi-strix");
 
-        // The exact resolution `message_send` performs when `signed_node_name`
+        // The exact resolution `message_send` performs when `signed_caller`
         // is `Some` — the SOLE resolution, no fallthrough to addr/token (P-P4).
         let nodes = aoide_storage::node_store::load_nodes();
         let resolved = nodes
             .iter()
-            .find(|p| p.name == signed_node_name)
+            .find(|p| p.name == signed_caller)
             .map(|p| (p, aoide_storage::node_store::NodeRung::Signature));
         assert!(spawn_admitted(resolved), "a genuinely signed, paired, spawn-allowed node must be ADMITTED");
         // The exact name that would flow into `do_spawn`'s `node_name` arg,
@@ -6290,10 +6438,11 @@ mod tests {
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("revoked"));
-        let signed_node_name = match verify_signed_request(&req, now) {
-            SignedRequestOutcome::Verified { resolved, .. } => resolved,
+        let (signed_name, signed_key) = match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
+        let caller = SignedCaller { name: &signed_name, key: &signed_key };
 
         let err = message_send(
             &body["params"],
@@ -6303,7 +6452,7 @@ mod tests {
             ConnOrigin::Loopback,
             "",
             None,
-            Some(signed_node_name.as_str()),
+            Some(caller),
         )
         .unwrap_err();
         assert_eq!(err.0, -32006, "genuinely signed and paired, but `spawn` was revoked from allows");
@@ -6349,8 +6498,8 @@ mod tests {
         let body_bytes = serde_json::to_vec(&body).unwrap();
         let now = 1_800_000_000_i64;
         let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("bad-from"));
-        let signed_node_name = match verify_signed_request(&req, now) {
-            SignedRequestOutcome::Verified { resolved, .. } => resolved,
+        let (signed_name, signed_key) = match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
 
@@ -6363,7 +6512,7 @@ mod tests {
             ConnOrigin::Loopback,
             "",
             None,
-            Some(signed_node_name.as_str()),
+            Some(SignedCaller { name: &signed_name, key: &signed_key }),
         )
         .unwrap_err();
         assert_eq!(err.0, -32602, "a signed caller's malformed claim is invalid params, never a silent drop");
@@ -6403,6 +6552,183 @@ mod tests {
         match saved_stage {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
             None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
+    /// P-RSA S3 / MED-3: the claim belongs to the SPAWN side. The Inject arm
+    /// consumes it nowhere — S5 is what threads an attested sender into an
+    /// inject — so a malformed claim on an inject-shaped request must take
+    /// exactly the path an ABSENT claim takes (the send is queued and answered
+    /// with a `submitted` Task), never the door's `-32602`. Driven through the
+    /// REAL `message_send` with a genuinely signed caller and a session that is
+    /// conductable right now, because that is where the ordering bug lived: the
+    /// refusal used to fire between node resolution and the uniform-response
+    /// guard, ahead of the arm that never reads the value.
+    #[test]
+    fn a_malformed_claim_on_an_inject_shaped_request_is_ignored_not_refused() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-inject-bad-from-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+        std::env::remove_var("AOIDE_CONDUCT_AUTOGATE");
+        std::env::remove_var("AOIDE_SESSION_ID");
+
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
+
+        // A session that IS conductable NOW (registered + its socket on disk),
+        // so `decide_send_action` classifies this request Inject (contextId
+        // present, spawn not asked) instead of Spawn or Error.
+        let id = "inject-tgt";
+        let socket = aoide_conduct::graph::conduct_socket_path(id);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let sf = SessionsFile {
+            schema_version: "0".to_string(),
+            sessions: vec![conductable_session(id, &socket)],
+        };
+        write_stage(&sessions_path(), &sf).unwrap();
+
+        let body = aoide_client::wire::build_message_send_body(
+            "status check please",
+            "mid-inject-bad",
+            Some(id),
+            Some("not/a/session"),
+        );
+        let body_bytes = serde_json::to_vec(&body).unwrap();
+        let now = 1_800_000_000_i64;
+        let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("inject-bad-from"));
+        let (signed_name, signed_key) = match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
+            other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
+        };
+
+        let audit_log = root.join("log");
+        let result = message_send(
+            &body["params"],
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Loopback,
+            "",
+            None,
+            Some(SignedCaller { name: &signed_name, key: &signed_key }),
+        );
+        let task = result.unwrap_or_else(|e| {
+            panic!("a malformed claim on the Inject arm must not be refused: {e:?}")
+        });
+        assert_eq!(task["id"], id, "the Inject arm's Task for the session it targeted");
+
+        // The send took the queued path — a signed, non-autogate caller is not
+        // delivered straight through — attributed to the NODE that verified,
+        // never to the malformed claim, which nothing on this arm read.
+        let pending: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
+        let entries = pending["pending"].as_array().unwrap();
+        assert_eq!(entries.len(), 1, "{pending}");
+        assert_eq!(entries[0]["from"], "node:yomi-strix");
+
+        // The weaker-rung ignore line did not fire: this request DID verify by
+        // a node's key, so the claim was not ignored for its rung — it simply
+        // is not consumed on this arm yet.
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(
+            !log.contains("ignored-unsigned-from"),
+            "a signed caller is not an unsigned ignore: {log}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+        match saved_stage {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+    }
+
+    /// P-RSA S3 / LOW-1: the stamp's `key` is the key that VERIFIED, not a
+    /// second read of the registry by name. Hand-written `nodes.json` only —
+    /// `insert_node` refuses duplicate names — but the decoupling is real: two
+    /// records sharing a name, the IMPOSTOR listed FIRST with a different
+    /// stored key. `verify_signed_request` resolves the signer by KEY, so it
+    /// returns the second record; a stamp that re-found the record by name
+    /// would take the first record's pubkey and stamp a `remoteParent.key`
+    /// that never verified anything.
+    #[test]
+    fn the_remote_parent_keys_on_the_verifying_key_not_a_second_name_lookup() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = std::env::temp_dir().join(format!(
+            "aoide-a2a-remote-parent-twin-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::env::set_var("AOIDE_STATE_DIR", &root);
+
+        let kp = setup_signed_node_with_allows("yomi-strix", &["read", "spawn"]);
+        let real = aoide_storage::node_store::load_nodes().remove(0);
+        // The twin: same name, a different (never-verifying) stored key, placed
+        // FIRST in the file so a find-by-name lands on it.
+        let mut impostor = real.clone();
+        impostor.url = "http://impostor/".to_string();
+        impostor.pubkey = Some("cd".repeat(32));
+        aoide_storage::node_store::save_nodes(&[impostor, real]).unwrap();
+
+        let body = aoide_client::wire::build_message_send_body(
+            "status check please",
+            "mid-twin",
+            None,
+            Some("conduct-1-2"),
+        );
+        let body_bytes = serde_json::to_vec(&body).unwrap();
+        let now = 1_800_000_000_i64;
+        let req = signed_request(&kp, "yomi-strix", "/", &body_bytes, now, &unique_nonce("rp-twin"));
+        let (signed_name, signed_key) = match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
+            other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
+        };
+        assert_eq!(signed_key, kp.info().pubkey_hex, "the key trial resolved the REAL twin");
+
+        // `message_send`'s own resolution + claim, verbatim: the name lookup
+        // (which DOES land on the impostor, since names are not identity) and
+        // the rung gate, then the stamp — off the verified identity.
+        let nodes = aoide_storage::node_store::load_nodes();
+        let resolved = nodes
+            .iter()
+            .find(|p| p.name == signed_name)
+            .map(|p| (p, aoide_storage::node_store::NodeRung::Signature));
+        assert_eq!(
+            resolved.expect("the name exists").0.pubkey.as_deref(),
+            Some("cd".repeat(32).as_str()),
+            "the find-by-name really does land on the impostor — the point of this test",
+        );
+        let stamped = claimed_remote_parent(
+            claimable_caller(resolved, Some(SignedCaller { name: &signed_name, key: &signed_key })),
+            Some("conduct-1-2"),
+        )
+        .unwrap()
+        .expect("a verified signature plus a valid claim stamps a parent");
+        assert_eq!(
+            stamped.key,
+            kp.info().pubkey_hex,
+            "the stamped key is the one that verified, never the name-twin's stored key"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
         }
     }
 
@@ -6683,8 +7009,8 @@ mod tests {
     }
 
     #[test]
-    fn message_send_resolves_via_signed_node_name_producing_signature_rung_attribution() {
-        // P-P4: `message_send`'s `signed_node_name` param (already verified
+    fn message_send_resolves_via_signed_caller_producing_signature_rung_attribution() {
+        // P-P4: `message_send`'s `signed_caller` param (already verified
         // by `verify_signed_request`, one layer up) is the SOLE resolution
         // when present — this test drives that resolution directly (the
         // signature verification itself is `verify_signed_request`'s own
@@ -6730,7 +7056,7 @@ mod tests {
         // A REMOTE, non-autogated origin with NO token presented at all —
         // under the pre-P-P4 ladder this would resolve to nothing
         // (`resolve_node` needs a token or a matching address); it resolves
-        // here purely because `signed_node_name` is `Some`.
+        // here purely because `signed_caller` is `Some`.
         let remote_origin = ConnOrigin::Remote("203.0.113.1".parse().unwrap());
         let result = message_send(
             &params,
@@ -6740,7 +7066,7 @@ mod tests {
             remote_origin,
             "",
             None,
-            Some("signed-node"),
+            Some(caller("signed-node")),
         );
         assert!(result.is_ok());
 
@@ -6748,7 +7074,7 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(stage.join("pending.json")).unwrap()).unwrap();
         let entries = pending["pending"].as_array().unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0]["from"], "node:signed-node", "resolution via signed_node_name attributes correctly");
+        assert_eq!(entries[0]["from"], "node:signed-node", "resolution via signed_caller attributes correctly");
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {
@@ -6762,9 +7088,9 @@ mod tests {
     }
 
     #[test]
-    fn message_send_signed_node_name_never_falls_through_to_the_addr_token_ladder() {
+    fn message_send_signed_caller_never_falls_through_to_the_addr_token_ladder() {
         // Fail-closed discipline (#84 precedent, brief point 2): a
-        // `signed_node_name` that names a node NOT actually present in the
+        // `signed_caller` that names a node NOT actually present in the
         // (freshly reloaded) registry — an edge case `verify_signed_request`
         // itself already prevents in practice, since it only ever hands
         // back a name it just confirmed is registered+verified — must
@@ -6821,7 +7147,7 @@ mod tests {
             remote_origin,
             "",
             Some("real-secret"),
-            Some("ghost"),
+            Some(caller("ghost")),
         );
         assert!(result.is_ok());
 
@@ -6831,7 +7157,7 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert!(
             entries[0].get("from").is_none() || entries[0]["from"].is_null(),
-            "a signed_node_name resolving to nothing must NOT fall back to the token-resolved `real-node` — got {:?}",
+            "a signed_caller resolving to nothing must NOT fall back to the token-resolved `real-node` — got {:?}",
             entries[0].get("from")
         );
 
@@ -6847,7 +7173,7 @@ mod tests {
     }
 
     /// LANE IDENTITY P-ID3 (G9): the exact `from: None` shape the test above
-    /// already produces (an unresolvable `signed_node_name`), but with
+    /// already produces (an unresolvable `signed_caller`), but with
     /// `AOIDE_SESSION_ID` set in THIS PROCESS's own env first — standing in
     /// for whatever `aoide a2a serve` might have inherited at launch. Before
     /// the fix, `do_inject`'s bare `if let Some(f) = from` left `--from`
@@ -6902,7 +7228,7 @@ mod tests {
             "message": { "parts": [{ "kind": "text", "text": "hi" }], "contextId": id }
         });
         let remote_origin = ConnOrigin::Remote("10.0.0.9".parse().unwrap());
-        // An unresolvable `signed_node_name` ("ghost") — `do_inject` sees
+        // An unresolvable `signed_caller` ("ghost") — `do_inject` sees
         // `from: None`, exactly the shape that used to fall through to the
         // env.
         let result = message_send(
@@ -6913,7 +7239,7 @@ mod tests {
             remote_origin,
             "",
             Some("real-secret"),
-            Some("ghost"),
+            Some(caller("ghost")),
         );
         assert!(result.is_ok(), "{:?}", result.err());
         assert!(listener.accept().is_err(), "unattributed + non-autogate must never touch the socket");
@@ -7701,7 +8027,7 @@ mod tests {
             ConnOrigin::Loopback,
             "",
             None,
-            Some("tunneled-node"),
+            Some(caller("tunneled-node")),
         );
         assert!(result.is_ok(), "{:?}", result.err());
         assert!(listener.accept().is_err(), "a signed, non-autogate node's send must never touch the socket, loopback or not");
@@ -7779,7 +8105,7 @@ mod tests {
             ConnOrigin::Loopback,
             "",
             None,
-            Some("trusted-tunneled-node"),
+            Some(caller("trusted-tunneled-node")),
         );
         let got = acc.join().unwrap();
         assert_eq!(
@@ -10045,7 +10371,11 @@ mod tests {
         }
     }
 
-    fn mail_deposit_ctx<'a>(audit_log: &'a std::path::Path, signed_node_name: Option<&'a str>) -> RequestCtx<'a> {
+    /// A [`RequestCtx`] for the mail-deposit tests: the caller identity they
+    /// need is a NAME (`deposit_admitted` reads `allows`, and `hop_name` is
+    /// the name), so the key here is a fixture literal — no deposit path reads
+    /// it, and the stamp that does is `message/send`'s.
+    fn mail_deposit_ctx<'a>(audit_log: &'a std::path::Path, name: Option<&'a str>) -> RequestCtx<'a> {
         RequestCtx {
             audit_log,
             spawn_agent: "",
@@ -10055,7 +10385,7 @@ mod tests {
             self_url: "",
             expected_token: "",
             presented_token: None,
-            signed_node_name,
+            signed_caller: name.map(|name| SignedCaller { name, key: "aa11" }),
         }
     }
 
@@ -10082,7 +10412,7 @@ mod tests {
         // no now-superseded Token-rung history to migrate off of
         // (`node_may_message`'s own doc: "signature-only from the start"),
         // so there is no THIRD rung to construct a case from. `resolved` is
-        // populated ONLY by `mail_deposit`'s own `ctx.signed_node_name.
+        // populated ONLY by `mail_deposit`'s own `ctx.signed_caller.
         // and_then(...)` line, so `Some` here already MEANS "resolved via a
         // verified per-request signature" — this test pins that a
         // paired+allowed node still refuses the instant resolution drops to

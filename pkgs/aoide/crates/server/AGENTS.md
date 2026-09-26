@@ -289,13 +289,17 @@
   wire-authentication section, CONTRACTS.md §6).** `handle_connection`
   calls `verify_signed_request` exactly once per connection, strictly
   before either dispatch path, and threads its result down as
-  `signed_node_name: Option<&str>` through `route`/`stream_task`/
-  `RequestCtx` into `message_send`. The name it threads is the
+  `signed_caller: Option<SignedCaller>` through `route`/`stream_task`/
+  `RequestCtx` into `message_send`. The identity it threads is the
   KEY-RESOLVED one (#63 P-ID5): `verify_signed_request` finds the record
   BY the stored pubkey that verifies the signature — never by the
   `X-Aoide-Node` header, which is attribution only (a claimed-vs-resolved
   mismatch audits as `attribution-drift` via `attribution_drift_detail`,
-  and the resolved name wins everywhere downstream). Don't reintroduce a
+  and the resolved name wins everywhere downstream). The `key` rides out of
+  the verifier with the `name` for the same reason: a consumer that re-found
+  the record by name could pair this request's name with a key that never
+  verified anything, so the ONE thing that may stamp, gate, or attribute by
+  key reads both off the verifier's own outcome. Don't reintroduce a
   name-based lookup into the verifier, and keep the no-match refusal a
   single code path with a single message — unknown key, unverified node,
   keyless record, and bad signature must stay indistinguishable (no
@@ -358,23 +362,36 @@
   nothing else — never the top-level `params.metadata` fallback `aoide/spawn`
   also accepts, because this is a claim about WHO is calling and the client's
   outbound builder writes it in that one place; an empty or non-string value is
-  "no claim", not a third state. `claimed_remote_parent` is the whole decision,
-  pure over exactly two inputs: the `(node, rung)` pair `message_send`'s own
-  resolution produced and the claim string. Three invariants live there and
+  "no claim", not a third state. `claimable_caller` is the rung table and
+  `claimed_remote_parent` is the whole decision, pure over exactly two inputs:
+  the VERIFIED caller (`SignedCaller` — resolved `name` + the stored `key`
+  that verified, straight out of `verify_signed_request`) and the claim
+  string. `claimable_caller` passes that caller on for the
+  `NodeRung::Signature` resolution and yields `None` for every other rung;
+  never fold a second question into it (the ignore-audit stays where it was,
+  ahead of the uniform-response guard). Four invariants live across the two and
   none may be relaxed: (1) a weaker rung — no resolution, `NodeRung::Token`,
   `NodeRung::Addr` — IGNORES the claim and yields nothing, because a spawn
   already requires the Signature rung and a claim from an unauthenticated
   caller has nobody to attribute it to; the ignore is audited once
   (`a2a.message/send`/`status:"ignored-unsigned-from"`) and must NOT become a
   refusal — a distinct error there would be a new oracle where today there is
-  silence. (2) A signed caller's malformed claim is `-32602`, never a silent
-  drop: the value rode inside the body the caller signed, so a bad one is a
-  client bug worth surfacing, and `valid_claimed_session_id` is the SAME
-  predicate the client refuses its own claim with (never a second spelling).
-  (3) `node`/`key` come off the resolved `Node` record — the key that actually
+  silence. (2) A signed caller's malformed claim is an error the CALLER
+  applies: `valid_claimed_session_id` is the SAME predicate the client refuses
+  its own claim with (never a second spelling), and the `-32602` is applied on
+  the SPAWN side only — the value rode inside the body the caller signed, so a
+  bad one is a client bug worth surfacing, but the Inject arm consumes the
+  claim nowhere yet (S5 threads it) and a malformed one there is ignored
+  exactly as an absent one is. `claimed_remote_parent` itself stays a pure
+  `Result` so both halves are unit-testable without a spawn.
+  (3) `node`/`key` come off the `SignedCaller` — the key that actually
   verified this request — with the claim supplying `sessionId` alone; a name
   read off `X-Aoide-Node` or the body would be exactly the forgery the key
-  check exists to stop, so never thread a wire string into this value. The
+  check exists to stop, so never thread a wire string into this value.
+  (4) `spawn_session_id` mints `a2a-<pid>-<secs>-<n>` — the monotonic counter
+  is load-bearing: pid+second alone collides for two spawns inside one second,
+  and two children sharing one id share one `sessions.json` record, so the
+  last `stamp_spawn_provenance` would decide whose run it is. The
   stamp is `do_spawn`'s `remote_parent` argument → `stamp_spawn_provenance`,
   which spends the ONE registration retry loop on both its stamps
   (`stamp_origin`, then `stamp_remote_parent`) — never a second poll, never a
@@ -398,7 +415,7 @@
   loopback-terminating proxy) delivers a tunneled node's packets from its
   own end's sshd, so `classify_origin` sees loopback for a tunneled request
   exactly like a genuinely local caller — `origin_for_inject(origin,
-  signed_node_name.is_some() && !sig_autogate)` closes that gap by coercing
+  signed_caller.is_some() && !sig_autogate)` closes that gap by coercing
   the origin fed to `should_deliver_now` to `ConnOrigin::Unknown` for a
   signed, NON-autogate node (reusing that variant's existing fail-safe arm,
   the same move `effective_origin` already makes for an invalid door-wide
@@ -422,7 +439,7 @@
   `autogate_match`) instead of the coercion. Don't gate this on
   `token_configured`/`TokenState` — that's `effective_origin`'s own,
   separate question (an invalid DOOR-WIDE bearer); this narrowing fires on
-  `signed_node_name`/`sig_autogate` alone, unconditionally. Tests:
+  `signed_caller`/`sig_autogate` alone, unconditionally. Tests:
   `signed_inject_from_a_non_autogate_node_on_a_loopback_connection_is_held_pending`
   is the actual regression pin (the exact hole a tunnel would otherwise
   open); `signed_inject_from_an_autogate_node_on_a_loopback_connection_still_auto_delivers`
@@ -484,7 +501,7 @@
   calls `verify_signed_request` exactly ONCE per connection, strictly
   before both the streaming and the plain-JSON-RPC dispatch branches —
   don't duplicate that call inside `route`/`stream_task`/`handle_jsonrpc`;
-  they only ever receive the already-computed `signed_node_name`.
+  they only ever receive the already-computed `signed_caller`.
 - **`a2a::self_url(bind, port)` is the ONE formula the AgentCard's `url`
   field and `route`'s own `aoide/graphSummary` handling call — never a
   second inline `format!("http://{bind}:{port}/")` (P-P6).** Before this
@@ -559,7 +576,7 @@
   mirrors `spawn_admitted` one capability over, but signature-only from
   the start, with no Addr/Token fallback rung to migrate off of the way
   Spawn once had.** `node_may_message` is `verified && allows.contains
-  ("message")`, checked only against `ctx.signed_node_name`'s KEY-resolved
+  ("message")`, checked only against `ctx.signed_caller`'s KEY-resolved
   node (`resolved: Option<&Node>`, `None` whenever the request carried no
   verified signature at all). `deposit_refusal` returns `-32010` for
   BOTH its shapes (paired-but-not-`message`-allowed, told the exact `node

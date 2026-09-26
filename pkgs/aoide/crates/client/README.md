@@ -899,10 +899,15 @@ never the inbound/serve half (that's `aoide-server`).
   prompt, `confirm_spawn`, mirroring `confirm_invite`'s idiom) before calling
   `spawn_on_node_via` and shaping the `Outcome`. It resolves the caller-side
   remote parent first (`resolve_remote_parent`: a live `--parent`, else the
-  daemon-attested caller, never `AOIDE_SESSION_ID`), sends it as
+  daemon-attested caller, never `AOIDE_SESSION_ID`), holds whichever id won to
+  `valid_claimed_session_id` and refuses locally — before anything is signed or
+  sent — when it is not a legal claim (the same predicate the door applies
+  inbound, so the refusal costs no round trip and no signature), sends it as
   `metadata["aoide/from"]`, and on the ack appends the child to
   `aoide_storage::remote_children` (`remote_child_row`, keyed on the node's
-  pubkey and the child's session id). **`aoide-conduct`'s manifest
+  pubkey and the child's session id — and it holds the ack's own id to that
+  same predicate, so a paired-but-hostile node cannot plant a ledger row on a
+  shape no session can occupy). **`aoide-conduct`'s manifest
   remote-summon path** (U4, command-defrag lane U — `graph::resurrect::
   summon_remote`, the `conduct` → `client` edge documented in `conduct`'s
   own `Cargo.toml`) calls `spawn_on_node` directly, no confirm: a manifest

@@ -1289,6 +1289,10 @@ fn live_local_session(id: &str) -> bool {
 /// that var on every door-spawned child. With no parent resolvable the spawn
 /// still proceeds — it is simply a top-level remote spawn (`parent: none
 /// (unattested)`), never a spawn under a guessed session.
+///
+/// The one place this node decides what it will claim: whatever wins above
+/// must also BE a legal claim (`resolve_remote_parent_from` carries the rule),
+/// so no caller of this function can sign a value the far door would refuse.
 fn resolve_remote_parent(explicit: Option<&str>) -> Result<Option<String>, String> {
     let attested = aoide_storage::attest::attested_caller(std::process::id() as i32)
         .map(|(id, _origin)| id);
@@ -1297,20 +1301,43 @@ fn resolve_remote_parent(explicit: Option<&str>) -> Result<Option<String>, Strin
 
 /// [`resolve_remote_parent`]'s decision, over an ALREADY-RESOLVED attestation
 /// — pure, so the precedence (a live `--parent` first, the attestation as the
-/// fallback) and the live-record check are testable with no daemon, no seal
-/// key and no process ancestry in the picture.
+/// fallback), the live-record check, and the claim's own shape check are all
+/// testable with no daemon, no seal key and no process ancestry in the
+/// picture.
+///
+/// Whichever id wins is then held to
+/// [`aoide_storage::remote_children::valid_claimed_session_id`] — the same
+/// predicate the far door refuses a signed claim with (CONTRACTS.md §6). A
+/// session this node can show on its roster can still be an id the door
+/// cannot accept as a `remoteParent.sessionId` (over the length bound, a
+/// stray character), and shipping one only turns a local, immediately-fixable
+/// mistake into the door's `-32602` one round trip and one signature later.
+/// So this node refuses its own unruly claim here, before anything is signed
+/// or sent; `None` (no parent at all) is still a legal answer.
 fn resolve_remote_parent_from(
     attested: Option<String>,
     explicit: Option<&str>,
 ) -> Result<Option<String>, String> {
-    match explicit {
-        None => Ok(attested),
-        Some(id) if live_local_session(id) => Ok(Some(id.to_string())),
-        Some(id) => Err(format!(
-            "`--parent {id}` names no live local session — a remote parent must be a session \
-             this instance can still show on its roster; an ended or unknown id is refused \
-             rather than adopted as a stale parent"
+    let resolved = match explicit {
+        None => attested,
+        Some(id) if live_local_session(id) => Some(id.to_string()),
+        Some(id) => {
+            return Err(format!(
+                "`--parent {id}` names no live local session — a remote parent must be a session \
+                 this instance can still show on its roster; an ended or unknown id is refused \
+                 rather than adopted as a stale parent"
+            ))
+        }
+    };
+    match resolved {
+        Some(id) if !aoide_storage::remote_children::valid_claimed_session_id(&id) => Err(format!(
+            "this node would claim `{id}` as the remote parent, and that is not a legal \
+             `aoide/from` claim: {} bytes at most of [A-Za-z0-9._:-] with no `/` — the same rule \
+             the far door applies, so it would refuse this spawn `-32602`; spawn under a session \
+             whose id fits, or with no parent at all",
+            aoide_storage::remote_children::CLAIMED_SESSION_ID_MAX,
         )),
+        other => Ok(other),
     }
 }
 
@@ -1318,8 +1345,16 @@ fn resolve_remote_parent_from(
 /// the CHILD's verified identity (`node.pubkey` + `sessionId`) and carrying
 /// THIS node's own session as `parentSessionId`, so the entry stays
 /// attributable after a restart. `None` (nothing to write) when there is no
-/// parent to attribute, no child id came back, or the node carries no pubkey
-/// — with no key there is no identity to key the row on.
+/// parent to attribute, no child id came back, the node carries no pubkey —
+/// with no key there is no identity to key the row on — or the ack's id is
+/// not a session id at all.
+///
+/// That last case is the far door's `result.id` verbatim: a string this node
+/// did not mint and cannot vouch for. It is held to the same
+/// [`aoide_storage::remote_children::valid_claimed_session_id`] the door
+/// applies to `aoide/from` coming the other way, so a paired-but-hostile (or
+/// merely broken) node cannot plant a row keyed on a shape no session can
+/// occupy — a phantom entry for whatever reads this ledger next.
 fn remote_child_row(
     node: &aoide_storage::node_store::Node,
     parent_session_id: Option<&str>,
@@ -1327,7 +1362,7 @@ fn remote_child_row(
 ) -> Option<aoide_storage::remote_children::RemoteChild> {
     let key = node.pubkey.clone().filter(|k| !k.is_empty())?;
     let parent = parent_session_id?;
-    if child_session_id.is_empty() {
+    if !aoide_storage::remote_children::valid_claimed_session_id(child_session_id) {
         return None;
     }
     Some(aoide_storage::remote_children::RemoteChild {
@@ -1337,6 +1372,7 @@ fn remote_child_row(
         session_id: child_session_id.to_string(),
         spawned_at: aoide_storage::time::now_iso_utc(),
         lines_after: 0,
+        extra: Default::default(),
     })
 }
 
@@ -5271,6 +5307,49 @@ mod tests {
     }
 
     #[test]
+    fn an_unruly_claim_is_refused_locally_rather_than_signed_and_shipped() {
+        // MED-1: the far door's `-32602` on a malformed `aoide/from` is the
+        // LAST line of defence, not the only one. Both sources of a claim —
+        // the daemon attestation and an explicit `--parent` naming a live
+        // record — are held to `valid_claimed_session_id` HERE, before
+        // anything is signed, so the operator's mistake is local and taught
+        // instead of a refusal one round trip away.
+        with_parent_env("unruly-claim", || {
+            // A live record whose id the door could never accept (conduct
+            // takes `--id` verbatim): the attestation path refuses it.
+            write_local_sessions(&[("par/1", "working"), ("ok-1", "working")]);
+            let err = resolve_remote_parent_from(Some("par/1".to_string()), None).unwrap_err();
+            assert!(err.contains("not a legal"), "{err}");
+            assert!(err.contains("par/1"), "the refusal names the value: {err}");
+            assert!(
+                err.contains("no parent at all"),
+                "and the way out (spawn unattested): {err}"
+            );
+            // The same id as an explicit --parent: refused for the claim's
+            // shape, not for being unknown — it IS a live local record.
+            assert!(live_local_session("par/1"), "the record exists; only its shape is wrong");
+            let err = resolve_remote_parent_from(None, Some("par/1")).unwrap_err();
+            assert!(err.contains("not a legal"), "{err}");
+
+            // The predicate's other edges, same refusal: over the byte bound,
+            // and a character outside the set.
+            let too_long = "a".repeat(aoide_storage::remote_children::CLAIMED_SESSION_ID_MAX + 1);
+            write_local_sessions(&[(too_long.as_str(), "working")]);
+            assert!(resolve_remote_parent_from(Some(too_long.clone()), None).is_err());
+            let spaced = "has space".to_string();
+            write_local_sessions(&[(spaced.as_str(), "working")]);
+            assert!(resolve_remote_parent_from(Some(spaced), None).is_err());
+
+            // ...and a legal one still passes, so the check refuses the shape
+            // and not the resolution.
+            assert_eq!(
+                resolve_remote_parent_from(Some("ok-1".to_string()), None).unwrap(),
+                Some("ok-1".to_string())
+            );
+        });
+    }
+
+    #[test]
     fn the_ledger_row_is_keyed_on_the_child_identity_and_needs_a_parent() {
         let mut node = fixture_node(None);
         node.verified = true;
@@ -5290,6 +5369,21 @@ mod tests {
         let mut keyless = fixture_node(None);
         keyless.verified = true;
         assert!(remote_child_row(&keyless, Some("p1"), "a2a-1").is_none());
+
+        // LOW-2: the id is the FAR node's ack verbatim — the one string this
+        // node did not mint. An id no session can have (`/`, a space, past
+        // the byte bound) is refused the same way an empty one is, so a
+        // hostile or broken far door cannot key a phantom row in the ledger.
+        for unruly in ["", "a/b", "has space", "😀", &"a".repeat(129)] {
+            assert!(
+                remote_child_row(&node, Some("p1"), unruly).is_none(),
+                "ack id `{unruly}` is not a session id, so it is no ledger row"
+            );
+        }
+        assert!(
+            remote_child_row(&node, Some("p1"), "a2a-4411-1790").is_some(),
+            "...and the shape every real spawn mints still lands"
+        );
     }
 
     #[test]

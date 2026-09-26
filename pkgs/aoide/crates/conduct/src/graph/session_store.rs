@@ -2878,6 +2878,7 @@ mod tests {
             node: "yomi-strix".to_string(),
             key: "ab".repeat(32),
             session_id: "conduct-17991-1790312541".to_string(),
+            extra: Default::default(),
         };
         stamp_remote_parent("a2a-child-1", &parent);
 
@@ -2908,6 +2909,7 @@ mod tests {
             node: "sakaki".to_string(),
             key: "cd".repeat(32),
             session_id: "conduct-2".to_string(),
+            extra: Default::default(),
         };
         stamp_remote_parent("a2a-child-1", &other);
         let after2: SessionsFile = load_stage(&sessions_path()).unwrap();
@@ -2921,7 +2923,7 @@ mod tests {
         stamp_remote_parent("no-such-session", &other);
         stamp_remote_parent(
             "a2a-child-1",
-            &aoide_storage::records::RemoteParent { node: "sakaki".to_string(), key: String::new(), session_id: String::new() },
+            &aoide_storage::records::RemoteParent { node: "sakaki".to_string(), key: String::new(), session_id: String::new(), extra: Default::default() },
         );
         let after3: SessionsFile = load_stage(&sessions_path()).unwrap();
         assert_eq!(

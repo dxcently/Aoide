@@ -2149,6 +2149,19 @@ project/parent inheritance across local/remote/app/subagents;
   change-once stamps; `parentSessionId` stays `None`; no env var exists for
   it, and `resurrect` carries none); S4–S10 open, in the brief's order (S4
   and S5 may run in parallel after S3; cargo builds serialize).
+- Review pass over S1–S3 (same branch, `8236675` onward): the caller now
+  holds its own winning claim to `valid_claimed_session_id` and refuses
+  locally before signing (the "one predicate, both sides" line was
+  document-only until then), and its ledger row rejects an ack id outside
+  that same shape; `spawn_session_id` mints `a2a-<pid>-<secs>-<n>` (pid +
+  whole second collided for two spawns inside one second, leaving one
+  record's `remoteParent` to whichever of the two stamps landed last); the
+  `-32602` for a malformed claim is applied on the SPAWN side only, so the
+  Inject arm ignores it exactly as an absent one; both ledger shapes and
+  `records::RemoteParent` flatten unknown keys into `extra`, so a field this
+  version does not know survives a rewrite; and the stamped `key` is the key
+  `verify_signed_request` actually verified (threaded down as `SignedCaller`
+  with the name), not a second lookup of the resolved name.
 - Tests (`aoide-storage`, S1):
   `session_record_remote_parent_round_trips_and_stays_absent_when_unset`,
   `remote_parent_round_trips_unknown_fields_beside_it`,
@@ -2157,6 +2170,28 @@ project/parent inheritance across local/remote/app/subagents;
   `retain_drops_exactly_the_rejected_rows`,
   `advance_lines_after_is_forward_only_and_ignores_an_unknown_child`,
   `valid_claimed_session_id_admits_exactly_the_contract_shape`.
+- Tests (`aoide-client`, S2): `node_spawn_parent_must_name_a_live_local_
+  session`, `node_spawn_refuses_a_parent_that_is_not_a_live_local_session`,
+  `node_spawn_explicit_parent_beats_the_attestation_and_never_reads_the_
+  ambient_env`, `the_ledger_row_is_keyed_on_the_child_identity_and_needs_a_
+  parent`, `node_spawn_writes_the_ledger_row_for_its_parent_on_the_ack`,
+  `node_spawn_writes_no_ledger_row_without_a_parent` (`commands.rs`);
+  `build_message_send_body_writes_the_caller_claim_under_one_key`,
+  `the_signed_body_digest_covers_the_caller_claim` (`wire.rs`).
+- Tests (S1–S3 review pass, same branch): `aoide-storage` —
+  `remote_parent_round_trips_unknown_fields_beside_and_beneath_it`,
+  `remote_parent_extra_round_trips_through_the_struct_alone`,
+  `unknown_fields_survive_a_ledger_rewrite`; `aoide-client` —
+  `an_unruly_claim_is_refused_locally_rather_than_signed_and_shipped`
+  (plus unruly ids folded into the existing
+  `the_ledger_row_is_keyed_on_the_child_identity_and_needs_a_parent`);
+  `aoide-server` —
+  `the_remote_parent_keys_on_the_verifying_key_not_a_second_name_lookup`,
+  `a_malformed_claim_on_an_inject_shaped_request_is_ignored_not_refused`,
+  `spawn_ids_never_collide_within_a_second_and_stay_legal_session_ids`,
+  `message_send_resolves_via_signed_caller_producing_signature_rung_
+  attribution`,
+  `message_send_signed_caller_never_falls_through_to_the_addr_token_ladder`.
 - Tests (`aoide-server`, S3): `claimed_remote_parent_is_honoured_on_the_
   signature_rung_only`, `the_remote_parent_is_built_from_the_resolved_node_
   not_the_header_name`, `a_signed_callers_malformed_from_claim_is_refused_

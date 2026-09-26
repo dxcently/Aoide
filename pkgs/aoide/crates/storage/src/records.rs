@@ -174,7 +174,14 @@ pub struct RestoreSnapshot {
 /// against. `node` is only the display LABEL the door knew at stamp time, so
 /// a reader shows the current `nodes.json` name for `key` when it has one and
 /// falls back to `node`, and a local rename never orphans the link.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// `extra` round-trips any field under `remoteParent` this version does not
+/// know about, the same tolerance [`SessionRecord::extra`] holds one level up
+/// — and for a sharper reason: `sessions.json` is rewritten by many writers
+/// (every registration, every stamp, every prune), so a sub-field a later
+/// version adds here would otherwise be dropped by the NEXT rewrite of an
+/// older `aoided`, not merely by a downgrade-read.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RemoteParent {
     #[serde(default)]
     pub node: String,
@@ -182,6 +189,8 @@ pub struct RemoteParent {
     pub key: String,
     #[serde(rename = "sessionId", default)]
     pub session_id: String,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
 }
 
 /// One session record (`state/stage/sessions.json`, written by shellbridge).
@@ -1067,6 +1076,7 @@ mod tests {
             node: "yomi-strix".into(),
             key: "ab".repeat(32),
             session_id: "conduct-17991-1790312541".into(),
+            extra: Default::default(),
         });
         let json = serde_json::to_string(&rec).unwrap();
         assert!(json.contains("\"remoteParent\":{"), "serialised: {json}");
@@ -1098,15 +1108,16 @@ mod tests {
     }
 
     #[test]
-    fn remote_parent_round_trips_unknown_fields_beside_it() {
+    fn remote_parent_round_trips_unknown_fields_beside_and_beneath_it() {
         // The same shellbridge-grows-fields tolerance `session_records_
         // round_trip_unknown_fields` pins, now with the new field present: a
-        // rewrite must not drop an unknown key on the RECORD. `remoteParent`
-        // itself carries no `extra` map — it has exactly one writer (the
-        // door, in this repo), so there is no foreign writer to round-trip
-        // for, the same closed shape `RestoreSnapshot` holds.
+        // rewrite must not drop an unknown key on the RECORD — nor one
+        // BENEATH `remoteParent`, which is why that struct carries `extra`
+        // too (`sessions.json` is rewritten by every writer, so a sub-field
+        // a later version adds would otherwise die on the next rewrite).
         let raw = r#"{ "sessionId": "a2a-1", "agent": "a2a",
-                       "remoteParent": { "node": "yomi-strix", "key": "ab", "sessionId": "p1" },
+                       "remoteParent": { "node": "yomi-strix", "key": "ab", "sessionId": "p1",
+                                         "pingbackCursor": 7 },
                        "futureField": 42 }"#;
         let rec: SessionRecord = serde_json::from_str(raw).unwrap();
         let back = serde_json::to_value(&rec).unwrap();
@@ -1114,7 +1125,33 @@ mod tests {
         assert_eq!(back["remoteParent"]["node"], "yomi-strix");
         assert_eq!(back["remoteParent"]["key"], "ab");
         assert_eq!(back["remoteParent"]["sessionId"], "p1");
-        assert_eq!(back["remoteParent"].as_object().unwrap().len(), 3);
+        assert_eq!(back["remoteParent"]["pingbackCursor"], 7);
+        assert_eq!(back["remoteParent"].as_object().unwrap().len(), 4);
+
+        // A `remoteParent` with no unknown sub-field rewrites to exactly the
+        // three known keys — no null noise, no empty `extra` object.
+        let plain: SessionRecord = serde_json::from_str(
+            r#"{ "sessionId": "a2a-1",
+                 "remoteParent": { "node": "yomi-strix", "key": "ab", "sessionId": "p1" } }"#,
+        )
+        .unwrap();
+        let plain_back = serde_json::to_value(&plain).unwrap();
+        assert_eq!(plain_back["remoteParent"].as_object().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn remote_parent_extra_round_trips_through_the_struct_alone() {
+        // The same guarantee read off the struct itself, so the field's own
+        // tolerance is pinned with no `SessionRecord` in the picture: parse,
+        // re-serialise, the unknown key is still there.
+        let parent: RemoteParent = serde_json::from_str(
+            r#"{ "node": "yomi-strix", "key": "ab", "sessionId": "p1", "futureField": [1, 2] }"#,
+        )
+        .unwrap();
+        assert_eq!(parent.extra.get("futureField"), Some(&serde_json::json!([1, 2])));
+        assert_eq!(parent.extra.len(), 1, "the known fields stay named fields, never extra entries");
+        let json = serde_json::to_string(&parent).unwrap();
+        assert!(json.contains(r#""futureField":[1,2]"#), "serialised: {json}");
     }
 
     #[test]

@@ -433,7 +433,12 @@ by decision — no embedded database yet
   missing/corrupt file as empty, and the write is atomic — the same
   discipline `undying` holds. `valid_claimed_session_id` is the ONE predicate
   for an `aoide/from` claim (1..=128 bytes of `[A-Za-z0-9._:-]`, no `/`),
-  shared by the client that signs the claim and the door that honours it.
+  shared by both sides of it: the caller holds its own winning id to it and
+  refuses locally BEFORE signing, and the door holds an incoming claim to it
+  on the way in. Both ledger shapes flatten unknown keys into an `extra` map
+  (`RemoteChild`, `RemoteChildrenFile` — and `records::RemoteParent` beside
+  them), so a key this version does not know survives a rewrite by the
+  version that wrote it.
 - `manifest` — a project's own `.aoide/project.json` (v0, command-defrag
   lane U1): host-local SESSION SPECS (`{host, dir, agent, command?}`, `dir`
   always PROJECT-RELATIVE, never a session id or timestamp), so `resurrect`
@@ -532,7 +537,7 @@ by decision — no embedded database yet
   `mint_ack` seal a fresh envelope with THIS instance's own identity key
   (`from.node` always `display::local_host_name()` — `self` never crosses
   the wire); `verify_origin_signature` is the OTHER lookup a P-P4 caller
-  doesn't need — not the connection's signer (`ctx.signed_node_name`, a
+  doesn't need — not the connection's signer (`ctx.signed_caller`, a
   door concern) but `header.from.node`'s own key, tried against the ONE
   entry `node_store` has on record under that exact name, never every
   verified node's key (a paired node signing as another paired node's

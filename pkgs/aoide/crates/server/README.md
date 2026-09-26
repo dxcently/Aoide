@@ -343,8 +343,12 @@ the inbound half of the two-door contract (the outbound half is
   identity-adjacent role is the exact-name tiebreak among verified records
   sharing the verifying pubkey (CONTRACTS.md §6's P-P4 amendment has the
   full canonical-string/header shape, check order, collision semantics,
-  and pinned vectors). The KEY-RESOLVED name threads down as
-  `signed_node_name`; when present, `message_send` resolves EXCLUSIVELY
+  and pinned vectors). The KEY-RESOLVED identity threads down as
+  `signed_caller: Option<SignedCaller>` — the resolved record's `name` AND
+  the stored `key` that verified the signature, so no consumer has to
+  re-find the record by name to reach its key (LOW-1: a second lookup
+  could pair this request's name with a key that never verified anything);
+  when present, `message_send` resolves EXCLUSIVELY
   against it, never falling back to `aoide_storage::node_store::
   resolve_node`'s own two-rung ladder (a node's own `token_file` —
   `NodeRung::Token` — else the TCP origin against a node's `url` —
@@ -375,9 +379,11 @@ the inbound half of the two-door contract (the outbound half is
   otherwise forge the shape there too). The same stamp carries the caller's
   `remoteParent` when it presented a valid `metadata["aoide/from"]` claim
   (P-RSA S3) — one registration wait, two change-once stamps, and the value is
-  built from this resolved record's `name`/`pubkey`, never from a header or
-  body string (`claimed_remote_parent` in `a2a.rs` carries the rung rule and
-  the `-32602`). `stamp_spawn_provenance` polls for the
+  built from the VERIFIED caller `verify_signed_request` handed down
+  (the resolved record's `name` and the stored `key` that verified THIS
+  request), never from a header or body string (`claimable_caller` in `a2a.rs`
+  holds the rung rule, `claimed_remote_parent` the value and the `-32602`,
+  which the caller applies on the spawn side only). `stamp_spawn_provenance` polls for the
   record's registration on the same best-effort budget
   `spawn_inject_prompt` uses (~3s); a disclosed behavior change from the
   pre-P-ID0 synchronous env write — a child that registers slower than that
@@ -395,7 +401,7 @@ the inbound half of the two-door contract (the outbound half is
   §6's new subsection) is the SECOND capability-gated method, after
   Spawn, and the first one not gated on `spawn`.** `mail_deposit` resolves
   the caller the identical KEY-RESOLVED way Spawn does (`ctx.
-  signed_node_name` against the registry), then requires
+  signed_caller` against the registry), then requires
   `deposit_admitted` — `node_may_message` (`verified &&
   allows.contains("message")`), mirroring `node_may_spawn` one capability
   over, with no historical Addr/Token rung to migrate off since `message`
@@ -407,7 +413,7 @@ the inbound half of the two-door contract (the outbound half is
   allow). Past the gate, the envelope's own content is entirely
   `aoide_storage::mail::deposit`'s job — recomputing `msgid`, verifying the
   ORIGIN signature (the two-lookup identity model: hop via
-  `signed_node_name`, origin via the one key on record for
+  `signed_caller`, origin via the one key on record for
   `header.from.node`), deduping, and filing. `mail_deposit` self-audits
   UNCONDITIONALLY under `a2a.aoide/mailDeposit`, at both the admission
   refusal and the deposit outcome — mirroring `pair_request`'s "audit

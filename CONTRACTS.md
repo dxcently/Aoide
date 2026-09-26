@@ -4726,28 +4726,37 @@ are its two sides). Only `message.metadata` counts — never the top-level
 claim about WHO is calling, and the client's outbound builder
 (`aoide_client::wire::build_message_send_body`) writes it in the one place.
 The value is a session id, `1..=128` bytes of `[A-Za-z0-9._:-]` with no `/`
-(`aoide_storage::remote_children::valid_claimed_session_id`, the same
-predicate both sides read); it rides INSIDE the signed body, so the claim is
-covered by the body digest along with the prompt. Absent means "claims no
-parent" — an empty or non-string value is not a third state.
+(`aoide_storage::remote_children::valid_claimed_session_id` — ONE predicate
+read by BOTH sides: the caller holds its own winning id to it in
+`resolve_remote_parent_from` and refuses locally, before anything is signed,
+and the door holds an incoming claim to it again); it rides INSIDE the signed
+body, so the claim is covered by the body digest along with the prompt. Absent
+means "claims no parent" — an empty or non-string value is not a third state.
 
 **The claim is honoured on the SIGNATURE rung only, and the door stamps what
 it can prove.** `message_send` turns the claim into the spawned child's
-`remoteParent` (above, §4) via the pure `claimed_remote_parent`, which sees
-exactly two things: the `(node, rung)` pair its own resolution produced and the
-claim string. A request this door did not verify against a `verified` node's
-stored pubkey — unsigned, bearer-token, or a bare address match — ignores the
-claim entirely and writes one audit line
+`remoteParent` (above, §4) through two pure functions. `claimable_caller` is
+the whole rung table: it hands over the verified caller — the `SignedCaller`
+`verify_signed_request` proved, carrying the resolved record's `name` AND the
+stored `key` that verified the signature — for the `NodeRung::Signature`
+resolution, and for no other. `claimed_remote_parent` then sees exactly two
+things: that caller and the claim string. A request this door did not verify
+against a `verified` node's stored pubkey — unsigned, bearer-token, or a bare
+address match — ignores the claim entirely and writes one audit line
 (`a2a.message/send`/`status:"ignored-unsigned-from"`), rather than a refusal:
 an unauthenticated caller has no claim to make, and a distinct error there
 would be a new oracle where today there is silence. A claim from a genuinely
-signed caller is validated with `valid_claimed_session_id` and a malformed one
-is refused `-32602` — never silently dropped, since the value was inside the
-body the caller signed. The value passed to `do_spawn` is built from the
-RESOLVED node record's `name` and `pubkey` (the key that verified the request)
-with the claim as `sessionId` alone: no name or key from a header or the body
-ever reaches the stamp, so a paired node can only ever name parents inside its
-own namespace. The child itself gets no such value in its environment — the
+signed caller is validated with `valid_claimed_session_id`, and a malformed
+one is an error the CALLER applies — `-32602`, on the SPAWN side only: the
+claim rode inside the body that caller signed, so a bad one is a client bug
+worth surfacing. The Inject arm consumes the claim nowhere (S5 is what threads
+it), so a malformed one there is ignored exactly as an absent one is — never a
+refusal on the one arm that does not use the field. The value passed to
+`do_spawn` is built from that verified caller: the `name` and the `key` that
+actually verified THIS request, threaded out of `verify_signed_request` rather
+than re-found by name — with the claim as `sessionId` alone, no name or key
+from a header or the body ever reaches the stamp, so a paired node can only
+ever name parents inside its own namespace. The child itself gets no such value in its environment — the
 door stamps the record, exactly as it does for `node:*` `origin`.
 
 **The command a spawn runs is `aoide.a2a.spawnAgent`** — a nix option, off
@@ -4789,7 +4798,10 @@ RPC latency and never notices it.
 
 **MVP simplification, carried over from Phase B:** taskId == contextId ==
 sessionId for both inject and spawn (a fresh spawn's Task/contextId/sessionId
-are all the newly-minted `a2a-<pid>-<ts>` id). Splitting a Task from its
+are all the newly-minted `a2a-<pid>-<secs>-<n>` id — a process-local monotonic
+counter behind pid and second, because pid+second alone collides for two spawns
+inside one second and two children sharing an id share one `sessions.json`
+record's `remoteParent`, leaving it to whichever stamp lands last). Splitting a Task from its
 session for real multi-turn tracking (so a session with several in-flight or
 completed turns exposes each as its own addressable Task) remains future
 work, same as the `TaskState` gaps noted above.
@@ -5303,7 +5315,7 @@ node_store::NodeRung` gains a third variant, `Signature` — the new
 STRONGEST rung, never produced by `resolve_node` itself (which has no
 access to the raw HTTP request a signature needs); it is yielded only by
 `a2a.rs`'s own `verify_signed_request` → `message_send`'s resolution,
-which — when `signed_node_name` is `Some` — resolves EXCLUSIVELY against
+which — when `signed_caller` is `Some` — resolves EXCLUSIVELY against
 that name (`NodeRung::Signature`), with NO fallback to the addr/token
 ladder even on a registry-lookup miss (fail-closed: a request that
 `verify_signed_request` already proved came from node X is never silently
@@ -6172,7 +6184,7 @@ mailbase:
 
 **Admission is signature-only, from the start — no Addr/Token fallback
 rung to migrate off the way Spawn once had.** The caller must resolve via
-`verify_signed_request`'s KEY-RESOLVED `signed_node_name` (the identical
+`verify_signed_request`'s KEY-RESOLVED `signed_caller` (the identical
 per-request signature scheme the Spawn arm's gate uses, security posture
 above) to a node that is both `verified` and carries `"message"` in
 `allows`. A refusal is `-32010` — a NEW code: never `-32006` (Spawn's own)

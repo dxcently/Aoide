@@ -27,6 +27,7 @@
 use crate::fs::{atomic_write, conducting_stage_dir, with_stage_lock};
 use crate::stage::load_stage;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 /// `state/stage/remote-children.json` schema version (CONTRACTS.md §4, v0).
 pub const REMOTE_CHILDREN_VERSION: &str = "0";
@@ -39,8 +40,12 @@ pub const CLAIMED_SESSION_ID_MAX: usize = 128;
 /// One child this node spawned elsewhere. `parentSessionId` is this node's
 /// OWN local parent (the session that asked for the spawn), so the same child
 /// stays attributable after a restart; `key`/`sessionId` identify the child,
-/// and `node` is the display label known at spawn time.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// and `node` is the display label known at spawn time. `extra` round-trips
+/// any field this version does not know about — one writer, one version per
+/// node, but a rewrite by an older `aoided` (a rollback) must not silently
+/// drop a field a newer one wrote, the tolerance [`crate::records::RemoteParent`]
+/// and `SessionRecord` hold.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RemoteChild {
     #[serde(rename = "parentSessionId")]
     pub parent_session_id: String,
@@ -59,15 +64,21 @@ pub struct RemoteChild {
     /// at-most-once direction `pingback.json`'s cursor holds.
     #[serde(rename = "linesAfter", default)]
     pub lines_after: u64,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
 }
 
-/// The `state/stage/remote-children.json` container.
+/// The `state/stage/remote-children.json` container — `extra` for the same
+/// reason [`RemoteChild::extra`] exists, one level up: an unknown top-level
+/// key survives a rewrite by this version.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RemoteChildrenFile {
     #[serde(rename = "schemaVersion", default)]
     pub schema_version: String,
     #[serde(default)]
     pub children: Vec<RemoteChild>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
 }
 
 /// The ledger path: `state/stage/remote-children.json` — CONDUCTING state
@@ -222,7 +233,42 @@ mod tests {
             session_id: id.to_string(),
             spawned_at: "2026-09-25T00:00:00Z".to_string(),
             lines_after: 0,
+            extra: Default::default(),
         }
+    }
+
+    #[test]
+    fn unknown_fields_survive_a_ledger_rewrite() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = StageEnv::new("extra");
+        std::fs::create_dir_all(conducting_stage_dir()).unwrap();
+        // A ledger written by a LATER version: one unknown top-level key, one
+        // unknown key inside a child.
+        std::fs::write(
+            remote_children_path(),
+            r#"{ "schemaVersion": "0", "futureTop": "kept",
+                 "children": [ { "parentSessionId": "par1", "node": "nodeb", "key": "aa",
+                                 "sessionId": "c1", "spawnedAt": "2026-09-25T00:00:00Z",
+                                 "linesAfter": 0, "futureCursor": 3 } ] }"#,
+        )
+        .unwrap();
+
+        // The rewrite under test is a real one: the cursor advance re-reads
+        // the whole file and writes it back through `save`.
+        assert_eq!(advance_lines_after("aa", "c1", 5).unwrap(), true);
+        let raw = std::fs::read_to_string(remote_children_path()).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["futureTop"], "kept", "an unknown TOP-LEVEL key survives the rewrite: {raw}");
+        assert_eq!(v["children"][0]["futureCursor"], 3, "so does an unknown CHILD key: {raw}");
+        assert_eq!(v["children"][0]["linesAfter"], 5, "and the known field still moved: {raw}");
+
+        // The typed read agrees: exactly one child, its `extra` carrying the
+        // unknown key and nothing fabricated in it.
+        let mut children = load_remote_children();
+        assert_eq!(children.len(), 1);
+        let c = children.remove(0);
+        assert_eq!(c.extra.get("futureCursor"), Some(&serde_json::json!(3)));
+        assert_eq!(c.extra.len(), 1, "the known fields stay named fields, never extra entries");
     }
 
     #[test]

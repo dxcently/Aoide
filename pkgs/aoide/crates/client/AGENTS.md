@@ -99,7 +99,13 @@
   ambient id is the Osaka wrong-ancestry failure; a live `--parent` wins,
   else the daemon attestation, else no claim (a top-level remote spawn).
   A `--parent` naming no live local record is refused, never replaced by
-  the attestation. `build_message_send_body` is the one writer of the key;
+  the attestation — and whichever id wins is then held to
+  `aoide_storage::remote_children::valid_claimed_session_id`, the SAME
+  predicate the door applies inbound, so an unruly claim is refused HERE,
+  before anything is signed or sent, rather than one signature and one round
+  trip later as the door's `-32602`. `remote_child_row` holds the far node's
+  ack id to that predicate too: it is a string this node did not mint and
+  cannot vouch for. `build_message_send_body` is the one writer of the key;
   the claim rides inside the signed body, so never add it to headers or
   the top-level `params.metadata`.
 - **Forwarded event text from `adapter` is untrusted data**, same as root
