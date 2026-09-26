@@ -81,12 +81,49 @@ other crate in this workspace sits above.
   `(dev, ino)`; the private `feed_windows.rs` attaches an explicit,
   `SE_DACL_PROTECTED`, owner-only DACL AT creation (no post-create
   tightening) and identifies a file by its native 128-bit id — and there
-  `0o600` is the only supported mode, so the group-shared broker feed
-  (`aoide-secrets`' `0o640`) is refused by name rather than narrowed.
+  `create_mode` is ADVISORY on native Windows and the policy attached is
+  always a protected owner-only DACL: there is no group reader there (no
+  lyra/desktop surface) and no gid to name, so the group-shared broker feed
+  (`aoide-secrets`' `0o640`) is delivered STRICTER than it asks — that same
+  user, nobody else — rather than refused.
   `path_identity` is crate-visible and returns one opaque, comparable
   `PathIdentity`, because the identity question is not this module's alone:
   `agents`'s eidolon reader asks it about a journal whose cached cursor must
   never survive a replacement at the same path.
+- `owner_only` (Windows only) — the owner-only policy a native-Windows core
+  attaches to a private file or directory: an explicit, `SE_DACL_PROTECTED`,
+  single-ACE DACL for the current token user, attached AT creation and read
+  back before the first payload byte BY BOTH CONSUMERS (the feed on the
+  handle it just created, `aoide-storage`'s private temp by path), with a
+  reparse point refused as itself and a `chmod` stand-in
+  (`set_dir_access`, owner pinned) plus one idempotent `ensure_private_dir`
+  that refuses a symbolic link or junction by name. Two consumers, one
+  implementation (`AGENTS.md`: no cross-crate copying): `feed`'s Windows
+  writer and `aoide-storage`'s private-write / private-directory half.
+- `host_shell` — the ONE place a stored command LINE is handed to this
+  host's own interpreter: `sh -c` on Unix, `cmd /C` on native Windows with
+  the line handed over VERBATIM (`CommandExt::raw_arg` — `cmd` is not a
+  `CommandLineToArgvW` program and re-applies its own quote rules to `/C`'s
+  remainder, so MSVC-shaped quoting mangles a line carrying inner quotes).
+  Two consumers, one implementation: `aoide-secrets`' backend templates and
+  `aoide-upkeep`'s `verify_command`.
+- `host_random` — OS randomness, one contract per host: `/dev/urandom` on
+  Unix, CNG's `BCryptGenRandom` on native Windows. No pool, no seed, no
+  fallback: a host that cannot hand out OS randomness fails rather than
+  returning something weaker. Its one consumer is `aoide-secrets`'
+  enrollment.
+- `win_proc` (Windows only) — the process table `/proc` would answer, plus the
+  two acts `kill`/`waitpid` perform and the one fact the table does not carry:
+  one `Toolhelp32` snapshot (pid · parent · executable name), a creation-time
+  start time for the pid-reuse defence, the `kill(pid, 0)` liveness reading
+  with the same conservative verdicts, `terminate` (`TerminateProcess` — the
+  only primitive that host has), `wait_for_exit` (`WaitForSingleObject`, whose
+  three verdicts map onto `waitpid`'s), and `command_argv`
+  (`NtQueryInformationProcess(ProcessCommandLineInformation)` + this host's own
+  `CommandLineToArgvW`, for callers that must know WHAT a pid is running before
+  signalling it). Its callers are `aoide-storage::attest`'s ancestry walk,
+  `aoide-storage::fs`'s process acts, `aoide-client::tunnel`'s recycled-pid
+  guard and `dialog::probe_locker_running`.
 - `dialog` — the code-entry dialog substrate: `DialogResult` (a dialog
   child's outcome — approved/dismissed/cancelled/cancelled-externally/
   spawn-error/infra-failure) and `run_entry_dialog` (the generic
@@ -118,7 +155,17 @@ other crate in this workspace sits above.
   where verified, the argv that resumes a prior session of it by its own
   id — P-D7 — and, where a harness offers one, the argv that delivers a
   message to a live session WITHOUT the pty composer at all —
-  `native_send`, P-EIDOLON) keyed by harness name. `on_path` (P-I2,
+  `native_send`, P-EIDOLON — plus the two launch-time facts a first turn
+  needs: `readiness`, WHICH signal says a just-started process of this
+  harness can take a turn (`Hook` — its own `SessionStart`, stamped
+  `sessionStartAt` for the launch that waits on it; `OutputSettled`, which
+  claims no fact and makes the delivery `delivered-unverified`; a
+  prompt-pattern value was tried and withdrawn as unanchorable), and
+  `session_env_markers`, the variables this harness injects into the
+  processes it launches that mean "you are inside a `<harness>` session";
+  the union of every profile's list is `session_env_markers()`, the one list
+  a launch path drops from a child's environment before exec) keyed by
+  harness name. `on_path` (P-I2,
   ONBOARD.md decision 7) is the `AgentProfile`-shaped wrapper over
   `bin::on_path`, over the profile's own `launch` program name — onboard's
   harness-picker preselection. The table gains a fourth row for `eidolon`,

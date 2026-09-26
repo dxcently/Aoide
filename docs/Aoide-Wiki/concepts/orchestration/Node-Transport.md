@@ -61,7 +61,9 @@ Four ways a node picks one up:
   own tunnel looking like loopback, so the approver has no observed address
   to derive anything from; the request carries an optional self-asserted
   `ssh://[user@]host` claim (`--self-via` overrides the `$USER`/ outbound-address
-  default), and `aoide pair`'s commit sets the node's `via` to the
+  default — and a dial whose route resolves to LOOPBACK carries no claim at
+  all, since two daemons on one machine have no hop between them to name,
+  D5), and `aoide pair`'s commit sets the node's `via` to the
   claim and rewrites its `url` to `http://127.0.0.1:<port>/` — `<port>`
   parsed off the requester's own advertised url — in the same write.
   Self-asserted data, a transport marker only: trust stays in the pubkeys
@@ -100,9 +102,15 @@ construction, never a local caller, so `origin_for_inject` strips Loopback's
 free pass from it before the delivery decision runs, regardless of which
 address it arrived from. A signed, non-autogate node's send lands in the
 far end's pending queue with node attribution, same as any other signed
-node reaching the door any other way; `state/nodes.json`'s per-node
-`autogate` flag, not connection origin, is what restores auto-delivery. The
-spawn arm needs no separate carve-out here: it already accepts only the
+node reaching the door any other way — with one exception, and it is the
+pairing's own shape: a node that is the PARENT of the session it writes into
+(a child's spawner is `signed non-autogate`, exactly this shape) delivers its
+steer without pending on a matched remote-parent claim (CONTRACTS.md §6),
+riding the exemption `origin_for_inject` makes for that match — without it the
+loopback-classified tunnel would coerce to `Unknown`, which delivers nothing.
+For every OTHER signed node, `state/nodes.json`'s per-node `autogate` flag —
+not connection origin — is what restores auto-delivery. The spawn arm needs no
+separate carve-out here: it already accepts only the
 Signature rung, tunneled or not, so a spawn refusal reads exactly as taught
 whichever way the request traveled. `via`/`--via` are safe to use against a
 real node for this reason — the tunnel changes reachability, never trust.
@@ -159,7 +167,11 @@ allowed to become a resident daemon:
 - One `ssh` child is opened and reused per session per node — a second
   action under the same session never spawns a second forward.
 - A signed send from a non-autogate node lands in the far end's pending
-  queue, carrying node attribution.
+  queue, carrying node attribution — unless that node is the session's own
+  remote parent, whose steer delivers without pending
+  (`autogate-remote-parent`, CONTRACTS.md §6). A target conducting a shell
+  is the exception to both: its line is held pending whoever asks, because
+  a submitted line in a shell RUNS (N1).
 - Spawn is refused with `-32006` the moment `allows` drops `spawn`, with a
   taught error — the same instant either side of a live tunnel.
 - A settled, roster-less tunnel record is collected by the resident

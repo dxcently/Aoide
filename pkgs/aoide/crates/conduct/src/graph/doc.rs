@@ -5,14 +5,14 @@
 //! pure function of the registries.
 
 use super::model::{
-    graph_path, hooks_path, load_stage, merged_sessions, projects_path,
+    canonical_state, graph_path, hooks_path, load_stage, merged_sessions, projects_path,
     resolved_parent, sessions_path, sorted_projects, write_stage, HookRecord, HooksFile, Project,
     ProjectsFile, SessionRecord, SessionsFile, STAGE_GRAPH_VERSION,
 };
 use serde_json::{json, Value};
 #[cfg(test)]
 use serde_json::Map;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 
 /// Is `s` conductable RIGHT NOW, for a caller asking "can I reach this
@@ -51,9 +51,23 @@ pub fn build_graph(
     let projects = sorted_projects(projects);
     let sessions = merged_sessions(sessions, hooks);
     let ids: HashSet<&str> = sessions.iter().map(|s| s.session_id.as_str()).collect();
+    // The compositor block (§E of the core-seams design): the per-workspace
+    // rows and the ties between them, `None` when nothing is in play — that
+    // gate is what keeps every graph.json predating a workspace binding
+    // byte-identical, session `activeAt` included (below).
+    let block = workspace_block(&projects, &sessions, hooks);
 
     let mut nodes: Vec<Value> = Vec::new();
     let mut edges: Vec<Value> = Vec::new();
+
+    // The caller-side ledger (CONTRACTS.md §4): one row per child THIS node
+    // spawned on another node. Read once beside the node registry above — the
+    // projection below matches rows to a local parent's own session id.
+    let remote_children = aoide_storage::remote_children::load_remote_children();
+    // `nodes.json` once for the whole document: every link's `key` resolves
+    // against it (`model::current_node_name`), and the node fold at the bottom
+    // folds the same registry — one read, one parse, both uses.
+    let mesh_nodes = aoide_storage::node_store::load_nodes();
 
     for p in &projects {
         let mut node = json!({
@@ -179,6 +193,46 @@ pub fn build_graph(
         if let Some(i) = super::model::effective_project_for(s, &sessions, &projects) {
             node["effectiveProject"] = json!(projects[i].name);
         }
+        // The PULSE timestamp (§E): the latest hook `updatedAt`, else
+        // `startedAt` — the value a tie's and a workspace's own `activeAt` is
+        // the max over, and what the song watches advance between two reads.
+        // Rides under the SAME gate as the block it feeds: with no workspace in
+        // play there is nothing to pulse, and a document that never carried
+        // this key must not grow it for no reason.
+        if block.is_some() {
+            node["activeAt"] = json!(session_active_at(s, hooks));
+        }
+        // The cross-machine parent link (P-RSA S4, CONTRACTS.md §4). `node` is
+        // the CURRENT `nodes.json` name for the stamped `key` — never the
+        // stored label when a rename has happened — and `key` itself is
+        // deliberately NOT republished: it is identity, and this document is a
+        // display projection. Rides only when the record carries one, so a
+        // locally-registered record stays byte-for-byte as before. No edge
+        // accompanies it: the parent is not on this node, and a local
+        // `spawned` edge would have to name a foreign id as a local session.
+        if let Some(rp) = &s.remote_parent {
+            node["remoteParent"] = json!({
+                "node": super::model::current_node_name(&mesh_nodes, &rp.key, &rp.node),
+                "sessionId": rp.session_id,
+            });
+        }
+        // This node's own children that live on OTHER nodes, off the ledger
+        // above — the mirror of the same field, so both machines publish the
+        // link they can vouch for. Same present-only-when-non-empty rule the
+        // project node's `hosts` holds.
+        let kids: Vec<Value> = remote_children
+            .iter()
+            .filter(|c| c.parent_session_id == s.session_id)
+            .map(|c| {
+                json!({
+                    "node": super::model::current_node_name(&mesh_nodes, &c.key, &c.node),
+                    "sessionId": c.session_id,
+                })
+            })
+            .collect();
+        if !kids.is_empty() {
+            node["remoteChildren"] = json!(kids);
+        }
         nodes.push(node);
         if let Some(parent) = resolved_parent(s, &ids) {
             edges.push(json!({
@@ -231,7 +285,7 @@ pub fn build_graph(
     // an absent/empty registry (`state/nodes.json`) adds nothing and this
     // whole block is a no-op.
     let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap_or(0);
-    for mesh_node in aoide_storage::node_store::load_nodes() {
+    for mesh_node in mesh_nodes {
         let mut node = json!({
             "id": format!("node:{}", mesh_node.name),
             "kind": "node",
@@ -265,11 +319,255 @@ pub fn build_graph(
         nodes.push(node);
     }
 
-    json!({
+    let mut doc = json!({
         "schemaVersion": STAGE_GRAPH_VERSION,
         "nodes": nodes,
         "edges": edges,
-    })
+    });
+    // The block rides LAST, and ONLY when some session has a workspace or some
+    // project has a binding (§E): a document with neither carries no
+    // `workspaces`/`ties` key at all, so a headless host's graph.json is
+    // byte-for-byte what it was before this slice.
+    if let Some((rows, ties)) = block {
+        doc["workspaces"] = json!(rows);
+        doc["ties"] = json!(ties);
+    }
+    doc
+}
+
+// ── The compositor block: workspace rows + the ties between them (§E) ──────
+
+/// One session's pulse timestamp (§E): the latest hook `updatedAt` for it,
+/// else its own `startedAt`. Timestamps here are all `iso_utc_from_epoch`
+/// strings, so the string max IS the chronological max — the same comparison
+/// `merged_sessions` already makes when it folds the latest hook phase in.
+fn session_active_at(s: &SessionRecord, hooks: &[HookRecord]) -> String {
+    hooks
+        .iter()
+        .filter(|h| h.session_id == s.session_id && !h.updated_at.is_empty())
+        .map(|h| h.updated_at.as_str())
+        .max()
+        .unwrap_or(s.started_at.as_str())
+        .to_string()
+}
+
+/// One workspace row, while it is being accumulated.
+#[derive(Default)]
+struct WorkspaceRow {
+    project: Option<String>,
+    projects: BTreeSet<String>,
+    sessions: BTreeSet<String>,
+    live: usize,
+    working: usize,
+    awaiting: usize,
+    active_at: String,
+}
+
+impl WorkspaceRow {
+    fn to_json(&self, ws: i64) -> Value {
+        let mut row = json!({
+            "workspace": ws,
+            "projects": self.projects.iter().cloned().collect::<Vec<_>>(),
+            "sessions": self.sessions.iter().cloned().collect::<Vec<_>>(),
+            "live": self.live,
+            "working": self.working,
+            "awaiting": self.awaiting,
+            "activeAt": self.active_at,
+        });
+        // The BINDING rides only when there is one — an unbound workspace is
+        // labelled by its sessions' projects instead, never by a null.
+        if let Some(project) = &self.project {
+            row["project"] = json!(project);
+        }
+        row
+    }
+}
+
+/// The workspace a `spawned` tie leaves from: the session's nearest ancestor
+/// that REPORTS a workspace (its parent, or above it when the parent is
+/// headless) — with its session id, so the tie can name the pair. `None` when
+/// no ancestor is windowed (or a malformed cycle, which the visited set stops
+/// dead rather than spinning).
+fn windowed_ancestor<'a>(
+    s: &SessionRecord,
+    by_id: &BTreeMap<&'a str, &'a SessionRecord>,
+) -> Option<(i64, &'a str)> {
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    let mut cur = s.parent_session_id.as_deref();
+    while let Some(id) = cur {
+        if !seen.insert(id) {
+            return None;
+        }
+        let parent = by_id.get(id)?;
+        if let Some(ws) = parent.workspace {
+            return Some((ws, parent.session_id.as_str()));
+        }
+        cur = parent.parent_session_id.as_deref();
+    }
+    None
+}
+
+/// The compositor block (§E of `core-seams-design.md`): the per-workspace rows
+/// a pad draws and the ties between them, or `None` when NOTHING is in play —
+/// no session reports a workspace and no project has a binding. That one gate
+/// is what keeps a graph.json with no compositor in it byte-identical, session
+/// `activeAt` included (it feeds this block, so it rides with it).
+///
+/// Definitions, straight from §E:
+///
+/// - `sessions` lists every session whose record carries that workspace id;
+///   `live`/`working`/`awaiting` are counts over the same set. `live` is "not
+///   `done`" — a `stopped` session has ended a TURN, never died, so it is
+///   live.
+/// - `project` is the BINDING, absent when the workspace is unbound.
+///   `projects` is the binding PLUS the effective projects of that workspace's
+///   live sessions, so an unbound workspace with a project's sessions on it
+///   still labels itself (and one with neither stays an empty list).
+/// - A **project tie** is one per shared project, for every pair of workspaces
+///   whose `projects` intersect — a clique at three or more, which the song
+///   collapses itself. A **spawned tie** is the parent's (or nearest windowed
+///   ancestor's) workspace to the child's, ONLY when the two differ; a headless
+///   child has no workspace and therefore no tie of its own.
+/// - `activeAt` is the max over the sessions that contribute to a row or a tie.
+///
+/// LOCAL sessions only, by construction: `sessions` here IS the local roster,
+/// and another node's rows reach this document only nested under a fresh
+/// node's `children` — which this never reads.
+pub(crate) fn workspace_block(
+    projects: &[Project],
+    sessions: &[SessionRecord],
+    hooks: &[HookRecord],
+) -> Option<(Vec<Value>, Vec<Value>)> {
+    let mut rows: BTreeMap<i64, WorkspaceRow> = BTreeMap::new();
+    // Bindings first: a bound workspace with no session on it still gets a row.
+    for p in projects {
+        for ws in &p.workspaces {
+            let row = rows.entry(*ws).or_default();
+            row.project = Some(p.name.clone());
+            row.projects.insert(p.name.clone());
+        }
+    }
+    let mut in_play = !rows.is_empty();
+    // The parent lookup the two lineage walks share (a headless session's
+    // activity, and a spawned tie's leaving end).
+    let by_id: BTreeMap<&str, &SessionRecord> =
+        sessions.iter().map(|s| (s.session_id.as_str(), s)).collect();
+    for s in sessions {
+        let at = session_active_at(s, hooks);
+        let Some(ws) = s.workspace else {
+            // A HEADLESS session has no row of its own — §E: "its activity
+            // shows on its parent's workspace". So its pulse folds into the
+            // nearest windowed ancestor's row, as ACTIVITY ONLY: no session id
+            // joins that row's `sessions`, no count moves, and no tie is
+            // drawn. Subagents are most of this product's traffic, and without
+            // this fold their work would pulse nothing at all.
+            if let Some((ancestor_ws, _)) = windowed_ancestor(s, &by_id) {
+                let row = rows.entry(ancestor_ws).or_default();
+                if at > row.active_at {
+                    row.active_at = at;
+                }
+            }
+            continue;
+        };
+        in_play = true;
+        let state = canonical_state(&s.state);
+        let row = rows.entry(ws).or_default();
+        row.sessions.insert(s.session_id.clone());
+        if state != "done" {
+            row.live += 1;
+            if let Some(i) = super::model::effective_project_for(s, sessions, projects) {
+                row.projects.insert(projects[i].name.clone());
+            }
+        }
+        match state {
+            "working" => row.working += 1,
+            "awaiting" => row.awaiting += 1,
+            _ => {}
+        }
+        if at > row.active_at {
+            row.active_at = at;
+        }
+    }
+    if !in_play {
+        return None;
+    }
+
+    // Project ties: every pair (a < b) of workspaces claiming the same project.
+    let mut by_project: BTreeMap<&str, Vec<i64>> = BTreeMap::new();
+    for (ws, row) in &rows {
+        for name in &row.projects {
+            by_project.entry(name.as_str()).or_default().push(*ws);
+        }
+    }
+    let mut ties: Vec<(i64, i64, String, Value)> = Vec::new();
+    for (name, wss) in &by_project {
+        for (i, a) in wss.iter().enumerate() {
+            for b in &wss[i + 1..] {
+                ties.push((
+                    *a,
+                    *b,
+                    format!("project\t{name}"),
+                    json!({
+                        "kind": "project",
+                        "from": a,
+                        "to": b,
+                        "project": name,
+                        "activeAt": std::cmp::max(&rows[a].active_at, &rows[b].active_at),
+                    }),
+                ));
+            }
+        }
+    }
+    // Spawned ties: (from, to) → every pair that crossed, and the latest
+    // activity among them. `by_id` above is the same lookup this walk uses.
+    let mut spawned: BTreeMap<(i64, i64), (BTreeSet<(String, String)>, String)> = BTreeMap::new();
+    for s in sessions {
+        let Some(child_ws) = s.workspace else { continue };
+        let Some((parent_ws, parent_id)) = windowed_ancestor(s, &by_id) else {
+            continue;
+        };
+        // Same workspace: there is no lane to draw. A headless child never
+        // reaches here at all — `child_ws` is the whole reason it does not.
+        if parent_ws == child_ws {
+            continue;
+        }
+        let at = std::cmp::max(
+            session_active_at(s, hooks),
+            session_active_at(by_id[parent_id], hooks),
+        );
+        let entry = spawned.entry((parent_ws, child_ws)).or_insert_with(|| {
+            (BTreeSet::new(), String::new())
+        });
+        entry.0.insert((parent_id.to_string(), s.session_id.clone()));
+        if at > entry.1 {
+            entry.1 = at;
+        }
+    }
+    for ((from, to), (pairs, at)) in &spawned {
+        let pairs: Vec<Value> = pairs
+            .iter()
+            .map(|(p, c)| json!([p, c]))
+            .collect();
+        ties.push((
+            *from,
+            *to,
+            "spawned".to_string(),
+            json!({
+                "kind": "spawned",
+                "from": from,
+                "to": to,
+                "pairs": pairs,
+                "activeAt": at,
+            }),
+        ));
+    }
+    // Deterministic order, and the one the switchboard fixture uses: grouped
+    // by kind (every project tie, then every spawned one), then by (from, to),
+    // then by project name — `"project\t…"` sorting before `"spawned"`.
+    ties.sort_by(|a, b| (&a.2, a.0, a.1).cmp(&(&b.2, b.0, b.1)));
+
+    let rows: Vec<Value> = rows.iter().map(|(ws, row)| row.to_json(*ws)).collect();
+    Some((rows, ties.into_iter().map(|(_, _, _, v)| v).collect()))
 }
 
 // ── The Unicode tree render ─────────────────────────────────────────────────
@@ -545,12 +843,35 @@ pub fn prune_done(
 /// queue, the output, the outcome and the report — so routine cleanup must not
 /// make a completed task vanish. An AUTOMATIC sweep (`reap_inner`, and anything
 /// else routing through [`prune_done`]) therefore retains EVERY `task`-carrying
-/// `done` record, filed or not; an unfiled one is retained by both scopes,
-/// because the record is the report lane's own trigger. `explicit: true` is the
-/// user's own `aoide session prune` — the one path allowed to drop a filed task
-/// run, and even then it keeps an UNFILED one. After an explicit prune the
-/// history still lives on disk (the session ledger line, the letters, the PTY
-/// transcript, the instruction sidecar); only the roster record is gone.
+/// `done` record THIS BOX ran, filed or not; an unfiled one is retained by both
+/// scopes, because the record is the report lane's own trigger. `explicit: true`
+/// is the user's own `aoide session prune` — the one path allowed to drop a
+/// filed task run, and even then it keeps an UNFILED one. After an explicit
+/// prune the history still lives on disk (the session ledger line, the letters,
+/// the PTY transcript, the instruction sidecar); only the roster record is gone.
+///
+/// **A DOOR SUMMON is not this box's history (P-RSA S10 review, H1).** A
+/// record whose `origin` is a `node:*` value was spawned by the A2A door on a
+/// peer's request (`graph/conduct.rs` refuses that shape from any environment,
+/// so the door is its sole writer), and no local sweep would ever have created
+/// one. Retaining those forever made the roster a remote caller's to grow: one
+/// `metadata["aoide/task"]` spawn per request, each ending `done`, each kept —
+/// permanent, revocation-proof state written by a grant the operator can only
+/// take back for FUTURE children (`node allow <n> spawn off`, `node remove`).
+/// So a door summon is retained only while its report is still owed — the
+/// cursor entry is the lane's own trigger, exactly as it is for an unfiled
+/// local run — and once filed it is swept like an ordinary finished session,
+/// by the automatic sweep AND by `session prune`. Its durable history is
+/// untouched (the ledger line, the transcript, the instruction sidecar, the
+/// letters, the cursor entry all stay); only the roster record goes, exactly as
+/// for a pruned local run. O(live runs) resident instead of O(all runs).
+///
+/// The `removed` set this returns is also the ledger's own doom list: the
+/// caller hands it to [`drop_remote_child_rows`] once its `sessions.json` write
+/// has landed (both callers do), because a `state/stage/remote-children.json`
+/// row is a link TO a child on a far node and has no meaning once the local half
+/// of that link has left the roster. It covers the explicitly-doomed ids and the
+/// cascaded subagent descendants alike, since it is the whole set.
 pub fn prune_done_scoped(
     sessions: Vec<SessionRecord>,
     hooks: Vec<HookRecord>,
@@ -570,13 +891,45 @@ pub fn prune_done_scoped(
             if !is_task_run {
                 return true; // an ordinary finished session: swept as always
             }
-            // A task run: retained against every automatic sweep, and retained
-            // even by the explicit prune while its report is unfiled.
-            explicit && !unfiled.contains(s.session_id.as_str())
+            let filed = !unfiled.contains(s.session_id.as_str());
+            // A door summon: kept only while its report is still owed (see the
+            // doc above — a remote caller may not grow this roster forever).
+            if s.origin.as_deref().is_some_and(aoide_storage::attest::is_node_origin) {
+                return filed;
+            }
+            // A task run THIS BOX ran: retained against every automatic sweep,
+            // and retained even by the explicit prune while its report is
+            // unfiled.
+            explicit && filed
         })
         .map(|s| s.session_id.as_str())
         .collect();
-    drop_sessions(&sessions, &doomed, hooks)
+    let dropped = drop_sessions(&sessions, &doomed, hooks);
+    dropped
+}
+
+/// Drop the caller-side ledger rows of every parent in `removed`
+/// ([`aoide_storage::remote_children::retain_remote_children`]) — a
+/// `state/stage/remote-children.json` row is a link TO a child on a far node,
+/// so it has no meaning once the local half of that link has left the roster.
+///
+/// BOTH roster-exit paths call this (the explicit sweep and the reaper's
+/// superseded-tombstone drop), and each calls it only AFTER its own
+/// `sessions.json` write has succeeded: the ledger is a projection of the
+/// roster, so a stage write that bailed or failed must never leave the two
+/// disagreeing — a row outliving its parent, or a parent outliving its row.
+/// Best-effort (a failed retain is reported, never fatal), the same posture
+/// `ledger_session_exit` holds on those same two paths.
+pub(crate) fn drop_remote_child_rows(removed: &[String]) {
+    if removed.is_empty() {
+        return;
+    }
+    let gone: HashSet<&str> = removed.iter().map(String::as_str).collect();
+    if let Err(e) = aoide_storage::remote_children::retain_remote_children(|c| {
+        !gone.contains(c.parent_session_id.as_str())
+    }) {
+        eprintln!("[aoide/conduct] remote-children retain failed: {e}");
+    }
 }
 
 /// Drop exactly `roots` (+ their subagent descendants, + their hook records)
@@ -1066,6 +1419,203 @@ mod tests {
         let node_b = nodes.iter().find(|n| n["id"] == "session:b").unwrap();
         assert_eq!(node_a["workspace"], json!(4));
         assert!(node_b.get("workspace").is_none());
+    }
+
+    // ── §E: the compositor block (graph.json `workspaces` + `ties`) ────────
+
+    /// Two workspaces bound to ONE project are a project tie between them, and
+    /// the block carries a row for a bound workspace even with no session on
+    /// it. The names are the DESIGN's own S3 gate names.
+    #[test]
+    fn project_tie_between_two_bound_workspaces() {
+        let projects = vec![Project {
+            name: "aoide".into(),
+            workspaces: vec![3, 5],
+            ..Default::default()
+        }];
+        let doc = build_graph(&projects, &[], &[]);
+        assert_eq!(
+            doc["workspaces"],
+            json!([
+                { "workspace": 3, "project": "aoide", "projects": ["aoide"], "sessions": [],
+                  "live": 0, "working": 0, "awaiting": 0, "activeAt": "" },
+                { "workspace": 5, "project": "aoide", "projects": ["aoide"], "sessions": [],
+                  "live": 0, "working": 0, "awaiting": 0, "activeAt": "" },
+            ]),
+            "{doc}"
+        );
+        assert_eq!(
+            doc["ties"],
+            json!([
+                { "kind": "project", "from": 3, "to": 5, "project": "aoide", "activeAt": "" }
+            ]),
+            "{doc}"
+        );
+    }
+
+    /// A spawned tie is drawn only when the two ends sit on DIFFERENT
+    /// workspaces, and it leaves from the nearest ancestor that has a window
+    /// at all — not merely from the parent.
+    #[test]
+    fn spawned_tie_only_across_workspaces() {
+        let mut parent = session("p", "/home/k/Aoide", "working", "2026-09-26T13:00:00Z", None);
+        parent.workspace = Some(2);
+        let mut same = session("same", "/home/k/Aoide", "working", "2026-09-26T13:01:00Z", Some("p"));
+        same.workspace = Some(2);
+        let mut across = session("across", "/home/k/Aoide", "working", "2026-09-26T13:02:00Z", Some("p"));
+        across.workspace = Some(7);
+        // A headless child of the SAME child, on another workspace: its tie
+        // must leave from the parent's window, not from the headless middle.
+        let mut middle = session("mid", "/home/k/Aoide", "working", "2026-09-26T13:03:00Z", Some("across"));
+        middle.workspace = None;
+        let mut far = session("far", "/home/k/Aoide", "working", "2026-09-26T13:04:00Z", Some("mid"));
+        far.workspace = Some(9);
+
+        let doc = build_graph(&[], &[parent, same, across, middle, far], &[]);
+        assert_eq!(
+            doc["ties"],
+            json!([
+                { "kind": "spawned", "from": 2, "to": 7, "pairs": [["p", "across"]],
+                  "activeAt": "2026-09-26T13:02:00Z" },
+                { "kind": "spawned", "from": 7, "to": 9, "pairs": [["across", "far"]],
+                  "activeAt": "2026-09-26T13:04:00Z" },
+            ]),
+            "the same-workspace child draws nothing, and the headless middle is \
+             stepped over: {doc}"
+        );
+    }
+
+    /// A child with no window has no tie of its own — its activity is its
+    /// parent's, and nothing is invented.
+    #[test]
+    fn headless_child_makes_no_tie() {
+        let mut parent = session("p", "/home/k/Aoide", "working", "2026-09-26T13:00:00Z", None);
+        parent.workspace = Some(2);
+        let headless = session("h", "/home/k/Aoide", "working", "2026-09-26T13:01:00Z", Some("p"));
+        let doc = build_graph(&[], &[parent, headless], &[]);
+        assert_eq!(doc["ties"], json!([]), "{doc}");
+        // The child is still counted on the workspace its PARENT sits on: the
+        // row lists what the roster reports, and a headless session reports no
+        // workspace of its own.
+        assert_eq!(doc["workspaces"][0]["workspace"], 2);
+        assert_eq!(doc["workspaces"][0]["sessions"], json!(["p"]));
+    }
+
+    /// `activeAt` is the latest hook `updatedAt` for that session, falling back
+    /// to `startedAt` — and a tie's is the max over its two ends.
+    #[test]
+    fn active_at_is_the_latest_hook() {
+        let mut a = session("a", "/home/k/Aoide", "working", "2026-09-26T13:00:00Z", None);
+        a.workspace = Some(2);
+        let mut b = session("b", "/home/k/Aoide", "working", "2026-09-26T13:00:00Z", Some("a"));
+        b.workspace = Some(7);
+        let hooks = vec![
+            HookRecord { session_id: "a".into(), phase: "working".into(), updated_at: "2026-09-26T13:05:00Z".into(), ..Default::default() },
+            // An OLDER hook record for the same session never wins.
+            HookRecord { session_id: "a".into(), phase: "idle".into(), updated_at: "2026-09-26T12:00:00Z".into(), ..Default::default() },
+            HookRecord { session_id: "b".into(), phase: "working".into(), updated_at: "2026-09-26T14:00:00Z".into(), ..Default::default() },
+        ];
+        let doc = build_graph(&[], &[a, b], &hooks);
+        let nodes = doc["nodes"].as_array().unwrap();
+        let node_a = nodes.iter().find(|n| n["id"] == "session:a").unwrap();
+        let node_b = nodes.iter().find(|n| n["id"] == "session:b").unwrap();
+        assert_eq!(node_a["activeAt"], "2026-09-26T13:05:00Z");
+        assert_eq!(node_b["activeAt"], "2026-09-26T14:00:00Z");
+        assert_eq!(doc["workspaces"][0]["activeAt"], "2026-09-26T13:05:00Z");
+        assert_eq!(doc["workspaces"][1]["activeAt"], "2026-09-26T14:00:00Z");
+        assert_eq!(
+            doc["ties"][0]["activeAt"], "2026-09-26T14:00:00Z",
+            "a tie pulses at the LATER of its two ends: {doc}"
+        );
+
+        // No hook at all → `startedAt` is the pulse.
+        let mut solo = session("solo", "/home/k/Aoide", "working", "2026-09-26T13:00:00Z", None);
+        solo.workspace = Some(2);
+        let doc = build_graph(&[], &[solo], &[]);
+        assert_eq!(doc["nodes"][0]["activeAt"], "2026-09-26T13:00:00Z");
+    }
+
+    /// §E: a headless child has no tie of its own and no row of its own —
+    /// "its activity shows on its parent's workspace". Subagents are most of
+    /// this product's traffic, so without this fold their work pulses nothing.
+    #[test]
+    fn headless_child_activity_pulses_its_parents_workspace() {
+        let mut parent = session("p", "/home/k/Aoide", "working", "2026-09-26T13:00:00Z", None);
+        parent.workspace = Some(2);
+        let headless = session("h", "/home/k/Aoide", "working", "2026-09-26T13:01:00Z", Some("p"));
+        // A headless grandchild, too: the fold walks to the nearest WINDOWED
+        // ancestor, not merely one rung up.
+        let grandchild = session("g", "/home/k/Aoide", "working", "2026-09-26T13:02:00Z", Some("h"));
+        let hooks = vec![
+            HookRecord { session_id: "p".into(), phase: "working".into(), updated_at: "2026-09-26T13:10:00Z".into(), ..Default::default() },
+            HookRecord { session_id: "h".into(), phase: "working".into(), updated_at: "2026-09-26T23:59:00Z".into(), ..Default::default() },
+            HookRecord { session_id: "g".into(), phase: "working".into(), updated_at: "2026-09-26T14:30:00Z".into(), ..Default::default() },
+        ];
+        let doc = build_graph(&[], &[parent, headless, grandchild], &hooks);
+        let row = &doc["workspaces"][0];
+        assert_eq!(row["workspace"], 2);
+        assert_eq!(
+            row["activeAt"], "2026-09-26T23:59:00Z",
+            "the headless child's later activity IS the row's pulse: {doc}"
+        );
+        assert_eq!(
+            row["sessions"],
+            json!(["p"]),
+            "activity only — no session id joins the row: {row}"
+        );
+        assert_eq!(row["live"], 1, "no count moves: {row}");
+        assert_eq!(doc["ties"], json!([]), "and no tie is drawn: {doc}");
+        // The children still carry their OWN pulse on their nodes, which is
+        // what a DAG watcher reads.
+        let nodes = doc["nodes"].as_array().unwrap();
+        let node_h = nodes.iter().find(|n| n["id"] == "session:h").unwrap();
+        assert_eq!(node_h["activeAt"], "2026-09-26T23:59:00Z");
+        assert!(node_h.get("workspace").is_none());
+    }
+
+    /// Nothing in play — no workspace on any session, no binding anywhere —
+    /// means no `workspaces`, no `ties`, and no session `activeAt`: the
+    /// document is byte-for-byte what it was before this slice.
+    #[test]
+    fn nothing_in_play_leaves_the_document_byte_identical() {
+        let sessions = vec![
+            session("a", "/home/k/Aoide", "working", "2026-09-26T13:00:00Z", None),
+            session("b", "/home/k/Aoide", "working", "2026-09-26T13:01:00Z", Some("a")),
+        ];
+        let hooks = vec![HookRecord {
+            session_id: "a".into(),
+            phase: "awaiting".into(),
+            updated_at: "2026-09-26T13:02:00Z".into(),
+            ..Default::default()
+        }];
+        let projects = vec![Project { name: "aoide".into(), path: "/home/k/Aoide".into(), ..Default::default() }];
+        let doc = build_graph(&projects, &sessions, &hooks);
+        assert!(doc.get("workspaces").is_none(), "{doc}");
+        assert!(doc.get("ties").is_none(), "{doc}");
+        for n in doc["nodes"].as_array().unwrap() {
+            assert!(n.get("activeAt").is_none(), "no pulse off a workspace: {n}");
+        }
+        // And the same document with NO hook phase merged in at all — the
+        // pre-slice shape — keys exactly the same.
+        let bare = build_graph(&projects, &sessions, &[]);
+        assert_eq!(
+            doc["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n["id"].clone())
+                .collect::<Vec<_>>(),
+            bare["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n["id"].clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            doc.as_object().unwrap().keys().collect::<Vec<_>>(),
+            bare.as_object().unwrap().keys().collect::<Vec<_>>()
+        );
     }
     #[test]
     fn graph_node_carries_model_only_when_known() {
@@ -1583,6 +2133,388 @@ mod tests {
 
         let raw = std::fs::read_to_string(aoide_storage::ledger::session_ledger_path()).unwrap();
         assert!(raw.contains("\"restore\":null"), "line: {raw}");
+
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    // ── P-RSA S4: the cross-machine parent link, both sides ────────────────
+
+    fn remote_parent(node: &str, key: &str, session_id: &str) -> aoide_storage::records::RemoteParent {
+        aoide_storage::records::RemoteParent {
+            node: node.to_string(),
+            key: key.to_string(),
+            session_id: session_id.to_string(),
+            extra: Default::default(),
+        }
+    }
+
+    fn ledger_row(parent: &str, node: &str, key: &str, child: &str) -> aoide_storage::remote_children::RemoteChild {
+        aoide_storage::remote_children::RemoteChild {
+            parent_session_id: parent.to_string(),
+            node: node.to_string(),
+            key: key.to_string(),
+            session_id: child.to_string(),
+            spawned_at: "2026-09-25T00:00:00Z".to_string(),
+            lines_after: 0,
+            drained: false,
+            extra: Default::default(),
+        }
+    }
+
+    fn node_json_of<'a>(doc: &'a Value, id: &str) -> &'a Value {
+        doc["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["id"] == id)
+            .unwrap_or_else(|| panic!("no node {id} in {doc}"))
+    }
+
+    #[test]
+    fn a_remote_parent_projects_and_never_becomes_a_local_spawned_edge() {
+        // The child side: `remoteParent` rides the node as `{node, sessionId}`
+        // (no key — the document is display data) and the record's
+        // `parentSessionId` is untouched, so no `spawned` edge is minted and
+        // the session stays anchored/root locally.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let state = unique_stage("remote-parent");
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let mut child = session("a2a-1", "/remote/cwd", "running", "1", None);
+        child.remote_parent = Some(remote_parent("yomi-strix", "ab".repeat(32).as_str(), "par1"));
+
+        let doc = build_graph(&[], &[child], &[]);
+        let node = node_json_of(&doc, "session:a2a-1");
+        assert_eq!(node["remoteParent"]["node"], "yomi-strix");
+        assert_eq!(node["remoteParent"]["sessionId"], "par1");
+        assert!(
+            node["remoteParent"].get("key").is_none(),
+            "the key is identity, never republished as display data: {node}"
+        );
+        assert!(
+            node.get("remoteChildren").is_none(),
+            "a leaf child carries no remoteChildren: {node}"
+        );
+        assert!(
+            doc["edges"].as_array().unwrap().is_empty(),
+            "no local `spawned` edge for a parent that is not on this node, and no \
+             registered project to anchor to: {doc}"
+        );
+
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn a_local_id_equal_to_the_remote_session_id_is_not_a_local_parent() {
+        // The collision pin. `par1` happens to exist LOCALLY with the very id
+        // the far caller signed as its own session id. The projections must
+        // never join them: `parentSessionId` is what makes a local parent
+        // (autogate grant, sibling rule, project inheritance all read it), and
+        // the remote field never writes it.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let state = unique_stage("remote-collision");
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let par1 = session("par1", "/here", "running", "1", None);
+        let mut child = session("a2a-1", "/remote/cwd", "running", "2", None);
+        child.remote_parent = Some(remote_parent("yomi-strix", "ab".repeat(32).as_str(), "par1"));
+
+        let doc = build_graph(&[], &[par1, child], &[]);
+        assert!(
+            doc["edges"].as_array().unwrap().is_empty(),
+            "the same-named local session must not gain a spawned edge: {doc}"
+        );
+        assert!(
+            node_json_of(&doc, "session:par1").get("remoteChildren").is_none(),
+            "and must not gain remoteChildren either — the ledger is the only source of those: {doc}"
+        );
+        assert_eq!(node_json_of(&doc, "session:a2a-1")["remoteParent"]["sessionId"], "par1");
+
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn the_remote_parent_name_follows_a_rename_through_the_key() {
+        // Rename safety: `node` is the label stamped at spawn time; `key` is
+        // the identity. A reader resolves the CURRENT `nodes.json` name for the
+        // key, so renaming the node record re-labels every link instead of
+        // orphaning it — and a key no registered node claims falls back to the
+        // stored label rather than rendering blank.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let state = unique_stage("remote-rename");
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let key = "ab".repeat(32);
+        aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
+            name: "yomi-renamed".into(),
+            url: "http://yomi-strix:8710/".into(),
+            autogate: false,
+            token_file: None,
+            bearer_secret: None,
+            hub: false,
+            pubkey: Some(key.clone()),
+            verified: true,
+            allows: Vec::new(),
+            via: None,
+            added_at: "2026-08-14T00:00:00Z".into(),
+        }])
+        .unwrap();
+
+        let mut child = session("a2a-1", "/x", "running", "1", None);
+        child.remote_parent = Some(remote_parent("yomi-strix", &key, "par1"));
+        let mut orphan = session("a2a-2", "/x", "running", "2", None);
+        orphan.remote_parent = Some(remote_parent("sakaki", "cd".repeat(32).as_str(), "par2"));
+
+        let doc = build_graph(&[], &[child, orphan], &[]);
+        assert_eq!(
+            node_json_of(&doc, "session:a2a-1")["remoteParent"]["node"],
+            "yomi-renamed",
+            "the key resolves to the CURRENT name: {doc}"
+        );
+        assert_eq!(
+            node_json_of(&doc, "session:a2a-2")["remoteParent"]["node"],
+            "sakaki",
+            "an unregistered key falls back to the stamped label, never blank: {doc}"
+        );
+
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn the_parent_node_carries_its_ledger_children_and_only_its_own() {
+        // The parent side: `remoteChildren` comes off the caller-side ledger,
+        // matched on the parent's own session id, and rides only when
+        // non-empty (an ordinary record stays byte-for-byte as before).
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let state = unique_stage("remote-children");
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let key = "ab".repeat(32);
+        aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
+            name: "nodeb".into(),
+            url: "http://nodeb:8710/".into(),
+            autogate: false,
+            token_file: None,
+            bearer_secret: None,
+            hub: false,
+            pubkey: Some(key.clone()),
+            verified: true,
+            allows: Vec::new(),
+            via: None,
+            added_at: "2026-08-14T00:00:00Z".into(),
+        }])
+        .unwrap();
+        aoide_storage::remote_children::append_remote_child(&ledger_row("par1", "nodeb", &key, "C")).unwrap();
+        aoide_storage::remote_children::append_remote_child(&ledger_row("par1", "nodeb", &key, "C2")).unwrap();
+        aoide_storage::remote_children::append_remote_child(&ledger_row("someone-else", "nodeb", &key, "X")).unwrap();
+
+        let doc = build_graph(&[], &[session("par1", "/x", "running", "1", None)], &[]);
+        let kids = node_json_of(&doc, "session:par1")["remoteChildren"].as_array().unwrap();
+        assert_eq!(kids.len(), 2, "only this parent's rows: {doc}");
+        assert_eq!(kids[0]["node"], "nodeb");
+        assert_eq!(kids[0]["sessionId"], "C");
+        assert_eq!(kids[1]["sessionId"], "C2");
+        assert!(kids[0].get("key").is_none(), "no key on a display projection: {doc}");
+
+        // A second pass is byte-identical (the projection is derived, never a
+        // store), and a session with no rows carries no key at all.
+        let again = build_graph(&[], &[session("par1", "/x", "running", "1", None)], &[]);
+        assert_eq!(again, doc);
+        let alone = build_graph(&[], &[session("par2", "/x", "running", "2", None)], &[]);
+        assert!(node_json_of(&alone, "session:par2").get("remoteChildren").is_none());
+
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    #[test]
+    fn dropping_a_parents_ledger_rows_leaves_a_surviving_parents_alone() {
+        // A ledger row is the parent-side half of a link; once the parent has
+        // left the roster nothing can resolve it, so the row goes with it — and
+        // a row belonging to a SURVIVING parent stays. This is the helper both
+        // roster-exit paths call after their own `sessions.json` write; each
+        // path's own end-to-end half lives beside it (`manage.rs`'s
+        // `session prune` test, `reap.rs`'s superseded-tombstone test).
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let state = unique_stage("remote-prune");
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        let key = "ab".repeat(32);
+        aoide_storage::remote_children::append_remote_child(&ledger_row("done-par", "nodeb", &key, "C")).unwrap();
+        aoide_storage::remote_children::append_remote_child(&ledger_row("live-par", "nodeb", &key, "D")).unwrap();
+
+        let sessions = vec![
+            session("done-par", "/x", "done", "1", None),
+            session("live-par", "/x", "running", "2", None),
+        ];
+        let (kept, _hooks, removed, _cleared) = prune_done_scoped(sessions, Vec::new(), true);
+        assert_eq!(removed, vec!["done-par".to_string()]);
+        assert_eq!(kept.len(), 1);
+
+        // Nothing has dropped the rows yet: the prune alone is not the ledger's
+        // owner, only the caller that lands the roster is.
+        assert_eq!(aoide_storage::remote_children::load_remote_children().len(), 2);
+
+        drop_remote_child_rows(&removed);
+        let left = aoide_storage::remote_children::load_remote_children();
+        assert_eq!(left.len(), 1, "one row left: {left:?}");
+        assert_eq!(left[0].parent_session_id, "live-par");
+
+        // An empty drop set writes nothing at all.
+        drop_remote_child_rows(&[]);
+        assert_eq!(aoide_storage::remote_children::load_remote_children().len(), 1);
+
+        let _ = std::fs::remove_dir_all(&state);
+    }
+
+    /// P-RSA S10 review, H1: a DOOR SUMMON's finished record is not this box's
+    /// history. A task-carrying `done` record the door created (origin
+    /// `node:*` — the shape `session_conduct` refuses from any environment, so
+    /// the door is its only writer) is swept once its report is filed, exactly
+    /// like an untasked session; a task run THIS BOX ran is still retained by
+    /// the automatic sweep. A run whose report is still OWED is kept either
+    /// way, because the cursor entry is the report lane's own trigger.
+    ///
+    /// Driven through the real prune (`prune_done_scoped`, the one function
+    /// `reap_inner` and `session prune` both call), with the cursor file
+    /// written exactly as the lane writes it: one entry per FILED run.
+    #[test]
+    fn a_finished_door_summon_is_pruned_once_reported_while_a_local_task_run_is_kept() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR", "AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR"]);
+        let root = unique_stage("door-retention");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", root.join("run"));
+
+        let tasked = |id: &str, slug: &str, origin: Option<&str>| {
+            let mut rec = session(id, "/x", "done", "2026-09-25T00:00:00Z", None);
+            rec.task = Some(slug.to_string());
+            rec.origin = origin.map(str::to_string);
+            rec
+        };
+        std::fs::write(
+            crate::graph::taskreport::taskreport_path(),
+            serde_json::json!({
+                "door-filed": { "outcome": "exit" },
+                "local-filed": { "outcome": "exit" },
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let sessions = vec![
+            tasked("door-filed", "t-1", Some("node:peer")),
+            tasked("door-owed", "t-2", Some("node:peer")),
+            tasked("local-filed", "build", None),
+            tasked("local-owed", "build-2", None),
+        ];
+        let (kept, _hooks, removed, _cleared) = prune_done_scoped(sessions, Vec::new(), false);
+        let ids: Vec<&str> = kept.iter().map(|s| s.session_id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["door-owed", "local-filed", "local-owed"],
+            "a REPORTED door summon leaves the roster like any untasked session; every run on \
+             this box stays, reported or not, and an unreported door run stays until the lane \
+             can fire"
+        );
+        assert_eq!(removed, vec!["door-filed".to_string()]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_remote_childs_local_descendants_nest_under_it_from_a_pulled_graph() {
+        // The §10 gate: on A, `par1 → nodeb/C → nodeb/G`, where C and G are
+        // both records on B (C spawned by par1 over the door, G spawned
+        // locally by C). Nothing here invents a wire: the fixture IS B's own
+        // resolved document — the exact bytes `aoide/graphSummary` serves and
+        // `node pull` caches — so the far subtree nests through the fold A
+        // already does, and `remoteChildren` is only the link into it.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STATE_DIR"]);
+        let state = unique_stage("remote-nest");
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+
+        // ── B's own records → B's own document (what the door stamped) ──
+        let key_a = "ab".repeat(32);
+        let mut c = session("C", "/srv/work", "running", "1", None);
+        c.remote_parent = Some(remote_parent("yomi", &key_a, "par1"));
+        let g = session("G", "/srv/work", "running", "2", Some("C"));
+        let b_doc = build_graph(&[], &[c, g], &[]);
+        assert_eq!(node_json_of(&b_doc, "session:C")["remoteParent"]["sessionId"], "par1");
+        assert!(
+            b_doc["edges"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["from"] == "session:C" && e["to"] == "session:G" && e["kind"] == "spawned"),
+            "B's own local lineage: {b_doc}"
+        );
+
+        // ── A's registry: the far node, freshly pulled ──
+        let key_b = "cd".repeat(32);
+        aoide_storage::node_store::save_nodes(&[aoide_storage::node_store::Node {
+            name: "nodeb".into(),
+            url: "http://nodeb:8710/".into(),
+            autogate: false,
+            token_file: None,
+            bearer_secret: None,
+            hub: false,
+            pubkey: Some(key_b.clone()),
+            verified: true,
+            allows: Vec::new(),
+            via: None,
+            added_at: "2026-08-14T00:00:00Z".into(),
+        }])
+        .unwrap();
+        aoide_storage::node_store::save_node_cache(&aoide_storage::node_store::NodeCacheEntry {
+            schema_version: "0".into(),
+            name: "nodeb".into(),
+            instance: Some(json!({ "name": "nodeb" })),
+            graph: Some(b_doc),
+            fetched_at: Some(aoide_storage::time::now_iso_utc()),
+            stale: false,
+            last_error: None,
+        })
+        .unwrap();
+        aoide_storage::remote_children::append_remote_child(&ledger_row("par1", "nodeb", &key_b, "C")).unwrap();
+
+        // ── A's own document: par1 + the folded far subtree ──
+        let doc = build_graph(&[], &[session("par1", "/home/khoa", "running", "1", None)], &[]);
+        let link = &node_json_of(&doc, "session:par1")["remoteChildren"][0];
+        assert_eq!(link["node"], "nodeb");
+        assert_eq!(link["sessionId"], "C");
+
+        let far = node_json_of(&doc, "node:nodeb");
+        assert_eq!(far["state"], "fresh");
+        let far_sessions: Vec<&str> = far["children"]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|n| n["kind"] == "session")
+            .map(|n| n["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(far_sessions, vec!["session:C", "session:G"], "C AND its own descendant: {far}");
+        assert_eq!(
+            far["children"]["nodes"][1]["remoteParent"], Value::Null,
+            "G is B's OWN local child — a plain spawned edge, no remote link"
+        );
+        assert_eq!(
+            far["children"]["nodes"][0]["remoteParent"]["node"], "yomi",
+            "C names the parent it was spawned by, on A"
+        );
+        let far_edges = far["children"]["edges"].as_array().unwrap();
+        assert!(
+            far_edges.iter().any(|e| e["from"] == "session:C" && e["to"] == "session:G"),
+            "so the walk par1 → nodeb/C → nodeb/G resolves on A: {far}"
+        );
 
         let _ = std::fs::remove_dir_all(&state);
     }

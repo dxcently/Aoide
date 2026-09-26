@@ -49,7 +49,8 @@ there is no "this node may spawn, that one may not."
    ends; the popup is sugar.
 5. **Per-node permissions: a closed `allows` set.** Capabilities
    today: `"spawn"` (create a session via the A2A spawn arm),
-   `"read"` (graph/who summaries over A2A), and `"message"` (deposit a
+   `"read"` (graph/who summaries over A2A; `read` also admits output reads
+   (the watch frame) of any session on this node), and `"message"` (deposit a
    mail envelope via `aoide/mailDeposit` — data a reader pulls, never
    an instruction; it grants nothing on the spawn or conduct arms).
    Commands:
@@ -122,7 +123,8 @@ aoide pair <target> [--name b]
   → POST commitment to B's door ─────────► parks pending, UNREVEALED
      (A's pubkey, A's name,                (id, A's pubkey, A's claimed
       commit = H(pubkey_A, nonce_A),        name, origin addr, commit,
-      selfVia = A's own reach-back claim)   A's selfVia claim if given)
+      selfVia = A's own reach-back claim,   A's selfVia claim if given,
+      binding = A's signed age binding)     A's binding if given)
   ◄── B's pubkey + B's own nonce ─────────┘
   → POST reveal ──────────────────────────► verifies H(pubkey_A, nonce_A)
      (id, nonce_A)                             == commit; stores nonce_A
@@ -362,11 +364,26 @@ nodes:
   request whose signature this door already verified is, by
   construction, never a local caller, so it is treated as remote for
   the auto-deliver-vs-pending question regardless of which address it
-  arrived from: `state/nodes.json`'s per-node `autogate` flag, not
-  connection origin, decides whether a signed node's send still
-  auto-delivers. An unsigned request's loopback trust is unaffected —
+  arrived from: `state/nodes.json`'s per-node `autogate` flag, or the
+  remote-parent rule below, decides whether a signed node's send still
+  auto-delivers — never the connection origin. An unsigned request's
+  loopback trust is unaffected —
   this narrowing only ever removes a free pass a signature was never
   entitled to in the first place.
+- **A remote parent steers the child it spawned, and the tunnel is its
+  production shape.** The Inject arm matches the `metadata["aoide/from"]`
+  claim against the target record's `remoteParent`: the caller must have
+  signed with a paired node's key this door verified, that key must equal the
+  record's stored `remoteParent.key`, and the claim must equal its stored
+  `remoteParent.sessionId`. A match delivers WITHOUT pending
+  (`autogate-remote-parent`) on both rails the signature-rung `autogate` flag
+  rides — the exemption from `origin_for_inject`'s downgrade, which is what
+  carries the loopback/`ssh -L` shape above, and the fold into
+  `autogate_match`, which is what carries a directly-addressed
+  `ConnOrigin::Remote` caller. Both are load-bearing; the node's own
+  `autogate` flag need not be set, the door-wide bearer is still checked
+  first, and there is no off switch (unpairing the node or the child ending
+  are the levers — `node allow <n> spawn off` stops only new children).
 - **Identity IS the key; the name is a label (#63 P-ID5).**
   `X-Aoide-Node` carries the caller's own self name
   (`aoide_storage::display::local_host_name()`), the same value the
@@ -683,8 +700,16 @@ forward is a pipe, not a party to the protocol.
   a route with no packet sent; a claimed OS hostname was tried first and
   found to resolve only through the router's DHCP-DNS on this LAN —
   resolution by luck, not something a transport marker can lean on),
-  falling back to the claimed hostname only if that route lookup itself
-  fails; `--self-via` overrides the whole default. Same trust class as the
+  falling back to the claimed hostname if that route lookup fails for any
+  reason — and the loopback refusal is decided BEFORE that lookup is even
+  attempted, on the target's own resolved address, so it is not one of the
+  fallback's cases: a `toward` that resolves to LOOPBACK in either family
+  (`127.0.0.1`, `[::1]`, `::1`, `::ffff:127.0.0.1`, `localhost`, the
+  unspecified `0.0.0.0`/`::`) claims nothing at all (`selfVia` absent, the
+  wire's own "no claim": the two ends are the same machine, so there is no
+  hop between them to name, and the naive `ssh://<login>@127.0.0.1` was a hop to this
+  box's own sshd that the far end never asked for); `--self-via` overrides
+  the whole default. Same trust class as the
   `url` field beside it on that same wire message either way:
   self-asserted data, a transport marker only, never itself a source of
   trust (trust stays in pubkeys + the SAS comparison, "The ceremony"
@@ -728,18 +753,21 @@ forward is a pipe, not a party to the protocol.
   inject` strips loopback's free pass from it before the delivery decision
   runs (CONTRACTS.md §6). A signature-rung `autogate` flag restores
   auto-delivery for a node the operator already marked that way, exactly
-  the like-for-like an operator's existing grant expects. `via`/`--via` are
+  the like-for-like an operator's existing grant expects, and a matched
+  remote-parent claim does the same for the node that spawned this very
+  session — the tunneled parent is the shape that rule exists to serve.
+  `via`/`--via` are
   safe to use against a real node.
 
 ## Mesh declaration
 
 A named mesh (`config.toml`'s `[mesh.<name>]`, task #135 P4, CONTRACTS.md
 §4) is intent, not a second identity model. It is an operator's own
-bookkeeping — "these are the boxes I expect to belong to this roster,
+bookkeeping — "these are the boxes I expect to belong to this mesh,
 reached at these hops" — recorded once, on one instance, never transmitted:
 nothing in the ceremony, the wire (§"Wire authentication" above), or any
 A2A payload carries a mesh name, and `node_store::Node` gains no field for
-it. The roster itself stays exactly what the Kill-list below already
+it. The mesh itself stays exactly what the Kill-list below already
 settled — the closure of pairwise, individually-verified records — and a
 declared mesh only ever describes a NAMED EXPECTATION over that same
 closure, never a new object standing in front of it. Declaring one changes
@@ -788,13 +816,50 @@ skips exactly as it skips the sweep's proceed-prompt on `aoide pair`. It is
 a convenience over the listing, never a substitute for a code: skipping it
 bypasses no gate, because the codes are the gate.
 
-**`sameOperator` is declared and not acted on.** Whether a converge may
-ever satisfy the far side's typed code on an operator's behalf — a claim of
-one human at both screens — touches the mutual-code invariant directly and
-is not decided. Until it is, a mesh declaring `sameOperator = true`
-converges byte-identically to one that does not, and the report carries a
-single note saying the flag was seen and not acted on. The note is a note:
-it changes no node's outcome, no count, and refuses nothing.
+**The ceremony carries the age binding (P-SEAL).** The pairing ceremony is
+one of the two carriages `HTTPS-MESH-API.md` gives a node's self-signed age
+key binding; the other is the `aoide/binding` door read. This is the one
+that reaches a pair before either side has exchanged a letter, which is why
+it exists: without it, two freshly paired nodes seal nothing to each other
+until one of them happens to drain an outbox or poll.
+
+- `aoide/pairRequest` carries an OPTIONAL `binding` beside `selfVia` — A's
+  own signed binding. B checks it against the `pubkeyHex` the SAME request
+  claims, before it parks anything: a binding whose signer is not that key
+  is a malformed request, not an older-peer one. A request carrying no
+  binding at all parks and pairs exactly as it always did, and the parked
+  record has no `binding` key rather than a null one, so an older binary
+  reading B's state sees nothing new. **This is the per-peer upgrade path,
+  and it is why the field is optional rather than required.**
+- `aoide/pairPoll`'s `approved` answer carries B's own binding beside
+  `pubkeyHex`, minted at release time. A requester against an older approver
+  gets none, and its pairing still completes.
+- Each side records the other's binding when the pairing commits:
+  `seal::learn_binding`, which re-verifies it against the key now on record
+  and refuses `stale-binding` for a generation that is not above the stored
+  one.
+- **The high-water mark is enforced at the carriage as well as at the
+  commit.** A binding that is not newer than what the parked record already
+  carries is dropped on arrival, so a replay cannot walk the record
+  backwards while it waits for approval; an equal generation with different
+  bytes is not a change either. The rule lives in two places on purpose:
+  neither the wait nor the commit is its single home.
+- A binding the ceremony cannot record never fails the pairing. Both
+  recordings are best-effort by construction; an age key that will not mint
+  costs a node its sealing until it can, never its pairing.
+
+**`sameOperator` is declared and not acted on.** A converge never
+satisfies the far side's typed code on an operator's behalf: a mesh
+declaring `sameOperator = true` converges byte-identically to one that
+does not, and the report carries a single note saying the flag was seen
+and not acted on. The note is a note: it changes no node's outcome, no
+count, and refuses nothing. The question the flag asks — one human
+operating both ends — is answered by the signed charter instead
+([HTTPS-MESH-API.md](HTTPS-MESH-API.md), "Charters"): same operator means
+same charter signer, one operator's machines join the charter rather than
+pairing with each other, and the flag retires when P-CHARTER lands. The
+ceremony, with both codes, stays the entry for machines of different
+owners.
 
 `mesh.<name>.grant` IS live: it is the capability set a converge stamps at a
 first verification, riding the ceremony exactly as a typed `--allow` does,

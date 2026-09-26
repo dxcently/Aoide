@@ -40,7 +40,13 @@ full node id or the bare id.
   instead resolves one automatically: its self-first `/proc` ancestry
   (`hookAncestry`, stamped once at registration) is intersected against
   every live agent-kind session's own `hookAncestry`, and the closest
-  matching ancestor wins as parent (CONTRACTS.md §4).
+  matching ancestor wins as parent (CONTRACTS.md §4). A harness that reports
+  itself through the hook door is launched by a wrap, so its parent is usually
+  that wrap directly, and the door resolves it the same way whichever door
+  serves the hook: the claim in the hook process's own `AOIDE_SESSION_ID`
+  (checked — a claim whose record carries a pid the hook process is not
+  running under is dropped and reported, never linked) with the attested
+  conducted ancestor as the kernel-verified path ahead of it.
 - **`leads`** (session → session): a project that names a **lead**
   (`aoide project lead <name> <session>`, CONTRACTS.md §4's
   `projects.json`) hangs its other parentless sessions off that one
@@ -58,6 +64,46 @@ itself; the lead is anchored to the project it leads. Sessions matching no
 project group under a synthetic `(unanchored)` root. Each session's live
 state is the latest hook phase from `hooks.json` merged over its raw roster
 state ([[shellbridge]] writes both files).
+
+**The project ladder** — which project a session belongs to, derived and never
+stored (`CONTRACTS.md` §4, "stored-vs-effective"):
+
+```
+project_for(s)            explicit project > s's workspace default > s's cwd anchor
+effective_project_for(s)  explicit project > owner (nearest ancestor whose OWN
+                          claim resolves) > s's workspace default > s's cwd anchor
+```
+
+The **workspace default** is `workspaceProject`: the project the session's
+compositor workspace was bound to (`workspace set`, `CONTRACTS.md` §4's
+`projects.json`) at the moment its `workspace` first went from absent to
+present. It is stamped ONCE, through one seam
+(`aoide-conduct::graph::observe_workspace`), so a window dragged to another
+workspace keeps the project it was born with, and binding a workspace never
+adopts the sessions already sitting on it. The owner sits ABOVE the default —
+a child an agent spawns belongs to the agent's work wherever its window lands —
+and the default sits above the cwd anchor because binding a workspace is an act
+an operator performed while a cwd is incidental. A default naming a project
+that has since been removed falls through to the next rung; an observation that
+LAPSED — a `workspace` cleared because its window's client reported none —
+counts as a new birth when the workspace is observed again on a binding. The
+ladder is LIVE membership only: ledger-driven views are not re-run through it —
+`resurrect --project <name>` and the conductor's history label match an entry
+by its explicit project or its cwd, so a session whose membership comes from
+its workspace default is not offered by those views. On a host with no
+compositor no session carries a default at all, and the ladder is exactly the
+two rungs it was before.
+
+The BINDINGS are published for the desktop in `graph.json`'s top-level
+`workspaces` block (core-seams §E, slice S3, `CONTRACTS.md` §4): one row per
+workspace a session sits on or a project is bound to — `workspace`, `project`
+when bound, `projects` (the binding plus the effective projects of that
+workspace's live sessions), `sessions`, `live`/`working`/`awaiting`, and
+`activeAt` — plus `ties`, the pairs that share a project or cross a `spawned`
+edge. A bar or dock draws "workspace 3 → project aoide" and pulses it off the
+document it already hot-reloads, rewritten atomically by every `workspace
+set`/`clear`; the block rides only when a workspace is in play, and
+`projects.json` stays the record.
 
 ## The viewer — bare `graph`
 
@@ -248,9 +294,11 @@ socket, else the control socket with the wrap's own submit key), with no
 gate, no pending entry, no provenance prefix and no rename of the parent.
 `state/stage/pingback.json` holds the per-child cursor (`seen`, `silentAt`),
 claimed inside one short stage-lock section before the write, so each event
-is delivered at most once. A parent that is a bare shell is skipped — a line
-typed into a shell would run — as is one whose record is gone, not
-conductable, or already `done`. The ruling is the User's (2026-09-17): a
+is delivered at most once. A parent that is a shell is skipped — a line
+typed into a shell would run, and the WRAP decides that (its wrapped
+program's own basename, not the `agent` label a caller chose) — as is one
+whose record is gone, not conductable, or already `done`. The ruling is the
+User's (2026-09-17): a
 parent hears the children it spawned, and nothing wider.
 
 The contrasting shape is **a desktop Codex/ChatGPT thread**
@@ -368,7 +416,9 @@ seeing a stale "haunting" session.
 ## Session identity — origin and the sealed credential
 
 Two additive record fields carry a session's provenance (LANE IDENTITY,
-task #63); both are consumed internally and get no `graph.json` projection:
+task #63), plus a third for the SAME question across machines (the remote
+sub-agents lane's `remoteParent`, below); `origin` and the sealed credential
+are consumed internally and get no `graph.json` projection:
 
 - **`origin`** (string, write-once) — `"node:<name>"` for a session the A2A
   door spawned on behalf of an identified, paired node, a local-class value
@@ -384,6 +434,48 @@ task #63); both are consumed internally and get no `graph.json` projection:
   gate**: `sessions.json` and `state/session-ledger.jsonl` stay plain
   same-uid-writable files, so no security decision keys on `origin` as read
   off disk. The authenticated form is the seal.
+- **`remoteParent`** (object, `{node, key, sessionId}`) — the SAME spawned-by
+  edge across machines, deliberately a SECOND field. `parentSessionId` stays
+  LOCAL-only: every reader of it (the autogate grant and sibling rule in
+  `graph/send.rs`, `graph/model.rs`'s grouping, `graph link`'s cycle check,
+  `taskreport`'s mailbox) treats it as a local id, so a foreign value there
+  would dangle at best and match a same-named local session at worst — which
+  would hand local autogate to a stranger. The **receiving A2A door** is its
+  only writer: `stamp_remote_parent` lands it on the just-registered child
+  from the node record the caller's own signature verified (so `key` is the
+  identity and `node` only the label the door knew at stamp time), plus the
+  caller's session id off the signed `metadata["aoide/from"]` claim. Never a
+  name from a header or the body, and never through the child's env — a local
+  `conduct`/`spawn` cannot name one at all, and `resurrect` carries none
+  forward. Change-only, like `origin`. Same attribution posture as `origin`:
+  `sessions.json` stays a plain, same-uid-writable file, so the gate is the
+  key comparison the door makes, never this field as read off disk.
+- **Both machines show the link, and neither invents an edge for it** (P-RSA
+  S4). On the child's node, `graph.json`'s session node and `aoide session
+  --json`'s row carry `remoteParent: {node, sessionId}` — the name resolved to
+  the CURRENT `nodes.json` entry for `key`, falling back to the label stamped
+  at spawn time, so a rename never orphans the link — and the roster line
+  appends `↑ <node>/<sessionId>`; the key itself is never republished. On the
+  parent's node, the caller-side ledger (`state/stage/remote-children.json`,
+  one row per child this box spawned elsewhere) projects onto the parent's own
+  node and roster row as `remoteChildren: [{node, sessionId}]` and `↓ <n>
+  remote`. The child keeps its ordinary `anchors`/`leads` edge and gets NO
+  `spawned` edge for the far parent: `parentSessionId` is what makes a local
+  parent, so a remote one never writes it — not even when a local session
+  happens to carry the same id. The child's own local descendants need no
+  projection at all: the far node's document nests under its `node:<name>` root
+  in this one, carrying that child's `spawned` edges, so `par1 → nodeb/C →
+  nodeb/G` resolves off `remoteChildren` plus the fold, with no wire call of
+  its own — and `aoide session` renders exactly that chain: each
+  `remoteChildren` row joins the probed fold by `(node name, sessionId)` and is
+  drawn indented under the parent's own row, its far descendants beneath it,
+  with the same join feeding `--json`'s `fold`/`subtree` on the entry. A row
+  the fold does not carry is shown `(not pulled)`, never hidden; one behind an
+  expired cache TTL is shown `(stale)`, because the ledger link itself never
+  expires. The conductor TUI's DAG reads neither key yet — terminal-only.
+  A ledger row leaves with its parent: both roster-exit paths call
+  `drop_remote_child_rows` over the ids they removed, after their own
+  `sessions.json` write lands.
 - **`seal` + `sealedIssuedAt`** — the sealed session credential, sharing
   one lifecycle (always both or neither). `aoided` mints an ed25519 keypair
   once per process and holds it in memory only, never on disk — a separate

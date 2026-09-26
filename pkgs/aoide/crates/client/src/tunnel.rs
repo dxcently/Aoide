@@ -47,9 +47,16 @@
 // `proc_exists` is `aoide_storage::fs::pid_is_alive` — the one liveness probe in
 // core (POSIX `kill(pid, 0)`), imported rather than re-derived. Live is not
 // identity: the recycled-pid decision below still confirms WHOSE process it is.
-use aoide_storage::fs::pid_is_alive as proc_exists;
+// `terminate`/`wait_for_exit` are the same crate's process acts — the one place
+// core ends a pid and the one place it waits for one — so this module never
+// names `libc` or a Windows handle itself, and the host-split guarantee of
+// `terminate` (SIGTERM, a request a child may decline, versus Windows'
+// uncatchable `TerminateProcess`) is recorded there and handled here: the
+// bounded wait below is written for the arm where a survivor is possible.
+use aoide_storage::fs::{pid_is_alive as proc_exists, terminate, wait_for_exit, Waited};
 use aoide_storage::tunnel::{TunnelRecord, Via, TUNNEL_VERSION};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -238,23 +245,19 @@ pub fn close_all_for_session(session_id: &str) -> Result<(), String> {
 
 // ── process-liveness / signaling ────────────────────────────────────────
 
-/// The module doc's "recycled-pid decision": read `/proc/<pid>/cmdline`
-/// (NUL-separated argv) and confirm it is actually an `ssh` process
-/// carrying THIS record's exact `-L <local_port>:<remote_host>:<remote_port>`
-/// spec, before `close` ever signals it. A pid that no longer exists, or
-/// whose cmdline is unreadable (already exited, permission denied), or
-/// whose argv doesn't match, is NOT our ssh — `close` skips the signal and
-/// just drops the record.
+/// The module doc's "recycled-pid decision": read `pid`'s own argv — see
+/// [`process_argv`] for the read and the host split — and confirm it is
+/// actually an `ssh` process carrying THIS record's exact
+/// `-L <local_port>:<remote_host>:<remote_port>` spec, before `close` ever
+/// signals it. A pid that no longer exists, or whose argv is unreadable
+/// (already exited, permission denied, another user's process), or whose argv
+/// doesn't match, is NOT our ssh — `close` skips the signal and just drops
+/// the record.
 fn looks_like_our_ssh(pid: u32, local_port: u16, remote_port: u16) -> bool {
-    let Ok(raw) = std::fs::read(format!("/proc/{pid}/cmdline")) else {
+    let Some(args) = process_argv(pid) else {
         return false;
     };
-    let args: Vec<String> = raw
-        .split(|&b| b == 0)
-        .filter(|s| !s.is_empty())
-        .map(|s| String::from_utf8_lossy(s).into_owned())
-        .collect();
-    let is_ssh = args.first().is_some_and(|a| a == "ssh" || a.ends_with("/ssh"));
+    let is_ssh = args.first().is_some_and(|a| is_ssh_program(a));
     let spec = format!("{local_port}:127.0.0.1:{remote_port}");
     // The `-L` value itself may carry any host in its middle segment
     // (`spawn_ssh` below writes `remote_host` there); match on the
@@ -267,6 +270,50 @@ fn looks_like_our_ssh(pid: u32, local_port: u16, remote_port: u16) -> bool {
         a == &spec || (a.starts_with(&l_prefix) && a.ends_with(&l_suffix))
     });
     is_ssh && has_l_spec
+}
+
+/// `pid`'s argv, the ONE read behind [`looks_like_our_ssh`]'s decision.
+///
+/// Unix: `/proc/<pid>/cmdline`, NUL-separated (`Some(vec![])` on an empty
+/// read, exactly as before this split). Native Windows: there is no `/proc`,
+/// and a process's line is not in the process table at all — it comes from
+/// `aoide_protocol::win_proc::command_argv`, which reads it through the
+/// kernel's own `ProcessCommandLineInformation` and splits it with this
+/// host's `CommandLineToArgvW`, so the tokens this predicate compares are the
+/// tokens Windows itself would hand the child. `None` on any failure, which
+/// the caller reads as "not ours" — the fail-closed direction, since a
+/// process this reader cannot see must never be signaled.
+fn process_argv(pid: u32) -> Option<Vec<String>> {
+    #[cfg(unix)]
+    {
+        let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+        Some(
+            raw.split(|&b| b == 0)
+                .filter(|s| !s.is_empty())
+                .map(|s| String::from_utf8_lossy(s).into_owned())
+                .collect(),
+        )
+    }
+    #[cfg(windows)]
+    {
+        aoide_protocol::win_proc::command_argv(pid).ok()
+    }
+}
+
+/// Is this argv[0] this host's `ssh`? Unix: the bare command name, or a path
+/// ending in it. Native Windows: `ssh.exe` — the name a program has there
+/// carries its extension, and a Windows file name is case-insensitive, so
+/// both are folded rather than pretending `ssh` is its own name on that host.
+fn is_ssh_program(arg0: &str) -> bool {
+    #[cfg(unix)]
+    {
+        arg0 == "ssh" || arg0.ends_with("/ssh")
+    }
+    #[cfg(windows)]
+    {
+        let a = arg0.trim_matches('"').to_ascii_lowercase();
+        a == "ssh.exe" || a.ends_with("/ssh.exe") || a.ends_with("\\ssh.exe")
+    }
 }
 
 /// Kill `pid` if — and only if — it is still alive AND
@@ -305,44 +352,52 @@ pub fn kill_if_still_our_ssh(pid: u32, local_port: u16, remote_port: u16) -> boo
     true
 }
 
-/// `SIGTERM` a pid already confirmed (by the caller) to be this record's
-/// own `ssh` child, then reap it. Two REAP strategies, tried in order,
-/// because this pid is not always a child OF THIS PROCESS: when it is (a
-/// same-process open-then-close, or `open_or_reuse_with`'s own stale-reopen
-/// path, both of which parented the child moments ago), a bounded
-/// `waitpid(pid, WNOHANG)` poll performs a REAL `wait(2)` so no zombie is
-/// left behind — the courtesy `Child::wait()` gives when a `Child` handle
-/// is on hand, reproduced here without one. `ECHILD` (this pid is not, or
-/// is no longer, a child of this process — the ordinary cross-invocation
-/// case: an earlier `aoide` run opened it) means a real wait can never
-/// succeed here at all; that, and any other `waitpid` failure, falls back
-/// to the original best-effort courtesy of polling the pid's liveness until it
-/// stops reading live, within a short bound — never a guarantee, just a nicety for the
-/// caller's own next action.
+/// Ask a pid already confirmed (by the caller) to be this record's own `ssh`
+/// child to end, then reap it. Two REAP strategies, tried in order, because
+/// this pid is not always a child OF THIS PROCESS: when it is (a same-process
+/// open-then-close, or `open_or_reuse_with`'s own stale-reopen path, both of
+/// which parented the child moments ago), a bounded `waitpid(pid, WNOHANG)`
+/// poll performs a REAL `wait(2)` so no zombie is left behind — the courtesy
+/// `Child::wait()` gives when a `Child` handle is on hand, reproduced here
+/// without one. `ECHILD` (this pid is not, or is no longer, a child of this
+/// process — the ordinary cross-invocation case: an earlier `aoide` run
+/// opened it) means a real wait can never succeed here at all; that, and any
+/// other `waitpid` failure, falls back to the original best-effort courtesy of
+/// polling the pid's liveness until it stops reading live, within a short
+/// bound — never a guarantee, just a nicety for the caller's own next action.
+///
+/// **Both acts are [`aoide_storage::fs`]'s** (`terminate`/`wait_for_exit`),
+/// which is where the host split lives — and the two arms do not promise the
+/// same thing, so this loop is written for the weaker one. Unix sends
+/// `SIGTERM`, a REQUEST a trapped or hung child can survive, which is why the
+/// bounded wait exists at all and why a survivor leaves its record on disk.
+/// Native Windows `TerminateProcess`es the child — a primitive nothing can
+/// trap, so "still alive after the bounded kill" simply does not arise there
+/// — and then waits on the process handle, which on that host works for a pid
+/// an EARLIER invocation spawned too (no `ECHILD`). The hard kill is safe
+/// precisely because of this module's own guard: every caller reaches
+/// [`terminate_pid`] only through [`kill_if_still_our_ssh`], which has already
+/// confirmed the pid is THIS record's own `ssh` child, and a forward is a
+/// loopback TCP channel the far `sshd` reaps when the connection drops — there
+/// is no remote state a clean shutdown would have unwound and a hard kill
+/// leaks. What is identical on both hosts is the shape: ask, poll to a bound,
+/// and fall back to a liveness poll if no wait can answer.
 fn terminate_pid(pid: u32) {
-    // SAFETY: `pid` was just proven by `looks_like_our_ssh` to be this
-    // record's own `ssh` child, never an arbitrary/unrelated process.
-    unsafe {
-        libc::kill(pid as libc::pid_t, libc::SIGTERM);
-    }
+    terminate(pid);
 
     let waitpid_deadline = Instant::now() + Duration::from_millis(500);
     let mut reaped = false;
     loop {
-        let mut status: libc::c_int = 0;
-        // SAFETY: `pid` names a real process this call just signaled;
-        // `&mut status` is a valid local; `WNOHANG` never blocks.
-        let r = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, libc::WNOHANG) };
-        if r == pid as libc::pid_t {
-            reaped = true;
-            break;
-        }
-        if r < 0 {
-            // Most commonly ECHILD (not our child) — any negative return
-            // means a real wait(2) on this pid cannot succeed from this
-            // process; stop polling waitpid and fall through to the
+        match wait_for_exit(pid, false) {
+            Waited::Exited => {
+                reaped = true;
+                break;
+            }
+            // Most commonly ECHILD (not our child) — no wait can succeed for
+            // this pid from this process; stop polling and fall through to the
             // liveness poll below.
-            break;
+            Waited::NotWaitable => break,
+            Waited::Running => {}
         }
         if Instant::now() >= waitpid_deadline {
             break;
@@ -398,11 +453,12 @@ fn open_timeout_secs() -> u64 {
 
 // ── the real ssh child ──────────────────────────────────────────────────
 
-/// This box's own login: `$USER`, else `$LOGNAME`, else `Err` — the
-/// env-only half of [`resolve_login`]'s chain, pulled out so a caller with
-/// no `Via` at hand (`commands::default_self_via`, the pairing wire's own
-/// reach-back hop claim) can reuse the identical fallback instead of
-/// re-deriving it.
+/// This box's own login name: `$USER`, else `$LOGNAME`, else (native
+/// Windows, where neither of those is a variable the OS sets) `%USERNAME%`,
+/// else `Err` — the env-only half of [`resolve_login`]'s chain, pulled out so
+/// a caller with no `Via` at hand (`commands::default_self_via`, the pairing
+/// wire's own reach-back hop claim) can reuse the identical fallback instead
+/// of re-deriving it.
 pub(crate) fn local_login() -> Result<String, String> {
     if let Ok(u) = std::env::var("USER") {
         if !u.trim().is_empty() {
@@ -414,23 +470,60 @@ pub(crate) fn local_login() -> Result<String, String> {
             return Ok(u);
         }
     }
-    Err("neither $USER nor $LOGNAME is set".to_string())
+    #[cfg(windows)]
+    if let Ok(u) = std::env::var("USERNAME") {
+        if !u.trim().is_empty() {
+            return Ok(u);
+        }
+    }
+    Err(format!(
+        "no login name in the environment ({})",
+        if cfg!(windows) { "$USER, $LOGNAME or %USERNAME%" } else { "$USER or $LOGNAME" }
+    ))
 }
 
 /// `via`'s ssh login: its own `user` segment when present, else
-/// [`local_login`]'s `$USER`/`$LOGNAME` chain, else a taught refusal —
-/// never a guessed literal (the ssh-transport plan's K4; no new env knob,
-/// `--via user@host` already covers the override).
+/// [`local_login`]'s `$USER`/`$LOGNAME`/`%USERNAME%` chain, else a taught
+/// refusal — never a guessed literal (the ssh-transport plan's K4; no new env
+/// knob, `--via user@host` already covers the override).
 fn resolve_login(via: &Via) -> Result<String, String> {
     if let Some(u) = &via.user {
         return Ok(u.clone());
     }
-    local_login().map_err(|_| {
-        format!("no ssh login for `{via}` — neither $USER nor $LOGNAME is set; pass an explicit --via user@host")
+    local_login().map_err(|e| {
+        format!("no ssh login for `{via}` — {e}; pass an explicit --via user@host")
     })
 }
 
-/// The ONE place `Command::new("ssh")` is ever written. `BatchMode=yes` is
+/// The `ssh` program this host runs — the ONE place the client's choice of
+/// binary is written, so [`spawn_ssh`] and the tunnel tests that read a
+/// child's argv back agree by construction.
+///
+/// Unix: the bare name `ssh`, resolved through `PATH` — the operator's own
+/// client, whichever they installed. **Native Windows: the OpenSSH client
+/// that ships with the OS**, `%SystemRoot%\System32\OpenSSH\ssh.exe`
+/// (measured present on ThinkChiyo), named by FULL PATH because `ssh` is not
+/// a name `PATH` there is guaranteed to carry — Windows' `PATH` is a per-user
+/// variable and its OpenSSH is an optional feature that installs outside any
+/// standard directory. A host with `%SystemRoot%` unset gets a taught refusal
+/// naming what could not be located, never a guessed `C:\Windows`.
+fn ssh_program() -> Result<PathBuf, String> {
+    #[cfg(unix)]
+    {
+        Ok(PathBuf::from("ssh"))
+    }
+    #[cfg(windows)]
+    {
+        let root = std::env::var_os("SystemRoot").ok_or_else(|| {
+            "no `%SystemRoot%` in the environment, so this host's own OpenSSH client \
+             (System32\\OpenSSH\\ssh.exe) cannot be located"
+                .to_string()
+        })?;
+        Ok(PathBuf::from(root).join("System32").join("OpenSSH").join("ssh.exe"))
+    }
+}
+
+/// The ONE place the ssh child is ever spawned. `BatchMode=yes` is
 /// an invariant, not a preference (module/client-README note): it is the
 /// mechanical form of "aoide never automates key setup" — no password or
 /// host-key prompt can ever appear, so a missing `~/.ssh/authorized_keys`
@@ -439,7 +532,8 @@ fn resolve_login(via: &Via) -> Result<String, String> {
 /// prompt nothing here could ever answer.
 fn spawn_ssh(local_port: u16, via: &Via, remote_host: &str, remote_port: u16) -> Result<Child, String> {
     let login = resolve_login(via)?;
-    let mut cmd = Command::new("ssh");
+    let program = ssh_program()?;
+    let mut cmd = Command::new(&program);
     cmd.arg("-N")
         .arg("-T")
         .arg("-o")
@@ -461,7 +555,7 @@ fn spawn_ssh(local_port: u16, via: &Via, remote_host: &str, remote_port: u16) ->
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    cmd.spawn().map_err(|e| format!("spawn `ssh` for {via}: {e}"))
+    cmd.spawn().map_err(|e| format!("spawn `{}` for {via}: {e}", program.display()))
 }
 
 /// The taught error `open_or_reuse_with` returns when a stale record's OLD
@@ -521,6 +615,7 @@ fn exited_before_forward_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::os::unix::process::CommandExt;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
@@ -543,6 +638,39 @@ mod tests {
         out
     }
 
+    /// A real, ssh-free child that stays alive for the length of a test — the
+    /// pid fixtures here record and the process `terminate_pid` acts on. Unix:
+    /// `sleep 10`. Native Windows: `ping -n 60 127.0.0.1` writing nothing —
+    /// there is no `sleep` on that host's `PATH`.
+    fn quiet_child() -> Result<Child, String> {
+        #[cfg(unix)]
+        {
+            Command::new("sleep").arg("10").spawn().map_err(|e| format!("test fake spawn: {e}"))
+        }
+        #[cfg(windows)]
+        {
+            Command::new("cmd")
+                .args(["/C", "ping -n 60 127.0.0.1 > NUL"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|e| format!("test fake spawn: {e}"))
+        }
+    }
+
+    /// A real child that exits at once with a FAILURE status — the
+    /// fast-failure fixture. Unix: `false`. Native Windows: `cmd /C exit 1`.
+    fn exit_now_child() -> Result<Child, String> {
+        #[cfg(unix)]
+        {
+            Command::new("false").spawn().map_err(|e| format!("test fake spawn: {e}"))
+        }
+        #[cfg(windows)]
+        {
+            Command::new("cmd").args(["/C", "exit 1"]).spawn().map_err(|e| format!("test fake spawn: {e}"))
+        }
+    }
+
     fn fixture(session_id: &str, key: &str, pid: u32, local_port: u16) -> TunnelRecord {
         TunnelRecord {
             schema_version: TUNNEL_VERSION.to_string(),
@@ -562,8 +690,8 @@ mod tests {
     }
 
     /// A fake spawn that binds `local_port` itself (simulating a forward
-    /// that comes up) and starts a genuine but ssh-free child (`sleep`) so
-    /// the record it produces carries a real, killable pid. No `ssh`
+    /// that comes up) and starts a genuine but ssh-free child ([`quiet_child`])
+    /// so the record it produces carries a real, killable pid. No `ssh`
     /// anywhere in this test binary.
     fn spawn_that_binds_the_port() -> SpawnFn {
         Arc::new(|local_port: u16, _via: &Via, _remote_host: &str, _remote_port: u16| {
@@ -574,16 +702,14 @@ mod tests {
                 let _keep = listener;
                 std::thread::sleep(Duration::from_secs(10));
             });
-            Command::new("sleep").arg("10").spawn().map_err(|e| format!("test fake spawn: {e}"))
+            quiet_child()
         })
     }
 
     /// A fake spawn that starts a real child but never opens the port —
     /// the timeout branch's fixture.
     fn spawn_that_never_binds() -> SpawnFn {
-        Arc::new(|_local_port: u16, _via: &Via, _remote_host: &str, _remote_port: u16| {
-            Command::new("sleep").arg("10").spawn().map_err(|e| format!("test fake spawn: {e}"))
-        })
+        Arc::new(|_local_port: u16, _via: &Via, _remote_host: &str, _remote_port: u16| quiet_child())
     }
 
     /// A genuine child (`bash -c "read …"`, no `ssh` binary involved) whose
@@ -594,6 +720,12 @@ mod tests {
     /// back through `/proc/<pid>/cmdline`, regardless of which binary
     /// actually ran), plus the exact `-L` spec string as a harmless extra
     /// positional parameter the script never reads.
+    ///
+    /// POSIX-only fixture: overriding a child's `argv[0]` is an `execve`
+    /// convention with no Windows counterpart — a child's first token there is
+    /// the program path it was launched as — so the native fixture is
+    /// [`spawn_fake_ssh_argv`]'s other arm, which runs a REAL `ssh` instead of
+    /// pretending one. See its own doc.
     ///
     /// **Sandbox fix (review): a builtin busy-loop, not `sleep`, and
     /// `bash`, not `sh`.** The original fixture ran `sh -c "sleep <n>"` —
@@ -629,6 +761,7 @@ mod tests {
     /// alive process, with no real `ssh` anywhere in this test binary; a
     /// spin loop's brief CPU cost is negligible — every caller kills it
     /// within the same test, well under a second.
+    #[cfg(unix)]
     fn spawn_fake_ssh_argv(local_port: u16, remote_host: &str, remote_port: u16) -> Result<Child, String> {
         let spec = format!("{local_port}:{remote_host}:{remote_port}");
         Command::new("bash")
@@ -644,20 +777,74 @@ mod tests {
             .map_err(|e| format!("test fake ssh-argv spawn: {e}"))
     }
 
+    /// The same fixture natively: a live, killable process whose argv really
+    /// is `<ssh.exe> … -L <local_port>:<remote_host>:<remote_port> …` — because
+    /// it IS this host's own `ssh` ([`ssh_program`]), started against a
+    /// loopback listener that accepts and then says nothing. `ssh` sends its
+    /// own banner and waits forever for the server's, so it is alive and
+    /// mid-connection with no authentication, no host key and no traffic
+    /// leaving the box; every caller here terminates it, far inside a second.
+    ///
+    /// Windows needs a different fixture than Unix's for a real reason, not a
+    /// preference: there is no `execve` `argv[0]` override to fake a name with
+    /// — a child's argv[0] on this host is the path it was launched as.
+    #[cfg(windows)]
+    fn spawn_fake_ssh_argv(local_port: u16, remote_host: &str, remote_port: u16) -> Result<Child, String> {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|e| format!("test banner bind: {e}"))?;
+        let banner_port = listener.local_addr().map_err(|e| format!("test banner port: {e}"))?.port();
+        std::thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                // Accept and stay silent: `ssh` blocks waiting for the
+                // server's identification string, which is the whole
+                // fixture — a live ssh with this exact `-L` on its argv.
+                let _hold = stream;
+                std::thread::sleep(Duration::from_secs(30));
+            }
+        });
+        let program = ssh_program()?;
+        Command::new(program)
+            .arg("-o")
+            .arg("BatchMode=yes")
+            .arg("-o")
+            .arg("ConnectTimeout=10")
+            .arg("-o")
+            .arg("StrictHostKeyChecking=no")
+            .arg("-p")
+            .arg(banner_port.to_string())
+            .arg("-N")
+            .arg("-T")
+            .arg("-L")
+            .arg(format!("{local_port}:{remote_host}:{remote_port}"))
+            .arg("aoide-test-marker@127.0.0.1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("test fake ssh spawn: {e}"))
+    }
+
     /// Same shape and same sandbox-safety reasoning as
-    /// [`spawn_fake_ssh_argv`] (a builtin-only `-c` script, `argv[0]`
-    /// overridden to `"ssh"` via `CommandExt::arg0`, `bash` named directly)
-    /// — but traps `SIGTERM` away first, and only AFTER installing the trap
-    /// writes `ready_marker` (`:` and `>` are shell builtins too, so this
-    /// stays exec-free). The fixture for
+    /// [`spawn_fake_ssh_argv`]'s Unix arm (a builtin-only `-c` script,
+    /// `argv[0]` overridden to `"ssh"` via `CommandExt::arg0`, `bash` named
+    /// directly) — but traps `SIGTERM` away first, and only AFTER installing
+    /// the trap writes `ready_marker` (`:` and `>` are shell builtins too, so
+    /// this stays exec-free). The fixture for
     /// `close_keeps_the_record_when_the_child_survives_the_bounded_kill`:
-    /// real `ssh` never ignores `SIGTERM`, but `terminate_pid` only ever
-    /// sends one, so a stubborn/hung real child is the case this proves
-    /// `close` no longer mishandles. The marker exists so the TEST can wait
-    /// for the trap to actually be live before ever signaling the child —
-    /// without it, a signal sent the instant after `spawn()` returns could
-    /// race the child's own `trap` builtin and kill it the ordinary way,
-    /// making the test flaky rather than proving anything.
+    /// real `ssh` never ignores `SIGTERM`, but `terminate_pid` only ever sends
+    /// one, so a stubborn/hung real child is the case this proves `close` no
+    /// longer mishandles. The marker exists so the TEST can wait for the trap
+    /// to actually be live before ever signaling the child — without it, a
+    /// signal sent the instant after `spawn()` returns could race the child's
+    /// own `trap` builtin and kill it the ordinary way, making the test flaky
+    /// rather than proving anything.
+    ///
+    /// **POSIX-only, and there is no native arm to write**: the fixture's
+    /// whole content is a signal the child declines to handle, and native
+    /// Windows' one termination primitive (`TerminateProcess`) cannot be
+    /// trapped, blocked or ignored by anything — measured: the "survives the
+    /// bounded kill" state is unreachable there, which is why the two tests
+    /// using this fixture are gated with that reason at their own sites.
+    #[cfg(unix)]
     fn spawn_fake_ssh_argv_ignoring_sigterm(
         local_port: u16,
         remote_host: &str,
@@ -691,8 +878,13 @@ mod tests {
     /// harmless: `kill`/`waitpid` on an already-reaped pid just fail
     /// (`ESRCH`/`ECHILD`), which this ignores by design — a best-effort
     /// backstop, not a second assertion.
+    ///
+    /// POSIX-only, with the fixture it guards: its only callers are the two
+    /// tests [`spawn_fake_ssh_argv_ignoring_sigterm`]'s own doc gates.
+    #[cfg(unix)]
     struct KillOnDrop(u32);
 
+    #[cfg(unix)]
     impl Drop for KillOnDrop {
         fn drop(&mut self) {
             // SAFETY: `self.0` names a pid this test spawned; `SIGKILL`
@@ -822,6 +1014,16 @@ mod tests {
     /// shape `close`'s own fix exists to prevent. Pins the refusal:
     /// `open_or_reuse_with` errors out, the OLD record stays on disk
     /// exactly as it was, and the injected spawn never runs at all.
+    ///
+    /// POSIX-only: the state this refuses on — a child that survives
+    /// `terminate_pid`'s bounded kill — needs a signal a child can trap, and
+    /// native Windows' `TerminateProcess` cannot be trapped by anything
+    /// (fixture's own reason, [`spawn_fake_ssh_argv_ignoring_sigterm`]). The
+    /// contract it belongs to keeps its native coverage in
+    /// [`stale_reopen_kills_the_old_ssh_child_before_overwriting_its_record`]
+    /// and [`close_on_a_same_process_child_actually_reaps_it_leaving_no_zombie`],
+    /// which run against a real `ssh` on that host.
+    #[cfg(unix)]
     #[test]
     fn stale_reopen_refuses_rather_than_overwrite_a_child_that_survives_the_bounded_kill() {
         with_temp_runtime_dir("stale-reopen-refuses-survivor", || {
@@ -917,9 +1119,7 @@ mod tests {
             // Left at the 8s default deliberately — the assertion below is
             // that this returns in well under that, not that a shorter
             // configured timeout coincidentally fired first.
-            let spawn: SpawnFn = Arc::new(|_lp, _via, _rh, _rp| {
-                Command::new("false").spawn().map_err(|e| format!("test fake spawn: {e}"))
-            });
+            let spawn: SpawnFn = Arc::new(|_lp, _via, _rh, _rp| exit_now_child());
 
             let started = Instant::now();
             let via = bare_via("nowhere-listening");
@@ -962,9 +1162,13 @@ mod tests {
     /// `close` run in the SAME process, since nothing else ever reaps a
     /// child THIS process itself spawned. Proves the fix does a REAL
     /// `wait(2)`, not just "the pid stopped answering" (a zombie still
-    /// answers `kill(pid, 0)`): a second `waitpid` on the same pid, run by
-    /// this test AFTER `close`, must itself fail — nothing left to wait
-    /// for, because `close` already collected it.
+    /// answers `kill(pid, 0)`): a second WAIT on the same pid, run by
+    /// this test AFTER `close`, must itself find nothing left to collect,
+    /// because `close` already did. Both hosts, one assertion: Unix's
+    /// second `waitpid` returns `-1` (`ECHILD`), native Windows' pid no
+    /// longer opens at all (`NotWaitable`) — no zombie exists on that host,
+    /// which is why the "not lingering" half of this contract is a
+    /// liveness probe rather than a process state there.
     #[test]
     fn close_on_a_same_process_child_actually_reaps_it_leaving_no_zombie() {
         with_temp_runtime_dir("close-reaps", || {
@@ -984,10 +1188,26 @@ mod tests {
 
             assert!(close("sess-j", "sakaki").is_ok());
 
-            let mut status: libc::c_int = 0;
-            // SAFETY: `pid` and `&mut status` are valid; `WNOHANG` never blocks.
-            let r = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, libc::WNOHANG) };
-            assert!(r < 0, "a second waitpid on an already-reaped child must fail — nothing left to reap: r={r}");
+            // The "nothing left to collect" half is Unix's own: there a second
+            // `waitpid` FAILS, because `close` already reaped the child. Native
+            // Windows reaps nothing — a terminated process's object is signalled
+            // — so what this asserts there is that the wait no longer reports a
+            // RUNNING process (measured on ThinkChiyo: the object was still
+            // openable and already signalled, which is not a failure to collect
+            // anything). What both hosts must agree on, and what the caller's
+            // contract needs, is the line after: the child is gone.
+            #[cfg(unix)]
+            assert_ne!(
+                wait_for_exit(pid, false),
+                Waited::Exited,
+                "a second wait on an already-collected child must find nothing to collect"
+            );
+            #[cfg(windows)]
+            assert_ne!(
+                wait_for_exit(pid, true),
+                Waited::Running,
+                "the terminated child must never read as still running"
+            );
             assert!(!proc_exists(pid), "the child must be fully gone, not lingering as a zombie");
         });
     }
@@ -1004,6 +1224,17 @@ mod tests {
     /// the child is still alive, and a LATER `close` — once the child is
     /// actually gone — finally removes it, proving the kept record really
     /// is retryable and not just permanently stuck either.
+    ///
+    /// POSIX-only, same reason as its stale-reopen sibling: the state under
+    /// test is a child that SURVIVES the bounded kill, which needs a
+    /// trap-able signal — native Windows' one termination primitive cannot be
+    /// ignored, so that arm reaches `close`'s "confirmed gone" path on the
+    /// first try. Native coverage of "a record is only dropped once the child
+    /// is confirmed gone" is
+    /// [`close_on_a_same_process_child_actually_reaps_it_leaving_no_zombie`]
+    /// (confirmed gone) and
+    /// [`close_removes_the_record_and_is_idempotent_on_a_missing_one`].
+    #[cfg(unix)]
     #[test]
     fn close_keeps_the_record_when_the_child_survives_the_bounded_kill() {
         with_temp_runtime_dir("close-survivor", || {
@@ -1140,6 +1371,8 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_user = std::env::var("USER").ok();
         let saved_logname = std::env::var("LOGNAME").ok();
+        #[cfg(windows)]
+        let saved_username = std::env::var("USERNAME").ok();
 
         let named = Via { user: Some("khoa".to_string()), host: "sakaki".to_string(), port: None };
         assert_eq!(resolve_login(&named).unwrap(), "khoa");
@@ -1154,6 +1387,15 @@ mod tests {
         assert_eq!(resolve_login(&bare).unwrap(), "lognameuser");
 
         std::env::remove_var("LOGNAME");
+        // Native Windows' own login variable, and the LAST in the chain: it
+        // answers only once both POSIX names are gone — the arm a native
+        // console needs, where neither `$USER` nor `$LOGNAME` is ever set.
+        #[cfg(windows)]
+        {
+            std::env::set_var("USERNAME", "winuser");
+            assert_eq!(resolve_login(&bare).unwrap(), "winuser");
+            std::env::remove_var("USERNAME");
+        }
         assert!(resolve_login(&bare).is_err());
 
         match saved_user {
@@ -1164,5 +1406,22 @@ mod tests {
             Some(v) => std::env::set_var("LOGNAME", v),
             None => std::env::remove_var("LOGNAME"),
         }
+        #[cfg(windows)]
+        match saved_username {
+            Some(v) => std::env::set_var("USERNAME", v),
+            None => std::env::remove_var("USERNAME"),
+        }
+    }
+
+    /// The ONE place this client picks a binary, asserted against this host's
+    /// own file rather than a remembered string: a constant, a bare `ssh`, or
+    /// a never-run arm cannot pass it.
+    #[cfg(windows)]
+    #[test]
+    fn ssh_program_names_the_openssh_client_that_ships_with_windows() {
+        let program = ssh_program().expect("this host has %SystemRoot%");
+        let lowered = program.to_string_lossy().to_ascii_lowercase();
+        assert!(lowered.ends_with("system32\\openssh\\ssh.exe"), "the system OpenSSH client: {lowered}");
+        assert!(program.is_file(), "and it is really there, not a path we hope exists: {}", program.display());
     }
 }

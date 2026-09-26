@@ -8,12 +8,15 @@
 //! adding a caller.** [`snapshot_unlocked`] and [`snapshot_if_drifted_unlocked`]
 //! never take `aoide_storage::fs::with_stage_lock` themselves — allocating a
 //! take number is a read-max/write-max+1 race exactly like the lock exists
-//! for, but the lock is documented **not re-entrant**
-//! (`aoide-storage/src/fs.rs`). If these cores locked internally, `rice
-//! back` — which must snapshot-if-drifted, write the revert,
-//! AND advance the head cursor as one atomic unit — would either deadlock
-//! wrapping its whole body in a second acquire, or (worse, silently) run the
-//! rest of its body unlocked if it called the cores without wrapping at all.
+//! for, and closing it is the CALLER-held boundary's job.
+//! `with_stage_lock` nests for the thread that already holds it
+//! (`aoide-storage/src/fs.rs`), so a core that locked internally would not
+//! deadlock inside a caller's hold — it would simply move the atomic unit off
+//! the caller and onto each core. `rice back` — which must
+//! snapshot-if-drifted, write the revert,
+//! AND advance the head cursor as one atomic unit — therefore owns one hold
+//! around the whole body, and a caller that wrapped only part of its body
+//! would silently get several sections instead of one.
 //! [`snapshot`] is the ONLY locked entrypoint here — a single
 //! `with_stage_lock` around [`snapshot_unlocked`], fine for any caller whose
 //! write isn't already folded into someone else's locked mutator. That
@@ -1167,7 +1170,7 @@ fn prune_unlocked(song: &str, draft: Option<&str>, doomed: &[u32]) -> Result<Pru
 
 /// `rice take prune`'s locked entrypoint: exactly ONE `with_stage_lock`
 /// around [`prune_unlocked`]'s whole splice-persist-delete-remark body — the
-/// crate's non-reentrant lock rule (module doc's "Locking discipline"
+/// crate's one-hold-per-mutator rule (module doc's "Locking discipline"
 /// section), the same shape every other mutator in this file uses.
 fn prune(song: &str, draft: Option<&str>, doomed: &[u32]) -> Result<PruneResult, String> {
     shellbridge::with_stage_lock(|| prune_unlocked(song, draft, doomed))
@@ -1367,11 +1370,11 @@ fn handle_rice_take_prune(inv: &Invocation) -> Outcome {
 //
 // Everything below is ONE mutator: [`back_unlocked`] does drift-snapshot →
 // livery/cover write-back → compositor apply → registry re-sync → head
-// advance as a single `with_stage_lock` body (advisor verdict D2 — see the
-// module doc's "Locking discipline" section, which this function is the
-// concrete case that section was written for). It calls ONLY the `_unlocked`
-// cores above, never [`snapshot`]/[`mark`] — those re-acquire the lock and
-// `with_stage_lock` is documented not re-entrant (`aoide-storage/src/fs.rs`).
+// advance as a single `with_stage_lock` body (which nests for the thread that
+// already holds it — `aoide-storage/src/fs.rs`), which is why it
+// calls ONLY the `_unlocked` cores above, never [`snapshot`]/[`mark`]: those
+// own a hold of their own, and this function's whole point is that the unit is
+// ONE body, not a wrapper around four separately-serialised ones.
 
 /// Everything [`handle_rice_back`] needs to build its `Outcome`, assembled
 /// INSIDE the lock so nothing here re-reads state the write already changed

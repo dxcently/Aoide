@@ -870,12 +870,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Write `contents` to `dir.join(name)` and mark it executable —
-    /// `crate::bin::mark_executable` is the shared `PermissionsExt` dance.
+    /// Write `contents` to `dir.join(name)` and make it a program this host
+    /// will run.
+    ///
+    /// Unix: the execute bit, via `crate::bin::mark_executable` (the shared
+    /// `PermissionsExt` dance). Windows: a spawnable suffix, because that —
+    /// not any bit — is what both this crate's resolver and `Command`'s own
+    /// name lookup ask for. So the file lands as `<name>.exe`, and the
+    /// caller gets the path it must expect back. The two tests below that
+    /// actually RUN their shim stay `cfg(unix)`: their body is a `#!/bin/sh`
+    /// script, and a `.exe` this arm can write is never one a shell script
+    /// could be.
+    #[cfg(unix)]
     fn write_executable(dir: &std::path::Path, name: &str, contents: &str) -> PathBuf {
         let path = dir.join(name);
         std::fs::write(&path, contents).unwrap();
         crate::bin::mark_executable(&path);
+        path
+    }
+
+    #[cfg(windows)]
+    fn write_executable(dir: &std::path::Path, name: &str, contents: &str) -> PathBuf {
+        let path = dir.join(format!("{name}.exe"));
+        std::fs::write(&path, contents).unwrap();
         path
     }
 
@@ -1367,6 +1384,7 @@ mod tests {
     /// End-to-end through `run`: a hit spawns the child with `argv[1..]`
     /// VERBATIM and returns the CHILD's own exit code unchanged, never
     /// aoide's own vocabulary.
+    #[cfg(unix)]
     #[test]
     fn run_spawns_the_resolved_external_command_with_argv_verbatim_and_returns_its_exit_code() {
         let _guard = crate::bin::path_test_lock().lock().unwrap();
@@ -1411,6 +1429,14 @@ mod tests {
     /// The audit line lands at LAUNCH: resolved path + argument COUNT only —
     /// never an argument VALUE (`crates/secrets/src/client.rs`'s "never
     /// argv" rule). A secret-looking flag value must never reach the log.
+    /// The Windows half of the spawning pair is missing on purpose, and the
+    /// reason is the same one `write_executable`'s own doc gives: the shim
+    /// these two tests spawn is a `#!/bin/sh` script. What they assert about
+    /// `run` (argv verbatim, the child's exit code unchanged, the audit line's
+    /// path-and-count shape) is platform-independent policy, and the
+    /// resolution it rides on is covered natively by `bin.rs`'s
+    /// `windows_*` tests; only the child these two need cannot exist here.
+    #[cfg(unix)]
     #[test]
     fn run_audits_the_launch_with_path_and_arg_count_never_argument_values() {
         let _guard = crate::bin::path_test_lock().lock().unwrap();

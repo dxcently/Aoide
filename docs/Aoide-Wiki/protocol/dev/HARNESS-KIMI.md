@@ -97,7 +97,11 @@ aoide send --id <id> --yes --submit -- "1"
 
 **Kimi's TUI submits on `\r`, not `\n`.** A plain newline types the line
 without submitting it. `submit_key` in the profile carries this; a hand-rolled
-injection that sends `\n` leaves the text sitting unsent on the prompt.
+injection that sends `\n` leaves the text sitting unsent on the prompt. The
+tree has no such hand-roll left: every pty injection — `send`, the doorbell
+ring, `spawn --prompt`, `resurrect`'s restore delivery, the A2A door's opening
+turn — writes the text and then the target's own `submit_key` as a separate,
+later write (`write_delivery`, resolved through `profile_for_agent`).
 
 ---
 

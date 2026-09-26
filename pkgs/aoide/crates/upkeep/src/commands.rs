@@ -134,7 +134,9 @@ mod tests {
         run_git(&root, &["add", "-f", "cache.ignored"]);
         run_git(&root, &["commit", "-q", "-m", "oops, force-added"]);
         // C3 clutter: a root symlink into /nix/store.
-        std::os::unix::fs::symlink("/nix/store/abc123-aoide-0.0.0", root.join("result")).unwrap();
+        if !crate::test_fixture::plant_symlink("/nix/store/abc123-aoide-0.0.0", &root.join("result")) {
+            eprintln!("[test] no symlink privilege on this host: the C3 clutter fixture cannot exist here");
+        }
 
         std::env::set_var("AOIDE_FLAKE_ROOT", &root);
         root
@@ -232,8 +234,9 @@ mod tests {
         let root = plant_fixture();
         // A second clutter symlink, so this run carries >1 finding of the
         // SAME class too — the collision surface the id rule exists for.
-        std::os::unix::fs::symlink("/nix/store/def456-aoide-notes-0.0.0", root.join("result-1"))
-            .unwrap();
+        if !crate::test_fixture::plant_symlink("/nix/store/def456-aoide-notes-0.0.0", &root.join("result-1")) {
+            eprintln!("[test] no symlink privilege on this host: the second clutter fixture cannot exist here");
+        }
 
         let out = handle_soundcheck(&inv(&["soundcheck"], &[]));
         let data = out.data.unwrap();

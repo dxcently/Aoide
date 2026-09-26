@@ -23,8 +23,56 @@
 
 ## Invariants
 
+- **`runtime_dir::socket_dir` is a PURE resolution.** It answers a path and
+  creates nothing — `tunnel::list_records`' own tests depend on "the `aoide/`
+  subdirectory does not exist until a writer makes it", and a resolver that
+  created it would be lying to every caller about what it did. Creating the
+  directory belongs to whoever is about to write or bind there (on native
+  Windows, through `aoide_protocol::owner_only::ensure_private_dir`). The
+  `$XDG_RUNTIME_DIR` override wins on BOTH hosts: every isolating fixture sets
+  it, and an answer that ignored it on one host would read and write the
+  machine's real per-user directory instead of the fixture's.
 - Structured thread/reply IDs are signed context, not membership or delivery authority. Legacy four-field content remains valid.
 - Structured letter content is optional signed text, never a new transport header. Invalid or legacy content remains raw; decoding must not write or alter envelope identity.
+
+- **`seal` is the ONE module that touches the `age` crate, and `frame` is the
+  one encoding it is built from.** Every signed or hashed byte of the P-SEAL
+  container goes through `seal::frame(label, fields)` — a NUL-terminated label
+  then a `u32` big-endian length per field, with no field ever omitted and no
+  value ever entering as a rendering. The reserved label table is a block of
+  constants in that file and nowhere else; a new frame adds a label there.
+  Deleting `seal.rs` and the workspace `Cargo.toml`'s one `age` line removes
+  the dependency from the tree, which is the test this module has to keep
+  passing.
+- **No private key ever enters a `Serialize`/`Deserialize` type here, and
+  `seal.rs` enforces that on itself.** The age key is the stock
+  `AGE-SECRET-KEY-1…` text at `state/identity/age.key`, `0600`, beside
+  `ed25519.key`; the retired-key store is two plain files per generation for
+  the same reason. The `no_private_material_in_any_serialize_type` test reads
+  this module's own source text and fails the build if a serializable struct
+  ever grows a field that looks like key material — the same mechanical gate
+  `identity.rs` runs on itself.
+- **The filed record is the truth about filing, never a dedup gate's
+  memory.** `state/mail/containers.jsonl` only decides whether a container may
+  be OPENED, and it means **admitted AND filed**: `seal::record_admitted` is
+  called by the caller once `mail::deposit` has returned `Filed` or
+  `Duplicate`, never from inside `seal::deposit_container`. Whether a duplicate
+  was originally a letter — and so whether a lost receipt is owed — is read
+  back out of `base.jsonl` through `mail::filed_kind`/`mail::show`, never
+  remembered by the gate. Both halves of that ordering are load-bearing: record
+  any earlier and a refusal past the gate answers `duplicate` forever instead
+  of re-running, and a crash between the gate and `base.jsonl` claims a filing
+  that never happened.
+- **Housekeeping never decides a refusal word.** `seal::sweep_retired_keys`
+  runs only on the current key's own successful open — never before an
+  attempt, never on a failure. Deleting a just-expired key first would turn
+  an actionable `key-retired` into a bare `open-failed`; a refusal a caller
+  cannot act on is worse than no refusal.
+- **`outbox::poll_payloads` is a poll's only hand-over point, and it returns
+  pairs.** The container rides beside its envelope so the door can hand a
+  sealed entry over as a container and NO plaintext, while an entry spooled
+  before the destination published a binding still appears as an envelope. A
+  poll is still a pure read: nothing is marked, moved or counted.
 
 - **Enduring identity is independent of knowledge configuration.** Bind an
   explicit `valid_node_name`-shaped key in `session::bind_enduring_agent`;
@@ -55,6 +103,62 @@
   turn this into a periodic or unconditional re-sync; a second boot with
   both a old-path leftover and a populated new path should leave the new
   path exactly as it is.
+- **`remoteParent` and `parentSessionId` are two edges, never one field
+  (remote sub-agents lane, P-RSA).** `SessionRecord.parent_session_id` is a
+  LOCAL id and every reader treats it as one (autogate grant, sibling rule,
+  project grouping, `graph link`'s cycle check, `taskreport`'s mailbox) —
+  never put a qualified or foreign value in it, and never "unify" the two by
+  making `remoteParent` a string inside it: a foreign value would dangle at
+  best and match a same-named local session at worst. `remoteParent` has
+  exactly one writer (the A2A door) and is stamped on the CHILD's own
+  record, so registration (`session::upsert_session`, and thus
+  `session_conduct`) must keep writing `remote_parent: None`, never reading
+  it from env or argv. `records::RemoteParent` deliberately carries no
+  `extra` map: the door is its only writer, so there is no foreign writer to
+  round-trip for (unlike `SessionRecord`, whose writer is shellbridge).
+- **A `state/stage/` ledger with a cursor moves the cursor FORWARD ONLY, and
+  writes both inside one `with_stage_lock` section.** `remote_children::
+  claim_lines_after` and `retain_remote_children` are the shape (P-RSA S9):
+  mutate in-memory, write once, return whether anything changed; a no-op result
+  never rewrites the file (so an idle tick does not churn the tree), and a
+  replayed pull can never rewind a cursor and re-deliver a line. Where a
+  caller reads the cursor, acts on it over a NETWORK (the remote ping-back
+  pull), and only then advances it, the read and the advance must be ONE
+  operation — `claim_lines_after` returns the cursor the caller may act on, so
+  two overlapping passes cannot each hand over the same events. Its failure
+  mode is deliberate: a claim that cannot be written delivers NOTHING, because
+  with the cursor where it was the same events would come back and the line
+  would land twice.
+- **A one-way latch is a field that is only ever set, and it is never
+  written while it is false.** `remote_children::mark_drained` is the shape
+  (P-RSA S9): the remote-children ledger's `drained` latch stops the parent's
+  every later tick from asking a far node about a child that has nothing left
+  to say, and nothing ever clears it — the row leaves when its parent leaves
+  the roster, which is `retain_remote_children`'s job. `#[serde(default,
+  skip_serializing_if = "is_false")]` is what keeps it additive: a row
+  written before the field existed, and an unlatched row today, serialize
+  byte-identically.
+- **A bounded ring carries its own `seq`, never an index, and says when it
+  dropped something.** `pingback_remote::push_event`/`events_after` are the
+  shape (P-RSA S8): the cursor a reader hands back is a `seq` that only
+  climbs, the cap drops the OLDEST, and a read that missed any event between
+  the cursor and the oldest retained one sets `gap` rather than handing over a
+  non-contiguous run as if it were whole. A reader that needs to resync with
+  no event to advance past uses `last` — and only there: a reader that
+  believes `last` outside a `gap` is taking a peer's word for a cursor no
+  honest ring could report. The payload is `Value`, opaque on
+  purpose: the event vocabulary belongs to the crate that produces it, and
+  this layer is a queue.
+- **A ring that outlives its record carries its own way in and its own clock.**
+  `pingback_remote::ChildRing`'s `key` and `at` are that pair (P-RSA S9): the
+  key is the parent's node key, stamped with the child's FIRST event and never
+  replaced, so the door that serves the ring can admit the parent after the
+  child's `sessions.json` record is pruned; `at` is the last spool's unix
+  second, which is what `retain_rings` measures. Pruning is the CALLER's
+  decision (`retain_rings` takes the predicate) because only the caller knows
+  the roster — this layer refuses nothing on its own, and a rejected-nothing
+  call is not a write, the same change-only discipline every other mutator
+  here holds.
 - **`fs::migrate_root_once` is `pub` and deliberately NOT wired into any
   path getter (L-C2, lyra-carrier lane, task #107) — don't "fix" this by
   hanging it off `fs::root`'s no-override fallback the way
@@ -265,6 +369,20 @@
   `pid > pid_t::MAX` are refused BEFORE the syscall: both name a process group.
   Live is NOT identity, so a caller about to SIGNAL a pid still checks its own
   argv/port. Callers re-export or import this probe; never fork a `/proc` copy.
+- **The two process ACTS live beside the probe and promise DIFFERENT things per
+  host** — `fs::terminate` is `SIGTERM` (a request a trapped or hung child can
+  survive) on Unix and `TerminateProcess` (uncatchable) on native Windows, and
+  `fs::wait_for_exit` is `waitpid` there and `WaitForSingleObject` here. An
+  agent editing either must keep the doc's table honest and keep callers
+  written for the WEAKER arm; the one caller, `aoide-client::tunnel`, reaches
+  `terminate` only through its argv guard, which is what makes the hard arm
+  safe. Never add a second kill/wait path: this is the seam.
+- **A node name this box gives itself is `display::local_node_name()`, never
+  `local_host_name()`** — an address grammar (`^[a-z0-9][a-z0-9-]*$`) is
+  lowercase and an OS host name need not be (native Windows' DNS name is
+  conventionally upper-case). Any new site that stamps, declares or compares
+  this box as a NODE uses the folded form; the raw name stays for display and
+  for an ssh target.
 - **`fs::atomic_write`'s temp cleanup is directory-wide, and every failing
   half unlinks its own temp.** `sweep_stale_temps` reclaims any sibling
   `<stem>.tmp.<pid>` whose pid is dead, not only temps sharing the target's
@@ -415,7 +533,14 @@
   concurrent CLI invocation can never silently drop each other's
   `approved` flag or `tries` increment (#119 review finding 4). A new
   mutator here wraps its whole load-modify-write in `with_stage_lock` the
-  same way, never a bare `load → save`. `PARK_LOCK`
+  same way, never a bare `load → save`. **`with_stage_lock` is re-entrant for
+  the thread that already holds it** (`fs.rs`'s own doc, P-RSA S4): a nested
+  call on that thread runs its closure directly instead of opening a second
+  fd and blocking on the lock it already owns — which is what let
+  `aoide-conduct`'s `prune_done_scoped` retain `remote-children.json` from
+  inside `reap_inner`'s and `do_session_start_inner`'s existing holds. Other
+  threads and other processes still wait; `try_stage_lock`/`lock_path` are
+  untouched and still nest nowhere. `PARK_LOCK`
   (process-local `static Mutex<()>`, poison-recovering) stays alongside as
   the cap's in-process guarantee: `with_stage_lock` is best-effort by
   contract (a lock hiccup runs the closure unlocked), the mutex is not.
@@ -685,6 +810,37 @@
   does not remove it — the kill-list discipline `undying`/`manifest`
   above hold for their own state applies here too: only an explicit
   human action or a genuine delivery confirmation removes a record.
+- **`flavor` is a LOCAL entry fact, additive both ways (P-M3).** `now`
+  (attempted on every drain) vs `hold` (never attempted — it leaves only
+  through the destination's own `aoide/mailPoll`). The field must never
+  move onto the sealed `mail::Envelope`: an envelope is the immutable,
+  transfer-invariant unit whose `msgid` covers every byte of it, and the
+  flavor is the SENDER's routing intent, not part of the letter. On disk
+  the key is omitted for `now` (`flavor_is_now`), so every pre-P-M3 spool
+  file stays byte-identical and deserializes as `now`; and `is_held()` is
+  the only spelling of the check — anything that is not exactly `hold`
+  counts as attemptable, so an unknown/absent value fails toward DIALED,
+  never toward parked forever. `OutboxEntry::held` spools a held entry;
+  nothing else should construct the flavor by hand.
+- **A poll is a READ, and `poll_payloads` is its only entry point (P-M3).**
+  The offer rule lives there and nowhere else: every held entry toward the
+  node, plus every `now` entry with `tries > 0` whose last outcome did not
+  reach the peer (parked/`refused` ones included — a poller asking for its
+  own mail is a new fact; a never-attempted `now` entry excluded, the drain
+  owns it and offering it would double-drive one entry from two callers).
+  **Never add state to it**: no `tries` stamp, no `last_polled_at`, no
+  handed-over bookmark. Re-poll-before-ack idempotence is a CONSEQUENCE of
+  writing nothing (the same set is offered again) plus the receiver's
+  `msgid` dedup; a bookmark would be a second, drifting source of truth,
+  and any `tries` stamp on a poll would silently change which entries the
+  NEXT poll offers (the predicate reads exactly that field). The offer is
+  CAPPED at `POLL_BATCH_CAP` (50) — the drain's own batch size, oldest
+  first, capped after the filter, and it must stay capped: safe because the
+  poller acks what it files and those entries retire, so a large spool
+  advances a batch at a time rather than never; necessary because one
+  unbounded answer is a single JSON array of whole envelopes and walks
+  straight into the client's `MAX_RESPONSE_BYTES` refusal, which no retry
+  can clear.
 - **`write_ack_if_absent` gates on PENDING state, never a permanent
   ledger (mail register §26 outbox fix).** A duplicate letter redelivery
   mints a fresh ack via `mail::mint_ack` on every call — the gate lives
@@ -788,6 +944,29 @@
   too, for the same reason — a command whose handler needs to DIAL another
   node belongs in `aoide-client`, never here, regardless of which crate owns
   the state it reads or writes.
+
+- **A Windows arm keeps the Unix contract or refuses by name — never an
+  `Ok(())`, a `true`, or an empty collection standing in for a guarantee.**
+  The host split lives in one sibling file, `src/fs_windows.rs`, beside
+  `fs.rs` (the shape `aoide_protocol::feed`'s `feed_windows.rs` set): every
+  Unix-only primitive gets its Windows spelling there, and `fs.rs` keeps the
+  one function each caller names with two `cfg` bodies. `unlock`,
+  `lock_exclusive` and `try_lock_exclusive` are `pub(crate)` because
+  `outbox`'s `.bsy` guard takes the same lock rather than a second one.
+- **A private file or directory policy shared with another crate is CALLED,
+  never copied.** `aoide_protocol::owner_only` is the one implementation of
+  the owner-only DACL, so `atomic_write_private`'s temp and
+  `secure_private_dir` reach for it rather than writing a `windows-sys` call
+  sequence of their own — and a test that asks whether a file is private asks
+  through `fs::assert_private_file`/`assert_private_dir`, which read the
+  HOST's own answer (`mode` on Unix, the DACL on Windows). A privacy check
+  is never skipped on a host where it is inconvenient; a test that asserts a
+  Linux fact (`/proc`, a `umask`, a symlink fixture) is `cfg`-gated with the
+  reason in place. The readback obligation is not the test's alone:
+  `write_temp_file`'s Windows arm reads the private temp back through
+  `owner_only::file_privacy` BEFORE its first payload byte, because a
+  `SECURITY_ATTRIBUTES` descriptor is a request and a volume that ignores
+  ACLs would otherwise accept a private key at whatever policy it likes.
 
 ## Docs update required in the same commit
 

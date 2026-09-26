@@ -635,8 +635,10 @@ count.
   (P-C5) marks it a conducted shell, so it spawns windowed running its
   own login shell (`$SHELL` → passwd → `/bin/sh`, `-l`) instead. A
   candidate neither arm resolves is skipped with a taught message naming it,
-  never a guessed invocation. Once a terminal candidate's spawn registers,
-  its `restore` snapshot drives one more step, in-process through `send`,
+  never a guessed invocation. Once a terminal candidate's spawn registers AND
+  its target becomes READY (`aoide_conduct::graph::wait_ready`; a target that
+  never does is reported `not-ready` and typed at by nothing), its `restore`
+  snapshot drives one more step, in-process through `send`,
   never a direct socket write: a foreground command it was demonstrably
   running re-execs with `--yes --submit` (never for a recorded `sudo …`,
   which only restores the cwd); an idle session's clean unsubmitted
@@ -1089,8 +1091,12 @@ automatic anchoring without changing cwd. The exit ledger retains the value
 as `project` (null when absent), and resurrection restores it when registered.
 That stored project is distinct from the *effective* project a session
 renders under: `aoide-conduct::graph::effective_project_for` derives the
-latter (own explicit project, else the nearest owning ancestor's own explicit
-project or cwd anchor, else the session's own cwd anchor) and never writes it.
+latter (own explicit project, else the nearest owning ancestor's own claim,
+else the session's own workspace default, else its own cwd anchor) and never
+writes it. Ledger-driven views do NOT run that ladder: `resurrect --project
+<name>` and the conductor's history label match a ledger entry by its explicit
+`project` or its cwd only, so live membership can name a project those views
+will not offer for that session.
 `SessionRecord.project` and the graph node's `project` keep publishing the
 stored value only; `aoide session`'s bucket names and the conductor's
 per-project counts read the derived view. An additive `effectiveProject`
@@ -1104,6 +1110,34 @@ rows do not carry it either. The same rows carry `nativeRole` under the
 record rule above (present only when the record carries one); a row built
 from a remote node's graph document relays that node's own published
 `nativeRole` and never synthesizes one.
+
+**`workspaceProject` — the workspace's default project, stamped at birth.**
+A session record MAY carry an optional `workspaceProject` (string), naming
+the project its compositor workspace was BOUND to when the session's
+`workspace` first went from absent to present. It is a DEFAULT, never a
+choice: `SessionRecord.project` stays the explicit member and always outranks
+it, the owner rung sits between them (a child an agent spawns belongs to the
+agent's work wherever its window lands, and the owner's own default is visible
+to that walk), and the workspace default outranks the cwd anchor because
+binding a workspace is an act an operator performed while a cwd is incidental.
+`workspaceProject` is written ONLY by
+`aoide-conduct::graph::observe_workspace` — the one seam `workspace` itself is
+written through, called by all three compositor stamp sites (the hook-time
+window backfill, the event-driven sweep, and the synthetic bare-terminal
+publisher) — and only when the record has no explicit `project`, no
+`workspaceProject` yet, and its workspace carries a binding. It is therefore
+STAMPED ONCE: never re-stamped when a window moves, never cleared by movement,
+never adopted retroactively (binding a workspace affects new births, not the
+sessions already sitting on it). An observation that LAPSED counts as a NEW
+BIRTH: a record whose `workspace` was cleared — a window whose client reported
+no workspace — and later re-observed on a now-bound workspace IS stamped. The
+seam's rule is that state transition, not a permanent ever-stamped flag. A
+session whose default names a project that has since been removed falls
+THROUGH to the next rung — a default naming nothing is not a choice, and the
+stored field is left as it is; re-registering that name later RE-FORMS every
+membership the field still spells. Additive/v0-safe: absent on every record predating it and on every record whose host
+has no compositor adapter, `skip_serializing_if` keeping a record without it
+byte-identical on the wire.
 `session kill --id ID` is a local daemon-only SIGTERM request for an exclusively
 owned, conducted process verified against the daemon seal and pinned by Linux
 pidfd. Its successful response confirms signaling, never process exit.
@@ -1256,7 +1290,7 @@ sakaki = "ssh://khoa@192.168.1.202"
   takes no attribute fragment, so scoping is only expressible as a build of
   the check derivations.
 - `mesh.<name>` (task #135 P4, zero or more, keyed by the operator's own
-  mesh name) — a declared roster this instance believes it belongs to,
+  mesh name) — a declared mesh this instance believes it belongs to,
   compared against the live node registry by `aoide mesh`
   (`aoide_client::mesh`, see §3's CLI ledger). `mesh.<name>.nodes` is a
   `name -> ssh hop` map (`aoide_storage::tunnel::parse_via`'s own
@@ -1285,14 +1319,15 @@ sakaki = "ssh://khoa@192.168.1.202"
   the mesh is operated by the same human. It is declared and NOT acted on:
   `aoide mesh pair` converges a mesh declaring it identically to one that
   does not — every node paired with both codes typed — and says so in one
-  note on its report. Whether a converge may ever act on the claim touches
-  the mutual-code pairing invariant (`docs/architecture/PAIRING.md`'s "Mesh
-  declaration" section) and is not decided. This section is validated the
-  same as the two above it — an invalid mesh/node name, an out-of-
-  vocabulary `grant` element, an unparseable hop, or a node declared twice
-  is a LOUD error naming the offence — but it is declared, never settable:
-  its keys are the operator's own names, not a fixed table `aoide config
-  set` could walk, so `aoide config set mesh.*` is always
+  note on its report. The question it asks is answered by the signed charter
+  (`docs/architecture/HTTPS-MESH-API.md`, "Charters"): one operator is one
+  charter signer, so the key is never acted on and retires with P-CHARTER.
+  This section is validated the same as the two above it — an invalid
+  mesh/node name, an out-of-vocabulary `grant` element, an unparseable
+  hop, or a node declared twice is a LOUD error naming the offence — but
+  it is declared, never settable: its keys are the operator's own names,
+  not a fixed table `aoide config set` could walk, so
+  `aoide config set mesh.*` is always
   `SetRefusal::UnknownKey`, the same refusal an unknown key anywhere else
   gets. Writing a mesh is a text edit to this file; `aoide mesh` is the
   read-only comparison against `state/nodes.json` and `aoide mesh pair` is
@@ -1510,11 +1545,81 @@ The shellbridge roster + live hook phases (full field tables in
 windowAddress, cwd, state, startedAt }`; hook records: `{ sessionId, phase,
 updatedAt }`.
 
+**`shell` — the one durable answer to "is this session conducting a shell".**
+A session record MAY carry a `shell` bool, `true` only for a session whose
+wrapped command IS a shell (`aoide_conduct::graph::program_is_a_shell`: the
+program's own basename against the shell list, with `env`/`nix develop -c`/
+`setsid`/`timeout`/`nice`/… resolved to what they forward to). Written by the
+conducting process at REGISTRATION (`stamp_shell`), on both `upsert_session`
+arms, so re-registering an id as `-- env bash` sets it and re-registering it
+as a harness clears it. It exists because a line submitted into a shell RUNS
+as a command: the ping-back, the doorbell's PTY arm and the A2A door's own
+injects all refuse a record for which
+`aoide_conduct::graph::wrapped_program_is_a_shell` holds — that field OR a
+`Some` `restore` — rather than trusting the `agent` label, which is a
+caller's choice (`--agent pi -- bash` names a registered profile over a
+shell). A harness reached THROUGH a shell reads as a shell; the cost is a
+skipped auto-typing, never a line typed somewhere it would run. Absent (the
+default, skipped on serialization) means `false`, byte-identical to every
+record written before the field existed.
+
 **Additive in v0:** a session record MAY carry an optional `parentSessionId`
 (string) naming the session that spawned it — the graph's spawned-by edge. Set
 by `aoide graph link` (cycle-checked), cleared by `aoide session prune` when the
 parent is removed. Absent means "no spawned-by edge"; readers must tolerate
 both forms, and rewriters must round-trip fields they do not know.
+
+**`remoteParent` — the SAME edge across machines, deliberately a SECOND
+field.** A session record MAY carry an optional `remoteParent` object,
+`{node, key, sessionId}`: the session that spawned it on ANOTHER node.
+`parentSessionId` stays local-only and is never given a qualified or foreign
+value — every reader of it (the autogate grant and sibling rule in
+`conduct/graph/send.rs`, the grouping in `graph/model.rs`, `graph link`'s
+cycle check, `taskreport`'s mailbox) treats it as a local id, so a foreign
+value there would dangle at best and match a same-named local session at
+worst, which would grant local autogate to a stranger. `key` is the
+authoritative identity — the ed25519 pubkey the receiving door verified the
+request against (`docs/architecture/PAIRING.md`, "Identity IS the key") — and
+`node` is only the display label the door knew at stamp time: a reader prefers
+the current `nodes.json` name for `key`, so a local rename never orphans the
+link. Additive/v0-safe like every optional field above — absent on every
+locally-registered record and every record predating this field, and a record
+without it serialises byte-identical to before. Its caller-side mirror is
+`state/stage/remote-children.json`, below.
+
+**Who may write it, and with what.** Exactly one writer, the receiving A2A
+door: `a2a::do_spawn` stamps it through
+`aoide_conduct::graph::stamp_remote_parent` (one retry loop, alongside the
+`origin` stamp — `a2a::stamp_spawn_provenance`), and builds the value from the
+node record the request's own signature resolved to, never from a header or a
+body string. `node`/`key` are that record's, `sessionId` is the caller's
+`metadata["aoide/from"]` claim (§6, below). Nothing else mints one: there is no
+env var and no `conduct`/`spawn` flag for it (`session_conduct` reads none, and
+refuses nothing because there is nothing to read), and `resurrect` never
+carries it forward. Like `origin`, the field is **attribution, not
+authentication** — `sessions.json` stays a plain, same-uid-writable file, and
+same-uid is already loopback-trusted on its own host, so writing this field is
+no new authority: a local writer can hand itself a stamp, never a signature.
+One security decision does read it, though, and §6 states it: the Inject arm's
+deliver-now decision for a claimed remote parent keys on `remoteParent` as read
+off disk. What binds that read is the key comparison the door makes against the
+key it just verified — the stored `key` must equal the verified signer's, and
+the stored `sessionId` must equal the claim — so a hand-set `remoteParent` can
+only ever name a node whose OWN signature this door verified, on the one
+session id that record carries. It is
+change-only as a stamp, exactly like `origin`/`seal` (a same-value re-stamp
+writes nothing; a genuinely different value overwrites, since the guard is the
+value already on the record, not a "has this ever been set" flag).
+
+**How it reaches a surface.** Three projections, all derived, all additive:
+`graph.json`'s session node and `aoide session --json`'s row carry
+`remoteParent: {node, sessionId}` (the name resolved through the key, no key
+itself), the roster line appends `↑ <node>/<sessionId>`, and the caller-side
+mirror below adds `remoteChildren: [{node, sessionId}]` plus a `↓ <n> remote`
+tag on the parent's own row. None of them writes a record, and the child keeps
+its own `anchors`/`leads` edge: `parentSessionId` stays `None`, so no local
+`spawned` edge is ever minted for a remote parent — not even when a LOCAL
+session happens to carry the very id the far caller signed.
 
 **Additive in v0:** a session record MAY also carry an optional `contextTokens`
 (integer) — the input-side token count (`input_tokens +
@@ -1601,7 +1706,12 @@ tick, and its delivery cursor is `state/stage/taskreport.json` (beside
 `{endedAt, exitCode, outcome, msgid, mailbox, wake}`. The cursor advances only after the letter is
 in the mailbase, so a filing failure is retried on the next tick and a finished
 run whose report is not yet filed is retained against the sweep's prune
-(`prune_done`). Reads of it are read-only: no lock, no write, no cursor advance.
+(`prune_done`) — for a run summoned by the A2A door (`origin` `node:*`, the
+shape only that door writes) this is the ONLY retention it gets: once its
+report is filed (letter or the no-mailbox rail), it is swept like any untasked
+session, because a remote caller must not be able to grow this roster
+permanently (`prune_done_scoped`'s doc). Reads of it are read-only: no lock, no
+write, no cursor advance.
 
 **Additive in v0:** a session record MAY also carry an optional `outcome`
 (string, a CLOSED set) — a managed task run's discriminated end:
@@ -1765,6 +1875,40 @@ deliberately the opposite of `undying`'s own post-mortem posture below,
 because an exemption has nothing to mean once there is no record to hold it.
 Absent means "not exempt, or a legacy record"; readers must tolerate both
 forms and round-trip fields they do not know.
+
+**Additive in v0 (spawn readiness, 2026-09-26):** a session record MAY also
+carry an optional `sessionStartAt` (string, ISO-8601 UTC) — WHEN that
+harness's own `SessionStart` hook was recorded for this record. One writer:
+the hook door's `SessionStart` arm (`send.rs`), on every SessionStart a
+resume included. It exists so a launch can tell "this harness said hello, to
+THIS launch" from "a record exists, from some earlier run": `aoide spawn
+--prompt`, `resurrect`'s restore delivery and the A2A door's opening turn all
+wait on a child record of their wrapper carrying a stamp at or after their
+own start instant, and an unstamped (or older-stamped) leftover under a
+reused id is not readiness. Absent means "this harness's hooks never claimed
+this record" — never a readiness fact; readers must tolerate both forms and
+round-trip fields they do not know.
+
+**Additive in v0 (A2A opening turn, 2026-09-26):** a session record MAY also
+carry an optional `openingTurn` (string) — what became of the first turn the
+A2A door asked a spawned session to run. The vocabulary is complete and
+closed, and its home is the field's own doc in `storage/src/records.rs`:
+`pending` (accepted; a worker is waiting for the target), `delivered` /
+`delivered-unverified` (the turn went out; the second when the target
+declared no readiness fact), `not-ready` (the budget ran out, nothing typed),
+`busy` (the door's opening-turn worker pool was full — nothing typed, ask
+again), `no-worker` (no worker thread could be started), `skipped-empty` /
+`skipped-shell` (nothing to type, or a shell may not be typed at),
+`no-socket` / `write-failed` (the control socket never answered, or the write
+failed — no receipt filed either way), and `unknown` (the process that owed
+the verdict died; a boot pass reconciles a stranded `pending` to this). It is
+a HISTORICAL fact: stamped once, never cleared by a later turn, so a
+`tasks/get` days later reports the opening turn while the record's own
+`state` carries the live word. Its one reader is `tasks/get`, which reports
+it as the task's `status.message` — an A2A `Message` object (`role: "agent"`,
+one text part reading `opening turn: <verdict>`), which is what this binding
+types that field as (CONTRACTS.md §6). Absent on every locally
+spawned session.
 
 **Additive in v0 (P-D7, `docs/architecture/AOIDED.md`'s "L5"):** a session
 record MAY also carry an optional `harnessSessionId` (string) — the
@@ -2317,10 +2461,65 @@ outright, first path becoming `path`, the rest folded into the same
 `roots` list — the name stays immutable and `autoResume` is untouched.
 `project remove NAME [PATH]` drops one root (promoting the next into
 `path` when `path` itself was removed) or, with no `PATH`, the whole
-project. Every reader enumerates roots through `Project::roots()`
+project — and a deleted project's workspace bindings go with its record.
+Removing a project's LAST root does NOT delete it: the project is left
+standing with no folder, a NAME-ONLY project ("A project with no folder"
+below). Every reader enumerates roots through `Project::roots()`
 (`path` first, then `roots`, deduplicated) rather than the raw fields —
 a hand-edited record whose `path` does not match `roots[0]` is read, not
 silently rewritten.
+
+**A project with no folder.** A project entry MAY carry neither `path` nor
+`roots` (`{"name":"cadenza","path":"","roots":[]}`): `aoide project add NAME`with no path at all registers a NAME-ONLY project — a name a workspace can be
+bound to and a session can name explicitly, but that can never anchor a
+session by cwd, because `Project::roots()` is empty and the anchoring rung
+matches by root prefix. The cwd is NEVER a default root: registering the
+directory you happen to stand in is how a project anchors sessions nobody
+meant it to. A folder is added later with `project add NAME ROOT` and removed
+again with `project remove NAME ROOT`, which leaves the project name-only
+once more. Nothing else about the record changes — it keeps its
+`autoResume`/`hosts`/`lead` state and its workspace bindings.
+
+**Also additive in v0: `workspaces` — the workspaces that SHOW this project.**
+A project entry MAY carry an optional `workspaces` array of INTEGER compositor
+workspace ids (`"workspaces":[3,5]`), the same integer
+`SessionRecord.workspace` already holds (Hyprland's named and special
+workspaces carry negative ids; a future virtual-desktop adapter maps to the
+same integers). `#[serde(default, skip_serializing_if = "Vec::is_empty")]`
+keeps it off the wire for a project no binding has touched — the
+`hosts`/`autoResume` discipline, so every `projects.json` written before this
+field stays byte-identical. Written by `workspace set` (under the same stage
+lock local roots go through; daemon-owned, like every other `projects.json`
+mutation) and by `workspace clear` — and, from a desktop click, through the
+shellbridge socket's `workspaceaction` (W-P5), which re-execs those same two
+commands and writes nothing itself. ONE INVARIANT: a workspace id appears in AT
+MOST ONE project — `workspace set` MOVES it off whatever project held it —
+while two workspaces may show the same project. A binding is not a root: it
+anchors nothing by cwd, a rootless project may carry one, and `project remove
+NAME ROOT` leaves bindings alone; the bare `project remove NAME` takes them
+with the record. Read with `aoide workspace list [--json]`, which merges the
+bindings with every workspace a local session reports (`observed` is `false`
+by name on a host where no session reports one).
+
+**The binding's desktop door and read path (W-P5).** The RECORD is
+`$AOIDE_ROOT/state/stage/projects.json`, field `projects[].workspaces` (an
+integer array per project — invert it for a workspace → project map), and the
+desktop's READ is this document's top-level `workspaces`/`ties` block (S3,
+below) — the resolved projection the bar/dock widgets already hot-reload, so a
+binding arrives in the same atomic rewrite as the roster. `aoide workspace
+list --json` prints the same block for a terminal door. A
+click binds or unbinds by sending ONE line to
+shellbridge's socket: `{"cmd":"workspaceaction","action":"set|clear",
+"workspace":<int, omitted = the focused one>,"project":"<name>","new":<bool>}`,
+answered with one JSON reply — `{ok, message, action, workspace, project?,
+data?}`, the CLI's own `message`/`data` verbatim, `project` only on `set`.
+`workspace` is ABSENT only on the `no-compositor` refusal (`{ok:false, action,
+reason, message}` — nothing was resolved to name), and BOTH `workspace` and
+`action` are absent on a `bad-request` refusal (nothing parsed to echo back). A
+malformed line that NAMES this verb is answered rather than dropped, the same
+rule `sessiontrace` holds — one rule for every parked caller.
+The action re-execs `aoide workspace set|clear` and writes nothing itself, so
+the invariant above holds no matter which door the mutation came through.
 
 **Additive in v0 (P-D8, `docs/architecture/AOIDED.md`'s "L5"/"Open
 knobs"):** a project entry MAY also carry an optional `autoResume` (bool,
@@ -2361,8 +2560,9 @@ skip_serializing_if = "Vec::is_empty")]` keeps `hosts` off the wire for a
 project no `--host` invocation has touched, the discipline `autoResume`
 set. Set through the SAME three commands as local roots, scoped by a
 `--host <node>` flag: `project add NAME [PATH…] --host NODE` adds `NODE` as
-a member (membership-only when no path follows — `--host` never defaults
-to the cwd the way a bare `project add` does) and appends any given paths
+a member (membership-only when no path follows — a path is explicit for
+every command now, and a bare `project add NAME` registers a name-only
+project) and appends any given paths
 to that host's own root list, idempotently; `project edit NAME PATH… --host
 NODE` REPLACES that host's root list exactly (local roots and every other
 host untouched); `project remove NAME --host NODE` drops the whole
@@ -2453,6 +2653,83 @@ It MAY also carry that project's `lead` session id, under the same rule
 (only when one is named) — `{ "id": "project:aoide", …, "lead":
 "abc123" }`; the id is echoed as stored, whether or not the roster still
 holds it.
+
+**Additive in v0, at the TOP LEVEL: `workspaces` + `ties` — the compositor
+block (core-seams §E; the S3 slice).** Two keys beside `nodes`/`edges`, built
+by the same `build_graph` and printed identically by `aoide graph --json` and
+`aoide workspace list --json` (ONE builder, `doc::workspace_block`, so the two
+doors can never disagree — the command's own `data` carries both keys even when
+empty, while the document omits them):
+
+```json
+"workspaces": [
+  {"workspace":3,"project":"aoide","projects":["aoide"],"sessions":["s1","s2"],
+   "live":2,"working":1,"awaiting":0,"activeAt":"2026-09-26T14:02:31Z"}
+],
+"ties": [
+  {"kind":"project","from":3,"to":5,"project":"aoide","activeAt":"…"},
+  {"kind":"spawned","from":3,"to":7,"pairs":[["s1","s9"]],"activeAt":"…"}
+]
+```
+
+`project` is the BINDING and is absent when the workspace is unbound;
+`projects` is the binding PLUS the effective projects of that workspace's live
+sessions; `sessions` lists every session whose record carries that workspace id
+and `live`/`working`/`awaiting` are counts over it (`live` is "not `done`" — a
+`stopped` session has ended a TURN, not died). A **project tie** is emitted
+once per shared project for each pair of workspaces whose `projects` intersect
+(a clique at three or more workspaces; the song collapses lanes itself). A
+**spawned tie** runs from the parent's — or its nearest WINDOWED ancestor's —
+workspace to the child's, only when the two differ, so a headless child has no
+tie of its own and its activity shows on its parent's workspace. Every
+`activeAt` is the latest hook `updatedAt` for that session, else its
+`startedAt`, and a row's or tie's is the max over the sessions contributing to
+it: session nodes carry the same per-session value, which a watcher compares
+between two reads to pulse.
+
+**Both keys ride only when something is in play** — some session reports a
+workspace, or some project has a binding — and a session node's `activeAt`
+rides with them, since it feeds the block; a headless host's document
+therefore stays byte-for-byte what it was before this block existed. **Local
+sessions only**: another node's rows reach this document only nested under a
+fresh node's `children`, which the block never reads. The block is a
+PROJECTION: `projects.json` above stays the binding RECORD and the mutation's
+own write.
+
+**Additive in v0: the two cross-machine parentage keys.**
+`remoteParent` — `{ "node": "<current name>", "sessionId": "<id>" }` — rides a
+session node whose `sessions.json` record carries that field
+(the `state/stage/sessions.json` section above), and
+`remoteChildren` — `[ { "node", "sessionId" }, … ]` — rides a session node whose
+id is the `parentSessionId` of one or more rows in
+`state/stage/remote-children.json` (below), in that file's own order. Both are
+display projections: `node` is resolved to the CURRENT `nodes.json` name for the
+stored node key at publish time, and the key itself is never republished. Each
+rides only when it has something to say, so an ordinary locally-spawned session
+node stays byte-for-byte as before.
+
+Neither mints an edge. A remote parent is not a node in this document, so the
+child carries NO `spawned` edge for it — a `spawned` edge would have to name a
+foreign session id as a local one, and every reader of `parentSessionId` (the
+autogate grant, the sibling rule, project inheritance, `graph link`'s cycle
+check) reads that field as local. The two sides still agree without a new edge
+kind: the far graph nests under its own `node:<name>` root as `children`, and
+that document carries the child's own `remoteParent` naming this parent — with
+the child's local descendants beside it under their ordinary `spawned` edges —
+so `par1 → nodeb/C → nodeb/G` resolves through `remoteChildren` plus the
+node fold alone, with no wire call of its own.
+
+Who walks that: `aoide session` (both groupings and `--json`) joins each
+`remoteChildren` row to the probed fold by `(node name, sessionId)` and renders
+the far chain indented under the parent's own roster row — `par1`, then
+`nodeb/C`, then C's far descendants beneath it — with the row's own `fold`
+(`fresh`/`stale`/`not pulled`) as the JSON's marker, so the view and the JSON
+cannot disagree. A row the fold does not carry is still shown, marked
+`(not pulled)`, never hidden; a row found in a fold past
+`node_store::NODE_CACHE_TTL_SECS` is marked `(stale)` — the ledger link itself
+never expires, so it can render with nothing current behind it. The conductor
+TUI's own DAG (`conductor/src/graphview.rs`) does NOT yet walk either key: it
+reads project/session nodes only, so this chain is terminal-only for now.
 
 ### `state/stage/herald.json` — **v0**
 
@@ -2570,6 +2847,135 @@ the delivery — so a line is delivered at most once, and a crash between the
 claim and the write loses a line rather than duplicating one. A child whose
 eidolon record leaves the roster drops out of this file on the same pass.
 There is no command that reads or edits it: it is a cursor, not a queue.
+
+### `state/stage/remote-children.json` — **v0**
+
+The caller-side half of `remoteParent` (above): the children THIS node
+spawned on OTHER nodes over their A2A door. The child's own node records who
+its parent is on the child's record; this file records, on the parent's own
+node, which children that parent asked for — and carries the ping-back pull
+cursor each of them is up to.
+
+```json
+{
+  "schemaVersion": "0",
+  "children": [
+    { "parentSessionId": "conduct-17991-1790312541", "node": "sakaki",
+      "key": "<ed25519 pubkey hex>", "sessionId": "a2a-4411-1790",
+      "spawnedAt": "2026-09-25T04:00:00Z", "linesAfter": 0, "drained": false }
+  ]
+}
+```
+
+`parentSessionId` is this node's OWN local parent — the session that asked
+for the spawn — so the child stays attributable after a restart; `key`
+(identity) and `sessionId` name the child, and `node` is only the display
+label known at spawn time. An entry is keyed by the child's identity
+`(key, sessionId)`, and an append for a child already present is a no-op, so
+a re-acked spawn never doubles a row. `linesAfter` is the remote ping-back
+cursor: the highest event `seq` already delivered to `parentSessionId`. It
+only ever moves forward — a replayed pull can never rewind it — which makes
+the delivery at-most-once in the same direction `pingback.json`'s own cursor
+holds: a crash between the two loses a line, never duplicates one.
+`drained` is the row's one-way latch: the parent has drained the child's
+`Exited`, so the pull stops asking about it — a ring is never pruned and a
+child that has left this node's roster never pushes again, so without the
+latch every later tick would ask a far node about a session with nothing left
+to say. It is `false` until set and nothing ever clears it; like every other
+`false` flag in this tree it is omitted when false, so a row written before
+the field existed is byte-identical to one written today. Both fields are
+written only by `aoide-conduct`'s `pingback_pull`: the cursor through
+`claim_lines_after`, which reads the stored value and advances it in ONE
+`with_stage_lock` section and hands back the cursor the caller may deliver
+from — so two overlapping passes (the daemon's loop and a `session reap`
+re-entering through a connection thread) cannot each hand over the same events
+— and the latch after the line, from `mark_drained`. A failed claim delivers
+nothing, and a pull resolves the far node by `key` alone — never by `node`, so
+a rename cannot break a pull and a re-pair cannot silently dial a node the
+child does not live on.
+
+Written only through `aoide_storage::remote_children`, inside one short
+`state/stage/.stage.lock` section and atomically (temp-then-rename); a missing
+or corrupt file reads as empty. Like `remoteParent` it is attribution, never a
+grant: a same-uid process can write it, and the door gates only on the key
+comparison it makes itself against the verifying node. A row's own half of the
+link is the `parentSessionId` it names, so rows LEAVE with the parent that leaves
+the roster — `conduct`'s `drop_remote_child_rows` retains the ledger against the
+removed ids, and BOTH roster-exit paths call it once their own `sessions.json`
+write has landed (the reaper's `reap_inner`, for its automatic pass and for the
+superseded tombstones it drops through `drop_sessions` directly, and
+`session prune`'s explicit sweep). Committing the roster first is the point: a
+stage write that fails leaves the ledger untouched rather than a live parent with
+its rows already gone. A row whose parent still lives is untouched, and a row
+whose far child died is never reconciled — nothing on the child's side reports
+the death, so `↓ n remote` and the entry persist until the parent leaves.
+
+### `state/stage/pingback-remote.json` — **v0**
+
+The remote ping-back ring (P-RSA S8, `docs/architecture/EIDOLON-TRACE.md`'s
+"Second slice"): what a child whose parent sits on ANOTHER node has published
+for that parent to pull. It is the sibling of `remote-children.json`'s
+`linesAfter` cursor — that one is the parent-side "how far have I read", this
+one is the child-side "what is there to read" — and it exists because the
+events may not be pushed and may not be mailed (CONTRACTS.md §6,
+`aoide/linesAfter`).
+
+```json
+{
+  "schemaVersion": "0",
+  "children": {
+    "a2a-4411-1790": {
+      "last": 3,
+      "key": "<ed25519 pubkey hex, the parent's node>",
+      "at": 1790313000,
+      "events": [
+        { "seq": 2, "event": { "settled": { "stop": "end_turn", "calls": 1, "mins": 56,
+                                            "say": "read the slot catalog", "errors": 0 } } },
+        { "seq": 3, "event": { "exited": { "code": 7, "outcome": "exit" } } }
+      ]
+    }
+  }
+}
+```
+
+Keyed by the CHILD's own session id — the id its node knows it by, and the
+`tasks/get` id its parent pulls with. `seq` is per child, starts at 1, and
+only ever climbs; the ring retains at most 16 events per child (the cap is
+also the wire bound, so a read never promises what was already dropped) and a
+push past it drops the OLDEST. `last` is the highest `seq` ever pushed for
+that child, which is what lets a parent whose cursor fell off the retained
+window resynchronize instead of re-reading an empty answer forever.
+
+`key` is the parent's node key — the same string this node stamped on the
+child's `remoteParent` when it admitted the spawn — written on the child's
+FIRST event and never replaced. It is the ring's own gate input, and it is
+here because the ring OUTLIVES the record: the door's history arm compares the
+caller's verifying key against this, and against the record only as a
+fallback, so the parent can still read its child's last events once the record
+is pruned (CONTRACTS.md §6). `at` is the unix second the ring last took an
+event — its retention clock. A ring whose child's record is gone is kept for a
+week and then dropped by the child-side pass
+(`aoide_storage::pingback_remote::retain_rings`), because a ring is rewritten
+whole on every spool and an unbounded set of dead children would cost every
+live event a rewrite proportional to their number. A ring for a child still on
+the roster is never a candidate, and neither is one that keeps taking events.
+
+`event` is the reaper's own closed event vocabulary, written by
+`aoide-conduct`'s `PingEvent` and OPAQUE here — a queue that parsed its own
+payload would be a second definition of the event. Every string in it is
+already cleaned by the sender (control characters and every unsafe invisible
+mark stripped, clipped to 80 with `…`), and a reader re-cleans and re-clamps
+every field it re-renders rather than trusting another node's sanitizing. The
+events are claimed by the same at-most-once cursor as `pingback.json` and
+written after it: a crash between the two loses an event rather than
+duplicating one, the direction the whole lane loses in.
+
+Written only through `aoide_storage::pingback_remote`, inside one short
+`state/stage/.stage.lock` section and atomically (temp-then-rename); a missing
+or corrupt file reads as empty. Like `remote-children.json` it is attribution,
+never a grant: the door that serves it gates the read on the caller's own key
+against the ring's `key` (CONTRACTS.md §6).
+There is no command that edits it.
 
 ### `state/stage/mesh.json` — **v0**
 
@@ -2758,7 +3164,7 @@ all) file receipts through the same `mail::file_receipt`, the ONE seam
 covering every route a delivered message takes to land in a local
 session — `do_inject` files no entry of its own, see its doc comment. An
 OUTBOUND `--to node/<x>` send (P-M2) files nothing into THIS box's own
-`base.jsonl` at send time — it mints a sealed envelope and spools it into
+`base.jsonl` at send time — it mints a signed envelope and spools it into
 `state/outbox/` instead (below), delivered over `aoide/mailDeposit` by a
 best-effort drain right after the write, the daemon's own periodic sweep,
 or a door's post-heard drain of that node. The letter lands in a
@@ -2871,13 +3277,26 @@ check, the ack re-spooled. A tool that moves or archives entries out of
 
 ```json
 {
-  "envelope": { "...": "the sealed Envelope, byte-identical to mint time" },
+  "envelope": { "...": "the signed Envelope, byte-identical to mint time" },
+  "flavor": "hold",
   "tries": 2,
   "lastTryAt": "2026-09-07T14:03:10Z",
   "lastOutcome": "accepted",
   "refused": false
 }
 ```
+
+`flavor` is **v0+1 (P-M3, 2026-09-09, additive)**: `now` (deliver or
+queue+retry — attempted on every drain) or `hold` (wait to be polled —
+never attempted by a drain at all; it leaves only through the
+destination's own `aoide/mailPoll`). A `now` entry **omits the key
+entirely** and an absent key reads as `now`, so every pre-P-M3 spool file
+is byte-identical before and after this field existed; a value that is
+neither constant also reads as `now`, because an unrecognised flavor must
+fail toward being dialed rather than toward being parked forever. The
+flavor is a LOCAL fact of the entry and never a field of the sealed
+envelope — the `msgid` covers every byte of the envelope, and the flavor
+is the sender's routing intent, not part of the letter.
 
 The envelope is stored VERBATIM — a retry resends the exact signed bytes,
 never re-mints (a re-mint would also mint a fresh, different `msgid`,
@@ -3478,6 +3897,104 @@ short display label, distinct from P-P2's SAS (short authentication
 string), which is derived from BOTH sides' keys plus nonces at pairing
 time, not from one side's key alone. Nothing here is authenticated against
 a node until the pairing ceremony below runs.
+
+### `state/identity/age.key`, `state/identity/age-binding.json`, `state/identity/age-retired/` — **v0** (P-SEAL, `docs/architecture/HTTPS-MESH-API.md`)
+
+This instance's **age X25519 key** and the self-signed binding that
+publishes it (`aoide-storage::seal`, the one module in the tree that
+touches the `age` crate). The key is minted independently of the identity
+key and is never derived from its seed, in either direction.
+
+- `age.key` — the private key as the stock `AGE-SECRET-KEY-1…` text an
+  `age-keygen` produces (trailing newline), `0600`, in the same `0700`
+  directory as `ed25519.key` and written through the same
+  `fs::secure_private_dir` / `fs::atomic_write_private` pair. Stored as the
+  stock text deliberately: a human with this file and the stock tooling can
+  open anything sealed to this node even if Aoide is gone, which is the
+  recovery property choosing age buys. **Never a JSON value, never inside a
+  `Serialize`/`Deserialize` type, never printed, never in an `Outcome`**
+  (`PAIRING.md`'s kill-list, held here by the same mechanical test
+  `identity.rs` runs on itself).
+- `age-binding.json` — the current self-signed binding: version, purpose
+  (`mail-sealing`), the age recipient and its fingerprint, the accepted
+  suite list, a monotonic `generation`, `rotatedAt` and the validity
+  window, and the identity key that signs all of it. Written by
+  `seal::publish_binding`, which is idempotent: a valid binding for the
+  current key is returned unchanged, so a door read costs one small file
+  read and rotates nothing.
+- `age-retired/<generation>.key`, `age-retired/<generation>.until` and
+  `age-retired/<generation>.recipient` — a superseded private key, the
+  deadline it may still open mail until (the binding it belonged to had that
+  `not_after`), and the age recipient it answered to. A container addressed
+  to it still opens while the deadline is ahead; once it passes, the
+  container is refused `key-retired` and the **private key** is deleted by
+  the next successful current-key open.
+  `.until` and `.recipient` are the **tombstone** and are never deleted: the
+  address a retired key stood at has to outlive the key, or the refusal
+  degrades to `open-failed` — which `age` returns just as readily for a
+  wrong recipient or a tampered `ct`, so an operator could not tell a
+  rotation from an attack and the origin's retry loop learned nothing
+  actionable. Three files, not one JSON record, for the same reason
+  `ed25519.key` is not JSON: no private key in a serializable shape.
+
+  **Rotation has no operator seam in P-SEAL.** `seal::rotate_age_key` mints
+  the new key, writes the tombstone and publishes the next-generation
+  binding, and is tested — but nothing in the CLI reaches it. That seam is
+  P-CHARTER's, where a node's keys are managed; until it lands, no age key
+  retires in the field and the grace/tombstone machinery above is reachable
+  only from tests.
+
+### `state/age-bindings/<node>.json` — **v0** (P-SEAL)
+
+A peer's accepted binding, one file per node name.
+
+A store of its own rather than a field on `nodes.json`'s record: the
+binding is one removable file per node, `nodes.json`'s shape stays what
+§7 says it is, and a node removed and re-added inherits no trust —
+`seal::binding_for` re-verifies the file against the key ON RECORD on every
+read, so a file left behind by a removed node simply fails to verify and is
+inert.
+
+The file IS the generation high-water mark: `seal::learn_binding` refuses a
+binding whose generation is not above the stored one (`stale-binding`), and
+refuses an equal generation carrying different bytes (a conflict nothing
+here can order). An equal generation with identical bytes is a replay of
+what is already in force and is a no-op. A binding whose signer is not the
+key this node has on record for that name is refused `binding-mismatch`, and
+**a node with no key on record at all accepts nothing** — an age key is
+accepted only inside a binding signed by a key that was itself pinned.
+
+The comparison is against a file that still verifies **under the key now on
+record**, because generations are per identity key: a re-pair with a fresh
+identity key writes a fresh generation 1, and a file left by the dead key
+must not be a predecessor it is measured against. `node remove` deletes the
+file, so a node re-added under the same name inherits nothing.
+
+### `state/mail/containers.jsonl` — **v0** (P-SEAL)
+
+The sealed container's own dedup gate, append-only, one JSON object per
+admitted **and filed** container: `originKey`, `toNode`, `msgid`, `digest`.
+
+Separate from `state/mail/seen.jsonl` because it answers a different
+question at a different time. `seen.jsonl` is consulted *after* an envelope
+is opened and has no way to decide anything before that; this gate runs
+before the open, which is what makes "a previously admitted duplicate
+returns `duplicate`" cost no decryption and no recipient key at all.
+
+The lookup key is the authenticated `(originKey, toNode, msgid)` tuple —
+never `msgid` alone, since a relay cannot verify the inner hash and one
+origin must not be able to reserve another origin's message id. The
+comparison within that tuple is `digest`, `sha256` over the frame of
+`ctx ‖ ct ‖ sig`: everything `ctx` covers plus the ciphertext and the
+origin signature, and nothing hop-mutable. A retry over another route is
+therefore a duplicate, and a `msgid` that reappears with different
+immutable bytes is a collision and refuses. A container is recorded only
+after its outer origin signature verifies AND it is filed — `seal::
+record_admitted` is the caller's write, made once `mail::deposit` returns
+`Filed` or `Duplicate`, never from inside `seal::deposit_container`. A
+malformed or unverified container is never recorded, and neither is one that
+refused after the gate: those re-run and re-answer on a retry rather than
+turning into a permanent `duplicate`.
 
 ### `state/node-pairing-inbound.json` / `state/node-pairing-outbound.json` — **v0** (P-P2, `docs/architecture/PAIRING.md`)
 
@@ -4687,6 +5204,19 @@ Server-Sent Events. The MVP door serves exactly:
 adding it later is not a version bump to this contract (same additive
 discipline as §1/§4's optional tiers).
 
+**Additive in v0 (spawn readiness, 2026-09-26):** a `TaskStatus` MAY carry
+`message` — A2A's own optional field, and typed as this binding has it: a
+`Message` OBJECT (`role` + `parts`, with a minted `messageId`: the binding
+marks that field required, so an outbound status message carries one —
+`aoide_protocol::wire::gen_message_id`, the same generator the client's
+`message/send` bodies use), never a string, so a strict A2A client
+parses `tasks/get` unchanged. aoide's use is one `agent` message whose single
+text part reads `opening turn: <verdict>` (the vocabulary is §4's
+`openingTurn`), so a remote peer whose opening turn has not run yet — or never
+will — reads that instead of assuming `submitted` meant the turn ran. Absent
+(and skipped on the wire) for every task whose record carries no
+`openingTurn`, so those responses stay byte-identical.
+
 ### Streaming: SSE (Phase C)
 
 `message/stream` and `tasks/resubscribe` are served over **Server-Sent
@@ -4735,6 +5265,208 @@ request (`a2a.rs::decide_send_action`, unit-tested for every branch):
   nothing, is a structured JSON-RPC error (`-32004`/`-32001` respectively) —
   never a silent fallback to spawning.
 
+**`metadata["aoide/from"]` — the caller's own session id.** A spawn- or
+inject-shaped `message/send` MAY name the calling session under
+`message.metadata["aoide/from"]` (`aoide_protocol::wire::FROM_SESSION_KEY`;
+CONTRACTS.md §4's `remote-children.json` and the `remoteParent` record field
+are its two sides). Only `message.metadata` counts — never the top-level
+`params.metadata` fallback `aoide/spawn` also accepts — because this is a
+claim about WHO is calling, and the client's outbound builder
+(`aoide_client::wire::build_message_send_body`) writes it in the one place.
+The value is a session id, `1..=128` bytes of `[A-Za-z0-9._:-]` with no `/`
+(`aoide_storage::remote_children::valid_claimed_session_id` — ONE predicate
+read by BOTH sides: the caller holds its own winning id to it in
+`resolve_remote_parent_from` and refuses locally, before anything is signed,
+and the door holds an incoming claim to it again); it rides INSIDE the signed
+body, so the claim is covered by the body digest along with the prompt. Absent
+means "claims no parent" — an empty or non-string value is not a third state.
+
+**The claim is honoured on the SIGNATURE rung only, and the door stamps what
+it can prove.** `message_send` turns the claim into the spawned child's
+`remoteParent` (above, §4) through two pure functions. `claimable_caller` is
+the whole rung table: it hands over the verified caller — the `SignedCaller`
+`verify_signed_request` proved, carrying the resolved record's `name` AND the
+stored `key` that verified the signature — for the `NodeRung::Signature`
+resolution, and for no other. `claimed_remote_parent` then sees exactly two
+things: that caller and the claim string. A request this door did not verify
+against a `verified` node's stored pubkey — unsigned, bearer-token, or a bare
+address match — ignores the claim entirely and writes one audit line
+(`a2a.message/send`/`status:"ignored-unsigned-from"`), rather than a refusal:
+an unauthenticated caller has no claim to make, and a distinct error there
+would be a new oracle where today there is silence. A claim from a genuinely
+signed caller is validated with `valid_claimed_session_id`, and a malformed
+one is an error the CALLER applies — `-32602`, on the SPAWN side only: the
+claim rode inside the body that caller signed, so a bad one is a client bug
+worth surfacing. The Inject arm consumes the claim as a COMPARISON instead
+(below), where a malformed one is matched by nothing — never a refusal on the
+one arm that builds no value out of the field. The value passed to
+`do_spawn` is built from that verified caller: the `name` and the `key` that
+actually verified THIS request, threaded out of `verify_signed_request` rather
+than re-found by name — with the claim as `sessionId` alone, no name or key
+from a header or the body ever reaches the stamp, so a paired node can only
+ever name parents inside its own namespace. The child itself gets no such value in its environment — the
+door stamps the record, exactly as it does for `node:*` `origin`.
+
+**A remote parent steers the child it spawned, without pending.** The Inject
+arm reads the SAME one claim as the answer to one question: is this caller the
+target record's remote parent? `remote_parent_match(caller, claim, target)` is
+the whole predicate, and it is true only for all three at once — the caller
+`verify_signed_request` proved (the signature rung, so every weaker rung's
+`None` can never match), the target record's `remoteParent.key` equal to that
+caller's verified key, and its `remoteParent.sessionId` equal to the claim. The
+target side is read off `sessions.json` (`session_remote_parent`) only for a
+request that BOTH carried a claim and proved a signature, so an ordinary inject,
+and every spawn, reads exactly what it read before. A match delivers WITHOUT the
+pending dance — audited `a2a.message/send`/`status:"autogate-remote-parent"` —
+on the same two rails the signature-rung `autogate` flag rides, and both rails
+are load-bearing — each carries one of the two transports this rule has to
+serve. The EXEMPTION from `origin_for_inject`'s downgrade carries the
+loopback/`ssh -L` shape: a request through a forward terminates at loopback
+here, `should_deliver_now`'s `Loopback` arm delivers unconditionally, and the
+exemption is therefore all that shape needs — without it the tunneled parent is
+coerced to `Unknown`, whose arm delivers nothing at all. The FOLD into
+`autogate_match` carries the `Remote(<ip>)` shape: that arm consults
+`autogate_match` and nothing else, so a directly-addressed parent pends without
+the fold (the exemption is inert there — nothing coerced an origin that was
+never `Loopback`). Deleting either one silently breaks a whole transport, which
+is why neither is redundancy. It overrides neither earlier question. The
+door-wide bearer runs FIRST: a door with a token set admits a remote parent only
+if it presents the bearer, and `effective_origin` still coerces a bearer that
+does not classify `Valid`. And the node's own `autogate` flag need not be on for
+a parent to steer the child it spawned — the same independence the LOCAL parent
+rule has (`--yes` ▸ global switch ▸ parent-of-target), which delivers whether
+the box-wide autogate switch is on or off. **That independence is also why this
+rule has no off switch**: neither the per-node `autogate` flag nor
+`AOIDE_CONDUCT_AUTOGATE` gates its computation or its delivery, and the door
+consults no setting of its own. The levers an operator actually holds are
+unpairing the node (`node remove` — with no candidate record
+`verify_signed_request` has nothing to resolve, so every claim fails) and the
+child ending; `node allow <name> spawn off` stops only NEW children, and
+unpairs nothing already spawned.
+**A target conducting a SHELL is the one thing that overrides every rail
+above** (N1, house rule 4): the Inject arm reads the target record's own
+wrapped-program shape (`session_wrapped_is_a_shell` →
+`aoide_conduct::graph::wrapped_program_is_a_shell`, the record-side half of
+conduct's `program_is_a_shell`) and holds the line PENDING when it is a
+shell — the loopback arm, the exemption, the fold and a door-wide bearer all
+deliver to a harness, never to a pty whose submitted input RUNS. Audited
+`a2a.message/send`/`status:"shell-wrapped"`, paid only where it can change the
+outcome, and an unreadable stage answers "shell" (a refusal's safe arm). The
+`agent` label is deliberately not the question: `--agent <harness> -- bash`
+names a registered profile over a shell, which is the shape that made this
+necessary. A malformed claim needs no handling here
+at all: this door never stamped a value outside `valid_claimed_session_id` as
+any record's `sessionId`, so equality is false, and the `-32602` stays spawn-side
+where the value is actually built. It follows that the CALLER need not refuse one
+either, and `send --to` does not: the claim it resolves is the same
+KERNEL-ATTESTED id `node spawn` reads (`resolve_remote_parent`), and an unruly
+one is DROPPED — the send goes out with no claim and one warning line
+(`not claiming parent: <reason>`), because the door answers that send the same
+way either way. `node spawn` still refuses the call outright, its caller having
+named a parentage.
+
+**A signed reader reads ANY session's output: `tasks/get` carries the watch
+frame.** `tasks/get` accepts `params.metadata["aoide/frame"]`
+(`aoide_protocol::wire::FRAME_KEY`), whose optional `tail` is the output-line
+window, and answers with the SAME status read plus the session's watch frame as
+one `data` artifact (`artifactId: "frame"`, the frame under the part's `data`).
+It is the frame `aoide session watch` renders — conduct's `watch_frame` is the
+existing `gather` with `raw = false`, one definition, so the wire frame and the
+rendered one cannot drift. `Task.artifacts`/`Task.history` are the envelope's
+two optional fields (A2A's own names), both omitted when absent, so a request
+without the frame key is answered byte-identically to before. The frame leaves
+this host through `Frame::for_wire`, which nulls `logPath`, `instructionsPath`,
+`socket` and `suggested` — paths and a command that name THIS box — and the door
+bounds what it sends: `tail` clamped to `1..=200`, each letter's body to 40
+lines, and the frame to 256 KiB, shedding the OLDEST mail letter first and then
+the OLDEST output line, with `truncated: true` whenever that byte cap cut
+anything. The instruction block is never shed — it is the text the frame exists
+to show — and is bound only by its own block caps, so a frame may exceed 256 KiB
+by that block alone.
+
+**The output-read gate is `output_read_admitted`: `read_ok` (the door-wide
+bearer rule every read arm already carries) AND a caller resolved through the
+SIGNATURE rung AND that node record `verified` with `read` in its `allows`
+(`node_may_read`, [`node_may_spawn`]'s twin one capability over).** The
+remote-parent key match is deliberately NOT required to read: a signed,
+verified node holding `read` reads any session's frame on this node, while
+steering without pending (above) and the ping-back history (`aoide/linesAfter`)
+still need the remote-parent key. Unsigned, bearer-token and bare-address rungs
+are refused — `-32011`, this arm's OWN code, ONE text for every refusal and the
+same text whether the named session exists or not, so the gate reveals no more
+about the roster than the status read it shares the method with. `-32011` is
+minted here and nowhere else: `-32007` stays [`verify_signed_request`]'s own
+incomplete-headers/signature-mismatch family, decided before the frame arm runs
+at all. Every capability-gated arm mints its own code for this reason — Spawn's
+`-32006`, `mailDeposit`'s `-32010`, and now this one — so the code alone names
+the arm that refused, without matching prose. A frame read
+audits under its own label, `a2a.tasks/get.frame`, so an operator can tell which
+`tasks/get` calls read output from which were status polls. A session that has
+no frame to read — an unknown id, a `sub:` card, a record that keeps no
+conduct-owned PTY — answers with `session watch`'s own taught refusal under
+`-32001`, after the gate.
+
+**The ping-back history is `tasks/get` with `aoide/linesAfter`, and it is the
+one output read the key match still gates.** The request carries
+`params.metadata["aoide/linesAfter"]` (`aoide_protocol::wire::LINES_AFTER_KEY`)
+— the `seq` the caller has already seen, a number — and the answer is the SAME
+status read plus the ring's events after it as ONE `data` message under
+`Task.history` (`messageId: "pingback"`, the whole read under the part's
+`data`: `{events: [{seq, event}], gap, last}`). Both the ring's cap (16) and
+the wire's come from the same number, so a pull never asks for more than a
+ring can hold; `gap: true` says the ring rolled past the caller's cursor and
+something was dropped between it and the oldest event returned, and `last` is
+the newest `seq` the child ever pushed — the cursor a caller that saw a `gap`
+with no event to advance past can move to. A `seq` beyond the end is the
+quiet empty answer, never an error, and a key whose value is not a number
+reads as `0` (the same tolerant reading `aoide/frame`'s `tail` takes: a wrong
+cursor costs duplicates the caller can see in `seq`, while refusing it would
+cost a parent its child's history over one integer type).
+
+**It is gated by `output_read_admitted` AND the parent's own key — read off
+the RING first, the record second.** The child's record carries
+`remoteParent.key` (the key this door stamped when it admitted the spawn that
+created it) and its ring entry carries the same key as its own `key`
+(CONTRACTS.md §4); history is served only to a caller whose signature verified
+against one of them. This is the one read the 2026-09-25 ruling did NOT widen:
+a signed, `read`-holding node may watch any session's frame, but what a child
+published for its parent belongs to that parent. The ring is consulted FIRST
+because it outlives the record: a gate that could only read `sessions.json`
+would refuse a parent the child's every remaining event the moment the record
+was pruned, which is exactly the read the ring exists to serve. The stored
+`node` label is never consulted (a name follows a rename, a key is the
+identity), an empty stored key matches nobody, and an unsigned, bearer-token or
+bare-address caller is refused by the output gate before the key is even
+compared. The refusal is `-32011` — §4.4 of the lane brief names no code of its
+own for this arm, and both refusals are one family: an output read this caller
+is not admitted to — with its own TEXT, because the reason is not the same one
+and an operator deserves to read which it was. Like every refusal in this arm
+it says nothing about the sessions it is not yours to read, and the gate runs
+before the status read, so it is no existence oracle either.
+A read audits under its own label, `a2a.tasks/get.history` (which wins the tie
+when a request asks for both output keys).
+
+**A ring whose child's record is gone is still served, and an id this node
+holds at all is still not an oracle.** When the record has been pruned
+(any unrelated reap can prune it) and the ring remains, the history read is
+answered from the ring itself: the SAME status envelope, with the ring's own
+tail deciding the one field that must be derived — an `exited` last event
+means `completed`, anything else `working` — and no `artifacts` (a frame needs
+a record, and there is none). An id this node holds **neither** a record nor a
+ring is not a refusal at all: it answers `-32001` (`TASK_NOT_FOUND_CODE`), the
+same "task not found" every other `tasks/get` arm answers an unknown id with,
+which the pulling parent reads as the permanent answer it is — the child is
+gone for good and its ledger row is latched rather than retried forever.
+
+**Asking for history decides the whole request.** A request carrying BOTH
+`aoide/frame` and `aoide/linesAfter` is judged by the stricter of the two
+gates: the frame alone needs `output_read_admitted` (and a `read`-granted
+caller with a FOREIGN key still gets its frame when it asks for one), but a
+request that also asks for history is answered — or refused — as a history
+read. The alternative is a response carrying a frame and a silently missing
+ring, and this door never answers a question it did not understand with
+silence.
+
 **The command a spawn runs is `aoide.a2a.spawnAgent`** — a nix option, off
 (`""`) by default, resolved once at `a2a serve` launch (`--spawn-agent` flag →
 `AOIDE_A2A_SPAWN_AGENT` env, set by the `aoide-a2a` systemd unit → the
@@ -4744,7 +5476,15 @@ external A2A caller can do to aoide: task the operator's own
 already-configured agent, or steer a session already running under aoide's
 conductor, but never execute an arbitrary binary. If `spawnAgent` is empty,
 the spawn path returns `{"code": -32004, "message": "A2A spawn not
-configured"}` rather than silently doing nothing.
+configured"}` rather than silently doing nothing. **A `spawnAgent` that IS a
+shell is refused the same way, `-32004`, in `do_spawn`'s own prologue and
+before any process starts** (H1): the spawn's first turn is typed into the
+child's pty, a shell's stdin is a command line, and a remote peer's prompt
+would RUN. The check reads the configured ARGV through
+`aoide_conduct::graph::program_is_a_shell` — so `bash`, `bash -lc claude`
+and `env bash` are all shells — and the refusal is audited by name
+(`a2a.message/send`/`status:"shell-spawn-agent"`) rather than left for the
+caller to infer.
 
 **Security model.** The capability is admitted **at rebuild time**, not
 per-request: setting `aoide.a2a.spawnAgent` to a non-empty command is the
@@ -4756,6 +5496,91 @@ spawn target is fixed at rebuild time (never client-chosen), the door is
 loopback/user-scoped by default (same as the rest of §6's security posture),
 and every inject/spawn/error is audited through `Door::A2a`, the same single
 audit log every other door writes.
+
+**A spawn is a managed run when the caller names a task.** `message/send` may
+carry `metadata["aoide/task"]`
+(`aoide_protocol::wire::TASK_KEY`) — a task slug, read on the same two spots
+`aoide/spawn` is (`message.metadata` first, then top-level `params.metadata`,
+unlike `aoide/from`'s identity claim, because this one is a directive about
+what to do, not about who is calling). The door turns it into the wrapper's own
+`--task <slug>`; with it, the remote child IS a managed task run — the task
+mailbox, `session watch`'s task view, the exit report and the retained record
+all come from the same flag a local `aoide spawn --task` passes. Without it,
+the spawn is a plain headless conducted session: watchable through its log and
+steerable through the door, with no mailbox and no report.
+
+The slug is held to the one predicate every task slug and mailbox name already
+takes — `^[a-z0-9][a-z0-9-]*$`, `node_store::valid_node_name`, the validator
+`spawn --task` applies to its own flag, since the slug IS the mailbox name —
+and an illegal one is refused `-32602` with a taught message that quotes the
+value, states the shape and names the way out (a legal slug, or no key). Like
+S3's malformed `aoide/from`, that refusal is applied **spawn-side only**: an
+Inject request that happens to carry the key builds nothing out of it and is
+answered exactly as before. The check runs before an id is minted or
+`current_exe()` resolves, so an illegal slug costs one RPC and no process. The
+quoted value is CLEANED first (`aoide_conduct::graph::clean_line`, the one
+sanitizer every surface that shows a peer's bytes uses) and that same call caps
+it: an illegal slug is illegal precisely because it may hold a newline, an
+escape or a bidi override, and this string is printed by a caller's own UI.
+
+**A slug a live run holds is refused, through the wrapper's own admission
+step.** `-32602` again — nothing is wrong with the caller's authority; the
+request collides with state this node already holds — and the message is
+`aoide-conduct`'s ONE refusal sentence (`live_run_for`/`live_run_refusal`,
+shared with local `spawn --task` rather than reworded here), naming the holding
+session and its start instant. Without it the door would be the one spawn path
+that never asks, and a peer's child could deny the operator their own task name
+for as long as the peer chose, since this door imposes no deadline. It is a
+courtesy, not a lock: two concurrent spawns of one slug can still both pass it,
+and no code claims slug uniqueness.
+
+**The task namespace is flat, and the caller picks a roster label.** No name is
+reserved: `conductor` (the report role fallback), a registered node's name, a
+project name and a name a live run holds are all either acceptable or refused
+by the one predicate above and the live-run check alone. The slug also becomes
+the run's own session NAME (`conduct`'s task registration), so it is what the
+roster, the graph and `session watch` show — a paired peer choosing it is the
+same power a local `spawn --task` has always had, handed one door over. That is
+stated rather than reserved away: an operator's own habits are the namespace's
+only convention, and a reserved list would be a second, undocumented rule.
+
+**A finished door-summoned run is retained only until its report is filed.**
+Retention is per-provenance (`prune_done_scoped`): a task-carrying record whose
+`origin` is a `node:*` value — the shape only this door writes — is kept while
+the report lane is still owed a filing, exactly as an unfiled local run is, and
+is swept by the automatic sweep and by `session prune` alike once that filing
+has landed. Otherwise a peer could mint permanent records one request at a
+time, which no unpairing would ever collect. Local runs are unaffected: they
+stay retained as §4 states.
+
+**The report of a door-summoned run does not leave its node, and it is not a
+letter.** A remote spawn passes neither `--parent` nor `--report-to`, and this
+door clears `AOIDE_SESSION_ID` on the child, so the run has no report mailbox
+at all: it is reported WITHOUT a letter — the `no_mailbox` rail of the exit
+report lane, audited as `unmailed` — while its outcome rides the report cursor
+entry (`taskreport.json`), the record's own end facts and the audit line, all
+on the child's node. Nothing is mailed cross-node, and no `self/<slug>` letter
+appears for a remote caller: what a remote parent hears is the ping-back, over
+`tasks/get` (`aoide/linesAfter`), never mail (Q5).
+
+Three things a managed spawn is NOT: `--parent` (the door never writes the
+LOCAL `parentSessionId` — the remote parent is the `remoteParent` RECORD field
+`stamp_spawn_provenance` stamps), `--instructions-path` (a remote caller names
+no sidecar; the prompt is injected as the first turn), and `--timeout` (the
+door has no deadline to impose, and a default one would kill a long remote run
+mid-flight).
+
+**The child is always headless, and its argv is the local one.** `do_spawn`
+builds its argv through `aoide_conduct::graph::build_conduct_args` — the ONE
+builder a local `spawn` uses, never a second copy of it kept in step by hand —
+with `headless = true` unconditionally: this door has no terminal to hand a
+child (its stdio is nulled and it is `setsid`'d), so the log is the sink, the
+pty gets the conventional fallback geometry, and `conduct` reads no stdin. The
+door's environment for the child is unchanged by either flag — the same three
+entries as before this managed mode existed (`AOIDE_AUDIT_LOG` set,
+`AOIDE_SESSION_ORIGIN` and `AOIDE_SESSION_ID` removed) — because both travel by
+ARGV: `AOIDE_TASK`/`AOIDE_TASK_INSTRUCTIONS` are exported by the child's own
+`conduct` to the AGENT it wraps, never by this door.
 
 **Spawn acks only once the wrapper proves it's alive (task #103).**
 `do_spawn` launches the configured agent via a detached `aoide conduct`
@@ -4774,7 +5599,10 @@ RPC latency and never notices it.
 
 **MVP simplification, carried over from Phase B:** taskId == contextId ==
 sessionId for both inject and spawn (a fresh spawn's Task/contextId/sessionId
-are all the newly-minted `a2a-<pid>-<ts>` id). Splitting a Task from its
+are all the newly-minted `a2a-<pid>-<secs>-<n>` id — a process-local monotonic
+counter behind pid and second, because pid+second alone collides for two spawns
+inside one second and two children sharing an id share one `sessions.json`
+record's `remoteParent`, leaving it to whichever stamp lands last). Splitting a Task from its
 session for real multi-turn tracking (so a session with several in-flight or
 completed turns exposes each as its own addressable Task) remains future
 work, same as the `TaskState` gaps noted above.
@@ -5288,7 +6116,7 @@ node_store::NodeRung` gains a third variant, `Signature` — the new
 STRONGEST rung, never produced by `resolve_node` itself (which has no
 access to the raw HTTP request a signature needs); it is yielded only by
 `a2a.rs`'s own `verify_signed_request` → `message_send`'s resolution,
-which — when `signed_node_name` is `Some` — resolves EXCLUSIVELY against
+which — when `signed_caller` is `Some` — resolves EXCLUSIVELY against
 that name (`NodeRung::Signature`), with NO fallback to the addr/token
 ladder even on a registry-lookup miss (fail-closed: a request that
 `verify_signed_request` already proved came from node X is never silently
@@ -5407,7 +6235,10 @@ behind the same NAT/proxy as the real node). **Signature**
 rung a PAIRED node earns by completing the ceremony (`aoide pair`) and
 signing every request with the identity that ceremony verified —
 strictly stronger than `token_file`'s bare replayable shared secret, and
-the ONLY rung Spawn accepts (`a2a.rs::spawn_admitted`). A verified
+the ONLY rung Spawn accepts (`a2a.rs::spawn_admitted`) — and the only rung on
+which a `metadata["aoide/from"]` parent claim is honoured at all (the
+`remoteParent` stamp on a spawn, and the Inject arm's remote-parent autogate on
+a send; that paragraph above carries the rule and both audit lines). A verified
 signature also outranks loopback for the Inject gate: an ssh `-L` forward
 (or any other loopback-terminating proxy) delivers a tunneled node's
 packets from its own end's sshd, so `classify_origin` sees loopback for
@@ -5420,7 +6251,9 @@ signature-rung `autogate` flag (folded into `autogate_match` alongside
 a signed node, exactly as an operator already granted it. In short: the
 read arms and attribution tolerate any of the four; Spawn accepts exactly
 one; and once a request is signed, its delivery timing is decided by
-autogate, never by which address it happened to arrive from. §7's
+autogate or by a PROVEN remote-parent match, never by which address it happened
+to arrive from — with the door-wide bearer still ahead of both, so a door that
+sets a token admits a remote parent only if it presents that token too. §7's
 "`state/nodes.json`" subsection below has the full mechanical detail
 (which field backs which rung, `resolve_node`'s ladder, tie-break order).
 
@@ -6135,11 +6968,75 @@ version bump to §1–§6 and needs no playbook migration entry.
 
 ### `aoide/mailDeposit` (P-M2, `docs/architecture/MAIL.md`)
 
+**P-SEAL (`docs/architecture/HTTPS-MESH-API.md`, §4's
+`state/identity/age.key`) adds a sealed arm to this same method.** `params`
+carries either the plaintext `envelope` above — which P-SEAL keeps exactly
+as it is, for the one remaining plaintext path, the direct SSH lane to a
+destination that has published no binding — or a `container`, the outer
+object of `seal::Container`. The two are mutually exclusive and the
+container is preferred when both are present; admission (the `-32010`
+ladder above) is identical for either.
+
+A container takes a longer path than an envelope, and every step of it is
+still a REFUSED RESULT rather than a JSON-RPC error, because what became of
+a well-formed container is the same kind of answer as what became of a
+well-formed envelope. In order: `ctx` is recomputed from the outer fields;
+`purpose` and the `board`/`epoch` fields must agree (`purpose-mismatch`);
+`suite` must be one this build implements (`unsupported-suite`) and `v` must be a container version this build knows (`unsupported-container-version`, its own word so an operator debugging a v2 container is not sent hunting a board/epoch bug); the outer
+origin signature is verified under the key on record for `origin.node`
+(`unverified-origin`); the container is deduped against
+`state/mail/containers.jsonl` (§4) — a duplicate answers `"duplicate"`
+WITHOUT opening anything, and a same-`msgid` collision with different
+immutable bytes answers `context-mismatch`; and only then is `ct` opened.
+Past the open, the inner `ctx` must equal the recomputed outer one
+(`context-mismatch`), the inner `msgid` must recompute to the container's
+(`bad-msgid`), the inner addressing must agree with the outer
+(`addressing-mismatch`), the inner envelope signature must verify
+(`unverified-origin`), and the full hop chain must walk from `msgid` to
+this node with entry 1 named by and signed under `origin.key`
+(`broken-chain`). A ciphertext that opens under no identity this node holds
+is `open-failed`; one addressed to a retired key past its grace window is
+`key-retired`.
+
+A container that passes all of it is handed to the SAME
+`aoide_storage::mail::deposit` an envelope is, so filing, `seen.jsonl` and
+the pending-receipt rule have one implementation. `aoide/mailPoll`'s answer
+becomes two lists, `containers` and `envelopes`: a sealed entry hands over
+its container and NO plaintext, and only an entry spooled before the
+destination published a binding appears in `envelopes`.
+
+### `aoide/binding` (P-SEAL, `docs/architecture/HTTPS-MESH-API.md`)
+
+`params` may carry the caller's own signed age binding; the result always
+carries this node's. `{ "binding": <Binding> }` either way:
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "method": "aoide/binding",
+  "params": { "binding": { "v": 1, "purpose": "mail-sealing", "...": "..." } } }
+```
+
+A signed read of the node's own current binding, and — when the caller
+includes its own — the moment this node stores the caller's. One
+authenticated round trip upgrades both ends, which is what a direct lane
+wants and what the per-peer upgrade needs before the first sealed letter
+can go anywhere. Admission is `mailDeposit`'s own question (a verified
+caller holding `message`): the binding is what a peer needs before it can
+seal anything TO this node, so refusing it to a node that may already
+deposit mail would gate two halves of one exchange differently.
+
+A caller's binding that is not accepted as current is an ERROR, not a
+result — the caller has to know before it starts sealing:
+`stale-binding` (not above the stored generation) or `binding-mismatch`
+(its signer is not the key on record for the caller). Audits under
+`a2a.aoide/binding`, unconditionally, in the door's audit-name whitelist.
+
+The rest of this section describes the plaintext arm, unchanged:
+
 One new method on the SAME existing A2A JSON-RPC/HTTP door (§6) — no new
 transport, no new server, no new port; the SECOND capability-gated method
 after Spawn (`message/send`'s Spawn arm, above), and the first not gated
 on `spawn`. A registered node's own outbox drain (`state/outbox/`, §4)
-POSTs this to deposit one sealed letter or receipt into the target's
+POSTs this to deposit one signed letter or receipt into the target's
 mailbase:
 
 ```json
@@ -6152,7 +7049,7 @@ mailbase:
 
 **Admission is signature-only, from the start — no Addr/Token fallback
 rung to migrate off the way Spawn once had.** The caller must resolve via
-`verify_signed_request`'s KEY-RESOLVED `signed_node_name` (the identical
+`verify_signed_request`'s KEY-RESOLVED `signed_caller` (the identical
 per-request signature scheme the Spawn arm's gate uses, security posture
 above) to a node that is both `verified` and carries `"message"` in
 `allows`. A refusal is `-32010` — a NEW code: never `-32006` (Spawn's own)
@@ -6220,6 +7117,109 @@ simply matches nothing and retires nothing; every `state/outbox/` call
 here runs strictly AFTER `mail::deposit` has already released its own
 lock, never nested inside it (`mail`'s and `outbox`'s stage locks are the
 identical non-reentrant primitive).
+
+### `aoide/mailPoll` (P-M3, `docs/architecture/MAIL.md`)
+
+The second mail method on the SAME existing door, and the relay-first half
+of the model: a member with no inbound address asks a node it can reach
+for everything that node spooled toward it. No new transport, no new
+server, no new port, no new file — a poll is a READ.
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "method": "aoide/mailPoll",
+  "params": { "node": "yomi-strix" } }
+```
+
+`node` is required; a missing or empty one is `-32602`, refused BEFORE any
+lookup (the same shape-before-existence precedence `aoide/pairPoll`
+holds). **Admission** resolves the caller exactly as `mailDeposit` does —
+a verified per-request signature, key-resolved — and then requires BOTH
+`node_may_message` (paired, `verified`, `"message"` in this node's
+`allows`) AND `params.node` equal to the caller's own resolved name:
+MAIL.md §Wire's "the caller's verified identity must BE `node` (no polling
+on another's behalf)". A refusal is `-32010`, the SAME code the deposit arm
+mints (never `-32006`/`-32007`), in one of three shapes: the claim is not
+the signer (told both names), paired but `message` missing (told the exact
+`aoide node allow <name> message on` fix, which runs on the POLLED host),
+or no verified signature resolution at all (told to pair first).
+
+**`down` is not enforced here yet.** It is declared in
+`[mesh.<name>.status]`, a declaration the door does not read until P-M4
+(MAIL.md §Status); P-M3's reachable refusal is the `message` half, which
+`aoide node allow <node> message off` — the per-request quarantine that
+already exists — is expressed by. P-M4 adds the declaration read and the
+`down` clause to this same predicate; that is a scope line, not a stubbed
+branch.
+
+A successful poll answers
+
+```json
+{ "result": { "envelopes": [ { "...": "an Envelope, as mailDeposit takes it" } ] } }
+```
+
+— every entry this box spooled toward `node` that `node` itself may take,
+oldest first, **at most `aoide_storage::outbox::POLL_BATCH_CAP` (50) of
+them**: all `hold`-flavored ones, and `now` ones whose own attempts
+have been failing (`tries > 0` with a last outcome that did not reach the
+peer; parked/`refused` entries included, never-attempted ones excluded —
+the drain owns those, and offering one here would double-drive it from two
+callers). Nothing else rides the answer: no flavor, no tries, no route, and
+no marker that a batch was ever handed over.
+
+**A poll writes nothing at all.** No `tries` stamp, no `last_polled_at`,
+no "already handed over" bookmark — which is exactly why a re-poll before
+the ack hands the same envelopes over again, and why an entry still leaves
+the spool only when the far end's ordinary receipt retires it (a `letter`
+filed by the poller mints a receipt exactly as a deposit would; an ack is
+an envelope, so the poller's own next drain carries it back) or through
+`aoide mail outbox rm <msgid>`. The receiving side is the SAME receive path
+a pushed deposit takes — `aoide_client::mail_wire::poll_node` runs
+`mail::deposit`'s whole chain (recompute `msgid`, verify the ORIGIN
+against `header.from.node`'s own key, dedup against `seen.jsonl`, file)
+with the hop set to the node it polled, then the shared outcome dispatch
+(`settle_deposit`, the one implementation the door reaches through
+`aoide_conduct::mail_bridge`) — so the poller's `msgid` dedup, not any
+bookmark here, is what makes a re-poll harmless.
+
+**This method self-audits UNCONDITIONALLY under its own
+`a2a.aoide/mailPoll` label** — at the admission refusal and again with the
+handed-over count — and the connection handler's audit-name whitelist
+carries the name beside `aoide/mailDeposit`'s so a poll never logs as bare
+`a2a.rpc`. The count is the pull direction's flood signal: a relay
+answering one node with hundreds of letters is visible at the node that
+spooled them.
+
+`aoide/mailPoll` is driven from `aoide_client::mail_wire::poll_node`. It has
+two triggers, and they are the same call:
+
+- **`aoide mail poll [<node>]`** — the explicit ask. With a `<node>` it dials
+  that node alone; a name this box is not paired with is refused BEFORE any
+  dial (`unknown-node` for a name the registry has never seen,
+  `unpaired-node` for one registered but never verified — the same two
+  refusals `mail send`'s node branch makes). With no argument it asks every
+  node `mail_wire::pollable_nodes` returns: registered, `verified`, and
+  carrying `message` in THIS box's own `allows` for it — the same gate a
+  letter has to clear to be spooled there, so "a node this box sends to" and
+  "a node this box asks" stay one set. Per node the answer reports
+  `polled`/`filed` or `unreachable`/`reason`; one node's failure never stops
+  the sweep, and the command's own status reports that the ASK was made
+  (write-is-the-report), never the far end's outcome. This is the receive
+  trigger a node with nothing to send needs: an empty outbox never dials, so
+  poll-on-contact alone can never reach it, and an OS timer driving this
+  command is H1's own scope.
+- **poll-on-contact** — the end of any drain pass that actually reached a
+  node (see MAIL.md §Outbox). The drain's dial policy is unchanged by the
+  command above: a pass with nothing attemptable still dials nothing.
+
+The offer is bounded at `aoide_storage::outbox::POLL_BATCH_CAP` (50), the
+drain's own batch size, applied after the offer filter and handed over
+oldest-first. Bounding is safe here *because* retirement is by ack —
+the poller acks what it files, those entries retire, and the next poll
+answers with the next batch — and it is necessary because the answer is one
+JSON array of whole envelopes: a hub holding more than the client's
+`MAX_RESPONSE_BYTES` (20 MiB) of held mail for one node would otherwise
+answer with a body the poller refuses outright, a head-of-line stall no
+retry could clear.
 
 ---
 

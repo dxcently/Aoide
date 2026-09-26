@@ -303,9 +303,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// The private key's file policy, asked of the host that holds it: mode
+    /// `0600` on Unix, the owner-only DACL on Windows — the same promise,
+    /// and the same readback every private write is checked with.
     #[test]
-    fn the_private_key_file_is_locked_to_0600() {
-        use std::os::unix::fs::PermissionsExt;
+    fn the_private_key_file_is_locked_to_the_owner_only_policy() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = aoide_test_support::EnvSaver::capture(&["AOIDE_STATE_DIR"]);
         let root = aoide_test_support::unique_tmp("identity-0600");
@@ -314,19 +316,19 @@ mod tests {
         let (_kp, minted) = load_or_mint().unwrap();
         assert!(minted);
 
-        let mode = std::fs::metadata(key_path()).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "ed25519.key must be 0600, got {mode:o}");
+        crate::fs::assert_private_file(&key_path());
 
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn the_identity_directory_itself_is_locked_to_0700() {
-        // RIDER 1 (review): the file lock alone isn't enough — the
+    fn the_identity_directory_itself_is_locked_to_the_owner_only_policy() {
+        // RIDER 1 (review): the file policy alone isn't enough — the
         // directory it lives in must be locked down too, or its entries
         // stay world-listable under `create_dir_all`'s umask-derived
-        // default.
-        use std::os::unix::fs::PermissionsExt;
+        // default. The Windows arm of that sentence is a DACL rather than a
+        // mode, so it is asserted through the same reader the write path's
+        // readback uses.
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = aoide_test_support::EnvSaver::capture(&["AOIDE_STATE_DIR"]);
         let root = aoide_test_support::unique_tmp("identity-dir-0700");
@@ -335,8 +337,7 @@ mod tests {
         let (_kp, minted) = load_or_mint().unwrap();
         assert!(minted);
 
-        let mode = std::fs::metadata(identity_dir()).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o700, "identity/ must be 0700, got {mode:o}");
+        crate::fs::assert_private_dir(&identity_dir());
 
         let _ = std::fs::remove_dir_all(&root);
     }

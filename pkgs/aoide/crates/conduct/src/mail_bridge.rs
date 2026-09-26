@@ -19,6 +19,19 @@ pub fn drain_node(name: &str) -> Result<(), String> {
     aoide_client::mail_wire::drain_node(name)
 }
 
+/// Everything that follows a deposit outcome — a passthrough to
+/// [`aoide_client::mail_wire::settle_deposit`]. Called by the door
+/// (`aoide-server::a2a::mail_deposit`) once per request, after
+/// `aoide_storage::mail::deposit` has already released its own lock. The
+/// SAME function receives the envelopes a poll hands over, so the two doors
+/// into the mailbase cannot drift on what a filed letter or receipt does.
+pub fn settle_deposit(
+    envelope: &aoide_storage::mail::Envelope,
+    outcome: &aoide_storage::mail::DepositOutcome,
+) {
+    aoide_client::mail_wire::settle_deposit(envelope, outcome)
+}
+
 /// Drain every node with a non-empty outbox — the daemon tick's own call,
 /// mirroring `daemon::run_internal_reap`'s "reach a sibling crate's
 /// handler on its tick" shape. One node's drain returning `Err` (a genuine

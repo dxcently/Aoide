@@ -56,18 +56,23 @@ use crate::sealed_id::{verify_seal, SealedIdentity};
 use aoide_protocol::state::canonical_state;
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
+#[cfg(windows)]
+use aoide_protocol::win_unix::UnixStream;
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Duration;
 
-// ── /proc kernel facts ───────────────────────────────────────────────────
+// ── the process facts: `/proc` on Unix, `win_proc` on Windows ────────────
 
 /// Read the parent pid of `pid` from `/proc/<pid>/stat`. The `comm` (2nd)
 /// field is wrapped in parens and may itself contain spaces or `)`, so ppid
 /// is parsed as the 2nd whitespace field AFTER the FINAL `)` (state, then
 /// ppid) — the only robust way to split a stat line. `None` on any
 /// read/parse miss.
+#[cfg(unix)]
 fn parent_pid(pid: i32) -> Option<i32> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after = &stat[stat.rfind(')')? + 1..];
@@ -76,11 +81,18 @@ fn parent_pid(pid: i32) -> Option<i32> {
     fields.next()?.parse().ok() // ppid
 }
 
-/// The pid-ancestry chain of `pid`, self first, walking up the ppid chain
-/// via `/proc`. Bounded (a bad `/proc` or a self-parenting loop can never
-/// spin) and stops at init (ppid ≤ 1) — the terminal is always a mid-chain
+/// The pid-ancestry chain of `pid`, self first, walking up the ppid chain —
+/// via `/proc` on Unix, one `Toolhelp32` snapshot on Windows
+/// ([`aoide_protocol::win_proc`]). Bounded (a bad source or a self-parenting
+/// loop can never spin) and stops at the root (Unix: ppid ≤ 1; Windows: the
+/// System process, whose parent is `0`) — the terminal is always a mid-chain
 /// ancestor. Moved verbatim from `aoide_conduct::graph::window` (P-ID4's
 /// seam lift, module doc); that module's `pid_ancestry` now delegates here.
+///
+/// Windows has no `/proc` to read, and no third source is invented beside it:
+/// the native process table answers all three of ppid, ancestry and start
+/// time, and the host split is the whole difference.
+#[cfg(unix)]
 pub fn pid_ancestry(pid: i32) -> Vec<i32> {
     let mut chain = Vec::new();
     let mut cur = pid;
@@ -94,6 +106,11 @@ pub fn pid_ancestry(pid: i32) -> Vec<i32> {
     chain
 }
 
+#[cfg(windows)]
+pub fn pid_ancestry(pid: i32) -> Vec<i32> {
+    aoide_protocol::win_proc::parent_chain(pid as u32, 64).into_iter().map(|pid| pid as i32).collect()
+}
+
 /// Read `pid`'s start time (`/proc/<pid>/stat` field 22, 1-indexed —
 /// `man proc(5)`) — the other half of the (pid, starttime) reuse-proof
 /// identity a sealed credential is minted over. Same "split after the FINAL
@@ -103,10 +120,24 @@ pub fn pid_ancestry(pid: i32) -> Vec<i32> {
 /// split. `None` on any read/parse miss (a vanished pid, a malformed
 /// `/proc` line). Moved verbatim from `aoide_conduct::graph::window`
 /// (P-ID4's seam lift); that module's `pid_starttime` now delegates here.
+#[cfg(unix)]
 pub fn pid_starttime(pid: i32) -> Option<u64> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after = &stat[stat.rfind(')')? + 1..];
     after.split_whitespace().nth(22 - 3)?.parse().ok()
+}
+
+/// The Windows arm: the process's CREATION time off `GetProcessTimes`, in
+/// `FILETIME` units (100 ns since 1601) rather than clock ticks since boot.
+/// The same fact under a different unit, and the same guarantee — monotonic
+/// within a boot and unique per process instance, which is all the pid-reuse
+/// defence needs, because the value is never trusted from the record: it is
+/// re-derived fresh here and compared. `None` on any failure (a vanished pid,
+/// a pid out of range), never a fabricated one; the caller's own `0`-means-
+/// absent rule then refuses a fresh read that came back zero.
+#[cfg(windows)]
+pub fn pid_starttime(pid: i32) -> Option<u64> {
+    aoide_protocol::win_proc::start_time(pid as u32)
 }
 
 // ── seal verification over a live record ─────────────────────────────────
@@ -243,17 +274,22 @@ pub fn daemon_socket_path() -> PathBuf {
             return PathBuf::from(p);
         }
     }
-    let runtime = std::env::var("XDG_RUNTIME_DIR")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "/run/user/1000".into());
-    PathBuf::from(runtime).join("aoide").join("aoided.sock")
+    let runtime = crate::runtime_dir::socket_dir();
+    runtime.join("aoided.sock")
 }
 
-/// Bound a Unix-socket connect with a background-thread-plus-channel race
+/// Bound a local-socket connect with a background-thread-plus-channel race
 /// (moved from `aoide_client::daemon`, same mechanism, same doc): `None`
 /// when the connect fails or `timeout` elapses first — including the racer
 /// thread failing to spawn at all, treated as "no daemon."
+///
+/// **One seam, two hosts, the same mechanism**: `UnixStream` is `std`'s on
+/// Unix and `aoide_protocol::win_unix`'s native `AF_UNIX` on Windows, so the
+/// body below — the thread, the channel, the timeout — is not host-split at
+/// all. [`daemon_seal_pubkey_hex`] therefore answers on BOTH hosts, and the
+/// "unreachable daemon" `None` covers "no daemon", "a daemon that cannot be
+/// reached" and a socket path whose directory does not exist as ONE answer
+/// rather than three shapes a caller would have to tell apart.
 pub fn connect_bounded(socket_path: &Path, timeout: Duration) -> Option<UnixStream> {
     let (tx, rx) = mpsc::channel();
     let sp = socket_path.to_path_buf();
@@ -282,6 +318,12 @@ pub fn connect_bounded(socket_path: &Path, timeout: Duration) -> Option<UnixStre
 /// cached process-wide, and never a file read — module doc's "live round
 /// trip" rule; the same-uid unlink-then-bind honesty note on this channel
 /// lives in `CONTRACTS.md`'s identity section, unchanged by the move.
+///
+/// **Both hosts, one body**: the channel is an `AF_UNIX` socket on either
+/// one (`std`'s on Unix, `aoide_protocol::win_unix`'s native binding on
+/// Windows), so this is not a Unix arm with a Windows refusal beside it — the
+/// same round trip runs on both, and the only difference a caller can see is
+/// the socket PATH, which `crate::runtime_dir` already answers per host.
 pub fn daemon_seal_pubkey_hex() -> Option<String> {
     let socket_path = daemon_socket_path();
     let stream = connect_bounded(&socket_path, CONNECT_TIMEOUT)?;
@@ -308,7 +350,10 @@ mod tests {
     use super::*;
     use crate::identity;
     use crate::sealed_id::mint_seal;
+    #[cfg(unix)]
     use std::os::unix::net::UnixListener;
+    #[cfg(windows)]
+    use aoide_protocol::win_unix::UnixListener;
 
     fn sealed_record(
         session_id: &str,
@@ -338,7 +383,10 @@ mod tests {
     }
 
     /// A one-shot fake daemon: binds `path`, answers exactly one connection's
-    /// first line with a canned `ping` reply carrying `pubkey_hex`.
+    /// first line with a canned `ping` reply carrying `pubkey_hex`. Both
+    /// hosts: the listener is `std`'s `AF_UNIX` on Unix and
+    /// `aoide_protocol::win_unix`'s native binding on Windows, which is the
+    /// same channel [`connect_bounded`] opens on either one.
     fn spawn_fake_daemon(path: &std::path::Path, pubkey_hex: &str) {
         let listener = UnixListener::bind(path).expect("bind fake daemon socket");
         let pk = pubkey_hex.to_string();
@@ -476,14 +524,21 @@ mod tests {
 
     // ── daemon_seal_pubkey_hex / attested_caller ─────────────────────────
 
+    /// A socket path neither host has bound yet: this process's own temp
+    /// directory (the `/tmp` of each host) plus a name unique per call. Short
+    /// on purpose — a socket path is bounded by the target's `sun_path`, which
+    /// is what both binds below check and refuse by name.
     fn short_tmp(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .subsec_nanos();
-        PathBuf::from(format!("/tmp/av-attest-{tag}-{}-{nanos}", std::process::id()))
+        std::env::temp_dir().join(format!("av-attest-{tag}-{}-{nanos}", std::process::id()))
     }
 
+    /// Both hosts: [`short_tmp`] is built under this process's own temp
+    /// directory, and the daemon it round-trips against binds an `AF_UNIX`
+    /// socket there — the one channel `daemon_seal_pubkey_hex` speaks.
     #[test]
     fn daemon_seal_pubkey_hex_round_trips_against_a_fake_daemon() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -495,6 +550,9 @@ mod tests {
         let _ = std::fs::remove_file(&sock);
     }
 
+    /// Both hosts: "a dead socket" is a socket-path fact on either one — the
+    /// path names no listener, and the connect fails or times out into the
+    /// same `None` an unreachable daemon gives.
     #[test]
     fn daemon_seal_pubkey_hex_against_a_dead_socket_is_none() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -507,6 +565,8 @@ mod tests {
     /// roster on disk → live pubkey off a (fake) daemon ping → verified
     /// origin. Also pins the fail-to-unidentified halves: a daemon serving
     /// the WRONG key, and no daemon at all, both resolve `None`.
+    /// Both hosts: the whole broker-side path runs against the fake daemon
+    /// above, which is a real `AF_UNIX` listener on either one.
     #[test]
     fn attested_caller_resolves_a_sealed_remote_origin_session_and_fails_to_none_otherwise() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -551,5 +611,26 @@ mod tests {
         assert_eq!(attested_caller(me), None);
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Windows: the channel has no arm on this host, and what it answers is
+    /// the documented "unidentified" — the same fail-closed `None` an
+    /// unreachable daemon gives — never a fabricated key and never a skipped
+    /// check. The half of the lane that IS real here is pinned by the two
+    /// `verify_seal_over` tests above, which run on this host too: the
+    /// pid-reuse defence re-derives a live start time from the native process
+    /// table, so a genuine seal for a live pid still verifies and a stale one
+    /// still refuses.
+    #[cfg(windows)]
+    #[test]
+    fn daemon_seal_pubkey_hex_is_unidentified_where_the_channel_has_no_arm() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = aoide_test_support::EnvSaver::capture(&["AOIDE_DAEMON_SOCKET"]);
+        std::env::set_var("AOIDE_DAEMON_SOCKET", "C:\\aoide\\there-is-no-such-socket");
+        assert_eq!(daemon_seal_pubkey_hex(), None, "no channel, no key — never a fabricated one");
+
+        // The caller-side resolution refuses for the same reason, rather than
+        // resolving something weaker from the roster it can still read.
+        assert_eq!(attested_caller(std::process::id() as i32), None, "unidentified, never partial");
     }
 }

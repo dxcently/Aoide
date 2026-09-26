@@ -12,6 +12,15 @@ to the PTY transcript, and returns one deterministic outcome. `aoide spawn
 `conduct` argv, so every behavior below is shared by construction, and every
 fact either shape records lands on the same record.
 
+**A remote spawn is the same wrapper.** `message/send` on the [[A2A-Door]]
+spawns through `conduct --spawned --headless`, from the one argv builder
+`spawn` itself uses — so a child summoned from another node is this wrapper, not
+a lookalike. It has no terminal there and gets the log as its sink. It names a
+task when the caller sent `metadata["aoide/task"]`, and then everything on this
+page holds for it: the mailbox, the retained record, the exit report filed on
+the child's own node, the read-only observer. Without that key it is a plain
+conducted session — tracked, watchable, steerable, and nothing more.
+
 ```sh
 # foreground: the tool call. Blocks, streams, returns the outcome.
 aoide conduct --task fix-flaky --instructions-path /path/brief.md \
@@ -109,6 +118,40 @@ return (MCP/stdin) — it renders one frame from the same gather, so it can neve
 drift from the live view. `--tail <n>` sets the output window (default 50);
 `--json` returns the frame in the registry's envelope.
 
+`<id>` may also name a session **on another node** — `session watch
+<node>/<query>` — resolved by the same rule `send --to` uses against that
+node's cached graph (`graph pull`'s document; a node never pulled is a taught
+`aoide node pull <node>` refusal, never an implicit fetch). The watch then
+reads the run's frame OFF that node over `tasks/get`
+(`params.metadata["aoide/frame"]`, CONTRACTS.md §6) — the same frame as the
+local one, gathered on the box that owns the run and rendered by the same
+renderer, with the node prefixing the header line (`yomi/brave-otter (child) ·
+claude · running · …`). The far frame is **untrusted data**: every string goes
+through the same sanitizers the local view uses, every count is re-clamped to
+the local bounds (the requested tail, the mail rail, the block cap), raw PTY
+bytes have no path to this terminal at all, and the suggested follow-up is
+rebuilt here as `aoide send --to <node>/<id> --submit -- "<text>"` rather than
+taken from a line naming a session in that box's namespace. `logPath`,
+`socket` and `instructionsPath` are struck on arrival — they name paths and a
+control socket on the box that wrote the frame, so a peer's invented
+`/etc/shadow` never reads as this run's log; the instruction TEXT still shows.
+A far node's own error message is cleaned before it is printed, here and on
+`send`, because an OSC-52 escape or a bidi override in a peer's message is a
+terminal instruction rather than text. A refusal by the far door's output gate
+(`-32011`: no signed, verified node holding `read` on that host) is a taught
+error naming the grant and the box it runs on —
+`aoide node allow <this box> read on` **on the far node**.
+
+Remote live mode polls every 2 s and stops when the far record's own
+`presence` is no longer `running`, or on Ctrl-C: the frame carries the state
+that decides, so there is no cursor to keep and nothing to hold open. A poll
+that FAILS also ends the watch — with the failure as the result (an error
+carrying the reason, the far door's code when it refused, and
+`followed: true`), never a cheerful exit that hides why it stopped, since a
+dead tunnel and a finished run must not read the same. (Frame deltas over
+`tasks/resubscribe` are deliberately deferred — that stream holds a connection
+slot for the run's whole life and carries status changes only.)
+
 A frame shows the instructions the run was started with, the run's own output,
 the child's mailbox, and where it stands —
 
@@ -156,6 +199,22 @@ record is retained until it does`.
 Refusals are taught, never an empty view: an unknown id, a `sub:` card (which
 shares its executor's process and keeps no PTY of its own), and a record that
 keeps no conduct-owned PTY.
+
+**Across a node, the same frame rides `tasks/get`.** A signed, verified node
+whose `allows` include `read` reads **any** session's frame on this box over the
+A2A door (`params.metadata["aoide/frame"]`, CONTRACTS.md §6) and gets the frame
+above as one `data` artifact — the same `render` draws it, so a remote frame
+reads like a local one, with `logPath`/`instructionsPath`/`socket`/`suggested`
+struck because they name paths and a command on the box that wrote them. The
+door bounds it: `tail` to 200 lines, each letter's body to 40 lines, the whole
+frame to 256 KiB (that cap sheds the oldest letter first, then the oldest output
+line, and says `truncated`), and an instruction block it never sheds. The frame
+is read-only on both ends: no cursor moves, and raw PTY bytes exist on no wire.
+Unsigned, bearer and address callers are refused (`-32011`), as is a signed node
+never granted `read` — and the reader's own end re-clamps what arrives before
+anything is printed, because a peer's frame is data like any other. This is the
+same read `aoide session watch <node>/<query>` performs; the `suggested` line
+above is the one that reader rebuilds for itself.
 
 ## The end: a closed vocabulary, and a deadline that is not inactivity
 
@@ -219,6 +278,33 @@ the cursor write re-files on the next pass, and that retry mints a **new**
 msgid, so the mailbase's own duplicate memory cannot collapse it and one extra
 identically-worded letter may appear. No claim of exactly-once is made.
 
+**A parent on another node hears the run through the ping-back, not the letter.**
+A run spawned over the A2A door carries `remoteParent` on its record: its report
+lane is unchanged — the letter is filed and the mailbase keeps it — but the exit
+line that would have gone to a local parent takes the child's own ring instead
+(`docs/architecture/EIDOLON-TRACE.md`'s "Second slice"). The parent's own node
+pulls it: signed `tasks/get` calls with `aoide/linesAfter` set to the cursor in
+this node's `remote-children.json` row, keyed on the ssh forward of the
+**parent's own session id** so the forward closes with that session, and bounded
+per pass — a six-second budget over all the rows, the start rotated each tick —
+so a node that is merely unreachable cannot eat the tick that reaps everything
+else. Nothing is pushed, nothing is mailed, and the child's node never writes
+into anyone's composer — the parent's node re-validates each event against the
+closed event set, re-cleans every string, renders the line itself, and applies
+the same delivery skips a local line gets (a shell parent included — by label
+or by its wrapped program — and it
+is judged before the far node is asked anything). The row's cursor is claimed
+*atomically with the read of it* and only then is a line delivered, so this
+lane's guarantee is at-most-once — the opposite direction from the letter's
+at-least-once above: a crash, or a failed write, loses a line rather than
+repeating one, and a ring that rolled past the cursor is reported as exactly
+that (`· <n> events lost before this point`) instead of being papered over.
+Once a run's `exited` has been drained the row is latched and the pull stops for
+it — as it does for a child the far node no longer holds at all, which answers
+the plain `task not found`. A ring whose child has left the roster is still
+readable by its parent for a week before it is dropped, so a parent whose own
+daemon was down still gets the child's last words.
+
 ## Completed runs stay inspectable
 
 Routine cleanup retains every finished task run's record — filed or not — so a
@@ -229,6 +315,17 @@ there. After any explicit prune the durable history remains on disk: the
 session-ledger line, the letters, the PTY transcript and the instruction
 sidecar. Deleting a session is the user's act, never a side effect of tidying
 the roster.
+
+**One run is somebody else's history: the one the [[A2A-Door|A2A door]]
+summoned.** A remote caller may name a task, and each such run ends `done` —
+retaining those forever would let a peer grow this node's roster without
+bound, permanently (unpairing it does not sweep them either). So a run carrying
+a `node:*` origin — the shape only the door can write — is retained only while
+its report is still owed, and once filed it is swept like an ordinary finished
+run, by the automatic sweep and by `session prune` alike. Its durable history is
+exactly as durable as a local run's: the ledger line, the transcript, the
+instruction sidecar, the letters and the cursor entry all stay; only the roster
+record goes.
 
 ## Platform
 

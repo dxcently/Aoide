@@ -37,7 +37,7 @@ writes in this group route through `aoide_storage::fs::atomic_write`
 (temp `<stem>.tmp.<pid>` then rename, symlink-transparent — a write to a
 symlinked `stage/livery.json` lands in the link target). Shared stage
 mutators serialise through a `.stage.lock` `flock` in the stage dir
-(`with_stage_lock`, non-reentrant).
+(`with_stage_lock`, which nests for the thread that already holds it).
 
 Every command takes `--json`. Without it the CLI prints the human `message`
 line; with it, an envelope `{status, command, message, gated, changed?, data?}`

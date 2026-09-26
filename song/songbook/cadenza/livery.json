@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "0",
+  "palette": {
+    "bg":     "#050a06",
+    "fg":     "#86f2a0",
+    "accent": "#39ff6a",
+    "urgent": "#ff4d4d",
+    "hot":    "#ffb000"
+  },
+  "base16": {
+    "base00": "#050a06",
+    "base01": "#0a140c",
+    "base02": "#12261a",
+    "base03": "#4a905d",
+    "base04": "#62b377",
+    "base05": "#86f2a0",
+    "base06": "#b6ffc8",
+    "base07": "#e4ffea",
+    "base08": "#ff4d4d",
+    "base09": "#ff7a2e",
+    "base0A": "#ffb000",
+    "base0B": "#39ff6a",
+    "base0C": "#3fe0d0",
+    "base0D": "#4aa8ff",
+    "base0E": "#d65cff",
+    "base0F": "#8a6a3a"
+  },
+  "bar": {
+    "bg":     "#050a06",
+    "fg":     "#86f2a0",
+    "accent": "#39ff6a"
+  },
+  "notif": {
+    "bg":     "#050a06",
+    "fg":     "#86f2a0",
+    "urgent": "#ff4d4d"
+  },
+  "window": {
+    "border":         "#39ff6a",
+    "borderInactive": "#2e5a3a"
+  },
+  "geometry": {
+    "gapsOut": 8,
+    "gapsIn": 4,
+    "borderSize": 1,
+    "rounding": 0,
+    "blurEnabled": false
+  }
+}

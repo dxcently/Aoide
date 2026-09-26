@@ -13,6 +13,15 @@ by decision — no embedded database yet
 
 ## Named seams (what it exposes)
 
+- `seal` — the P-SEAL container and the signed age key binding
+  (`docs/architecture/HTTPS-MESH-API.md`). Exposes `frame` (the one encoding
+  primitive every signed byte is built from), the node's own age X25519 key
+  and its self-signed `Binding` with its generation high-water mark, retired
+  keys and validity window, the per-peer binding store
+  (`binding_for`/`learn_binding`), `Container`/`Ctx` with
+  `seal_envelope`/`deposit_container`, and the hop-chain and dedup frames. It
+  is the ONLY module in this workspace that depends on the `age` crate.
+
 - `letter` defines optional `AOIDE-LETTER/1` content within the existing
   signed envelope text: Subject, To, Cc, body, and optional threadId/replyTo.
   Absent thread metadata preserves the four-field format. It performs no I/O
@@ -51,6 +60,20 @@ by decision — no embedded database yet
   `$AOIDE_STAGE_DIR` (absolute-path-wins) as one combined override, same as
   before the split; `conducting_stage_dir`'s own no-override fallback is
   `state_dir().join("stage")` instead of `stage_dir`'s `song/stage`.
+
+  **The host split inside `fs`.** The one place a Unix primitive had no
+  Windows spelling is `fs_windows.rs`, beside `fs.rs` the way
+  `aoide-protocol`'s `feed_windows.rs` sits beside `feed.rs`:
+  `flock(LOCK_EX)`/`LOCK_EX|LOCK_NB` become `LockFileEx` on the same lock
+  files (and a lock that belongs to the HANDLE, so a second handle in the
+  same process blocks exactly as a second process's does — the property
+  `with_stage_lock`'s re-entrancy flag exists for), `renameat2(RENAME_NOREPLACE)`
+  becomes `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING`, and the
+  link-preserving copy picks `symlink_dir`/`symlink_file` by asking the
+  source what its target is. The private-file and private-directory policy is
+  NOT answered here: `atomic_write_private`'s temp and `secure_private_dir`
+  call `aoide_protocol::owner_only`, one implementation exposed from the leaf
+  crate rather than a second copy in this one.
   `conducting_stage_dir`'s first no-override resolution in a process also
   drives `fs::migrate_conducting_stage`: a one-shot, idempotent move of the
   six core files off their pre-split `song/stage/` location, never
@@ -83,11 +106,30 @@ by decision — no embedded database yet
   resolver uses, applied to a directory instead of an executable. Returns
   `None` (never a default that might not exist) when neither resolves; the
   caller turns that into a taught error naming both locations.
+- `runtime_dir::socket_dir` — the per-user runtime directory every aoide
+  socket lives in, and the ONE authority for it (`tunnel`, `attest::
+  daemon_socket_path`, conduct's conductor-control/channel/shellbridge
+  sockets, `client::pair_watch`, `server::daemon`, lyra's preview all call
+  it). `$XDG_RUNTIME_DIR` (non-empty) wins on BOTH hosts, else
+  `/run/user/<this process's euid>` on Unix and `%LOCALAPPDATA%\aoide` on
+  native Windows — where the host provides neither the directory nor an
+  owner-only policy on a new one, so a native binder creates it through
+  `aoide_protocol::owner_only::ensure_private_dir`. A PURE resolution: it
+  creates and chmods nothing.
 - `fs::pid_is_alive` — the one process-liveness probe (POSIX `kill(pid, 0)`:
   `0`/`EPERM` live, `ESRCH` absent, any other errno conservatively live; `0`
   and `pid > pid_t::MAX` refused before the syscall, both naming a process
   group). Live is not identity. Backs the stale-temp sweep, is re-exported as
   `aoide_conduct::reap::proc_exists`, and is imported by `aoide-client`.
+- `fs::terminate` / `fs::wait_for_exit` (`Waited`) — the two process ACTS, in
+  the same module for the same reason the probe is: one seam, two hosts. Unix
+  sends `SIGTERM` and really waits (`waitpid`, `WNOHANG` or blocking); native
+  Windows `TerminateProcess`es and waits on the process handle
+  (`aoide_protocol::win_proc`). **The arms do not promise the same thing** —
+  Unix's is a request a trapped or hung child can survive, Windows' cannot be
+  caught at all — so the docs state the degradation and callers are written for
+  the weaker arm; `aoide-client::tunnel`'s record-keeping (a survivor keeps its
+  record) is the one caller, always behind its own argv guard.
 - `records::Project` — a project is a set of anchor roots, not one
   directory: `path` is always the first root, mirrored at `roots[0]`;
   `roots` is the FULL ordered root list, always written by
@@ -103,6 +145,16 @@ by decision — no embedded database yet
   invocation ever touched round-trips byte-identical. `Project::roots()`
   never reads it: local anchoring and host membership are two disjoint
   facts about a project.
+- `records::SessionRecord.shell` — the durable half of
+  `aoide_conduct::graph::program_is_a_shell`'s verdict (wire name `shell`,
+  `skip_serializing_if` false, so every record written before it stays
+  byte-identical): whether this session's wrapped command IS a shell, written
+  by the conducting process at registration from its own argv. It exists so a
+  lane that refuses to type a line into a shell — the ping-back, the
+  doorbell's PTY arm, the A2A door's injects and spawn arm — can read that
+  answer off a record instead of trusting the `agent` label, which a caller
+  chooses freely (`--agent pi -- bash`). Re-registration re-stamps it, so an
+  id re-conducted as a harness stops claiming to be one.
 - `records::SessionRecord.sources` — an optional, additive
   `field name -> "<absolute path>#<record ordinal>"` provenance map (wire
   name `sources`, serialised only when `Some`, CONTRACTS.md §4), for a
@@ -425,6 +477,48 @@ by decision — no embedded database yet
   the pre-rename `state/carry.json`, idempotent by construction (a cheap
   `exists()` check, no process-wide `Once` needed for a single file) —
   narrated, never a clobber of a fresher `undying.json`.
+- `pingback_remote` — the remote ping-back ring (remote sub-agents lane,
+  P-RSA S8): `state/stage/pingback-remote.json` (CONTRACTS.md §4), per child,
+  the events a child whose parent sits on ANOTHER node published for that
+  parent to pull — the child-side sibling of `remote_children`'s
+  `linesAfter` cursor. `push_event`/`events_after` are the pure ring algebra
+  (per-child `seq` from 1, cap 16, the OLDEST dropped, `gap` when the ring
+  rolled past the cursor, `last` as the newest `seq`); `spool_event` appends
+  under one `fs::with_stage_lock` section, stamping the entry's `key` (the
+  parent's node key, written once, and the door's own gate input once the
+  record is gone) and its `at` (the retention clock); `events_for` reads
+  without a lock and `ring_key` answers one child's stamped key;
+  `retain_rings` is the prune the child-side pass drives — a ring whose record
+  is gone and whose `at` is older than the caller's grace leaves, and a
+  rejected-nothing call is not a write. The events are OPAQUE
+  `serde_json::Value`: the closed vocabulary is
+  `aoide-conduct`'s `PingEvent`, and a queue that parsed its own payload would
+  be a second definition of the event it carries.
+- `remote_children` — the remote-children ledger (remote sub-agents lane,
+  P-RSA): `state/stage/remote-children.json` (CONTRACTS.md §4), one row per
+  child THIS node spawned on another node over its A2A door — the
+  caller-side mirror of `records::RemoteParent`, keyed by the child's
+  verified identity `(key, sessionId)`. `append_remote_child` is idempotent
+  on that identity; `retain_remote_children` is how a roster exit drops them;
+  `advance_lines_after` moves one child's ping-back pull cursor forward only
+  (a replayed pull never rewinds it) and `claim_lines_after` is what the pull
+  actually uses — the same advance, in the same locked section that READS the
+  stored cursor and hands it back, so the read and the write cannot be split
+  by a second pass; `mark_drained` latches the row once
+  the parent has drained the child's `Exited` — a ring is never pruned and a
+  child that has left the roster never speaks again, so that latch is what
+  stops the parent's every later tick from asking about it. All of them run
+  inside one short `fs::with_stage_lock` section, `load_remote_children`
+  tolerates a missing/corrupt file as empty, and the write is atomic — the
+  same discipline `undying` holds. `valid_claimed_session_id` is the ONE
+  predicate
+  for an `aoide/from` claim (1..=128 bytes of `[A-Za-z0-9._:-]`, no `/`),
+  shared by both sides of it: the caller holds its own winning id to it and
+  refuses locally BEFORE signing, and the door holds an incoming claim to it
+  on the way in. Both ledger shapes flatten unknown keys into an `extra` map
+  (`RemoteChild`, `RemoteChildrenFile` — and `records::RemoteParent` beside
+  them), so a key this version does not know survives a rewrite by the
+  version that wrote it.
 - `manifest` — a project's own `.aoide/project.json` (v0, command-defrag
   lane U1): host-local SESSION SPECS (`{host, dir, agent, command?}`, `dir`
   always PROJECT-RELATIVE, never a session id or timestamp), so `resurrect`
@@ -521,9 +615,12 @@ by decision — no embedded database yet
 
   P-M2 adds the wire for directly-paired nodes: `mint_outbound_letter`/
   `mint_ack` seal a fresh envelope with THIS instance's own identity key
-  (`from.node` always `display::local_host_name()` — `self` never crosses
-  the wire); `verify_origin_signature` is the OTHER lookup a P-P4 caller
-  doesn't need — not the connection's signer (`ctx.signed_node_name`, a
+  (`from.node` always `display::local_node_name()` — `self` never crosses
+  the wire, and the form it crosses as is the ADDRESS one: an OS host name is
+  case-preserved and native Windows' is conventionally upper-case while a node
+  name is grammar-lowercase, so the folded name is the single name this box
+  mints, declares and is looked up under); `verify_origin_signature` is the OTHER lookup a P-P4 caller
+  doesn't need — not the connection's signer (`ctx.signed_caller`, a
   door concern) but `header.from.node`'s own key, tried against the ONE
   entry `node_store` has on record under that exact name, never every
   verified node's key (a paired node signing as another paired node's
@@ -612,7 +709,33 @@ by decision — no embedded database yet
   the entry a transport failure actually hit before backing off), a thin
   bridge in `aoide-conduct::mail_bridge`, the same split `tunnel` above
   already holds between record CRUD (here) and the ssh child process
-  (`client`).
+  (`client`). **P-M3 adds the entry's own `flavor` and the poll's read.**
+  `flavor` is `now` (attempted on every drain) or `hold` (never attempted —
+  it leaves only through the destination's own `aoide/mailPoll`); it is a
+  LOCAL fact of the entry, never a field of the sealed envelope, and it is
+  additive on disk in both directions: a `now` entry omits the key entirely
+  (`flavor_is_now`), so a pre-P-M3 spool file stays byte-identical and reads
+  back as `now`, while any value that is not exactly `hold` also reads as
+  attemptable — an unknown flavor fails toward being dialed, never toward
+  being silently parked forever. `OutboxEntry::held` is the constructor a
+  held entry is spooled with; `is_held` is the one spelling of the check.
+  `poll_payloads` is the WHOLE offer rule for a poll, in one place: every
+  held entry toward that node, plus every `now` entry whose own attempts
+  have been failing (`tries > 0` and its last outcome did not reach the
+  peer — parked/refused ones included, a never-attempted one excluded
+  because the drain owns it). **It writes nothing at all** — no `tries`,
+  no bookmark, no new file: that is what makes a re-poll before the ack
+  hand the same envelopes over again, and why retirement stays exactly the
+  two paths it always had (a valid ack, `mail outbox rm`). The offer is
+  bounded at `POLL_BATCH_CAP` (50 — the drain's own batch size,
+  re-derived rather than imported, since `storage` sits below `client` in
+  the DAG), oldest first, and the cap applies AFTER the filter for the
+  drain's own reason. **Why bounding is safe here and only here:** a
+  poller acks what it files, those entries retire, and the next poll
+  answers with the next batch — so a big spool drains in bounded steps.
+  Leaving it unbounded would hand one JSON array of whole envelopes to a
+  client that refuses any response over 20 MiB (`MAX_RESPONSE_BYTES`): a
+  stall no retry could clear, since nothing at the hub would change.
 - `identity` — this instance's lazily-minted ed25519 keypair (pairing
   workstream P-P1, `docs/architecture/PAIRING.md`, CONTRACTS.md §4's
   `state/identity/` subsection): `state/identity/ed25519.key` (the raw
@@ -676,7 +799,9 @@ by decision — no embedded database yet
   reconstruction — the pid-reuse defense), `attested_session` (the
   verified nearest-ancestor walk the send gate keys on), the daemon
   seal-pubkey channel (`daemon_socket_path`/`connect_bounded`/
-  `daemon_seal_pubkey_hex` — a LIVE `ping` round trip, never a file), and
+  `daemon_seal_pubkey_hex` — a LIVE `ping` round trip, never a file, and ONE
+  body on both hosts now that the socket type is `std`'s on Unix and
+  `aoide_protocol::win_unix`'s native `AF_UNIX` on Windows), and
   `attested_caller` — the secrets broker's one-stop: peercred pid →
   verified `(sessionId, originClass)`, `None` = UNIDENTIFIED. Lives here
   because the crate DAG forbids every other shared home (`aoide-secrets`
@@ -750,7 +875,10 @@ for the version/feature reasoning). `toml`/`toml_edit` join them at P-C for
 split by direction (`toml` deserializes into the typed schema, `toml_edit`
 rewrites one key in place so comments survive); both are pure Rust over one
 shared parser/writer stack, which is what keeps `checks.portability`'s
-static-musl artifact buildable. It is the second-lowest crate in the DAG —
+static-musl artifact buildable. `age` joins them at P-SEAL for `seal` — the
+third sanctioned break, with its weight measured and accepted up front (see
+that manifest entry's own comment) and every use of it confined to that one
+module. It is the second-lowest crate in the DAG —
 everything that persists state sits above it.
 
 ## How it composes

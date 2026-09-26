@@ -47,15 +47,15 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["project", "add"],
-        summary: "Register a project anchor root in state/stage/projects.json, or ADD roots to an existing project (atomic, idempotent per root).",
+        summary: "Register a project in state/stage/projects.json — with folders to anchor by cwd, or name-only — or ADD roots to an existing project (atomic, idempotent per root).",
         args: [
             arg!("name", "string", true, "Project name (its node id becomes project:<name>)."),
-            arg!("path", "string", false, "Project root path; give one or more (defaults to the current working directory). Each is appended as a root — a name that already exists gains roots rather than losing the ones it has. Sessions anchor by cwd prefix, longest root wins."),
+            arg!("path", "string", false, "Project root path; give one or more. Each is appended as a root — a name that already exists gains roots rather than losing the ones it has. Sessions anchor by cwd prefix, longest root wins. Omit every path to register a NAME-ONLY project: it anchors no cwd and is reached by a workspace binding or an explicit `session project`."),
         ],
         flags: [
             flag!("auto-resume", "bool", "Opt this project into the daemon's boot-time auto-resume sweep (`resurrect --project <name>` on `run_loop` entry, once per boot). Only ever sets it true — hand-edit projects.json to clear it."),
             flag!("new", "bool", "Refuse if the project name already exists instead of adding roots to it."),
-            flag!("host", "string", "Re-scope the path list to that REGISTERED node's own roots instead of local ones — adds it as a member and appends any given roots (idempotent per root). With no path, membership-only; never falls back to the cwd default. Refused (unknown-host, zero writes) if the node isn't registered."),
+            flag!("host", "string", "Re-scope the path list to that REGISTERED node's own roots instead of local ones — adds it as a member and appends any given roots (idempotent per root). With no path, membership-only; no path is ever a cwd default. Refused (unknown-host, zero writes) if the node isn't registered."),
         ],
         gated: false,
         implemented: true,
@@ -73,7 +73,7 @@ pub fn register(r: &mut Registry) {
         summary: "Unregister a project anchor root, or one root of a multi-root project (ok + no-op if absent).",
         args: [
             arg!("name", "string", true, "Project name to remove."),
-            arg!("path", "string", false, "One root to remove instead of the whole project; removing the last root removes the project."),
+            arg!("path", "string", false, "One root to remove instead of the whole project; removing a project's LAST root leaves it standing with no folder (name-only), its workspace bindings intact — only omitting this path deletes the project."),
         ],
         flags: [
             flag!("host", "string", "Re-scope PATH to that host's own roots: bare `--host <node>` drops the whole membership (roots included); `--host <node> <path>` drops just that one host root and leaves the membership, even at zero roots."),
@@ -485,9 +485,9 @@ pub fn register_mail_ring(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["session", "project"],
-        summary: "Assign a local session to a registered project without changing its cwd; --clear restores automatic path anchoring.",
+        summary: "Assign a local session to a registered project without changing its cwd; --clear drops the explicit choice, so the ladder applies again (the session's workspace default, else its cwd anchor).",
         args: [],
-        flags: [flag!("id", "string", "Exact local session id."), flag!("project", "string", "Registered project name."), flag!("clear", "bool", "Restore automatic cwd anchoring.")],
+        flags: [flag!("id", "string", "Exact local session id."), flag!("project", "string", "Registered project name."), flag!("clear", "bool", "Drop the explicit project: the session's saved workspace default (if it was born on a bound workspace) then its cwd anchoring applies again.")],
         gated: false,
         implemented: true,
         handler: crate::graph::session_project,
@@ -501,5 +501,61 @@ pub fn register_mail_ring(r: &mut Registry) {
         implemented: true,
         handler: crate::graph::session_kill,
     ));
-
+    // The workspace ↔ project binding (core-seams §B). Appended last: the
+    // registry's order is byte-stable, so a family that is not moving a
+    // binary lands at the tail and the sort slot is the golden test's own
+    // sorted list.
+    r.insert(cmd!(
+        path: ["workspace", "set"],
+        summary: "Bind a compositor workspace to a project: sessions BORN on that workspace join it. Omit the workspace to use the focused one.",
+        args: [
+            arg!("workspace", "integer", false, "Workspace id (an integer, the same value sessions.json holds). Omit it to use the FOCUSED workspace, resolved through the compositor adapter — a host with no adapter gets a taught refusal asking for the number."),
+            arg!("project", "string", true, "Registered project name to bind. A project may have no folder; with --new an unregistered name is created name-only and bound in one call."),
+        ],
+        flags: [
+            flag!("new", "bool", "Create the project (name-only, no folder) when the name is not registered, then bind it; on a name that IS registered it just binds — it never edits that project. Never implicit — a typo must refuse, not register."),
+        ],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::workspace_set,
+        examples: [
+            "workspace set 3 aoide",
+            "workspace set cadenza --new",
+            "workspace set aoide",
+        ],
+    ));
+    r.insert(cmd!(
+        path: ["workspace", "clear"],
+        summary: "Unbind a compositor workspace. Sessions already born on it keep the default project they were stamped with — the binding is a birth default, not a live link.",
+        args: [arg!("workspace", "integer", true, "Workspace id to unbind.")],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::workspace_clear,
+        examples: ["workspace clear 3"],
+    ));
+    r.insert(cmd!(
+        path: ["workspace", "list"],
+        summary: "Every workspace binding plus every workspace a session on this host reports, sorted by id; --json is the shape a widget pad reads.",
+        args: [],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::workspace_list,
+        examples: ["workspace list", "workspace list --json"],
+    ));
+    r.insert(cmd!(
+        path: ["workspace", "root"],
+        summary: "Print the first folder of the project bound to a workspace (or to the FOCUSED one), for a launcher to open a terminal in — one bare path on stdout, nothing at all when it refuses.",
+        args: [arg!("workspace", "integer", false, "Workspace id; omit it to use the focused workspace, resolved through the compositor adapter.")],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: crate::graph::workspace_root,
+        examples: [
+            "workspace root 3",
+            "workspace root",
+            r#"kitty --directory "$(aoide workspace root 2>/dev/null || echo "$HOME")""#,
+        ],
+    ));
 }

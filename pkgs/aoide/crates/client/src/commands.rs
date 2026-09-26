@@ -59,6 +59,36 @@ fn run_curl(extra: &[&str], stdin_body: Option<&str>) -> Result<(u16, String), S
 /// runaway one.
 const MAX_RESPONSE_BYTES: usize = 20 * 1024 * 1024; // 20 MiB
 
+/// The ceiling ONE read gets instead of [`MAX_RESPONSE_BYTES`]: the watch
+/// frame (`tasks/get` + `metadata["aoide/frame"]`, P-RSA S7) and the ping-back
+/// history read (`metadata["aoide/linesAfter"]`, P-RSA S9).
+///
+/// **The arithmetic, honestly.** The far door bounds a frame's SHEDDABLE
+/// content to 256 KiB, but the instruction block is exempt from that cap by
+/// design (`aoide-server::a2a::frame_artifact`, CONTRACTS.md §6) — it is the
+/// text the frame exists to show. Its own worst case is
+/// `BLOCK_LINES_MAX` (400 lines) × `LINE_MAX` (200 chars) × 4 bytes ≈ 320 KB,
+/// and when that block alone is over the 256 KiB cap the door sheds every
+/// output line and letter and still sends the block. So the largest frame an
+/// HONEST node can produce is ~321 KB, not 256 KiB: this cap is 512 KiB —
+/// roughly 1.6× that ceiling, comfortably above it while still refusing a node
+/// that answers a frame request with something else entirely.
+///
+/// (Two crates hold those two constants — `aoide_conduct::graph`'s
+/// `BLOCK_LINES_MAX`/`LINE_MAX` and `aoide-server`'s `FRAME_MAX_BYTES` — so
+/// this number cannot be derived from them here without reaching across both;
+/// it is stated as arithmetic instead. Widening either bound is what this
+/// comment is for.)
+const FRAME_MAX_RESPONSE_BYTES: usize = 512 * 1024;
+
+/// The `--max-time` one PING-BACK PULL gets (P-RSA S9): shorter than the 15 s
+/// every interactive node read carries, because this call is one step of the
+/// daemon's own reap tick (~12 s apart) rather than a command an operator is
+/// waiting on. A dead far node must not eat the tick that reaps live sessions —
+/// the same reasoning `pull_node_live`'s own short probe holds, and the pull
+/// makes its own retry on the next tick, from the same cursor.
+const HISTORY_PULL_TIMEOUT_SECS: u64 = 5;
+
 /// `run_curl`'s parameterised core: same transport, an explicit `--max-time`
 /// instead of the hardcoded `15`. Split out for `pull_node_live` (the
 /// roster core's presence probe, workstream C2 — reached via bare
@@ -79,14 +109,34 @@ const MAX_RESPONSE_BYTES: usize = 20 * 1024 * 1024; // 20 MiB
 /// crosses the cap — every real fetch in this crate (`post_json`'s node
 /// POSTs, the AgentCard GET, `mcp_client`'s Melete calls) routes through
 /// this one function, so there is exactly one place this needed wiring.
+///
+/// A call site with its OWN, tighter ceiling ([`FRAME_MAX_RESPONSE_BYTES`])
+/// goes through [`run_curl_capped`] instead; every other caller keeps this
+/// wrapper and [`MAX_RESPONSE_BYTES`].
 fn run_curl_with_timeout(
     timeout_secs: u64,
     extra: &[&str],
     stdin_body: Option<&str>,
 ) -> Result<(u16, String), String> {
+    run_curl_capped(timeout_secs, MAX_RESPONSE_BYTES, extra, stdin_body)
+}
+
+/// [`run_curl_with_timeout`] with an explicit ceiling, in BYTES — the same
+/// transport, the same bounded read loop, one `--max-filesize` value and one
+/// cut-off compared against the caller's own cap instead of
+/// [`MAX_RESPONSE_BYTES`]. The watch frame is the caller that needs it: a
+/// frame is bytes another box wrote and this process only displays, and
+/// `--max-filesize 524288` names the ceiling the far door's own 256 KiB frame
+/// bound never reaches.
+fn run_curl_capped(
+    timeout_secs: u64,
+    max_bytes: usize,
+    extra: &[&str],
+    stdin_body: Option<&str>,
+) -> Result<(u16, String), String> {
     let mut cmd = std::process::Command::new("curl");
     let timeout = timeout_secs.to_string();
-    let max_filesize = MAX_RESPONSE_BYTES.to_string();
+    let max_filesize = max_bytes.to_string();
     cmd.args(["-sS", "--max-time", &timeout, "--max-filesize", &max_filesize, "-w", "\n%{http_code}"]);
     cmd.args(extra);
     cmd.stdout(Stdio::piped()).stderr(Stdio::null());
@@ -113,11 +163,11 @@ fn run_curl_with_timeout(
             }
         };
         buf.extend_from_slice(&chunk[..n]);
-        if buf.len() > MAX_RESPONSE_BYTES {
+        if buf.len() > max_bytes {
             let _ = child.kill();
             let _ = child.wait();
             return Err(format!(
-                "response exceeded the {MAX_RESPONSE_BYTES}-byte cap \u{2014} refusing (the far side sent too much data)"
+                "response exceeded the {max_bytes}-byte cap \u{2014} refusing (the far side sent too much data)"
             ));
         }
     }
@@ -275,13 +325,31 @@ const HTTP_METHOD: &str = "POST";
 /// making this parameter's addition byte-identical-when-empty by
 /// construction.
 pub(crate) fn post_json(url: &str, body: &str, bearer: Option<&str>, extra_headers: &[(String, String)], timeout_secs: u64) -> Result<(u16, String), String> {
+    post_json_capped(url, body, bearer, extra_headers, timeout_secs, MAX_RESPONSE_BYTES)
+}
+
+/// [`post_json`] with an explicit response ceiling — the same request build,
+/// the same transport, one cap passed through to [`run_curl_capped`] instead
+/// of [`MAX_RESPONSE_BYTES`]. Extracted rather than adding the parameter to
+/// `post_json` so every existing call site is untouched, the same
+/// "the override-free path stays the simpler function" split
+/// [`post_json_to_node`]/[`post_json_to_node_with_via_override`] holds.
+/// [`task_get_on_node`] is the one caller that passes a tighter cap.
+pub(crate) fn post_json_capped(
+    url: &str,
+    body: &str,
+    bearer: Option<&str>,
+    extra_headers: &[(String, String)],
+    timeout_secs: u64,
+    max_bytes: usize,
+) -> Result<(u16, String), String> {
     let header_args: Vec<String> = extra_headers.iter().flat_map(|(k, v)| ["-H".to_string(), format!("{k}: {v}")]).collect();
     match bearer {
         None => {
             let mut args: Vec<&str> = vec!["-X", HTTP_METHOD, "-H", "Content-Type: application/json"];
             args.extend(header_args.iter().map(String::as_str));
             args.extend(["--data-binary", "@-", "--", url]);
-            run_curl_with_timeout(timeout_secs, &args, Some(body))
+            run_curl_capped(timeout_secs, max_bytes, &args, Some(body))
         }
         Some(token) => {
             let scratch = ScratchBodyFile::write(body)?;
@@ -290,8 +358,9 @@ pub(crate) fn post_json(url: &str, body: &str, bearer: Option<&str>, extra_heade
             let mut args: Vec<&str> = vec!["-X", HTTP_METHOD, "-H", "Content-Type: application/json"];
             args.extend(header_args.iter().map(String::as_str));
             args.extend(["-H", "@-", "--data-binary", &data_arg, "--", url]);
-            run_curl_with_timeout(
+            run_curl_capped(
                 timeout_secs,
+                max_bytes,
                 &args,
                 Some(&header_line),
             )
@@ -484,14 +553,45 @@ pub(crate) fn post_json_to_node(
     extra_headers: &[(String, String)],
     timeout_secs: u64,
 ) -> Result<(u16, String), String> {
+    post_json_to_node_with_tunnel_key(
+        node,
+        body,
+        bearer,
+        extra_headers,
+        timeout_secs,
+        &node.name,
+        MAX_RESPONSE_BYTES,
+    )
+}
+
+/// [`post_json_to_node`]'s own body with the tunnel key stated EXPLICITLY
+/// rather than taken from `node.name`, and its own response ceiling instead of
+/// [`MAX_RESPONSE_BYTES`] — the two things [`task_get_on_node`] needs and no
+/// other caller varies. `node.name` is the key convention every caller here
+/// holds (`Node-Transport.md`: "keyed by `(session id, node name)`"), which is
+/// why the override-free call site keeps the simpler signature and this stays
+/// a sibling rather than a sixth parameter on `post_json_to_node` — the same
+/// split [`post_json_to_node_with_via_override`] holds. An explicit key must
+/// still be `valid_node_name`-shaped: [`resolve_dial_url`]'s own record write
+/// refuses anything else, so a caller cannot smuggle a path separator or a
+/// `..` out of a session id through here.
+pub(crate) fn post_json_to_node_with_tunnel_key(
+    node: &aoide_storage::node_store::Node,
+    body: &str,
+    bearer: Option<&str>,
+    extra_headers: &[(String, String)],
+    timeout_secs: u64,
+    tunnel_key: &str,
+    cap_bytes: usize,
+) -> Result<(u16, String), String> {
     let via = node
         .via
         .as_deref()
         .map(aoide_storage::tunnel::parse_via)
         .transpose()
         .map_err(|e| format!("node `{}`'s recorded via: {e}", node.name))?;
-    let dial_url = resolve_dial_url(&node.url, via.as_ref(), &node.name)?;
-    post_json(&dial_url, body, bearer, extra_headers, timeout_secs)
+    let dial_url = resolve_dial_url(&node.url, via.as_ref(), tunnel_key)?;
+    post_json_capped(&dial_url, body, bearer, extra_headers, timeout_secs, cap_bytes)
 }
 
 /// [`post_json_to_node`]'s own body, plus an explicit `via_override` that
@@ -619,7 +719,10 @@ pub(crate) fn sign_headers_for_node(node: &aoide_storage::node_store::Node, body
     let canonical = aoide_storage::wire_auth::canonical_string(HTTP_METHOD, &path, &timestamp, &nonce, body.as_bytes());
     let signature = aoide_storage::wire_auth::sign_hex(&keypair, canonical.as_bytes());
     Ok(vec![
-        (aoide_storage::wire_auth::HEADER_NODE.to_string(), aoide_storage::display::local_host_name()),
+        // The node this request claims to be: the ADDRESS form of this box's own
+        // name (`display::local_node_name`) — the same name its mail and its
+        // pairing handshake declare, and the one a peer's registry stores for it.
+        (aoide_storage::wire_auth::HEADER_NODE.to_string(), aoide_storage::display::local_node_name()),
         (aoide_storage::wire_auth::HEADER_TIMESTAMP.to_string(), timestamp),
         (aoide_storage::wire_auth::HEADER_NONCE.to_string(), nonce),
         (aoide_storage::wire_auth::HEADER_SIGNATURE.to_string(), signature),
@@ -650,15 +753,12 @@ fn build_signed_pair_poll_body(id: &str) -> Result<String, String> {
     Ok(serde_json::to_string(&body).unwrap_or_default())
 }
 
-/// A unique `messageId` for one outbound `message/send` (pid + wall-clock
-/// nanos — never reused within a process).
-fn gen_message_id() -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("aoide-{}-{}", std::process::id(), nanos)
-}
+/// A unique `messageId` for one outbound `message/send`. One home
+/// (`aoide_protocol::wire::gen_message_id`, re-exported here so this module's
+/// callers are unchanged): the server's outbound A2A `status.message` mints
+/// ids the same way, and the binding marks `messageId` required on a
+/// `Message`.
+pub use aoide_protocol::wire::gen_message_id;
 
 // ── The seven `node` commands (CONTRACTS.md §7: same-network federation) ───────
 //
@@ -837,9 +937,21 @@ fn handle_node_remove(inv: &Invocation) -> Outcome {
             .with_data(json!({ "reason": "registry-write-failed" }));
     }
     let _ = std::fs::remove_file(aoide_storage::node_store::node_cache_path(&name));
+    // M2 (the branch review): the stored age binding goes with the record. A
+    // binding keyed by node NAME that outlives its node is exactly the residue
+    // that wedged a re-paired peer — `binding_for` re-verifies on every read,
+    // so it was inert rather than trusted, but leaving it means a re-added node
+    // under the same name inherits a comparison it should never be measured
+    // against. The removal is reported, not silent.
+    let binding_forgotten = aoide_storage::seal::forget_binding(&name).unwrap_or(false);
     Outcome::ok(cmd, format!("removed node `{name}` ({} remaining)", nodes.len()))
         .changed(vec![aoide_storage::node_store::nodes_path().to_string_lossy().into_owned()])
-        .with_data(json!({ "removed": true, "name": name, "count": nodes.len() }))
+        .with_data(json!({
+            "removed": true,
+            "name": name,
+            "count": nodes.len(),
+            "bindingForgotten": binding_forgotten,
+        }))
 }
 
 /// `node hub <name> [--clear]` — designate `name` as THE hub (at most one;
@@ -1046,6 +1158,14 @@ pub fn pull_node_live(node: &aoide_storage::node_store::Node, timeout_secs: u64)
 /// does, see the crate's `Cargo.toml`/`AGENTS.md` on the `conduct → client`
 /// edge.
 ///
+/// `from_session` is the calling session's OWN id — the remote-parent claim
+/// the receiving door stamps onto the steered child (P-RSA §4.2; the claim
+/// half of the gate, whose match half lands with the door's Inject arm). It
+/// rides INSIDE the signed body, so the door can bind it to the verifying
+/// key. `None` (every caller that is not claiming a parent — today:
+/// `aoide-conduct`'s `send --to`, until S5 threads its attested sender
+/// through) leaves the body byte-identical to before this parameter.
+///
 /// Same `run_curl` transport and 15s timeout every other `message/send`
 /// call site in this file uses — this is a real delivery, not the roster
 /// core's short-timeout presence probe, so it does NOT reuse
@@ -1058,9 +1178,10 @@ pub fn send_message_to_node(
     node: &aoide_storage::node_store::Node,
     text: &str,
     context_id: &str,
+    from_session: Option<&str>,
 ) -> Result<Value, String> {
     let message_id = gen_message_id();
-    let body = crate::wire::build_message_send_body(text, &message_id, Some(context_id));
+    let body = crate::wire::build_message_send_body(text, &message_id, Some(context_id), from_session, None);
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let bearer = resolve_node_bearer(node)?;
     let extra_headers = sign_headers_for_node(node, &body_str)?;
@@ -1080,6 +1201,117 @@ pub fn send_message_to_node(
         return Err(format!("node returned an error: {detail}"));
     }
     Ok(parsed)
+}
+
+/// Read ONE session's watch frame off a NODE — `session watch <node>/<query>`
+/// (aoide-conduct, P-RSA S7) resolves `<query>` against the node's cached
+/// graph to that one remote sessionId, then drives THIS function. The
+/// transport lives here, not duplicated in `conduct`, for the same reason
+/// [`send_message_to_node`] does (see the crate's `Cargo.toml`/`AGENTS.md` on
+/// the `conduct → client` edge).
+///
+/// It signs exactly as [`send_message_to_node`] does — `sign_headers_for_node`
+/// over the canonical string of THIS body, plus the node's bearer when it has
+/// one — because the far door's output-read gate admits nothing less than the
+/// SIGNATURE rung with `read` in the record's `allows` (`-32011`, CONTRACTS.md
+/// §6). An unpaired node therefore gets NO headers and a guaranteed refusal,
+/// exactly as a spawn does; the caller (`conduct`) is the side that turns that
+/// into a taught error, and it can, because the refusal code rides back in
+/// [`crate::node::FrameReadError::code`].
+///
+/// `frame_tail` is the output-line window asked for; the door clamps it to
+/// its own `1..=200` regardless, so a larger number is not an error, just
+/// narrowed. The tunnel key is `node.name` — the documented
+/// `(session id, node name)` pair every other node action keys its forward
+/// under, passed EXPLICITLY to [`post_json_to_node_with_tunnel_key`] (the one
+/// helper that takes it) rather than through the override-free wrapper, so
+/// this call site reads as the deliberate choice it is.
+///
+/// Returns the frame JSON itself (the `frame` artifact's `data`, unread by
+/// this side — `aoide_conduct::graph::Frame` owns that shape), bounded by
+/// [`FRAME_MAX_RESPONSE_BYTES`]. The failure text is the peer's OWN bytes,
+/// verbatim: this is a transport, and the door that PRINTS it is the one that
+/// sanitizes it (`aoide_conduct::graph::common::clean_line`, one definition,
+/// both doors) — a second sanitizer down here is how the two would drift.
+pub fn task_get_on_node(
+    node: &aoide_storage::node_store::Node,
+    id: &str,
+    frame_tail: u64,
+) -> Result<Value, crate::node::FrameReadError> {
+    let wire = crate::node::build_task_get_frame_request(id, frame_tail);
+    let body_str = serde_json::to_string(&wire).unwrap_or_default();
+    let plain = |message: String| crate::node::FrameReadError { code: None, message };
+    let bearer = resolve_node_bearer(node).map_err(plain)?;
+    let extra_headers = sign_headers_for_node(node, &body_str).map_err(plain)?;
+    let (code, resp) = post_json_to_node_with_tunnel_key(
+        node,
+        &body_str,
+        bearer.as_deref(),
+        &extra_headers,
+        15,
+        &node.name,
+        FRAME_MAX_RESPONSE_BYTES,
+    )
+    .map_err(plain)?;
+    if code != 200 {
+        return Err(plain(format!("HTTP {code}")));
+    }
+    let parsed: Value = serde_json::from_str(&resp).map_err(|e| plain(format!("unparseable response: {e}")))?;
+    crate::node::parse_frame_response(&parsed)
+}
+
+/// [`task_get_on_node`]'s twin for the PING-BACK HISTORY read (P-RSA S9,
+/// CONTRACTS.md §6, `aoide/linesAfter`): the events a child published on its
+/// own node for a parent that lives HERE. It is signed exactly as the frame
+/// read is — the far door serves the ring only to a caller whose signature
+/// verified against the CHILD's stamped `remoteParent.key`, so an
+/// unsigned/unpaired caller gets a guaranteed refusal — and it reuses the same
+/// signed-POST sequence the frame read does, through the same two transport
+/// helpers, never a second spelling of it.
+///
+/// Two things differ, and both are the caller's to state:
+/// - **`tunnel_key` is explicit.** The frame read keys its forward under
+///   `node.name`; this one runs from the daemon's own tick on behalf of the
+///   PARENT, so the key is the parent session id — the forward then reuses the
+///   session's existing ssh path and `close_all_for_session` closes it when the
+///   session ends. The daemon never holds a standing forward of its own
+///   (`docs/architecture/PAIRING.md`, Transport).
+/// - **the timeout is shorter.** A frame read is an operator's foreground
+///   command; this one is one step of a tick that repeats every ~12 s, and a
+///   dead node must not eat its own cadence (the same reasoning
+///   `pull_node_live`'s ~2 s probe holds).
+///
+/// Returns the ring read's JSON itself, bounded by
+/// [`FRAME_MAX_RESPONSE_BYTES`] — the same "one read" ceiling the frame gets:
+/// the door caps the ring at 16 events, and a status envelope beside them is
+/// smaller than a frame's instruction block. The failure text is the peer's
+/// OWN bytes, verbatim (one sanitizer, at the door that prints it).
+pub fn task_history_on_node(
+    node: &aoide_storage::node_store::Node,
+    id: &str,
+    lines_after: u64,
+    tunnel_key: &str,
+) -> Result<Value, crate::node::FrameReadError> {
+    let wire = crate::node::build_task_get_history_request(id, lines_after);
+    let body_str = serde_json::to_string(&wire).unwrap_or_default();
+    let plain = |message: String| crate::node::FrameReadError { code: None, message };
+    let bearer = resolve_node_bearer(node).map_err(plain)?;
+    let extra_headers = sign_headers_for_node(node, &body_str).map_err(plain)?;
+    let (code, resp) = post_json_to_node_with_tunnel_key(
+        node,
+        &body_str,
+        bearer.as_deref(),
+        &extra_headers,
+        HISTORY_PULL_TIMEOUT_SECS,
+        tunnel_key,
+        FRAME_MAX_RESPONSE_BYTES,
+    )
+    .map_err(plain)?;
+    if code != 200 {
+        return Err(plain(format!("HTTP {code}")));
+    }
+    let parsed: Value = serde_json::from_str(&resp).map_err(|e| plain(format!("unparseable response: {e}")))?;
+    crate::node::parse_history_response(&parsed)
 }
 
 /// Prompt `y/N` before spawning on a node — a LOCAL UX confirmation only
@@ -1115,7 +1347,7 @@ fn confirm_spawn(name: &str, text: &str) -> Result<bool, String> {
 /// remote-chosen executable: which agent runs is the NODE's own configured
 /// `aoide.a2a.spawnAgent`, never client-supplied (`do_spawn`'s own doc
 /// comment on `SessionRef`'s security model). Built via
-/// `crate::wire::build_message_send_body(text, message_id, None)` — the
+/// `crate::wire::build_message_send_body(text, message_id, None, None)` — the
 /// SAME builder every other `message/send` call site in this file uses, so
 /// this is a proven shape, not a new invention.
 ///
@@ -1161,7 +1393,7 @@ pub fn spawn_on_node(
     node: &aoide_storage::node_store::Node,
     text: &str,
 ) -> Result<Value, SpawnNodeError> {
-    spawn_on_node_via(node, text, None)
+    spawn_on_node_via(node, text, None, None, None)
 }
 
 /// [`spawn_on_node`]'s own body, PLUS an optional `--via` OVERRIDE
@@ -1173,13 +1405,28 @@ pub fn spawn_on_node(
 /// before this override existed. Extracted rather than adding the
 /// parameter to `spawn_on_node` directly so `aoide-conduct`'s existing
 /// call site (`graph::resurrect.rs`) needs no change.
+///
+/// `from_session` (P-RSA S2) is the caller's OWN session id — the claim the
+/// receiving door stamps onto the child's record as its `remoteParent`.
+/// `handle_node_spawn` is the one caller that resolves it (attested caller,
+/// else `--parent`; never `AOIDE_SESSION_ID`); `spawn_on_node` above passes
+/// `None`, so a manifest remote-summon claims no parent — a `--task`-less,
+/// unattended summon has no calling session to name.
+///
+/// `task` (P-RSA S10) is the slug the FAR node should run the child under,
+/// already validated here (`handle_node_spawn`'s own `--task` check) and
+/// signed into the same body. `None` — every caller but `handle_node_spawn` —
+/// sends no `aoide/task` key at all, so the child is a plain headless
+/// conducted session: byte-identical to the pre-S10 body.
 pub fn spawn_on_node_via(
     node: &aoide_storage::node_store::Node,
     text: &str,
     via_override: Option<&aoide_storage::tunnel::Via>,
+    from_session: Option<&str>,
+    task: Option<&str>,
 ) -> Result<Value, SpawnNodeError> {
     let message_id = gen_message_id();
-    let body = crate::wire::build_message_send_body(text, &message_id, None);
+    let body = crate::wire::build_message_send_body(text, &message_id, None, from_session, task);
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let bearer =
         resolve_node_bearer(node).map_err(|e| SpawnNodeError::new("bearer-resolve-failed", e))?;
@@ -1239,9 +1486,145 @@ impl std::fmt::Display for SpawnNodeError {
     }
 }
 
+/// Is `id` a LIVE local session record — `node spawn --parent`'s acceptance
+/// check (P-RSA §4.1)? A record that has ended (`canonical_state` folds
+/// every producer's spelling onto the five-state vocabulary, so `done` is
+/// the one question) and an id naming no record at all are both refused:
+/// never adopt a stale id as a parent, the same ruling
+/// `conduct`'s `window.rs::resolve_registration_parent` made for the
+/// ambient-env case.
+fn live_local_session(id: &str) -> bool {
+    aoide_storage::stage::load_stage::<aoide_storage::records::SessionsFile>(
+        &aoide_storage::stage::sessions_path(),
+    )
+    .ok()
+    .is_some_and(|f| {
+        f.sessions.iter().any(|s| {
+            s.session_id == id && aoide_protocol::state::canonical_state(&s.state) != "done"
+        })
+    })
+}
+
+/// Resolve the caller-side remote parent for a NODE call (P-RSA §4.1) — an
+/// explicit `--parent` naming a live local record, else the KERNEL-ATTESTED
+/// caller when the daemon can prove one
+/// (`aoide_storage::attest::attested_caller` — needs the daemon's live seal
+/// key), else none. An explicit `--parent` wins because it is the operator's
+/// stated intent (spawning on behalf of another session on this node, the
+/// node being the trust unit); a `--parent` that names no live record is
+/// refused, never silently replaced by the attestation.
+///
+/// Two callers, ONE resolution: `node spawn --parent <id>` (the `remoteParent`
+/// stamp on the child it creates) and `send --to <node>/<query>` (P-RSA S5,
+/// which has no `--parent` flag and passes `None` — the parent that steers a
+/// child it spawned is the same caller the spawn path stamped, so both read
+/// this one function instead of re-deriving it). `pub` for exactly that
+/// reason: a second spelling of "which claim may this node make" is how the
+/// two sides of the wire drift apart.
+///
+/// `AOIDE_SESSION_ID` is NEVER read here: an ambient id is exactly the Osaka
+/// failure the lane exists to close, and the daemon-side fix for it clears
+/// that var on every door-spawned child. With no parent resolvable the call
+/// still proceeds — it is simply a top-level spawn (`parent: none
+/// (unattested)`), never a spawn under a guessed session.
+///
+/// The one place this node decides what it will claim: whatever wins above
+/// must also BE a legal claim (`resolve_remote_parent_from` carries the rule),
+/// so no caller of this function can sign a value the far door would refuse.
+pub fn resolve_remote_parent(explicit: Option<&str>) -> Result<Option<String>, String> {
+    let attested = aoide_storage::attest::attested_caller(std::process::id() as i32)
+        .map(|(id, _origin)| id);
+    resolve_remote_parent_from(attested, explicit)
+}
+
+/// [`resolve_remote_parent`]'s decision, over an ALREADY-RESOLVED attestation
+/// — pure, so the precedence (a live `--parent` first, the attestation as the
+/// fallback), the live-record check, and the claim's own shape check are all
+/// testable with no daemon, no seal key and no process ancestry in the
+/// picture.
+///
+/// Whichever id wins is then held to
+/// [`aoide_storage::remote_children::valid_claimed_session_id`] — the same
+/// predicate the far door refuses a signed claim with (CONTRACTS.md §6). A
+/// session this node can show on its roster can still be an id the door
+/// cannot accept as a `remoteParent.sessionId` (over the length bound, a
+/// stray character), and shipping one only turns a local, immediately-fixable
+/// mistake into the door's own answer one round trip and one signature later —
+/// `-32602` on its spawn arm, a lost autogate on its inject one (P-RSA S5).
+/// So an unruly claim is refused at THIS function, before anything is signed
+/// or sent — and the refusal reaches the caller only when the caller asked
+/// for a parentage: `node spawn` fails the call outright, while `send`, which
+/// never asked for one and treats the claim as an autogate shortcut, DROPS it
+/// and names the reason on one warning line rather than failing
+/// (`aoide_conduct::graph::send`'s `remote_parent_claim`). `None` (no parent
+/// at all) is a legal answer either way.
+fn resolve_remote_parent_from(
+    attested: Option<String>,
+    explicit: Option<&str>,
+) -> Result<Option<String>, String> {
+    let resolved = match explicit {
+        None => attested,
+        Some(id) if live_local_session(id) => Some(id.to_string()),
+        Some(id) => {
+            return Err(format!(
+                "`--parent {id}` names no live local session — a remote parent must be a session \
+                 this instance can still show on its roster; an ended or unknown id is refused \
+                 rather than adopted as a stale parent"
+            ))
+        }
+    };
+    match resolved {
+        Some(id) if !aoide_storage::remote_children::valid_claimed_session_id(&id) => Err(format!(
+            "this node would claim `{id:?}` as the remote parent, and that is not a legal \
+             `aoide/from` claim: {} bytes at most of [A-Za-z0-9._:-] with no `/` — the same rule \
+             the far door applies, so a caller that signed this would be refused `-32602` on a \
+             spawn and simply matched by nothing on a send; claim a session whose id fits, or no \
+             parent at all",
+            aoide_storage::remote_children::CLAIMED_SESSION_ID_MAX,
+        )),
+        other => Ok(other),
+    }
+}
+
+/// The ledger row for one acknowledged remote spawn (P-RSA §4.1) — keyed by
+/// the CHILD's verified identity (`node.pubkey` + `sessionId`) and carrying
+/// THIS node's own session as `parentSessionId`, so the entry stays
+/// attributable after a restart. `None` (nothing to write) when there is no
+/// parent to attribute, no child id came back, the node carries no pubkey —
+/// with no key there is no identity to key the row on — or the ack's id is
+/// not a session id at all.
+///
+/// That last case is the far door's `result.id` verbatim: a string this node
+/// did not mint and cannot vouch for. It is held to the same
+/// [`aoide_storage::remote_children::valid_claimed_session_id`] the door
+/// applies to `aoide/from` coming the other way, so a paired-but-hostile (or
+/// merely broken) node cannot plant a row keyed on a shape no session can
+/// occupy — a phantom entry for whatever reads this ledger next.
+fn remote_child_row(
+    node: &aoide_storage::node_store::Node,
+    parent_session_id: Option<&str>,
+    child_session_id: &str,
+) -> Option<aoide_storage::remote_children::RemoteChild> {
+    let key = node.pubkey.clone().filter(|k| !k.is_empty())?;
+    let parent = parent_session_id?;
+    if !aoide_storage::remote_children::valid_claimed_session_id(child_session_id) {
+        return None;
+    }
+    Some(aoide_storage::remote_children::RemoteChild {
+        parent_session_id: parent.to_string(),
+        node: node.name.clone(),
+        key,
+        session_id: child_session_id.to_string(),
+        spawned_at: aoide_storage::time::now_iso_utc(),
+        lines_after: 0,
+        drained: false,
+        extra: Default::default(),
+    })
+}
+
 fn handle_node_spawn(inv: &Invocation) -> Outcome {
     let cmd = "node.spawn";
-    const USAGE: &str = "usage: aoide node spawn <name> [--yes] [--via ssh://[user@]host[:port]] -- <text…>";
+    const USAGE: &str = "usage: aoide node spawn <name> [--yes] [--via ssh://[user@]host[:port]] [--parent <id>] [--task <slug>] -- <text…>";
     let name = match inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         Some(n) => n.to_string(),
         None => return Outcome::usage(cmd, USAGE),
@@ -1257,6 +1640,38 @@ fn handle_node_spawn(inv: &Invocation) -> Outcome {
         Ok(v) => v,
         Err(e) => return Outcome::usage(cmd, format!("{USAGE} — {e}")),
     };
+    // The remote-parent claim (P-RSA §4.1). An empty --parent is absent, the
+    // same read parse_via_flag gives an empty --via; a --parent naming no
+    // live local session is a usage error, never a silently-dropped claim.
+    let explicit_parent = inv.flags.get("parent").map(|s| s.trim()).filter(|s| !s.is_empty());
+    let parent = match resolve_remote_parent(explicit_parent) {
+        Ok(p) => p,
+        Err(e) => return Outcome::usage(cmd, format!("{USAGE} — {e}")),
+    };
+    // The managed-run request (P-RSA S10). Held to the SAME predicate the far
+    // door applies — `aoide_storage::node_store::valid_node_name`, the one
+    // task-slug/mailbox-name check in the tree — so a typo is refused HERE,
+    // before anything is signed or sent, with the local wording; the door
+    // refuses it again on its own side (its own `-32602`), which is the
+    // authority. An empty --task is absent, the same read the other two flags
+    // get.
+    let task = inv.flags.get("task").map(|s| s.trim()).filter(|s| !s.is_empty());
+    if let Some(slug) = task {
+        if !aoide_storage::node_store::valid_node_name(slug) {
+            // Echoed as TYPED: this string goes to the operator's own terminal,
+            // and a local command line is not a peer's bytes (the door, which
+            // does print those, cleans its own echo — `spawn_task_slug`). The
+            // client cannot reach the shared sanitizer regardless: `conduct`
+            // depends on THIS crate, so the edge does not exist.
+            return Outcome::usage(
+                cmd,
+                format!(
+                    "{USAGE} — --task `{slug}` is not a legal task slug (^[a-z0-9][a-z0-9-]*$, the \
+                     same name a mailbox takes); it names the remote run's task mailbox there"
+                ),
+            );
+        }
+    }
 
     let nodes = aoide_storage::node_store::load_nodes();
     let node = match nodes.iter().find(|p| p.name == name) {
@@ -1295,15 +1710,62 @@ fn handle_node_spawn(inv: &Invocation) -> Outcome {
         }
     }
 
-    match spawn_on_node_via(&node, &text, via_override.as_ref()) {
+    match spawn_on_node_via(&node, &text, via_override.as_ref(), parent.as_deref(), task) {
         Ok(parsed) => {
             let session_id = parsed
                 .get("result")
                 .and_then(|r| r.get("id"))
                 .and_then(Value::as_str)
                 .unwrap_or("");
-            Outcome::ok(cmd, format!("spawned on `{}` — remote session `{session_id}`", node.name))
-                .with_data(json!({ "name": node.name, "url": node.url, "sessionId": session_id, "response": parsed }))
+            // The caller-side half of the parent link (P-RSA §4.1): one row
+            // keyed by the child's verified identity, written only once the
+            // door has acknowledged the spawn. Best-effort — the spawn itself
+            // already happened, so a ledger write that fails must not turn a
+            // successful spawn into an error; it is named on stderr instead.
+            if let Some(row) = remote_child_row(&node, parent.as_deref(), session_id) {
+                if let Err(e) = aoide_storage::remote_children::append_remote_child(&row) {
+                    eprintln!(
+                        "aoide node spawn: could not record remote child `{session_id}` on `{}` in the ledger: {e}",
+                        node.name
+                    );
+                }
+            }
+            let parent_note = match parent.as_deref() {
+                Some(p) => format!("parent `{p}`"),
+                None => "parent: none (unattested)".to_string(),
+            };
+            // What became of the opening turn, straight off the ack Task's
+            // `status.message` — a proper A2A `Message` (role + parts), so the
+            // text is its first part's `text`. The spawn ack carries `pending`
+            // (the door's worker is still waiting for the target); a later
+            // `tasks/get` carries the verdict, and this line is where the
+            // operator sees that the opening turn has NOT run yet rather than
+            // assuming it did.
+            let opening_note = parsed
+                .get("result")
+                .and_then(|r| r.get("status"))
+                .and_then(|s| s.get("message"))
+                .and_then(|m| m.get("parts"))
+                .and_then(Value::as_array)
+                .and_then(|parts| parts.first())
+                .and_then(|part| part.get("text"))
+                .and_then(Value::as_str)
+                .map(|text| format!(" — {text}"))
+                .unwrap_or_default();
+            Outcome::ok(
+                cmd,
+                format!(
+                    "spawned on `{}` — remote session `{session_id}` ({parent_note}){opening_note}",
+                    node.name
+                ),
+            )
+            .with_data(json!({
+                "name": node.name,
+                "url": node.url,
+                "sessionId": session_id,
+                "parentSessionId": parent,
+                "response": parsed,
+            }))
         }
         Err(e) => {
             let mut data = json!({ "reason": e.reason, "name": node.name, "url": node.url });
@@ -1474,6 +1936,8 @@ pub fn register_nodes(r: &mut Registry) {
         flags: [
             flag!("yes", "bool", "Skip the local y/N confirmation (scripted use) — a LOCAL UX gate only; the remote door's own gate is unaffected."),
             flag!("via", "string", "An ssh://[user@]host[:port] transport marker for THIS call, overriding any via recorded on the node. Absent = the node's own recorded via, if any (today's behavior when neither is set)."),
+            flag!("parent", "string", "The LOCAL session id to record as this child's parent, riding the signed body so the far door stamps it as the child's `remoteParent`. The kernel-attested caller wins when the daemon can prove one (this flag is then unused), and `AOIDE_SESSION_ID` is never read for it; a name that is not a live local session is refused rather than adopted as a stale parent. Absent = claim no parent (a top-level remote spawn)."),
+            flag!("task", "string", "The task slug the FAR node runs this child under (^[a-z0-9][a-z0-9-]*$, the same shape a mailbox name takes), riding the signed body as metadata['aoide/task']. It makes the remote child a managed task run on its own node — task mailbox, exit report, `session watch`'s task view — and its slug becomes that run's session name there. Refused locally on a bad shape, and again by the far door, which also refuses a slug a live run already holds. Absent = a plain headless conducted session with no mailbox and no report."),
         ],
         gated: false,
         implemented: true,
@@ -1774,28 +2238,122 @@ pub(crate) fn default_self_url() -> String {
 /// env var is set (no guessed literal there either). `--self-via`
 /// overrides this whole function outright, mirroring `--self-url`; every
 /// caller only ever reaches this as an `Option::or_else` fallback.
+///
+/// **A route that resolves to a LOOPBACK address claims NO hop at all
+/// (D5).** `pair` between two daemons on one machine — `pair
+/// http://127.0.0.1:18712/`, and the hostname arm's own heard-source when
+/// the second daemon advertises over loopback — routed the outbound trick
+/// to `127.0.0.1`, so the record was stamped `via:"ssh://khoa@127.0.0.1"`:
+/// an ssh hop invented for a peer that IS this box, and one that would
+/// dial this box's own sshd at a port the far end never asked for.
+///
+/// The target is resolved to a `SocketAddr` FIRST and refused there — a
+/// literal `::ffff:127.0.0.1` is the IPv4 loopback it names (normalized
+/// through `to_ipv4_mapped`, which `Ipv6Addr::is_loopback` alone does not
+/// do), `[::1]`/`::1`/`localhost` are loopback by resolution — BEFORE any
+/// route is probed, so no address family can reach the hostname fallback
+/// through a failed connect the way `[::1]` did. The probe itself then
+/// binds a socket of the TARGET's own family (`[::]:0` for a v6 target,
+/// `0.0.0.0:0` for a v4 one): a v4-only socket could never route a v6
+/// target, and that failure is precisely what resurrected the fabrication.
+/// `None` here means "no claim", which is exactly what the wire's absent
+/// `selfVia` already means to the approver; `--self-via` overrides the
+/// whole function.
 pub(crate) fn default_self_via(toward: &str) -> Option<String> {
+    default_self_via_with(toward, &resolve_toward, &outbound_ip_toward)
+}
+
+/// [`default_self_via`] with its two environment-touching steps injected —
+/// name resolution and the route probe — so the rule above is provable
+/// without a network, the shape `cwd_for`/`restore_snapshot` already use for
+/// their own lookups.
+fn default_self_via_with(
+    toward: &str,
+    resolve: impl Fn(&str) -> Option<std::net::SocketAddr>,
+    route: impl Fn(std::net::SocketAddr) -> Option<std::net::IpAddr>,
+) -> Option<String> {
+    let target = resolve(toward);
+    // The refusal is decided on the RESOLVED target, before any probe: a v6
+    // literal cannot slip past it by failing to connect. An UNSPECIFIED target
+    // (`0.0.0.0`, `::`) is refused with it — it names no peer at all, so it
+    // names no hop either, and the kernel's own reading of it (the local host)
+    // is not a fact to write into someone else's node record.
+    if target.is_some_and(|t| is_this_box(t.ip())) {
+        return None;
+    }
     let login = crate::tunnel::local_login().ok()?;
-    let host = outbound_ip_toward(toward)
+    let host = target
+        .and_then(route)
+        .filter(|ip| !is_this_box(*ip))
         .map(|ip| ip.to_string())
         .unwrap_or_else(aoide_storage::display::local_host_name);
     Some(format!("ssh://{login}@{host}"))
 }
 
-/// The local address the kernel would route a packet toward `toward`
-/// (`host` or `host:port`) through — no packet is ever actually sent, a
-/// UDP `connect` only resolves a route and binds the socket's local
-/// endpoint to it. `toward` gets a dummy port appended (`8710`, never used
-/// for anything beyond satisfying `ToSocketAddrs` — any nonzero port picks
-/// the identical route) when it doesn't already carry one. `None` on any
-/// failure (unresolvable host, no route, socket error) — the caller's own
-/// fallback case, never a panic; this is a best-effort LAN heuristic, not
-/// a guarantee.
-fn outbound_ip_toward(toward: &str) -> Option<std::net::IpAddr> {
-    let target = if toward.contains(':') { toward.to_string() } else { format!("{toward}:8710") };
-    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
-    socket.connect(&target).ok()?;
-    socket.local_addr().ok().map(|addr| addr.ip())
+/// The one normalization both loopback tests use: a v4-mapped v6 address
+/// (`::ffff:127.0.0.1`) IS the v4 address it embeds, and `is_loopback` on the
+/// v6 form says `false` — a miss that would hand back an invented hop.
+fn normalize_ip(ip: std::net::IpAddr) -> std::net::IpAddr {
+    match ip {
+        std::net::IpAddr::V6(v6) => {
+            v6.to_ipv4_mapped().map(std::net::IpAddr::V4).unwrap_or(std::net::IpAddr::V6(v6))
+        }
+        v4 => v4,
+    }
+}
+
+/// An address that names THIS box — loopback in either family, or the
+/// unspecified address (`0.0.0.0`/`::`, which names no peer at all and which
+/// the kernel itself reads as the local host).
+fn is_this_box(ip: std::net::IpAddr) -> bool {
+    normalize_ip(ip).is_loopback() || ip.is_unspecified()
+}
+
+/// Append the house door port to a `toward` that carries none, leaving every
+/// form that already does — and bracketing a BARE v6 literal, which no
+/// resolver accepts unbracketed. The old `contains(':')` test read `::1`'s own
+/// colons as a port separator, which is how a v6 target reached the route
+/// probe as an unparseable address and fell through to the hostname.
+fn with_default_port(toward: &str) -> String {
+    if let Some(rest) = toward.strip_prefix('[') {
+        return match rest.split_once(']') {
+            Some((_, after)) if after.starts_with(':') => toward.to_string(),
+            _ => format!("{toward}:8710"),
+        };
+    }
+    if toward.matches(':').count() > 1 {
+        return format!("[{toward}]:8710");
+    }
+    if toward.contains(':') {
+        toward.to_string()
+    } else {
+        format!("{toward}:8710")
+    }
+}
+
+/// Resolve `toward` (a host, `host:port`, or a v6 literal in either form) to
+/// one address — `None` when the name does not resolve at all, which is the
+/// caller's own fallback case, never a guess.
+fn resolve_toward(toward: &str) -> Option<std::net::SocketAddr> {
+    use std::net::ToSocketAddrs;
+    with_default_port(toward).to_socket_addrs().ok()?.next()
+}
+
+/// The local address the kernel would route a packet to `target` through — no
+/// packet is ever actually sent, a UDP `connect` only resolves a route and
+/// binds the socket's local endpoint to it. The socket's family follows the
+/// TARGET's: a v4 socket cannot route a v6 address at all, and that failure is
+/// what let a `[::1]` dial fall through to a fabricated hop. `None` on any
+/// failure (no route, socket error) — the caller's own fallback case, never a
+/// panic; this is a best-effort LAN heuristic, not a guarantee.
+fn outbound_ip_toward(target: std::net::SocketAddr) -> Option<std::net::IpAddr> {
+    let bind = match target {
+        std::net::SocketAddr::V4(_) => "0.0.0.0:0",
+        std::net::SocketAddr::V6(_) => "[::]:0",
+    };
+    let socket = std::net::UdpSocket::bind(bind).ok()?;
+    socket.connect(target).ok()?;
+    Some(normalize_ip(socket.local_addr().ok()?.ip()))
 }
 
 /// The house A2A door port this box assumes for itself AND for a
@@ -1971,8 +2529,20 @@ pub(crate) fn run_pair_request(
     // `remember_outbound` below; sending it here instead made the approver
     // file the requester under the requester's-nickname-for-the-approver
     // (the live yomi↔sakaki ceremony's phantom-node defect, 2026-08-26).
-    let self_name = aoide_storage::display::local_host_name();
-    let body = crate::node::build_pair_request_body(&own_pubkey, &self_name, &commit, &self_url, self_via);
+    // The name this handshake DECLARES, and therefore the name every approver
+    // stores for this box: the address form (`display::local_node_name`), the
+    // same one its mail envelopes carry — a raw OS host name would be stored by
+    // peers as a node name no address grammar accepts (native Windows' is
+    // upper-case).
+    let self_name = aoide_storage::display::local_node_name();
+    let body = crate::node::build_pair_request_body(
+        &own_pubkey,
+        &self_name,
+        &commit,
+        &self_url,
+        self_via,
+        aoide_storage::seal::publish_binding().ok().as_ref(),
+    );
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let (code, resp_body) = match post_json_via(url, dial_via, name, &body_str, None, &[], 15) {
         Ok(v) => v,
@@ -2024,6 +2594,7 @@ pub(crate) fn run_pair_request(
     let sas = aoide_storage::pairing::derive_sas(&own_pubkey, &ack.pubkey_hex, &own_nonce, &ack.nonce_hex);
     let requested_at = aoide_storage::time::now_iso_utc();
     let outbound = aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
         id: ack.id.clone(),
         url: url.to_string(),
         name: name.to_string(),
@@ -2587,6 +3158,16 @@ pub(crate) fn approve_inbound(
     if let Err(e) = aoide_storage::node_store::save_nodes(&nodes) {
         return Outcome::error(cmd, format!("writing the node registry: {e}"));
     }
+    // P-SEAL: the ceremony's binding carriage, approver side. The requester's
+    // binding was verified under its own claimed key at park time
+    // (`pair_request`), and `learn_binding` re-verifies it against the key
+    // now on record. Best-effort and deliberately non-fatal: a refused learn
+    // means this instance already holds an equal or newer generation, which
+    // is exactly the "never downgrade" rule, and a pairing must not fail
+    // over an age key either way.
+    if let Some(binding) = &entry.binding {
+        let _ = aoide_storage::seal::learn_binding(&entry.name, binding);
+    }
     // Design A: mark approved, never take — the entry stays parked for the
     // requester's own poll to find (module doc above).
     let _ = aoide_storage::pairing::mark_inbound_approved(id, now_epoch);
@@ -2736,10 +3317,16 @@ pub(crate) fn poll_outbound_once(cmd: &str, id: &str, entry: &aoide_storage::pai
         Ok(s) => s,
         Err(e) => return PollOutcome::Refused(Outcome::error(cmd, e).with_data(json!({ "reason": "poll-refused", "id": id }))),
     };
-    let polled_pubkey = match status {
+    let (polled_pubkey, released_binding) = match status {
         crate::node::PairPollStatus::Pending => return PollOutcome::Pending,
-        crate::node::PairPollStatus::Approved { pubkey_hex } => pubkey_hex,
+        crate::node::PairPollStatus::Approved { pubkey_hex, binding } => (pubkey_hex, binding),
     };
+    // P-SEAL: park the released binding beside the entry, best-effort. A
+    // release that carries none (an older approver) leaves the entry as it
+    // was, and the ceremony is unaffected either way.
+    if let Some(binding) = &released_binding {
+        let _ = aoide_storage::pairing::set_outbound_binding(id, binding);
+    }
     // The SAS/transcript binding (review-bounce Finding 2, preserved):
     // a released pubkey that does not match what THIS instance learned
     // at request time is refused here, entry untouched — the SAME
@@ -2889,7 +3476,24 @@ pub(crate) fn commit_outbound(
     if let Err(e) = aoide_storage::node_store::save_nodes(&nodes) {
         return Outcome::error(cmd, format!("writing the node registry: {e}"));
     }
+    // P-SEAL: the ceremony's binding carriage, requester side. The binding
+    // rode the approver's `aoide/pairPoll` release and was parked on this
+    // outbound entry by `poll_outbound_once`. Captured BEFORE the entry is
+    // taken (below), applied after: `learn_binding` re-verifies it against
+    // the key now on record and refuses `stale-binding`. Best-effort and
+    // never fatal, exactly as on the approver's leg — a pairing must not
+    // fail over an age key, and a refused learn means this instance already
+    // holds an equal or newer generation, which is the rule working.
+    //
+    // This half was missing at first, and a live two-daemon pairing is what
+    // caught it: the approver stored the requester's binding out of the
+    // request, the requester stored nothing, and the pair sealed
+    // one-directionally until the first `aoide/binding` exchange.
+    let released_binding = entry.binding.clone();
     let _ = aoide_storage::pairing::take_outbound(id, now_epoch);
+    if let Some(binding) = released_binding {
+        let _ = aoide_storage::seal::learn_binding(&entry.name, &binding);
+    }
 
     use aoide_storage::node_store::PairChange;
     let word = match change {
@@ -3732,10 +4336,11 @@ pub fn register_mail(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["mail", "send"],
-        summary: "File a letter into the mailbase. --to self/<name> files locally — self never crosses the wire. --to <node>/<name> spools it into that (already verified/paired) node's outbox and makes one best-effort delivery attempt right away; this command reports the WRITE, never the delivery outcome — see `mail outbox` for that.",
+        summary: "File a letter into the mailbase. --to self/<name> files locally — self never crosses the wire. --to <node>/<name> spools it into that (already verified/paired) node's outbox and makes one best-effort delivery attempt right away; this command reports the WRITE, never the delivery outcome — see `mail outbox` for that. --hold spools without ever dialing: the entry leaves when that node polls.",
         args: [arg!("text", "string", true, "The letter's text — put it after `--` so its own words/flags pass through verbatim.")],
         flags: [
             flag!("to", "string", "Recipient address, self/<name> or <node>/<name> (required). <node> must already be a verified node for anything but self. <name> is free text — a role name, never a session petname."),
+            flag!("hold", "bool", "Spool the letter but never dial it: it leaves only when that node itself polls (aoide/mailPoll), the relay-first flavor. Requires a <node>/<name> destination — self/<name> is filed locally and immediately, so there is nothing to hold."),
             flag!("from", "string", "Sender attribution override (default: AOIDE_SESSION_ID). Attribution only, not authentication."),
             flag!("subject", "string", "Single-line subject; enables structured signed letter content."),
             flag!("thread", "string", "Existing thread ID (64 lowercase hex); omitted starts a fresh thread."),
@@ -3830,6 +4435,16 @@ pub fn register_mail(r: &mut Registry) {
         implemented: true,
         handler: handle_mail_export,
         examples: ["mail export", "mail export --dir ~/Magi/aoide-mail"],
+    ));
+    r.insert(cmd!(
+        path: ["mail", "poll"],
+        summary: "Ask for your mail without sending any: poll the named paired node — or, with no argument, every paired node this box holds the `message` grant for. Receives everything that node spooled for this box (all held entries, plus ones whose own delivery attempts have been failing), files each with the same origin verification a pushed deposit gets, and spools the acks. The receive trigger a node with nothing to send needs; the drain's own dial policy is untouched.",
+        args: [arg!("node", "string", false, "Poll only this node. Omit to poll every paired node holding `message` in this box's own allows for it. A node this box is not paired with is refused by name.")],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: handle_mail_poll,
+        examples: ["mail poll", "mail poll yomi-strix"],
     ));
 }
 
@@ -4072,8 +4687,21 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
     }
     let text = inv.args.join(" ");
     let from = mail_sender_attribution(inv).unwrap_or_default();
+    let hold = inv.flag_present("hold");
 
-    if node == "self" || node == aoide_storage::display::local_host_name() {
+    if node == "self" || node == aoide_storage::display::local_node_name() {
+        if hold {
+            // A hold is a SPOOL fact — "wait to be polled" has no meaning for
+            // a filing that never leaves this box and has nobody to poll it.
+            // Refused rather than ignored: reporting a successful send that
+            // dropped the one thing the caller asked for is the lie the
+            // outbox's own write-is-the-report rule exists to avoid.
+            return Outcome::error(
+                cmd,
+                "`--hold` needs a node destination: self/<name> is filed locally and immediately, so there is nothing to hold",
+            )
+            .with_data(json!({ "reason": "hold-needs-a-node", "to": to }));
+        }
         return match aoide_storage::mail::file_letter(&from, name, &text) {
             Ok(entry) => {
                 let mut data = serde_json::to_value(&entry).unwrap_or_default();
@@ -4146,7 +4774,15 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
         Err(e) => return Outcome::error(cmd, format!("state/mail: {e}")),
     };
     let msgid = envelope.msgid.clone();
-    if let Err(e) = aoide_storage::outbox::write_entry(node, &aoide_storage::outbox::OutboxEntry::fresh(envelope.clone())) {
+    // P-SEAL: the entry is built at MINT — sealed to the destination's
+    // binding when one is held, plaintext when none is, parked when the one
+    // held is not usable now (`mail_wire::spool_entry`).
+    let entry = match crate::mail_wire::spool_entry(node, envelope.clone(), hold) {
+        Ok(entry) => entry,
+        Err(e) => return Outcome::error(cmd, format!("state/outbox: {e}")),
+    };
+    let sealed = entry.is_sealed();
+    if let Err(e) = aoide_storage::outbox::write_entry(node, &entry) {
         return Outcome::error(cmd, format!("state/outbox: {e}"));
     }
     // Best-effort — this command already reported the WRITE above and
@@ -4164,9 +4800,34 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
         obj.insert("delivery".to_string(), delivery);
     }
 
-    Outcome::ok(cmd, format!("spooled to {node}/{name} (msgid {msgid})"))
-        .changed(vec![format!("state/outbox/{node}/: +1 entry")])
-        .with_data(data)
+    // L11 (the branch review): three states, not two. `!is_sealed()` was
+    // reported as "plaintext" even for the PARKED arm — an entry waiting on a
+    // binding that is not usable yet and which will never be sent as plaintext
+    // at all. The delivery status said `refused` while the sentence said
+    // "plaintext", which reads as the leak the parking exists to prevent.
+    let disposition = if sealed {
+        "sealed"
+    } else if entry.refused {
+        "parked (the destination holds a binding that is not usable now — not sent in the clear)"
+    } else {
+        "plaintext (the destination has published no binding)"
+    };
+
+    Outcome::ok(
+        cmd,
+        if hold {
+            format!(
+                "held for {node}/{name} (msgid {msgid}, {disposition}) — a drain never dials it; it leaves when {node} polls"
+            )
+        } else {
+            format!("spooled to {node}/{name} (msgid {msgid}, {disposition})")
+        },
+    )
+    .changed(vec![format!(
+        "state/outbox/{node}/: +1 {} entry",
+        if hold { "hold" } else { "now" }
+    )])
+    .with_data(data)
 }
 
 /// `aoide mail read (--for <name> | --all-names) [--reread] [--json]`.
@@ -4285,6 +4946,21 @@ fn handle_mail_export(inv: &Invocation) -> Outcome {
 /// receipts sitting at `tries=0`) is invisible in the row-by-row listing
 /// alone — a summary is the shape an operator actually needs to notice
 /// that before it happens again.
+/// One spooled entry's destination address, as the outbox renders it.
+///
+/// A **sealed** entry's spooled envelope has no mailbox name — the P-SEAL
+/// outbox rule strips it, because a mailbox name is a letter byte the spool
+/// must not hold — so `node/name` would render a bare trailing slash and
+/// read as a bug. This says `node` and nothing more, and the caller marks
+/// the entry sealed beside it; the name is not lost, it is inside `ct`.
+fn sealed_address(to: &aoide_storage::mail::Address) -> String {
+    if to.name.is_empty() {
+        to.node.clone()
+    } else {
+        format!("{}/{}", to.node, to.name)
+    }
+}
+
 fn outbox_node_summary(entries: &[aoide_storage::outbox::OutboxEntry]) -> Value {
     let depth = entries.len();
     let now = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc());
@@ -4358,7 +5034,6 @@ fn handle_mail_outbox(inv: &Invocation) -> Outcome {
         }
         let link = aoide_storage::outbox::read_link_state(node);
         for e in &entries {
-            let to = &e.envelope.header.to;
             let delivery = match &link {
                 Ok(l) => delivery_projection(&base, node, e, l.as_ref()),
                 Err(err) => delivery_status_unavailable(err),
@@ -4366,7 +5041,9 @@ fn handle_mail_outbox(inv: &Invocation) -> Outcome {
             rows.push(json!({
                 "node": node,
                 "msgid": e.envelope.msgid,
-                "to": format!("{}/{}", to.node, to.name),
+                "to": sealed_address(&e.envelope.header.to),
+                "flavor": e.flavor,
+                "sealed": e.is_sealed(),
                 "tries": e.tries,
                 "lastTryAt": e.last_try_at,
                 "lastOutcome": e.last_outcome,
@@ -4388,6 +5065,16 @@ fn handle_mail_outbox(inv: &Invocation) -> Outcome {
                     r["to"].as_str().unwrap_or(""),
                     r["tries"],
                 );
+                if r["sealed"].as_bool() == Some(true) {
+                    // A sealed entry's spool holds no mailbox name — that is
+                    // the P-SEAL outbox rule, not a gap — so the line says
+                    // what the entry IS rather than printing the blank the
+                    // redaction legitimately left behind.
+                    line.push_str("  sealed (the letter is inside ct; open it with this node's age key)");
+                }
+                if r["flavor"].as_str() == Some(aoide_storage::outbox::FLAVOR_HOLD) {
+                    line.push_str("  hold (leaves only when its node polls)");
+                }
                 if let Some(reason) = r["delivery"]["reason"].as_str() {
                     line.push_str(&format!("  reason {reason}"));
                 }
@@ -4502,6 +5189,83 @@ fn handle_mail_outbox_retry(inv: &Invocation) -> Outcome {
         .with_data(json!({ "reason": "not-found", "msgid": msgid }))
 }
 
+/// `aoide mail poll [<node>] [--json]` — the receive trigger (P-M3, MAIL.md
+/// §Wire/§Outbox). A node with nothing to send has no drain contact, so
+/// poll-on-contact alone can never deliver to it; this is the act that asks
+/// anyway. Same [`crate::mail_wire::poll_node`] the drain calls, so the wire,
+/// the filing and the acking are one implementation — never a second receive
+/// path.
+///
+/// With an argument, that ONE node is dialed, and a node this box is not
+/// paired with is refused BEFORE any dial: `unknown-node` when the name means
+/// nothing here, `unpaired-node` when it is registered but never verified —
+/// the identical two refusals `mail send`'s node branch makes, by name, for
+/// the identical reason (a poll of a stranger is not a thing this box does).
+/// With no argument, every node [`crate::mail_wire::pollable_nodes`] returns
+/// is asked in turn, oldest name first; one node's failure never stops the
+/// sweep — it is reported per node and the next one is still asked.
+///
+/// The command's own `Outcome` is `Ok` whenever the ask was MADE (that is the
+/// same write-is-the-report discipline `mail send` holds): what each node
+/// answered, how many envelopes were filed, rides in `data.nodes`.
+fn handle_mail_poll(inv: &Invocation) -> Outcome {
+    let cmd = "mail.poll";
+    const USAGE: &str = "usage: aoide mail poll [<node>]";
+    if inv.args.len() > 1 {
+        return Outcome::usage(cmd, USAGE);
+    }
+    let named = inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()).map(str::to_string);
+
+    let nodes = aoide_storage::node_store::load_nodes();
+    let targets: Vec<String> = match &named {
+        Some(name) => {
+            match nodes.iter().find(|n| n.name == *name) {
+                None => {
+                    return Outcome::error(cmd, format!("no node named `{name}`"))
+                        .with_data(json!({ "reason": "unknown-node", "name": name }));
+                }
+                Some(node) if !node.verified => {
+                    return Outcome::error(
+                        cmd,
+                        format!(
+                            "node `{name}` is registered but not paired — a poll requires a VERIFIED node; \
+                             pair first with `aoide pair {name}`"
+                        ),
+                    )
+                    .with_data(json!({ "reason": "unpaired-node", "name": name }));
+                }
+                Some(_) => vec![name.clone()],
+            }
+        }
+        None => crate::mail_wire::pollable_nodes(),
+    };
+
+    let mut rows: Vec<Value> = Vec::new();
+    let mut filed = 0usize;
+    for node in &targets {
+        match crate::mail_wire::poll_node(node) {
+            Ok(n) => {
+                filed += n;
+                rows.push(json!({ "node": node, "status": "polled", "filed": n }));
+            }
+            Err(e) => rows.push(json!({ "node": node, "status": "unreachable", "filed": 0, "reason": e })),
+        }
+    }
+    let unreachable = rows.iter().filter(|r| r["status"] == "unreachable").count();
+    let message = if targets.is_empty() {
+        "no paired node holds `message` — nothing to poll".to_string()
+    } else {
+        format!(
+            "polled {} node(s): {filed} envelope(s) filed{}",
+            targets.len(),
+            if unreachable == 0 { String::new() } else { format!(", {unreachable} unreachable") }
+        )
+    };
+    Outcome::ok(cmd, message)
+        .changed(vec![format!("state/mail/base.jsonl: +{filed} on poll")])
+        .with_data(json!({ "nodes": rows, "filed": filed }))
+}
+
 /// [`handle_mail_outbox_retry`]'s `--refused` half. `target` narrows the
 /// sweep to one node (an unknown or empty node is an ordinary "nothing
 /// parked", never an error — the same absent-is-nothing stance `mail outbox`
@@ -4588,6 +5352,38 @@ fn retry_refused_entries(cmd: &str, target: Option<&str>) -> Outcome {
 mod tests {
     use super::*;
 
+    /// The listener a fake daemon binds: `std`'s `AF_UNIX` on Unix, the native
+    /// binding out of `aoide_protocol::win_unix` on Windows — one type per host
+    /// at the seam, never a second socket implementation (the same shape
+    /// `aoide-secrets`' `test_net` holds for its own fixtures).
+    #[cfg(unix)]
+    fn fake_daemon_listener(path: &std::path::Path) -> std::os::unix::net::UnixListener {
+        std::os::unix::net::UnixListener::bind(path).unwrap()
+    }
+
+    #[cfg(windows)]
+    fn fake_daemon_listener(path: &std::path::Path) -> aoide_protocol::win_unix::UnixListener {
+        aoide_protocol::win_unix::UnixListener::bind(path).unwrap()
+    }
+
+    /// The identity of a FILE OBJECT, for tests that assert a file was not
+    /// replaced: `ino` on Unix; on native Windows, `Metadata::ino`'s named
+    /// alternative — the creation time. Both are "fresh for a new file object
+    /// at that path, unchanged by a rewrite in place", which is the fact the
+    /// callers assert; `std`'s Windows `file_index()` is still unstable, and
+    /// a number derived from a path would be invented rather than observed.
+    #[cfg(unix)]
+    fn file_identity(meta: &std::fs::Metadata) -> u64 {
+        use std::os::unix::fs::MetadataExt;
+        meta.ino()
+    }
+
+    #[cfg(windows)]
+    fn file_identity(meta: &std::fs::Metadata) -> u64 {
+        use std::os::windows::fs::MetadataExt;
+        meta.creation_time()
+    }
+
     fn fixture_node(bearer_secret: Option<&str>) -> aoide_storage::node_store::Node {
         aoide_storage::node_store::Node {
             name: "yomi-strix".to_string(),
@@ -4661,29 +5457,78 @@ mod tests {
     /// same reasoning `outbound_ip_toward`'s own doc gives.
     #[test]
     fn outbound_ip_toward_resolves_to_loopback_when_dialing_127_0_0_1() {
-        assert_eq!(outbound_ip_toward("127.0.0.1"), Some("127.0.0.1".parse().unwrap()));
-        assert_eq!(outbound_ip_toward("127.0.0.1:9999"), Some("127.0.0.1".parse().unwrap()), "an explicit port in `toward` is honored, never overridden");
+        let target = resolve_toward("127.0.0.1").expect("a literal IP always resolves");
+        assert_eq!(target.ip().to_string(), "127.0.0.1");
+        assert_eq!(outbound_ip_toward(target), Some("127.0.0.1".parse().unwrap()));
+        // An explicit port in `toward` is honored, never overridden.
+        assert_eq!(resolve_toward("127.0.0.1:9999").unwrap().port(), 9999);
+    }
+
+    /// The port/parse shapes that decide whether a `toward` ever reaches the
+    /// route probe as something resolvable at all — `::1`'s own colons used to
+    /// read as a port separator, which is how a v6 target skipped the loopback
+    /// refusal entirely (M3).
+    #[test]
+    fn with_default_port_covers_both_ip_families_in_both_forms() {
+        assert_eq!(with_default_port("127.0.0.1"), "127.0.0.1:8710");
+        assert_eq!(with_default_port("127.0.0.1:18712"), "127.0.0.1:18712");
+        assert_eq!(with_default_port("localhost"), "localhost:8710");
+        assert_eq!(with_default_port("::1"), "[::1]:8710");
+        assert_eq!(with_default_port("[::1]"), "[::1]:8710");
+        assert_eq!(with_default_port("[::1]:18712"), "[::1]:18712");
+        assert_eq!(with_default_port("::ffff:127.0.0.1"), "[::ffff:127.0.0.1]:8710");
     }
 
     /// `default_self_via`'s own claim-formatting (`ssh://<login>@<host>`),
-    /// pinned deterministically: `$USER` is stamped to a known value and
-    /// `toward` is loopback, so the HOST half resolves the same way
-    /// [`outbound_ip_toward_resolves_to_loopback_when_dialing_127_0_0_1`]
-    /// above already proved it does, with no real network involved either
-    /// way.
+    /// pinned deterministically by INJECTING both steps that would otherwise
+    /// consult the network (L2): resolution answers one fixed address and the
+    /// route answers one fixed local address, so the HOST half of the claim is
+    /// a constant the test states rather than a property it hopes for.
     #[test]
     fn default_self_via_formats_login_at_the_outbound_address_toward_the_node() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_user = std::env::var("USER").ok();
         let saved_logname = std::env::var("LOGNAME").ok();
+        #[cfg(windows)]
+        let saved_username = std::env::var("USERNAME").ok();
         std::env::set_var("USER", "testuser");
         std::env::remove_var("LOGNAME");
 
-        assert_eq!(default_self_via("127.0.0.1").as_deref(), Some("ssh://testuser@127.0.0.1"));
+        let via = default_self_via_with(
+            "198.51.100.9",
+            |t| {
+                assert_eq!(t, "198.51.100.9", "the resolver sees the dial target verbatim");
+                Some("198.51.100.9:8710".parse().unwrap())
+            },
+            |_| Some("192.168.1.175".parse().unwrap()),
+        );
+        assert_eq!(via.as_deref(), Some("ssh://testuser@192.168.1.175"));
+
+        // A target the kernel cannot route at all: the claimed-hostname
+        // fallback, unchanged from before this rule existed.
+        let unrouted = default_self_via_with(
+            "198.51.100.9",
+            |_| Some("198.51.100.9:8710".parse().unwrap()),
+            |_| None,
+        );
+        assert_eq!(unrouted.as_deref(), Some(&format!("ssh://testuser@{}", aoide_storage::display::local_host_name())[..]));
 
         std::env::remove_var("USER");
         std::env::remove_var("LOGNAME");
-        assert_eq!(default_self_via("127.0.0.1"), None, "no $USER/$LOGNAME at all — refuse rather than guess a login, same as resolve_login's own stance");
+        // Native Windows' own login variable is the LAST in the chain, so the
+        // refusal only fires once it is gone too — the same three-name sweep
+        // `tunnel`'s own `resolve_login` test makes.
+        #[cfg(windows)]
+        std::env::remove_var("USERNAME");
+        assert_eq!(
+            default_self_via_with(
+                "198.51.100.9",
+                |_| Some("198.51.100.9:8710".parse().unwrap()),
+                |_| Some("192.168.1.175".parse().unwrap()),
+            ),
+            None,
+            "no $USER/$LOGNAME at all — refuse rather than guess a login, same as resolve_login's own stance"
+        );
 
         match saved_user {
             Some(v) => std::env::set_var("USER", v),
@@ -4693,6 +5538,78 @@ mod tests {
             Some(v) => std::env::set_var("LOGNAME", v),
             None => std::env::remove_var("LOGNAME"),
         }
+        #[cfg(windows)]
+        match saved_username {
+            Some(v) => std::env::set_var("USERNAME", v),
+            None => std::env::remove_var("USERNAME"),
+        }
+    }
+
+    /// D5/M3: a dial that RESOLVES to loopback — `pair` between two daemons on
+    /// one machine, the acceptance report's `"via":"ssh://khoa@127.0.0.1"` —
+    /// claims NO hop at all, in every spelling the CLI can produce and in both
+    /// address families, whatever `$USER` says. These all resolve from
+    /// `/etc/hosts` or as literals, so nothing here needs a network.
+    #[test]
+    fn default_self_via_claims_no_hop_over_loopback() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_user = std::env::var("USER").ok();
+        let saved_logname = std::env::var("LOGNAME").ok();
+        std::env::set_var("USER", "testuser");
+        std::env::remove_var("LOGNAME");
+
+        for toward in ["127.0.0.1", "127.0.0.1:18712", "127.0.0.2", "0.0.0.0", "::1", "[::1]", "[::1]:18712", "::ffff:127.0.0.1", "localhost", "localhost:18712"] {
+            assert_eq!(default_self_via(toward), None, "`{toward}` names this box: no hop to claim");
+        }
+
+        std::env::remove_var("USER");
+        std::env::remove_var("LOGNAME");
+        assert_eq!(default_self_via("127.0.0.1"), None, "no login needed to decide this one either");
+
+        match saved_user {
+            Some(v) => std::env::set_var("USER", v),
+            None => std::env::remove_var("USER"),
+        }
+        match saved_logname {
+            Some(v) => std::env::set_var("LOGNAME", v),
+            None => std::env::remove_var("LOGNAME"),
+        }
+    }
+
+    /// The refusal is decided on the RESOLVED target, BEFORE the route probe —
+    /// so a v6 literal cannot slip past it by failing to connect (the `[::1]`
+    /// hole). The route closure panics: reaching it at all is the failure.
+    #[test]
+    fn the_loopback_refusal_precedes_any_route_probe() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_user = std::env::var("USER").ok();
+        std::env::set_var("USER", "testuser");
+
+        for (toward, resolved) in [
+            ("[::1]", "[::1]:8710"),
+            ("::ffff:127.0.0.1", "[::ffff:127.0.0.1]:8710"),
+        ] {
+            let via = default_self_via_with(
+                toward,
+                |_| Some(resolved.parse().unwrap()),
+                |_| panic!("the route must never be probed for `{toward}`"),
+            );
+            assert_eq!(via, None, "`{toward}` is loopback: refused before any probe");
+        }
+
+        match saved_user {
+            Some(v) => std::env::set_var("USER", v),
+            None => std::env::remove_var("USER"),
+        }
+    }
+
+    /// The one shape the family change exists for, stated as a family fact
+    /// rather than a routing outcome: a v6 target is probed over a v6 socket
+    /// (a v4 socket can never route it), and a v4 target over a v4 one.
+    #[test]
+    fn the_route_probe_binds_the_targets_own_family() {
+        assert_eq!(outbound_ip_toward("[::1]:8710".parse().unwrap()).map(|ip| ip.is_loopback()), Some(true));
+        assert_eq!(outbound_ip_toward("127.0.0.1:8710".parse().unwrap()).map(|ip| ip.is_loopback()), Some(true));
     }
 
     // ── `handle_node_allow` (P-P3) — pure file I/O, so unlike most `node`
@@ -4801,7 +5718,7 @@ mod tests {
                     .map(|(_, v)| v.clone())
                     .unwrap_or_else(|| panic!("missing header {name}: {headers:?}"))
             };
-            assert_eq!(get(aoide_storage::wire_auth::HEADER_NODE), aoide_storage::display::local_host_name());
+            assert_eq!(get(aoide_storage::wire_auth::HEADER_NODE), aoide_storage::display::local_node_name());
             let timestamp = get(aoide_storage::wire_auth::HEADER_TIMESTAMP);
             let nonce = get(aoide_storage::wire_auth::HEADER_NONCE);
             let signature = get(aoide_storage::wire_auth::HEADER_SIGNATURE);
@@ -4852,7 +5769,7 @@ mod tests {
                 .find(|(k, _)| k == aoide_storage::wire_auth::HEADER_NODE)
                 .map(|(_, v)| v.clone())
                 .unwrap_or_else(|| panic!("missing {}: {headers:?}", aoide_storage::wire_auth::HEADER_NODE));
-            assert_eq!(sent, aoide_storage::display::local_host_name(), "must carry this instance's own self name");
+            assert_eq!(sent, aoide_storage::display::local_node_name(), "must carry this instance's own self name");
             assert_ne!(sent, node.name, "must never carry the local nickname for the counterpart");
         });
     }
@@ -4904,6 +5821,36 @@ mod tests {
     // ── against the SERVER's real parser in `aoide-server::a2a`'s own test
     // ── module (a dev-dependency on this crate exists specifically for that
     // ── round trip — see this crate's `Cargo.toml`). ─────────────────────────
+
+    /// P-RSA S10: `--task <slug>` is held to the predicate the far door
+    /// applies, LOCALLY and before anything is signed or sent — so a typo
+    /// costs no round trip and no signature (the same posture `--parent`
+    /// already has). It fires before the node is even looked up, which is why
+    /// this test needs no registered node.
+    #[test]
+    fn node_spawn_refuses_an_unruly_task_slug_before_anything_is_sent() {
+        with_node_state("spawn-task-slug", || {
+            let mut inv = spawn_inv(&["yomi-strix", "hello"], true);
+            inv.flags.insert("task".to_string(), "Build Reports".to_string());
+            let out = handle_node_spawn(&inv);
+            assert_eq!(out.status, aoide_protocol::output::Status::Usage, "{out:?}");
+            assert!(
+                out.message.contains("Build Reports") && out.message.contains("--task"),
+                "quotes the value and the flag: {}",
+                out.message
+            );
+            assert!(
+                out.message.contains("^[a-z0-9][a-z0-9-]*$"),
+                "states the predicate so the operator can fix it: {}",
+                out.message
+            );
+            assert!(
+                out.message.contains("node spawn <name>"),
+                "and repeats the usage line: {}",
+                out.message
+            );
+        });
+    }
 
     fn spawn_inv(args: &[&str], yes: bool) -> Invocation {
         let mut flags = std::collections::BTreeMap::new();
@@ -4970,7 +5917,7 @@ mod tests {
         with_node_state("spawn-signs", || {
             let mut node = fixture_node(None);
             node.verified = true;
-            let body = crate::wire::build_message_send_body("do the thing", &gen_message_id(), None);
+            let body = crate::wire::build_message_send_body("do the thing", &gen_message_id(), None, None, None);
             assert!(body["params"]["message"].get("contextId").is_none(), "spawn-shaped body carries no contextId");
             let body_str = serde_json::to_string(&body).unwrap();
             let headers = sign_headers_for_node(&node, &body_str).unwrap();
@@ -4984,6 +5931,338 @@ mod tests {
                 assert!(headers.iter().any(|(k, _)| k == name), "missing {name}: {headers:?}");
             }
         });
+    }
+
+    // ── the remote-parent claim on `node spawn` (P-RSA S2) ──────────────────
+
+    /// The process-global knobs a remote-parent test needs — a temp
+    /// `AOIDE_ROOT`/`AOIDE_STATE_DIR`/`AOIDE_STAGE_DIR` (the ledger,
+    /// `sessions.json` and the node registry all live under them, and NOTHING
+    /// may touch the operator's live `~/.aoide`), plus a
+    /// `AOIDE_DAEMON_SOCKET` that cannot exist so the ATTESTATION leg of
+    /// [`resolve_remote_parent`] can never reach a LIVE daemon from a test and
+    /// every box gets the same answer. Every knob is restored (and the temp
+    /// tree removed) on drop. The caller holds `env_lock` — this is the
+    /// lock-free half, so a test that needs `install_fake_curl` too does not
+    /// try to take the same lock twice.
+    struct ParentEnv {
+        dir: std::path::PathBuf,
+        saved: Vec<(&'static str, Option<String>)>,
+    }
+
+    impl ParentEnv {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "aoide-client-remote-parent-{tag}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let vars: [&'static str; 6] = [
+                "AOIDE_ROOT",
+                "AOIDE_STATE_DIR",
+                "AOIDE_STAGE_DIR",
+                "AOIDE_DAEMON_SOCKET",
+                "AOIDE_CONFIG",
+                "AOIDE_SESSION_ID",
+            ];
+            let saved = vars.iter().map(|v| (*v, std::env::var(v).ok())).collect();
+            std::env::set_var("AOIDE_ROOT", &dir);
+            std::env::set_var("AOIDE_STATE_DIR", dir.join("state"));
+            std::env::set_var("AOIDE_STAGE_DIR", dir.join("stage"));
+            std::env::set_var("AOIDE_DAEMON_SOCKET", dir.join("no-daemon.sock"));
+            std::env::remove_var("AOIDE_CONFIG");
+            std::env::remove_var("AOIDE_SESSION_ID");
+            Self { dir, saved }
+        }
+    }
+
+    impl Drop for ParentEnv {
+        fn drop(&mut self) {
+            for (var, saved) in &self.saved {
+                match saved {
+                    Some(v) => std::env::set_var(var, v),
+                    None => std::env::remove_var(var),
+                }
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// [`ParentEnv`] with the env lock — the shape every other test in this
+    /// module uses.
+    fn with_parent_env<T>(tag: &str, f: impl FnOnce() -> T) -> T {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = ParentEnv::new(tag);
+        f()
+    }
+
+    /// Write session records straight into the stage, the same
+    /// `sessions.json` shape `live_local_session` reads.
+    fn write_local_sessions(rows: &[(&str, &str)]) {
+        let file = aoide_storage::records::SessionsFile {
+            schema_version: "0".to_string(),
+            sessions: rows
+                .iter()
+                .map(|(id, state)| aoide_storage::records::SessionRecord {
+                    session_id: id.to_string(),
+                    state: state.to_string(),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let path = aoide_storage::stage::sessions_path();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, serde_json::to_string_pretty(&file).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn node_spawn_parent_must_name_a_live_local_session() {
+        with_parent_env("live-check", || {
+            // `done` is the one state the fold calls ENDED; every other
+            // spelling is a live phase (`stopped`/`idle` sessions are warm,
+            // not gone — `protocol::state`'s own vocabulary).
+            write_local_sessions(&[
+                ("live-1", "working"),
+                ("warm-1", "stopped"),
+                ("cold-1", "idle"),
+                ("done-1", "done"),
+            ]);
+            assert_eq!(
+                resolve_remote_parent_from(None, Some("live-1")).unwrap(),
+                Some("live-1".to_string())
+            );
+            assert_eq!(
+                resolve_remote_parent_from(None, Some("cold-1")).unwrap(),
+                Some("cold-1".to_string()),
+                "an idle-but-unended session is still a valid parent"
+            );
+            for refused in ["done-1", "ghost-1", ""] {
+                assert!(
+                    resolve_remote_parent_from(None, Some(refused)).is_err(),
+                    "`{refused}` must be refused, never adopted as a stale parent"
+                );
+            }
+            assert_eq!(
+                resolve_remote_parent_from(None, None).unwrap(),
+                None,
+                "no parent named and none attested = no claim, and the spawn still proceeds"
+            );
+        });
+    }
+
+    #[test]
+    fn node_spawn_explicit_parent_beats_the_attestation_and_never_reads_the_ambient_env() {
+        with_parent_env("attested", || {
+            write_local_sessions(&[("explicit-1", "working")]);
+            // A live explicit --parent wins over the attestation: it is the
+            // operator's stated intent, on a node that is one trust unit.
+            assert_eq!(
+                resolve_remote_parent_from(Some("attested-1".to_string()), Some("explicit-1")).unwrap(),
+                Some("explicit-1".to_string())
+            );
+            // With no --parent the attestation is the answer.
+            assert_eq!(
+                resolve_remote_parent_from(Some("attested-1".to_string()), None).unwrap(),
+                Some("attested-1".to_string())
+            );
+            // A dead --parent is refused even when an attestation exists —
+            // never silently replaced.
+            assert!(resolve_remote_parent_from(Some("attested-1".to_string()), Some("gone-9")).is_err());
+            // The real resolver with NO reachable daemon, while a decoy
+            // ambient id sits in the env: the decoy is never the answer.
+            std::env::set_var("AOIDE_SESSION_ID", "decoy-ambient");
+            assert_eq!(
+                resolve_remote_parent(None).unwrap(),
+                None,
+                "AOIDE_SESSION_ID must never be read as a remote parent"
+            );
+        });
+    }
+
+    #[test]
+    fn an_unruly_claim_is_refused_locally_rather_than_signed_and_shipped() {
+        // MED-1: the far door's `-32602` on a malformed `aoide/from` is the
+        // LAST line of defence, not the only one. Both sources of a claim —
+        // the daemon attestation and an explicit `--parent` naming a live
+        // record — are held to `valid_claimed_session_id` HERE, before
+        // anything is signed, so the operator's mistake is local and taught
+        // instead of a refusal one round trip away.
+        with_parent_env("unruly-claim", || {
+            // A live record whose id the door could never accept (conduct
+            // takes `--id` verbatim): the attestation path refuses it.
+            write_local_sessions(&[("par/1", "working"), ("ok-1", "working")]);
+            let err = resolve_remote_parent_from(Some("par/1".to_string()), None).unwrap_err();
+            assert!(err.contains("not a legal"), "{err}");
+            assert!(err.contains("par/1"), "the refusal names the value: {err}");
+            assert!(
+                err.contains("no parent at all"),
+                "and the way out (spawn unattested): {err}"
+            );
+            // The same id as an explicit --parent: refused for the claim's
+            // shape, not for being unknown — it IS a live local record.
+            assert!(live_local_session("par/1"), "the record exists; only its shape is wrong");
+            let err = resolve_remote_parent_from(None, Some("par/1")).unwrap_err();
+            assert!(err.contains("not a legal"), "{err}");
+
+            // The predicate's other edges, same refusal: over the byte bound,
+            // and a character outside the set.
+            let too_long = "a".repeat(aoide_storage::remote_children::CLAIMED_SESSION_ID_MAX + 1);
+            write_local_sessions(&[(too_long.as_str(), "working")]);
+            assert!(resolve_remote_parent_from(Some(too_long.clone()), None).is_err());
+            let spaced = "has space".to_string();
+            write_local_sessions(&[(spaced.as_str(), "working")]);
+            assert!(resolve_remote_parent_from(Some(spaced), None).is_err());
+
+            // ...and a legal one still passes, so the check refuses the shape
+            // and not the resolution.
+            assert_eq!(
+                resolve_remote_parent_from(Some("ok-1".to_string()), None).unwrap(),
+                Some("ok-1".to_string())
+            );
+        });
+    }
+
+    #[test]
+    fn the_ledger_row_is_keyed_on_the_child_identity_and_needs_a_parent() {
+        let mut node = fixture_node(None);
+        node.verified = true;
+        node.pubkey = Some("aa11".to_string());
+        let row = remote_child_row(&node, Some("conduct-parent-1"), "a2a-4411-1790").unwrap();
+        assert_eq!(row.parent_session_id, "conduct-parent-1");
+        assert_eq!(row.node, "yomi-strix");
+        assert_eq!(row.key, "aa11");
+        assert_eq!(row.session_id, "a2a-4411-1790");
+        assert_eq!(row.lines_after, 0, "the pull cursor starts at the beginning of the ring");
+        assert!(!row.spawned_at.is_empty());
+
+        // Nothing to attribute, nothing to key on, or no child id back: no
+        // row — never a half-filled one.
+        assert!(remote_child_row(&node, None, "a2a-1").is_none());
+        assert!(remote_child_row(&node, Some("p1"), "").is_none());
+        let mut keyless = fixture_node(None);
+        keyless.verified = true;
+        assert!(remote_child_row(&keyless, Some("p1"), "a2a-1").is_none());
+
+        // LOW-2: the id is the FAR node's ack verbatim — the one string this
+        // node did not mint. An id no session can have (`/`, a space, past
+        // the byte bound) is refused the same way an empty one is, so a
+        // hostile or broken far door cannot key a phantom row in the ledger.
+        for unruly in ["", "a/b", "has space", "😀", &"a".repeat(129)] {
+            assert!(
+                remote_child_row(&node, Some("p1"), unruly).is_none(),
+                "ack id `{unruly}` is not a session id, so it is no ledger row"
+            );
+        }
+        assert!(
+            remote_child_row(&node, Some("p1"), "a2a-4411-1790").is_some(),
+            "...and the shape every real spawn mints still lands"
+        );
+    }
+
+    #[test]
+    fn node_spawn_refuses_a_parent_that_is_not_a_live_local_session() {
+        // The flag path, driven through the real handler: the refusal lands
+        // BEFORE any node lookup or confirmation, so it needs no paired node
+        // and never reaches the wire.
+        with_parent_env("spawn-parent-refused", || {
+            let mut inv = spawn_inv(&["yomi-strix", "hello"], true);
+            inv.flags.insert("parent".to_string(), "ghost-1".to_string());
+            let out = handle_node_spawn(&inv);
+            assert_eq!(out.status, aoide_protocol::output::Status::Usage);
+            assert!(
+                out.message.contains("live local session"),
+                "taught refusal naming why: {}",
+                out.message
+            );
+        });
+    }
+
+    // cfg(unix): the fixture is a `#!/bin/sh` fake `curl` — native Windows has
+    // no shebang and `CreateProcess` resolves `curl` to `curl.exe` only, so no
+    // script can stand in for the program under test there. The reason, and
+    // what covers this contract on that host, is in `install_fake_curl`'s note.
+    #[cfg(unix)]
+    #[test]
+    fn node_spawn_writes_the_ledger_row_for_its_parent_on_the_ack() {
+        // The real handler, a REAL signed body, and a fake `curl` standing in
+        // for the far door's `submitted` ack — so the ledger write is proven
+        // where it actually happens, not just in `remote_child_row`.
+        let ack = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": { "id": "a2a-4411-1790", "status": { "state": "submitted" } }
+        })
+        .to_string();
+        let script = format!("cat <<'JSONBODY'\n{ack}\nJSONBODY\nprintf '200'\n");
+
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = ParentEnv::new("spawn-ack");
+        write_local_sessions(&[("live-1", "working")]);
+        let mut node = fixture_node(None);
+        node.verified = true;
+        node.pubkey = Some("aa11".to_string());
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        let mut inv = spawn_inv(&["yomi-strix", "hello"], true);
+        inv.flags.insert("parent".to_string(), "live-1".to_string());
+        let (shim_dir, saved_path) = install_fake_curl("spawn-ack", &script);
+        let out = handle_node_spawn(&inv);
+        uninstall_fake_curl(&shim_dir, saved_path);
+
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+        assert_eq!(out.data.as_ref().unwrap()["parentSessionId"], "live-1");
+        assert!(
+            out.message.contains("parent `live-1`"),
+            "the outcome names the parent it claimed: {}",
+            out.message
+        );
+
+        let rows = aoide_storage::remote_children::load_remote_children();
+        assert_eq!(rows.len(), 1, "exactly one ledger row on the ack: {rows:?}");
+        let row = &rows[0];
+        assert_eq!(row.parent_session_id, "live-1");
+        assert_eq!(row.node, "yomi-strix");
+        assert_eq!(row.key, "aa11", "keyed on the node's own stored pubkey");
+        assert_eq!(row.session_id, "a2a-4411-1790", "the child id the door acked");
+        assert_eq!(row.lines_after, 0);
+    }
+
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).
+    #[cfg(unix)]
+    #[test]
+    fn node_spawn_writes_no_ledger_row_without_a_parent() {
+        // No parent to attribute (no attestation, no --parent): the spawn is
+        // still a spawn, and the outcome says so — but there is nothing to
+        // pull a ping-back for, so the ledger stays empty.
+        let ack = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": { "id": "a2a-4411-1791", "status": { "state": "submitted" } }
+        })
+        .to_string();
+        let script = format!("cat <<'JSONBODY'\n{ack}\nJSONBODY\nprintf '200'\n");
+
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = ParentEnv::new("spawn-no-parent");
+        let mut node = fixture_node(None);
+        node.verified = true;
+        node.pubkey = Some("aa11".to_string());
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        let (shim_dir, saved_path) = install_fake_curl("spawn-no-parent", &script);
+        let out = handle_node_spawn(&spawn_inv(&["yomi-strix", "hello"], true));
+        uninstall_fake_curl(&shim_dir, saved_path);
+
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+        assert!(out.data.as_ref().unwrap()["parentSessionId"].is_null());
+        assert!(
+            out.message.contains("parent: none (unattested)"),
+            "a top-level remote spawn says so: {}",
+            out.message
+        );
+        assert!(aoide_storage::remote_children::load_remote_children().is_empty());
     }
 
     // ── resolve_node_bearer — the no-secret-configured short circuit ────────
@@ -5468,8 +6747,42 @@ mod tests {
     /// The drain is load-bearing — `post_json` always writes to curl's
     /// stdin, and a shim that exits without reading turns a descheduled
     /// caller's write into an EPIPE (`crates/AGENTS.md`).
+    ///
+    /// **POSIX-only fixture, and the reason is the host's, not a shortcut**:
+    /// the shim is a `#!/bin/sh` script placed at the front of `PATH` under
+    /// the NAME `curl`, which is how a Unix `execvp` finds it. Native Windows
+    /// resolves a bare name through `CreateProcess`, which appends `.exe` and
+    /// understands no shebang at all: a script named `curl` is not a program
+    /// there, and a `curl.exe` this suite could control would have to be a
+    /// compiled binary the tests cannot build at run time. What that leaves
+    /// unproven natively, and where it is proven instead: the
+    /// credential-placement half (a bearer/session value on stdin, never in
+    /// argv) is covered on ThinkChiyo by `mcp_client`'s
+    /// `native_windows_the_bearer_value_never_reaches_curls_argv`, which drives
+    /// the REAL system `curl.exe` against a loopback server and reads the live
+    /// child's own command line through `aoide_protocol::win_proc`. The
+    /// response-CAP half (an over-cap body refused rather than buffered) has no
+    /// native arm in this slice and is listed as such in CORE-POSIX: its
+    /// fixture streams more than `MAX_RESPONSE_BYTES` from a stand-in, and the
+    /// seam to do that with the real client over a loopback socket does not
+    /// exist yet.
+    #[cfg(unix)]
     fn with_fake_curl<T>(tag: &str, script: &str, f: impl FnOnce() -> T) -> T {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (shim_dir, saved_path) = install_fake_curl(tag, script);
+        let out = f();
+        uninstall_fake_curl(&shim_dir, saved_path);
+        out
+    }
+
+    /// [`with_fake_curl`]'s two halves, split out for a test that ALREADY
+    /// holds `env_lock` (and cannot take it a second time): drop the shim at
+    /// the front of `PATH`, run the closure-free part between the two calls,
+    /// then restore. The shim's stdin drain is load-bearing — `post_json`
+    /// always writes to curl's stdin, and a shim that exits without reading
+    /// turns a descheduled caller's write into an EPIPE (`crates/AGENTS.md`).
+    #[cfg(unix)]
+    fn install_fake_curl(tag: &str, script: &str) -> (std::path::PathBuf, Option<String>) {
         let shim_dir = std::env::temp_dir().join(format!(
             "aoide-client-curlshim-{tag}-{}-{}",
             std::process::id(),
@@ -5484,15 +6797,16 @@ mod tests {
         }
         let saved_path = std::env::var("PATH").ok();
         std::env::set_var("PATH", format!("{}:{}", shim_dir.display(), saved_path.clone().unwrap_or_default()));
+        (shim_dir, saved_path)
+    }
 
-        let out = f();
-
+    #[cfg(unix)]
+    fn uninstall_fake_curl(shim_dir: &std::path::Path, saved_path: Option<String>) {
         match saved_path {
             Some(p) => std::env::set_var("PATH", p),
             None => std::env::remove_var("PATH"),
         }
-        let _ = std::fs::remove_dir_all(&shim_dir);
-        out
+        let _ = std::fs::remove_dir_all(shim_dir);
     }
 
     /// #114: an over-cap response refuses with the taught error, naming
@@ -5506,6 +6820,8 @@ mod tests {
     /// The child is killed the moment the running total crosses the cap,
     /// so this test returns promptly rather than waiting for the shim's
     /// full `dd` to finish writing.
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_curl_refuses_a_response_over_the_max_response_bytes_cap() {
         let over_cap_mib = (MAX_RESPONSE_BYTES / (1024 * 1024)) + 1;
@@ -5522,6 +6838,8 @@ mod tests {
     /// #114's other half: an ordinary, well-under-cap payload passes
     /// through the same read-loop untouched — the byte cap must not
     /// mangle or truncate a normal response.
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).
+    #[cfg(unix)]
     #[test]
     fn run_curl_passes_an_ordinary_payload_under_the_cap() {
         let script = "printf '{\"ok\":true}\\n200'\n";
@@ -5541,6 +6859,8 @@ mod tests {
     /// driven through a fake `curl` shim standing in for the remote door's
     /// HTTP 200 / JSON-RPC-error response (JSON-RPC errors are always HTTP
     /// 200 — the error lives in the envelope, not the status line).
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).
+    #[cfg(unix)]
     #[test]
     fn spawn_on_node_via_surfaces_a_json_rpc_error_ack_as_a_taught_node_refused_error() {
         let taught = "the configured agent (`claude`) exited immediately after launch \
@@ -5559,7 +6879,7 @@ mod tests {
         // `-w "\n%{http_code}"` status line.
         let script = format!("cat <<'JSONBODY'\n{body}\nJSONBODY\nprintf '200'\n");
         let node = fixture_node(None);
-        let result = with_fake_curl("spawn-refused", &script, || spawn_on_node_via(&node, "hello", None));
+        let result = with_fake_curl("spawn-refused", &script, || spawn_on_node_via(&node, "hello", None, None, None));
         let err = result.expect_err("a JSON-RPC error ack must surface as an Err, never as Ok");
         assert_eq!(err.reason, "node-refused");
         assert!(
@@ -5634,6 +6954,8 @@ mod tests {
     /// `run_curl` anyway, the fake responds with neither a `200` nor
     /// parseable JSON, so the command would ALSO fail — a false pass here
     /// is not possible by construction.
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).
+    #[cfg(unix)]
     #[test]
     fn handle_node_add_no_verify_never_invokes_curl() {
         with_node_state("add-no-verify", || {
@@ -5743,6 +7065,8 @@ mod tests {
     /// This is THE test that pins "no approver->requester network callback
     /// happens" at the client layer (the a2a.rs full-ceremony test pins the
     /// same invariant one layer down, by never dialing an undialable url).
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).
+    #[cfg(unix)]
     #[test]
     fn approve_inbound_never_invokes_curl_purely_local_commit() {
         with_node_state("approve-inbound-no-curl", || {
@@ -5871,6 +7195,7 @@ mod tests {
         // expired before the poll ever runs.
         let now = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap();
         aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
             id: id.to_string(),
             url: url.to_string(),
             name: "box-b".to_string(),
@@ -7041,11 +8366,11 @@ mod tests {
     }
 
     #[test]
-    fn register_mail_wires_all_ten_commands() {
+    fn register_mail_wires_all_eleven_commands() {
         let mut r = Registry::new();
         register_mail(&mut r);
         let paths: Vec<String> = r.commands().map(|c| c.dotted()).collect();
-        for want in ["mail", "mail.send", "mail.read", "mail.show", "mail.mark", "mail.rm", "mail.outbox", "mail.outbox.rm", "mail.outbox.retry", "mail.export"] {
+        for want in ["mail", "mail.send", "mail.read", "mail.show", "mail.mark", "mail.rm", "mail.outbox", "mail.outbox.rm", "mail.outbox.retry", "mail.export", "mail.poll"] {
             assert!(paths.contains(&want.to_string()), "missing {want}");
         }
     }
@@ -7054,7 +8379,12 @@ mod tests {
     fn structured_mail_send_files_signed_to_and_cc_once_with_local_aliases() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("structured-mail-real-send");
-        let local = aoide_storage::display::local_host_name();
+        // The ADDRESS form of this box's own name: every use below is a mail
+        // address or a paired-node name, both of which the grammar constrains
+        // to lowercase (`display::local_node_name`'s own doc) — a fixture
+        // building these from the raw host name refuses itself on a Windows box
+        // whose host name is upper-case (measured on ThinkChiyo).
+        let local = aoide_storage::display::local_node_name();
         let (key, _) = aoide_storage::identity::load_or_mint().unwrap();
         let mut nodes = Vec::new();
         aoide_storage::node_store::upsert_paired_node(&mut nodes, &local, "http://localhost", &key.info().pubkey_hex, "2026-09-13T00:00:00Z", &["message".into()]);
@@ -7152,8 +8482,15 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-ring-daemon");
 
-        let socket_path = root.join("fake-daemon.sock");
-        let listener = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
+        // The daemon socket lives in this host's own temp directory under a
+        // SHORT name, never inside the mail root: a socket path is bounded by
+        // the target's `sun_path` (108 bytes including its terminator, 107
+        // usable on native Windows), and the mail root's own generated name
+        // already spends most of that there — measured: the long form refused
+        // the bind by name on ThinkChiyo. Both binds check the budget; this is
+        // the fixture staying inside it.
+        let socket_path = std::env::temp_dir().join(format!("aoide-md-{}.sock", std::process::id()));
+        let listener = fake_daemon_listener(&socket_path);
         std::env::set_var("AOIDE_DAEMON_SOCKET", &socket_path);
 
         let handle = std::thread::spawn(move || {
@@ -7250,9 +8587,209 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// `mail send --hold` (P-M3): the entry is spooled HELD — a drain will
+    /// never dial it, so the command says so plainly rather than reporting a
+    /// bare "spooled", and `mail outbox` shows which entries are held.
     #[test]
-    fn mail_outbox_reports_waiting_tries_and_last_outcome_per_entry() {
+    fn mail_send_hold_spools_a_held_entry_and_reports_it_as_held() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-hold");
+
+        aoide_storage::node_store::save_nodes(&[verified_node("osaka", "http://127.0.0.1:1/")]).unwrap();
+
+        let out = handle_mail_send(&mail_inv_with_flags(
+            &["mail", "send"],
+            &["wait for my ask"],
+            &[("to", "osaka/bob"), ("hold", "")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        assert!(out.message.contains("held for osaka/bob"), "a held send says it is held: {}", out.message);
+        assert!(out.message.contains("polls"), "and who moves it: {}", out.message);
+
+        let spooled = aoide_storage::outbox::list_entries("osaka").unwrap();
+        assert_eq!(spooled.len(), 1);
+        assert!(spooled[0].is_held(), "the spooled entry carries the hold flavor");
+        assert_eq!(spooled[0].tries, 0, "a hold entry is never dialed, so it is never attempted");
+
+        let listing = handle_mail_outbox(&mail_inv(&["mail", "outbox"], &[]));
+        let rows = listing.data.unwrap()["entries"].as_array().unwrap().clone();
+        assert_eq!(rows[0]["flavor"], aoide_storage::outbox::FLAVOR_HOLD);
+        assert!(listing.message.contains("hold (leaves only when its node polls)"), "the listing says it: {}", listing.message);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A hold with nothing to hold: `self` filing is local and immediate, so
+    /// the flag is refused by NAME rather than silently dropped — the caller
+    /// asked for a wait that cannot exist, and "Ok" would be a lie.
+    #[test]
+    fn mail_send_hold_to_self_is_refused_and_files_nothing() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-hold-self");
+
+        let out = handle_mail_send(&mail_inv_with_flags(
+            &["mail", "send"],
+            &["nothing to hold"],
+            &[("to", "self/bob"), ("hold", "")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "msg: {}", out.message);
+        assert_eq!(out.data.unwrap()["reason"], "hold-needs-a-node");
+        assert!(aoide_storage::mail::read_base().unwrap().is_empty(), "nothing was filed either way");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A fake door that answers every POST with the same fixed JSON, counts
+    /// the requests it actually saw (a bare probe connect sends no bytes and
+    /// is not counted), and is silenced by dropping the listener. Unlike
+    /// [`spawn_fake_card_server`] this one takes an OWNED body, because a
+    /// `aoide/mailPoll` answer carries a freshly minted envelope and so
+    /// cannot be a `&'static str`.
+    fn spawn_fixed_answer_door(
+        body: String,
+    ) -> (std::net::TcpListener, u16, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = seen.clone();
+        let accepter = listener.try_clone().unwrap();
+        std::thread::spawn(move || loop {
+            let Ok((mut stream, _)) = accepter.accept() else { break };
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            if n == 0 {
+                continue;
+            }
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        });
+        (listener, port, seen)
+    }
+
+    fn poll_answer_for(envelope: &aoide_storage::mail::Envelope) -> String {
+        format!(
+            r#"{{"jsonrpc":"2.0","id":1,"result":{{"envelopes":[{}]}}}}"#,
+            serde_json::to_string(envelope).unwrap()
+        )
+    }
+
+    /// H1, as a test: **a node with NOTHING to send receives a held letter
+    /// via `mail poll`.** This is the case `poll-on-contact` cannot reach —
+    /// an empty outbox has no dial, so no contact, so no poll (the drain's
+    /// own doc says so) — and it is the relay model's only receive path. The
+    /// poll files the envelope through the same chain a pushed deposit gets
+    /// and spools the ack back toward its origin, exactly as the hand-over
+    /// would if a drain had carried it.
+    #[test]
+    fn mail_poll_receives_a_held_letter_with_nothing_to_send() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-poll-receives");
+
+        // The letter the hub hands back was minted by this process's own
+        // identity and stamped `from.node = local_host_name()`, so the
+        // ORIGIN record this box must hold is one named exactly that (the
+        // same one-process-plays-both-roles shortcut `mail_wire`'s own tests
+        // document). Its url points nowhere: the ack this poll spools has to
+        // STAY spooled for the assertion below.
+        let me = aoide_storage::display::local_node_name();
+        let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "conductor", "held for a quiet box").unwrap();
+        let letter_msgid = letter.msgid.clone();
+        let (listener, port, hits) = spawn_fixed_answer_door(poll_answer_for(&letter));
+
+        let mut origin = verified_node(&me, "http://127.0.0.1:1/");
+        origin.pubkey = Some(kp.info().pubkey_hex.clone());
+        aoide_storage::node_store::save_nodes(&[verified_node("relay", &format!("http://127.0.0.1:{port}/")), origin]).unwrap();
+
+        // The whole point: this box holds NOTHING for `relay`, so a drain
+        // would never dial it and the envelope could never arrive.
+        assert!(aoide_storage::outbox::list_entries("relay").unwrap().is_empty(), "nothing spooled toward the hub");
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0, "and nothing has dialed it yet");
+
+        let out = handle_mail_poll(&mail_inv(&["mail", "poll"], &[]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["filed"], 1, "{:?}", out.data);
+        // The sweep also asks `me` (this fixture's own stand-in for another
+        // box, registered verified + `message`): its url is dead, so it is
+        // reported `unreachable` — and the letter from `relay` still landed,
+        // which is the sweep's own promise that one node's failure never
+        // stops the next.
+        assert_eq!(out.message, "polled 2 node(s): 1 envelope(s) filed, 1 unreachable", "{}", out.message);
+        let rows = out.data.as_ref().unwrap()["nodes"].as_array().unwrap().clone();
+        assert_eq!(rows.iter().find(|r| r["node"] == "relay").unwrap()["status"], "polled");
+        assert_eq!(rows.iter().find(|r| r["node"] == me.as_str()).unwrap()["status"], "unreachable");
+        // Two requests reach the hub, not one: P-SEAL adds the binding
+        // exchange (`aoide/binding`, published and learned on the drain's
+        // own session) ahead of the poll. The poll proper ran exactly once —
+        // which is what the filed count and the single base entry below
+        // prove; a second poll of the same held letter would be a duplicate,
+        // not a second filing.
+        assert_eq!(
+            hits.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "the hub was asked twice: the binding exchange, then the poll"
+        );
+
+        let base = aoide_storage::mail::read_base().unwrap();
+        assert_eq!(base.len(), 1, "the hand-over is filed: {base:?}");
+        assert_eq!(base[0].envelope.msgid, letter_msgid);
+        assert_eq!(base[0].via, "relay", "via is the node that was polled");
+
+        let acks = aoide_storage::outbox::list_entries(&me).unwrap();
+        assert_eq!(acks.len(), 1, "and its ack is spooled back toward the origin");
+        assert_eq!(acks[0].envelope.header.kind, aoide_storage::mail::ENTRY_TYPE_RECEIPT);
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A poll of a node this box is not paired with is refused BY NAME,
+    /// before any dial — the same two refusals `mail send`'s node branch
+    /// makes. And the no-argument sweep says plainly when it has nobody to
+    /// ask, rather than reporting a silent success.
+    #[test]
+    fn mail_poll_names_a_node_this_box_is_not_paired_with() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-poll-refusals");
+
+        // Registered but never paired, with a live door listening: if the
+        // refusal were not made BEFORE the dial, this door would see a hit.
+        let (listener, port, hits) = spawn_fixed_answer_door(r#"{"jsonrpc":"2.0","id":1,"result":{"envelopes":[]}}"#.to_string());
+        let mut half_paired = verified_node("half-paired", &format!("http://127.0.0.1:{port}/"));
+        half_paired.verified = false;
+        aoide_storage::node_store::save_nodes(&[half_paired]).unwrap();
+
+        let unknown = handle_mail_poll(&mail_inv(&["mail", "poll"], &["stranger"]));
+        assert_eq!(unknown.status, aoide_protocol::output::Status::Error);
+        assert_eq!(unknown.data.unwrap()["reason"], "unknown-node");
+        assert!(unknown.message.contains("stranger"), "{}", unknown.message);
+
+        let unpaired = handle_mail_poll(&mail_inv(&["mail", "poll"], &["half-paired"]));
+        assert_eq!(unpaired.status, aoide_protocol::output::Status::Error);
+        assert_eq!(unpaired.data.unwrap()["reason"], "unpaired-node");
+        assert!(unpaired.message.contains("half-paired") && unpaired.message.contains("pair"), "{}", unpaired.message);
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0, "a refused poll never dials");
+
+        // The sweep form with nobody to ask is an honest no-op, not a silent
+        // "polled 0 nodes".
+        let sweep = handle_mail_poll(&mail_inv(&["mail", "poll"], &[]));
+        assert_eq!(sweep.status, aoide_protocol::output::Status::Ok);
+        assert_eq!(sweep.data.unwrap()["filed"], 0);
+        assert!(sweep.message.contains("nothing to poll"), "{}", sweep.message);
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0, "an unpaired node is not in the sweep either");
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mail_outbox_reports_waiting_tries_and_last_outcome_per_entry() {        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-outbox-report");
 
         let envelope = aoide_storage::mail::mint_outbound_letter("here", "osaka", "bob", "hi").unwrap();
@@ -7472,7 +9009,7 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("delivery-ack-validation");
 
-        let node_name = aoide_storage::display::local_host_name();
+        let node_name = aoide_storage::display::local_node_name();
         let letter = aoide_storage::mail::mint_outbound_letter("here", &node_name, "bob", "hi").unwrap();
         let msgid = letter.msgid.clone();
         let entry = aoide_storage::outbox::OutboxEntry::fresh(letter);
@@ -7513,7 +9050,7 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("delivery-genuine-ack");
 
-        let node_name = aoide_storage::display::local_host_name();
+        let node_name = aoide_storage::display::local_node_name();
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
         let mut nodes = Vec::new();
         aoide_storage::node_store::upsert_paired_node(
@@ -7655,6 +9192,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).
+    #[cfg(unix)]
     #[test]
     fn mail_outbox_listing_never_invokes_curl() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -7836,7 +9375,7 @@ mod tests {
     /// malformed lines and checks nothing else), so a torn or hand-edited base
     /// is the boundary the note naming has to hold at.
     fn file_raw_letter(seq: u64, msgid: &str, text: &str) {
-        let local = aoide_storage::display::local_host_name();
+        let local = aoide_storage::display::local_node_name();
         let header = aoide_storage::mail::Header {
             version: aoide_storage::mail::ENVELOPE_VERSION.to_string(),
             from: aoide_storage::mail::Address { node: local.clone(), name: "peer".into() },
@@ -7939,7 +9478,9 @@ mod tests {
     fn mail_export_groups_a_thread_and_gives_everything_else_its_own_note() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-group");
-        let local = aoide_storage::display::local_host_name();
+        // Address form (`display::local_node_name`): every use below is a mail
+        // address or an assertion on one the export renders.
+        let local = aoide_storage::display::local_node_name();
 
         let thread = "a".repeat(64);
         for body in ["the first word", "the second word"] {
@@ -8060,8 +9601,6 @@ mod tests {
 
     #[test]
     fn mail_export_rewrites_nothing_when_the_note_already_matches() {
-        use std::os::unix::fs::MetadataExt;
-
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-idempotent");
         let thread = "b".repeat(64);
@@ -8089,7 +9628,7 @@ mod tests {
         );
 
         let after = std::fs::metadata(&path).unwrap();
-        assert_eq!(after.ino(), before.ino(), "an unchanged note must not be re-created");
+        assert_eq!(file_identity(&after), file_identity(&before), "an unchanged note must not be re-created");
         assert_eq!(after.modified().unwrap(), before.modified().unwrap(), "nor rewritten");
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
 
@@ -8100,7 +9639,8 @@ mod tests {
     fn mail_export_fences_a_body_that_carries_its_own_fence() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-fence");
-        let local = aoide_storage::display::local_host_name();
+        // Address form (`display::local_node_name`) — see the group's own test.
+        let local = aoide_storage::display::local_node_name();
 
         let thread = "c".repeat(64);
         let body = "before\n```\n## not a heading\n```\nafter";
@@ -8192,7 +9732,8 @@ mod tests {
     fn mail_export_joins_only_copies_that_are_adjacent_in_seq() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-export-adjacent");
-        let local = aoide_storage::display::local_host_name();
+        // Address form (`display::local_node_name`) — see the group's own test.
+        let local = aoide_storage::display::local_node_name();
         let thread = "f".repeat(64);
 
         // TWO sends of ONE identical text, each declaring the same To/Cc and
@@ -8245,6 +9786,8 @@ mod mcp_http_tests {
         assert!(parse_http_response(200, "{\"missing\":\"headers\"}").is_err());
     }
 
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `install_fake_curl`'s note).
+    #[cfg(unix)]
     #[test]
     fn mcp_credentials_and_session_headers_use_stdin_never_argv_or_body_file() {
         use std::os::unix::fs::PermissionsExt;
@@ -8285,5 +9828,73 @@ printf 'HTTP/1.1 200 OK\r\nMcp-Session-Id: reply-id\r\n\r\n{{"jsonrpc":"2.0","id
         assert_eq!(response.headers[0].1, "reply-id");
         assert!(request_json_with_headers("POST", "https://mneme.invalid/mcp", "{}", "token\nInjected: value", &[], 1).is_err());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// H2, the third path (the re-review): `mail outbox retry --refused`
+    /// un-parks an entry and immediately drains it, so a letter parked
+    /// *because* its destination's binding was unusable was walked straight
+    /// into a plaintext deposit. It must re-park instead, and nothing must be
+    /// dialed at all.
+    #[test]
+    fn retry_refused_re_parks_a_letter_whose_binding_is_unusable() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("outbox-retry-unusable");
+
+        // A destination with a binding on record that is expired.
+        let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
+        let now = aoide_storage::time::now_iso_utc();
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        aoide_storage::node_store::upsert_paired_node(
+            &mut nodes,
+            "liveb",
+            "http://127.0.0.1:1/",
+            &kp.info().pubkey_hex,
+            &now,
+            &["message".to_string()],
+        );
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+        let expired = aoide_storage::seal::mint_binding(
+            &kp,
+            "age1expired",
+            1,
+            &aoide_storage::time::shift_iso_utc(&now, -7200),
+            &aoide_storage::time::shift_iso_utc(&now, -3600),
+        )
+        .unwrap();
+        aoide_storage::seal::learn_binding("liveb", &expired).unwrap();
+
+        // A plaintext letter, already parked for exactly that reason.
+        let canary = "CANARY-H2-RETRY-UNUSABLE";
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "liveb", "bob", canary).unwrap();
+        let mut parked = aoide_storage::outbox::OutboxEntry::fresh(envelope);
+        parked.refused = true;
+        parked.last_outcome = "parked: the destination holds a binding that is not usable now".to_string();
+        aoide_storage::outbox::write_entry("liveb", &parked).unwrap();
+
+        let mut inv = aoide_test_support::inv(&["mail", "outbox", "retry"], &[]);
+        inv.flags.insert("refused".to_string(), String::new());
+        let out = handle_mail_outbox_retry(&inv);
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+
+        let after = aoide_storage::outbox::list_entries("liveb").unwrap();
+        assert_eq!(after.len(), 1, "the letter is still spooled");
+        assert!(after[0].refused, "and re-parked, not left dialable");
+        assert!(
+            after[0].last_outcome.starts_with("parked:"),
+            "with the reason it was parked for: {}",
+            after[0].last_outcome
+        );
+        // The spool still holds the body, and that is correct: this entry was
+        // never sealed, so there is no container to hold it instead —
+        // redaction happens when an entry IS sealed. What matters is that the
+        // retry did not put it on a wire, which the link check below proves.
+        // Nothing was dialed: a dead port that had been tried would have left
+        // the link backed off.
+        assert!(
+            aoide_storage::outbox::read_link_state("liveb").unwrap().is_none(),
+            "no attempt reached the link at all"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

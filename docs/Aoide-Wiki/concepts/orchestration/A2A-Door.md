@@ -45,7 +45,13 @@ The server serves:
   an existing conducted session named by `contextId`, or **spawns** a new
   conducted agent. The spawn runs a **configured** agent
   (`aoide.a2a.spawnAgent`), never a client-supplied command — the client
-  supplies only the prompt. See [[#Security and governance]].
+  supplies only the prompt. A spawn may also name a task
+  (`metadata["aoide/task"]`), which makes the child the SAME
+  [[Managed-Task-Wrapper|managed task run]] a local `aoide spawn --task`
+  produces: task mailbox, exit report, a record the routine prune retains. A
+  spawn is always headless — the door has no terminal to hand the child — and
+  its wrapper argv is the local one's, built by one shared builder. See
+  [[#Security and governance]].
 - **`message/stream`** and **`tasks/resubscribe`** — Server-Sent-Events
   streaming of task-status updates. A stream emits on state change, marks the
   terminal frame `final: true`, and polls the stage on a short tick. It is
@@ -123,25 +129,54 @@ to **rebuild time** instead.
 - **Bounded per request.** A `message/send` spawn runs **only** the configured
   `spawnAgent` executable — the client names the prompt, never the command. If
   `spawnAgent` is empty (the default), spawning is unavailable and the door
-  returns a structured error rather than launching anything. An inject steers a
+  returns a structured error rather than launching anything; if it is a
+  SHELL (`bash`, `bash -lc <harness>`, `env bash`), the door refuses it the
+  same way and before any process starts, because the spawn's first turn is
+  a line typed into that pty and a shell would run it. An inject steers a
   session already running under aoide's conductor, the same door `send`
   uses. A forwarded A2A message is **data**, routed through the dispatcher, never
   executed — the A2A door adds no new trust tier.
+- **A spawn's child is the local wrapper, always headless.** The door has no
+  terminal to hand a child, so its spawn is `conduct --spawned --headless`,
+  built by the ONE argv builder a local `aoide spawn` uses
+  ([[Managed-Task-Wrapper]]). A caller may also name a task
+  (`metadata["aoide/task"]`) — an illegal slug is refused `-32602` with a
+  taught message (the echoed value cleaned and capped by the shared sanitizer),
+  before any id, argv or process exists — and that turns the child into a full
+  managed task run on the far node: a mailbox named by the caller's slug, an
+  exit report, and a record `session watch` resolves. A slug a live run already
+  holds is refused `-32602` too, through the same admission step a local
+  `spawn --task` consults — the door reaches the wrapper WITHOUT bypassing the
+  wrapper's own checks, so a peer cannot squat the operator's task name.
+  Three consequences a caller should know. The mailbox namespace is FLAT and
+  shares the roster's label space: no name is reserved (`conductor` included),
+  and the slug becomes the run's own session name in the roster and the
+  [[Session-Graph|graph]] — the same power a local `spawn --task` has always
+  had, now reachable by a paired peer. A door-summoned run is retained only
+  until its report is filed, then swept like any finished session, so a peer
+  cannot grow this node's roster without bound. And because the child is
+  headless, it is REACHABLE, not merely watchable: a ping-back line or a
+  mail-side doorbell write lands in its input, where a non-headless wrap with no
+  channel would have been skipped. All of it is the local wrapper's own
+  semantics, reached through this door — not a second set of rules.
 - **Non-loopback callers are gated at request time.** `message/send`
   classifies the caller's address first (`a2a::classify_origin` →
   `ConnOrigin`: `Loopback` / `Remote(IpAddr)` / `Unknown`). A `Remote`
   caller falls back to the same interactive pending-approval queue
   `send` uses — auto-delivering on an autogate match: the OR of the
-  address check, the per-node `tokenFile` check, and the signature-rung
-  `autogate` flag on the resolved node's own record
-  ([[Node-Federation]]); an `Unknown` origin (the address couldn't be read
-  at all) is never auto-delivered, failing safe like an unmatched `Remote`.
+  address check, the per-node `tokenFile` check, the signature-rung
+  `autogate` flag on the resolved node's own record, and a matched
+  remote-parent claim — the node that spawned this very session steering its
+  own child ([[Node-Federation]]; the claim and its three-way match are
+  CONTRACTS.md §6's remote-parent rule); an `Unknown` origin (the address
+  couldn't be read at all) is never auto-delivered, failing safe like an
+  unmatched `Remote`.
   A verified signature outranks loopback for this question: a request
   `verify_signed_request` already verified is remote by construction (an
   ssh `-L` forward terminates at loopback on this end), so
-  `origin_for_inject` strips `Loopback`'s free pass from it and the node's
-  own `autogate` flag — not the arrival address — decides delivery
-  ([[Node-Transport]]).
+  `origin_for_inject` strips `Loopback`'s free pass from it — and then the
+  node's own `autogate` flag or a matched remote-parent claim decides
+  delivery, never the arrival address ([[Node-Transport]]).
   This is the one interactive per-request gate the wire otherwise lacks —
   added for [[Node-Federation|node federation]]'s non-loopback case, which
   the original loopback-only design didn't need to cover.
@@ -187,8 +222,10 @@ to **rebuild time** instead.
   above — a legacy escape for unpaired callers, like it.
   `node_store::is_autogated_node_token` folds a presented token
   against every registered node's own token file, and Inject's autogate
-  match is the OR of the address check, this token check, and the
-  signature-rung `autogate` flag — a shared
+  match is the OR of the address check, this token check, the
+  signature-rung `autogate` flag, and a matched remote-parent claim — the
+  node that spawned this very session steering its own child
+  (CONTRACTS.md §6's remote-parent rule, [[Node-Transport]]) — a shared
   secret could never tell two nodes apart, so identifying which node called
   needs one file per node, not one flag for the whole door.
 - **The outbound direction has its own bearer.** `node add --bearer-secret

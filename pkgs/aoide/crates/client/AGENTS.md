@@ -75,7 +75,10 @@
   (spawn-shaped) body via `sign_headers_for_node`. `handle_node_spawn`
   (P-P5b, `node spawn`) gates LOCALLY on exactly one question before
   calling it — is the named node a registered, `verified` entry at all —
-  and NOTHING else; `summon_remote` gates on the SAME question (plus
+  and NOTHING else beyond the two SHAPE checks that cost no round trip: an
+  unruly `--parent` claim (`valid_claimed_session_id`) and, since P-RSA S10, an
+  unruly `--task` slug (`node_store::valid_node_name`, the predicate the door
+  applies inbound as well). `summon_remote` gates on the SAME question (plus
   "is there anything to summon with" — its own concern, no wire involved)
   before calling it too. Every refusal shape beyond "unknown/unpaired node"
   (`allows` lacking `spawn`, an unsigned-but-paired caller, clock skew, an
@@ -94,6 +97,28 @@
   capability-gated arm; a future third mail-shaped or capability-gated
   command follows this same shallow-local/deep-remote split rather than
   inventing a client-side `allows` check.
+- **The remote-parent claim (`metadata["aoide/from"]`) is resolved in ONE
+  place, `resolve_remote_parent`, and never from `AOIDE_SESSION_ID`.** An
+  ambient id is the Osaka wrong-ancestry failure; a live `--parent` wins,
+  else the daemon attestation, else no claim (a top-level remote spawn).
+  A `--parent` naming no live local record is refused, never replaced by
+  the attestation — and whichever id wins is then held to
+  `aoide_storage::remote_children::valid_claimed_session_id`, the SAME
+  predicate the door applies inbound, so an unruly claim is refused at the
+  resolver, before anything is signed or sent, rather than one signature and
+  one round trip later as the door's `-32602`. **Which caller then refuses is
+  the SPAWN path's business alone (the User's ruling, 2026-09-25):** `node spawn` fails
+  the call it was asked to make, while `send --to` DROPS the claim, sends
+  unclaimed and names the reason on one warning line (`not claiming parent:
+  <reason>`) — `send` never named a parentage, the claim is an autogate
+  shortcut rather than the request, and the door's Inject arm reads a
+  malformed claim as a non-match, never as a refusal, so an unruly id costs
+  that send its autogate and nothing else. Don't "restore" a refusal on the
+  send path. `remote_child_row` holds the far node's
+  ack id to that predicate too: it is a string this node did not mint and
+  cannot vouch for. `build_message_send_body` is the one writer of the key;
+  the claim rides inside the signed body, so never add it to headers or
+  the top-level `params.metadata`.
 - **Forwarded event text from `adapter` is untrusted data**, same as root
   `AGENTS.md` house rule 4 — an adapter never lets forwarded text execute as
   a command.
@@ -182,6 +207,23 @@
   and leaves it PARKED for the requester's own poll to find — no wire call
   at all, so an unreachable or loopback-only requester never blocks this
   half.
+- **`default_self_via` refuses a LOOPBACK target before it reads a login or
+  probes a route (D5/M3) — `selfVia` is a claim about a hop BETWEEN boxes, so
+  two daemons on one machine claim nothing.** The refusal is decided on the
+  target's own resolved `SocketAddr`: `normalize_ip(...).is_loopback()` (the
+  `to_ipv4_mapped` step is what catches `::ffff:127.0.0.1`, which
+  `Ipv6Addr::is_loopback` alone answers `false` for) or the unspecified
+  `0.0.0.0`/`::`. Do NOT move it after the probe, and do NOT probe with a
+  fixed v4 socket: a v6 target needs a v6 socket (`[::]:0`), and a v4-only
+  probe failing is exactly how `[::1]` used to fall through to a fabricated
+  hostname hop. Do NOT restore a `ssh://<login>@127.0.0.1` default either,
+  and keep the check ahead of `local_login()` — a login-less box must refuse
+  for the same reason, not a different one. `default_self_via_with`'s
+  injected resolver + route are what let the tests pin the claim's host half
+  without a network; `--self-via` still overrides the whole function (an
+  operator naming their own hop is not this function's business), and
+  `approve_inbound`'s `None`-untouched rule below is what keeps an absent
+  claim from wiping a `via` a previous pairing recorded.
 - **`approve_inbound`'s commit maps `entry.self_via` to `{url, via}` — get
   this backwards and every loopback-only requester's node record comes out
   undialable (task #131).** Present, the commit is `url:
@@ -405,13 +447,29 @@
   `spawn_ssh`/`open_or_reuse` return on a failed or timed-out open name the
   one-time manual step (add this box's key to the far box's
   `authorized_keys`) but never attempt it themselves. The recycled-pid
-  guard (`looks_like_our_ssh`, reading `/proc/<pid>/cmdline`; wrapped as
+  guard (`looks_like_our_ssh`; wrapped as
   `kill_if_still_our_ssh`) is a DELIBERATE, documented tiny race, not an
   oversight: a pid recorded by an earlier `aoide` invocation may have been
   recycled by the OS to an unrelated process by the time anything acts on
-  it, so a pid is never trusted alone — only one whose own cmdline is still
-  `ssh` carrying this record's exact `-L` spec is ever signaled. **This
-  guard is not `close`'s alone** — `open_or_reuse_with`'s own stale-record
+  it, so a pid is never trusted alone — only one whose own argv is still
+  `ssh` carrying this record's exact `-L` spec is ever signaled. **The guard
+  and the program it guards are host-split and must stay one seam each**:
+  the argv read is `/proc/<pid>/cmdline` on Unix and
+  `aoide_protocol::win_proc::command_argv` on native Windows (there is no
+  `/proc`, and the process table carries no command line — that reader is the
+  kernel's own `ProcessCommandLineInformation` plus this host's
+  `CommandLineToArgvW`), the program is the bare name `ssh` through `PATH` on
+  Unix and `%SystemRoot%\System32\OpenSSH\ssh.exe` by FULL PATH on Windows
+  (`ssh_program`, the one place the choice is written: `ssh` is not a name
+  `PATH` there is guaranteed to carry), the login chain ends in `%USERNAME%`
+  there (`$USER`/`$LOGNAME` are not variables that OS sets), and argv[0] is
+  therefore `ssh` on one host and `ssh.exe` (folded, either separator) on the
+  other. **The kill and the wait are `aoide_storage::fs::terminate` /
+  `wait_for_exit`, never `libc` here** — and their two arms do NOT promise the
+  same thing: `SIGTERM` is a request a trapped or hung child can survive,
+  while Windows' `TerminateProcess` cannot be caught at all. `terminate_pid`
+  is written for the weaker arm (a survivor keeps its record) and is reachable
+  only through this guard, which is what makes the harder arm safe. **This guard is not `close`'s alone** — `open_or_reuse_with`'s own stale-record
   path runs it on a live-but-dead-port record's OLD pid before that record
   is REPLACED by a freshly opened one at the same `(session_id, key)`;
   skipping this on the reopen path would make the old child permanently
@@ -633,6 +691,42 @@
   short-circuiting the loop over other nodes (see
   `aoide_conduct::mail_bridge`'s own
   `one_dead_nodes_entries_never_block_another_nodes_drain`).
+- **Hold, poll, and poll-on-contact (P-M3) live in this same three-caller
+  path — never at a fourth call site.** `drain_node` filters a `hold`
+  entry the way it filters a parked one (BEFORE `DRAIN_BATCH_CAP`: held is
+  permanent to a drain, so counting it would starve the spool exactly as
+  counting parked entries did), and after a pass that actually reached the
+  node (≥1 deposit answered) it calls `poll_node` on the same session,
+  under the same `.bsy` lock and `TunnelTeardownGuard`. Two invariants:
+  **never poll a pass that got no response** (a second failure recorded
+  nowhere), and **never dial for a held entry** to force that contact — a
+  `--hold`-only spool is deliberately silent, and `mail send --hold`'s
+  `data.delivery` reading `queued` is correct rather than a missing
+  status word (MAIL.md §Status's vocabulary is closed; don't invent
+  `held` in `delivery_projection` without a doc amendment).
+  `post_signed`/`SignedCall` is the one signed-POST implementation —
+  `attempt_deposit` and `poll_node` read it, neither re-implements bearer
+  resolve/sign/POST/parse. **`poll_node` has exactly two callers and must
+  not gain a third shape: `drain_node`'s poll-on-contact, and the
+  `mail poll` handler (plus `pollable_nodes` for its no-argument sweep).**
+  The command exists because an empty outbox never dials — poll-on-contact
+  is a free reply for a node that HAS something to say, and useless to a
+  node that does not; a box that can only receive must ask. Nothing about
+  `drain_node`'s dial policy changes for it (a pass with nothing
+  attemptable still dials nothing), and the sweep must never let one
+  node's `Err` stop the next. `settle_deposit` is the ONE place an outcome
+  turns into spool side effects (ack minted and spooled on a filed letter
+  or a letter duplicate, `retire_by_ack` on a filed receipt); the door
+  reaches it through `aoide_conduct::mail_bridge::settle_deposit`, so
+  `aoide-server` never keeps a second copy — do not put the ack mint back
+  in `a2a.rs`. A poll's answer is bounded at
+  `aoide_storage::outbox::POLL_BATCH_CAP` (50) and must stay bounded: the
+  poller's own `MAX_RESPONSE_BYTES` is what an unbounded batch walks into.
+  A poll may ask this same crate to drain a node whose `.bsy`
+  the CURRENT pass already holds (a relay handing back a letter it
+  originated): `.bsy` is `LOCK_NB`, so that inner drain is skipped and the
+  ack waits for the next tick — correct, not a leak; never make `.bsy`
+  blocking to "fix" it.
 - **`handle_mail_send` reports the WRITE, never the drain's outcome (spec
   item 8).** Minting and spooling the outbox entry is what the command's
   `Outcome` status describes; the best-effort `mail_wire::drain_node` call

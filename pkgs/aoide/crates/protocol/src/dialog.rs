@@ -69,11 +69,19 @@ pub fn probe_loginctl_locked() -> Option<bool> {
     Some(String::from_utf8_lossy(&output.stdout).trim() == "yes")
 }
 
-/// Is a process named `process_name` (its `/proc/<pid>/comm`, exact match
-/// after trimming) currently running? Best-effort: an unreadable `/proc`
-/// entry (a process that exited mid-scan, a permission gap) is skipped, not
-/// fatal — same "a probe that can't answer reads as false, never crashes
-/// the watcher" posture [`probe_loginctl_locked`] holds.
+/// Is a process named `process_name` (its `/proc/<pid>/comm` on Unix,
+/// exact match after trimming) currently running? Best-effort: an unreadable
+/// `/proc` entry (a process that exited mid-scan, a permission gap) is
+/// skipped, not fatal — same "a probe that can't answer reads as false, never
+/// crashes the watcher" posture [`probe_loginctl_locked`] holds.
+///
+/// Windows has no `/proc`; the same fact comes from one `Toolhelp32` snapshot
+/// ([`crate::win_proc`]). The one difference is the name it carries: a
+/// process table row names `hyprlock.exe` where `comm` names `hyprlock`, so
+/// the Windows arm accepts the caller's name with or without that suffix.
+/// Which locker a host runs is still the caller's declaration — this probe
+/// never widens the match to substrings or to a different process.
+#[cfg(unix)]
 pub fn probe_locker_running(process_name: &str) -> bool {
     let Ok(entries) = std::fs::read_dir("/proc") else { return false };
     for entry in entries.flatten() {
@@ -88,6 +96,18 @@ pub fn probe_locker_running(process_name: &str) -> bool {
         }
     }
     false
+}
+
+/// The Windows arm — see the Unix arm's doc above for the shared contract and
+/// the one name-folding difference. A snapshot that cannot be taken answers
+/// `false`, the same best-effort reading an unreadable `/proc` gets.
+#[cfg(windows)]
+pub fn probe_locker_running(process_name: &str) -> bool {
+    let Ok(table) = crate::win_proc::processes() else { return false };
+    table.iter().any(|p| {
+        p.exe.eq_ignore_ascii_case(process_name)
+            || p.exe.eq_ignore_ascii_case(&format!("{process_name}.exe"))
+    })
 }
 
 /// The locked-state OR: `loginctl`'s own `LockedHint` (`None` when it can't
@@ -307,7 +327,9 @@ pub fn strip_one_trailing_newline(mut s: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::path::{Path, PathBuf};
+    #[cfg(unix)]
     use std::sync::Mutex;
 
     // ── locked_state (the OR logic, injected probes) ─────────────────
@@ -407,6 +429,14 @@ mod tests {
 
     // ── zenity_available (feature-detect, real spawn) ──────────────────
 
+    /// The shim builders and the spawn test below are `cfg(unix)` because a
+    /// spawnable shim is a POSIX fact: an extensionless `#!/bin/sh` script
+    /// with the owner execute bit. Windows resolves a program by suffix and
+    /// hands the image to the loader, so the same trick would need a real
+    /// `.exe` (or a `.cmd`, which `Command` does not back) — the probe's
+    /// refusal half, which is what matters on every host, is tested by
+    /// `zenity_available_is_false_...` above and runs everywhere.
+    ///
     /// Serializes this module's own write-a-shim-then-exec-it tests
     /// against each other — the same genuine `execve()`/`close()` TOCTOU
     /// `aoide_secrets::watch`'s own `shim_lock` documents at length
@@ -415,6 +445,7 @@ mod tests {
     /// test today, so the lock is a cheap defensive precedent rather than
     /// a proven-necessary fix here — kept anyway so a second shim test
     /// added later doesn't have to rediscover the race.
+    #[cfg(unix)]
     fn shim_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: Mutex<()> = Mutex::new(());
         LOCK.lock().unwrap_or_else(|e| e.into_inner())
@@ -423,6 +454,7 @@ mod tests {
     /// A `#!/bin/sh` script (the one interpreter the nix build sandbox
     /// provides — `/usr/bin/env` does not exist there), never a `PATH`
     /// mutation — sandbox-safe under a nix build's restricted `PATH`.
+    #[cfg(unix)]
     fn write_shim(tag: &str, script: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "aoide-protocol-dialog-shim-{tag}-{}-{}",
@@ -438,6 +470,7 @@ mod tests {
         shim
     }
 
+    #[cfg(unix)]
     fn remove_shim(shim: &Path) {
         if let Some(dir) = shim.parent() {
             std::fs::remove_dir_all(dir).ok();
@@ -449,11 +482,33 @@ mod tests {
         assert!(!zenity_available("aoide-protocol-dialog-test-definitely-not-a-real-binary"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn zenity_available_is_true_when_the_shim_spawns_and_exits_zero() {
         let _guard = shim_lock();
         let shim = write_shim("version", "#!/bin/sh\necho zenity 3.99.0\nexit 0\n");
         assert!(zenity_available(shim.to_str().unwrap()));
         remove_shim(&shim);
+    }
+
+    // ── probe_locker_running (the locker half of the lock gate) ────────
+
+    /// Windows: the same probe against the native process table. The test
+    /// process is named by its own executable, so the two name shapes the
+    /// Windows arm accepts — with and without `.exe` — are both real
+    /// positive cases rather than mocks, and a name nothing carries is the
+    /// negative one.
+    #[cfg(windows)]
+    #[test]
+    fn probe_locker_running_reads_the_native_process_table_by_name() {
+        let exe = std::env::current_exe().unwrap();
+        let name = exe.file_name().unwrap().to_string_lossy().to_string();
+        assert!(name.ends_with(".exe"), "a Windows test binary is a .exe: {name}");
+        assert!(probe_locker_running(&name), "the running test binary is found by its own file name");
+        assert!(
+            probe_locker_running(name.trim_end_matches(".exe")),
+            "and by the extensionless name a host's config would declare"
+        );
+        assert!(!probe_locker_running("aoide-protocol-dialog-locker-that-is-not-running"));
     }
 }

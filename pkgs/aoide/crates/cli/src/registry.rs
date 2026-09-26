@@ -263,6 +263,12 @@ mod tests {
         // `state/mail-export/` (`aoide_client::mail_export`). Sorts between
         // `mail` and `mail.mark`, the same family, giving this list 98 paths.
         //
+        // Mail poll (P-M3) adds `mail.poll` (+1) — the receive trigger a node
+        // with nothing to send needs, and the only caller of
+        // `aoide_client::mail_wire::poll_node` outside the drain. Same
+        // family, so it sorts between `mail.outbox.rm` and `mail.read`; no
+        // other entry moves.
+        //
         // Bumped by 1 for `project.edit` (multi-root projects) — the
         // exact-replacement editor for a project's root list, the
         // `project edit` that `records.rs`'s `Project.auto_resume` doc
@@ -283,6 +289,16 @@ mod tests {
         // `status`): one row per registered policy, policy METADATA only,
         // read by the broker over the socket. Sort slot: between
         // `secrets.set-totp` and `secrets.watch`.
+        //
+        // Bumped by 3 for the workspace ↔ project binding
+        // (`workspace.set`/`workspace.clear`/`workspace.list`, core-seams
+        // design §B) — the binding that makes a workspace carry a project.
+        // Registered from `aoide-conduct`'s `commands/graph.rs`, appended at
+        // that `register()`'s tail; the sort slot falls after `usage`.
+        // Bumped by 1 more for `workspace root` (W-P4 of that slice lane) —
+        // the launcher's bare-path read of a bound project's first folder, the
+        // second special-cased command here after the `secrets` value-printers
+        // (`cli/README.md`'s named-seam list).
         let mut expected: Vec<&str> = vec![
             "a2a.serve",
             "adapter.melete",
@@ -308,6 +324,7 @@ mod tests {
             "mail.outbox",
             "mail.outbox.retry",
             "mail.outbox.rm",
+            "mail.poll",
             "mail.read",
             "mail.ring",
             "mail.rm",
@@ -382,6 +399,10 @@ mod tests {
             "spawn",
             "update",
             "usage",
+            "workspace.clear",
+            "workspace.root",
+            "workspace.list",
+            "workspace.set",
         ];
         expected.sort();
 

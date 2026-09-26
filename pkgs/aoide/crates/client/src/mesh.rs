@@ -1490,6 +1490,7 @@ mod tests {
         with_config_root("parked-id", |_dir| {
             assert_eq!(parked_id_for("sakaki"), None, "nothing parked yet");
             aoide_storage::pairing::park_outbound(aoide_storage::pairing::OutboundPairingRequest {
+        binding: None,
                 id: "abc123".to_string(),
                 url: "http://127.0.0.1:8710/".to_string(),
                 name: "sakaki".to_string(),

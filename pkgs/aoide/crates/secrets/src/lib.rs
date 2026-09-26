@@ -144,3 +144,15 @@ pub(crate) fn env_lock() -> &'static std::sync::Mutex<()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     &LOCK
 }
+
+/// The socket types a TEST builds its fixtures with: `std`'s on Unix, the
+/// native `AF_UNIX` binding on native Windows. One type per host, chosen at
+/// the seam — never a second implementation of the socket, and never a test
+/// that reaches for a host it is not on.
+#[cfg(test)]
+pub mod test_net {
+    #[cfg(unix)]
+    pub use std::os::unix::net::{UnixListener, UnixStream};
+    #[cfg(windows)]
+    pub use aoide_protocol::win_unix::{UnixListener, UnixStream};
+}

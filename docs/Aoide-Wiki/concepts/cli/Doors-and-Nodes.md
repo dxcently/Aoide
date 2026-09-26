@@ -159,11 +159,34 @@ lyra shellbridge [--run] [--json]
   roots; `removehost` re-execs `aoide project remove <name> --host <host>`
   and is refused unless exactly one host is given; the same sequencer as
   `sessionaction`, generic over which subject owns the plan, so reply,
-  audit, and partial-failure shapes are identical). Also
+  audit, and partial-failure shapes are identical), and `workspaceaction`
+  (the bar's bind click, W-P5 — a closed two-action whitelist, `set` /
+  `clear`, that plans the exact argv the CLI takes: `aoide workspace set
+  <ws> <project> [--new]` / `aoide workspace clear <ws>`, so no second
+  binding exists anywhere. Zero-session like `projectaction`, and the one
+  acknowledged action that resolves a field itself: an omitted `workspace`
+  is the FOCUSED one, read in-process through the compositor adapter
+  (`focused_workspace`, the same function the CLI's own caller-side
+  resolution uses) because `workspace clear` takes an id — the child always
+  receives an integer. A host with no adapter is ANSWERED
+  (`reason: "no-compositor"`, the CLI's own sentence) rather than dropped,
+  because a click is parked on a reply. Its reply is `{ok, message, action,
+  workspace, project?, data?}` — the resolved workspace id is the key,
+  `project` rides only on `set` — and what a bar draws the current bindings
+  from is `graph.json`'s TOP-LEVEL `workspaces` block (`{workspace, project?,
+  projects, sessions, live, working, awaiting, activeAt}`) with `ties` beside
+  it, the resolved projection of `state/stage/projects.json`'s
+  `projects[].workspaces` — which stays the record and an equally valid read,
+  and which `aoide workspace list --json` republishes as the same block).
+  Also
   spawns the Hyprland window→session listener thread at startup
   (`graph::run_hypr_window_listener`). A malformed or unknown line is
   audited (action `unparseable`, a byte count only, never the payload) and
-  dropped — nothing kills the accept loop.
+  dropped — nothing kills the accept loop. The two verbs whose caller is
+  PARKED on a reply (`sessiontrace`, `workspaceaction`) are the exceptions:
+  a line that names one of them and fails its own gate is answered with a
+  `bad-request` refusal instead of silence (`CONTRACTS.md` §4's
+  workspaceaction paragraph has the shapes).
 - **Notes:** not gated. The `--run` flag is registered in the schema but the
   handler (`conduct/src/commands/shellbridge.rs::handle_shellbridge`) never
   consults it — bare `lyra shellbridge` runs the blocking loop either way. The
@@ -302,7 +325,7 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
     `idle→submitted`, `done→completed`. Unknown id → `-32001`.
   - `message/send` — inject into a known conductable session (`contextId`),
     or spawn when `metadata["aoide/spawn"] == true` or no contextId: re-execs
-    the aoide binary as `conduct --agent a2a --id a2a-<pid>-<ts> --
+    the aoide binary as `conduct --agent a2a --id a2a-<pid>-<secs>-<n> --
     <spawnAgent>` (`setsid`, stdio nulled, reaped on a parked thread,
     `$AOIDE_AUDIT_LOG` passed down), then types the prompt as its first turn
     over the conduct socket with a connect-retry budget. A loopback caller's
@@ -526,7 +549,10 @@ outright at task #135 P3', hard cutover, no aliases.
   request carries the requester's `selfVia` claim, the inbound commit
   also sets the node's `url` to `http://127.0.0.1:<port>/` (port parsed
   off the requester's advertised url) and `via` to the claim in the same
-  write ([[Node-Transport]]); `aoide pair reject <id|name>` removes the
+  write ([[Node-Transport]]); a request that carried NO claim — including
+  every dial that resolved to loopback, where [[Node-Transport]]'s
+  `default_self_via` claims no hop at all — leaves `via` untouched;
+  `aoide pair reject <id|name>` removes the
   parked entry locally on either queue, no wire call, no record — by
   name it matches exactly one pending request or refuses as ambiguous.
 - **Output:** starting a new request prints the derived SAS (the
@@ -590,7 +616,7 @@ aoide node allow <name> <cap> on|off
 ### aoide node spawn
 
 ```
-aoide node spawn <name> [--yes] [--via ssh://[user@]host[:port]] -- <text…>
+aoide node spawn <name> [--yes] [--parent <session>] [--via ssh://[user@]host[:port]] -- <text…>
 ```
 
 - **Reads:** `state/nodes.json`; this instance's identity (the POST is
@@ -600,6 +626,17 @@ aoide node spawn <name> [--yes] [--via ssh://[user@]host[:port]] -- <text…>
   false`) name LOCALLY with a taught error naming `aoide pair`.
 - **Output:** POSTs a spawn-shaped `message/send` (no `contextId`) to the
   node's A2A door; `<text…>` becomes the spawned session's first turn.
+  The body carries the caller's own session id under
+  `metadata["aoide/from"]`, inside the signed digest: a live `--parent`
+  first, else the daemon-attested caller, never `AOIDE_SESSION_ID` — and
+  whichever id wins is held locally to the very shape the door accepts
+  (`valid_claimed_session_id`), so an id the far side would refuse
+  `-32602` is refused here first, before anything is signed. On
+  the ack the caller appends the child to `state/stage/remote-children.json`
+  (keyed on the node's pubkey and the child's session id). Nothing reads
+  that ledger back yet — listing a parent's remote children is S4's roster
+  projection, so today the file is the record of what this node asked for,
+  not something any command displays.
   What actually runs is the NODE's configured `aoide.a2a.spawnAgent`,
   never a remote-chosen executable. Every other refusal — `allows`
   lacking `spawn`, an unsigned-but-paired caller, clock skew — is the

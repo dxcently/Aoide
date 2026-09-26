@@ -38,17 +38,18 @@
 //! since the receiving node's own `message_send` Inject arm is where that
 //! gate actually lives — see `deliver_remote`'s doc comment.
 
-use super::common::{require_flag, stage_error};
+use super::common::{self, require_flag, stage_error};
 use super::doc::restage_graph;
 use super::model::{
     load_stage, resolved_parent, sessions_path, write_stage, SessionRecord, SessionsFile,
     STAGE_GRAPH_VERSION,
 };
+use super::remote::{node_record, resolve_on_node};
 use super::session_store::{
     clear_stale_parent, do_session_end, do_session_phase, do_session_phase_if, do_session_start,
     do_subagent_end, do_subagent_rekey, do_subagent_spawn, ensure_session_ceiling, now_iso_utc,
     refresh_subagent_says, refresh_transcript_fields, set_owner_activity, stamp_attested_parent,
-    stamp_harness_session_id, stamp_hook_ancestry, stored_phase,
+    stamp_harness_session_id, stamp_hook_ancestry, stamp_session_start_at, stored_phase,
 };
 use super::window::{discover_window, ensure_session_window, pid_ancestry, windowless_by_lineage_from_parent};
 use aoide_protocol::agents::{agent_profile, known_agents, AgentProfile, HookClass, CLAUDE_PROFILE};
@@ -85,13 +86,16 @@ use std::path::{Path, PathBuf};
 /// `cfg(test)` so the unit suite doesn't pay it — a real delay is only
 /// meaningful against a real pty reader; [`write_delivery`]'s own tests
 /// pass a real, explicit delay when they need to observe the boundary.
-// `pub(in crate::graph)`: the ring (`graph/doorbell.rs`, P-M5a-2) is a
-// SECOND production caller of `write_delivery`, alongside `deliver_local_with`
-// below — both raw-inject, both want the exact same submit-keystroke gap.
+// `pub`: the ring (`graph/doorbell.rs`, P-M5a-2) is a SECOND production
+// caller of `write_delivery`, alongside `deliver_local_with` below — both
+// raw-inject, both want the exact same submit-keystroke gap — and
+// `aoide-server`'s A2A door (`a2a::spawn_inject_prompt`) is the THIRD, from
+// another crate: a spawned session's opening turn is a pty injection like any
+// other and must not carry a keystroke spelling of its own.
 #[cfg(not(test))]
-pub(in crate::graph) const SUBMIT_KEYSTROKE_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+pub const SUBMIT_KEYSTROKE_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
 #[cfg(test)]
-pub(in crate::graph) const SUBMIT_KEYSTROKE_DELAY: std::time::Duration = std::time::Duration::from_millis(0);
+pub const SUBMIT_KEYSTROKE_DELAY: std::time::Duration = std::time::Duration::from_millis(0);
 
 // ── `send`: the gated injection door ──────────────────────────────────
 
@@ -593,8 +597,8 @@ fn real_attested_sender(sessions: &[SessionRecord]) -> Option<String> {
 /// [`real_attested_sender`] makes, delegated to
 /// [`crate::graph::identity::attested_wrap`] (the conducted-ancestor-only
 /// walk) instead of `attested_sender`'s any-sealed-ancestor one, walked from
-/// `hook_pid` — the HOOK process's own real pid (carried across the daemon
-/// hop by [`HOOK_PID_FLAG`]), never this process's own `std::process::id()`
+/// `hook_pid` — the HOOK process's own real pid (the pid the door stamped,
+/// `DAEMON_PEER_PID_FLAG`), never this process's own `std::process::id()`
 /// when running daemon-side. An unreachable daemon or an unreadable roster
 /// makes every hook unattested (`None`), never a benign fallback — same
 /// fail-closed posture as `real_attested_sender`.
@@ -613,9 +617,121 @@ fn real_attested_wrap(hook_pid: i32) -> Option<String> {
 /// pid to walk — so the preference order is directly testable without a
 /// live daemon: [`real_attested_wrap`] itself always resolves `None` under
 /// this crate's fixtures (a dead `AOIDE_DAEMON_SOCKET` by design,
-/// `aoide_test_support::isolated_mail_root`'s own doc).
-fn start_parent(attested: Option<String>, env_parent: Option<String>) -> Option<String> {
-    attested.or(env_parent)
+/// `aoide_test_support::isolated_mail_root`'s own doc). `env_parent` is
+/// borrowed because on both arms it is the caller's own claim
+/// ([`own_parent_claim`] / [`HOOK_PARENT_FLAG`]), never a value this function
+/// goes looking for.
+fn start_parent(attested: Option<String>, env_parent: Option<&str>) -> Option<String> {
+    attested.or_else(|| env_parent.map(str::to_string))
+}
+
+/// What a hook's own parent claim resolved to against the hook process's real
+/// ancestry — the ruling that a claim is never trusted blindly: the ID is
+/// whatever the caller says, but the CHECK is a `/proc` walk of `hook_pid`.
+#[derive(Debug, PartialEq, Eq)]
+enum ParentClaim {
+    /// Nothing claimed, or nothing to check a claim against (the record's own
+    /// id, filtered at the call sites), or no walkable pid at all — the
+    /// daemon-side "the door stamped no pid" case. Register parentless.
+    Unclaimed,
+    /// The claim stands. `checked` records WHICH way it stood: `true` when the
+    /// claimed record carries a pid that really is in `hook_pid`'s ancestry
+    /// (kernel evidence), `false` when there was no pid to compare — a
+    /// hook-registered parent is pid-less by construction (`payload_pid`'s own
+    /// doc) — or no record to find. The distinction exists only so the audit
+    /// note can say which one happened; both accept.
+    Linked { id: String, checked: bool },
+    /// The claim names a pid-carrying record this hook process is NOT running
+    /// under — a stale or fabricated `AOIDE_SESSION_ID`. DROPPED.
+    Contradicted(String),
+}
+
+impl ParentClaim {
+    /// The parent to register, when the claim survived.
+    fn linked(&self) -> Option<&str> {
+        match self {
+            ParentClaim::Linked { id, .. } => Some(id),
+            _ => None,
+        }
+    }
+}
+
+/// [`ParentClaim`]'s ONE decision, shared by both arms of the hook door:
+/// `session_hook` hands it the same two inputs either way — the hook process's
+/// own real pid, and the claim from THAT process's env — so the arms cannot
+/// drift. On the CLI arm `hook_pid` is this process (its env is the claim's
+/// source too); on the daemon arm both arrive over the dispatch hop, and the
+/// pid is the door's own `SO_PEERCRED` stamp rather than anything the caller
+/// typed (`DAEMON_PEER_PID_FLAG`).
+///
+/// The check is [`pid_ancestry`], the same real-`/proc` walk
+/// `window::ancestry_parent` and the attested-wrap resolution already stand on,
+/// so the answer is kernel evidence about the CLAIMER rather than anything the
+/// caller could assert: an ordinary same-user variable can name any session it
+/// likes, and a session whose own pid is not in this walking process's ancestry
+/// was never this harness's launcher. A pid-less record cannot contradict
+/// anything — there is no fact to check, and the CLI arm has always taken it
+/// (that is exactly how a hook-registered parent links its child), so it is
+/// taken here too. A claim naming no record at all is `Linked` on the same
+/// grounds: nothing contradicts it, and refusing it would change the CLI arm's
+/// own answer rather than verify it.
+///
+/// `hook_pid: None` — no walkable pid — is `Unclaimed` for every claim. That
+/// is the daemon arm with no door-stamped pid, and it must not be papered over
+/// with this process's own pid: daemon-side that is `aoided`, whose ancestry
+/// would "verify" whatever the caller asserted about the daemon's own tree.
+fn resolve_parent_claim(
+    hook_pid: Option<i32>,
+    claim: Option<&str>,
+    sessions: &[SessionRecord],
+) -> ParentClaim {
+    let (Some(hook_pid), Some(id)) = (hook_pid, claim) else {
+        return ParentClaim::Unclaimed;
+    };
+    match sessions.iter().find(|s| s.session_id == id).and_then(|s| s.pid) {
+        Some(pid) if !pid_ancestry(hook_pid).contains(&(pid as i32)) => {
+            ParentClaim::Contradicted(id.to_string())
+        }
+        Some(_) => ParentClaim::Linked { id: id.to_string(), checked: true },
+        None => ParentClaim::Linked { id: id.to_string(), checked: false },
+    }
+}
+
+/// The one wording for a dropped claim, folded onto the hook's own `Outcome`
+/// (and therefore into the audit record every door writes for that outcome) by
+/// both action sites that can resolve one.
+fn contradicted_claim_note(claim: &str) -> String {
+    format!("hook parent claim `{claim}` contradicted by this hook's own /proc ancestry — not used")
+}
+
+/// And the one wording for a claim that STOOD, on the daemon arm only: a claim
+/// that crossed the hop is a trust decision taken inside this process on
+/// another process's word, so it leaves a trace whether or not it was
+/// contradicted (the CLI arm's claim is this process's own env — the same
+/// process that walks it — and reporting it would say nothing the record does
+/// not already say on every launch).
+fn linked_claim_note(claim: &str, checked: bool) -> String {
+    if checked {
+        format!("hook parent claim `{claim}` verified against this hook's own /proc ancestry")
+    } else {
+        format!("hook parent claim `{claim}` taken unchecked (its record carries no pid)")
+    }
+}
+
+/// The trace a resolved claim leaves on the outcome — and therefore in the
+/// audit record every door writes for it. `daemon_arm` is `may_ring`'s own
+/// fact (`inv.door == Door::Daemon`, the only door that serves a hook over the
+/// hop): a claim that crossed the hop is reported whether it stood or was
+/// dropped, so every cross-process trust decision this door makes is legible
+/// after the fact; the local arm's own env claim is not (see
+/// [`linked_claim_note`]), while a CONTRADICTION is reported from either arm —
+/// a dropped claim is never routine, wherever it was dropped.
+fn claim_trace(claim: &ParentClaim, daemon_arm: bool) -> Option<String> {
+    match claim {
+        ParentClaim::Contradicted(c) => Some(contradicted_claim_note(c)),
+        ParentClaim::Linked { id, checked } if daemon_arm => Some(linked_claim_note(id, *checked)),
+        _ => None,
+    }
 }
 
 /// The exact body `--id` has always run, factored out so [`session_send_to`]'s
@@ -633,13 +749,17 @@ fn deliver_local(inv: &Invocation, id: &str) -> Outcome {
 /// #124; see [`SUBMIT_KEYSTROKE_DELAY`]'s doc comment for why this must be
 /// two writes, never one concatenated write). `delay` is a parameter, not a
 /// hardcoded read of the constant, so a test can pass a real, observable gap
-/// directly — [`deliver_local_with`] is the one production caller, and it
-/// always passes [`SUBMIT_KEYSTROKE_DELAY`].
+/// directly — [`deliver_local_with`] is the one production caller inside this
+/// crate, and it always passes [`SUBMIT_KEYSTROKE_DELAY`].
 ///
-/// `pub(in crate::graph)`: the ring (`graph/doorbell.rs`, P-M5a-2) is the
-/// second production caller — raw injection into a target wrap's socket,
-/// no gate, no provenance prefix, exactly this function's own contract.
-pub(in crate::graph) fn write_delivery(
+/// `pub`: the ring (`graph/doorbell.rs`, P-M5a-2) is the second production
+/// caller — raw injection into a target wrap's socket, no gate, no provenance
+/// prefix, exactly this function's own contract — and `aoide-server`'s
+/// `a2a::spawn_inject_prompt` the third, typing a brand-new session's opening
+/// turn over the same control socket. Every pty injection in the tree goes
+/// through here, which is the point: the keystroke shape (payload, flush, the
+/// gap, then the TARGET's own submit key alone) has one implementation.
+pub fn write_delivery(
     stream: &mut UnixStream,
     payload: &[u8],
     submit: bool,
@@ -989,15 +1109,13 @@ fn session_send_to(inv: &Invocation, target: &str) -> Outcome {
 
     match addr::resolve_with_hub(target, &host, &candidates, &node_names, hub) {
         Resolution::Local(id) => deliver_local(inv, &id),
-        Resolution::Remote { node, query } => match nodes.iter().find(|p| p.name == node) {
-            Some(p) => deliver_remote(inv, p, &query),
+        Resolution::Remote { node, query } => match node_record(cmd, &nodes, &node) {
+            Ok(p) => deliver_remote(inv, p, &query),
             // `addr::resolve` only ever names a node it was HANDED in
             // `node_names` above (built from this SAME `nodes` slice), so a
             // miss here is unreachable in practice — a defensive clean error
             // rather than an unwrap/panic.
-            None => {
-                let out = Outcome::error(cmd, format!("node `{node}` vanished mid-resolution"))
-                    .with_data(json!({ "reason": "node-not-found", "node": node }));
+            Err(out) => {
                 audit_send(inv, "error", &out.message, &text);
                 out
             }
@@ -1036,67 +1154,6 @@ fn session_send_to(inv: &Invocation, target: &str) -> Outcome {
     }
 }
 
-/// Extract every `kind:"session"` node from a node's CACHED graph document
-/// as (sessionId, petname, role) triples — role derived from the SAME
-/// document's own `spawned` edges. A `send`-local twin of
-/// `who.rs::sessions_from_graph`'s extraction: not reused directly, since
-/// that function returns `who`'s own display-only `SessionView`, a shape
-/// this door has no use for — this needs only what [`LocalCandidate`] and an
-/// error-message label need.
-fn node_cached_sessions(graph: &Value) -> Vec<(String, Option<String>, &'static str)> {
-    let empty: Vec<Value> = Vec::new();
-    let nodes = graph.get("nodes").and_then(Value::as_array).unwrap_or(&empty);
-    let edges = graph.get("edges").and_then(Value::as_array).unwrap_or(&empty);
-    nodes
-        .iter()
-        .filter(|n| n["kind"] == "session")
-        .map(|n| {
-            let full_id = n["id"].as_str().unwrap_or("");
-            let session_id = full_id.strip_prefix("session:").unwrap_or(full_id).to_string();
-            let role = if edges.iter().any(|e| e["kind"] == "spawned" && e["to"] == full_id) {
-                "child"
-            } else {
-                "root"
-            };
-            let petname = n["petname"].as_str().map(String::from);
-            (session_id, petname, role)
-        })
-        .collect()
-}
-
-/// Resolve `query` (the remainder after `node/` — see `aoide_storage::addr`'s
-/// tier-5 doc) against `node`'s cached session set. Tries `query` AS TYPED
-/// first — this covers the common, DOCUMENTED case (`addr.rs`'s own module
-/// doc example: `Remote { node: "yomi-strix", query: "brave-otter" }`, a
-/// bare petname) via tiers 1–3 (exact remote id, id tail4, bare petname) —
-/// and only on a miss retries the RECONSTRUCTED `<node>/<query>` form, so a
-/// `role/petname` remainder (what tier 5 stripped the host segment OFF of —
-/// `addr.rs`'s "multi-segment rest… passes it through verbatim" test case)
-/// still resolves via tier 4 against the node's own name standing in as
-/// `host`. `nodes: &[]` on BOTH attempts: a remote-of-remote is not a shape
-/// this phase resolves, so tier 5 can never fire here — see
-/// [`deliver_remote`]'s `Resolution::Remote` arm.
-fn resolve_remote_query(node: &str, query: &str, candidates: &[LocalCandidate<'_>]) -> Resolution {
-    match addr::resolve(query, node, candidates, &[]) {
-        Resolution::NotFound => addr::resolve(&format!("{node}/{query}"), node, candidates, &[]),
-        other => other,
-    }
-}
-
-/// A node session's display label for an error message — mirrors
-/// `who.rs::sessions_from_graph`'s label construction
-/// (`display::session_label` with the node's own name standing in as
-/// `host`), so an ambiguous/not-found `--to` error names candidates the same
-/// way `aoide session --hosts` would already be showing them.
-fn node_session_label(node: &str, session_id: &str, petname: Option<&str>, role: &str) -> String {
-    let rec = aoide_storage::records::SessionRecord {
-        session_id: session_id.to_string(),
-        petname: petname.map(String::from),
-        ..Default::default()
-    };
-    aoide_storage::display::session_label(&rec, node, role)
-}
-
 /// Which of `--submit`/`--yes` the caller actually passed on THIS
 /// invocation — both are accepted-but-unused for a `--to` remote send (see
 /// [`deliver_remote`]'s doc), so this is purely for surfacing that fact back
@@ -1127,6 +1184,10 @@ fn ignored_remote_flags(inv: &Invocation) -> Vec<&'static str> {
 /// LOCAL-SOCKET concept: they decide whether THIS process writes to a
 /// socket it owns. A remote send is always ATTEMPTED over the network,
 /// exactly like `node pull` already does unconditionally.
+/// It does resolve one identity — the `aoide/from` claim
+/// ([`remote_parent_claim`], P-RSA S5) — but that is a CLAIM the far door
+/// judges, not a gate here: this side only refuses to sign a value the far
+/// door would reject outright.
 /// The RECEIVING node's own `message_send` Inject arm
 /// (`aoide-server::a2a::message_send` → `do_inject`) is where the real gate
 /// lives: it decides deliver-now vs. hold-pending off ITS OWN node-trust
@@ -1145,6 +1206,44 @@ fn ignored_remote_flags(inv: &Invocation) -> Vec<&'static str> {
 /// for the same reason). Authenticated cross-host provenance is #51's
 /// scope, not this phase's (messaging plan, "Verified facts").
 fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, query: &str) -> Outcome {
+    deliver_remote_with(inv, node, query, remote_parent_claim)
+}
+
+/// The `aoide/from` claim a remote send carries (P-RSA S5) — the
+/// KERNEL-ATTESTED sender, i.e. `node spawn`'s own resolution with no
+/// `--parent` (`aoide_client::commands::resolve_remote_parent`), because `send`
+/// has no `--parent` flag and the parent steering a child it spawned is exactly
+/// the caller the spawn path stamped into that child's `remoteParent`. The
+/// receiving door reads the claim as `remote_parent_match`: a match delivers
+/// without pending (`autogate-remote-parent`), a mismatch changes nothing. The
+/// env is never read (an ambient `AOIDE_SESSION_ID` is the Osaka failure §4.1
+/// closes), so no daemon and no sealed ancestry simply means no claim.
+///
+/// `Err` is the resolver's own "this node would sign a claim the far door
+/// refuses" case, and the two callers answer it differently because they were
+/// asked for different things. `node spawn` REFUSES the call (a caller who named
+/// a parentage gets one or hears why). A `send` DROPS the claim and delivers
+/// anyway, naming the reason on one warning line: it was never asked for a
+/// parentage — the claim is an autogate shortcut, not the request — and the
+/// door's Inject arm reads a malformed claim as a non-match, never as a refusal
+/// (`a2a.rs`'s own `remote_parent_match`), so an unruly id costs this send the
+/// autogate and nothing else. Neither path lets one reach the wire: the one that
+/// refuses never signs, the other signs nothing.
+fn remote_parent_claim() -> Result<Option<String>, String> {
+    aoide_client::commands::resolve_remote_parent(None)
+}
+
+/// [`deliver_remote`]'s body, parameterized over the claim resolver for the
+/// same reason [`deliver_local_with`] is parameterized over the sender-identity
+/// resolver: the whole remote path stays testable with no daemon and no seal
+/// key in the picture. Production wires [`remote_parent_claim`]; the test
+/// injects a fixed one and reads the bytes the fake transport received.
+fn deliver_remote_with(
+    inv: &Invocation,
+    node: &aoide_storage::node_store::Node,
+    query: &str,
+    resolve_claim: impl Fn() -> Result<Option<String>, String>,
+) -> Outcome {
     let cmd = "send";
     let text = inv.args.join(" ");
     // `--submit`/`--yes` are accepted-but-unused for a remote send (see this
@@ -1163,33 +1262,28 @@ fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, quer
         )
     };
 
-    let cache = aoide_storage::node_store::load_node_cache(&node.name);
-    let Some(graph) = cache.and_then(|c| c.graph) else {
-        let out = Outcome::error(
-            cmd,
-            format!(
-                "node `{}` has no cached graph — run `aoide node pull {}` first",
-                node.name, node.name
-            ),
-        )
-        .with_data(json!({ "reason": "node-never-pulled", "node": node.name }));
-        audit_send(inv, "error", &out.message, &text);
-        return out;
-    };
-
-    let sess = node_cached_sessions(&graph);
-    let candidates: Vec<LocalCandidate<'_>> = sess
-        .iter()
-        .map(|(id, pet, role)| LocalCandidate { session_id: id, petname: pet.as_deref(), role })
-        .collect();
-
-    match resolve_remote_query(&node.name, query, &candidates) {
-        Resolution::Local(remote_id) => {
-            match aoide_client::commands::send_message_to_node(node, &text, &remote_id) {
+    let resolved = resolve_on_node(cmd, &node.name, query);
+    match resolved {
+        Ok(remote_id) => {
+            // The `aoide/from` claim (P-RSA S5): who this node PROVES it is,
+            // resolved before the body is built because the claim rides inside
+            // the signed body digest. An unruly claim never stops the send (see
+            // [`remote_parent_claim`]) — it is dropped here and reported on its
+            // own warning line in BOTH arms below, since the claim was equally
+            // absent whichever way the delivery went.
+            let (from, claim_note) = match resolve_claim() {
+                Ok(from) => (from, String::new()),
+                Err(e) => (None, format!("\nnot claiming parent: {e}")),
+            };
+            match aoide_client::commands::send_message_to_node(node, &text, &remote_id, from.as_deref())
+            {
                 Ok(response) => {
                     let out = Outcome::ok(
                         cmd,
-                        format!("delivered to `{remote_id}` on node `{}`{ignored_note}", node.name),
+                        format!(
+                            "delivered to `{remote_id}` on node `{}`{ignored_note}{claim_note}",
+                            node.name
+                        ),
                     )
                     .changed(vec![format!("sent to {}/{remote_id}", node.name)])
                     .with_data(json!({
@@ -1203,9 +1297,14 @@ fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, quer
                     out
                 }
                 Err(e) => {
+                    // The far node's own words — a peer's bytes, so cleaned
+                    // before they reach a terminal (`common::clean_line`: no
+                    // control character, no `Cf` mark, one clipped line). Same
+                    // rule, same helper, as the watch's `read_refused`.
+                    let peer = common::clean_line(&e);
                     let out = Outcome::error(
                         cmd,
-                        format!("delivering to `{remote_id}` on node `{}`: {e}{ignored_note}", node.name),
+                        format!("delivering to `{remote_id}` on node `{}`: {peer}{ignored_note}{claim_note}", node.name),
                     )
                     .with_data(json!({
                         "reason": "node-send-failed", "node": node.name, "remoteSessionId": remote_id,
@@ -1216,56 +1315,11 @@ fn deliver_remote(inv: &Invocation, node: &aoide_storage::node_store::Node, quer
                 }
             }
         }
-        Resolution::Ambiguous(ids) => {
-            let labels: Vec<String> = ids
-                .iter()
-                .filter_map(|id| {
-                    sess.iter().find(|(sid, _, _)| sid == id).map(|(sid, pet, role)| {
-                        node_session_label(&node.name, sid, pet.as_deref(), role)
-                    })
-                })
-                .collect();
-            let out = Outcome::error(
-                cmd,
-                format!(
-                    "`{query}` is ambiguous on node `{}` — {} session(s) match: {}",
-                    node.name,
-                    ids.len(),
-                    labels.join(", ")
-                ),
-            )
-            .with_data(json!({ "reason": "ambiguous", "node": node.name, "query": query, "candidates": ids }));
-            audit_send(inv, "error", &out.message, &text);
-            out
-        }
-        Resolution::NotFound => {
-            let labels: Vec<String> = sess
-                .iter()
-                .map(|(id, pet, role)| node_session_label(&node.name, id, pet.as_deref(), role))
-                .collect();
-            let hint = if labels.is_empty() {
-                format!(" (node `{}` has no cached sessions)", node.name)
-            } else {
-                format!(" — available on `{}`: {}", node.name, labels.join(", "))
-            };
-            let out = Outcome::error(
-                cmd,
-                format!("no session on node `{}` matches `{query}`{hint}", node.name),
-            )
-            .with_data(json!({ "reason": "not-found", "node": node.name, "query": query }));
-            audit_send(inv, "error", &out.message, &text);
-            out
-        }
-        Resolution::Remote { .. } => {
-            // Unreachable: `resolve_remote_query` always passes `nodes: &[]`
-            // to `addr::resolve`, so tier 5 (the only source of `Remote`)
-            // never fires. A clean error, not a panic/unwrap, in case that
-            // invariant ever drifts.
-            let out = Outcome::error(
-                cmd,
-                format!("`{query}` resolved to a nested node reference, which is not supported"),
-            )
-            .with_data(json!({ "reason": "nested-remote-unsupported", "node": node.name, "query": query }));
+        Err(out) => {
+            // Every refusal `resolve_on_node` can build — an unpulled node,
+            // and the two query outcomes that name no single session — with
+            // this door's own audit line. One arm, because there is one
+            // definition of what each of them says (`remote::unresolved_remote`).
             audit_send(inv, "error", &out.message, &text);
             out
         }
@@ -1632,13 +1686,32 @@ fn payload_ceiling(payload: &Value) -> Option<u64> {
     (n > 0).then_some(n)
 }
 
-/// Up to 8 ancestor pids of THIS hook-firing process, self-first — the
+/// Up to 8 ancestor pids of THE HOOK PROCESS, self-first — the
 /// `hookAncestry` a fresh hook session stamps ONCE at registration (task
 /// #89), consumed later by a `wrap`/`conduct`/`spawn` registration's own
 /// ancestry walk (`window::ancestry_parent`) to find its true launching
-/// agent.
-fn my_hook_ancestry() -> Vec<i32> {
-    pid_ancestry(std::process::id() as i32).into_iter().take(8).collect()
+/// agent. Walks `hook_pid`, never `std::process::id()`: on the daemon-routed
+/// path those are two different processes, and `aoided`'s own ancestry
+/// describes systemd's tree, not the agent's — the same substitution
+/// [`DAEMON_PEER_PID_FLAG`] exists for, and the same reason it must not be undone
+/// here (a session stamped with the daemon's chain would hand every later
+/// registration under that daemon's own process tree a false parent).
+fn hook_ancestry(hook_pid: i32) -> Vec<i32> {
+    pid_ancestry(hook_pid).into_iter().take(8).collect()
+}
+
+/// The parent claim a harness's hook subprocess carries in its own
+/// `AOIDE_SESSION_ID` — the id of the wrap that launched the harness
+/// (`conduct`'s own `spawn_on_pty` export). Read by whoever IS the hook
+/// process, and by nobody else: on the CLI arm that is this process's own
+/// env, and on the daemon arm the value arrives on [`HOOK_PARENT_FLAG`].
+/// **`aoided`'s own env is never a source** — the G8 accounting
+/// (`server/src/daemon.rs::invocation_from_dispatch_request`'s own doc) at
+/// this second door: a daemon that inherited an `AOIDE_SESSION_ID` from the
+/// terminal that launched IT would hand that session to every
+/// hook-registered child, which is a WRONG parent, not a missing one.
+fn own_parent_claim() -> Option<String> {
+    std::env::var("AOIDE_SESSION_ID").ok().filter(|p| !p.is_empty())
 }
 
 /// The profile-parametrized core of [`hook_from_str`].
@@ -1689,8 +1762,15 @@ fn my_hook_ancestry() -> Vec<i32> {
 /// registration below, unmodified. No daemon or no resolvable ancestor →
 /// `None` → nothing touched, no error (fail-closed, never a guess from
 /// cwd/title/workspace).
-fn hook_ensure_session(profile: &AgentProfile, payload: &Value, id: &str, attest: Option<i32>) {
-    hook_ensure_session_with(profile, payload, id, attest, real_attested_wrap)
+fn hook_ensure_session(
+    profile: &AgentProfile,
+    payload: &Value,
+    id: &str,
+    hook_pid: Option<i32>,
+    attest: bool,
+    claim: Option<&str>,
+) -> Option<ParentClaim> {
+    hook_ensure_session_with(profile, payload, id, hook_pid, attest, real_attested_wrap, claim)
 }
 
 /// [`hook_ensure_session`]'s actual body, parameterized over the
@@ -1700,17 +1780,31 @@ fn hook_ensure_session(profile: &AgentProfile, payload: &Value, id: &str, attest
 /// re-parenting behavior is table-testable without a live daemon: production
 /// wires [`real_attested_wrap`] via [`hook_ensure_session`]; tests inject a
 /// fixed resolver directly.
+///
+/// `hook_pid` and `attest` are two questions, deliberately not one: `hook_pid`
+/// is the pid the door stamped (or this process on the local arm) — the ancestry
+/// fact EVERY arm needs to stamp [`hook_ancestry`] on a fresh record, and the
+/// one the claim is checked against — while `attest` is whether THIS arm pays
+/// for the attested-wrap walk, a live-daemon round trip the once-per-tool-call
+/// arms must not spend (`hook_for_profile_gated`'s own doc has the rate
+/// argument). `claim` is the hook's own `AOIDE_SESSION_ID`, as
+/// [`own_parent_claim`] resolves it. Returns the decision it reached, or `None`
+/// when it never reached one (a `sub:` id, or an existing record) — the caller
+/// turns that into the outcome's trace, because only the caller knows which arm
+/// this hook arrived on ([`claim_trace`]).
 fn hook_ensure_session_with(
     profile: &AgentProfile,
     payload: &Value,
     id: &str,
-    attest: Option<i32>,
+    hook_pid: Option<i32>,
+    attest: bool,
     resolve_wrap: impl Fn(i32) -> Option<String>,
-) {
+    claim: Option<&str>,
+) -> Option<ParentClaim> {
     if id.starts_with("sub:") {
-        return;
+        return None;
     }
-    let attested = attest.and_then(resolve_wrap);
+    let attested = attest.then(|| hook_pid.and_then(&resolve_wrap)).flatten();
     if let Some(w) = attested.as_deref() {
         stamp_attested_parent(id, w);
     }
@@ -1748,18 +1842,17 @@ fn hook_ensure_session_with(
                 }
             });
         }
-        return;
+        return None;
     }
     let cwd = payload.get("cwd").and_then(Value::as_str).map(str::to_string);
-    let env_parent = std::env::var("AOIDE_SESSION_ID")
-        .ok()
-        .filter(|p| !p.is_empty() && *p != id);
+    let sessions = existing.as_ref().map(|f| f.sessions.as_slice()).unwrap_or(&[]);
+    let resolved = resolve_parent_claim(hook_pid, claim.filter(|p| *p != id), sessions);
     // Attested beats env — kernel truth over an ordinary same-user variable
     // a subprocess could set on itself. Same value feeds windowless
     // discovery below AND `do_session_start`: one resolution, no double
     // write (the fresh record doesn't exist yet, so `stamp_attested_parent`
     // above was a no-op; `do_session_start` is what actually stamps it).
-    let parent = attested.as_deref().or(env_parent.as_deref());
+    let parent = attested.as_deref().or_else(|| resolved.linked());
     // Windowless by construction (task #89): a hook session whose
     // (about-to-be-set) parent's own lineage runs through an unwindowed
     // conducted wrap must never discover a window at all — that walk would
@@ -1792,7 +1885,10 @@ fn hook_ensure_session_with(
         None,
         pid,
     );
-    stamp_hook_ancestry(id, &my_hook_ancestry());
+    if let Some(pid) = hook_pid {
+        stamp_hook_ancestry(id, &hook_ancestry(pid));
+    }
+    Some(resolved)
 }
 
 /// Test-only convenience wrapper: every existing test in this module drives
@@ -1803,7 +1899,7 @@ fn hook_ensure_session_with(
 /// [`hook_for_profile_gated`] directly with the real `may_ring` value.
 #[cfg(test)]
 fn hook_for_profile(profile: &'static AgentProfile, buf: &str) -> Outcome {
-    hook_for_profile_gated(profile, buf, true, std::process::id() as i32)
+    hook_for_profile_gated(profile, buf, true, Some(std::process::id() as i32), own_parent_claim().as_deref())
 }
 
 /// `may_ring` gates ONLY the Stop-hook ring replay inside `HookAction::
@@ -1812,19 +1908,20 @@ fn hook_for_profile(profile: &'static AgentProfile, buf: &str) -> Outcome {
 /// ring). Every other action, and every other line of this function, is
 /// unaffected by it. [`session_hook`] is the one production caller, passing
 /// `inv.door == Door::Daemon` straight through — never a global, a
-/// thread-local, or an env var. `hook_pid` (P-QOL-C §1) is the raw pid every
+/// thread-local, or an env var. `hook_pid` (P-QOL-C §1) is the pid every
 /// [`hook_ensure_session`] call site below could attest from — see
-/// [`HOOK_PID_FLAG`]'s doc for why it cannot be re-derived from
-/// `std::process::id()` on the daemon-routed path — but only the `Phase`
-/// self-heal and `PhaseIfRunning` arms actually pass it on
-/// (`Some(hook_pid)`); `ToolStart`/`ToolEnd`/`SubRekey`/`SubEnsure` pass
-/// `None` and skip the walk ([`hook_ensure_session`]'s own doc has the rate
-/// argument for the split).
+/// [`DAEMON_PEER_PID_FLAG`]'s doc for why it is `None` whenever the door
+/// stamped no pid, and why this process's own pid is never a substitute.
+/// The claim is the hook
+/// process's own parent claim, resolved by whoever IS the hook process and
+/// passed in — never read here, so the daemon-routed path can never pick up
+/// `aoided`'s own `AOIDE_SESSION_ID` (see [`own_parent_claim`]).
 fn hook_for_profile_gated(
     profile: &'static AgentProfile,
     buf: &str,
     may_ring: bool,
-    hook_pid: i32,
+    hook_pid: Option<i32>,
+    claim: Option<&str>,
 ) -> Outcome {
     let cmd = "session.hook";
     let noop = |reason: &str| {
@@ -1868,15 +1965,34 @@ fn hook_for_profile_gated(
     // Folded onto the final Outcome's message after the match so every OTHER
     // event stays exactly as chatty as it was.
     let mut lane_note: Option<String> = None;
+    // The other "the hook learned something the operator must be able to find
+    // later" note, on the same channel for the same reason: a parent claim the
+    // kernel contradicted (see [`resolve_parent_claim`]) is dropped, and the
+    // record of the drop is the outcome every door audits for this event.
+    let mut claim_note: Option<String> = None;
     let inner = match action {
         HookAction::Start { id, cwd } => {
             // A claude launched INSIDE a conducted session inherits its parent's
-            // `AOIDE_SESSION_ID` in the hook process env — thread it as the
+            // `AOIDE_SESSION_ID` in the HOOK PROCESS's env — thread it as the
             // parent so a claude-conducting-claude (or a claude-in-a-shell) nests
-            // in the graph. The hook door inherits the launcher's env.
-            let env_parent = std::env::var("AOIDE_SESSION_ID")
-                .ok()
-                .filter(|p| !p.is_empty() && *p != id);
+            // in the graph. `claim` is exactly that env value, read where the hook
+            // actually runs (`own_parent_claim`): on the daemon-routed path it
+            // arrives on [`HOOK_PARENT_FLAG`] rather than being re-read here, so a
+            // daemon whose own env happens to carry an `AOIDE_SESSION_ID` can
+            // never pass it off as this harness's launcher.
+            let env_parent = claim.filter(|p| *p != id);
+            // The claim is CHECKED before it is used (`resolve_parent_claim`):
+            // a claimed record carrying a pid this hook process does not run
+            // under is a stale or fabricated `AOIDE_SESSION_ID`, and the
+            // session registers parentless instead. The roster is loaded once
+            // here and reused for the windowless walk below.
+            let existing = load_stage::<SessionsFile>(&sessions_path()).ok();
+            let resolved = resolve_parent_claim(
+                hook_pid,
+                env_parent,
+                existing.as_ref().map(|f| f.sessions.as_slice()).unwrap_or(&[]),
+            );
+            claim_note = claim_trace(&resolved, may_ring);
             // Attested kernel evidence outranks `env_parent` (`start_parent`'s
             // own doc): `do_session_start` below re-stamps `parentSessionId`
             // on any EXISTING id whenever `parent` is `Some` (`upsert_session`
@@ -1890,7 +2006,7 @@ fn hook_for_profile_gated(
             // below rather than left standing — `session kill` then refuses
             // (`NO_DEDICATED_PROCESS`) instead of resolving through the
             // terminal that hosted that earlier run.
-            let parent = start_parent(real_attested_wrap(hook_pid), env_parent);
+            let parent = start_parent(hook_pid.and_then(real_attested_wrap), resolved.linked());
             if parent.is_none() {
                 clear_stale_parent(&id);
             }
@@ -1900,8 +2016,8 @@ fn hook_for_profile_gated(
             // outright rather than pid-ancestry-walking to the ENCLOSING
             // terminal's window (the exact same-window collision that made
             // the eviction pass treat two unrelated agents as stale twins).
-            let windowless = load_stage::<SessionsFile>(&sessions_path())
-                .ok()
+            let windowless = existing
+                .as_ref()
                 .map(|f| windowless_by_lineage_from_parent(parent.as_deref(), &f.sessions))
                 .unwrap_or(false);
             // Best-effort: the hook is a subprocess of the agent's terminal, so
@@ -1944,7 +2060,16 @@ fn hook_for_profile_gated(
                 None,
                 pid,
             );
-            stamp_hook_ancestry(&id, &my_hook_ancestry());
+            if let Some(pid) = hook_pid {
+                stamp_hook_ancestry(&id, &hook_ancestry(pid));
+            }
+            // The harness's own hello, timestamped: the one writer of
+            // `sessionStartAt`, and the fact a first-turn injection waits on
+            // (`wait_ready`). Stamped AFTER `do_session_start` above, so the
+            // record it lands on exists — and on every SessionStart, a resume
+            // included, so the stamp always names the most recent launch this
+            // harness announced.
+            stamp_session_start_at(&id, &now_iso_utc());
             // The check lane's own SessionStart trigger. Settled: run the
             // lane, drain any pending note, flag an already-red or
             // already-.nix-carrying tree. Mid-turn: no lane run, just replay
@@ -1976,7 +2101,8 @@ fn hook_for_profile_gated(
             // env-parent threading), fresh idle. Attested (`Some(hook_pid)`):
             // this arm fires once per turn (Stop/UserPromptSubmit/Awaiting),
             // the rate the re-parenting walk is actually worth paying.
-            hook_ensure_session(profile, &payload, &id, Some(hook_pid));
+            claim_note = hook_ensure_session(profile, &payload, &id, hook_pid, true, claim)
+                .and_then(|c| claim_trace(&c, may_ring));
             // Backfill a still-empty windowAddress on any later hook — covers a
             // session that registered before the window mapped (or before this
             // discovery shipped), so it becomes jumpable without a restart.
@@ -2069,7 +2195,8 @@ fn hook_for_profile_gated(
         HookAction::PhaseIfRunning { id, phase } => {
             // Attested — the other once-per-turn hook (an idle ping outside
             // an active turn), same rate as the `Phase` self-heal above.
-            hook_ensure_session(profile, &payload, &id, Some(hook_pid));
+            claim_note = hook_ensure_session(profile, &payload, &id, hook_pid, true, claim)
+                .and_then(|c| claim_trace(&c, may_ring));
             ensure_session_window(&id);
             do_session_phase_if(&id, &phase, "working")
         }
@@ -2079,10 +2206,12 @@ fn hook_for_profile_gated(
             activity,
             spawn,
         } => {
-            // Unattested (`None`) — PreToolUse fires on EVERY tool call; the
-            // walk buys nothing here (a wrap cannot change mid-tool-call),
-            // so only the pid refresh / fresh registration below runs.
-            hook_ensure_session(profile, &payload, &session, None);
+            // Unattested (`attest: false`) — PreToolUse fires on EVERY tool
+            // call; the walk buys nothing here (a wrap cannot change
+            // mid-tool-call), so only the pid refresh / fresh registration
+            // below runs.
+            claim_note = hook_ensure_session(profile, &payload, &session, hook_pid, false, claim)
+                .and_then(|c| claim_trace(&c, may_ring));
             ensure_session_window(&session);
             // Spawn the child FIRST so it exists before its parent's activity
             // points at it, then mark the owner working + its current activity.
@@ -2099,7 +2228,8 @@ fn hook_for_profile_gated(
         } => {
             // Unattested — PostToolUse, the same every-tool-call rate as
             // ToolStart above.
-            hook_ensure_session(profile, &payload, &session, None);
+            claim_note = hook_ensure_session(profile, &payload, &session, hook_pid, false, claim)
+                .and_then(|c| claim_trace(&c, may_ring));
             ensure_session_window(&session);
             if let Some(sub) = end_sub {
                 do_subagent_end(&sub);
@@ -2116,7 +2246,8 @@ fn hook_for_profile_gated(
             to_sub_id,
         } => {
             // Unattested — a subagent handoff, not a wrap change.
-            hook_ensure_session(profile, &payload, &session, None);
+            claim_note = hook_ensure_session(profile, &payload, &session, hook_pid, false, claim)
+                .and_then(|c| claim_trace(&c, may_ring));
             ensure_session_window(&session);
             do_subagent_rekey(&from_sub_id, &to_sub_id);
             // The launch returned; the parent is no longer running that tool in
@@ -2135,7 +2266,8 @@ fn hook_for_profile_gated(
             create,
         } => {
             // Unattested — same reasoning as SubRekey above.
-            hook_ensure_session(profile, &payload, &session, None);
+            claim_note = hook_ensure_session(profile, &payload, &session, hook_pid, false, claim)
+                .and_then(|c| claim_trace(&c, may_ring));
             do_subagent_spawn(&sub_id, &session, &agent_type, &agent_type, create);
             Outcome::ok("session.hook", format!("subagent {sub_id}"))
         }
@@ -2223,9 +2355,13 @@ fn hook_for_profile_gated(
     // (`hooks::door_command`'s claude wrapper stopped swallowing stdout for
     // exactly this reason), so the note has nowhere else to go.
     let note_for_data = lane_note.clone();
-    let message = match lane_note {
-        Some(note) => format!("{} — {note}", inner.message),
-        None => inner.message,
+    let claim_for_data = claim_note.clone();
+    let message = match (lane_note, claim_note) {
+        (None, None) => inner.message,
+        (lane, claim) => {
+            let notes: Vec<String> = [lane, claim].into_iter().flatten().collect();
+            format!("{} — {}", inner.message, notes.join("; "))
+        }
     };
     Outcome::ok(cmd, message)
         .changed(inner.changed)
@@ -2234,6 +2370,7 @@ fn hook_for_profile_gated(
             "innerStatus": format!("{:?}", inner.status),
             "innerData": inner.data,
             "checkLane": note_for_data,
+            "parentClaim": claim_for_data,
         }))
 }
 
@@ -2271,30 +2408,50 @@ fn hook_profile_for(inv: &Invocation) -> Result<&'static AgentProfile, Outcome> 
 /// which is never the calling hook's own pipe.
 const STDIN_PAYLOAD_FLAG: &str = "__daemon-stdin-payload";
 
-/// Internal-only flag key carrying the HOOK process's own real pid across the
-/// same daemon hop `STDIN_PAYLOAD_FLAG` rides (P-QOL-C §1) — never set by a
-/// real CLI/MCP/A2A caller, never registered in `commands/graph.rs`'s
-/// `flags:` list, no schema surface. `std::process::id()` read daemon-side
-/// (inside `hook_ensure_session`'s attested-wrap walk) is `aoided`'s OWN
-/// pid, not the hook's — useless as ancestry evidence (its parent is
-/// `systemd --user`, not the agent's terminal tree). The hook process is
-/// blocked on the daemon's reply while this rides along, so its `/proc`
-/// entry is still live when the daemon walks it.
+/// Internal-only flag key carrying the DOOR's own kernel-attested peer pid —
+/// stamped by `aoided` on every dispatch request it builds
+/// (`server/src/daemon.rs::invocation_from_dispatch_request`, from the same
+/// `SO_PEERCRED` read `cross_uid_gate` admits the connection on), and NEVER set
+/// by a caller: the wire's value for this key is overwritten before the
+/// invocation exists. That is the whole point of it being a door stamp rather
+/// than a hook-carried flag — the hook's own pid is a fact about the caller,
+/// and only the door can observe it (the review's M1: a hook-carried pid and a
+/// hook-carried claim are the same caller's word twice, which verifies
+/// nothing).
 ///
-/// **This pid is trusted verbatim, not attested.** It rides the SAME
-/// dispatch socket `cross_uid_gate`'s doc (`server/src/daemon.rs`) and
-/// `daemon_seal_pubkey_hex`'s doc (`client/src/daemon.rs`) already give the
-/// honest accounting for: a same-uid process can already dispatch over that
-/// socket and could name any pid here it likes, real or fabricated — "NOT a
-/// channel a same-uid attacker is locked out of". Not a privilege
-/// escalation: `terminate_verified` re-verifies the resolved kill target's
-/// OWN seal before ever signaling it (`actions.rs`), and a same-uid attacker
-/// could already signal any process of its own directly, flag or no flag —
-/// but a lied-about pid can still walk to, and re-parent onto, a real
-/// conducted wrap that pid's true ancestry has no business near, so treat
-/// this flag as ordinary same-uid input, never as kernel evidence in its own
-/// right.
-const HOOK_PID_FLAG: &str = "__daemon-hook-pid";
+/// Read by `session hook`'s daemon arm as the ONLY pid it will walk
+/// (attestation, the ancestry stamp, and the claim check all key on it).
+/// Absent or unparsable — an older `aoided`, a non-peercred host, an empty
+/// stamp — means NO pid, which means no claim and no ancestry stamp, never
+/// `std::process::id()`: daemon-side that is `aoided` itself, and stamping its
+/// ancestry onto a harness record is the false fact this door just stopped
+/// manufacturing.
+///
+/// Not registered in `commands/graph.rs`'s `flags:` list and no schema surface,
+/// the same posture the payload/claim keys hold; being door-written, it is also
+/// the one of the three that is not ordinary same-uid input.
+pub const DAEMON_PEER_PID_FLAG: &str = "__daemon-peer-pid";
+
+/// Internal-only flag key carrying the HOOK PROCESS's own `AOIDE_SESSION_ID`
+/// across the same daemon hop the payload rides — never set by a real
+/// CLI/MCP/A2A caller, never registered in `commands/graph.rs`'s `flags:`
+/// list, no schema surface. The value is what [`own_parent_claim`] read in the
+/// hook process itself; the daemon-side arm takes its parent claim from HERE
+/// and never from its own env (`invocation_from_dispatch_request`'s G8
+/// accounting), so "the harness's launcher" is a fact about the CALLER in both
+/// arms rather than about whichever process happens to answer the door.
+///
+/// **Ordinary same-uid input, and only as far as the door itself is.** It rides the
+/// dispatch socket `cross_uid_gate` (`server/src/daemon.rs`) admits only
+/// same-uid peers on — a same-uid process could already export any
+/// `AOIDE_SESSION_ID` it likes and take the CLI arm (`session_hook`'s own
+/// no-daemon fallback) with it, so carrying the claim over this hop grants no
+/// capability that door does not already grant. It is ordinary same-uid input,
+/// never kernel evidence: the attested-wrap walk stays FIRST
+/// (`start_parent`/`hook_ensure_session_with`), so a conducted parent is proven
+/// whenever it can be, and a claim only ever fills the gap the CLI arm's own
+/// env fallback fills today.
+const HOOK_PARENT_FLAG: &str = "__daemon-hook-parent";
 
 /// `session hook [--agent <name>]` — the hook door for agent harnesses.
 /// Reads ONE JSON object from stdin and maps it (through the selected agent
@@ -2307,6 +2464,19 @@ const HOOK_PID_FLAG: &str = "__daemon-hook-pid";
 /// on [`STDIN_PAYLOAD_FLAG`] instead of the wire growing a new field. The
 /// daemon-side invocation (flag present) skips both the routing attempt AND
 /// the real stdin read, using the forwarded payload directly.
+///
+/// **The two arms, and the one rule between them.** The hook is the only
+/// process that can read what a harness reports about itself — its own pid and
+/// the parent claim in its own env ([`HOOK_PARENT_FLAG`]) — and on the daemon
+/// arm the DOOR is the only party that can see the pid
+/// ([`DAEMON_PEER_PID_FLAG`]). Whichever arm runs the action, the parent resolves
+/// the same way — [`start_parent`]'s attested-wrap-first order, then the
+/// claim — and the ancestry stamp walks the same pid ([`hook_ancestry`]); the
+/// ONLY difference is where those two values come from: daemon-side they
+/// arrive on the routed invocation, and locally they ARE this process.
+/// Nothing in the action below reads `std::env::var("AOIDE_SESSION_ID")`, so
+/// `aoided`'s own ambient session can never be mistaken for the harness's
+/// launcher.
 pub fn session_hook(inv: &Invocation) -> Outcome {
     use std::io::Read;
     let profile = match hook_profile_for(inv) {
@@ -2323,26 +2493,40 @@ pub fn session_hook(inv: &Invocation) -> Outcome {
     // is whatever door the ORIGINAL caller actually used.
     let may_ring = inv.door == Door::Daemon;
     if let Some(payload) = inv.flags.get(STDIN_PAYLOAD_FLAG) {
-        // Daemon side: `std::process::id()` here is `aoided`'s own pid, not
-        // the hook's — use the pid the hook stamped onto the routed
-        // invocation before the hop, falling back to this process's pid on
-        // an absent or unparsable flag (never a hard failure of the hook).
-        let hook_pid = inv
+        // Daemon side: the ONLY pid this arm may walk is the door's own
+        // `SO_PEERCRED` stamp (`DAEMON_PEER_PID_FLAG`) — a caller-supplied pid
+        // and a caller-supplied claim are one caller's word twice, and the door
+        // is holding the real one. Absent/blank/unparsable (an older `aoided`
+        // that does not stamp it yet, a host with no peer credentials) means NO
+        // pid: `hook_for_profile_gated` then registers the session parentless
+        // and stamps no ancestry, never falling back to this process's own —
+        // that would be `aoided`'s ancestry, the false fact this door exists to
+        // stop recording.
+        let door_pid = inv
             .flags
-            .get(HOOK_PID_FLAG)
+            .get(DAEMON_PEER_PID_FLAG)
             .and_then(|s| s.parse::<i32>().ok())
-            .unwrap_or_else(|| std::process::id() as i32);
-        return hook_for_profile_gated(profile, payload, may_ring, hook_pid);
+            .filter(|p| *p > 0);
+        // The claim comes off the wire or not at all — deliberately no env
+        // fallback here (`own_parent_claim`'s own doc). It is CHECKED against
+        // `door_pid`'s ancestry before it is used.
+        let claim = inv.flags.get(HOOK_PARENT_FLAG).map(String::as_str).filter(|p| !p.is_empty());
+        return hook_for_profile_gated(profile, payload, may_ring, door_pid, claim);
     }
     let mut buf = String::new();
     let _ = std::io::stdin().lock().read_to_string(&mut buf);
+    // THIS process is the hook: its own pid IS the kernel fact, and its own env
+    // claim is the harness's launcher. Read once, so a daemon appearing or dying
+    // between two events cannot change the answer.
+    let hook_pid = std::process::id() as i32;
+    let claim = own_parent_claim();
     let routed = Invocation {
         path: inv.path.clone(),
         args: inv.args.clone(),
         flags: {
             let mut f = inv.flags.clone();
             f.insert(STDIN_PAYLOAD_FLAG.to_string(), buf.clone());
-            f.insert(HOOK_PID_FLAG.to_string(), std::process::id().to_string());
+            f.insert(HOOK_PARENT_FLAG.to_string(), claim.clone().unwrap_or_default());
             f
         },
         door: inv.door,
@@ -2351,7 +2535,7 @@ pub fn session_hook(inv: &Invocation) -> Outcome {
         return outcome;
     }
     // Local, no-daemon fallback: THIS process is the hook itself.
-    hook_for_profile_gated(profile, &buf, may_ring, std::process::id() as i32)
+    hook_for_profile_gated(profile, &buf, may_ring, Some(hook_pid), claim.as_deref())
 }
 
 #[cfg(test)]
@@ -4389,73 +4573,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_remote_query_table() {
-        // Pure, no I/O — mirrors `aoide_storage::addr`'s own table-driven
-        // style, scoped to what this function adds on top of `addr::resolve`
-        // itself: trying `query` exactly as typed first (tiers 1-3), and
-        // only on a miss retrying the reconstructed `<node>/<query>` form
-        // (tier 4, the `role/petname` remainder tier 5 stripped the host off
-        // of).
-        struct Case {
-            name: &'static str,
-            query: &'static str,
-            candidates: Vec<(&'static str, Option<&'static str>, &'static str)>,
-            expected: Resolution,
-        }
-        let node = "yomi-strix";
-        let cases = vec![
-            Case {
-                name: "exact remote id, tried as typed",
-                query: "sess-aaaa-1111",
-                candidates: vec![("sess-aaaa-1111", Some("brave-otter"), "root")],
-                expected: Resolution::Local("sess-aaaa-1111".into()),
-            },
-            Case {
-                name: "id tail4, tried as typed",
-                query: "1111",
-                candidates: vec![("sess-aaaa-1111", Some("brave-otter"), "root")],
-                expected: Resolution::Local("sess-aaaa-1111".into()),
-            },
-            Case {
-                name: "bare petname, tried as typed (the documented common case)",
-                query: "brave-otter",
-                candidates: vec![("sess-aaaa-1111", Some("brave-otter"), "root")],
-                expected: Resolution::Local("sess-aaaa-1111".into()),
-            },
-            Case {
-                name: "role/petname compound falls back to the reconstructed <node>/<query> form",
-                query: "root/brave-otter",
-                candidates: vec![("sess-aaaa-1111", Some("brave-otter"), "root")],
-                expected: Resolution::Local("sess-aaaa-1111".into()),
-            },
-            Case {
-                name: "petname collision on the node's own cache is ambiguous",
-                query: "brave-otter",
-                candidates: vec![
-                    ("sess-aaaa-1111", Some("brave-otter"), "root"),
-                    ("sess-bbbb-2222", Some("brave-otter"), "child"),
-                ],
-                expected: Resolution::Ambiguous(vec!["sess-aaaa-1111".into(), "sess-bbbb-2222".into()]),
-            },
-            Case {
-                name: "no match in either attempt",
-                query: "ghost-name",
-                candidates: vec![("sess-aaaa-1111", Some("brave-otter"), "root")],
-                expected: Resolution::NotFound,
-            },
-        ];
-        for c in cases {
-            let candidates: Vec<LocalCandidate<'_>> = c
-                .candidates
-                .iter()
-                .map(|(id, pet, role)| LocalCandidate { session_id: id, petname: *pet, role })
-                .collect();
-            let got = resolve_remote_query(node, c.query, &candidates);
-            assert_eq!(got, c.expected, "case failed: {}", c.name);
-        }
-    }
-
-    #[test]
     fn to_and_id_together_is_a_usage_error() {
         let out = session_send(&send_invocation(&["hi"], &[("id", "x"), ("to", "y"), ("yes", "true")]));
         assert_eq!(out.status, aoide_protocol::output::Status::Usage);
@@ -4758,6 +4875,176 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // ── P-RSA S5: the `aoide/from` claim a remote send carries ────────────
+
+    /// A fake `curl` at the front of `PATH` that CAPTURES the body handed to
+    /// it on stdin and answers like a door (`{response}` + curl's
+    /// `-w "\n%{http_code}"` trailer, `run_curl_with_timeout`'s own protocol).
+    /// The two claim tests below are the only readers: this is where the bytes
+    /// `deliver_remote_with` would put on the wire are actually inspectable,
+    /// with no network, no daemon and no real `curl` process. Same shim
+    /// technique `aoide-client`'s transport tests use; kept local because a
+    /// remote send's BODY is built in this crate and the conduct suite should
+    /// not reach into that crate's test-only helpers.
+    ///
+    /// The stdin redirect is load-bearing twice: `post_json` always writes the
+    /// body to curl's stdin (`--data-binary @-`), so a shim that exits without
+    /// reading turns a descheduled caller's write into an EPIPE
+    /// (`crates/AGENTS.md`) — and the captured copy IS the assertion.
+    fn install_capturing_curl(
+        tag: &str,
+        capture: &Path,
+        response: &str,
+    ) -> (PathBuf, Option<String>) {
+        let shim_dir = std::env::temp_dir().join(format!(
+            "aoide-conduct-curlshim-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&shim_dir).unwrap();
+        let shim = shim_dir.join("curl");
+        std::fs::write(
+            &shim,
+            format!(
+                "#!/bin/sh\ncat > '{capture}'\ncat <<'JSONBODY'\n{response}\nJSONBODY\nprintf '200'\n",
+                capture = capture.display(),
+            ),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let saved_path = std::env::var("PATH").ok();
+        std::env::set_var(
+            "PATH",
+            format!("{}:{}", shim_dir.display(), saved_path.clone().unwrap_or_default()),
+        );
+        (shim_dir, saved_path)
+    }
+
+    fn uninstall_capturing_curl(shim_dir: &Path, saved_path: Option<String>) {
+        match saved_path {
+            Some(p) => std::env::set_var("PATH", p),
+            None => std::env::remove_var("PATH"),
+        }
+        let _ = std::fs::remove_dir_all(shim_dir);
+    }
+
+    /// The fixture both claim tests share: isolated stage/state, a VERIFIED
+    /// node record and that node's cached graph naming one session. Isolation
+    /// is what makes the verified node signable with no daemon anywhere —
+    /// `sign_headers_for_node` mints its identity under `AOIDE_STATE_DIR`,
+    /// which is this temp dir. Straight at `deliver_remote_with`, so no node
+    /// registry is involved (the record is passed in) and `--to` resolution
+    /// reads only the cache written here.
+    fn remote_claim_fixture(tag: &str) -> (PathBuf, aoide_storage::node_store::Node) {
+        let root = unique_stage(tag);
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::create_dir_all(&state).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+
+        let mut node = test_node("yomi-strix", "http://127.0.0.1:9/");
+        node.verified = true;
+        node.pubkey = Some("aa11".to_string());
+        aoide_storage::node_store::save_node_cache(&test_cache(
+            "yomi-strix",
+            node_graph_json(&[("sess-remote-1", Some("misty-comet"), "child")]),
+        ))
+        .unwrap();
+        (root, node)
+    }
+
+    /// The client half of S5: `send --to <node>/<query>` carries the
+    /// KERNEL-ATTESTED parent as its `aoide/from` claim, inside the body it
+    /// signs. That is the same resolution `node spawn` stamps into a child's
+    /// `remoteParent`, which is the whole point — the door's Inject arm can
+    /// only recognise the parent steering the child it spawned if the two
+    /// sides read ONE resolution. The injected claim resolver is the seam (no
+    /// daemon, no seal key in the picture); the captured stdin is the proof
+    /// the value actually rides the wire, on an ordinary inject to the
+    /// resolved remote session.
+    #[test]
+    fn send_to_carries_the_attested_parent_as_its_from_claim() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "AOIDE_AUDIT_LOG"]);
+        let (root, node) = remote_claim_fixture("to-remote-claim");
+
+        let capture = root.join("captured.json");
+        let (shim_dir, saved_path) = install_capturing_curl("claim", &capture, "{}");
+        let out = deliver_remote_with(
+            &send_invocation(&["hi", "there"], &[]),
+            &node,
+            "misty-comet",
+            || Ok(Some("parent-1".to_string())),
+        );
+        uninstall_capturing_curl(&shim_dir, saved_path);
+
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+        assert!(!out.message.contains("not claiming parent"), "msg: {}", out.message);
+
+        let sent: Value = serde_json::from_str(&std::fs::read_to_string(&capture).unwrap()).unwrap();
+        assert_eq!(
+            sent["params"]["message"]["metadata"][aoide_protocol::wire::FROM_SESSION_KEY],
+            "parent-1",
+            "the attested parent is the claim the door reads: {sent}",
+        );
+        assert_eq!(sent["params"]["message"]["contextId"], "sess-remote-1");
+        assert_eq!(sent["params"]["message"]["parts"][0]["text"], "hi there");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The ruling on S5's client half: an UNRULY attested id does not refuse
+    /// the send. `node spawn` would — its caller named a parentage — but a
+    /// `send --to` was never asked for one: the claim is an autogate shortcut,
+    /// and the door's Inject arm reads a malformed claim as a non-match
+    /// (`remote_parent_match`), never as a refusal. So the send goes out with
+    /// NO claim (the same delivery it gets today with no daemon to attest
+    /// against) and names the reason on one warning line, rather than failing
+    /// a send that works.
+    #[test]
+    fn an_unruly_claim_still_sends_without_claiming_a_parent() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "AOIDE_AUDIT_LOG"]);
+        let (root, node) = remote_claim_fixture("to-remote-unruly");
+
+        let capture = root.join("captured.json");
+        let (shim_dir, saved_path) = install_capturing_curl("unruly", &capture, "{}");
+        let out = deliver_remote_with(
+            &send_invocation(&["hi"], &[]),
+            &node,
+            "misty-comet",
+            || Err("`bogus/1` is not a legal claim".to_string()),
+        );
+        uninstall_capturing_curl(&shim_dir, saved_path);
+
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+        assert!(
+            out.message.contains("not claiming parent: `bogus/1` is not a legal claim"),
+            "one warning line naming the reason: {}",
+            out.message
+        );
+        assert!(
+            out.message.contains("delivered to `sess-remote-1`"),
+            "the send itself still succeeded: {}",
+            out.message
+        );
+
+        let sent: Value = serde_json::from_str(&std::fs::read_to_string(&capture).unwrap()).unwrap();
+        assert!(
+            sent["params"]["message"].get("metadata").is_none(),
+            "no claim reaches the wire at all: {sent}",
+        );
+        assert_eq!(sent["params"]["message"]["contextId"], "sess-remote-1");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn to_remote_ambiguous_in_the_cache_lists_node_session_labels() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -4823,6 +5110,50 @@ mod tests {
         assert_eq!(out.data.as_ref().unwrap()["reason"], "not-found");
         assert!(out.message.contains("misty-comet"), "msg: {}", out.message);
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// HIGH-1's `send` twin: what a peer answers with is its OWN bytes, so a
+    /// hostile error message (an OSC-52 clipboard write) must be cleaned
+    /// before this door prints it — one sanitizer, both doors. Driven against a
+    /// REAL curl POST to a fake door (never a mocked transport), because the
+    /// point is the text that actually arrives from the wire.
+    #[test]
+    fn a_remote_send_failure_cleans_the_far_node_s_own_error_text() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "AOIDE_STATE_DIR", "AOIDE_AUDIT_LOG"]);
+
+        let root = unique_stage("to-remote-hostile-error");
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::create_dir_all(&state).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+
+        let hostile = format!("\u{1b}]52;c;{}\u{7}\u{202e}gniddec\r", "QkFTRTY0".repeat(20));
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "error": { "code": -32000, "message": hostile } })
+            .to_string();
+        let (listener, url) = crate::graph::testutil::fake_door(body);
+
+        aoide_storage::node_store::save_nodes(&[test_node("yomi-strix", &url)]).unwrap();
+        aoide_storage::node_store::save_node_cache(&test_cache(
+            "yomi-strix",
+            node_graph_json(&[("sess-remote-1", Some("misty-comet"), "root")]),
+        ))
+        .unwrap();
+
+        let out = session_send(&send_invocation(&["hi"], &[("to", "yomi-strix/misty-comet")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["reason"], "node-send-failed");
+        assert!(out.message.contains("node returned an error:"), "{}", out.message);
+        for forbidden in ['\u{1b}', '\u{7}', '\r', '\u{202e}'] {
+            assert!(!out.message.contains(forbidden), "{forbidden:?} reached the message: {}", out.message);
+        }
+        assert!(out.message.contains("QkFTRTY0"), "the peer's text is shown as text: {}", out.message);
+
+        drop(listener);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -6267,15 +6598,15 @@ mod tests {
     }
 
     /// The gate itself (`hook_ensure_session`'s own doc has the rate
-    /// argument): `attest: Some(pid)` on the Start-shaped self-heal and
-    /// PhaseIfRunning arms runs the walk, `None` on a tool/sub arm never
+    /// argument): `attest: true` on the Start-shaped self-heal and
+    /// PhaseIfRunning arms runs the walk, `false` on a tool/sub arm never
     /// even calls the resolver. Driven straight at [`hook_ensure_session_with`]
     /// with each arm's actual `attest` argument shape — the SAME injection
     /// seam [`deliver_local_with`]'s own tests use for
     /// [`real_attested_sender`] — rather than a live daemon (out of scope
     /// for this crate's fixtures, `isolated_mail_root`'s own doc).
     #[test]
-    fn attested_walk_fires_only_when_attest_carries_a_pid() {
+    fn attested_walk_fires_only_where_the_arm_asks_for_it() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _env_sid = EnvVars::save(&["AOIDE_SESSION_ID"]);
         std::env::remove_var("AOIDE_SESSION_ID");
@@ -6307,41 +6638,43 @@ mod tests {
         );
         let payload = json!({ "session_id": "c1", "hook_event_name": "Stop" });
 
-        // (i) Start-shaped: the `Phase` arm's registration self-heal passes
-        // `Some(hook_pid)` — re-stamps the stale parent onto the attested wrap.
-        hook_ensure_session_with(profile, &payload, "c1", Some(4242), resolve_wrap_x);
+        // (i) Start-shaped: the `Phase` arm's registration self-heal asks for
+        // the walk (`attest: true`) — re-stamps the stale parent onto it.
+        hook_ensure_session_with(profile, &payload, "c1", Some(4242), true, resolve_wrap_x, None);
         assert_eq!(parent_of("c1"), Some("wrap-x".to_string()), "Start-shaped re-stamps");
         assert_eq!(calls.get(), 1);
 
-        // (ii) PhaseIfRunning-shaped: same `Some(hook_pid)`, same treatment.
+        // (ii) PhaseIfRunning-shaped: same `attest: true`, same treatment.
         restage_stale("c1");
-        hook_ensure_session_with(profile, &payload, "c1", Some(4242), resolve_wrap_x);
+        hook_ensure_session_with(profile, &payload, "c1", Some(4242), true, resolve_wrap_x, None);
         assert_eq!(parent_of("c1"), Some("wrap-x".to_string()), "PhaseIfRunning-shaped re-stamps");
         assert_eq!(calls.get(), 2);
 
-        // (iii) ToolStart-shaped: `None` — the resolver is never even
+        // (iii) ToolStart-shaped: `attest: false` — the resolver is never even
         // invoked (the call count does not move), so the stale parent from
         // ToolStart/ToolEnd/SubRekey/SubEnsure's shared shape survives untouched.
         restage_stale("c1");
-        hook_ensure_session_with(profile, &payload, "c1", None, resolve_wrap_x);
+        hook_ensure_session_with(profile, &payload, "c1", Some(4242), false, resolve_wrap_x, None);
         assert_eq!(parent_of("c1"), Some("old-wrap".to_string()), "ToolStart-shaped never re-stamps");
-        assert_eq!(calls.get(), 2, "attest: None must never call the resolver");
+        assert_eq!(calls.get(), 2, "attest: false must never call the resolver");
     }
 
     /// (iv) The FRESH branch's own resolution order — `attested.or(env_parent)`
-    /// — survives the `attest: Option<i32>` gate: an attested wrap still
-    /// outranks `AOIDE_SESSION_ID` when both are present, exactly as it did
-    /// when the walk ran unconditionally.
+    /// — survives the `attest` gate: an attested wrap still outranks the
+    /// caller's `AOIDE_SESSION_ID` claim when both are present, exactly as it
+    /// did when the walk ran unconditionally. The claim is PASSED here rather
+    /// than set in the ambient env: since the daemon arm has no env of the
+    /// hook's to read, the claim is a value the caller hands in
+    /// (`own_parent_claim` / [`HOOK_PARENT_FLAG`]), and that is what this test
+    /// is asserting the precedence against.
     #[test]
     fn attested_wins_over_env_parent_on_the_fresh_branch() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env_sid = EnvVars::save(&["AOIDE_SESSION_ID"]);
         let (_env, _root) = aoide_test_support::isolated_mail_root("hook-attest-fresh");
         let profile = agent_profile(CLAUDE_PROFILE.name).unwrap();
-        std::env::set_var("AOIDE_SESSION_ID", "env-parent");
 
         let payload = json!({ "session_id": "c2", "hook_event_name": "Stop" });
-        hook_ensure_session_with(profile, &payload, "c2", Some(4242), |_| Some("wrap-x".to_string()));
+        hook_ensure_session_with(profile, &payload, "c2", Some(4242), true, |_| Some("wrap-x".to_string()), Some("env-parent"));
 
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
         let rec = s.sessions.iter().find(|s| s.session_id == "c2").unwrap();
@@ -6359,16 +6692,210 @@ mod tests {
     #[test]
     fn start_parent_prefers_attested_over_env_and_falls_back() {
         assert_eq!(
-            start_parent(Some("wrap-x".to_string()), Some("env-parent".to_string())),
+            start_parent(Some("wrap-x".to_string()), Some("env-parent")),
             Some("wrap-x".to_string()),
             "an attested wrap outranks the env parent"
         );
         assert_eq!(
-            start_parent(None, Some("env-parent".to_string())),
+            start_parent(None, Some("env-parent")),
             Some("env-parent".to_string()),
             "no attested wrap falls back to the env parent"
         );
         assert_eq!(start_parent(None, None), None, "neither present resolves to no parent");
+    }
+
+    /// The claim gate itself (`resolve_parent_claim`'s own doc): a claim is
+    /// accepted on kernel evidence about the CLAIMER — this walking process's
+    /// own real ancestry — never on the claim's text.
+    #[test]
+    fn a_parent_claim_is_accepted_only_against_the_hooks_own_ancestry() {
+        let me = std::process::id() as i32;
+        let rec = |id: &str, pid: Option<u32>| SessionRecord {
+            session_id: id.to_string(),
+            pid,
+            ..Default::default()
+        };
+        let sessions = vec![
+            // This very process IS self-first in its own chain — the CLI arm's
+            // own shape (hook process == the claimed wrap's descendant).
+            rec("self-wrap", Some(me as u32)),
+            // A real-looking pid this process does not run under: the shape a
+            // stale `AOIDE_SESSION_ID` from an earlier run leaves behind, and
+            // the shape a fabricated claim has.
+            rec("elsewhere-wrap", Some(2_000_000_000)),
+            // A hook-registered parent: no pid, so nothing to contradict.
+            rec("hook-parent", None),
+        ];
+        assert_eq!(
+            resolve_parent_claim(Some(me), Some("self-wrap"), &sessions),
+            ParentClaim::Linked { id: "self-wrap".to_string(), checked: true },
+            "a pid-carrying claim inside the hook's own ancestry stands"
+        );
+        assert_eq!(
+            resolve_parent_claim(Some(me), Some("elsewhere-wrap"), &sessions),
+            ParentClaim::Contradicted("elsewhere-wrap".to_string()),
+            "a pid-carrying claim OUTSIDE the hook's own ancestry is dropped"
+        );
+        assert_eq!(
+            resolve_parent_claim(Some(me), Some("hook-parent"), &sessions),
+            ParentClaim::Linked { id: "hook-parent".to_string(), checked: false },
+            "a pid-less record cannot be contradicted — the CLI arm's own long-standing answer"
+        );
+        assert_eq!(
+            resolve_parent_claim(Some(me), Some("names-no-record"), &sessions),
+            ParentClaim::Linked { id: "names-no-record".to_string(), checked: false },
+            "and a claim naming no record is not contradicted either: nothing checkable refuses it"
+        );
+        assert_eq!(
+            resolve_parent_claim(Some(me), None, &sessions), ParentClaim::Unclaimed,
+            "no claim at all"
+        );
+        // L2: no walkable pid means no decision, whatever the claim says — the
+        // daemon arm with no door-stamped pid. Falling back to this process's
+        // own pid here would be `aoided` checking a claim against its OWN tree.
+        assert_eq!(
+            resolve_parent_claim(None, Some("self-wrap"), &sessions),
+            ParentClaim::Unclaimed,
+            "with no door pid, even a claim that would verify is Unclaimed"
+        );
+        assert_eq!(
+            resolve_parent_claim(None, Some("hook-parent"), &sessions),
+            ParentClaim::Unclaimed,
+            "and the pid-less arm is Unclaimed too — the arm an attacker would pick"
+        );
+        assert_eq!(ParentClaim::Unclaimed.linked(), None);
+        assert_eq!(ParentClaim::Contradicted("x".to_string()).linked(), None);
+    }
+
+    /// The trace side of the same decision: what each resolved claim leaves on
+    /// the outcome (and therefore in the audit record every door writes). A
+    /// claim that crossed the hop is reported whether it stood or was dropped;
+    /// the local arm's own env claim is reported only when it was dropped.
+    #[test]
+    fn a_claim_leaves_a_trace_on_the_arm_that_had_to_trust_it() {
+        let checked = ParentClaim::Linked { id: "w".to_string(), checked: true };
+        let unchecked = ParentClaim::Linked { id: "w".to_string(), checked: false };
+        let dropped = ParentClaim::Contradicted("w".to_string());
+
+        let daemon_checked = claim_trace(&checked, true).expect("the daemon arm reports a linked claim");
+        assert!(daemon_checked.contains("verified against"), "{daemon_checked}");
+        let daemon_unchecked = claim_trace(&unchecked, true).expect("...including one it could not check");
+        assert!(daemon_unchecked.contains("taken unchecked"), "{daemon_unchecked}");
+        let daemon_dropped = claim_trace(&dropped, true).expect("a drop is always reported");
+        assert!(daemon_dropped.contains("contradicted"), "{daemon_dropped}");
+
+        assert_eq!(claim_trace(&checked, false), None, "the local arm's own verified claim is routine");
+        assert_eq!(claim_trace(&unchecked, false), None, "...and so is its unchecked one");
+        let local_dropped = claim_trace(&dropped, false).expect("but a drop is news on either arm");
+        assert!(local_dropped.contains("contradicted"), "{local_dropped}");
+        assert_eq!(claim_trace(&ParentClaim::Unclaimed, true), None, "nothing claimed, nothing to say");
+    }
+
+    /// L2, at the door's own entry point: a `session hook` served with a payload
+    /// but NO door-stamped pid registers the session parentless and stamps no
+    /// `hookAncestry` — it must not fall back to this process's own pid, which
+    /// on the daemon arm is `aoided` and would "verify" a claim against the
+    /// daemon's own process tree. The same claim on the local arm (this very
+    /// process IS the hook) links normally, because the difference is the pid,
+    /// not the claim: one rule, two arms.
+    #[test]
+    fn a_daemon_served_hook_with_no_door_pid_links_nothing_and_stamps_no_ancestry() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, _root) = aoide_test_support::isolated_mail_root("hook-no-door-pid");
+        let profile = agent_profile(CLAUDE_PROFILE.name).unwrap();
+        // A pid-LESS parent — the arm that is normally "taken" (a
+        // hook-registered session), so only the missing pid can stop it.
+        do_session_start(
+            "w", Some("claude"), Some("/p"), None, None, Some(true), None, None, None,
+        );
+
+        let start = |id: &str| {
+            format!(
+                r#"{{ "session_id": "{id}", "hook_event_name": "SessionStart", "cwd": "/p" }}"#
+            )
+        };
+
+        // The daemon arm (`may_ring` is `inv.door == Door::Daemon`) with the
+        // door's pid absent.
+        let out = hook_for_profile_gated(profile, &start("d1"), true, None, Some("w"));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok);
+        let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = file.sessions.iter().find(|s| s.session_id == "d1").unwrap();
+        assert_eq!(rec.parent_session_id, None, "no pid to check a claim against ⇒ parentless");
+        assert!(rec.hook_ancestry.is_empty(), "and no ancestry stamp at all: got {:?}", rec.hook_ancestry);
+        assert_eq!(out.data.as_ref().unwrap()["parentClaim"], json!(null));
+
+        // The local arm, the same claim, its own real pid: linked.
+        let out = hook_for_profile_gated(
+            profile,
+            &start("d2"),
+            false,
+            Some(std::process::id() as i32),
+            Some("w"),
+        );
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok);
+        let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = file.sessions.iter().find(|s| s.session_id == "d2").unwrap();
+        assert_eq!(
+            rec.parent_session_id.as_deref(),
+            Some("w"),
+            "the local arm's own pid is a real fact, so the pid-less record links"
+        );
+        assert!(!rec.hook_ancestry.is_empty(), "and the ancestry is this process's own chain");
+    }
+
+    /// The CLI arm's half of the ruling, through the real hook door: a claim
+    /// contradicted by this process's OWN ancestry registers the session
+    /// parentless — and says so, on the one text channel the audit record for
+    /// this event is written from. Same rule, same answer as the daemon arm's
+    /// (driven end to end in `crates/cli/tests/daemon_dispatch_door.rs`).
+    #[test]
+    fn a_claim_the_hooks_own_ancestry_contradicts_registers_parentless() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env_sid = EnvVars::save(&["AOIDE_SESSION_ID"]);
+        let (_env, _root) = aoide_test_support::isolated_mail_root("hook-claim-contradicted");
+
+        // A live wrap from an EARLIER run, still on the roster, with a pid this
+        // test process does not run under — exactly what a leaked
+        // `AOIDE_SESSION_ID` points at.
+        do_session_start(
+            "stale-wrap",
+            Some("claude"),
+            Some("/p"),
+            None,
+            None,
+            Some(true),
+            None,
+            None,
+            Some(2_000_000_000),
+        );
+        std::env::set_var("AOIDE_SESSION_ID", "stale-wrap");
+
+        let out = hook_from_str(
+            r#"{ "session_id": "c9", "hook_event_name": "SessionStart", "cwd": "/p" }"#,
+        );
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok);
+        let file: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = file.sessions.iter().find(|s| s.session_id == "c9").unwrap();
+        assert_eq!(
+            rec.parent_session_id, None,
+            "a contradicted claim must not become the parent"
+        );
+        assert_eq!(
+            rec.harness_session_id.as_deref(),
+            Some("c9"),
+            "the session still registers normally — only the parent was dropped"
+        );
+        assert!(
+            out.message.contains("stale-wrap") && out.message.contains("contradicted"),
+            "the drop must be reported, not silent: {}",
+            out.message
+        );
+        assert_eq!(
+            out.data.as_ref().unwrap()["parentClaim"].as_str().map(|s| s.contains("stale-wrap")),
+            Some(true),
+            "and on the outcome's own data, which is the text the audit record carries"
+        );
     }
 
     /// The exact upsert path the `HookAction::Start` arm now relies on
@@ -6461,8 +6988,18 @@ mod tests {
         std::env::set_var("AOIDE_SESSION_ID", "w");
         let (_env, _root) = aoide_test_support::isolated_mail_root("resume-inside-wrap-keeps");
 
+        // `w` carries one of THIS process's own real ancestors (its parent) —
+        // the claim check (`resolve_parent_claim`) asks whether the claimed
+        // wrap's pid really is in the claiming process's ancestry, and a fixture
+        // wrap this process is not running under would be — correctly — refused.
+        // Not this process's OWN pid: the kill guard below declines a target
+        // that is the caller itself (a shared app, not a dedicated wrap).
+        let host = pid_ancestry(std::process::id() as i32)
+            .get(1)
+            .copied()
+            .expect("the test process has a parent") as u32;
         do_session_start(
-            "w", Some("claude"), Some("/p"), None, None, Some(true), None, None, Some(4242),
+            "w", Some("claude"), Some("/p"), None, None, Some(true), None, None, Some(host),
         );
         do_session_start(
             "c1", Some("claude"), Some("/p"), None, Some("w"), None, None, None, None,

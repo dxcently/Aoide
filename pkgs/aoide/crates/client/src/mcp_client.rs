@@ -536,6 +536,14 @@ mod tests {
     /// scratch file (the outbound JSON-RPC request body — `post_json`'s
     /// bearer branch never puts it on stdin) to that marker path, so a test
     /// can assert on exactly what this module put on the wire.
+    /// POSIX-only fixture: a `#!/bin/sh` script named `curl` at the front of
+    /// `PATH`. Native Windows has no shebang and `CreateProcess` resolves a bare
+    /// name to `curl.exe` only, so no script can stand in for the program under
+    /// test there; the credential-placement contract these tests assert is
+    /// covered on that host by
+    /// [`native_windows_the_bearer_value_never_reaches_curls_argv`], which reads
+    /// the REAL system `curl.exe`'s live command line instead of a stand-in's.
+    #[cfg(unix)]
     fn write_curl_shim(tag: &str, response_body: &str, status: u16, capture_body_into: Option<&std::path::Path>) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "aoide-client-mcp-client-curlshim-{tag}-{}-{}",
@@ -560,6 +568,80 @@ mod tests {
         dir
     }
 
+    /// The gated shim group's contract, covered natively WITHOUT a shim: the
+    /// transport starts this host's REAL `curl.exe` — the very program
+    /// production uses there — against a loopback listener that accepts and
+    /// then says nothing, so curl is alive mid-request, and this test reads
+    /// that child's own command line out of the host's process table
+    /// (`aoide_protocol::win_proc::command_argv`, the same read the tunnel's
+    /// recycled-pid guard uses) to assert the bearer value is nowhere in it.
+    ///
+    /// The Unix shim tests observe the other half of the contract — the value
+    /// reaching the program on its STDIN — by draining it; another process's
+    /// stdin is not readable, so what this asserts is the half that matters for
+    /// a leak (never in argv, never in a body file) plus the fact that the
+    /// request really was made, by the real client, to the loopback URL.
+    /// A constant, a never-run arm, or a child that never started cannot pass
+    /// it: the argv has to be READ, from a curl this test saw spawn.
+    #[cfg(windows)]
+    #[test]
+    fn native_windows_the_bearer_value_never_reaches_curls_argv() {
+        let _g = env_guard();
+        clear_melete_env();
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a loopback listener");
+        let port = listener.local_addr().expect("the listener's port").port();
+        std::env::set_var(MELETE_TOKEN_VAR, "tok-native-secret");
+        std::env::set_var(MELETE_URL_VAR, format!("http://127.0.0.1:{port}/mcp"));
+        // Accept one connection and never answer it: curl stays alive, mid
+        // request, for as long as this test needs to read its command line.
+        std::thread::spawn(move || {
+            if let Ok((conn, _)) = listener.accept() {
+                let _hold = conn;
+                std::thread::sleep(std::time::Duration::from_secs(30));
+            }
+        });
+
+        let caller = std::thread::spawn(|| {
+            handle_melete_status(&cli_inv(&["melete", "status"], &[], &[]));
+        });
+
+        let me = std::process::id();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let mut argv: Option<Vec<String>> = None;
+        while argv.is_none() && std::time::Instant::now() < deadline {
+            if let Ok(table) = aoide_protocol::win_proc::processes() {
+                for row in table.iter().filter(|p| p.parent == me && p.exe.eq_ignore_ascii_case("curl.exe")) {
+                    if let Ok(args) = aoide_protocol::win_proc::command_argv(row.pid) {
+                        // Only OUR curl: another test's child would carry a
+                        // different port, so the URL is what identifies it.
+                        if args.iter().any(|a| a.contains(&port.to_string())) {
+                            argv = Some(args);
+                            break;
+                        }
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        let argv = argv.expect("the transport must start this host's own curl for the loopback url");
+        let joined = argv.join(" ");
+        assert!(
+            !joined.contains("tok-native-secret"),
+            "the bearer value must never reach curl's argv: {joined}"
+        );
+        assert!(
+            !argv.iter().any(|a| a.ends_with(".mcp") || a.ends_with("/tmp/aoide-mcp")),
+            "and the body/header scratch file is passed, not its content: {joined}"
+        );
+        assert!(joined.contains("aoide/mailPoll") || joined.contains("/mcp") || joined.contains(&port.to_string()), "{joined}");
+
+        let _ = caller.join();
+        clear_melete_env();
+    }
+
+    #[cfg(unix)]
     fn with_curl_shim<T>(dir: &std::path::Path, f: impl FnOnce() -> T) -> T {
         let saved = std::env::var("PATH").ok();
         std::env::set_var("PATH", format!("{}:{}", dir.display(), saved.clone().unwrap_or_default()));
@@ -571,6 +653,8 @@ mod tests {
         out
     }
 
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `write_curl_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn handle_melete_status_reports_reachable_on_a_clean_initialize_reply() {
         let _g = env_guard();
@@ -589,6 +673,8 @@ mod tests {
         assert!(out.message.contains("9.9.9"), "{}", out.message);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `write_curl_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn handle_melete_status_surfaces_a_401_as_a_bearer_error_naming_the_token_var() {
         let _g = env_guard();
@@ -605,6 +691,8 @@ mod tests {
         assert!(out.message.contains(MELETE_TOKEN_VAR), "{}", out.message);
     }
 
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `write_curl_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn handle_melete_status_never_invokes_curl_when_unconfigured() {
         let _g = env_guard();
@@ -630,6 +718,8 @@ mod tests {
         assert!(!curl_ran, "unconfigured melete must never invoke curl");
     }
 
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `write_curl_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn handle_melete_graph_writes_the_snapshot_under_the_env_overridden_state_dir() {
         // `AOIDE_STATE_DIR` (absolute-path-wins) is `state_dir()`'s own test
@@ -670,6 +760,8 @@ mod tests {
         clear_melete_env();
     }
 
+    // cfg(unix): `#!/bin/sh` fake `curl` (see `write_curl_shim`'s note).
+    #[cfg(unix)]
     #[test]
     fn handle_melete_call_sends_the_named_tool_and_parsed_args_verbatim() {
         let _g = env_guard();

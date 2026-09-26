@@ -64,15 +64,6 @@ use std::path::{Path, PathBuf};
 #[path = "feed_windows.rs"]
 mod feed_windows;
 
-/// The one creation mode native Windows can honor: a protected owner-only
-/// DACL. Everything else is a named refusal there (see
-/// [`FeedWriter::append`]), never a silent narrowing — a group-shared or
-/// world-readable feed has no Windows mapping in this slice.
-#[cfg(any(windows, test))]
-fn owner_only_mode(mode: u32) -> bool {
-    mode == 0o600
-}
-
 // ── what identifies one file on this host ────────────────────────────────
 
 /// What identifies one file on this host: the `(dev, ino)` pair Unix answers
@@ -458,27 +449,13 @@ mod tests {
         std::fs::remove_file(&moved).ok();
     }
 
-    // ── the creation-mode policy ──────────────────────────────────────
-
-    /// The pure policy every host shares the ANSWER to, even though only
-    /// Windows acts on it (Unix honors the caller's mode as given): `0o600`
-    /// is the one mode native Windows can express as a protected owner-only
-    /// DACL, so a group-shared or world-readable mode is refused there
-    /// rather than narrowed.
-    #[test]
-    fn owner_only_mode_is_exactly_0600() {
-        assert!(owner_only_mode(0o600));
-        for mode in [0o640, 0o644, 0o400, 0o660, 0o700, 0o600 | 0o2000, 0o0] {
-            assert!(!owner_only_mode(mode), "mode {mode:o} must not pass as owner-only");
-        }
-    }
-
     // ── FeedWriter ────────────────────────────────────────────────────
 
     /// Unix-specific: this asserts the MODE BITS the create_mode chmod left,
-    /// and `0o640` is exactly the group-shared mode native Windows refuses
-    /// (it has no gid to name). Gated, not narrowed to `0o600` — that would
-    /// stop proving what the test exists to prove.
+    /// and `0o640` is exactly the group-shared mode `aoide-secrets`' broker
+    /// feed uses. Gated rather than rewritten to `0o600` — that would stop
+    /// proving what the test exists to prove (the native arm's own answer for
+    /// the same mode is asserted in `feed_windows`' tests: owner-only).
     #[cfg(unix)]
     #[test]
     fn feed_writer_creates_the_file_at_the_given_mode() {
