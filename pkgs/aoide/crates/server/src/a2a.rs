@@ -703,13 +703,14 @@ const FRAME_TAIL_DEFAULT: u64 = 50;
 const LETTER_BODY_LINES_MAX: usize = 40;
 /// The serialized frame's own bound, in bytes.
 const FRAME_MAX_BYTES: usize = 256 * 1024;
-/// The output-read refusal's code. Deliberately the SAME `-32007`
-/// `verify_signed_request` refuses a malformed/bad signature with — the
-/// brief's own number for this refusal (CONTRACTS.md §6). The two never
-/// share a TEXT, and they cannot be confused about what happened: a
-/// signature refusal is decided by [`verify_signed_request`] BEFORE this
-/// arm runs at all.
-const OUTPUT_READ_REFUSED_CODE: i64 = -32007;
+/// The output-read refusal's code — its OWN, `-32011` (CONTRACTS.md §6).
+/// Every capability-gated arm mints the code it refuses with, and this is
+/// the third after Spawn's `-32006` and `mailDeposit`'s `-32010`:
+/// `-32007` stays [`verify_signed_request`]'s own incomplete-headers/
+/// signature-mismatch family, which is decided BEFORE this arm runs at
+/// all, so an operator reading a code off the wire can tell a refused read
+/// from a refused signature without matching prose.
+const OUTPUT_READ_REFUSED_CODE: i64 = -32011;
 /// What a refused output read says. ONE text for every refusal, and it says
 /// NOTHING about the session asked for — the same message whether the id
 /// exists or not, so the read gate is not an existence oracle beyond the
@@ -8816,6 +8817,107 @@ mod tests {
         restore_stage_state(saved_stage, saved_state);
     }
 
+    /// The ssh `-L` shape — the transport every real pair rides (PAIRING.md):
+    /// the request arrives at the far door's socket classified `Loopback`,
+    /// exactly as an unsigned local caller's does. This row pins the EXEMPTION,
+    /// one half of what carries the rule: without it the signed parent is
+    /// coerced to `Unknown` (where `should_deliver_now` ignores `autogate_match`
+    /// outright) and a genuinely tunneled parent would silently pend — the
+    /// production shape S5 exists to serve. Its twin, the FOLD into
+    /// `autogate_match`, is what the two `Remote` rows above pin; both are
+    /// load-bearing.
+    #[test]
+    fn a_tunneled_remote_parent_steers_its_child_without_pending() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = remote_parent_box_root("s5-parent-tunneled");
+        let (stage, audit_log, listener) =
+            write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, false);
+
+        let acc = std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            use std::io::Read as _;
+            let mut buf = Vec::new();
+            let _ = conn.read_to_end(&mut buf);
+            buf
+        });
+
+        let key = PARENT_KEY.to_string();
+        let result = message_send(
+            &remote_parent_body(Some(PARENT_SESSION)),
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Loopback,
+            "",
+            None,
+            Some(SignedCaller { name: "parent-node", key: &key }),
+        );
+        assert!(result.is_ok(), "{:?}", result.err());
+        assert!(
+            !stage.join("pending.json").exists(),
+            "a tunneled parent that PENDED would be the regression — assert before joining, so \
+             the failure is clean rather than a test that hangs on bytes that never arrive"
+        );
+        assert_eq!(
+            String::from_utf8(acc.join().unwrap()).unwrap(),
+            "steer it\r",
+            "the tunneled parent's steer is DELIVERED — the exemption keeps it off the Unknown arm"
+        );
+        assert!(std::fs::read_to_string(&audit_log).unwrap().contains("autogate-remote-parent"));
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
+    /// The door-wide bearer runs FIRST, and the remote-parent rule exempts
+    /// nothing from it: with a door token configured and no bearer presented, a
+    /// signed caller holding a genuinely matching parentage gets exactly the
+    /// uniform `submitted` Task every unauthenticated inject gets (#50's guard,
+    /// decided before the match is even computed). Nothing is delivered and
+    /// nothing queues, so this refusal is indistinguishable from an unknown
+    /// context.
+    #[test]
+    fn a_door_token_refuses_a_remote_parents_delivery_uniformly() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = remote_parent_box_root("s5-parent-token");
+        let (stage, audit_log, listener) =
+            write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, false);
+        listener.set_nonblocking(true).unwrap();
+
+        let key = PARENT_KEY.to_string();
+        let task = message_send(
+            &remote_parent_body(Some(PARENT_SESSION)),
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Loopback,
+            "door-secret",
+            None,
+            Some(SignedCaller { name: "parent-node", key: &key }),
+        )
+        .expect("the uniform response is an ANSWER, not a refusal");
+
+        assert_eq!(task["status"]["state"], "submitted", "the uniform Task, verbatim: {task}");
+        assert_eq!(task["id"], REMOTE_CHILD);
+        assert!(task.get("artifacts").is_none(), "{task}");
+        assert!(listener.accept().is_err(), "a tokenless caller's send is never delivered");
+        assert!(!stage.join("pending.json").exists(), "the uniform path never queues either");
+
+        let log = std::fs::read_to_string(&audit_log).unwrap();
+        assert!(log.contains("no valid token, no autogate match"), "the guard's own audit: {log}");
+        assert!(
+            !log.contains("autogate-remote-parent"),
+            "the bearer is checked BEFORE the match, so the parent rule never even speaks: {log}"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        restore_stage_state(saved_stage, saved_state);
+    }
+
     // ── Uniform-response guard, #50 (CONTRACTS.md §6 amendment, 2026-08-20) ──
     //
     // Once a token is configured, an unauthenticated `message/send` naming a
@@ -11696,8 +11798,12 @@ mod tests {
 
         let known = handle_jsonrpc(&frame_request("sess-1", Some(5)), &ctx);
         let unknown = handle_jsonrpc(&frame_request("ghost", Some(5)), &ctx);
-        assert_eq!(known["error"]["code"], -32007);
-        assert_eq!(unknown["error"]["code"], -32007);
+        assert_eq!(known["error"]["code"], OUTPUT_READ_REFUSED_CODE);
+        assert_eq!(unknown["error"]["code"], OUTPUT_READ_REFUSED_CODE);
+        assert_eq!(
+            OUTPUT_READ_REFUSED_CODE, -32011,
+            "the read refusal has its own code, never verify_signed_request's -32007"
+        );
         assert_eq!(
             known["error"]["message"], unknown["error"]["message"],
             "one text for every refusal, or the gate is an existence oracle"
@@ -11721,7 +11827,7 @@ mod tests {
     }
 
     /// A genuinely signed caller whose node was never granted `read` is
-    /// refused with the same `-32007`.
+    /// refused with the same `-32011`.
     #[test]
     fn a_signed_node_without_read_is_refused() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -11733,7 +11839,7 @@ mod tests {
         let parsed = serde_json::from_slice::<Value>(&body).unwrap();
 
         let resp = handle_jsonrpc(&parsed, &ctx);
-        assert_eq!(resp["error"]["code"], -32007);
+        assert_eq!(resp["error"]["code"], OUTPUT_READ_REFUSED_CODE);
         assert_eq!(resp["error"]["message"], OUTPUT_READ_REFUSED);
 
     }

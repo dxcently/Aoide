@@ -1321,11 +1321,13 @@ pub fn resolve_remote_parent(explicit: Option<&str>) -> Result<Option<String>, S
 /// stray character), and shipping one only turns a local, immediately-fixable
 /// mistake into the door's own answer one round trip and one signature later —
 /// `-32602` on its spawn arm, a lost autogate on its inject one (P-RSA S5).
-/// So this node refuses its own unruly claim here, before anything is signed
-/// or sent; `None` (no parent at all) is still a legal answer, and `send` is
-/// the caller that TAKES it: it drops the claim and names the reason on one
-/// warning line rather than failing the send
-/// (`aoide_conduct::graph::send`'s `remote_parent_claim`).
+/// So an unruly claim is refused at THIS function, before anything is signed
+/// or sent — and the refusal reaches the caller only when the caller asked
+/// for a parentage: `node spawn` fails the call outright, while `send`, which
+/// never asked for one and treats the claim as an autogate shortcut, DROPS it
+/// and names the reason on one warning line rather than failing
+/// (`aoide_conduct::graph::send`'s `remote_parent_claim`). `None` (no parent
+/// at all) is a legal answer either way.
 fn resolve_remote_parent_from(
     attested: Option<String>,
     explicit: Option<&str>,
@@ -1343,7 +1345,7 @@ fn resolve_remote_parent_from(
     };
     match resolved {
         Some(id) if !aoide_storage::remote_children::valid_claimed_session_id(&id) => Err(format!(
-            "this node would claim `{id}` as the remote parent, and that is not a legal \
+            "this node would claim `{id:?}` as the remote parent, and that is not a legal \
              `aoide/from` claim: {} bytes at most of [A-Za-z0-9._:-] with no `/` — the same rule \
              the far door applies, so a caller that signed this would be refused `-32602` on a \
              spawn and simply matched by nothing on a send; claim a session whose id fits, or no \
