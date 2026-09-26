@@ -60,7 +60,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     CREATE_ALWAYS, CREATE_NEW, CreateDirectoryW, CreateFileW, FILE_APPEND_DATA, FILE_ATTRIBUTE_NORMAL,
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_READ_EA, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    FILE_EXECUTE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, FileAttributeTagInfo, GetFileInformationByHandleEx,
+    FILE_DELETE_CHILD, FILE_EXECUTE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, FileAttributeTagInfo, GetFileInformationByHandleEx,
     OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE, WRITE_DAC,
 };
 use windows_sys::Win32::System::SystemServices::{ACCESS_ALLOWED_ACE_TYPE, SECURITY_DESCRIPTOR_REVISION, SID_REVISION};
@@ -101,17 +101,23 @@ pub const READ_ONLY_MASK: u32 =
 pub(crate) const REQUIRED_ACCESS: u32 = OWNER_ONLY_MASK;
 
 /// The directory half of the private policy — the native spelling of `0o700`,
-/// which on Unix is read + write + EXECUTE. For a directory `FILE_EXECUTE` is
-/// `FILE_TRAVERSE`: the right to open anything INSIDE it by path. `0o700`
-/// without it is a directory nobody can list through, which is not `0700` in
-/// any sense — and the difference is observable, not theoretical: a directory
-/// read back as private and then used as a parent fails the child's own open.
-/// Files keep [`OWNER_ONLY_MASK`] (`0o600` has no execute bit to map).
+/// which on Unix is read + write + EXECUTE for the owner. Two of those three
+/// bits have directory meanings this mask has to name explicitly:
 ///
-/// Deleting an entry is deliberately NOT here, on either host: on Unix `rm`
-/// asks for write on the PARENT, and on Windows the parent's
-/// `FILE_DELETE_CHILD` is the same door.
-pub const PRIVATE_DIR_MASK: u32 = OWNER_ONLY_MASK | FILE_EXECUTE;
+/// - `FILE_EXECUTE` is `FILE_TRAVERSE`: the right to open anything INSIDE the
+///   directory by path. `0o700` without it is a directory nobody can list
+///   through, and the difference is observable, not theoretical — a directory
+///   read back as private and then used as a parent fails the child's own
+///   open.
+/// - `FILE_DELETE_CHILD` is the other half of `w` on a directory: on Unix
+///   removing an entry asks for write on the PARENT, and on Windows the
+///   check is DELETE on the child or `FILE_DELETE_CHILD` on the parent. A
+///   `0o700` directory whose owner could not remove its own entries would be
+///   the analogue of a directory with `r` and `x` but no `w`.
+///
+/// Files keep [`OWNER_ONLY_MASK`] (`0o600` has no execute or delete-children
+/// bit to map).
+pub const PRIVATE_DIR_MASK: u32 = OWNER_ONLY_MASK | FILE_EXECUTE | FILE_DELETE_CHILD;
 
 /// The access a validated open asks for on a FILE: enough to read its policy
 /// and its bytes, and — for the create-if-absent caller — to append.
@@ -445,15 +451,12 @@ pub(crate) struct SecurityFacts {
 }
 
 impl SecurityFacts {
-    pub(crate) fn is_owner_only(&self) -> bool {
-        self.covers(REQUIRED_ACCESS)
-    }
 
     /// Does every fact hold for the mask `required`? The refusal reader asks
     /// this with the mask of the OBJECT it is looking at — a file's
     /// [`OWNER_ONLY_MASK`], a directory's [`PRIVATE_DIR_MASK`] — so the same
     /// walk answers for both without a second implementation.
-    fn covers(&self, required: u32) -> bool {
+    pub(crate) fn covers(&self, required: u32) -> bool {
         self.dacl_present
             && self.dacl_protected
             && self.ace_count > 0

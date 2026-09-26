@@ -1240,10 +1240,23 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn set_refuses_an_unwritable_config_without_touching_it() {
-        use aoide_protocol::owner_only::{PRIVATE_DIR_MASK, READ_ONLY_MASK, set_dir_access};
+        use aoide_protocol::owner_only::{PRIVATE_DIR_MASK, READ_ONLY_MASK, create_truncating, set_dir_access};
+        use std::io::Write;
         with_temp_root("unwritable", |dir| {
             let path = dir.join(CONFIG_FILE);
-            std::fs::write(&path, "[pairing]\ndefaultGrant = [\"read\"]\n").unwrap();
+            // The file gets its OWN protected policy before the directory's
+            // is touched, and that is not decoration: a child whose ACEs are
+            // merely INHERITED is re-evaluated when its parent's DACL
+            // changes, and a directory policy written with NO_INHERITANCE
+            // leaves such a child with no ACE at all — so a file relying on
+            // inheritance becomes unreadable the moment its directory turns
+            // read-only, and the "untouched" bytes below could not be read
+            // back at all. A file with its own policy (which is what every
+            // private write in this crate produces) is unaffected by its
+            // directory's policy; that is the property this test relies on.
+            let mut file = create_truncating(&path).unwrap();
+            file.write_all(b"[pairing]\ndefaultGrant = [\"read\"]\n").unwrap();
+            drop(file);
             // Same mechanism as the Unix arm's `chmod`, read at the same
             // place: the atomic write renames a temp INTO this directory, so
             // the directory's policy is what decides writability.

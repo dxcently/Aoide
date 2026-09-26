@@ -403,7 +403,10 @@ mod tests {
         assert!(facts.all_aces_are_current_user_allows, "the only ACE must be an allow for the current user");
         assert!(facts.owner_is_current_user, "the owner must be the current user");
         assert_eq!(facts.covered_mask & REQUIRED_ACCESS, REQUIRED_ACCESS);
-        assert!(facts.is_owner_only());
+        assert!(
+            facts.covers(REQUIRED_ACCESS),
+            "the mask the refusal reader requires is the one an owner-only file covers"
+        );
         drop(file);
         std::fs::remove_file(&path).ok();
     }
