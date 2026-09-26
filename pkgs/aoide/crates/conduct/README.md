@@ -1274,6 +1274,27 @@ Live mail attachment catches up from the opening frame's watermark, including
 letters arriving while the watcher attaches or before the mailbase exists.
 Watching never advances the child's read cursor.
 
+**The same watch reads across a node (P-RSA S7).** `session watch
+<node>/<query>` resolves `<query>` through `graph/remote.rs` — the ONE
+definition of what a remote target means, shared with `send --to` (the node's
+CACHED graph, `node_cached_sessions` + `resolve_remote_query` +
+`unresolved_remote`, plus the caller's own already-loaded `nodes` slice) — and
+then reads the far run's frame over the A2A door
+(`aoide_client::commands::task_get_on_node`). What arrives is a peer's bytes:
+`Frame::clamp_untrusted` re-cleans every string through the same
+`clean_line`/`clean_block` pair the local view uses, re-clamps every count to
+the local bounds (the requested tail, `MAIL_RAIL`, `BLOCK_LINES_MAX`), STRIKES
+`logPath`/`socket`/`instructionsPath` (paths and a control socket on the box
+that wrote the frame — the instruction TEXT still shows), and rebuilds
+`suggested` locally. Raw PTY bytes have no path on this side at all. Live polls
+every 2 s until the far record's `presence` is no longer `running`, ends on
+Ctrl-C, and a FAILED poll ends the watch with the structured refusal
+(`Status::Error`, its own `reason`/`code`, `followed: true`) rather than an `ok`
+that hides the diagnosis. A peer's own error text is cleaned with
+`common::clean_line` before it is printed (here and on `send`'s remote failure),
+and a far door's `-32011` refusal becomes a taught error naming the grant and
+the node it runs on.
+
 Nothing here reads or writes another module: the seam is the record
 (`task`/`instructionsPath`/`outcome`/`reportTo`/`exitCode`/`endedAt`), the
 sidecar beside the

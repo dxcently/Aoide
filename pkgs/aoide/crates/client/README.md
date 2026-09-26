@@ -254,7 +254,15 @@ never the inbound/serve half (that's `aoide-server`).
   in the read loop itself, killing the child the moment the running total
   crosses the limit rather than waiting for it to finish. An over-cap
   response refuses with a taught error naming the cap; every existing
-  caller's own node/url context still wraps it, unchanged.
+  caller's own node/url context still wraps it, unchanged. `run_curl_capped`
+  / `post_json_capped` are the same transport with the cap STATED by the
+  caller, and the watch frame is their one caller today
+  (`FRAME_MAX_RESPONSE_BYTES`, 512 KiB): the far door bounds a frame to
+  256 KiB of shed content PLUS an instruction block it never sheds, whose own
+  worst case is 400 lines × 200 chars × 4 B ≈ 320 KB — so an honest frame tops
+  out near 321 KB and 512 KiB is ~1.6× that, not 2×. (Stated as arithmetic
+  rather than derived: those two bounds live in `aoide-conduct` and
+  `aoide-server`.)
 - **Dial resolution (P-S4, ssh-transport lane)** — the tunnel seam every
   outbound POST resolves through BEFORE it ever reaches `commands::
   post_json` (`aoide-client`'s one HTTP transport, unchanged by this
@@ -846,12 +854,12 @@ never the inbound/serve half (that's `aoide-server`).
   workstream C3 — POSTs `message/send` with an explicit `contextId` naming
   the resolved remote session), and `task_get_on_node` (P-RSA S7 —
   `session watch <node>/<query>`'s READ: a signed `tasks/get` with the frame
-  attached, bounded at `FRAME_MAX_RESPONSE_BYTES` (512 KiB, double the far
-  door's own 256 KiB frame cap) rather than the general
-  `MAX_RESPONSE_BYTES`, and dialed through
+  attached, bounded at `FRAME_MAX_RESPONSE_BYTES` (512 KiB) rather than the
+  general `MAX_RESPONSE_BYTES`, and dialed through
   `post_json_to_node_with_tunnel_key` — the one helper that takes the tunnel
-  key EXPLICITLY instead of reading it off `node.name` — so the key a
-  `--via` forward is opened under is the caller's stated choice). **Outbound bearer presentation (task
+  key EXPLICITLY instead of reading it off `node.name` — with `node.name` as
+  the key this call site passes, the documented `(session id, node name)` pair
+  every other node action shares). **Outbound bearer presentation (task
   #84)**: `node add --bearer-secret <name>` records a per-node
   `Node.bearerSecret` (`aoide-storage`'s `node_store`); every outbound
   node POST (`pull_one_node`, `pull_node_live`, `send_message_to_node`)

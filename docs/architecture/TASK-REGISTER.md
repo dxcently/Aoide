@@ -2227,30 +2227,54 @@ project/parent inheritance across local/remote/app/subagents;
   `node_cached_sessions`/`resolve_remote_query`/`node_session_label` (moved
   out of `send.rs`, which now shares them plus `node_record`,
   `node_cached_graph` and `unresolved_remote`, so `send --to` and the watch
-  refuse an unresolvable query with ONE text and ONE `data` shape), and the
+  refuse an unresolvable query with ONE text and ONE `data` shape; the
+  "vanished mid-resolution" wording of the unreachable node arm came back with
+  the move, and `node_record` now reads the `nodes` slice the caller already
+  loaded instead of re-reading `nodes.json`), and the
   `Resolution::Remote` arm of `view.rs` watches instead of refusing. The read
-  is `aoide_client::commands::task_get_on_node(node, id, frame_tail,
-  tunnel_key)` — signed exactly as `send_message_to_node`, over
+  is `aoide_client::commands::task_get_on_node(node, id, frame_tail)` — signed
+  exactly as `send_message_to_node`, over
   `post_json_to_node_with_tunnel_key`/`post_json_capped`/`run_curl_capped`
   (the first call site with its own response cap, `--max-filesize 524288`, and
-  the first to state its tunnel key instead of reading `node.name`), parsing
+  the only one to go through the helper that takes the tunnel key explicitly;
+  the cap is ~1.6× the honest frame ceiling, not 2× — the door's 256 KiB bounds
+  shed content only, so the exempt instruction block's own worst case
+  (`BLOCK_LINES_MAX` 400 × `LINE_MAX` 200 × 4 B ≈ 320 KB) is what a real frame
+  can reach), parsing
   the `frame` artifact into the ONE `Frame` type both sides share.
   `Frame::clamp_untrusted(node, tail)` re-cleans every string through the
   shared `clean_line`/`clean_block`, re-clamps every count (output to the
   requested tail, mail to `MAIL_RAIL`, a body/instruction block to
-  `BLOCK_LINES_MAX`), rebuilds `suggested` locally as `aoide send --to
-  <node>/<id> --submit -- …`, and leaves raw PTY bytes with no path at all on
-  the remote side; the header carries `<node>/`. `--snapshot` reads once, live
-  polls every 2 s until the far `presence != running` (or Ctrl-C, which the
-  local view's own handler serves). `-32011` renders as a taught error naming
-  the grant and the box it runs on. Two places the brief disagreed with the
+  `BLOCK_LINES_MAX`), STRIKES `logPath`/`socket`/`instructionsPath` (the paths
+  and control socket of the box that wrote the frame — the renderer gained the
+  arm that still shows the instruction TEXT with its path gone), rebuilds
+  `suggested` locally as `aoide send --to <node>/<id> --submit -- …`, and
+  leaves raw PTY bytes with no path at all on the remote side; the header
+  carries `<node>/`. `--snapshot` reads once, live polls every 2 s until the
+  far `presence != running` (or Ctrl-C, which the
+  local view's own handler serves), and a FAILED poll ends the watch with the
+  structured refusal (`Status::Error`, its own `reason`/`code`,
+  `followed: true`) rather than an `ok` that hides the diagnosis — with no
+  prose printed on a `--json` stream. `-32011` renders as a taught error naming
+  the grant and the box it runs on. Review pass over S6+S7 (same branch): a far
+  node's own error text is now cleaned at the seam with `common::clean_line`
+  for BOTH doors (the watch's `read_refused`, `send`'s remote-delivery failure)
+  and for the petname/session id `remote::node_session_label` renders out of a
+  peer's cached document — an OSC-52 escape or bidi override in a peer's
+  message reached the operator's terminal uncleaned before this, and the tests
+  drive a real curl POST at a fake door to prove the cleaned text end to end;
+  `-32011` is spelled ONCE (protocol `OUTPUT_READ_REFUSED_CODE`, read by the
+  door and by both readers), and the live remote loop is finally tested (the
+  `presence` exit with changed-only emits, and the failed poll keeping its
+  reason). Two places the brief disagreed with the
   code, both recorded as code facts: `Frame` has no `raw` field at all
   (S6 landed `gather`'s `raw` parameter, not a field, and the wire frame is
   built with it false) — so "force `raw` = false" lands as "there is no
   terminal gate on the remote path", pinned by test; and the brief's §4.3
   signature carries a `lines_after` the Do's own list drops — S7 sends only
-  the frame key, and `aoide/linesAfter` stays S8's. Tests: aoide-conduct 887,
-  aoide-client 316 — all pass, `cargo test --workspace --no-run` clean. S8–S10
+  the frame key, and `aoide/linesAfter` stays S8's. Tests: aoide-conduct 892,
+  aoide-client 316, aoide-protocol 174, aoide-server 240 — all pass,
+  `cargo test --workspace --no-run` clean. S8–S10
   open, in the brief's order (cargo builds serialize).
 - Review pass over S1–S3 (same branch, `8236675` onward): the caller now
   holds its own winning claim to `valid_claimed_session_id` and refuses

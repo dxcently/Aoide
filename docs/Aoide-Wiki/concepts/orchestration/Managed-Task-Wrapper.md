@@ -122,16 +122,26 @@ through the same sanitizers the local view uses, every count is re-clamped to
 the local bounds (the requested tail, the mail rail, the block cap), raw PTY
 bytes have no path to this terminal at all, and the suggested follow-up is
 rebuilt here as `aoide send --to <node>/<id> --submit -- "<text>"` rather than
-taken from a line naming a session in that box's namespace. A refusal by the
-far door's output gate (`-32011`: no signed, verified node holding `read` on
-that host) is a taught error naming the grant and the box it runs on —
+taken from a line naming a session in that box's namespace. `logPath`,
+`socket` and `instructionsPath` are struck on arrival — they name paths and a
+control socket on the box that wrote the frame, so a peer's invented
+`/etc/shadow` never reads as this run's log; the instruction TEXT still shows.
+A far node's own error message is cleaned before it is printed, here and on
+`send`, because an OSC-52 escape or a bidi override in a peer's message is a
+terminal instruction rather than text. A refusal by the far door's output gate
+(`-32011`: no signed, verified node holding `read` on that host) is a taught
+error naming the grant and the box it runs on —
 `aoide node allow <this box> read on` **on the far node**.
 
 Remote live mode polls every 2 s and stops when the far record's own
 `presence` is no longer `running`, or on Ctrl-C: the frame carries the state
-that decides, so there is no cursor to keep and nothing to hold open. (Frame
-deltas over `tasks/resubscribe` are deliberately deferred — that stream holds
-a connection slot for the run's whole life and carries status changes only.)
+that decides, so there is no cursor to keep and nothing to hold open. A poll
+that FAILS also ends the watch — with the failure as the result (an error
+carrying the reason, the far door's code when it refused, and
+`followed: true`), never a cheerful exit that hides why it stopped, since a
+dead tunnel and a finished run must not read the same. (Frame deltas over
+`tasks/resubscribe` are deliberately deferred — that stream holds a connection
+slot for the run's whole life and carries status changes only.)
 
 A frame shows the instructions the run was started with, the run's own output,
 the child's mailbox, and where it stands —

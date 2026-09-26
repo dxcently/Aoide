@@ -1821,12 +1821,24 @@
   before a byte is rendered; **raw PTY bytes have no path at all on the remote
   side**, whatever stdout is, because there is no terminal gate there to open.
   `suggested` is rebuilt locally (`aoide send --to <node>/<id> --submit -- …`),
-  never taken from the frame, and the header carries the node. Live polls every
+  never taken from the frame, and the header carries the node. `logPath`,
+  `socket` and `instructionsPath` are STRUCK (`None`) — they name paths and a
+  control socket on the box that wrote the frame, so a peer's invented
+  `/etc/shadow` never renders as `log …` (the instruction TEXT still shows;
+  the renderer has an arm for a block whose path is gone). Live polls every
   2 s and ends on the far record's own `presence != running`, or Ctrl-C: no
   cursor is kept on either box, so a remote watch is exactly as read-only as a
-  local one. The far door's `-32011` refusal is rendered as a taught error
-  naming the grant and the box it runs on — never as a bare refusal, and never
-  as "the session does not exist".
+  local one. **A FAILED poll ends the watch with the structured refusal** —
+  `Status::Error` carrying its own `reason`/`code` plus `followed: true` — never
+  an `ok` that hides the diagnosis, and no prose is printed on a `--json`
+  stream (that applies to the Ctrl-C report too). A peer's own error text
+  (`FrameReadError.message`, and `send`'s remote-delivery failure) goes through
+  `common::clean_line` before it is printed — an OSC-52 escape or a bidi
+  override in a far node's message is a terminal instruction, not a message —
+  as do the petname/session id `remote::node_session_label` renders out of
+  another box's cached document. The far door's `-32011` refusal is rendered as
+  a taught error naming the grant and the box it runs on — never as a bare
+  refusal, and never as "the session does not exist".
 - **A finished run's exit report is filed by the daemon tick through the
   registered `mail.send` implementation** (`Door::Daemon`, in-process — the
   daemon authority path, not a bypass), never by the mail layer called directly
