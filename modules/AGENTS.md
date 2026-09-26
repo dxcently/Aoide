@@ -7,17 +7,18 @@ house rule 1 (only `song/` is agent-writable — `modules/` changes by
 upstream merge or new-dendrite-addition only) and house rule 7 (everything is
 a plugin).
 
-## The registry names; the aggregates import
+## The catalogue names; one aggregate derives
 
-`modules/default.nix` is the registry — plain data, never a module.
-`catalogue` holds one `name = path;` line per capability, and that name is
-how a host, a user and an aggregation reach it; `aggregations` and `overrides`
-are discovered one level deep beside it. A capability's own directory still
-carries the aggregate that puts it in the full tree
-(`modules/dendrites/default.nix` imports every dendrite's `body`), so a
-capability is added as a new file plus two lines — one in the catalogue, one
-in the aggregate — and removed by deleting both, with no other file in the
-tree aware it existed.
+`modules/default.nix` is the catalogue — plain data, never a module.
+`catalogue` holds one `name = path;` line per dendrite, and that name is how a
+host, a user and an aggregation reach it. It is the ONE place a dendrite file is
+named. `aggregations` and `overrides` are the records read one level deep beside
+it — empty until `modules/aggregations/` and `modules/overrides/` land. A
+dendrite is added as a new file plus ONE line — the catalogue line — and removed
+by deleting both, with no other file in the tree aware it existed:
+`modules/dendrites/default.nix` derives its imports from the catalogue
+(`builtins.attrValues (import ../default.nix).catalogue`) instead of naming a
+file itself.
 
 ## A dendrite is a lane record
 
@@ -46,23 +47,22 @@ for this reason, so the linter does not fight the style.
 
 ## Aggregate discipline
 
-Each of `modules/dendrites/`, `modules/facets/`, `modules/nucleus/` carries
-its own `default.nix`, naming every file in that directory one line per
-file, in `LC_ALL=C` order, and nothing named from outside that directory. The
-catalogue is the one place a dendrite is named by its *selection* name — the
-registry is not a second aggregate, it is the list of what can be chosen. No
-file is ever named from outside the directory that holds it, catalogue entries
-included: a catalogue line names a file inside `modules/dendrites/`, written by
-the directory that holds it.
+`modules/facets/default.nix` and `modules/nucleus/default.nix` each name every
+file in their own directory, one line per file, in `LC_ALL=C` order, and nothing
+from outside it — a layer nothing selects has no selection name, so its own
+directory is what names it. `modules/dendrites/default.nix` is the other half of
+the rule: it names no dendrite at all and derives its imports from the
+catalogue, in attribute-name order — the `LC_ALL=C` order the catalogue itself
+is written in. Nothing walks the dendrite tree: a name with no catalogue line is
+unreachable, which is what shelving means.
 
 ## `_`-prefix shelving
 
-A `_`-prefixed file or directory is not a module: nothing imports it and no
-`default.nix` lists it — the opt-out for work-in-progress or scratch
-dendrites: `modules/dendrites/_example.nix` is the checked-in template. Drop
-the leading `_`, add one line to the catalogue and one to
-`modules/dendrites/default.nix`; drop both and add the `_` back to shelve
-without deleting.
+A `_`-prefixed file or directory is not a module: nothing imports it and the
+catalogue does not name it — the opt-out for work-in-progress or scratch
+dendrites: `modules/dendrites/_example.nix` is the checked-in template. Drop the
+leading `_` and add one catalogue line; drop that line and add the `_` back to
+shelve without deleting.
 
 ## The closed read whitelist
 

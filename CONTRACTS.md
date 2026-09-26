@@ -16,15 +16,18 @@ recorded here because every contract in this file is downstream of it.
 
 **Everything is a plugin.** A capability enters Aoide by *existing* at a
 conventional path, declaring what it needs by *name*, and being removable
-without a trace. Nothing enters by being named from outside its own
-directory.
+without a trace: delete the file and its one catalogue line, and nothing else
+in the tree knows it was there. That line — in `modules/default.nix`'s
+catalogue — is the only place a module file is named.
 
-The repo already runs this way and did before it had a name for it: every
-module directory carries a `default.nix` naming its own files, so **adding a
-capability is a new file and one line in the directory that holds it**
-(`modules/dendrites/`, `modules/facets/`, `modules/nucleus/`); `lib/walk.nix`
-still discovers `pkgs/*` and `song/songbook/*/rice.nix` the same way (§2,
-§5). Each of those modules
+The repo already runs this way and did before it had a name for it. A dendrite
+is one file (or one directory) plus **one catalogue line** — the whole-tree
+aggregate derives its imports from that catalogue, so no second list follows it.
+`lib/walk.nix` discovers `pkgs/*` and `song/songbook/*/rice.nix` by a
+directory's one typed scan the same way (§2, §5). `modules/facets/` and
+`modules/nucleus/` name their own files in their own `default.nix`: a layer
+nothing selects has no name to be reached by, and their one line per file is
+what puts them in the tree. Each of those modules
 self-gates on its own `enable`/`aoide.song` rather than being switched on from
 outside. A widget resolves through `StagingEngine.resolveSong(song, slot)` — by
 slot *name*, falling back to sonata — so no surface ever imports a concrete
@@ -51,7 +54,7 @@ This is Nix's own thesis (declarative, additive, atomically reversible) applied
 above the nix layer, and it is why the three doors — CLI, MCP, and A2A — are
 one implementation with three façades rather than three features.
 
-**What it forbids, concretely:** a registry an author must edit to be seen; a
+**What it forbids, concretely:** a second place a module file is named; a
 module reaching into another module; a capability that only exists inside one
 consumer; an effect with no inverse. When a design choice is open, take the one
 that can be deleted.
@@ -426,8 +429,9 @@ untracked both).
 ### Package shape (`pkgs/` is walked too)
 
 `pkgs/` self-registers by the same walk `song/songbook/` still uses
-(`modules/` self-registers through its own `default.nix` aggregates
-instead). Drop
+(`modules/` self-registers through the catalogue instead — one line per
+dendrite, which the whole-tree aggregate derives over — and
+`modules/{facets,nucleus}/` through their own `default.nix`). Drop
 `pkgs/<name>/default.nix` — a `callPackage`-able derivation taking standard
 nixpkgs args — and `lib/pkgs.nix` (the packages walker) discovers it into **all
 four** consumers from one source:
