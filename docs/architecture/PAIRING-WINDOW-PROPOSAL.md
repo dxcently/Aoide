@@ -49,7 +49,7 @@ Define crash/restart, expiry during a handshake, retry after lost completion, an
 
 Timed enrollment serves manually added batches. It does not mean that every discovered device is accepted. Every new device must authenticate under a current code and its bounded authority.
 
-One operator's machines are not enrolled through windows. They share the mesh's signed roster ([HTTPS-MESH-API.md](HTTPS-MESH-API.md), "Rosters"): each machine's public keys are listed in one file that the mesh's operator key signs, and each machine trusts that operator key once, by configuration or one LAN join. The roster keeps per-node grants, revocation (a removed line, re-signed) and audit identity, and it has its own design and slice. This implementation slice adds no enrollment authority, relay, or transitive trust.
+One operator's machines are not enrolled through windows. They share the mesh's signed charter ([HTTPS-MESH-API.md](HTTPS-MESH-API.md), "Charters"): each machine's public keys are listed in one file that the mesh's operator key signs, and each machine trusts that operator key once, by configuration or one LAN join. The charter keeps per-node grants, revocation (a removed line, re-signed) and audit identity, and it has its own design and slice. This implementation slice adds no enrollment authority, relay, or transitive trust.
 
 Enrollment windows serve machines of different owners, which share no operator. Trust between them stays pairwise and is made in a pair mesh: a full mesh of N such machines has N(N-1)/2 relationships, so declare the required edges rather than implicitly connecting every host. Known peers reconnect automatically without enrollment.
 

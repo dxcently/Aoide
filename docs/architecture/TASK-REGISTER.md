@@ -340,15 +340,15 @@ Fields per entry: status · owner · depends on · evidence · next.
   alongside this register; protocol review FIRST.
 - Scope as ruled (User, 2026-09-26): pairing is for links between machines
   of DIFFERENT owners. One operator's machines join through the signed
-  roster (`HTTPS-MESH-API.md` "Rosters", MAIL.md P-ROSTER), which is the
+  charter (`HTTPS-MESH-API.md` "Charters", MAIL.md P-CHARTER), which is the
   proposal's "managed fleet automation" mode; there is no crowd pairing
   mode. The reviewed protocol must: name the pair mesh the pairing is made
   in (`--mesh`), carry each side's signed age binding, keep the
   local-network guard, never run through a relay or the HTTPS adapter,
   and serve as the carrier for `aoide mesh join <mesh> <operator-node>`
-  (operator key + signed roster, no pairwise record).
+  (operator key + signed charter, no pairwise record).
 - Open for the User: whether the timed batch window (`pair open --for`)
-  survives now that the roster covers one owner's fleet.
+  survives now that the charter covers one owner's fleet.
 - Owner: Fable (Opus for protocol review); no competing pairing executors.
 - Depends on: 1–3; a reviewed protocol before any code.
 - Evidence: proposal §Delivery phases and §Acceptance.
@@ -1804,7 +1804,7 @@ project/parent inheritance across local/remote/app/subagents;
   to it) read with per-reader board cursors; the TUI mail view is a VIEW
   of that store (§19), never a second one. Mesh trust = `node allow`/
   `node remove` (grants are global per node today, §11, and per mesh from
-  P-ROSTER — a roster line for one operator's machines, a pairing in a
+  P-CHARTER — a charter line for one operator's machines, a pairing in a
   pair mesh for another owner's); pairing = `pair`/`pair watch`/
   `pair reject`/`mesh pair` (windows redesign §5 QUEUED, codes never
   ferried); secrets = the `secrets` command family (`grant`, `revoke`,
@@ -1824,7 +1824,7 @@ project/parent inheritance across local/remote/app/subagents;
   only — the value path stays `secrets expose` under its own gate.
 - Permission boundaries (binding for every brief): project membership and
   role assignment grant NO access — mesh trust is the node's grant in
-  a mesh (global per node until P-ROSTER), and board membership grants
+  a mesh (global per node until P-CHARTER), and board membership grants
   nothing beyond reading and posting that board; a TUI action never
   bypasses the daemon gate (`node allow`, `secrets grant/approve`,
   `pair`) — it issues the same command a terminal would and shows the
@@ -2091,28 +2091,28 @@ project/parent inheritance across local/remote/app/subagents;
   pairing LAN-only, never through a relay; HTTPS exposes only a node's
   grants in a mesh, never a command endpoint; the hop chain signs `next`
   (cut-and-reappend refused); trust is per mesh (existing paired records move
-  into the home mesh); one operator's machines share a signed roster
+  into the home mesh); one operator's machines share a signed charter
   (operator key = mesh root, monotonic versions, remove + re-sign =
   revocation, re-root costs one touch per machine), which answers
   `sameOperator` and supersedes crowd pairing and symmetric declaration;
   every group conversation is a board with a key per epoch, owned by its
-  creating node; in a roster mesh the operator can take a board over
+  creating node; in a charter mesh the operator can take a board over
   (the new owner rotates the epoch), and a pair-mesh board whose owner
   is gone is frozen and recreated.
 - Beta path (slice order, each with its tests in the two docs): P-M3 hold +
   poll (in progress) → P-SEAL sealing + key bindings (SSH direct lane) →
-  P-ROSTER roster + trust per mesh → H1 mail-only HTTPS adapter on the
+  P-CHARTER charter + trust per mesh → H1 mail-only HTTPS adapter on the
   relay (native Windows `poll` node in its acceptance, §28) → P-M4 transit
   with the `next` hop chain → P-BOARD boards. Then H2 state/events, H3
   direct HTTPS edges, H4 typed control, each after its own review.
 - Status: design amended to the rulings; encryption-library profile
-  (`age` crate, `ctx` and roster-signature encodings) and a follow-up
+  (`age` crate, `ctx` and charter-signature encodings) and a follow-up
   review remain before P-SEAL. HTTPS has no plaintext fallback. Existing
   SSH delivery remains in service until parity and recovery are
   demonstrated.
 - Open (the docs' "Open design decisions"): where the relay runs (an
   always-on host with a public 443 that is not a home machine); forward
-  secrecy; padding; roster expiry; a pre-committed successor operator key;
+  secrecy; padding; charter expiry; a pre-committed successor operator key;
   cross-mesh origin verification through a gate; read visibility per mesh;
   relay failover.
 
@@ -2159,12 +2159,12 @@ project/parent inheritance across local/remote/app/subagents;
 - Fix: `restrict,command="<aoide door entry>"` on each mesh key, the entry
   point to be read from the SSH transport path; stale or mislabelled keys
   removed on the User's word. The same audit runs on every host.
-- Interaction with trust per mesh (§29, HTTPS-MESH-API.md "Rosters"): a
-  roster or pairing grant is an Aoide grant at the door and never governs
+- Interaction with trust per mesh (§29, HTTPS-MESH-API.md "Charters"): a
+  charter or pairing grant is an Aoide grant at the door and never governs
   SSH, so an unrestricted mesh key bypasses every grant in every mesh.
   Trust per mesh holds on a host only once this fix is done there; it is a
-  prerequisite for claiming P-ROSTER's per-mesh scoping on any host another
-  owner's key can reach. Between roster nodes that reach each other through
+  prerequisite for claiming P-CHARTER's per-mesh scoping on any host another
+  owner's key can reach. Between charter nodes that reach each other through
   a relay, an `ssh://` edge is optional and its key can be removed rather
   than restricted.
 - Status: not started. Owner: unassigned. Keys are the User's to change.

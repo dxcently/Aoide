@@ -1196,9 +1196,9 @@ sakaki = "ssh://khoa@192.168.1.202"
   the mesh is operated by the same human. It is declared and NOT acted on:
   `aoide mesh pair` converges a mesh declaring it identically to one that
   does not — every node paired with both codes typed — and says so in one
-  note on its report. The question it asks is answered by the signed roster
-  (`docs/architecture/HTTPS-MESH-API.md`, "Rosters"): one operator is one
-  roster signer, so the key is never acted on and retires with P-ROSTER.
+  note on its report. The question it asks is answered by the signed charter
+  (`docs/architecture/HTTPS-MESH-API.md`, "Charters"): one operator is one
+  charter signer, so the key is never acted on and retires with P-CHARTER.
   This section is validated the same as the two above it — an invalid
   mesh/node name, an out-of-vocabulary `grant` element, an unparseable
   hop, or a node declared twice is a LOUD error naming the offence — but

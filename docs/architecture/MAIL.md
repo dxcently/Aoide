@@ -4,9 +4,9 @@ The design authority for the mail workstream. Everything in "Settled
 decisions" was User-decided — the 2026-09-04 → 09-06 design grill (three
 rounds, click-through), informed by the four-system survey in
 `docs/Aoide-Wiki/references/P2P-Board-Protocols.md`, and the 2026-09-25/26
-rulings on sealing, rosters, trust per mesh and boards; executors do not
+rulings on sealing, charters, trust per mesh and boards; executors do not
 relitigate it. [HTTPS-MESH-API.md](HTTPS-MESH-API.md) owns the sealed
-container, the key bindings, the roster's trust rules and the threat model;
+container, the key bindings, the charter's trust rules and the threat model;
 this document owns the store, the addressing, the routing, boards and the
 slice order. Where this document and a brief conflict, this document wins.
 The default for anything this document leaves unruled: **do it the way
@@ -75,14 +75,14 @@ FidoNet node could.
    opposite: decision 17 seals every letter that leaves its node.
 5. **Deposits are ungated per letter, not per node.** Trust in a mesh
    (decision 16) is what admits a node — its pairing, or its line on the
-   mesh's roster — and a `message` capability in the closed
+   mesh's charter — and a `message` capability in the closed
    `NODE_CAPABILITIES` vocabulary is what lets it deposit: a node holding
    `message` in the letter's mesh deposits every letter without further
    approval, and one that does not hold it there deposits nothing.
    `message` is an explicit widening like `spawn`, never part of
    `[pairing] defaultGrant` — opening a mail link is a gesture the User
    makes, which is also the moment the bearer-token fix below is due. A
-   roster line's default grant is `message`, because writing the line
+   charter line's default grant is `message`, because writing the line
    is that gesture. Conduct's gate (`pending.json`, autogate) is untouched
    and mail never queues there.
 6. **Deposit-always, then a doorbell.** Writing to the store IS delivery.
@@ -104,11 +104,11 @@ FidoNet node could.
 11. **Mail routes through hubs, zone-scoped, in v1.** This amends
     PAIRING's kill-list with one carve-out: mail TRANSIT through declared
     hubs. Pairing and code-ferrying rulings are untouched — a hub relays
-    letters, never trust; a roster riding through a hub carries the
+    letters, never trust; a charter riding through a hub carries the
     operator's signature, not the hub's word. A hub routes only between
     nodes of a mesh it shares with both ends; cross-mesh transit only
     through a node declared as the zonegate between two named meshes. The
-    routing table IS the mesh declaration — the roster, for a roster
+    routing table IS the mesh declaration — the charter, for a charter
     mesh.
 12. **Transit files at the hub** (FidoNet-faithful): a typed `transit`
     entry in the hub's mailbase, holding the sealed container and its
@@ -129,12 +129,12 @@ FidoNet node could.
 16. **Meshes are zones and trust scopes.** A mesh partitions routing AND
     trust: a grant is given in one mesh and holds only there, so a node
     trusted in one mesh gains nothing in another. A mesh is either a
-    roster mesh (one operator key signs its nodes and grants) or a pair
+    charter mesh (one operator key signs its nodes and grants) or a pair
     mesh (its trust is the pairwise records made in it, for machines of
     different owners). A node may sit in several meshes with a different
     grant in each; declaring it with two different keys is a load-time
     validation error — one node, one key. Grants are global per node
-    until P-ROSTER, which moves every existing pairing into the User's
+    until P-CHARTER, which moves every existing pairing into the User's
     home mesh with its grant unchanged. The full rules are
     HTTPS-MESH-API.md's "Trust per mesh".
 17. **Every letter that leaves its node is sealed at mint** (from
@@ -143,12 +143,12 @@ FidoNet node could.
     container, with the envelope below as its sealed inner plaintext. No
     relay, hub or TLS front holds a key that opens one. Each host
     generates its own keys; private keys never leave it.
-18. **One operator's machines share a roster.** The operator keeps one
-    signed roster per mesh — node names, identity keys, signed age
+18. **One operator's machines share a charter.** The operator keeps one
+    signed charter per mesh — node names, identity keys, signed age
     bindings, grants, addresses, relays — and every machine trusts the
-    operator key once. For those machines the roster IS the mesh
+    operator key once. For those machines the charter IS the mesh
     declaration and replaces per-pair ceremonies; pairing stays for
-    links between different owners. Same operator means same roster
+    links between different owners. Same operator means same charter
     signer.
 
 ## Vocabulary
@@ -157,9 +157,9 @@ FidoNet node could.
 | -------- | ------------------------------------------------------------------ | --------------------------- |
 | node     | one Aoide instance in a mesh: one identity key, one age key        | node                        |
 | edge     | a verified pairing between two nodes, made in one pair mesh        | link, pkt password          |
-| mesh     | a named routing zone and trust scope: a roster mesh or a pair mesh | zone                        |
-| roster   | a mesh's node list, grants and relays, signed by its operator key  | nodelist                    |
-| operator key | the Ed25519 key that signs one mesh's roster and board takeovers; the mesh root | zone coordinator            |
+| mesh     | a routing zone and trust scope: a charter mesh or a pair mesh      | zone                        |
+| charter  | a mesh's node list, grants and relays, signed by its operator key  | nodelist                    |
+| operator key | the Ed25519 key that signs one mesh's charter and board takeovers; the mesh root | zone coordinator            |
 | home mesh | the User's own mesh (`[pairing] homeMesh`, default `home`)        | —                           |
 | hub      | a node a mesh declares as a transit relay (key `relays`)           | hub / host                  |
 | zonegate | a node both of two meshes declare as their gate to each other      | zonegate                    |
@@ -297,8 +297,8 @@ An entry is an envelope plus local facts:
   held sealed — the container and its routing metadata, never an opened
   envelope; readers hide them unless asked.
 - `type=post` entries are opened board posts, filed once per node and
-  carrying their board id (§Boards). A roster letter and a wrap are
-  applied, not filed as correspondence: the roster to `state/mesh/`, the
+  carrying their board id (§Boards). A charter letter and a wrap are
+  applied, not filed as correspondence: the charter to `state/mesh/`, the
   epoch key to `state/boards/`; only their `msgid` enters `seen.jsonl`.
 - Reading never mutates an entry. Cursors are per reader: a name maps to
   a set of readers, each with its own high-water mark, and a read
@@ -410,9 +410,9 @@ door's audit name whitelist gains both names so they never log as bare
      checked against ONE key; the hop's identity for every later step is
      the node that key belongs to — never a name the caller wrote in the
      envelope, never a `nodes.json` nickname looked up by name. From
-     P-ROSTER the signed request names its mesh, which must equal the
+     P-CHARTER the signed request names its mesh, which must equal the
      envelope's `mesh`, and the grant is read in that mesh only: the
-     caller's roster line, or its paired record's grant there;
+     caller's charter line, or its paired record's grant there;
   2. `msgid` recomputes from the envelope;
   3. **zone check:** the receiver declares `envelope.mesh`, and the hop
      from step 1 is declared in it. If `envelope.mesh ≠ header.originMesh`
@@ -422,8 +422,8 @@ door's audit name whitelist gains both names so they never log as bare
      node cannot re-label a letter into its other mesh: its hop signature
      would name a node that is no gate;
   4. origin signature verifies against **the key on record for
-     `header.from.node`** in `header.originMesh` — its roster line in a
-     roster mesh, its paired record in a pair mesh (§Transit). One key is
+     `header.from.node`** in `header.originMesh` — its charter line in a
+     charter mesh, its paired record in a pair mesh (§Transit). One key is
      tried, the one that name maps to. Today's connection-signature resolution tries every
      verified key and reports whichever matched; that shape must not be
      reused here, because a paired node signing as another paired node
@@ -517,7 +517,7 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   reason. Parked is not condemned: the refusing grant is the RECEIVING
   node's record of the sender, so once that host runs `aoide node allow
   <sender> message on` (or the operator adds `message` to the sender's
-  roster line), the sender runs `aoide mail outbox retry <msgid>` (or
+  charter line), the sender runs `aoide mail outbox retry <msgid>` (or
   `--refused [<node>]`) to un-park and dial at once.
   The stored signed envelope is resent as-is, never re-minted, so the far
   end's msgid dedup still holds.
@@ -533,7 +533,7 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
 ## Transit
 
 The routing table is the mesh declaration, in one of two places. A
-roster mesh's is its roster (HTTPS-MESH-API.md, "Rosters"): `relays`,
+charter mesh's is its charter (HTTPS-MESH-API.md, "Charters"): `relays`,
 each node's `address`, and optional `[status]` and `[gates]`, signed by
 the operator; config names only the operator key. A pair mesh's is its
 `[mesh.<name>]` section, with additive keys (deny_unknown_fields — the
@@ -561,11 +561,11 @@ home = "sakaki"                          # the OTHER mesh must declare it back
   load-time error — one node, one key.
 - **Keys come from trust, never from a hop.** Decision 10 needs the
   destination to hold the origin's public key even with no direct edge.
-  In a roster mesh the roster carries every node's key — the nodelist
+  In a charter mesh the charter carries every node's key — the nodelist
   carrying identity, as FidoNet's did, signed by the operator. In a pair
   mesh the destination's own pairing with the origin carries it, so
   transit there joins nodes that are paired but have no address for each
-  other. A hub never supplies a key, and a paired key in a roster mesh is
+  other. A hub never supplies a key, and a paired key in a charter mesh is
   inert (HTTPS-MESH-API.md, "Keys").
 - A gate is symmetric or it is nothing: `friends.gates.home = "sakaki"`
   requires `home.gates.friends = "sakaki"`, else `validate` refuses. How a
@@ -592,7 +592,7 @@ door check (Wire, step 3) verifies the depositing hop belongs to the
 zone it claims to carry, and that a rewritten `mesh` is signed by the
 declared gate. Every membership, gate, and status lookup in those
 checks starts from the **verifying key** and maps it to a declared
-name through the roster or the paired record; the `nodes.json`
+name through the charter or the paired record; the `nodes.json`
 nickname is a display fact and never an input to policy.
 
 At a hub, a deposit whose `to.node` is not self: run the keyless checks
@@ -787,7 +787,7 @@ reply chain; neither has members or a key. Boards land at P-BOARD.
   never spans meshes;
 - an **owner**: the node that created it — a project board's owner is
   the project's host node — whose identity key signs every membership
-  record; in a roster mesh the operator can move ownership to another
+  record; in a charter mesh the operator can move ownership to another
   member node (Takeover, below);
 - **members**: mailboxes (`<node>/<name>`). Keys are held per node, so two
   member mailboxes on one node share that node's copy (decision 4);
@@ -822,10 +822,10 @@ the epoch key. Nothing else ever carries an epoch key.
   accepted for a bounded grace window, then refused (`stale-epoch`).
 - **Rotation is per node.** Removing one mailbox while another member
   mailbox remains on the same node rotates nothing, because that node
-  still holds the key. Removing a node from a roster removes its
+  still holds the key. Removing a node from a charter removes its
   mailboxes from every board of that mesh, and each owner rotates.
 
-**Takeover.** In a roster mesh, the mesh's operator can take a board
+**Takeover.** In a charter mesh, the mesh's operator can take a board
 over when its owner node is dead or gone. `aoide board takeover <board>
 [--owner <node>]`, run on the operator's machine, signs a **takeover
 record** with the mesh's operator key:
@@ -835,7 +835,7 @@ takeover_sig = operator Ed25519 over canonical("aoide/board-takeover", mesh, boa
 ```
 
 - `owner_key` is the identity key of the new owner, which must be a
-  roster node and a member node at `epoch`, the board's current epoch:
+  charter node and a member node at `epoch`, the board's current epoch:
   only a member node holds the epoch keys, so only it can read the sealed
   membership and wrap earlier epochs. `--owner` defaults to the
   operator's own machine when that machine is a member node; otherwise
@@ -862,7 +862,7 @@ takeover_sig = operator Ed25519 over canonical("aoide/board-takeover", mesh, boa
 - A takeover is never silent: `aoide board` marks a board whose owner
   changed by takeover, and each member node audits the record.
 
-A board whose owner node is removed from the roster is frozen until the
+A board whose owner node is removed from the charter is frozen until the
 operator takes it over. A direct board is never taken over, because the
 rotation would leave it one member: without its owner it is frozen, and
 the remaining member creates a new one.
@@ -909,7 +909,7 @@ rule 4).
 **Letters stay separate.** A letter to a mailbox is not a post on a
 direct board:
 
-- The letter is the transport. Posts, membership records, wraps, rosters
+- The letter is the transport. Posts, membership records, wraps, charters
   and receipts all move as letters, and a board cannot carry the key
   that opens it.
 - Addressed mail needs no membership: a mailbox exists by being named
@@ -1034,9 +1034,9 @@ cc: …
 
 `aoide mesh` is the nodelist command (FTS-5000: "the nodelist defines the
 network"). It grows columns: mesh, status (`hold`/`down`/normal), role
-(relay/gate/spoke), key source (paired/roster), liveness, and the roster
-version in force for each roster mesh. Statuses are declared like every
-other mesh fact — in the roster for a roster mesh, in config for a pair
+(relay/gate/spoke), key source (paired/charter), liveness, and the charter
+version in force for each charter mesh. Statuses are declared like every
+other mesh fact — in the charter for a charter mesh, in config for a pair
 mesh; the command reports, it does not edit. `aoide mail route <node>` runs the four steps and prints
 the path without sending — the dry run before a routing change. A later
 `aoide mesh down <node>` that edits the declaration for the User is a
@@ -1053,18 +1053,18 @@ the declaration is signed by an operator or managed on a NixOS box
 rebuild, and the rebuild is the User's gate):
 
 - **Now:** `aoide node allow <node> message off` — the existing
-  per-node capability switch (per mesh from P-ROSTER, `--mesh`), which
+  per-node capability switch (per mesh from P-CHARTER, `--mesh`), which
   writes `nodes.json` and which the door reads per request. It narrows a
-  roster grant as well as a paired one. The node's deposits refuse on
+  charter grant as well as a paired one. The node's deposits refuse on
   the next request; nothing waits for a switch. It is one-sided: this box
   stops listening, routing elsewhere is unchanged.
 - **Routing-wide:** `down` for the node in every mesh that declares it —
-  the roster's `[status]` and a re-sign for a roster mesh, a config
+  the charter's `[status]` and a re-sign for a charter mesh, a config
   `status` line and the next switch for a pair mesh — so every hop
-  refuses, routes around, drops. Removing the node's roster line is the
-  stronger form: revocation (HTTPS-MESH-API.md, "Rosters").
+  refuses, routes around, drops. Removing the node's charter line is the
+  stronger form: revocation (HTTPS-MESH-API.md, "Charters").
 
-The door reads `config.toml` and the rosters in force per request for
+The door reads `config.toml` and the charters in force per request for
 the mail methods — **new at P-M4**; today the door never loads the
 declaration, only `nodes.json`, so this is a seam added, not one reused.
 A declaration that fails to load refuses both mail methods with
@@ -1114,7 +1114,7 @@ Threat: code execution as the aoide unix user on one node; also a
 paired node that merely misbehaves.
 
 - **On that node: total.** Keys (identity, age, any operator key, the
-  epoch keys it holds), ssh, stores, logs. Host security's jurisdiction.
+  epoch keys it holds), roster, ssh, stores, logs. Host security's jurisdiction.
   Mail's duty is to not AMPLIFY it.
 - **Across edges, as that node's identity:** only its grants in each
   mesh — `read` (recon), `message` (deposit letters and posts — inert
@@ -1124,13 +1124,13 @@ paired node that merely misbehaves.
   stop silent-drop-by-forged-ack; trust per mesh and the zone check at
   every hop stop a compromise in one mesh reaching another except
   through a declared gate; `down` is the quarantine gesture and keeps
-  the pairing record for forensics; a roster re-sign without the node's
+  the pairing record for forensics; a charter re-sign without the node's
   line is its revocation.
-- **As the operator key:** every node that trusts it accepts the rosters
+- **As the operator key:** every node that trusts it accepts the charters
   and board takeovers it signs, until re-rooted — the mesh's root, kept
   on the operator's machine and never on a relay (HTTPS-MESH-API.md,
-  "Rosters"). A stolen one can seize the mesh's boards: take them over,
-  and re-key a member node's roster line to keys it holds so every
+  "Charters"). A stolen one can seize the mesh's boards: take them over,
+  and re-key a member node's charter line to keys it holds so every
   later wrap reaches it; it opens no epoch wrapped before the re-key.
   Every takeover and every re-keyed line is marked on each member node;
   re-rooting ends it.
@@ -1163,7 +1163,7 @@ paired node that merely misbehaves.
   destination-signed acks) were taken from an inter-operator network,
   and the two additions such use needs are both here: sealing to the
   destination key (NNCP's shape, decision 17) and a signed nodelist
-  (the roster, decision 18), with trust scoped per mesh (decision 16).
+  (the charter, decision 18), with trust scoped per mesh (decision 16).
 
 ## Commands
 
@@ -1179,28 +1179,28 @@ aoide mail rm --older-than <Nd|Nh>                       prune the base, never s
 aoide mail export [--dir <path>]                         one Markdown note per thread (read-only)
 aoide mail ring --for <name> [--from <session-id>]       the doorbell, by hand; --from excludes that reader
 aoide mail poll                                          a poll node's poll, by hand or from the OS scheduler (H1)
-aoide mesh                          nodelist view: + mesh, status, role, key source, liveness, roster version
+aoide mesh                          nodelist view: + mesh, status, role, key source, liveness, charter version
 aoide node allow <node> message off [--mesh <m>]         quarantine this box's door, now (existing command)
 aoide identity                                           this node's line: identity key, age binding, fingerprint
 aoide mesh join <mesh> (--operator <key> | <operator-node>)   trust a mesh's operator key, once
-aoide mesh roster init <mesh>                            root a mesh: mint its operator key (operator's machine)
-aoide mesh roster sign <mesh> [--file <path>]            validate, bump version, sign, send to every node
-aoide mesh roster show [<mesh>]                          the roster in force: version, signer, this node's grant
-aoide mesh roster accept <file>                          apply a signed roster carried by hand
-aoide mesh roster reroot <mesh>                          replace a lost or compromised operator key
+aoide mesh charter init <mesh>                            root a mesh: mint its operator key (operator's machine)
+aoide mesh charter sign <mesh> [--file <path>]            validate, bump version, sign, send to every node
+aoide mesh charter show [<mesh>]                          the charter in force: version, signer, this node's grant
+aoide mesh charter accept <file>                          apply a signed charter carried by hand
+aoide mesh charter reroot <mesh>                          replace a lost or compromised operator key
 aoide board                                              boards with unread posts for this reader
 aoide board create (--direct <mailbox> | --project <p> | --member <mailbox>…) [--history all|from-join]
 aoide board post <board> -- <text>                       post; the conductor's composer runs the same command
 aoide board read <board>                                 print + advance this reader's cursor
 aoide board add|remove <board> <mailbox>                 owner only; remove rotates the epoch
 aoide board leave <board>
-aoide board takeover <board> [--owner <node>]            operator's machine, roster mesh only; the new owner rotates
+aoide board takeover <board> [--owner <node>]            operator's machine, charter mesh only; the new owner rotates
 ```
 
 `aoide send`, `aoide pair`, `aoide mesh pair` are unrenamed — none of
 them lies under the new model. `aoide pair` gains `--mesh`, the pair
 mesh the pairing is made in; `aoide mesh pair` converges pair meshes
-only, because a roster mesh's nodes need no pairing. `inbox list/read/clear` retire with
+only, because a charter mesh's nodes need no pairing. `inbox list/read/clear` retire with
 their store (golden −3); every new command rides its phase's golden
 delta with the full count-site checklist. Like every existing command,
 the CLI writes state files itself under the stage lock — "through
@@ -1228,7 +1228,7 @@ Serialized, exec + different reviewer each, cargo field exclusive per
 phase, docs in the same commit (this file, CONTRACTS, the crate
 READMEs), no subagent spawning and no backgrounded cargo in any brief.
 
-The beta path runs P-M3 → P-SEAL → P-ROSTER → H1 → P-M4 → P-BOARD. H1
+The beta path runs P-M3 → P-SEAL → P-CHARTER → H1 → P-M4 → P-BOARD. H1
 (the mail-only HTTPS adapter on the relay) is HTTPS-MESH-API.md's, which
 also lists the acceptance tests each of these slices owes beyond its
 mail-side tests below. The P-M5 doorbell phases are orthogonal to that
@@ -1288,26 +1288,26 @@ path.
   outbox and the wire hold no letter bytes; a destination with a binding
   never receives plaintext; a retry resends the stored container
   byte-identical; plus HTTPS-MESH-API.md's P-SEAL list.
-- **P-ROSTER — the roster and trust per mesh (L).** Rosters (file,
-  `sign`, `accept`, carriage as a `roster` letter, the version high-water
+- **P-CHARTER — the charter and trust per mesh (L).** Charters (file,
+  `sign`, `accept`, carriage as a `charter` letter, the version high-water
   mark, `reroot`), `aoide mesh join`, the operator line in config, the
   node line from `aoide identity` and `aoide onboard`, grants read per
   mesh at the door (the signed request names its mesh), `nodes.json`
   grants per mesh with every existing record migrated into the home
   mesh, `aoide pair --mesh`, `node allow --mesh` as local narrowing,
-  `sameOperator` retired. Tests: a `message`-only roster node deposits
+  `sameOperator` retired. Tests: a `message`-only charter node deposits
   and is refused `spawn`; a node trusted in mesh A is refused in mesh B;
-  a roster letter carried through the relay applies, and a stale one is
+  a charter letter carried through the relay applies, and a stale one is
   refused; removing a line refuses the node on the next request after
-  receipt; every pre-roster grant survives migration byte-identical;
-  plus HTTPS-MESH-API.md's P-ROSTER list.
+  receipt; every pre-charter grant survives migration byte-identical;
+  plus HTTPS-MESH-API.md's P-CHARTER list.
 - **H1 — the mail-only HTTPS adapter on the relay.** HTTPS-MESH-API.md.
   Until P-M4, a `poll` node exchanges letters with the relay node itself
   only.
 - **P-M4 — zones and transit (L).** `relays`/`status`/`gates` from the
-  roster (roster mesh) or config (pair mesh) (validate_mesh:
+  charter (charter mesh) or config (pair mesh) (validate_mesh:
   multi-membership allowed, key divergence and one-sided gates refused;
-  drift shows them), origin verification through the roster or the
+  drift shows them), origin verification through the charter or the
   pairing of `originMesh`, the four-step router with the zone clause,
   transit filing of sealed containers + the chained hop signature naming
   `next` + loop guards, the door's per-request declaration read (fail
@@ -1323,7 +1323,7 @@ path.
   at all three points; `node allow … message off` refuses on the next
   request with no reload; an unloadable declaration refuses both mail
   methods and nothing else; a renamed `nodes.json` nickname changes no
-  policy outcome; a paired key for a node the roster lists is inert.
+  policy outcome; a paired key for a node the charter lists is inert.
   Hop chain: a removed middle entry fails `broken-chain`; swapped entries
   fail; **truncating the chain to entry `j` and re-appending the
   truncating hop fails**, on the `prev` or the `next` link; a chain whose
@@ -1346,7 +1346,7 @@ path.
   only the owner's membership record is accepted (`not-owner`); a
   direct board refuses a third member; removing one of two member
   mailboxes on one node rotates nothing; removing a node from the
-  roster rotates every board of that mesh it sat on; the relay's
+  charter rotates every board of that mesh it sat on; the relay's
   board log, spool and audit hold no plaintext and no mailbox name; a
   post and its title never reach a doorbell line; a post containing its
   own fence cannot escape the frame; the conductor composer's post and
@@ -1359,7 +1359,7 @@ path.
   member node at the current epoch is refused (`not-a-member`); after a
   takeover, a membership record signed by the old owner is refused
   (`not-owner`); a direct board refuses a takeover; removing the owner
-  node from the roster freezes its boards (no membership change
+  node from the charter freezes its boards (no membership change
   accepted) until a takeover; a later `history = all` joiner under the
   new owner opens every earlier post; `aoide board` marks the board and
   each member node's audit holds the record.
@@ -1412,8 +1412,8 @@ path.
 Verification gate per phase: the crate's own tests green, `aoide schema
 --json` golden updated in the same commit, and a live two-node run
 (yomi ⇄ osaka) of the phase's headline command recorded in the session
-ledger. P-ROSTER's live gate is the home mesh rooted and every host
-admitted from one signed roster with its old grants intact; H1's is a
+ledger. P-CHARTER's live gate is the home mesh rooted and every host
+admitted from one signed charter with its old grants intact; H1's is a
 native Windows `poll` node exchanging letters with sakaki over HTTPS
 with no SSH; P-M4's is the routed letter osaka → sakaki → chiyo, which
 needs chiyo lit and the mesh declarations deployed in the ruled order.
@@ -1436,13 +1436,13 @@ needs chiyo lit and the mesh declarations deployed in the ruled order.
   text plus a clamped name, ever.
 - No transit outside a declared zone except through a symmetric
   declared gate; no implicit bridging by dual membership.
-- No key ferried by a hop — keys come from a pairing or from a roster
+- No key ferried by a hop — keys come from a pairing or from a charter
   signed by the operator key the node trusts, nowhere else; a carrier is
   never the authority.
 - No relay of trust, codes, or pairing state — the PAIRING kill-list
-  stands; mail transit is the one named carve-out, and a roster riding
+  stands; mail transit is the one named carve-out, and a charter riding
   it carries the operator's signature, not the relay's.
-- No crowd pairing — one operator's many machines are a roster, never
+- No crowd pairing — one operator's many machines are a charter, never
   one code shown to a room.
 - No grant that crosses meshes — trust is per mesh.
 - No per-mesh identity — one identity key and one age key per node.

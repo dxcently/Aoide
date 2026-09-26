@@ -821,10 +821,10 @@ declaring `sameOperator = true` converges byte-identically to one that
 does not, and the report carries a single note saying the flag was seen
 and not acted on. The note is a note: it changes no node's outcome, no
 count, and refuses nothing. The question the flag asks — one human
-operating both ends — is answered by the signed roster instead
-([HTTPS-MESH-API.md](HTTPS-MESH-API.md), "Rosters"): same operator means
-same roster signer, one operator's machines join the roster rather than
-pairing with each other, and the flag retires when the roster lands. The
+operating both ends — is answered by the signed charter instead
+([HTTPS-MESH-API.md](HTTPS-MESH-API.md), "Charters"): same operator means
+same charter signer, one operator's machines join the charter rather than
+pairing with each other, and the flag retires when P-CHARTER lands. The
 ceremony, with both codes, stays the entry for machines of different
 owners.
 
