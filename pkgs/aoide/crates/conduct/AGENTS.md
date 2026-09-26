@@ -794,7 +794,34 @@
   names no registered harness profile is skipped and counted
   (`shell-parent`) — a line submitted into a bare shell would RUN as a
   command. The same applies to `not-conductable`, `parent-done` and
-  `no-parent-record`.
+  `no-parent-record`; those four predicates live in ONE function
+  (`unreceptive`), which `deliver` itself calls, so nothing may restate them.
+  **The parent pulls its own remote children (P-RSA S9, `CONTRACTS.md`
+  §4/§6).** `pingback_pull` runs in the SAME post-lock block, right after
+  `pingback`, and only under `Door::Daemon`: for every row in
+  `state/stage/remote-children.json` that is not `drained` and whose
+  `parentSessionId` is a record `unreceptive` admits, it asks that child's
+  node `tasks/get` + `aoide/linesAfter` = the row's cursor
+  (`aoide_client::commands::task_history_on_node`, tunnel key = the PARENT's
+  session id, so the ssh forward is the parent's own and the daemon holds
+  none) and renders the answer HERE. The far node is resolved by the row's
+  `key` alone, never by its display `node`. The events are a peer's bytes:
+  each is re-validated against the closed set (`ping_event_of` — an unknown
+  kind is dropped), every string re-cleaned (`reclean` = the shared
+  `common::strip_unsafe` + `SAY_MAX` + the `/`/`!` guard, because the BARE
+  segments `render_line` emits are never quoted), and rendered by the LOCAL
+  `render_line` under `[<node>/<child id>]`. The cursor advances BEFORE the
+  line (at-most-once), to the newest `seq` the answer carried or `last` for a
+  `gap`; a `gap` buys exactly one arithmetic marker line, never a fabricated
+  event; a drained `Exited` latches the row with
+  `remote_children::mark_drained`. A failed pull is quiet — cleaned audit
+  record, named skip, no retry storm, the next tick from the same cursor (no
+  backoff: one pull per child per tick) — and must never be fatal to the
+  tick. `deliver`'s gate label is a parameter: `autogate-child` for a local
+  line, `autogate-child remote` for a pulled one. `clean`/`quote`/`reclean`
+  all judge through `common::strip_unsafe` — control AND Unicode `Cf` — and a
+  new sanitizer anywhere in this crate must too, never a copied `is_format`
+  table (S9's own review found the local lane filtering `is_control` only).
   **`died mid-turn` is the sync's own additive return.**
   `sync_eidolon_sessions` returns `(bool, Vec<DroppedEidolon>)` — the bool
   means exactly what it did before, so every existing caller is unchanged in
@@ -1813,7 +1840,13 @@
   or to what a remote child spools also updates `CONTRACTS.md`'s
   `state/stage/pingback-remote.json` (§4) and its ping-back-history paragraph
   (§6) — the reaper that writes the ring and the door that serves it are two
-  ends of the one shape.
+  ends of the one shape. A change to the PULL — the ledger fields it reads or
+  writes (`linesAfter`, `drained`), what it re-validates, or the tag it
+  renders — updates `CONTRACTS.md`'s `state/stage/remote-children.json` (§4),
+  `docs/Aoide-Wiki/concepts/orchestration/Managed-Task-Wrapper.md`'s "How the
+  report is delivered" (the remote-parent paragraph), and `EIDOLON-TRACE.md`'s
+  "Second slice" beside the spool half: the two lanes are one conversation,
+  and a doc that describes only the sending end is half a page.
 - A change to shellbridge's `sessionaction`/`projectaction` whitelists or
   reply shape updates `ShellBridge.qml`'s protocol comment and
   `concepts/cli/Doors-and-Nodes.md`'s socket-command list, in the same

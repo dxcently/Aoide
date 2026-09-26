@@ -2327,8 +2327,61 @@ project/parent inheritance across local/remote/app/subagents;
   events per child this node ever ran — the same "never reconciled" shape the
   remote-children ledger holds. Tests: aoide-storage 438 (6 new),
   aoide-conduct 896 (4 new), aoide-protocol 174, aoide-server 245 (5 new), all
-  pass, `cargo test --workspace --no-run` clean. S9–S10
-  open, in the brief's order (cargo builds serialize).
+  pass, `cargo test --workspace --no-run` clean. S9 LANDED — the parent's own
+  node pulls what its child published: `conduct`'s `pingback_pull`, in
+  `reap()`'s post-lock block one lane over from `pingback`, walks
+  `remote-children.json` and — only under `Door::Daemon`, only for a row that
+  is not `drained` and whose `parentSessionId` is a live record `deliver`
+  could reach — asks that child's node `tasks/get` +
+  `aoide/linesAfter` = the row's cursor and renders what comes back HERE.
+  `aoide-client` gained `task_history_on_node` (the signed POST shared with
+  `task_get_on_node`, a new `commands::HISTORY_PULL_TIMEOUT_SECS` = 5 rather
+  than the interactive reads' 15, because this runs inside a ~12 s tick, and
+  the existing `FRAME_MAX_RESPONSE_BYTES` for the cap) plus its pure
+  builder/parser pair in `client/node.rs`; the tunnel key is the PARENT's
+  session id, so the ssh forward is the one `close_all_for_session` already
+  closes and the daemon holds no forward of its own. The events are a peer's
+  BYTES, so each is re-validated against the closed event set (an unknown kind
+  is dropped, never guessed at), every string re-cleaned (control AND Unicode
+  `Cf`, clipped to 80) and rendered by the LOCAL `render_line` under a tag
+  built from the row — `[<node>/<child id>]`, since the far node supplies no
+  tag at all — and `deliver` still applies every skip it always did, now with
+  the gate label `autogate-child remote` (the label became a `deliver`
+  parameter; the local call site keeps `autogate-child`, and the four target
+  predicates moved into one `unreceptive` the pull and the delivery BOTH call,
+  so the candidate filter and the writer cannot disagree). The row's cursor
+  advances BEFORE the line, to whatever the answer carried — the newest event,
+  or `last` for a `gap` with no event to move past — so this lane is
+  at-most-once: a failed write loses a line rather than repeating one, which
+  the tests pin directly. A `gap` costs one line built from arithmetic
+  (`· <n> events lost before this point`), never a fabricated event. `Exited`
+  drained ⇒ `remote_children::mark_drained` latches the row (additive,
+  omitted while false) and the pull stops for it forever, because a ring is
+  never pruned and a departed child never speaks again. A pull failure is
+  quiet — one `clean_line`d audit record, `report.skipped`, no retry storm,
+  the next tick from the same cursor; the brief names no backoff, so there is
+  none, one pull per child per tick. Two judgments beyond the row, both stated
+  here: the tag the brief writes as `<node>/<petname|id>` is
+  `<node>/<sessionId>` because the ledger stores no petname, and the far node
+  is resolved by the row's `key` alone (never the display `node`, so a rename
+  cannot break a pull and a re-pair cannot dial a wrong box). Review of the
+  lane's own sender found the hole S7's `clean_line` had closed only on the
+  READ path: `pingback`'s `clean` filtered `char::is_control`, which does NOT
+  cover Unicode `Cf`, so a bidi override or zero-width mark in a child's say,
+  prompt, stop reason or tool label still reached a LOCAL parent's line. Fixed
+  on the shared sanitizer — `common::strip_unsafe` is now the one filter
+  `clean_line` and the ping-back's 80-clipped `clean` both use, no copied
+  `is_format` table — and the existing fixtures are byte-identical because
+  none of them carries a `Cf`. Tests: aoide-conduct 907 (11 new: the pull's
+  line/tag/audit, an unknown kind dropped, a `/`-leading quoted field
+  neutralized, a hostile escape+bidi+zero-width string re-cleaned on BOTH
+  lanes, a shell parent skipped before any request, the cursor advancing on a
+  failed write, the retry from an unchanged cursor beside a healthy child, the
+  gap marker with and without an event in the answer, the drain latch, no pull
+  for a done/absent parent or an unresolved node, and the `Door::Daemon`
+  gate), aoide-storage 439 (1 new), aoide-client 318 (2 new), all pass,
+  `cargo test --workspace --no-run` clean. S10 open, in the brief's order
+  (cargo builds serialize).
 - Review pass over S1–S3 (same branch, `8236675` onward): the caller now
   holds its own winning claim to `valid_claimed_session_id` and refuses
   locally before signing (the "one predicate, both sides" line was

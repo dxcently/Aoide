@@ -269,6 +269,27 @@ the cursor write re-files on the next pass, and that retry mints a **new**
 msgid, so the mailbase's own duplicate memory cannot collapse it and one extra
 identically-worded letter may appear. No claim of exactly-once is made.
 
+**A parent on another node hears the run through the ping-back, not the letter.**
+A run spawned over the A2A door carries `remoteParent` on its record: its report
+lane is unchanged — the letter is filed and the mailbase keeps it — but the exit
+line that would have gone to a local parent takes the child's own ring instead
+(`docs/architecture/EIDOLON-TRACE.md`'s "Second slice"). The parent's own node
+pulls it: one signed `tasks/get` per child per tick, with `aoide/linesAfter` set
+to the cursor in this node's `remote-children.json` row, keyed on the ssh
+forward of the **parent's own session id** so the forward closes with that
+session. Nothing is pushed, nothing is mailed, and the child's node never writes
+into anyone's composer — the parent's node re-validates each event against the
+closed event set, re-cleans every string, renders the line itself, and applies
+the same delivery skips a local line gets (a bare shell parent included, and it
+is judged before the far node is asked anything). The row's cursor advances
+*before* the line is delivered, so this lane's guarantee is at-most-once — the
+opposite direction from the letter's at-least-once above: a crash loses a line
+rather than repeating one, and a ring that rolled past the cursor is reported as
+exactly that (`· <n> events lost before this point`) instead of being papered
+over. Once a run's `exited` has been drained the row is latched and the pull
+stops for it, because a ring is never pruned and a run that has left the roster
+never speaks again.
+
 ## Completed runs stay inspectable
 
 Routine cleanup retains every finished task run's record — filed or not — so a

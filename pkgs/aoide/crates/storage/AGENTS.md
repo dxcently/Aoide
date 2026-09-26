@@ -74,6 +74,15 @@
   in-memory, write once, return whether anything changed; a no-op result
   never rewrites the file (so an idle tick does not churn the tree), and a
   replayed pull can never rewind a cursor and re-deliver a line.
+- **A one-way latch is a field that is only ever set, and it is never
+  written while it is false.** `remote_children::mark_drained` is the shape
+  (P-RSA S9): the remote-children ledger's `drained` latch stops the parent's
+  every later tick from asking a far node about a child that has nothing left
+  to say, and nothing ever clears it — the row leaves when its parent leaves
+  the roster, which is `retain_remote_children`'s job. `#[serde(default,
+  skip_serializing_if = "is_false")]` is what keeps it additive: a row
+  written before the field existed, and an unlatched row today, serialize
+  byte-identically.
 - **A bounded ring carries its own `seq`, never an index, and says when it
   dropped something.** `pingback_remote::push_event`/`events_after` are the
   shape (P-RSA S8): the cursor a reader hands back is a `seq` that only

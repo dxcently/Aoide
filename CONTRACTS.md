@@ -2583,7 +2583,7 @@ cursor each of them is up to.
   "children": [
     { "parentSessionId": "conduct-17991-1790312541", "node": "sakaki",
       "key": "<ed25519 pubkey hex>", "sessionId": "a2a-4411-1790",
-      "spawnedAt": "2026-09-25T04:00:00Z", "linesAfter": 0 }
+      "spawnedAt": "2026-09-25T04:00:00Z", "linesAfter": 0, "drained": false }
   ]
 }
 ```
@@ -2598,6 +2598,17 @@ cursor: the highest event `seq` already delivered to `parentSessionId`. It
 only ever moves forward — a replayed pull can never rewind it — which makes
 the delivery at-most-once in the same direction `pingback.json`'s own cursor
 holds: a crash between the two loses a line, never duplicates one.
+`drained` is the row's one-way latch: the parent has drained the child's
+`Exited`, so the pull stops asking about it — a ring is never pruned and a
+child that has left this node's roster never pushes again, so without the
+latch every later tick would ask a far node about a session with nothing left
+to say. It is `false` until set and nothing ever clears it; like every other
+`false` flag in this tree it is omitted when false, so a row written before
+the field existed is byte-identical to one written today. Both fields are
+written only by `aoide-conduct`'s `pingback_pull` (`advance_lines_after`
+BEFORE the line is delivered, `mark_drained` after it), and a pull resolves
+the far node by `key` alone — never by `node`, so a rename cannot break a
+pull and a re-pair cannot silently dial a node the child does not live on.
 
 Written only through `aoide_storage::remote_children`, inside one short
 `state/stage/.stage.lock` section and atomically (temp-then-rename); a missing

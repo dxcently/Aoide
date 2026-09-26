@@ -264,8 +264,11 @@ carries whatever the journal carries; that fix is harnox's.
   last assistant `text` block; a `ToolResult{is_error:true}` among the new
   records rides a priority-1..3 line as ` · <k> tool errors`. Every
   child-authored fragment — quoted or the bare `<tool label>` — is untrusted
-  model output: one line, control characters stripped, clipped to 80
-  characters with `…`; the quoted ones never able to start with `/` or `!`.
+  model output: one line, every unsafe character stripped (control, and the
+  Unicode `Cf` marks — bidi overrides, zero-width joiners — that would
+  otherwise reorder or hide the line; one `is_unsafe` set, shared with the
+  door's own `clean_line`), clipped to 80 characters with `…`; the quoted ones
+  never able to start with `/` or `!`.
 
   **It is the daemon's own line, not a send.** The send door attests the
   sender from the running process's `/proc` ancestry, so inside the daemon
@@ -302,7 +305,7 @@ carries whatever the journal carries; that fix is harnox's.
   to — a closed `PingEvent`, one variant per row of the table above plus
   `exited` below — and `render_line(tag, &event)` renders the line from it,
   taking the tag from whoever renders. Every string in an event is already
-  cleaned at the sender (control characters stripped, clipped to 80 with `…`,
+  cleaned at the sender (unsafe characters stripped, clipped to 80 with `…`,
   a payload number left a number), because the renderer may be another node's
   code. Local lines are the same bytes they always were.
 
@@ -327,3 +330,33 @@ carries whatever the journal carries; that fix is harnox's.
   a remote child ever publishes one: a local parent hears the run's report
   (Q5's ruling). A child the sync DROPPED is never decided again, so a dropped
   remote child claims its trace row and this exit on that one pass.
+
+  **The parent pulls, and only the parent's own node delivers.** The other end
+  is `pingback_pull`, one lane over in the same post-lock block: for every row
+  in `state/stage/remote-children.json` (CONTRACTS.md §4) whose parent is
+  still a live, conductable session on THIS node, it asks that child's node
+  `tasks/get` with `aoide/linesAfter` = the row's cursor and renders what comes
+  back HERE. The tunnel key is the PARENT's own session id, so the ssh forward
+  is the one the parent already owns and closes with the session; the daemon
+  holds no forward of its own. The events are a peer's bytes: each is
+  re-validated against the closed event set (a kind this version does not know
+  is dropped, never guessed at), every string re-cleaned (unsafe characters
+  stripped, clipped to 80) and rendered by the SAME `render_line` the local
+  lane uses — under a tag naming the box and the child, `[<node>/<child id>]`,
+  built from the row because the far node supplies no tag at all. Then
+  `deliver()`, as always, with the audit label `autogate-child remote`.
+
+  The row's cursor advances BEFORE any line is delivered — at-most-once, so a
+  failed write loses a line rather than repeating one — and it advances to
+  whatever the answer CARRIED: the newest event in it, or `last` for a `gap`
+  the ring cannot hand over an event for. A `gap` costs the parent exactly one
+  extra line, built here from that same arithmetic (`· <n> events lost before
+  this point`) and never a fabricated event. Once an `exited` has been drained
+  the row is latched (`drained`): a ring is never pruned and a child that has
+  left the roster never pushes again, so without the latch every tick would
+  ask about a session with nothing left to say. A target that can never
+  receive a line — no record, a bare shell, not conductable, already `done` —
+  is judged before the far node is asked anything, so it neither spends a
+  request nor consumes events it would not have shown. A failed pull is quiet:
+  no line, no retry storm, one audit record, and the next tick asks again from
+  the same cursor — one pull per child per tick, with no backoff.

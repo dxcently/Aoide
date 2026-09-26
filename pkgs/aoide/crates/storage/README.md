@@ -439,10 +439,14 @@ by decision — no embedded database yet
   verified identity `(key, sessionId)`. `append_remote_child` is idempotent
   on that identity; `retain_remote_children` is how a roster exit drops them;
   `advance_lines_after` moves one child's ping-back pull cursor forward only
-  (a replayed pull never rewinds it). All three run inside one short
-  `fs::with_stage_lock` section, `load_remote_children` tolerates a
-  missing/corrupt file as empty, and the write is atomic — the same
-  discipline `undying` holds. `valid_claimed_session_id` is the ONE predicate
+  (a replayed pull never rewinds it), and `mark_drained` latches the row once
+  the parent has drained the child's `Exited` — a ring is never pruned and a
+  child that has left the roster never speaks again, so that latch is what
+  stops the parent's every later tick from asking about it. All of them run
+  inside one short `fs::with_stage_lock` section, `load_remote_children`
+  tolerates a missing/corrupt file as empty, and the write is atomic — the
+  same discipline `undying` holds. `valid_claimed_session_id` is the ONE
+  predicate
   for an `aoide/from` claim (1..=128 bytes of `[A-Za-z0-9._:-]`, no `/`),
   shared by both sides of it: the caller holds its own winning id to it and
   refuses locally BEFORE signing, and the door holds an incoming claim to it
