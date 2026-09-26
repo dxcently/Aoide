@@ -34,3 +34,24 @@ What it recorded, distilled from its `design/intent.md` Iteration Log:
 
 Full history — every dated log line, the actual `rice.nix`/`livery.json` — is
 in git; `git log --follow -- song/songbook/default/` finds it.
+
+## `cadenza` staged live (2026-09-26)
+
+- **`rice stage <song>` reads the RUNTIME songbook**
+  (`$AOIDE_ROOT/song/songbook/<song>/widgets`), not the checkout. A song
+  written straight into a checkout stages its stale compose scaffold until
+  the runtime copy is refreshed from the committed tree. The slot owner map
+  (`manifest.json`) comes from `nix eval` of `AOIDE_FLAKE_ROOT`, so it only
+  sees committed files.
+- **`rice stage <song>` does not survive a `RICE` toggle.** The bar's RICE
+  cell runs `rice mode declarative` then `rice mode stage`, and the latter
+  re-stages the song recorded in `stage/mode.json`, which `rice stage`
+  left on the previous song. Pin with `rice mode stage <song>` instead.
+- **Staging swaps every slot a song provides at once.** "One surface at a
+  time" is a checking order, not a staging order.
+- **The preview canvas cannot catch edge clipping.** A pane whose title is
+  cut into its top rule at y=0 loses the glyph tops at the window edge; the
+  canvas shot looks the same, so it passed review. Give a surface root a
+  half-cell top inset.
+- **Measured at rest, live:** quickshell 1.4% CPU over 10s and 266 MB RSS
+  with tier-0 glow on, under a 99%-busy machine (noisy). Glow stays on.
