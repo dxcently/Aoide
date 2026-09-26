@@ -20,14 +20,16 @@ are core `aoide` identity, root `AGENTS.md`).
   coupled `onboard` (below).
 - `commands::onboard` — `lyra onboard` (P-I3, docs/architecture/ONBOARD.md):
   the nix half of the onboarding flow, reached only via `aoide onboard`'s
-  delegate spawn once `rice_bin()` resolves. Shells `nix eval --json
-  <checkout>#aoideOptions` (flake.nix/lib/options.nix — every `aoide.*`
-  option declared across `modules/{nucleus,dendrites}`, derived, not
-  hand-listed) and renders `aoide.nix`: a nix module the user imports, every
-  option commented out at its default. Reruns over a previously-generated
-  file warn, back up to `<out>.bak`, and regenerate; a hand-written file at
-  the target path is refused, never overwritten. Never touches the user's
-  flake.
+  delegate spawn once `rice_bin()` resolves. Reads the SHIPPED
+  `share/lyra/aoide-options.json` (`fs::lyra_share_dir()`, which
+  `pkgs/lyra-songbook` builds from `lib/options.nix` — every `aoide.*` option
+  declared across `modules/{nucleus,dendrites}`, derived, not hand-listed) and
+  renders `aoide.nix`: a nix module the user imports, every option commented
+  out at its default. No `nix` and no checkout are needed: the file is the
+  eval, so it works from any cwd. Reruns over a
+  previously-generated file warn, back up to `<out>.bak`, and regenerate; a
+  hand-written file at the target path is refused, never overwritten. Never
+  touches the user's flake.
 - `run_lyra` — drives `aoide_protocol::door::run` with lyra's own registry/
   dispatcher and its own smaller `special` hook (`mcp serve --stdio`,
   `guide`/`schema`/`livery`/`secrets ask`/`pair ask`/`pair show` raw
@@ -396,6 +398,6 @@ docs/architecture/ELEMENTS.md) renders a song's committed
 `elements/*/element.json` (non-QML rice targets — waybar, dunst, anything
 with a config file) into `run/elements/`. Never depends on
 `aoide-client`/`aoide-conductor` — no A2A client, no TUI; those stay
-core-only. May depend on Nix (`song::widgets`'s `nix eval`, and now
-`commands::onboard`'s own `nix eval`/`nix-instantiate` shell-outs) — the
+core-only. May depend on Nix (`song::widgets`'s `nix-instantiate` over the
+shipped generator) — the
 one binary allowed to (root `AGENTS.md`, "core is nix-independent").

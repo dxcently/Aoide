@@ -595,6 +595,107 @@ let
     in
     assertCheck "livery-fanout" (stagedPalette == resolvedPalette && identity)
       "stagePatch and resolve disagree on the override recolour, or stagePatch is not the identity with no override set";
+  # ── Checks 11 and 12: the shipped songbook generator is offline ───────────
+  # §9's claim, as a build: `share/lyra/nix/manifest.nix` (shipped by
+  # `pkgs/lyra-songbook`) is the runtime's generator, and a plain
+  # `nix-instantiate --eval --strict --json --expr` on it — the exact argv
+  # `aoide-song::widgets` runs, with `NIX_PATH=` empty, no flake, no network, no
+  # checkout — must answer what the flake's own `songbookManifest` answers.
+  #
+  # Check 11 (`generator-offline`): over the repo's committed songbook.
+  # Check 12 (`generator-relocatable`): over a COPY of it in `$TMPDIR`, outside
+  # the repo — §7.4's constraints 1 and 5 (a song folder is self-contained and
+  # holds no repo-absolute path), which is what lets a machine evaluate its OWN
+  # songbook.
+  #
+  # `expected` is `builtins.toJSON { inherit (songbookLib) manifestAttrs
+  # registryAttrs; }` — the same value the `songbookManifest` flake output
+  # exposes, so the comparison is against the flake, never a hand-kept golden.
+  generatorCommands =
+    { lyraSongbook, songbookArg }:
+    ''
+      export XDG_CACHE_HOME="$TMPDIR/cache" HOME="$TMPDIR"
+      nix-instantiate --eval --strict --json --expr \
+        "import ${lyraSongbook}/share/lyra/nix/manifest.nix { songbook = \"${songbookArg}\"; }" \
+        | jq -c 'del(.packages)'
+    '';
+
+  generatorOffline =
+    {
+      lyraSongbook,
+      songbook,
+      expected,
+    }:
+    pkgs.runCommand "aoide-check-generator-offline"
+      {
+        nativeBuildInputs = [
+          pkgs.nix
+          pkgs.jq
+          pkgs.diffutils
+        ];
+        expectedJson = pkgs.writeText "aoide-songbook-manifest.json" expected;
+      }
+      ''
+        got=$(${
+          generatorCommands {
+            inherit lyraSongbook;
+            songbookArg = "${songbook}";
+          }
+        })
+        want=$(cat "$expectedJson")
+        if [ "$got" != "$want" ]; then
+          echo "the shipped generator's answer over ${songbook} is not #songbookManifest:" >&2
+          diff <(printf '%s' "$want" | jq -S .) <(printf '%s' "$got" | jq -S .) >&2 || true
+          exit 1
+        fi
+        printf 'aoide check generator-offline: ok\n' > "$out"
+      '';
+
+  generatorRelocatable =
+    {
+      lyraSongbook,
+      songbook,
+      expected,
+    }:
+    pkgs.runCommand "aoide-check-generator-relocatable"
+      {
+        nativeBuildInputs = [
+          pkgs.nix
+          pkgs.jq
+          pkgs.diffutils
+        ];
+        songbookCopy = builtins.path {
+          path = songbook;
+          name = "aoide-songbook-copy";
+        };
+        expectedJson = pkgs.writeText "aoide-songbook-manifest.json" expected;
+      }
+      ''
+        export XDG_CACHE_HOME="$TMPDIR/cache" HOME="$TMPDIR"
+        # A copy that shares no directory with any checkout — the shape a
+        # machine's own `$AOIDE_ROOT/song/songbook` has.
+        mkdir -p "$TMPDIR/relocated"
+        cp -r "$songbookCopy"/. "$TMPDIR/relocated"/
+        in_repo=$(${
+          generatorCommands {
+            inherit lyraSongbook;
+            songbookArg = "${songbook}";
+          }
+        })
+        relocated=$(${
+          generatorCommands {
+            inherit lyraSongbook;
+            songbookArg = "$TMPDIR/relocated";
+          }
+        })
+        want=$(cat "$expectedJson")
+        if [ "$in_repo" != "$want" ] || [ "$relocated" != "$want" ]; then
+          echo "the shipped generator answers differently for a relocated songbook:" >&2
+          diff <(printf '%s' "$want" | jq -S .) <(printf '%s' "$relocated" | jq -S .) >&2 || true
+          exit 1
+        fi
+        printf 'aoide check generator-relocatable: ok\n' > "$out"
+      '';
 in
 {
   inherit
@@ -609,5 +710,7 @@ in
     portability
     nixLint
     liveryFanout
+    generatorOffline
+    generatorRelocatable
     ;
 }

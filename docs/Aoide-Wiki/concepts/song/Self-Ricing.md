@@ -73,12 +73,14 @@ shipped score templates at `<templates>/<from>/livery.json`, where
 templates is `$AOIDE_SONG_TEMPLATES` (absolute) else
 `<exe_dir>/../share/lyra/songbook` when that directory exists.
 `pkgs/lyra-songbook` bakes the committed `song/songbook/` tree plus
-prebaked `manifest.json`/`registry.json` into that share dir, so a
-repo-less host (no flake checkout on disk at all) still composes from
-`sonata` and regenerates the widget registry/manifest without ever invoking
-nix — baked baseline, surviving host-songbook entries overlaid, the staged
-song's own scan patched in last. A song with a `_widgets/` shelf still
-needs a real checkout.
+prebaked `manifest.json`/`registry.json`/`builtin.json` into that share dir,
+and beside it the OFFLINE generator (`nix/manifest.nix` + copies of
+`lib/songbook.nix`/`lib/song.nix` + the locked nixpkgs `lib/`) and
+`aoide-options.json`. So a repo-less host composes from `sonata` with no
+nix at all, and regenerates the widget registry/manifest over its OWN
+songbook with a plain `nix-instantiate --eval` on that shipped file — no
+flake, no network, no checkout. A song with a `_widgets/` shelf needs that
+generator, not a checkout: `composeSong` runs inside it.
 
 The same templates dir also seeds the runtime songbook itself: the first
 `lyra rice stage <name>` / `lyra rice mode stage <name>` for a song that is
@@ -216,14 +218,18 @@ and `stage/cover.json` anywhere in the codebase (unaffected by which of
 brings live comes from the runtime root: the notes, the cover, the widget
 bodies, and the song's slot-owner map and widget-type registry
 (`run/qml/songs/manifest.json`/`registry.json`). None of it is evaluated
-from the git checkout, so a song that exists only in the runtime songbook
-stages and hot-loads without a commit, a merge or a rebuild. The
+from the git checkout: the manifest/registry sources are the shipped
+templates' baked files (for a song this system built in) and this machine's
+own songbook, evaluated by the SHIPPED generator over
+`$AOIDE_ROOT/song/songbook`. So a song that exists only in the runtime
+songbook stages and hot-loads without a commit, a merge or a rebuild. The
 declarative path may seed staging (the activation seed, the baked
 templates), never gate it. The staged song is always the LAST one staged:
 `stage/mode.json` remembers it as `stagingSong`, and every way back into
 staging (the bar's RICE toggle, a bare `rice mode stage`, a reboot)
-restores that song, never the declared one. Register §33 tracks the one
-path that still evaluates the checkout for the owner map.
+restores that song, never the declared one. The checkout is reached by
+exactly one staging-adjacent step, `rice declare`'s commit-in, and by
+nothing else.
 
 `rice stage` doesn't only hot-load the palette/notes tier any more —
 it also syncs the song's widget QML **bodies**

@@ -1553,7 +1553,11 @@ fn back_unlocked(cmd: &str, take_flag: Option<u32>, mark_flag: Option<String>) -
     // a revert never touches by design (widget bodies are git's substrate,
     // §5.2) — so that call is never reached from here, deliberately, not by
     // omission.
-    let registry_sync = crate::widgets::sync_song_registry(&song).map_err(|e| {
+    let songbook = crate::widgets::plan_stage(&song).map_err(|e| {
+        Outcome::error(cmd, e.error)
+            .with_data(json!({ "reason": "stage-refused", "target": e.target }))
+    })?;
+    let registry_sync = crate::widgets::sync_song_registry(&song, &songbook).map_err(|e| {
         Outcome::error(cmd, format!("failed to sync widget-type registry: {}", e.error))
             .with_data(json!({ "reason": "registry-sync-failed", "target": e.target }))
     })?;

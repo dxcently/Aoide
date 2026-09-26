@@ -98,8 +98,12 @@ by decision — no embedded database yet
   (L-C3, same lane) is a THIRD, sibling path seam alongside `root`/
   `flake_root`: the shipped SCORE TEMPLATES dir a repo-less host's `rice
   compose --from <song>` and `aoide-song::widgets`'s registry/manifest
-  regeneration both fall back to when `songbook_dir`/`flake_root` have
-  nothing. Two tiers — `$AOIDE_SONG_TEMPLATES` (absolute-wins, same
+  regeneration both fall back to when `songbook_dir` has
+  nothing. `fs::lyra_share_dir` is its PARENT — the shipped `share/lyra`
+  dir, where the offline generator (`nix/manifest.nix`) and
+  `aoide-options.json` (`lyra onboard`) sit — and `fs::songbook_root` is the
+  machine's `<song>/songbook/`, the argument that generator is pointed at.
+  Two tiers — `$AOIDE_SONG_TEMPLATES` (absolute-wins, same
   discipline as every override above), else a sibling of `current_exe()`'s
   directory (`<exe_dir>/../share/lyra/songbook`, gated on that directory
   actually existing) — the same shape `aoide_protocol::bin`'s sibling-binary

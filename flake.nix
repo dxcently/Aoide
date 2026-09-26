@@ -80,7 +80,19 @@
       # The packages walker — auto-discovers pkgs/<name>/default.nix. One source
       # feeds the `packages` output, the auto-generated `pkg-<name>` checks, and
       # the host + vm overlays (lib/aoideos.nix, tests/vm-boot.nix).
-      pkgsWalk = import ./lib/pkgs.nix { inherit lib; };
+      #
+      # `extra` is the walker's special-args escape hatch (lib/pkgs.nix's
+      # header): `lyra-songbook` ships the `aoide.*` option doc list, which
+      # `callPackage` cannot fill — it is derived from this flake's `inputs` —
+      # so it is named here, once, in the context that has them.
+      pkgsWalk = import ./lib/pkgs.nix {
+        inherit lib;
+        extra = {
+          lyra-songbook = {
+            aoideOptions = self.aoideOptions;
+          };
+        };
+      };
     in
     {
       # ── NixOS configurations ───────────────────────────────────────────────
@@ -255,6 +267,28 @@
           # and never shells out to nix — AGENTS.md's nix-independence claim
           # made a real gate (see lib/checks.nix's Check 7).
           nix-independence = checks.nixIndependence self;
+          # §9(b): the SHIPPED generator, evaluated exactly as the runtime
+          # evaluates it, reproduces `#songbookManifest` over the committed
+          # songbook — offline, no flake, no checkout.
+          generator-offline = checks.generatorOffline {
+            lyraSongbook = (pkgsWalk.discover pkgs).lyra-songbook;
+            songbook = ./song/songbook;
+            expected = builtins.toJSON {
+              manifest = songbookLib.manifestAttrs;
+              registry = songbookLib.registryAttrs;
+            };
+          };
+          # §9(e): and it answers the same over a COPY of that songbook outside
+          # the repo — §7.4's "a song is a self-contained folder" and "no
+          # repo-absolute paths", which is what a machine's own songbook needs.
+          generator-relocatable = checks.generatorRelocatable {
+            lyraSongbook = (pkgsWalk.discover pkgs).lyra-songbook;
+            songbook = ./song/songbook;
+            expected = builtins.toJSON {
+              manifest = songbookLib.manifestAttrs;
+              registry = songbookLib.registryAttrs;
+            };
+          };
           # VM boot test — boots the Aoide desktop config headless and asserts
           # the stack comes up (multi-user.target, aoide on PATH,
           # greeter enabled, aoided + shellbridge user services active, graph

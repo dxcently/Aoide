@@ -559,6 +559,7 @@ mod tests {
             r##"{"schemaVersion":"0","song":"../../evil","palette":{"bg":"#000"}}"##,
         )
         .unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         assert_eq!(current_staged_song(), None);
@@ -570,6 +571,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("mode-status-default");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_mode_status(&inv(&["rice", "mode", "status"], &[]));
@@ -587,6 +589,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("mode-stage-bare").join("stage");
         std::fs::create_dir_all(&stage).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_mode_stage(&inv(&["rice", "mode", "stage"], &[]));
@@ -608,6 +611,7 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&song).unwrap();
         std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_mode_stage(&inv(&["rice", "mode", "stage"], &["moonlight"]));
@@ -637,6 +641,7 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&templated_song).unwrap();
         std::fs::write(templated_song.join("livery.json"), VALID_NOTES).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         std::env::set_var("AOIDE_SONG_TEMPLATES", &templates);
 
@@ -680,6 +685,7 @@ mod tests {
             r##"{"schemaVersion":"0","song":"moonlight","palette":{"bg":"#000"}}"##,
         )
         .unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_mode_stage(&inv(&["rice", "mode", "stage"], &[]));
@@ -708,6 +714,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("mode-stage-badname").join("stage");
         std::fs::create_dir_all(&stage).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_mode_stage(&inv(&["rice", "mode", "stage"], &["nope"]));
@@ -741,6 +748,7 @@ mod tests {
             r##"{"schemaVersion":"0","song":"moonlight","palette":{"bg":"#000"}}"##,
         )
         .unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_mode_declarative(&inv(&["rice", "mode", "declarative"], &[]));
@@ -782,6 +790,7 @@ mod tests {
         std::fs::create_dir_all(&declared).unwrap();
         std::fs::write(sonata.join("livery.json"), VALID_NOTES).unwrap();
         std::fs::write(nocturne.join("livery.json"), VALID_NOTES).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         // The lane's activation seed published the DECLARED twin for sonata…
         std::fs::write(
@@ -838,6 +847,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("mode-declarative-bare");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_mode_declarative(&inv(&["rice", "mode", "declarative"], &[]));
@@ -864,6 +874,7 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(&song).unwrap();
         std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         // Starting from the unmarked (default-declarative) state — the
@@ -884,6 +895,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("mode-roundtrip");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         handle_mode_stage(&inv(&["rice", "mode", "stage"], &[]));
@@ -920,6 +932,7 @@ mod tests {
         std::fs::create_dir_all(&etude).unwrap();
         std::fs::write(sonata.join("livery.json"), VALID_NOTES).unwrap();
         std::fs::write(etude.join("livery.json"), VALID_NOTES).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         // Stage `etude` explicitly.
@@ -982,6 +995,7 @@ mod tests {
             r##"{"schemaVersion":"0","song":"moonlight","palette":{"bg":"#000"}}"##,
         )
         .unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         assert_eq!(load_mode_marker(), ModeMarker::default(), "no mode.json written yet");
 
@@ -1005,6 +1019,7 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         let live_notes = r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#live"}}"##;
         std::fs::write(stage.join("livery.json"), live_notes).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         save_mode_marker(&ModeMarker {
@@ -1049,6 +1064,7 @@ mod tests {
         std::fs::create_dir_all(&existing_dir).unwrap();
         let existing_notes = r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#already-saved"}}"##;
         std::fs::write(existing_dir.join("livery.json"), existing_notes).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         save_mode_marker(&ModeMarker {
@@ -1079,6 +1095,7 @@ mod tests {
             r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#seed"}}"##,
         )
         .unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         save_mode_marker(&ModeMarker {
             mode: RiceMode::Staging,
@@ -1104,6 +1121,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("mode-draft-locked");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         // No marker file at all IS declarative (the safe default).
@@ -1118,6 +1136,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("mode-draft-noname");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         save_mode_marker(&ModeMarker { mode: RiceMode::Staging, ..Default::default() }).unwrap();
 
@@ -1133,6 +1152,7 @@ mod tests {
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("mode-draft-nosong").join("stage");
         std::fs::create_dir_all(&stage).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         save_mode_marker(&ModeMarker { mode: RiceMode::Staging, ..Default::default() }).unwrap();
 
@@ -1160,6 +1180,7 @@ mod tests {
             r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#seed"}}"##,
         )
         .unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         save_mode_marker(&ModeMarker { mode: RiceMode::Staging, song: Some("sonata".to_string()), ..Default::default() }).unwrap();
 
@@ -1198,6 +1219,7 @@ mod tests {
             r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#seed"}}"##,
         )
         .unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         save_mode_marker(&ModeMarker { mode: RiceMode::Staging, song: Some("sonata".to_string()), ..Default::default() }).unwrap();
 

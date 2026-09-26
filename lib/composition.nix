@@ -550,13 +550,19 @@ rec {
       homeManagerModule,
       specialArgs ? { },
       extraModules ? [ ],
-      # Package overlays the CALLER provides, applied BEFORE the selection's own
-      # lanes. They are the base package set; a lane's overlay comes after and
-      # may therefore REPLACE a name supplied here — which is exactly how the
-      # lyra lane overrides `lyra-songbook` with the songs a host builds in.
-      # Order is the contract: for a list-merged `nixpkgs.overlays`, the last
-      # definition of an attribute wins, and a caller whose overlay landed last
-      # would silently undo every lane's replacement while both evaluated.
+      # Package overlays the CALLER provides — the base package set.
+      #
+      # They do NOT reach a lane's `prev`. Measured on yomi: the lane is applied
+      # BEFORE the walker here, so inside the lyra lane's overlay `prev` has no
+      # `lyra-songbook` at all — reading `prev.lyra-songbook.override { … }`
+      # aborts with "attribute 'lyra-songbook' missing". A lane therefore builds
+      # what it replaces with a FRESH `callPackage`, naming every argument it
+      # needs, and never inherits one from this base.
+      #
+      # What lets the lane's value stand either way is `lib/pkgs.nix`'s overlay
+      # stepping aside for a name `prev` already carries — see the yield there;
+      # it is load-bearing, not tidiness. That is how the lyra lane replaces
+      # `lyra-songbook` with the songs a host builds in.
       overlays ? [ ],
       selectionModules ? [ ],
       extraModulesFor ? (_: [ ]),

@@ -37,22 +37,32 @@
 # to pick a non-colliding name.
 #
 # Special-args escape hatch: `callPackage` auto-fills standard nixpkgs args. A
-# package needing a non-standard arg (e.g. another flake package, or an input)
-# overrides it with an explicit `//` after the call — edit THIS file's mapper
-# for that one name, e.g. in `discover`:
+# package needing an arg `callPackage` cannot reach (a value the FLAKE computes,
+# like `lyra-songbook`'s `aoideOptions`) declares it by name, and the caller
+# hands it in as `extra.<package>` at construction — one place per build
+# context, next to the `pkgs` that context calls through, never a special case
+# inside the mapper below:
 #
-#   discover = pkgs: (lib.genAttrs packageNames …) // {
-#     foo = pkgs.callPackage (pkgsDir + "/foo") { extraArg = pkgs.aoide; };
-#   };
+#   discovered = (import ./lib/pkgs.nix {
+#     inherit lib;
+#     extra = { foo = { extraArg = <flake value>; }; };
+#   }).discover pkgs;
 #
 # Keeping the override here (not in flake.nix) preserves the single source: the
-# flake output and both overlays still read the same set.
+# flake output and both overlays still read the same set, and a package whose
+# extras a context forgets fails loudly (a required argument `callPackage`
+# never got), never silently.
 #
 # Usage:
 #   discovered = (import ./lib/pkgs.nix { inherit lib; }).discover pkgs;
 #   # overlay form (collision guard active):
 #   nixpkgs.overlays = [ (import ./lib/pkgs.nix { inherit lib; }).overlay ];
-{ lib }:
+{
+  lib,
+  # Extra `callPackage` arguments, by package name. A name with no entry gets
+  # none — every package that needs nothing from the flake needs no mention.
+  extra ? { },
+}:
 let
   pkgsDir = ../pkgs;
 
@@ -80,8 +90,11 @@ let
 
   # Map every discovered name to its callPackage. `pkgs` is the package set that
   # supplies callPackage (nixpkgs legacyPackages in the flake output, `final`
-  # in the overlay).
-  discover = pkgs: lib.genAttrs packageNames (name: pkgs.callPackage (pkgsDir + "/${name}") { });
+  # in the overlay); `extra` (this file's own argument) supplies the arguments
+  # callPackage cannot fill by itself.
+  discover =
+    pkgs:
+    lib.genAttrs packageNames (name: pkgs.callPackage (pkgsDir + "/${name}") (extra.${name} or { }));
 
   # Entries under pkgsDir that are none of the three admitted shapes above
   # (shelved `_`-dir, callPackage target, self-flaked): a half-created
@@ -132,8 +145,17 @@ in
       if stock ? ${name} && !(builtins.elem name intentionalShadows) then
         throw "pkgs/${name} collides with a nixpkgs attribute — rename it (or add it to intentionalShadows in lib/pkgs.nix if the shadow is deliberate)"
       else if prev ? ${name} && !(stock ? ${name}) then
+        # LOAD-BEARING, not tidiness. This yield is what makes a lane's
+        # replacement of a base package safe in either overlay application
+        # order: whichever of the two definitions is applied first supplies the
+        # name, and the other steps aside instead of overwriting it. Two
+        # overlays writing one attribute in one order is otherwise a race whose
+        # winner depends on how `nixpkgs.overlays` happened to compose — and
+        # `prev` inside a lane's own overlay is NOT guaranteed to carry the
+        # base's attributes (see lib/composition.nix's `overlays` argument),
+        # which is why a lane cannot simply `.override` what this supplies.
         prev.${name}
       else
-        final.callPackage (pkgsDir + "/${name}") { }
+        final.callPackage (pkgsDir + "/${name}") (extra.${name} or { })
     );
 }

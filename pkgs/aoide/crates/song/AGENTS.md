@@ -3,25 +3,34 @@
 ## Invariants
 
 - **This crate is lyra-only and stays nix-independent itself.** `widgets.rs`
-  is the one `nix eval` call in the whole workspace — it's here because
+  is the one place the workspace spawns `nix-instantiate` — it's here because
   `song` is `lyra`'s domain, but nothing else in this crate may shell out to
   Nix; the ricing engine must apply a song on generic Linux too (root
   `AGENTS.md`, "Nix-independence").
-- **`widgets::eval_songbook`'s templates fallback (L-C3, task #107) is
-  triggered structurally, never by catching a `nix eval` failure.** It
-  checks `flake_root().join("flake.nix").is_file()` FIRST and routes to
-  `eval_songbook_from_templates` before ever building a `nix` command —
-  don't "simplify" this into a try-nix-then-fall-back-on-error shape; that
-  would spawn a doomed `nix` process on every repo-less-host call (slow, and
-  a wrong error message when `nix` itself isn't on `PATH`) for no benefit.
-- **`eval_songbook_from_templates` only ever resolves a NO-`_widgets/`-shelf
-  song — it must refuse, not guess, when `name` has one.** Borrowed/composed
-  widget ownership can only be resolved by `composeSong` in the nix
-  evaluator (`widgets.rs`'s own module doc); `rice compose` never writes a
-  shelf, so this is a real but narrow gap, not an oversight. Don't extend
-  `scan_own_entry` to attempt shelf resolution — that would silently
-  reproduce ownership nix alone can correctly compute.
-- **`eval_songbook_from_templates` is a THREE-layer merge, not
+- **`widgets::plan_stage` is the gate, and it runs BEFORE the first write.**
+  `rice stage`/`rice mode` call it ahead of the livery write and hand its
+  answer to both syncs; a refusal stages NOTHING. Don't move it back inside
+  `sync_song_widgets`/`sync_song_registry`, and don't add a write path that
+  precedes it — the two refusal texts are the contract
+  (`refusal_no_nix`, `refusal_rebuild_needed`).
+- **Nothing in the runtime reads a checkout for the songbook.** The generator
+  is the SHIPPED file (`<templates>/../nix/manifest.nix`), its argument is the
+  MACHINE's songbook (`fs::songbook_root`), and the spawn's
+  `ErrorKind::NotFound` IS the no-nix answer — never a `which` probe, never a
+  `flake_root()` check, never a `#<flake output>` argv. `$AOIDE_FLAKE_ROOT`
+  survives for `rice declare`'s commit-in step only.
+- **§7.5's three cases, in order, and case 1 must stay nix-free.** Built in
+  with no DIFFERING machine copy (absent counts, and so does byte-identical —
+  a seeded copy is the same song, and a mode comparison would call every
+  seeded song "differing") stages from the baked baseline; everything else is
+  the generator; no nix makes everything else a refusal.
+- **`baseline_songbook` only ever resolves a NO-`_widgets/`-shelf song's own
+  entry — it must skip the patch, not guess, when `name` has one.** Borrowed
+  ownership resolves only in `composeSong`, and for a built-in song the baked
+  baseline already carries that answer; patching it with a scan would DROP
+  every borrowed slot. Don't extend `scan_own_entry` to attempt shelf
+  resolution.
+- **`baseline_songbook` is a THREE-layer merge, not
   baseline-plus-current-song — don't collapse it back to two.** (1) the
   templates dir's baked `manifest.json`/`registry.json`, authoritative for
   every shipped, read-only song; (2) `overlay_surviving_entries` copies the

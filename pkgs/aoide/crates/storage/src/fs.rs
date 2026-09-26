@@ -714,6 +714,25 @@ pub fn song_templates_dir() -> Option<std::path::PathBuf> {
     resolve_song_templates_dir(env_value.as_deref(), exe_dir.as_deref(), sibling_is_dir)
 }
 
+/// `$AOIDE_SONG_TEMPLATES`'s parent — the shipped `share/lyra` dir. Beside
+/// the templates sit the two build-time payloads a repo-less machine reads to
+/// do its own work without a checkout: `nix/manifest.nix` (§9's offline
+/// songbook generator, evaluated by `aoide-song::widgets`) and
+/// `aoide-options.json` (`lyra onboard`'s option set). Named ONCE here, for
+/// the same reason [`LYRA_SHELL_SRC`] is: two crates derive it from
+/// [`song_templates_dir`], and a second derivation of the same parent is a
+/// rename waiting to leave one of them behind.
+///
+/// `None` exactly when [`song_templates_dir`] is `None` — there is no
+/// templates dir to sit beside.
+pub fn lyra_share_dir() -> Option<std::path::PathBuf> {
+    song_templates_dir().and_then(|templates| {
+        templates
+            .parent()
+            .map(std::path::Path::to_path_buf)
+    })
+}
+
 /// The committed-song directory: `<song>/songbook/<name>/`.
 ///
 /// Shares [`song_dir`]'s `AOIDE_STAGE_DIR`-relative resolution, so a test that
@@ -721,6 +740,14 @@ pub fn song_templates_dir() -> Option<std::path::PathBuf> {
 /// it (no separate `$AOIDE_SONGBOOK_DIR` needed — one seam, not two).
 pub fn songbook_dir(name: &str) -> std::path::PathBuf {
     song_dir().join("songbook").join(name)
+}
+
+/// The machine's songbook ROOT: `<song>/songbook/`, the directory a song is
+/// looked up BY NAME in ([`songbook_dir`]) and the argument the offline
+/// generator is pointed at (§9). A sibling of [`songbook_dir`] rather than a
+/// second path spelled at the call site, for the same one-seam reason.
+pub fn songbook_root() -> std::path::PathBuf {
+    song_dir().join("songbook")
 }
 
 /// The committed-song notes file: `<song>/songbook/<name>/livery.json`.

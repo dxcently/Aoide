@@ -16,3 +16,6 @@ pub mod quickshell;
 pub mod reload;
 pub mod rice;
 pub mod take;
+
+#[cfg(test)]
+pub(crate) mod test_support;

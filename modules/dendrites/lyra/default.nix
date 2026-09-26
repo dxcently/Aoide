@@ -52,6 +52,18 @@ let
       # `builtin.json`'s `packages` exists to check (§7.5).
       songbookLib = import ../../../lib/songbook.nix { inherit lib songbook; };
 
+      # The `aoide.*` option doc list the shipped `aoide-options.json` carries
+      # (`lib/options.nix`) — `lyra onboard`'s offline source, and the reason
+      # the shipped `lyra-songbook` needs an argument `callPackage` cannot
+      # fill. Derived here rather than handed down: this lane is what builds
+      # `pkgs.lyra-songbook` for the host, and the value needs `inputs`, which
+      # is a module argument. Lazily forced — a host that never reads
+      # `pkgs.lyra-songbook` never evaluates it.
+      aoideOptions = import ../../../lib/options.nix {
+        inherit lib inputs;
+        pkgs = inputs.nixpkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system};
+      };
+
       builtIn = config.aoide.songbook.builtIn;
 
       # ── The songs this derivation reads, as their OWN store paths ────────────
@@ -358,6 +370,16 @@ let
         # 5: neither of those names this lane.
         nixpkgs.overlays = [
           (_final: prev: {
+            # A FRESH `callPackage`, never `.override` on whatever the walker's
+            # overlay left in `prev`: application order across the base
+            # (lib/aoideos.nix) and this lane is not a contract, so
+            # `prev.lyra-songbook` may not exist yet. A fresh call also names
+            # every argument here rather than inheriting them — including
+            # `aoideOptions`, which this lane derives itself because the
+            # walker's own `extra` (lib/pkgs.nix) is that overlay's business,
+            # not this lane's. Both overlays may define the name; the walker's
+            # step-aside makes whichever is applied second yield, so this
+            # lane's answer wins in either order.
             lyra-songbook = prev.callPackage ../../../pkgs/lyra-songbook {
               songs = builtIn;
               builtin = {
@@ -365,6 +387,7 @@ let
                 songs = builtIn;
                 packages = songbookLib.packagesFor builtIn;
               };
+              inherit aoideOptions;
             };
           })
         ];

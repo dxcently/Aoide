@@ -421,13 +421,19 @@ surface: everything that paints, or that only a desktop needs.
 - **The shipped songbook is a package — `pkgs/lyra-songbook`.** The score a
   machine with no checkout falls back to: `share/lyra/songbook/` holding the song
   folders this instance ships plus baked `manifest.json`/`registry.json` and —
-  for a host that selected songs — `builtin.json`.
-  `aoide_storage::fs::song_templates_dir` finds it through
-  `AOIDE_SONG_TEMPLATES` or the exe-sibling path, and only `aoide-song` reads
-  it. Two arguments, both defaulted for this flake's own
+  for a host that selected songs — `builtin.json`; beside it
+  `share/lyra/nix/` (the OFFLINE generator: `manifest.nix`, copies of
+  `lib/songbook.nix`/`lib/song.nix`, and the locked nixpkgs `lib/`) and
+  `share/lyra/aoide-options.json` (`lib/options.nix`'s output, read by
+  `lyra onboard`). `aoide_storage::fs::song_templates_dir` finds the songbook
+  through `AOIDE_SONG_TEMPLATES` or the exe-sibling path, and `fs::lyra_share_dir`
+  is that path's parent; only `aoide-song`/`aoide-lyra` read either. THREE
+  arguments: `songs` (which folders ship) and `builtin` (the selection, written to
+  `builtin.json`), both defaulted for this flake's own
   `packages.<system>.lyra-songbook` (every discovered song) and both overridden
-  per host by the `lyra` lane: `songs` (which folders ship) and `builtin` (the
-  selection, written to `builtin.json`). **What it copies is a host contract,**
+  per host by the `lyra` lane, plus `aoideOptions` (the option doc list, which
+  `callPackage` cannot derive — each build context names it through
+  `lib/pkgs.nix`'s `extra`). **What it copies is a host contract,**
   not tidiness: each shipped song enters the derivation as its OWN store path
   and the baked manifest/registry are over the shipped set only, because this
   package's path is a STRING in a host's session variables and activation — so

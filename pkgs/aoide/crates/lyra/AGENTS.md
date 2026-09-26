@@ -206,8 +206,9 @@
   files it actually wrote before trusting a Rust API's own naming
   intuition.
 - **May be nix-dependent — the one binary allowed to.** `song::widgets`'s
-  `nix eval` and `commands::onboard`'s `nix eval`/`nix-instantiate` shell-outs
-  live reachable from here; that dependency must never migrate toward
+  `nix-instantiate` over the SHIPPED generator is the only shell-out left
+  reachable from here (`commands::onboard` reads a shipped JSON instead); that
+  dependency must never migrate toward
   `aoide-cli` or any core crate (root `AGENTS.md`, "core is
   nix-independent").
 - **`onboard`'s option derivation is DERIVED, never a hand-list.** Every
