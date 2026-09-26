@@ -209,13 +209,24 @@ One 28px line in the tmux/termui idiom, left to right:
   awaiting/blocked session red.
 - A bound jack carries its project after it, blue: `[2]aoide` (the core's
   `workspaces[].project`).
-- **Tie lines** run in a 6px band under the jack row as orthogonal routes:
-  drop from jack A, run along a lane, rise into jack B.
-  - `project` tie: solid line.
-  - `spawned` tie: dotted line.
-  - Up to 3 lanes; a 4th tie collapses into a `+n` badge on the jack. The
-    core publishes a clique for a project shared by 3+ jacks; the paint
-    draws that as one bus lane touching all of them, not n² lines.
+- **Tie lines are a schematic**, drawn in the band between the jack row
+  and the trunk (the bar's lower ~9px). Every line is 2px in phosphor fg
+  (idle rule ink), never dim: a tie must read at 1:1.
+  - **Nodes:** a tied jack gets a hollow node `○` (a ~5px ring) centred
+    under its number. Untied jacks get none.
+  - **Bus:** a `project` tie is a solid wire on the node row, joining the
+    nodes directly. The core publishes a clique for a project shared by
+    3+ jacks; the paint draws it as ONE bus through all of its nodes, not
+    n² lines.
+  - **Spawned wires:** a `spawned` tie drops from its node, runs dashed on
+    a lower lane, and rises into the other node — the schematic's
+    side-wire.
+  - **Junctions:** a filled dot `●` marks every point where a wire meets
+    another (a spawned wire leaving a bus, two buses meeting), the
+    schematic convention; a plain crossing without a dot is not a
+    connection.
+  - At most 2 lanes below the node row; a further tie collapses into a
+    `+n` badge (cyan) on its left jack.
 - Lamps run on `activeAt` (§2 Motion).
 - Hovering a jack opens the **jack insight pane** (§3.4).
 - **Until the seams land:** jack numbers, occupancy, active and urgent are
@@ -339,3 +350,7 @@ reads a fixture path.
   tab per project, one SYS tab (CPU + usage), a NOTIF tab; terminal
   contrast colours for highlights; dark mode; no blur, no hyprglass.
   Nouns: switchboard (jack · tie · trunk · lamp), adopting core's `tie`.
+- 2026-09-26 — first bar shots: 1px dim ties vanished at 1:1. khoa chose
+  brighter ties on the same 28px bar, drawn as a circuit schematic —
+  hollow nodes under tied jacks, a solid bus per project, dashed spawned
+  side-wires, filled junction dots (§3.2).
