@@ -2,7 +2,7 @@ import QtQuick
 import Quickshell
 
 // Standalone harness to render the Exodos powermenu for a screenshot.
-//   qs -p modules/facets/quickshell/qml/ExodosPreview.qml
+//   qs -p pkgs/lyra-shell/qml/ExodosPreview.qml
 // Loads the REAL powermenu.qml pre-shown — it owns its own full-screen
 // Overlay PanelWindow (namespace "aoide-powermenu", so a live compositor with
 // the facet's layerrules gives this preview the same blur + hyprglass the
@@ -21,7 +21,7 @@ import Quickshell
 // indirection for a source-tree checkout (QS_STAGE precedent — previews
 // honour env seams):
 //   POWERMENU_WIDGET=file://$PWD/song/songbook/sonata/widgets/powermenu.qml \
-//     qs -p modules/facets/quickshell/qml/ExodosPreview.qml
+//     qs -p pkgs/lyra-shell/qml/ExodosPreview.qml
 // In the deployed tree ($out/qml/, where songs/ sits beside this file) the
 // default relative source resolves with no env needed.
 ShellRoot {

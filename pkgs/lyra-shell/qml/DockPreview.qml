@@ -12,7 +12,7 @@ import Quickshell
 // override for a source-tree checkout (QS_STAGE precedent — previews
 // honour env seams):
 //   DOCK_WIDGET=file://$PWD/song/songbook/sonata/widgets/dock.qml \
-//     qs -p modules/facets/quickshell/qml/DockPreview.qml
+//     qs -p pkgs/lyra-shell/qml/DockPreview.qml
 // In the deployed tree ($out/qml/, where songs/ sits beside this file) the
 // default relative source resolves with no env needed.
 //

@@ -142,7 +142,7 @@ vs song QML**, and only applies to a file that already passed §0.
 
 > ### The paint test
 >
-> A file stays in `modules/facets/quickshell/qml/` **iff all three are YES**:
+> A file stays in `pkgs/lyra-shell/qml/` **iff all three are YES**:
 >
 > 1. **Song-blind.** Does the file name zero aesthetic decisions? Reading
 >    `livery.paletteFg` is fine — that is picking up an API. *Deciding* that a

@@ -650,7 +650,7 @@ ShellRoot {
         var p = ("" + canvas.widgetPath).trim()
         if (p.charAt(0) === "/") return p
         var m = /^songs\/([^\/]+)\/(.+)$/.exec(p)
-        var tail = m ? "/song/songbook/" + m[1] + "/widgets/" + m[2] : "/modules/facets/quickshell/qml/" + p
+        var tail = m ? "/song/songbook/" + m[1] + "/widgets/" + m[2] : "/pkgs/lyra-shell/qml/" + p
         for (var k in canvas.stageMap) if (k.length > tail.length && k.slice(-tail.length) === tail) return k
         return ""
     }

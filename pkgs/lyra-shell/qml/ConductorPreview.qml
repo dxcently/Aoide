@@ -3,7 +3,7 @@ import Quickshell
 import Quickshell.Wayland
 
 // Standalone harness to render the sonata conductor temple for a screenshot.
-//   qs -p modules/facets/quickshell/qml/ConductorPreview.qml
+//   qs -p pkgs/lyra-shell/qml/ConductorPreview.qml
 // Floats a 360x520 overlay surface. Unlike MetersPreview/PowerPreview's stub
 // palette, the roster needs LiveryState's real helpers (ctxPercent/ctxBar/
 // noteColor/elapsedSince), so the harness instantiates the real livery +
@@ -18,7 +18,7 @@ import Quickshell.Wayland
 // checkout point CONDUCTOR_WIDGET at the songbook file (QS_STAGE
 // precedent — previews honour env seams):
 //   CONDUCTOR_WIDGET=file://$PWD/song/songbook/sonata/widgets/conductor.qml \
-//     qs -p modules/facets/quickshell/qml/ConductorPreview.qml
+//     qs -p pkgs/lyra-shell/qml/ConductorPreview.qml
 // In the deployed tree ($out/qml/, where songs/ sits beside this file) the
 // default relative source resolves with no env needed.
 //

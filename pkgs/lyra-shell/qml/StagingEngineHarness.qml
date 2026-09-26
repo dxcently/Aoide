@@ -11,7 +11,7 @@
 // lesson this harness exists to honour) with an offscreen QPA platform:
 //
 //   QT_QPA_PLATFORM=offscreen HOME=<scratch> \
-//     qs -p modules/facets/quickshell/qml/StagingEngineHarness.qml
+//     qs -p pkgs/lyra-shell/qml/StagingEngineHarness.qml
 //
 // Prints one PASS/FAIL line per assertion plus a final HARNESS RESULT line,
 // then exits. Never touches the live `$AOIDE_ROOT/run` tree or the live shell

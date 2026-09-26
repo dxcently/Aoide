@@ -3,7 +3,7 @@ import Quickshell
 import Quickshell.Wayland
 
 // Standalone harness to render the sonata terminals temple for a screenshot.
-//   qs -p modules/facets/quickshell/qml/TerminalsPreview.qml
+//   qs -p pkgs/lyra-shell/qml/TerminalsPreview.qml
 // Floats a ~360x520 overlay surface, centred, carrying a stub palette + bridge.
 // Point at a different stage file with QS_STAGE (e.g. an empty one) to exercise
 // the empty state:  QS_STAGE=/tmp/empty.json qs -p .../TerminalsPreview.qml
@@ -15,7 +15,7 @@ import Quickshell.Wayland
 // checkout point TERMINALS_WIDGET at the songbook file (QS_STAGE
 // precedent — previews honour env seams):
 //   TERMINALS_WIDGET=file://$PWD/song/songbook/sonata/widgets/terminals.qml \
-//     qs -p modules/facets/quickshell/qml/TerminalsPreview.qml
+//     qs -p pkgs/lyra-shell/qml/TerminalsPreview.qml
 // In the deployed tree ($out/qml/, where songs/ sits beside this file) the
 // default relative source resolves with no env needed.
 //

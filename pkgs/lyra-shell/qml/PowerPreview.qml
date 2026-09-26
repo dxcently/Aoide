@@ -3,7 +3,7 @@ import Quickshell
 import Quickshell.Wayland
 
 // Standalone harness to render the sonata power temple for a screenshot.
-//   qs -p modules/facets/quickshell/qml/PowerPreview.qml
+//   qs -p pkgs/lyra-shell/qml/PowerPreview.qml
 // Floats a ~360x300 overlay surface carrying a stub gold-marble palette; the
 // widget reads real UPower (battery) + /proc/net/route (network) live. On a
 // desktop with no battery it exercises the honest "AC — no battery" path.
@@ -15,7 +15,7 @@ import Quickshell.Wayland
 // POWER_WIDGET at the songbook file (QS_STAGE precedent — previews honour env
 // seams):
 //   POWER_WIDGET=file://$PWD/song/songbook/sonata/widgets/power.qml \
-//     qs -p modules/facets/quickshell/qml/PowerPreview.qml
+//     qs -p pkgs/lyra-shell/qml/PowerPreview.qml
 // In the deployed tree ($out/qml/, where songs/ sits beside this file) the
 // default relative source resolves with no env needed.
 //

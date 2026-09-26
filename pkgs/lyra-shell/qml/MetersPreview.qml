@@ -3,7 +3,7 @@ import Quickshell
 import Quickshell.Wayland
 
 // Standalone harness to render the sonata meters temple for a screenshot.
-//   qs -p modules/facets/quickshell/qml/MetersPreview.qml
+//   qs -p pkgs/lyra-shell/qml/MetersPreview.qml
 // Floats a ~360x300 overlay surface carrying a stub gold-marble palette; the
 // widget reads the machine's real /proc/stat + /proc/meminfo live.
 //
@@ -14,7 +14,7 @@ import Quickshell.Wayland
 // METERS_WIDGET at the songbook file (QS_STAGE precedent — previews honour
 // env seams):
 //   METERS_WIDGET=file://$PWD/song/songbook/sonata/widgets/meters.qml \
-//     qs -p modules/facets/quickshell/qml/MetersPreview.qml
+//     qs -p pkgs/lyra-shell/qml/MetersPreview.qml
 // In the deployed tree ($out/qml/, where songs/ sits beside this file) the
 // default relative source resolves with no env needed.
 //
