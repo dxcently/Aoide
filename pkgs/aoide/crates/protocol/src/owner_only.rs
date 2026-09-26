@@ -61,7 +61,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_READ_EA, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
     FILE_DELETE_CHILD, FILE_EXECUTE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, FileAttributeTagInfo, GetFileInformationByHandleEx,
-    OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE, WRITE_DAC,
+    OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE, WRITE_DAC, WRITE_OWNER,
 };
 use windows_sys::Win32::System::SystemServices::{ACCESS_ALLOWED_ACE_TYPE, SECURITY_DESCRIPTOR_REVISION, SID_REVISION};
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -356,12 +356,21 @@ fn create_dir(path: &Path, access: u32) -> io::Result<()> {
 
 /// Replace an EXISTING directory's DACL with a protected, single-ACE policy
 /// granting `access` to the current user — the native stand-in for `chmod`,
-/// and the one place this module changes a policy it did not create. Only
-/// the DACL is written: the owner is left alone, because a directory that is
-/// already ours does not need re-owning and re-owning one that is not needs a
-/// privilege this module refuses to require.
+/// and the one place this module changes a policy it did not create.
+///
+/// **The owner is pinned here too, and it has to be.** A directory this
+/// module did not create may belong to someone else by the host's own
+/// default: an elevated-context process's new objects are owned by the
+/// Administrators group, not by its user, and [`dir_privacy`] asks for the
+/// current user. Pinning the owner to one's OWN token user needs no
+/// privilege (it is the same call creation-time pinning already makes), so a
+/// tighten that left the owner alone would hand back a directory that fails
+/// this module's own readback — a repair that reports the fault it was
+/// called to fix. `WRITE_OWNER` is requested on the open for that reason; a
+/// policy that does not grant it to its current owner cannot be repaired
+/// through this module, and says so with an error rather than half a fix.
 pub fn set_dir_access(path: &Path, access: u32) -> io::Result<()> {
-    let dir = open_existing(path, WRITE_DAC | READ_CONTROL, true)?;
+    let dir = open_existing(path, WRITE_DAC | WRITE_OWNER | READ_CONTROL, true)?;
     let sid = TokenUserSid::current()?;
     let mut sd = SECURITY_DESCRIPTOR::default();
     let _acl = owner_only_descriptor(&mut sd, &sid, access)?;
@@ -378,8 +387,8 @@ pub fn set_dir_access(path: &Path, access: u32) -> io::Result<()> {
         SetSecurityInfo(
             dir.as_raw_handle() as HANDLE,
             SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            null_mut(),
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            sid.as_ptr(),
             null_mut(),
             dacl,
             null_mut(),

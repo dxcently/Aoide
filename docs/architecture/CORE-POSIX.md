@@ -68,7 +68,7 @@ Two classes follow from that, and every row below is one of them:
   and `aoide-storage` built AND tested on ThinkChiyo with native
   `x86_64-pc-windows-msvc` (Rust 1.98.1): `cargo check -p aoide-protocol
   -p aoide-storage --all-targets` is 0 errors, and `cargo test` on the pair
-  is 171 + 438 passed / 0 failed / 0 ignored. That covers the feed's 17
+  is 171 + 439 passed / 0 failed / 0 ignored. That covers the feed's 17
   (ACL readback/refusal, append/truncation, replacement) plus this slice's
   arms: the owner-only file and directory policy read back from the object's
   own handle, `LockFileEx` held against a second handle and against a

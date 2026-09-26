@@ -2063,6 +2063,34 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Windows: `secure_private_dir` on a directory that already exists and is
+    /// NOT private must TIGHTEN it, not refuse it and not leave it as it is.
+    /// That is the second of the three states `ensure_private_dir` has to
+    /// tell apart (absent, present-and-private, present-and-open), and it is
+    /// the one a host inherits from an earlier install — the Unix arm's
+    /// `chmod 0700` over an existing directory, which is equally idempotent.
+    /// The fixture starts wide on purpose: `create_dir_all` leaves the
+    /// inherited default DACL, which is exactly the shape being repaired.
+    #[cfg(windows)]
+    #[test]
+    fn secure_private_dir_tightens_a_directory_another_run_left_open() {
+        let dir = std::env::temp_dir().join(format!("aoide-secure-dir-tighten-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let before = aoide_protocol::owner_only::dir_privacy(&dir).unwrap();
+        assert!(before.is_some(), "the fixture must start with a policy this crate would not accept: {before:?}");
+
+        secure_private_dir(&dir).unwrap();
+        assert_private_dir(&dir);
+
+        // And it stays idempotent: a second call over an already-private
+        // directory neither fails nor regresses it.
+        secure_private_dir(&dir).unwrap();
+        assert_private_dir(&dir);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn captures_dir_nests_under_state_dir_and_honors_its_override() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
