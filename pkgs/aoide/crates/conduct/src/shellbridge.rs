@@ -31,10 +31,7 @@ use std::path::PathBuf;
 /// The shellbridge socket path — **contract**: never computed independently.
 /// `$XDG_RUNTIME_DIR/aoide/shellbridge.sock`.
 pub fn socket_path() -> PathBuf {
-    let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/run/user/1000".into());
-    PathBuf::from(runtime)
-        .join("aoide")
-        .join("shellbridge.sock")
+    aoide_storage::runtime_dir::socket_dir().join("shellbridge.sock")
 }
 
 /// Records one `sessiontrace` answer carries when the wire names no `lines` —

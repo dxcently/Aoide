@@ -23,6 +23,15 @@
 
 ## Invariants
 
+- **`runtime_dir::socket_dir` is a PURE resolution.** It answers a path and
+  creates nothing — `tunnel::list_records`' own tests depend on "the `aoide/`
+  subdirectory does not exist until a writer makes it", and a resolver that
+  created it would be lying to every caller about what it did. Creating the
+  directory belongs to whoever is about to write or bind there (on native
+  Windows, through `aoide_protocol::owner_only::ensure_private_dir`). The
+  `$XDG_RUNTIME_DIR` override wins on BOTH hosts: every isolating fixture sets
+  it, and an answer that ignored it on one host would read and write the
+  machine's real per-user directory instead of the fixture's.
 - Structured thread/reply IDs are signed context, not membership or delivery authority. Legacy four-field content remains valid.
 - Structured letter content is optional signed text, never a new transport header. Invalid or legacy content remains raw; decoding must not write or alter envelope identity.
 

@@ -903,14 +903,11 @@ fn default_root() -> PathBuf {
 /// itself as "the live dir" from inside its own canvas and refuse every
 /// `--root <root>` rail call. This is the live dir as the REAL daemon would
 /// resolve it from a plain shell, independent of what a canvas child
-/// repoints; duplicated from attest's own unset-fallback (`/run/user/1000`)
-/// rather than reaching into that crate's env-reading internals.
+/// repoints. [`aoide_storage::runtime_dir::socket_dir`] is the ONE authority
+/// for the convention — a downward edge for this crate, which already depends
+/// on `aoide-storage`.
 fn live_daemon_dir() -> PathBuf {
-    let runtime = std::env::var("XDG_RUNTIME_DIR")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "/run/user/1000".into());
-    PathBuf::from(runtime).join("aoide")
+    aoide_storage::runtime_dir::socket_dir()
 }
 
 /// The root a `--root` names, else [`default_root`]. A relative `--root`

@@ -270,13 +270,7 @@ pub(in crate::graph) fn unix_ts() -> u64 {
 /// longer re-exports this symbol at all (dropped in Phase 4c as dead once the
 /// only caller moved into `aoide-server`).
 pub fn conduct_socket_path(id: &str) -> PathBuf {
-    let runtime = std::env::var("XDG_RUNTIME_DIR")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "/run/user/1000".into());
-    PathBuf::from(runtime)
-        .join("aoide")
-        .join(format!("session-{id}.sock"))
+    aoide_storage::runtime_dir::socket_dir().join(format!("session-{id}.sock"))
 }
 
 /// The per-session Claude Code channel socket (P-M5c-2,
@@ -290,13 +284,7 @@ pub fn conduct_socket_path(id: &str) -> PathBuf {
 /// the identical reason `conduct_socket_path` is: this crosses the
 /// `aoide-conduct` → `aoide-server` boundary too.
 pub fn channel_socket_path(id: &str) -> PathBuf {
-    let runtime = std::env::var("XDG_RUNTIME_DIR")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "/run/user/1000".into());
-    PathBuf::from(runtime)
-        .join("aoide")
-        .join(format!("channel-{id}.sock"))
+    aoide_storage::runtime_dir::socket_dir().join(format!("channel-{id}.sock"))
 }
 
 // SIGWINCH latch: the handler only flips a flag (async-signal-safe); the poll
