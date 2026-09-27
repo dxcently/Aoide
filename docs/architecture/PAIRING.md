@@ -764,14 +764,36 @@ forward is a pipe, not a party to the protocol.
 A named mesh (`config.toml`'s `[mesh.<name>]`, task #135 P4, CONTRACTS.md
 §4) is intent, not a second identity model. It is an operator's own
 bookkeeping — "these are the boxes I expect to belong to this mesh,
-reached at these hops" — recorded once, on one instance, never transmitted:
-nothing in the ceremony, the wire (§"Wire authentication" above), or any
-A2A payload carries a mesh name, and `node_store::Node` gains no field for
-it. The mesh itself stays exactly what the Kill-list below already
-settled — the closure of pairwise, individually-verified records — and a
-declared mesh only ever describes a NAMED EXPECTATION over that same
-closure, never a new object standing in front of it. Declaring one changes
-nothing about how a node is paired, verified, or reached.
+reached at these hops" — recorded once, on one instance, never transmitted
+by the ceremony. The mesh itself stays exactly what the Kill-list below
+already settled — the closure of pairwise, individually-verified records —
+and a declared mesh only ever describes a NAMED EXPECTATION over that same
+closure, never a new object standing in front of it.
+
+**P-CHARTER makes a mesh a trust scope, so two things above are no longer
+true.** A signed request now names the mesh it acts in, inside its
+per-request signature (`X-Aoide-Mesh`, `wire_auth::canonical_string`'s sixth
+field), and `node_store::Node` carries `grants` — one capability set PER
+MESH, with `allows` migrated into the home mesh (`[pairing] homeMesh`,
+default `home`). The door reads one mesh's grant per request
+(`aoide-server::a2a::grant_in_mesh`), and a grant given in one mesh holds
+only there.
+
+**The pairing's own mesh rides the ceremony** (P-CHARTER): `aoide pair …
+--mesh <m>` names it, the request's body carries it (`aoide/pairRequest`'s
+optional `mesh`, validated as a mesh name at the door and written onto the
+parked entry IN THE SAME WRITE as the park itself — `park_inbound_with_mesh`,
+so a park that lands always carries its mesh), and BOTH ends' commits take it
+— above every local source (`--mesh` on that side, the target's known meshes,
+the home mesh) — so the two sides agree by construction. A pairing that names
+none is the pre-charter shape and still works: each side resolves the mesh
+locally, exactly as before, and a box that knows more than one mesh for a
+target refuses rather than guessing.
+
+The mesh is self-asserted DATA of the same class as `url` and `selfVia` —
+validated for SHAPE, never trusted for authority (trust stays in pubkeys + the
+typed code) — and the operator sees it beside the code, so the human gate that
+authorizes a pairing covers it too.
 
 `aoide mesh` (`aoide_client::mesh`) is the read side: it compares a
 declaration against the live registry and reports where they diverge — a

@@ -30,6 +30,10 @@ use aoide_protocol::Invocation;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+/// The mesh both hand-written records grant `message` in: a request that names
+/// none is judged in `[pairing] homeMesh`, whose default this is.
+const HOME_MESH: &str = "home";
+
 fn unique_root(tag: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();
     dir.push(format!(
@@ -71,7 +75,9 @@ fn wait_for_tcp_up(host_port: &str) {
 }
 
 /// One hand-written VERIFIED node record — the shape `aoide pair` writes, made
-/// by hand because the ceremony is LAN-only and pre-P-CHARTER.
+/// by hand because the ceremony is LAN-only and a real run's charter supplies
+/// it (P-CHARTER): the `message` grant lives in the HOME mesh, which is the
+/// mesh a request that names none is judged in.
 fn verified_record(name: &str, url: &str, pubkey_hex: &str) -> aoide_storage::node_store::Node {
     aoide_storage::node_store::Node {
         name: name.to_string(),
@@ -82,7 +88,8 @@ fn verified_record(name: &str, url: &str, pubkey_hex: &str) -> aoide_storage::no
         hub: false,
         pubkey: Some(pubkey_hex.to_string()),
         verified: true,
-        allows: vec!["message".to_string()],
+        grants: aoide_storage::node_store::grants_in(HOME_MESH, &["message"]),
+        narrowed: aoide_storage::node_store::Grants::new(),
         via: None,
         added_at: "2026-09-26T00:00:00Z".to_string(),
     }

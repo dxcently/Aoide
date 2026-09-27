@@ -636,7 +636,7 @@ pub(crate) fn post_json_to_node_with_via_override(
 /// ceremony's own protocol, `client/AGENTS.md`) — kept as parameters
 /// anyway so this stays [`post_json`]'s same general shape, not a
 /// ceremony-only special case.
-fn post_json_via(
+pub(crate) fn post_json_via(
     logical_url: &str,
     via: Option<&aoide_storage::tunnel::Via>,
     tunnel_key: &str,
@@ -681,13 +681,24 @@ fn parse_via_flag(inv: &Invocation) -> Result<Option<aoide_storage::tunnel::Via>
 /// carry, so client and server MUST agree byte-for-byte or every signature
 /// fails to verify), and signs
 /// `aoide_storage::wire_auth::canonical_string(HTTP_METHOD, path, timestamp,
-/// nonce, body.as_bytes())` — [`HTTP_METHOD`], not a second hardcoded
+/// nonce, body.as_bytes(), mesh)` — [`HTTP_METHOD`], not a second hardcoded
 /// `"POST"` literal (P-P4 review finding 2: this function and
 /// [`post_json`] used to carry two INDEPENDENT `"POST"` literals that
 /// merely happened to agree; the canonical string's `method` field is now
 /// the exact value the request is actually sent with, not a re-typed
 /// guess) — with THIS instance's own identity
 /// (`aoide_storage::identity::load_or_mint()`) — never the node's.
+///
+/// **The mesh this request acts in is SIGNED, not merely declared**
+/// (P-CHARTER, `docs/architecture/HTTPS-MESH-API.md` "Trust per mesh"): the
+/// value rides `X-Aoide-Mesh` AND the canonical string, so the far end
+/// looks the caller's grant up in exactly this mesh and nobody can re-aim a
+/// captured request at another mesh's grant. `named` is the operator's own
+/// `--mesh` when the command has one; otherwise the mesh resolves by
+/// [`aoide_storage::node_store::resolve_mesh`] — the record's sole granted
+/// mesh, else the home mesh. A record trusted in more than one mesh with no
+/// flag to say which is REFUSED here, where the reason is known, rather than
+/// guessed into a request that would be refused opaquely one hop away.
 ///
 /// `X-Aoide-Node` carries THIS instance's own SELF name
 /// (`aoide_storage::display::local_host_name()`) — never `node.name`, which
@@ -717,22 +728,45 @@ fn parse_via_flag(inv: &Invocation) -> Result<Option<aoide_storage::tunnel::Via>
 /// unsigned request to a node that has since upgraded to require signed
 /// spawn admission would otherwise fail opaquely on the far end instead of
 /// here, where the real cause is known.
-pub(crate) fn sign_headers_for_node(node: &aoide_storage::node_store::Node, body: &str) -> Result<Vec<(String, String)>, String> {
+/// Resolve the mesh one outbound signed request acts in — the shared rule
+/// [`sign_headers_for_node`] applies (`node_store::resolve_mesh` over the
+/// record's grants and THE CAPABILITY THE CALL NEEDS: `message` for the mail
+/// methods, `read` for a frame/history/roster read, `spawn` for a spawn), so
+/// every caller's error message is the same taught sentence.
+pub fn request_mesh(node: &aoide_storage::node_store::Node, named: Option<&str>, cap: &str) -> Result<String, String> {
+    aoide_storage::node_store::resolve_mesh(named, &node.grants, &aoide_storage::config::home_mesh(), cap)
+}
+
+pub(crate) fn sign_headers_for_node(
+    node: &aoide_storage::node_store::Node,
+    body: &str,
+    named_mesh: Option<&str>,
+    cap: &str,
+) -> Result<Vec<(String, String)>, String> {
     if !node.verified {
         return Ok(Vec::new());
     }
+    // The mesh is resolved with THE CAPABILITY THE CALL NEEDS (review
+    // N2/N3/N4/N12): a mail call asks about `message`, a frame/history/roster
+    // read about `read`, a spawn about `spawn` — so a record trusted in two
+    // meshes stays reachable as long as the capability lives in one of them,
+    // and only a genuine tie refuses.
+    let mesh = request_mesh(node, named_mesh, cap)?;
     let (keypair, _) = aoide_storage::identity::load_or_mint()
         .map_err(|e| format!("loading this instance's identity to sign a request to node `{}`: {e}", node.name))?;
     let path = aoide_storage::node_store::url_path(&node.url);
     let timestamp = aoide_storage::time::now_iso_utc();
     let nonce = aoide_storage::pairing::random_hex(16);
-    let canonical = aoide_storage::wire_auth::canonical_string(HTTP_METHOD, &path, &timestamp, &nonce, body.as_bytes());
+    let canonical = aoide_storage::wire_auth::canonical_string(HTTP_METHOD, &path, &timestamp, &nonce, body.as_bytes(), Some(&mesh));
     let signature = aoide_storage::wire_auth::sign_hex(&keypair, canonical.as_bytes());
     Ok(vec![
         // The node this request claims to be: the ADDRESS form of this box's own
         // name (`display::local_node_name`) — the same name its mail and its
         // pairing handshake declare, and the one a peer's registry stores for it.
         (aoide_storage::wire_auth::HEADER_NODE.to_string(), aoide_storage::display::local_node_name()),
+        // The mesh it acts in — signed (the canonical string above), carried
+        // here so the far end knows which grant to read.
+        (aoide_storage::wire_auth::HEADER_MESH.to_string(), mesh),
         (aoide_storage::wire_auth::HEADER_TIMESTAMP.to_string(), timestamp),
         (aoide_storage::wire_auth::HEADER_NONCE.to_string(), nonce),
         (aoide_storage::wire_auth::HEADER_SIGNATURE.to_string(), signature),
@@ -757,7 +791,7 @@ fn build_signed_pair_poll_body(id: &str) -> Result<String, String> {
         aoide_storage::identity::load_or_mint().map_err(|e| format!("loading this instance's identity to poll pairing request `{id}`: {e}"))?;
     let timestamp = aoide_storage::time::now_iso_utc();
     let nonce = aoide_storage::pairing::random_hex(16);
-    let canonical = aoide_storage::wire_auth::canonical_string("PAIRPOLL", id, &timestamp, &nonce, &[]);
+    let canonical = aoide_storage::wire_auth::canonical_string("PAIRPOLL", id, &timestamp, &nonce, &[], None);
     let signature = aoide_storage::wire_auth::sign_hex(&keypair, canonical.as_bytes());
     let body = crate::node::build_pair_poll_body(id, &timestamp, &nonce, &signature);
     Ok(serde_json::to_string(&body).unwrap_or_default())
@@ -789,7 +823,7 @@ pub use aoide_protocol::wire::gen_message_id;
 /// second `add`).
 fn handle_node_add(inv: &Invocation) -> Outcome {
     let cmd = "node.add";
-    const USAGE: &str = "usage: aoide node add <name> <url> [--autogate] [--no-verify] [--via ssh://[user@]host[:port]] [--json]";
+    const USAGE: &str = "usage: aoide node add <name> <url|poll> [--autogate] [--no-verify] [--via ssh://[user@]host[:port]] [--json]";
     let name = match inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         Some(n) => n.to_string(),
         None => return Outcome::usage(cmd, USAGE),
@@ -833,7 +867,15 @@ fn handle_node_add(inv: &Invocation) -> Outcome {
         }));
     }
     let autogate = inv.flag_present("autogate");
-    let no_verify = inv.flag_present("no-verify");
+    // **A `poll` address is the design's third transport member, and it names
+    // the ABSENCE of an inbound one** (`docs/architecture/HTTPS-MESH-API.md`
+    // "Transports and relays"): the node connects out and asks, so there is no
+    // AgentCard to fetch and the fetch below is skipped exactly as
+    // `--no-verify` skips it. It is still recorded as given — `verified` is
+    // `false` on this path either way, because a card fetch is reachability
+    // and never identity.
+    let poll_address = url.eq_ignore_ascii_case(aoide_storage::charter::DEFAULT_ADDRESS);
+    let no_verify = inv.flag_present("no-verify") || poll_address;
     let token_file = inv.flags.get("token-file").cloned().filter(|s| !s.is_empty());
     let bearer_secret = inv.flags.get("bearer-secret").cloned().filter(|s| !s.is_empty());
 
@@ -903,7 +945,8 @@ fn handle_node_add(inv: &Invocation) -> Outcome {
         hub: false,
         pubkey: None,
         verified: false,
-        allows: Vec::new(),
+        grants: aoide_storage::node_store::Grants::new(),
+        narrowed: aoide_storage::node_store::Grants::new(),
         via: via.as_ref().map(|v| v.to_string()),
         added_at: aoide_storage::time::now_iso_utc(),
     };
@@ -995,9 +1038,26 @@ fn handle_node_remove(inv: &Invocation) -> Outcome {
 /// an unknown node AND an unknown capability — the capability check runs
 /// FIRST (`set_node_allow`'s own ordering), so a typo'd capability against a
 /// typo'd name still names the capability problem, not the node one.
+/// `node allow <name> <cap> on|off [--mesh <m>]` (P-P3, `docs/architecture/
+/// PAIRING.md` decision 5; per mesh from P-CHARTER): flip one capability in
+/// `name`'s grant FOR ONE MESH —
+/// `aoide_storage::node_store::set_node_allow` holds the closed-set
+/// validation and the idempotence invariant; this handler just reports
+/// exactly what changed (enabled/disabled/no-op), mirroring `handle_node_hub`'s
+/// "report the change, never a bare ok" discipline one field over. Refuses
+/// an unknown node AND an unknown capability — the capability check runs
+/// FIRST (`set_node_allow`'s own ordering), so a typo'd capability against a
+/// typo'd name still names the capability problem, not the node one.
+///
+/// **The mesh is required exactly when it is ambiguous**: `--mesh` wins when
+/// given; otherwise the node's sole granted mesh, else the home mesh
+/// ([`aoide_storage::node_store::resolve_mesh`], the same rule the pair
+/// commit and every outbound request use). A node trusted in two meshes and
+/// no `--mesh` REFUSES rather than guessing — the one moment a guess would
+/// silently narrow or widen a grant in a mesh the operator never named.
 fn handle_node_allow(inv: &Invocation) -> Outcome {
     let cmd = "node.allow";
-    const USAGE: &str = "usage: aoide node allow <name> <cap> on|off";
+    const USAGE: &str = "usage: aoide node allow <name> <cap> on|off [--mesh <mesh>]";
     let name = match inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         Some(n) => n.to_string(),
         None => return Outcome::usage(cmd, USAGE),
@@ -1013,7 +1073,16 @@ fn handle_node_allow(inv: &Invocation) -> Outcome {
     };
 
     let mut nodes = aoide_storage::node_store::load_nodes();
-    let change = match aoide_storage::node_store::set_node_allow(&mut nodes, &name, &cap, on) {
+    let known = nodes
+        .iter()
+        .find(|p| p.name == name)
+        .map(aoide_storage::node_store::granted_meshes)
+        .unwrap_or_default();
+    let mesh = match aoide_storage::node_store::resolve_mesh_any(inv.flags.get("mesh").map(String::as_str), &known, &aoide_storage::config::home_mesh()) {
+        Ok(m) => m,
+        Err(e) => return Outcome::error(cmd, format!("--mesh: {e}")).with_data(json!({ "reason": "mesh-ambiguous", "node": name })),
+    };
+    let change = match aoide_storage::node_store::set_node_allow(&mut nodes, &name, &cap, on, &mesh) {
         Ok(c) => c,
         Err(aoide_storage::node_store::AllowError::UnknownCapability) => {
             return Outcome::error(
@@ -1029,16 +1098,39 @@ fn handle_node_allow(inv: &Invocation) -> Outcome {
             return Outcome::error(cmd, format!("no node named `{name}`"))
                 .with_data(json!({ "reason": "unknown-node", "name": name }));
         }
+        Err(aoide_storage::node_store::AllowError::WidensCharter) => {
+            // Two different truths behind one refusal (review N5): the charter
+            // may simply not grant it, or the mesh may be charter-shaped with
+            // an UNDECIDABLE operator key — where there is no readable line at
+            // all, and the fix is to resolve the key, not to sign a new
+            // charter. Say which.
+            let undecidable = aoide_storage::charter::charter_shaped(&mesh)
+                && aoide_storage::charter::governing(&mesh).is_none();
+            let message = if undecidable {
+                format!(
+                    "`{name}` cannot be granted `{cap}` in mesh `{mesh}`: that mesh is a CHARTER mesh here and its \
+                     operator key is UNDECIDABLE right now, so no charter line can be read and nothing local widens \
+                     anything. Resolve the key first — `aoide mesh charter show {mesh}` shows which key is recorded \
+                     and where it is written down (config line vs state record)"
+                )
+            } else {
+                format!(
+                    "`{name}` is on mesh `{mesh}`'s charter, and that charter does not grant it `{cap}` — nothing local widens a charter grant; the operator's line in the charter must change (`aoide mesh charter sign {mesh}`), or narrow it here with `off`"
+                )
+            };
+            return Outcome::error(cmd, message)
+                .with_data(json!({ "reason": "widens-charter", "name": name, "cap": cap, "mesh": mesh, "operatorUndecidable": undecidable }));
+        }
     };
 
     use aoide_storage::node_store::AllowChange;
     let (msg, tag) = match &change {
-        AllowChange::Enabled => (format!("`{cap}` is now allowed for node `{name}`"), "enabled"),
-        AllowChange::Disabled => (format!("`{cap}` is no longer allowed for node `{name}`"), "disabled"),
-        AllowChange::NoOp if on => (format!("`{name}` already allows `{cap}`"), "no-op"),
-        AllowChange::NoOp => (format!("`{name}` already does not allow `{cap}`"), "no-op"),
+        AllowChange::Enabled => (format!("`{cap}` is now allowed for node `{name}` in mesh `{mesh}`"), "enabled"),
+        AllowChange::Disabled => (format!("`{cap}` is no longer allowed for node `{name}` in mesh `{mesh}`"), "disabled"),
+        AllowChange::NoOp if on => (format!("`{name}` already allows `{cap}` in mesh `{mesh}`"), "no-op"),
+        AllowChange::NoOp => (format!("`{name}` already does not allow `{cap}` in mesh `{mesh}`"), "no-op"),
     };
-    let data = json!({ "name": name, "cap": cap, "on": on, "change": tag });
+    let data = json!({ "name": name, "cap": cap, "on": on, "mesh": mesh, "change": tag });
 
     if matches!(change, AllowChange::NoOp) {
         return Outcome::ok(cmd, msg).with_data(data);
@@ -1100,14 +1192,14 @@ fn handle_node_hub(inv: &Invocation) -> Outcome {
 /// the others (`handle_node_pull` below iterates every selected node through
 /// this regardless of an individual failure). Returns a small JSON summary
 /// row for the aggregate Outcome's `data.results`.
-fn pull_one_node(node: &aoide_storage::node_store::Node) -> Value {
+fn pull_one_node(node: &aoide_storage::node_store::Node, named: Option<&str>) -> Value {
     let now = aoide_storage::time::now_iso_utc();
     let body = crate::node::build_graph_summary_request();
     let body_str = serde_json::to_string(&body).unwrap_or_default();
 
     let attempt: Result<aoide_storage::node_store::NodeCacheEntry, String> = (|| {
         let bearer = resolve_node_bearer(node)?;
-        let extra_headers = sign_headers_for_node(node, &body_str)?;
+        let extra_headers = sign_headers_for_node(node, &body_str, named, "read")?;
         let (code, resp_body) = post_json_to_node(node, &body_str, bearer.as_deref(), &extra_headers, 15)?;
         if code != 200 {
             return Err(format!("HTTP {code}"));
@@ -1158,11 +1250,11 @@ fn pull_one_node(node: &aoide_storage::node_store::Node) -> Value {
 /// the fallback for a node this call fails to reach. Returns just the node's
 /// resolved `graph` document (`{nodes, edges}`) — the roster core has no use
 /// for the envelope's `instance` field `pull_one_node` also captures.
-pub fn pull_node_live(node: &aoide_storage::node_store::Node, timeout_secs: u64) -> Result<Value, String> {
+pub fn pull_node_live(node: &aoide_storage::node_store::Node, timeout_secs: u64, named: Option<&str>) -> Result<Value, String> {
     let body = crate::node::build_graph_summary_request();
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let bearer = resolve_node_bearer(node)?;
-    let extra_headers = sign_headers_for_node(node, &body_str)?;
+    let extra_headers = sign_headers_for_node(node, &body_str, named, "read")?;
     let (code, resp_body) = post_json_to_node(node, &body_str, bearer.as_deref(), &extra_headers, timeout_secs)?;
     if code != 200 {
         return Err(format!("HTTP {code}"));
@@ -1203,12 +1295,13 @@ pub fn send_message_to_node(
     text: &str,
     context_id: &str,
     from_session: Option<&str>,
+    named_mesh: Option<&str>,
 ) -> Result<Value, String> {
     let message_id = gen_message_id();
     let body = crate::wire::build_message_send_body(text, &message_id, Some(context_id), from_session, None);
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let bearer = resolve_node_bearer(node)?;
-    let extra_headers = sign_headers_for_node(node, &body_str)?;
+    let extra_headers = sign_headers_for_node(node, &body_str, named_mesh, "message")?;
     let (code, resp) = post_json_to_node(node, &body_str, bearer.as_deref(), &extra_headers, 15)?;
     if code != 200 {
         return Err(format!("HTTP {code}"));
@@ -1261,12 +1354,13 @@ pub fn task_get_on_node(
     node: &aoide_storage::node_store::Node,
     id: &str,
     frame_tail: u64,
+    named_mesh: Option<&str>,
 ) -> Result<Value, crate::node::FrameReadError> {
     let wire = crate::node::build_task_get_frame_request(id, frame_tail);
     let body_str = serde_json::to_string(&wire).unwrap_or_default();
     let plain = |message: String| crate::node::FrameReadError { code: None, message };
     let bearer = resolve_node_bearer(node).map_err(plain)?;
-    let extra_headers = sign_headers_for_node(node, &body_str).map_err(plain)?;
+    let extra_headers = sign_headers_for_node(node, &body_str, named_mesh, "read").map_err(plain)?;
     let (code, resp) = post_json_to_node_with_tunnel_key(
         node,
         &body_str,
@@ -1315,12 +1409,13 @@ pub fn task_history_on_node(
     id: &str,
     lines_after: u64,
     tunnel_key: &str,
+    named_mesh: Option<&str>,
 ) -> Result<Value, crate::node::FrameReadError> {
     let wire = crate::node::build_task_get_history_request(id, lines_after);
     let body_str = serde_json::to_string(&wire).unwrap_or_default();
     let plain = |message: String| crate::node::FrameReadError { code: None, message };
     let bearer = resolve_node_bearer(node).map_err(plain)?;
-    let extra_headers = sign_headers_for_node(node, &body_str).map_err(plain)?;
+    let extra_headers = sign_headers_for_node(node, &body_str, named_mesh, "read").map_err(plain)?;
     let (code, resp) = post_json_to_node_with_tunnel_key(
         node,
         &body_str,
@@ -1417,7 +1512,7 @@ pub fn spawn_on_node(
     node: &aoide_storage::node_store::Node,
     text: &str,
 ) -> Result<Value, SpawnNodeError> {
-    spawn_on_node_via(node, text, None, None, None)
+    spawn_on_node_via(node, text, None, None, None, None)
 }
 
 /// [`spawn_on_node`]'s own body, PLUS an optional `--via` OVERRIDE
@@ -1448,6 +1543,7 @@ pub fn spawn_on_node_via(
     via_override: Option<&aoide_storage::tunnel::Via>,
     from_session: Option<&str>,
     task: Option<&str>,
+    named_mesh: Option<&str>,
 ) -> Result<Value, SpawnNodeError> {
     let message_id = gen_message_id();
     let body = crate::wire::build_message_send_body(text, &message_id, None, from_session, task);
@@ -1455,7 +1551,7 @@ pub fn spawn_on_node_via(
     let bearer =
         resolve_node_bearer(node).map_err(|e| SpawnNodeError::new("bearer-resolve-failed", e))?;
     let extra_headers =
-        sign_headers_for_node(node, &body_str).map_err(|e| SpawnNodeError::new("signing-failed", e))?;
+        sign_headers_for_node(node, &body_str, named_mesh, "spawn").map_err(|e| SpawnNodeError::new("signing-failed", e))?;
     let (code, resp) = post_json_to_node_with_via_override(node, &body_str, bearer.as_deref(), &extra_headers, 15, via_override)
         .map_err(|e| SpawnNodeError::new("send-failed", e))?;
     if code != 200 {
@@ -1734,7 +1830,7 @@ fn handle_node_spawn(inv: &Invocation) -> Outcome {
         }
     }
 
-    match spawn_on_node_via(&node, &text, via_override.as_ref(), parent.as_deref(), task) {
+    match spawn_on_node_via(&node, &text, via_override.as_ref(), parent.as_deref(), task, inv.flags.get("mesh").map(String::as_str)) {
         Ok(parsed) => {
             let session_id = parsed
                 .get("result")
@@ -1826,7 +1922,7 @@ fn handle_node_pull(inv: &Invocation) -> Outcome {
         return Outcome::ok(cmd, "no nodes registered — nothing to pull").with_data(json!({ "results": [] }));
     }
 
-    let results: Vec<Value> = selected.iter().map(pull_one_node).collect();
+    let results: Vec<Value> = selected.iter().map(|p| pull_one_node(p, inv.flags.get("mesh").map(String::as_str))).collect();
     let ok_count = results.iter().filter(|r| r["ok"] == true).count();
     Outcome::ok(cmd, format!("pulled {ok_count}/{} node(s) successfully", selected.len()))
         .with_data(json!({ "results": results }))
@@ -1874,7 +1970,11 @@ fn handle_node_status(_inv: &Invocation) -> Outcome {
     } else {
         format!("{} node(s) registered", rows.len())
     };
-    Outcome::ok(cmd, msg).with_data(json!({ "nodes": rows }))
+    // P-CHARTER (review finding 12): the effective HOME mesh rides the same
+    // payload, so a consumer that only ever sees `--json` (the conductor's
+    // Mesh pane) can describe the mesh a bare `node allow` would act in
+    // without restating the rule with a divergent default of its own.
+    Outcome::ok(cmd, msg).with_data(json!({ "nodes": rows, "homeMesh": aoide_storage::config::home_mesh() }))
 }
 
 /// The seven `node` commands (CONTRACTS.md §7; `hub` is P-D5, `allow` is P-P3),
@@ -1911,7 +2011,9 @@ pub fn register_nodes(r: &mut Registry) {
         path: ["node", "pull"],
         summary: "Pull aoide/graphSummary from one (or, with no name, every) registered node and refresh its cache.",
         args: [arg!("name", "string", false, "Pull only this node; omit to pull every registered node.")],
-        flags: [],
+        flags: [
+            flag!("mesh", "string", "The mesh this request acts in (P-CHARTER): it is signed, and the far end reads the caller's grant in it. Absent = the node's sole granted mesh, else `[pairing] homeMesh`; required when that node is trusted in more than one mesh."),
+        ],
         gated: false,
         implemented: true,
         handler: handle_node_pull,
@@ -1938,17 +2040,19 @@ pub fn register_nodes(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["node", "allow"],
-        summary: "Flip one capability in a node's `allows` set (P-P3, PAIRING.md decision 5) — idempotent, reports exactly what changed.",
+        summary: "Flip one capability in a node's grant FOR ONE MESH (P-P3, PAIRING.md decision 5; per mesh from P-CHARTER) — idempotent, reports exactly what changed.",
         args: [
             arg!("name", "string", true, "The registered node's name."),
             arg!("cap", "string", true, "The capability — one of the closed set: read, spawn, message."),
             arg!("state", "string", true, "`on` or `off`."),
         ],
-        flags: [],
+        flags: [
+            flag!("mesh", "string", "The mesh this grant change lands in. Absent = the node's sole granted mesh, else `[pairing] homeMesh`; required when the node is trusted in more than one mesh."),
+        ],
         gated: false,
         implemented: true,
         handler: handle_node_allow,
-        examples: ["node allow yomi-strix spawn on", "node allow yomi-strix spawn off"],
+        examples: ["node allow yomi-strix spawn on", "node allow yomi-strix spawn off --mesh away"],
     ));
     r.insert(cmd!(
         path: ["node", "spawn"],
@@ -1962,6 +2066,7 @@ pub fn register_nodes(r: &mut Registry) {
             flag!("via", "string", "An ssh://[user@]host[:port] transport marker for THIS call, overriding any via recorded on the node. Absent = the node's own recorded via, if any (today's behavior when neither is set)."),
             flag!("parent", "string", "The LOCAL session id to record as this child's parent, riding the signed body so the far door stamps it as the child's `remoteParent`. The kernel-attested caller wins when the daemon can prove one (this flag is then unused), and `AOIDE_SESSION_ID` is never read for it; a name that is not a live local session is refused rather than adopted as a stale parent. Absent = claim no parent (a top-level remote spawn)."),
             flag!("task", "string", "The task slug the FAR node runs this child under (^[a-z0-9][a-z0-9-]*$, the same shape a mailbox name takes), riding the signed body as metadata['aoide/task']. It makes the remote child a managed task run on its own node — task mailbox, exit report, `session watch`'s task view — and its slug becomes that run's session name there. Refused locally on a bad shape, and again by the far door, which also refuses a slug a live run already holds. Absent = a plain headless conducted session with no mailbox and no report."),
+            flag!("mesh", "string", "The mesh this request acts in (P-CHARTER): the far door reads the caller's `spawn` grant in it. Absent = the node's sole granted mesh, else `[pairing] homeMesh`; required when that node is trusted in more than one mesh."),
         ],
         gated: false,
         implemented: true,
@@ -2011,6 +2116,40 @@ pub fn register_nodes(r: &mut Registry) {
 // reject <id>` doubles the same way, and on an outbound id is also the
 // ceremony's missing ABORT command: it removes the entry at either outbound
 // state, whether or not a poll has succeeded yet.
+
+/// The mesh a pairing commit lands its grant in (P-CHARTER): the mesh the
+/// CEREMONY carried, else the `--mesh` the operator named on this side, else
+/// the mesh this box already associates with the target, else the home mesh.
+///
+/// **The wire's mesh comes first, and that is what makes a pair symmetric.**
+/// Both sides used to resolve this alone — exactly as they each still resolve
+/// their own `grant`, which does not ride the wire — so two operators naming
+/// different meshes landed an asymmetric pair, each end holding the record in
+/// its own mesh and granting nothing the other could read. The requester's
+/// choice now rides `aoide/pairRequest` (`InboundPairingRequest::mesh` on the
+/// approver's side, `OutboundPairingRequest::mesh` on the requester's), and
+/// `named` is where each leg passes it; the local sources below are the
+/// fallback for a pairing that named none at all, which is every request from
+/// a pre-P-CHARTER requester.
+///
+/// What this box "knows" about the target is the record's own granted meshes
+/// ([`aoide_storage::node_store::granted_meshes`]) UNION the `[mesh.<name>]`
+/// names this config declares — a fresh pair has no record yet, and a declared
+/// mesh is exactly the operator's statement of where that node belongs. More
+/// than one known and no name wins REFUSES
+/// ([`aoide_storage::node_store::resolve_mesh`]) rather than guessing: a wrong
+/// guess writes a grant in a mesh the door will never read.
+fn pairing_mesh(name: &str, named: Option<&str>) -> Result<String, String> {
+    let mut known = aoide_storage::node_store::load_nodes()
+        .into_iter()
+        .find(|p| p.name == name)
+        .map(|p| aoide_storage::node_store::granted_meshes(&p))
+        .unwrap_or_default();
+    if let Ok(loaded) = aoide_storage::config::load() {
+        known.extend(loaded.config.mesh.keys().cloned());
+    }
+    aoide_storage::node_store::resolve_mesh_any(named, &known, &aoide_storage::config::home_mesh())
+}
 
 /// The capability set a pairing commit stamps on a FIRST verification (task
 /// #135 P1) — `Some` is the `--allow` an operator typed at this commit,
@@ -2479,6 +2618,19 @@ fn pair_via_url(cmd: &str, inv: &Invocation, url: &str, usage: &str) -> Outcome 
         Ok(f) => f,
         Err(e) => return Outcome::usage(cmd, format!("{usage} — {e}")),
     };
+    // A mesh the operator names here rides the request (P-CHARTER), so the
+    // approver commits the SAME one — validated as a mesh name, since it names
+    // a trust scope and a typo would otherwise become a silently empty grant
+    // scope on the far side.
+    let mesh = match inv.flags.get("mesh").cloned().filter(|s| !s.is_empty()) {
+        Some(m) => {
+            if !aoide_storage::node_store::valid_node_name(&m) {
+                return Outcome::usage(cmd, format!("{usage} — `--mesh {m}` is not a mesh name (`^[a-z0-9][a-z0-9-]*$`)"));
+            }
+            Some(m)
+        }
+        None => None,
+    };
     if let Some(out) = refuse_detached_grant(cmd, &finish) {
         return out;
     }
@@ -2486,7 +2638,17 @@ fn pair_via_url(cmd: &str, inv: &Invocation, url: &str, usage: &str) -> Outcome 
         return out;
     }
 
-    run_pair_request(cmd, url, &name, &self_url, self_via.as_deref(), via.as_ref(), via.as_ref().map(|v| v.to_string()), &finish)
+    run_pair_request(
+        cmd,
+        url,
+        &name,
+        &self_url,
+        self_via.as_deref(),
+        via.as_ref(),
+        via.as_ref().map(|v| v.to_string()),
+        mesh.as_deref(),
+        &finish,
+    )
 }
 
 /// The requester's half of the ceremony, shared verbatim by
@@ -2533,6 +2695,7 @@ pub(crate) fn run_pair_request(
     self_via: Option<&str>,
     dial_via: Option<&aoide_storage::tunnel::Via>,
     record_via: Option<String>,
+    mesh: Option<&str>,
     finish: &PairFinish,
 ) -> Outcome {
     let (kp, _) = match aoide_storage::identity::load_or_mint() {
@@ -2566,6 +2729,7 @@ pub(crate) fn run_pair_request(
         &self_url,
         self_via,
         aoide_storage::seal::publish_binding().ok().as_ref(),
+        mesh,
     );
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let (code, resp_body) = match post_json_via(url, dial_via, name, &body_str, None, &[], 15) {
@@ -2629,6 +2793,7 @@ pub(crate) fn run_pair_request(
         expires_at: ack.expires_at.clone(),
         state: aoide_storage::pairing::OutboundState::AwaitingApproval,
         via: record_via,
+        mesh: mesh.map(str::to_string),
         tries: 0,
     };
     if let Err(e) = aoide_storage::pairing::park_outbound(outbound) {
@@ -3173,7 +3338,11 @@ pub(crate) fn approve_inbound(
     };
     let mut nodes = aoide_storage::node_store::load_nodes();
     let first_pairing = !nodes.iter().any(|p| p.name == entry.name && p.verified);
-    let change = aoide_storage::node_store::upsert_paired_node(&mut nodes, &entry.name, &record_url, &entry.pubkey_hex, now, &allows);
+    let mesh = match pairing_mesh(&entry.name, entry.mesh.as_deref()) {
+        Ok(m) => m,
+        Err(e) => return Outcome::error(cmd, e).with_data(json!({ "reason": "mesh-unresolved", "id": id })),
+    };
+    let change = aoide_storage::node_store::upsert_paired_node(&mut nodes, &entry.name, &record_url, &entry.pubkey_hex, now, &allows, &mesh);
     if let Some(via) = entry.self_via.as_deref() {
         if let Err(e) = aoide_storage::node_store::set_node_via(&mut nodes, &entry.name, Some(via)) {
             return Outcome::error(cmd, format!("recording the node's transport marker: {e}"));
@@ -3477,7 +3646,11 @@ pub(crate) fn commit_outbound(
 
     let mut nodes = aoide_storage::node_store::load_nodes();
     let first_pairing = !nodes.iter().any(|p| p.name == entry.name && p.verified);
-    let change = aoide_storage::node_store::upsert_paired_node(&mut nodes, &entry.name, &entry.url, &entry.pubkey_hex, now, allows);
+    let mesh = match pairing_mesh(&entry.name, entry.mesh.as_deref()) {
+        Ok(m) => m,
+        Err(e) => return Outcome::error(cmd, e).with_data(json!({ "reason": "mesh-unresolved", "id": id })),
+    };
+    let change = aoide_storage::node_store::upsert_paired_node(&mut nodes, &entry.name, &entry.url, &entry.pubkey_hex, now, allows, &mesh);
     // P-S4: the via this ceremony resolved back at `pair` request
     // time (K1's src_addr-derived default, or an explicit `--via`) rode
     // the parked entry here — commit it onto the node record in the SAME
@@ -3844,7 +4017,18 @@ fn pair_via_hostname(cmd: &str, inv: &Invocation, target: &str, usage: &str) -> 
     if let Some(out) = refuse_code_on_new_request(cmd, &finish) {
         return out;
     }
-    pair_with_heard(cmd, &hit, via_flag.as_ref(), self_via_flag.as_deref(), &finish)
+    // The mesh the operator named (`--mesh`), validated here for the same
+    // reason the url arm validates it: it names a trust scope on the far side.
+    let mesh = match inv.flags.get("mesh").cloned().filter(|s| !s.is_empty()) {
+        Some(m) => {
+            if !aoide_storage::node_store::valid_node_name(&m) {
+                return Outcome::usage(cmd, format!("{usage} — `--mesh {m}` is not a mesh name (`^[a-z0-9][a-z0-9-]*$`)"));
+            }
+            Some(m)
+        }
+        None => None,
+    };
+    pair_with_heard(cmd, &hit, via_flag.as_ref(), self_via_flag.as_deref(), mesh.as_deref(), &finish)
 }
 
 /// The tail `pair`'s hostname arm ([`pair_via_hostname`]) and bare
@@ -3873,6 +4057,7 @@ fn pair_with_heard(
     hit: &crate::discover::Heard,
     via_flag: Option<&aoide_storage::tunnel::Via>,
     self_via_flag: Option<&str>,
+    mesh: Option<&str>,
     finish: &PairFinish,
 ) -> Outcome {
     let dial_url = format!("http://{}:{}/", hit.src_addr, default_a2a_port());
@@ -3882,7 +4067,17 @@ fn pair_with_heard(
     // for `default_self_via`'s outbound-route trick.
     let self_via = self_via_flag.map(|s| s.to_string()).or_else(|| default_self_via(&hit.src_addr));
     let (dial_via, record_via) = resolve_pair_vias(hit, via_flag);
-    run_pair_request(cmd, &dial_url, &hit.advertisement.name, &self_url, self_via.as_deref(), dial_via.as_ref(), record_via, &finish)
+    run_pair_request(
+        cmd,
+        &dial_url,
+        &hit.advertisement.name,
+        &self_url,
+        self_via.as_deref(),
+        dial_via.as_ref(),
+        record_via,
+        mesh,
+        &finish,
+    )
 }
 
 /// The pure decision [`pair_with_heard`] otherwise buries inline (P-PV1,
@@ -4250,7 +4445,7 @@ fn pair_overview(cmd: &str, inv: &Invocation) -> Outcome {
                 if let Some(out) = refuse_code_on_new_request(cmd, &finish) {
                     return out;
                 }
-                pair_with_heard(cmd, &h, None, None, &finish)
+                pair_with_heard(cmd, &h, None, None, None, &finish)
             }
         },
     }
@@ -4272,6 +4467,7 @@ pub fn register_pair(r: &mut Registry) {
             flag!("code", "string", "The typed code, scripted: on an INBOUND request, the pairing code read from the requester's screen; on an OUTBOUND one, the reply code read from the approver's screen. A wrong code counts one persisted try; the 3rd cumulative mismatch auto-denies an inbound request or auto-aborts an outbound one."),
             flag!("wait", "int", "Seconds to block for the far operator (default 600). On a new request: park, then poll until approved or the wait runs out. On a resume: the same poll loop. --wait 0 parks a new request and returns immediately, or polls a resumed one exactly once."),
             flag!("allow", "string", "The capabilities this commit grants the node, comma-separated (read, spawn) — overriding config.toml's `[pairing] defaultGrant`, and empty (--allow \"\") to grant nothing. First verification only: re-pairing an already-verified node never re-grants, so use `node allow` to change a live grant."),
+            flag!("mesh", "string", "The mesh this pairing's grants land in, ON BOTH SIDES — the one field that makes a pair symmetric, since each end used to resolve it alone and two operators naming different meshes landed a grant the other end could never read. It rides `aoide/pairRequest`; absent, each side resolves it locally (the target's sole known mesh, else config.toml's `[pairing] homeMesh`), and a box that knows more than one mesh for the target refuses rather than guessing."),
             flag!("yes", "bool", "Skip THIS side's own non-code confirmations — the sweep proceed prompt and the already-paired re-pair confirm. The final code gate, on either leg, still needs a real terminal prompt or --code; --yes alone there is a taught refusal, never a bypass."),
             flag!("name", "string", "URL target only: a local nickname for the other instance; defaults to a sanitized form of the URL's host."),
             flag!("via", "string", "An ssh://[user@]host[:port] transport marker — both the ceremony's own dial AND the resulting node's recorded via. Absent = direct dial."),
@@ -4370,6 +4566,7 @@ pub fn register_mail(r: &mut Registry) {
             flag!("thread", "string", "Existing thread ID (64 lowercase hex); omitted starts a fresh thread."),
             flag!("reply-to", "string", "Parent message ID (64 lowercase hex); requires --thread."),
             flag!("cc", "string", "Comma-separated node/mailbox recipients; each receives a signed copy. To may also be comma-separated with subject or cc."),
+            flag!("mesh", "string", "The mesh this letter rides (P-CHARTER): it is signed into the letter AND into the request that deposits it, so sender and receiver agree. Absent = the destination's sole granted mesh, else `[pairing] homeMesh`; required when that node is trusted in more than one mesh."),
         ],
         gated: false,
         implemented: true,
@@ -4463,8 +4660,10 @@ pub fn register_mail(r: &mut Registry) {
     r.insert(cmd!(
         path: ["mail", "poll"],
         summary: "Ask for your mail without sending any: poll the named paired node — or, with no argument, every paired node this box holds the `message` grant for. Receives everything that node spooled for this box (all held entries, plus ones whose own delivery attempts have been failing), files each with the same origin verification a pushed deposit gets, and spools the acks. The receive trigger a node with nothing to send needs; the drain's own dial policy is untouched.",
-        args: [arg!("node", "string", false, "Poll only this node. Omit to poll every paired node holding `message` in this box's own allows for it. A node this box is not paired with is refused by name.")],
-        flags: [],
+        args: [arg!("node", "string", false, "Poll only this node. Omit to poll every paired node holding `message` in this box's own grant for it. A node this box is not paired with is refused by name.")],
+        flags: [
+            flag!("mesh", "string", "The mesh this poll acts in (P-CHARTER): the request is signed with it, and every container handed over is verified against it. Absent = the node's sole granted mesh, else `[pairing] homeMesh`; required when that node is trusted in more than one mesh."),
+        ],
         gated: false,
         implemented: true,
         handler: handle_mail_poll,
@@ -4793,7 +4992,21 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
         }
     }
 
-    let envelope = match aoide_storage::mail::mint_outbound_letter(&from, node, name, &text) {
+    // P-CHARTER (review finding 1): the letter is MINTED in the mesh its
+    // request will be signed in — the same rule the signing path applies
+    // (`request_mesh`: the `--mesh` typed here, else the destination's sole
+    // granted mesh, else the home mesh; a record trusted in several meshes
+    // refuses, naming them). `origin_mesh` is signed into the header, so a
+    // letter minted unnamed could never be deposited to a peer trusted only
+    // outside the home mesh.
+    let record = aoide_storage::node_store::load_nodes().into_iter().find(|p| p.name == node);
+    let mesh = match record.as_ref().map(|p| request_mesh(p, inv.flags.get("mesh").map(String::as_str), "message")) {
+        Some(Ok(mesh)) => mesh,
+        Some(Err(e)) => return Outcome::error(cmd, format!("--mesh: {e}")).with_data(json!({ "reason": "mesh-ambiguous", "node": node })),
+        None => return Outcome::error(cmd, format!("no node named `{node}`")).with_data(json!({ "reason": "unknown-node", "name": node })),
+    };
+
+    let envelope = match aoide_storage::mail::mint_outbound_letter_in_mesh(&from, node, name, &text, &mesh) {
         Ok(e) => e,
         Err(e) => return Outcome::error(cmd, format!("state/mail: {e}")),
     };
@@ -5266,11 +5479,28 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
 
     let mut rows: Vec<Value> = Vec::new();
     let mut filed = 0usize;
+    let mut refused_total = 0usize;
+    let mut withheld_total = 0usize;
     for node in &targets {
-        match crate::mail_wire::poll_node(node) {
-            Ok(n) => {
-                filed += n;
-                rows.push(json!({ "node": node, "status": "polled", "filed": n }));
+        match crate::mail_wire::poll_node(node, inv.flags.get("mesh").map(String::as_str)) {
+            Ok(outcome) => {
+                filed += outcome.filed;
+                refused_total += outcome.refused.len();
+                withheld_total += outcome.withheld.len();
+                // Review N13: a refused container is REPORTED, not only
+                // audited — the row names its msgid and the taught word, so a
+                // mesh-mismatched hand-over is visible where the operator is
+                // looking. H1's `withheld` rides the same row for the same
+                // reason: a sealed-only listener holding an entry back is
+                // exactly the "0 filed and no reason" answer this projection
+                // exists to prevent.
+                rows.push(json!({
+                    "node": node,
+                    "status": "polled",
+                    "filed": outcome.filed,
+                    "refused": outcome.refused,
+                    "withheld": outcome.withheld,
+                }));
             }
             Err(e) => rows.push(json!({ "node": node, "status": "unreachable", "filed": 0, "reason": e })),
         }
@@ -5280,14 +5510,20 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
         "no paired node holds `message` — nothing to poll".to_string()
     } else {
         format!(
-            "polled {} node(s): {filed} envelope(s) filed{}",
+            "polled {} node(s): {filed} envelope(s) filed{}{}{}",
             targets.len(),
+            if refused_total == 0 { String::new() } else { format!(", {refused_total} container(s) refused") },
+            if withheld_total == 0 {
+                String::new()
+            } else {
+                format!(", {withheld_total} withheld (sealed-required — they stay on the far side until this box publishes a binding)")
+            },
             if unreachable == 0 { String::new() } else { format!(", {unreachable} unreachable") }
         )
     };
     Outcome::ok(cmd, message)
         .changed(vec![format!("state/mail/base.jsonl: +{filed} on poll")])
-        .with_data(json!({ "nodes": rows, "filed": filed }))
+        .with_data(json!({ "nodes": rows, "filed": filed, "withheld": withheld_total }))
 }
 
 /// [`handle_mail_outbox_retry`]'s `--refused` half. `target` narrows the
@@ -5418,7 +5654,8 @@ mod tests {
             hub: false,
             pubkey: None,
             verified: false,
-            allows: Vec::new(),
+            grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-24T00:00:00Z".to_string(),
         }
@@ -5698,7 +5935,7 @@ mod tests {
             assert_eq!(on.status, aoide_protocol::output::Status::Ok, "{on:?}");
             assert!(!on.changed.is_empty());
             let nodes = aoide_storage::node_store::load_nodes();
-            assert_eq!(nodes[0].allows, vec!["spawn".to_string()]);
+            assert_eq!(nodes[0].grant("home"), ["spawn".to_string()], "no --mesh and nothing else known: the grant lands in the home mesh");
 
             // Re-enabling is a reported no-op — nothing written, nothing duplicated.
             let on_again = handle_node_allow(&allow_inv(&["yomi-strix", "spawn", "on"]));
@@ -5707,7 +5944,7 @@ mod tests {
 
             let off = handle_node_allow(&allow_inv(&["yomi-strix", "spawn", "off"]));
             assert_eq!(off.status, aoide_protocol::output::Status::Ok, "{off:?}");
-            assert!(aoide_storage::node_store::load_nodes()[0].allows.is_empty());
+            assert!(aoide_storage::node_store::load_nodes()[0].grants.is_empty(), "the last capability leaving its mesh drops the entry");
 
             let off_again = handle_node_allow(&allow_inv(&["yomi-strix", "spawn", "off"]));
             assert!(off_again.changed.is_empty(), "disabling an already-absent cap is also a no-op");
@@ -5721,7 +5958,7 @@ mod tests {
         with_node_state("sign-unverified", || {
             let node = fixture_node(None);
             assert!(!node.verified);
-            let headers = sign_headers_for_node(&node, "{}").unwrap();
+            let headers = sign_headers_for_node(&node, "{}", None, "read").unwrap();
             assert!(headers.is_empty(), "an unpaired/unverified node gets no signature headers: {headers:?}");
         });
     }
@@ -5733,7 +5970,7 @@ mod tests {
             let mut node = fixture_node(None);
             node.verified = true;
             let body = r#"{"jsonrpc":"2.0","method":"message/send"}"#;
-            let headers = sign_headers_for_node(&node, body).unwrap();
+            let headers = sign_headers_for_node(&node, body, None, "read").unwrap();
 
             let get = |name: &str| {
                 headers
@@ -5756,7 +5993,14 @@ mod tests {
             // `HTTP_METHOD` (P-P4 review finding 2) over a second `"POST"`
             // literal.
             let path = aoide_storage::node_store::url_path(&node.url);
-            let canonical = aoide_storage::wire_auth::canonical_string(HTTP_METHOD, &path, &timestamp, &nonce, body.as_bytes());
+            let canonical = aoide_storage::wire_auth::canonical_string(
+                HTTP_METHOD,
+                &path,
+                &timestamp,
+                &nonce,
+                body.as_bytes(),
+                Some(aoide_storage::config::default_home_mesh().as_str()),
+            );
             assert!(
                 aoide_storage::wire_auth::verify_signature_hex(&info.pubkey_hex, canonical.as_bytes(), &signature),
                 "the signature must verify against this instance's own identity"
@@ -5765,8 +6009,24 @@ mod tests {
             // Tampering with the body must break verification — proves the
             // signature is actually bound to the body's digest, not just
             // structurally present.
-            let tampered = aoide_storage::wire_auth::canonical_string(HTTP_METHOD, &path, &timestamp, &nonce, b"{\"tampered\":true}");
+            let tampered = aoide_storage::wire_auth::canonical_string(
+                HTTP_METHOD,
+                &path,
+                &timestamp,
+                &nonce,
+                b"{\"tampered\":true}",
+                Some(aoide_storage::config::default_home_mesh().as_str()),
+            );
             assert!(!aoide_storage::wire_auth::verify_signature_hex(&info.pubkey_hex, tampered.as_bytes(), &signature));
+
+            // P-CHARTER: the mesh rides BOTH the header and the signature, so
+            // it cannot be re-aimed in flight. A record with no grant in any
+            // mesh names the home mesh, and both places say so.
+            assert_eq!(
+                get(aoide_storage::wire_auth::HEADER_MESH),
+                aoide_storage::config::default_home_mesh(),
+                "an untrusted-anywhere record's request acts in the home mesh"
+            );
         });
     }
 
@@ -5787,7 +6047,7 @@ mod tests {
             let mut node = fixture_node(None);
             node.name = "this-sides-nickname-for-the-approver".to_string();
             node.verified = true;
-            let headers = sign_headers_for_node(&node, "{}").unwrap();
+            let headers = sign_headers_for_node(&node, "{}", None, "read").unwrap();
             let sent = headers
                 .iter()
                 .find(|(k, _)| k == aoide_storage::wire_auth::HEADER_NODE)
@@ -5819,7 +6079,7 @@ mod tests {
                 Some("unknown-capability")
             );
 
-            assert!(aoide_storage::node_store::load_nodes()[0].allows.is_empty(), "no refusal mutates the registry");
+            assert!(aoide_storage::node_store::load_nodes()[0].grants.is_empty(), "no refusal mutates the registry");
         });
     }
 
@@ -5944,10 +6204,11 @@ mod tests {
             let body = crate::wire::build_message_send_body("do the thing", &gen_message_id(), None, None, None);
             assert!(body["params"]["message"].get("contextId").is_none(), "spawn-shaped body carries no contextId");
             let body_str = serde_json::to_string(&body).unwrap();
-            let headers = sign_headers_for_node(&node, &body_str).unwrap();
-            assert_eq!(headers.len(), 4, "all four X-Aoide-* headers present: {headers:?}");
+            let headers = sign_headers_for_node(&node, &body_str, None, "read").unwrap();
+            assert_eq!(headers.len(), 5, "all five X-Aoide-* headers present: {headers:?}");
             for name in [
                 aoide_storage::wire_auth::HEADER_NODE,
+                aoide_storage::wire_auth::HEADER_MESH,
                 aoide_storage::wire_auth::HEADER_TIMESTAMP,
                 aoide_storage::wire_auth::HEADER_NONCE,
                 aoide_storage::wire_auth::HEADER_SIGNATURE,
@@ -6449,14 +6710,14 @@ mod tests {
             let self_url = default_self_url();
 
             // `pair_via_url`'s own documented tail.
-            let direct = run_pair_request("pair", url, name, &self_url, None, None, None, &PairFinish::detached());
+            let direct = run_pair_request("pair", url, name, &self_url, None, None, None, None, &PairFinish::detached());
             // The same ceremony tail `pair_via_hostname` reaches on its
             // single-match branch — it composes an OBSERVED dial url first
             // (src_addr + `default_a2a_port`, P-S1/task #120) and passes
             // that, but the tail function is still this one; reproduced
             // here under the identical `pair` command name both arms
             // now share.
-            let via_hostname = run_pair_request("pair", url, name, &self_url, None, None, None, &PairFinish::detached());
+            let via_hostname = run_pair_request("pair", url, name, &self_url, None, None, None, None, &PairFinish::detached());
 
             assert_eq!(direct.status, aoide_protocol::output::Status::Error, "{direct:?}");
             assert_eq!(direct.command, "pair");
@@ -6635,12 +6896,12 @@ mod tests {
             // And directly: sign_headers_for_node itself only ever reads
             // node.url (never node.via, never a dial url) — an unverified
             // node's empty-headers shortcut is untouched by via either way.
-            assert_eq!(sign_headers_for_node(&node, "{}").unwrap(), Vec::<(String, String)>::new(), "unverified nodes are unaffected, via or not");
+            assert_eq!(sign_headers_for_node(&node, "{}", None, "read").unwrap(), Vec::<(String, String)>::new(), "unverified nodes are unaffected, via or not");
             node.verified = true;
-            let headers_with_via = sign_headers_for_node(&node, "{}").unwrap();
+            let headers_with_via = sign_headers_for_node(&node, "{}", None, "read").unwrap();
             let mut node_no_via = node.clone();
             node_no_via.via = None;
-            let headers_without_via = sign_headers_for_node(&node_no_via, "{}").unwrap();
+            let headers_without_via = sign_headers_for_node(&node_no_via, "{}", None, "read").unwrap();
             // Nonce/timestamp differ call to call (fresh each time) — but
             // the NODE identity header (never derived from via) must agree.
             let node_header_idx = aoide_storage::wire_auth::HEADER_NODE;
@@ -6666,6 +6927,28 @@ mod tests {
         );
         let err = parse_via_flag(&inv(&[("via", "http://not-ssh")])).unwrap_err();
         assert!(!err.is_empty(), "an invalid --via is Err, never silently treated as absent");
+    }
+
+    /// **`node add <name> poll` is the third transport member, and it never
+    /// dials.** The AgentCard fetch is skipped for it (there is no inbound
+    /// transport to fetch from — the same reason `--no-verify` exists), so the
+    /// node registers with no network at all, and the record it writes is one
+    /// the mail path will hold for rather than dial.
+    #[test]
+    fn handle_node_add_with_a_poll_address_registers_without_a_dial() {
+        with_node_state("add-poll", || {
+            let out = handle_node_add(&Invocation {
+                path: vec!["node".to_string(), "add".to_string()],
+                args: vec!["laptop".to_string(), "poll".to_string()],
+                flags: Default::default(),
+                door: aoide_protocol::Door::Cli,
+            });
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "a poll address registers with no fetch: {out:?}");
+            let nodes = aoide_storage::node_store::load_nodes();
+            assert_eq!(nodes.len(), 1);
+            assert_eq!(nodes[0].url, "poll");
+            assert!(nodes[0].never_dialled(), "and the predicate reads it for the mail path");
+        });
     }
 
     #[test]
@@ -6728,7 +7011,8 @@ mod tests {
                 hub: false,
                 pubkey: None,
                 verified: false,
-                allows: Vec::new(),
+                grants: aoide_storage::node_store::Grants::new(),
+                narrowed: aoide_storage::node_store::Grants::new(),
                 via: Some("ssh://khoa@sakaki".to_string()),
                 added_at: "2026-09-26T00:00:00Z".to_string(),
             };
@@ -6966,7 +7250,7 @@ mod tests {
         // `-w "\n%{http_code}"` status line.
         let script = format!("cat <<'JSONBODY'\n{body}\nJSONBODY\nprintf '200'\n");
         let node = fixture_node(None);
-        let result = with_fake_curl("spawn-refused", &script, || spawn_on_node_via(&node, "hello", None, None, None));
+        let result = with_fake_curl("spawn-refused", &script, || spawn_on_node_via(&node, "hello", None, None, None, None));
         let err = result.expect_err("a JSON-RPC error ack must surface as an Err, never as Ok");
         assert_eq!(err.reason, "node-refused");
         assert!(
@@ -7293,6 +7577,7 @@ mod tests {
             expires_at: aoide_storage::pairing::expires_at_from(now),
             state: aoide_storage::pairing::OutboundState::AwaitingApproval,
             via: None,
+            mesh: None,
             tries: 0,
         }
     }
@@ -7639,7 +7924,7 @@ mod tests {
             let nodes = aoide_storage::node_store::load_nodes();
             assert_eq!(nodes.len(), 1);
             assert!(nodes[0].verified, "the pair completes inside the one command — no second invocation");
-            assert_eq!(nodes[0].allows, vec!["read".to_string(), "spawn".to_string()], "`pair --allow` reaches the commit, which is why the flag belongs here now");
+            assert_eq!(nodes[0].grant("home"), ["read".to_string(), "spawn".to_string()], "`pair --allow` reaches the commit, which is why the flag belongs here now");
             let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap();
             assert!(aoide_storage::pairing::list_outbound(now_epoch).is_empty(), "the entry is consumed on commit");
         });
@@ -7762,10 +8047,23 @@ mod tests {
         self_via: Option<&str>,
         url: &str,
     ) -> (aoide_storage::pairing::InboundPairingRequest, String) {
+        parked_revealed_inbound_full(now_epoch, self_via, url, None)
+    }
+
+    /// The innermost fixture: adds P-CHARTER's `mesh`, the field the ceremony
+    /// carries on the wire and the door records **in the same write as the
+    /// park** (`park_inbound_with_mesh`, review F6 — there is no second,
+    /// best-effort write for anything to ignore).
+    fn parked_revealed_inbound_full(
+        now_epoch: i64,
+        self_via: Option<&str>,
+        url: &str,
+        mesh: Option<&str>,
+    ) -> (aoide_storage::pairing::InboundPairingRequest, String) {
         let requester_pk = "e".repeat(64);
         let nonce = "aabbccdd11223344";
         let commit = aoide_storage::pairing::derive_commit(&requester_pk, nonce);
-        let (entry, _) = aoide_storage::pairing::park_inbound(
+        let (entry, _) = aoide_storage::pairing::park_inbound_with_mesh(
             &requester_pk,
             "box-a",
             "10.0.0.5",
@@ -7774,6 +8072,7 @@ mod tests {
             &aoide_storage::time::iso_utc_from_epoch(now_epoch),
             &aoide_storage::pairing::expires_at_from(now_epoch),
             self_via,
+            mesh,
         )
         .unwrap();
         let entry = aoide_storage::pairing::reveal_inbound(&entry.id, nonce, now_epoch).unwrap();
@@ -7831,6 +8130,53 @@ mod tests {
             let listed = aoide_storage::pairing::list_inbound(now_epoch);
             assert_eq!(listed.len(), 1, "an approved entry stays parked for the requester's poll (Design A)");
             assert!(listed[0].approved);
+        });
+    }
+
+    /// **The mesh rides the ceremony, and it wins** (P-CHARTER, item 3's
+    /// headline): an inbound entry that named `away` commits the resulting
+    /// record's grant in `away`, whatever this box would have resolved on its
+    /// own. Without the wire field the same pairing lands in the home mesh —
+    /// which is exactly the asymmetric pair the field exists to end (each end
+    /// resolving alone, two operators naming different meshes, a grant the
+    /// other end can never read).
+    #[test]
+    fn approve_inbound_commits_the_mesh_the_ceremony_carried() {
+        with_node_state("approve-inbound-wire-mesh", || {
+            let now_epoch = 1_700_000_000_i64;
+            let now = aoide_storage::time::iso_utc_from_epoch(now_epoch);
+            let (entry, sas) = parked_revealed_inbound_full(now_epoch, None, "http://box-a:8710/", Some("away"));
+            let id = entry.id.clone();
+
+            // What the door records off the wire, in the same write as the
+            // park itself (`a2a::pair_request` → `park_inbound_with_mesh`),
+            // and what `pair <id>` then reads.
+            assert_eq!(
+                aoide_storage::pairing::list_inbound(now_epoch)[0].mesh.as_deref(),
+                Some("away"),
+                "the parked entry carries the mesh it was sent, in the park's own write"
+            );
+            let fresh = aoide_storage::pairing::list_inbound(now_epoch)
+                .into_iter()
+                .find(|e| e.id == id)
+                .expect("the entry is still parked");
+            assert_eq!(fresh.mesh.as_deref(), Some("away"), "the parked entry carries the mesh it was sent");
+
+            let out = approve_inbound(CodeGate::Code(sas), "pair", &id, fresh, &now, now_epoch, None);
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+
+            let nodes = aoide_storage::node_store::load_nodes();
+            let record = nodes.iter().find(|n| n.name == "box-a").expect("the pairing committed");
+            assert!(
+                record.grant("away").iter().any(|c| c == "read"),
+                "the grant landed in the mesh the ceremony named: {:?}",
+                record.grants
+            );
+            assert!(
+                record.grant("home").is_empty(),
+                "and NOT in the home mesh, which is what resolving locally would have answered: {:?}",
+                record.grants
+            );
         });
     }
 
@@ -7896,7 +8242,7 @@ mod tests {
             // P1 narrowed from ["read","spawn"] to ["read"].
             let out = approve_the_one_inbound(1_700_000_000, None);
             assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
-            assert_eq!(aoide_storage::node_store::load_nodes()[0].allows, vec!["read".to_string()]);
+            assert_eq!(aoide_storage::node_store::load_nodes()[0].grant("home"), ["read".to_string()]);
             assert!(out.message.contains("granted read"), "the commit says what it granted: {}", out.message);
         });
         with_node_state("grant-config-widened", || {
@@ -7904,7 +8250,7 @@ mod tests {
             let out = approve_the_one_inbound(1_700_000_000, None);
             assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
             assert_eq!(
-                aoide_storage::node_store::load_nodes()[0].allows,
+                aoide_storage::node_store::load_nodes()[0].grant("home"),
                 vec!["read".to_string(), "spawn".to_string()],
                 "an operator who widened defaultGrant gets the wider set, with no code change and no rebuild"
             );
@@ -7917,7 +8263,7 @@ mod tests {
             write_config("[pairing]\ndefaultGrant = [\"read\"]\n");
             let out = approve_the_one_inbound(1_700_000_000, Some(&["read".to_string(), "spawn".to_string()]));
             assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
-            assert_eq!(aoide_storage::node_store::load_nodes()[0].allows, vec!["read".to_string(), "spawn".to_string()]);
+            assert_eq!(aoide_storage::node_store::load_nodes()[0].grant("home"), ["read".to_string(), "spawn".to_string()]);
             assert!(out.message.contains("granted read, spawn"), "{}", out.message);
 
             // Nothing persisted it: the config is untouched, so the NEXT
@@ -7934,14 +8280,14 @@ mod tests {
         with_node_state("grant-repair-unchanged", || {
             let now_epoch = 1_700_000_000_i64;
             approve_the_one_inbound(now_epoch, None);
-            assert_eq!(aoide_storage::node_store::load_nodes()[0].allows, vec!["read".to_string()]);
+            assert_eq!(aoide_storage::node_store::load_nodes()[0].grant("home"), ["read".to_string()]);
 
             // Same box pairs again (a key rotation) and this operator types
             // the wider grant.
             let out = approve_the_one_inbound(now_epoch, Some(&["read".to_string(), "spawn".to_string()]));
             assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
             assert_eq!(
-                aoide_storage::node_store::load_nodes()[0].allows,
+                aoide_storage::node_store::load_nodes()[0].grant("home"),
                 vec!["read".to_string()],
                 "an already-verified node's grant survives a re-pair untouched — a revoked spawn stays revoked"
             );
@@ -8247,7 +8593,7 @@ mod tests {
     fn pair_on_an_already_verified_name_is_gated_before_any_request() {
         with_node_state("pair-repair-gate", || {
             let mut nodes = Vec::new();
-            aoide_storage::node_store::upsert_paired_node(&mut nodes, "box-v", "http://box-v:8710/", &"a".repeat(64), "2026-08-30T00:00:00Z", &["read".to_string()]);
+            aoide_storage::node_store::upsert_paired_node(&mut nodes, "box-v", "http://box-v:8710/", &"a".repeat(64), "2026-08-30T00:00:00Z", &["read".to_string()], "home");
             aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
             let out = handle_pair(&pair_inv(&["box-v"], &[]));
@@ -8446,7 +8792,8 @@ mod tests {
             hub: false,
             pubkey: None,
             verified: true,
-            allows: vec!["message".to_string()],
+            grants: aoide_storage::node_store::grants_in("home", &["message"]),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-09-07T00:00:00Z".to_string(),
         }
@@ -8474,7 +8821,7 @@ mod tests {
         let local = aoide_storage::display::local_node_name();
         let (key, _) = aoide_storage::identity::load_or_mint().unwrap();
         let mut nodes = Vec::new();
-        aoide_storage::node_store::upsert_paired_node(&mut nodes, &local, "http://localhost", &key.info().pubkey_hex, "2026-09-13T00:00:00Z", &["message".into()]);
+        aoide_storage::node_store::upsert_paired_node(&mut nodes, &local, "http://localhost", &key.info().pubkey_hex, "2026-09-13T00:00:00Z", &["message".into()], "home");
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
         let recipient = format!("{local}/primary");
         let copies = format!("self/copy,{local}/copy,self/primary");
@@ -8764,6 +9111,55 @@ mod tests {
             r#"{{"jsonrpc":"2.0","id":1,"result":{{"envelopes":[{}]}}}}"#,
             serde_json::to_string(envelope).unwrap()
         )
+    }
+
+    /// **H1's `withheld` surface, at the command.** A sealed-only listener
+    /// answers a poll with `withheld` entries rather than letter bytes (the
+    /// adapter's `sealed-required`), and before this the operator saw
+    /// `0 envelope(s) filed` and nothing else. The row and the summary both
+    /// have to name it.
+    #[test]
+    fn mail_poll_reports_what_a_sealed_only_listener_withheld() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-poll-withheld");
+
+        let msgid = "ab".repeat(32);
+        let withheld_answer = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"result":{{"containers":[],"envelopes":[],"withheld":[{{"msgid":"{msgid}","reason":"sealed-required","detail":"publish an age binding and poll again"}}]}}}}"#
+        );
+        let (listener, port, _hits) = spawn_fixed_answer_door(withheld_answer);
+        let relay = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[verified_node("relay", &relay)]).unwrap();
+
+        let out = handle_mail_poll(&mail_inv(&["mail", "poll"], &["relay"]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["filed"], 0, "{:?}", out.data);
+        assert_eq!(
+            out.data.as_ref().unwrap()["withheld"], 1,
+            "the count rides the outcome: {:?}",
+            out.data
+        );
+        let row = &out.data.as_ref().unwrap()["nodes"][0];
+        assert_eq!(row["node"], "relay");
+        assert_eq!(row["refused"], json!([]), "and nothing was refused: {row}");
+        assert!(
+            row["withheld"][0].as_str().unwrap().contains(&msgid) && row["withheld"][0].as_str().unwrap().contains("sealed-required"),
+            "the row names the entry and the taught word: {row}"
+        );
+        assert!(
+            out.message.contains("1 withheld (sealed-required"),
+            "and the summary says why nothing was filed: {}",
+            out.message
+        );
+
+        // The far side holds it, so this box filed nothing and has nothing to
+        // ack — the letter is still on the relay, which is exactly what the
+        // message tells the operator.
+        assert!(aoide_storage::mail::read_base().unwrap().is_empty(), "nothing is filed");
+        assert!(aoide_storage::outbox::list_entries("relay").unwrap().is_empty(), "and nothing is spooled");
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// H1, as a test: **a node with NOTHING to send receives a held letter
@@ -9147,6 +9543,7 @@ mod tests {
             &kp.info().pubkey_hex,
             "2026-09-07T00:00:00Z",
             &[],
+            "home",
         );
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
@@ -9938,6 +10335,7 @@ printf 'HTTP/1.1 200 OK\r\nMcp-Session-Id: reply-id\r\n\r\n{{"jsonrpc":"2.0","id
             &kp.info().pubkey_hex,
             &now,
             &["message".to_string()],
+            "home",
         );
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
         let expired = aoide_storage::seal::mint_binding(

@@ -636,31 +636,59 @@ pub struct SecretAskRow {
 pub struct NodeTrustRow {
     pub name: String,
     pub verified: bool,
-    pub allows: Vec<String>,
+    /// The record's grant PER MESH (P-CHARTER) — `node status --json`'s own
+    /// `grants` object, read verbatim.
+    pub grants: std::collections::BTreeMap<String, Vec<String>>,
     /// `fresh` / `stale` / `never-pulled` — the backend's own word.
     pub state: String,
     /// The last pull's recorded error, when the cache carries one.
     pub error: Option<String>,
     pub hub: bool,
     pub autogate: bool,
+    /// The effective home mesh the CLI reported (`node status --json`'s
+    /// `data.homeMesh`) — the default [`NodeTrustRow::acted_mesh`] answers
+    /// with, so this pane never restates the rule with a literal of its own.
+    pub home_mesh: String,
     pub url: String,
 }
 
 impl NodeTrustRow {
-    /// Does this node's `allows` set carry `cap`? Read off the registry's own
-    /// snapshot — the toggle's on/off is decided here, never guessed.
-    pub fn allows_cap(&self, cap: &str) -> bool {
-        self.allows.iter().any(|a| a == cap)
+    /// The one mesh a bare `node allow` would act in for this record: its SOLE
+    /// granted mesh, and nothing else — with TWO or more the bare command
+    /// refuses ("knows 2 meshes … add `--mesh`"), so this pane must not
+    /// describe a mesh no bare command would act in (review N15: reporting the
+    /// home mesh's caps there was a description of a command the operator
+    /// cannot run). `None` is that honest "unknown from here".
+    fn acted_mesh(&self) -> Option<String> {
+        match self.grants.len() {
+            1 => self.grants.keys().next().cloned(),
+            _ => None,
+        }
     }
 
-    /// The grants as one short cell: `read` / `read,spawn` / `—` when the set
-    /// is empty. Only the closed capability vocabulary the backend validates.
+    /// The capabilities a bare `node allow` would see for this record in the
+    /// mesh it would act in — what the Mesh pane's cell and the toggle's
+    /// on/off are read from, never guessed. Empty when
+    /// [`NodeTrustRow::acted_mesh`] is `None`: the toggle still dispatches
+    /// (idempotently, "on"), and the CLI's own refusal names the meshes.
+    pub fn acted_grant(&self) -> Vec<String> {
+        self.acted_mesh()
+            .and_then(|mesh| self.grants.get(&mesh).cloned())
+            .unwrap_or_default()
+    }
+
+    /// The grants as one short cell, per mesh: `home:read,spawn away:read` /
+    /// `—` when the record holds nothing anywhere. Only the closed capability
+    /// vocabulary the backend validates.
     pub fn grants(&self) -> String {
-        if self.allows.is_empty() {
-            "—".to_string()
-        } else {
-            self.allows.join(",")
+        if self.grants.is_empty() {
+            return "—".to_string();
         }
+        self.grants
+            .iter()
+            .map(|(mesh, caps)| format!("{mesh}:{}", if caps.is_empty() { "—".to_string() } else { caps.join(",") }))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 
@@ -2294,11 +2322,18 @@ impl App {
             .map(|n| NodeTrustRow {
                 name: n["name"].as_str().unwrap_or("").to_string(),
                 verified: n["verified"].as_bool().unwrap_or(false),
-                allows: n["allows"]
-                    .as_array()
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|c| c.as_str().map(String::from))
+                // P-CHARTER: `node status --json` reports each record's grant
+                // PER MESH (`grants`), never one flat set — reading the old
+                // `allows` key here would show every row as grantless.
+                grants: n["grants"]
+                    .as_object()
+                    .map(|m| {
+                        m.iter()
+                            .map(|(mesh, caps)| {
+                                let caps: Vec<String> =
+                                    caps.as_array().map(|a| a.iter().filter_map(|c| c.as_str().map(String::from)).collect()).unwrap_or_default();
+                                (mesh.clone(), caps)
+                            })
                             .collect()
                     })
                     .unwrap_or_default(),
@@ -2306,6 +2341,7 @@ impl App {
                 error: n["error"].as_str().map(String::from),
                 hub: n["hub"].as_bool().unwrap_or(false),
                 autogate: n["autogate"].as_bool().unwrap_or(false),
+                home_mesh: data.get("homeMesh").and_then(|v| v.as_str()).unwrap_or("").to_string(),
                 url: n["url"].as_str().unwrap_or("").to_string(),
             })
             .collect()
@@ -2713,7 +2749,7 @@ impl App {
     pub fn open_context_for_node(&mut self, name: String, x: u16, y: u16) {
         let trust = self.node_trust(&name);
         let (known, allows) = match &trust {
-            Some(t) => (true, t.allows.clone()),
+            Some(t) => (true, t.acted_grant()),
             None => (false, Vec::new()),
         };
         // A pairing leg in flight is already going to write the node registry
@@ -6563,10 +6599,10 @@ mod tests {
             "pair.reject" => Outcome::ok("pair.reject", "removed the pending request"),
             "node.status" => Outcome::ok("node.status", "2 node(s) registered")
                 .with_data(json!({ "nodes": [
-                    { "name": "osaka", "verified": true, "allows": ["read", "spawn"],
+                    { "name": "osaka", "verified": true, "grants": { "home": ["read", "spawn"] },
                       "state": "fresh", "url": "http://127.0.0.1:8710/", "hub": false,
                       "autogate": true, "error": Value::Null },
-                    { "name": "box", "verified": false, "allows": [],
+                    { "name": "box", "verified": false, "grants": {},
                       "state": "never-pulled", "url": "http://box:8710/", "hub": true,
                       "autogate": false, "error": "unreachable" },
                 ] })),
@@ -7012,6 +7048,28 @@ mod tests {
             }
             assert_ne!(path, "pair.watch");
         }
+    }
+
+    /// **Review N12/N15.** The pane must describe the mesh a bare command would
+    /// actually act in: the record's SOLE granted mesh, and nothing at all when
+    /// it is trusted in two (where a bare `node allow` refuses and names the
+    /// meshes) — never a guessed home mesh.
+    #[test]
+    fn the_trust_row_acts_in_a_sole_mesh_and_says_nothing_for_several() {
+        let mut row = NodeTrustRow { name: "n".to_string(), verified: true, ..Default::default() };
+        row.grants = std::collections::BTreeMap::from([
+            ("fleet".to_string(), vec!["spawn".to_string()]),
+            ("home".to_string(), vec!["read".to_string()]),
+        ]);
+        row.home_mesh = "fleet".to_string();
+        assert!(
+            row.acted_grant().is_empty(),
+            "two meshes trusted: a bare command refuses, so the pane claims no mesh"
+        );
+
+        let mut single = NodeTrustRow { name: "n".to_string(), verified: true, ..Default::default() };
+        single.grants = std::collections::BTreeMap::from([("away".to_string(), vec!["read".to_string()])]);
+        assert_eq!(single.acted_grant(), ["read".to_string()], "a sole granted mesh is the one a bare command acts in");
     }
 
     #[test]
@@ -7717,10 +7775,10 @@ mod tests {
         app.nodes = Some(
             Outcome::ok("node.status", "2 node(s) registered").with_data(json!({
                 "nodes": [
-                    { "name": "osaka", "verified": true, "allows": ["read", "spawn"],
+                    { "name": "osaka", "verified": true, "grants": { "home": ["read", "spawn"] },
                       "state": "fresh", "url": "http://127.0.0.1:8710/", "hub": false,
                       "autogate": true, "error": Value::Null },
-                    { "name": "yomi", "verified": false, "allows": [],
+                    { "name": "yomi", "verified": false, "grants": {},
                       "state": "never-pulled", "url": "http://yomi:8710/", "hub": false,
                       "autogate": false, "error": Value::Null },
                 ],

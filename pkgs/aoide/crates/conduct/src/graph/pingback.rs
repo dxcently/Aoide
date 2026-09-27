@@ -1393,7 +1393,7 @@ fn fetch_history(
     after: u64,
     tunnel_key: &str,
 ) -> Result<RingRead, FrameReadError> {
-    let value = aoide_client::commands::task_history_on_node(node, id, after, tunnel_key)?;
+    let value = aoide_client::commands::task_history_on_node(node, id, after, tunnel_key, None)?;
     serde_json::from_value::<RingRead>(value).map_err(|e| FrameReadError {
         code: None,
         message: format!("the far node's ping-back read did not parse: {e}"),
@@ -2745,7 +2745,8 @@ mod tests {
             hub: false,
             pubkey: Some(remote_key()),
             verified: true,
-            allows: vec!["read".into()],
+            grants: aoide_storage::node_store::grants_in("home", &["read"]),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-09-25T00:00:00Z".into(),
         }])

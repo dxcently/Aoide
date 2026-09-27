@@ -935,8 +935,8 @@ fn roster_row_item<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette) -
             // The registry's own verdict and grant set ride the same header
             // line: a name with no record says so rather than implying one.
             let trust = match verified {
-                Some(true) => format!("  paired · allows {grants}"),
-                Some(false) => format!("  unverified (no pairing on record) · allows {grants}"),
+                Some(true) => format!("  paired · grants {grants}"),
+                Some(false) => format!("  unverified (no pairing on record) · grants {grants}"),
                 None => "  no registry record".to_string(),
             };
             ListItem::new(Line::from(vec![
