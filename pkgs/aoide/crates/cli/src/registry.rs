@@ -276,6 +276,12 @@ mod tests {
         // family, so it sorts between `mail.outbox.rm` and `mail.read`; no
         // other entry moves.
         //
+        // H1 adds `mail.serve` (+1) — the mail adapter, the second listener:
+        // a long-running server registering beside `a2a.serve` (its own
+        // sibling in `server/commands.rs`, the crate that owns both serve
+        // loops), sorting in the mail family between `mail.send` and
+        // `mail.show`.
+        //
         // Bumped by 1 for `project.edit` (multi-root projects) — the
         // exact-replacement editor for a project's root list, the
         // `project edit` that `records.rs`'s `Project.auto_resume` doc
@@ -336,6 +342,7 @@ mod tests {
             "mail.ring",
             "mail.rm",
             "mail.send",
+            "mail.serve",
             "mail.show",
             "make",
             "mcp.serve",

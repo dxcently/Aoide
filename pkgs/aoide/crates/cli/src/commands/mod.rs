@@ -22,7 +22,8 @@ use crate::registry::Registry;
 /// guide, schema, content(stub), make(stub), update(stub), onboard (P-I2:
 /// the first-boot flow, real as of this commit),
 /// mcp serve, daemon, graph + conduct, adapter melete, conductor, a2a
-/// serve, node add/remove/pull/status (CONTRACTS.md §7,
+/// serve, mail serve (the mail adapter — the second listener, H1), node
+/// add/remove/pull/status (CONTRACTS.md §7,
 /// same-network federation), usage, hooks install,
 /// soundcheck (the mechanical-integrity command's WORKING-tree half,
 /// `aoide-upkeep`; report-only, forever — see its own module doc for the
@@ -79,6 +80,7 @@ pub fn all() -> Registry {
     aoide_client::commands::register_post_graph(&mut r); // adapter melete
     aoide_conductor::commands::register(&mut r); // conductor
     aoide_server::commands::register_a2a_serve(&mut r); // a2a serve
+    aoide_server::commands::register_mail_serve(&mut r); // mail serve — the mail adapter, the second listener (H1)
     aoide_client::commands::register_nodes(&mut r); // node add/remove/pull/status — same-network federation (CONTRACTS.md §7, appended newest)
     aoide_storage::commands::register(&mut r); // usage — local token/cost rollup (CONTRACTS.md §4)
     aoide_conduct::commands::hooks::register(&mut r); // hooks install — the hook-installer command

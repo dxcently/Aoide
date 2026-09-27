@@ -1066,6 +1066,12 @@ acted.
 - Doorbells are fixed nudges that the recipient controls, and they carry no letter
   or post bytes.
 - Control actions use explicit capabilities and the existing admission gates.
+- **An agent-triggered cross-node send is mail only, and off by default.** A
+  conducted session reaching another node deposits a letter; it never reaches the
+  conduct channel (`aoide send --id … --submit`), whose gates are not on this
+  profile's path at all. Sending on a session's behalf is a per-session opt-in, and
+  the originating session rides the audit line, so a letter's provenance is legible
+  at the node that filed it.
 
 ## Migration and coexistence
 
@@ -1133,12 +1139,19 @@ the same slices. They are required, not suggestions.
 2. **P-SEAL: sealing and key bindings**, on the SSH direct lane, the only transport
    the slice has.
 3. **P-CHARTER: the charter and trust per mesh.**
-4. **H1: the mail-only HTTPS adapter on the relay.** The loopback HTTPS adapter on
-   the relay, fronted by a tunnel, a VPS or a tailnet; `https://` and `poll`
+4. **H1: the mail-only HTTPS adapter on the relay.** The loopback mail adapter
+   (`aoide mail serve`) on the relay — a plain-HTTP listener, TLS terminating at
+   the front — fronted by a tunnel, a VPS or a tailnet; `https://` and `poll`
    addresses; signed requests on every call; deposit, poll and receipts for letters
-   already sealed at P-SEAL; hold-flavored spooling for `poll` nodes. No node accepts
-   inbound connections except the relay's loopback adapter. Until P-M4, a `poll` node
-   exchanges letters with the relay node itself only.
+   already sealed at P-SEAL; hold-flavored spooling for `poll` nodes. It serves the
+   three mail methods and the stripped AgentCard, and no other method: the door's
+   `message/send`, `tasks/get`, `message/stream` and the pairing ceremony are not
+   reachable from it. The relay's ingress target is the mail adapter's port, and
+   the A2A door is never fronted by a TLS-terminating front — an unsigned loopback
+   request reaching that door is conduct. No node accepts inbound connections
+   except the relay's loopback adapter. Until P-M4, a `poll` node exchanges letters
+   with the relay node itself only, which is also the bound on its charter: the
+   first one arrives by LAN join or as a file.
 5. **P-M4: transit with the `next` hop chain.** MAIL.md.
 6. **P-BOARD: boards.** MAIL.md.
 

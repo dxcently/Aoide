@@ -7134,6 +7134,48 @@ JSON array of whole envelopes: a hub holding more than the client's
 answer with a body the poller refuses outright, a head-of-line stall no
 retry could clear.
 
+### `aoide mail serve` — the mail adapter (H1, `docs/architecture/HTTPS-MESH-API.md`)
+
+A SECOND listener, and not a second door: its own process, its own loopback
+port (`8712`; `--port` → `AOIDE_MAIL_ADAPTER_PORT`), built so that a
+TLS-terminating front — a Cloudflare Tunnel, a VPS with public 443, a tailnet
+— can be pointed at something whose method set is mail and nothing else.
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "method": "aoide/mailPoll", "params": { "node": "laptop" } }
+```
+
+- **Binds `127.0.0.1` absolutely.** There is no `--bind`, no bind env var, no
+  option: a routable bind is not a configuration of this listener, it is the
+  removal of the boundary that makes it one. (Contrast `aoide.a2a.bindAddress`,
+  which is a deliberate user choice.)
+- **Serves exactly four things**: `aoide/mailDeposit`, `aoide/mailPoll`,
+  `aoide/binding`, and `GET /.well-known/agent-card.json`. Every other method
+  name is `-32601`, and is *unreachable* rather than refused —
+  `message/send`, `tasks/get`, `message/stream`, `tasks/resubscribe`,
+  `aoide/graphSummary`, the `pair*` ceremony and the SSE takeover are not
+  compiled into this listener's path at all.
+- **The card is the stripped three-key shape unconditionally** — `name`,
+  `protocolVersion`, `url`. The door strips it only for an unauthorized caller;
+  the mail profile has no door-wide token concept, so there is no caller to
+  hand the full card to, and the relay's skills inventory stays off the open
+  internet.
+- **Shares the door's transport**: `MAX_CONN`/`MAX_BODY`/`MAX_LINE`/
+  `MAX_HEADERS`/`MAX_REQUEST`, per-request signature verification with the
+  same process-local nonce cache and the same ±`AOIDE_SIGNATURE_SKEW_SECS`
+  window, `write_http_response`, and the single audit log (house rule 6).
+  Refusals are the door's own: `-32007` signature, `-32008` skew, `-32009`
+  nonce replay, `-32010` admission. It carries no bearer and no spawn
+  configuration.
+- **The Host header is never consulted.** Through a tunnel it is the front's
+  own hostname, which names nothing this process decides.
+- **Audit**: the door's own labels (`a2a.aoide/mailDeposit`,
+  `a2a.aoide/mailPoll`, `a2a.aoide/binding`, `a2a.agent-card`) under
+  `Door::A2a`, with a detail that names the listener and the connection's
+  origin (`HTTP 200 from loopback via mail-adapter`) — a front dials from
+  loopback, so the origin alone cannot separate tunnel traffic from door
+  traffic.
+
 ---
 
 ## 7. Node federation door — **v0** (2026-08-14)

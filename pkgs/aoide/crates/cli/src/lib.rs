@@ -127,6 +127,31 @@ pub fn run_cli(argv: &[String]) -> i32 {
             });
         }
 
+        // `mail serve` is the mail adapter (H1) — a long-running server
+        // launched at the entry point exactly like `a2a serve` above: dispatch
+        // FIRST (so the single audit log records the launch, and a non-Cli
+        // door gets the "run this from a terminal" outcome via
+        // `handle_mail_serve` instead of blocking that door), then block in
+        // the adapter's own accept loop, which binds 127.0.0.1 and nothing
+        // else.
+        if inv.path == ["mail", "serve"] {
+            let launch = dispatch::dispatch(inv);
+            if launch.status != output::Status::Ok {
+                let (body, code) = launch.render(json);
+                eprintln!("{body}");
+                return Some(code);
+            }
+            let port = server::a2a::resolve_mail_adapter_port(inv);
+            let audit_log = dispatch::audit_log_path(inv);
+            return Some(match server::a2a::serve_mail(port, &audit_log, dispatch::registry()) {
+                Ok(()) => output::exit::OK,
+                Err(e) => {
+                    eprintln!("aoide mail serve: {e}");
+                    output::exit::ERROR
+                }
+            });
+        }
+
         // `conductor` is an interactive loop, resolved at the entry point exactly
         // like `mcp serve --stdio` — mode resolution happens here; everything
         // below the door is frontend-agnostic. We dispatch FIRST (so the single

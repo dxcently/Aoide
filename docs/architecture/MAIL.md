@@ -535,7 +535,11 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
   token is configured. That is a conduct hole older than mail; mail
   does not widen it, and the ops fix — `aoide.a2a.bearerSecret` set on
   every node, so an unsigned caller is Unknown and gated — is
-  recommended in the same breath as the first `message` grant.
+  recommended in the same breath as the first `message` grant. The front
+  that faces the mesh points at the mail adapter's port, never at the A2A
+  door: `https://` reaches a listener whose whole method set is mail, and
+  the door — where a loopback caller is conduct — is never fronted by a
+  TLS-terminating hop (H1).
 - `now` entries are attempted on every drain; `hold` entries are never
   attempted — they leave only through the node's `mailPoll`. A node
   declared `hold` in the mesh config makes every entry toward it `hold`
@@ -1208,6 +1212,7 @@ aoide mail route <node>                                  dry-run the four steps
 aoide mail rm --older-than <Nd|Nh>                       prune the base, never seen.jsonl
 aoide mail export [--dir <path>]                         one Markdown note per thread (read-only)
 aoide mail poll [<node>]                                 ask without depositing; no <node> polls every paired node holding message (a poll node: its relay, from the OS scheduler)
+aoide mail serve [--port N]                              the relay's loopback mail adapter: deposit, poll, binding and the stripped card, nothing else (H1)
 aoide mail ring --for <name> [--from <session-id>]       the doorbell, by hand; --from excludes that reader
 aoide mesh                          nodelist view: + mesh, status, role, key source, liveness, charter version
 aoide node allow <node> message off [--mesh <m>]         quarantine this box's door, now (existing command)
@@ -1259,7 +1264,8 @@ phase, docs in the same commit (this file, CONTRACTS, the crate
 READMEs), no subagent spawning and no backgrounded cargo in any brief.
 
 The beta path runs P-M3 → P-SEAL → P-CHARTER → H1 → P-M4 → P-BOARD. H1
-(the mail-only HTTPS adapter on the relay) is HTTPS-MESH-API.md's, which
+(the loopback mail adapter: plain HTTP, TLS terminating at the front) is
+HTTPS-MESH-API.md's, which
 also lists the acceptance tests each of these slices owes beyond its
 mail-side tests below. The P-M5 doorbell phases are orthogonal to that
 path.
@@ -1332,9 +1338,11 @@ path.
   refused; removing a line refuses the node on the next request after
   receipt; every pre-charter grant survives migration byte-identical;
   plus HTTPS-MESH-API.md's P-CHARTER list.
-- **H1 — the mail-only HTTPS adapter on the relay.** HTTPS-MESH-API.md.
-  Until P-M4, a `poll` node exchanges letters with the relay node itself
-  only.
+- **H1 — the mail adapter on the relay.** `aoide mail serve`, HTTPS-MESH-API.md:
+  a loopback listener (127.0.0.1 only, no bind option) whose whole method set is
+  `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding` and the stripped card,
+  fronted by whatever owns 443. Until P-M4, a `poll` node exchanges letters with
+  the relay node itself only, and its charter arrives by LAN join or as a file.
 - **P-M4 — zones and transit (L).** `relays`/`status`/`gates` from the
   charter (charter mesh) or config (pair mesh) (validate_mesh:
   multi-membership allowed, key divergence and one-sided gates refused;

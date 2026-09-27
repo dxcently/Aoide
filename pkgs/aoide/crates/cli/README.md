@@ -13,7 +13,9 @@ correspondence").
 - `bin/{aoide,aoided}` — the two binary entry points.
 - `cli`/`dispatch` — argv parsing and the dispatcher, over
   `aoide_protocol::door::run`'s shared skeleton with core's own `special`
-  hook (`mcp serve --stdio`, `a2a serve`, `secrets serve`, `secrets exec`,
+  hook (`mcp serve --stdio`, `a2a serve`, `mail serve` (the mail adapter,
+  H1, which blocks in `serve_mail`'s own loopback accept loop),
+  `secrets serve`, `secrets exec`,
   `secrets enroll`, `secrets watch`, `events tail`, `pair watch`
   (P-P5), `conductor`, `guide`/`schema` raw output, `workspace root` — one
   bare path on stdout and NOTHING on stdout when it refuses, because a

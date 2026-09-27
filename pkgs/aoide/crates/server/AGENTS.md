@@ -655,6 +655,37 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   env/flag "for redundancy": a duplicate advertiser thread would just
   double the send rate and complicate the "both off means silence"
   proof.
+- **The mail adapter's method table is `mail_rpc`, and nothing may add a
+  second entry to it (H1).** `aoide mail serve` is a second LISTENER with its
+  own process: `route_mail` → `handle_mail_jsonrpc` → `mail_rpc`, which is the
+  same function `handle_jsonrpc` falls through to first. Adding a method here
+  means adding it to `mail_rpc`, which adds it to the DOOR too — if a method
+  must not be on the adapter, it must not be in that function, and if it must
+  be on the adapter it must already be on the door. Never give `route_mail` a
+  second table, a fall-through to `route`, or a `stream_task` branch; never
+  thread `spawn_agent`/`spawn_cwd`/`node_name`/a bearer into
+  `RequestCtx::mail_adapter` (no method it can reach reads them, which is what
+  keeps the conduct path unreachable from that process rather than merely
+  refused). `Listener` is checked in exactly ONE place — `handle_connection`'s
+  dispatch selection — so the shared transport hardening and the single
+  signed-request verification path are inherited, never re-implemented.
+- **The mail adapter has no bind address, and must never grow one (User
+  ruling, H1).** `MAIL_ADAPTER_BIND` is `127.0.0.1` as a constant, not a
+  default: there is no `--bind`, no env var, and no `aoide.mail.adapter.bind…`
+  option to resolve. Contrast `aoide.a2a.bindAddress`, which exists because a
+  user may deliberately choose to expose the door on their own LAN — the
+  adapter's whole reason to exist is that it is the loopback thing BEHIND a
+  TLS-terminating front, so a routable bind on it is not a configuration, it
+  is the removal of the boundary. The card it serves is always
+  `stripped_card`, unconditionally: the mail profile has no door-wide token to
+  condition on, and a full card publishes the relay's skills inventory.
+- **The adapter's audit detail names the listener; the door's stays `HTTP
+  {status}` (H1).** `Listener::audit_detail` is the one place that
+  differentiates them (`HTTP {status} from {origin} via mail-adapter`), for
+  the reason the tag exists at all: a front dials this box from loopback, so
+  the origin can never tell tunnel traffic from door traffic on its own.
+  Don't widen the door's detail "for symmetry" — its bytes are pinned by
+  existing tests and by operators' greps.
 - **`do_spawn` never acks `submitted` on `cmd.spawn()`'s success alone
   (task #103).** `cmd.spawn()` only proves the WRAPPER `aoide conduct`
   process launched — it says nothing about whether that process's OWN

@@ -129,6 +129,33 @@ const STREAM_POLL: Duration = Duration::from_millis(750);
 /// paired with [`ConnGuard`] so the count is accurate even across a panic.
 static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
 
+// ── The H1 mail adapter's own constants ─────────────────────────────────────
+//
+// The adapter is a SECOND listener that is NOT the door: a process whose whole
+// method set is the three mail methods ([`mail_rpc`]) plus the stripped card.
+// What it may bind is therefore not a configurable property — it is the
+// capability itself.
+
+/// The address the mail adapter binds, ever and only. There is deliberately no
+/// `--bind`, no `aoide.mail.adapter.bindAddress` and no env var beside this
+/// one: a TLS-terminating front (cloudflared, a VPS, a tailnet) is what faces
+/// the mesh, and the A2A door is never fronted by one (`aoide.a2a.bindAddress`
+/// exists for a user's own deliberate choice; this has no such choice to
+/// offer).
+const MAIL_ADAPTER_BIND: &str = "127.0.0.1";
+
+/// The mail adapter's port when neither `--port` nor the env var names one.
+pub const MAIL_ADAPTER_PORT_DEFAULT: u16 = 8712;
+
+/// The env var the adapter's systemd unit sets (`AOIDE_MAIL_ADAPTER_PORT`).
+const MAIL_ADAPTER_PORT_ENV: &str = "AOIDE_MAIL_ADAPTER_PORT";
+
+/// The word the adapter's own audit details carry, so a log line can be told
+/// apart from the door's without knowing which port answered it. Tunnel-borne
+/// traffic arrives from loopback (the front dials this box), so the origin
+/// alone would not distinguish the two listeners.
+const MAIL_ADAPTER_AUDIT_TAG: &str = "mail-adapter";
+
 // ── Bind/port resolution (CONTRACTS.md §6 security posture) ─────────────────
 
 /// Resolve the bind address + port for `a2a serve`: `--bind`/`--port` flags →
@@ -153,6 +180,18 @@ pub fn resolve_bind_port(inv: &Invocation) -> (String, u16) {
         })
         .unwrap_or(8710);
     (bind, port)
+}
+
+/// Resolve the mail adapter's port (H1): `--port` flag →
+/// `AOIDE_MAIL_ADAPTER_PORT` env (set by the adapter's own systemd unit) →
+/// [`MAIL_ADAPTER_PORT_DEFAULT`]. There is no bind-address counterpart —
+/// [`serve_mail`] binds [`MAIL_ADAPTER_BIND`] and nothing else.
+pub fn resolve_mail_adapter_port(inv: &Invocation) -> u16 {
+    inv.flags
+        .get("port")
+        .and_then(|p| p.parse::<u16>().ok())
+        .or_else(|| std::env::var(MAIL_ADAPTER_PORT_ENV).ok().and_then(|p| p.parse::<u16>().ok()))
+        .unwrap_or(MAIL_ADAPTER_PORT_DEFAULT)
 }
 
 /// Resolve `aoide.a2a.spawnAgent`: the command `message/send`'s SPAWN path
@@ -324,6 +363,41 @@ pub fn classify_origin(node_ip: Option<IpAddr>) -> ConnOrigin {
         Some(ip) if ip.is_loopback() => ConnOrigin::Loopback,
         Some(ip) => ConnOrigin::Remote(ip),
         None => ConnOrigin::Unknown,
+    }
+}
+
+/// How one connection's origin reads inside an audit detail (H1): the
+/// adapter's lines name it, so a tunnel-borne request (always `loopback`, the
+/// front dials this box) is distinguishable from a LAN one. Pure.
+fn origin_spelling(origin: ConnOrigin) -> String {
+    match origin {
+        ConnOrigin::Loopback => "loopback".to_string(),
+        ConnOrigin::Remote(ip) => format!("remote {ip}"),
+        ConnOrigin::Unknown => "unknown".to_string(),
+    }
+}
+
+/// Which listener a connection arrived at (H1). A property of the PROCESS,
+/// checked in exactly one place — [`handle_connection`]'s dispatch selection —
+/// so the adapter cannot grow a second, unreviewed path into the door's table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Listener {
+    /// `aoide a2a serve`: the whole door (CONTRACTS.md §6).
+    A2a,
+    /// `aoide mail serve`: the loopback mail adapter (H1) — [`route_mail`]'s
+    /// three methods and the stripped card, nothing else.
+    Mail,
+}
+
+impl Listener {
+    /// The audit detail one handled request leaves behind. The door's is
+    /// `HTTP {status}` exactly as it always was; the adapter's names its own
+    /// listener and the connection's origin on top of it.
+    fn audit_detail(self, status: u16, origin: ConnOrigin) -> String {
+        match self {
+            Listener::A2a => format!("HTTP {status}"),
+            Listener::Mail => format!("HTTP {status} from {} via {MAIL_ADAPTER_AUDIT_TAG}", origin_spelling(origin)),
+        }
     }
 }
 
@@ -3901,6 +3975,32 @@ struct RequestCtx<'a> {
     signed_caller: Option<SignedCaller<'a>>,
 }
 
+impl<'a> RequestCtx<'a> {
+    /// The mail adapter's ctx (H1): every door-only field a mail method never
+    /// reads is empty by construction — no spawn command, no spawn cwd, no
+    /// instance name, no door token, no presented bearer (the adapter has no
+    /// token concept at all). What is left is exactly what `mail_rpc`'s three
+    /// methods consume: the audit log, the connection's origin, and the
+    /// verified caller.
+    fn mail_adapter(
+        audit_log: &'a Path,
+        origin: ConnOrigin,
+        signed_caller: Option<SignedCaller<'a>>,
+    ) -> RequestCtx<'a> {
+        RequestCtx {
+            audit_log,
+            spawn_agent: "",
+            spawn_cwd: "",
+            origin,
+            node_name: "",
+            self_url: "",
+            expected_token: "",
+            presented_token: None,
+            signed_caller,
+        }
+    }
+}
+
 /// Handle one parsed JSON-RPC 2.0 request `Value`, returning the response
 /// `Value` (always — unlike `mcp.rs`'s stdio notifications, an HTTP POST
 /// always gets a reply body).
@@ -3970,6 +4070,35 @@ fn jsonrpc_error_value(code: i64, message: impl Into<String>) -> Value {
 fn handle_jsonrpc_bytes(body: &[u8], ctx: &RequestCtx) -> Value {
     match serde_json::from_slice::<Value>(body) {
         Ok(req) => handle_jsonrpc(&req, ctx),
+        Err(e) => jsonrpc_error_value(-32700, format!("parse error: {e}")),
+    }
+}
+
+/// The mail adapter's dispatch (H1): [`mail_rpc`], or `-32601`. That is the
+/// whole table — `message/send`, `tasks/get`, the `pair*` ceremony and
+/// `message/stream` are not merely refused here, they are unreachable: the
+/// functions behind them are never called from this process.
+///
+/// A missing `method` is `-32601` here rather than the door's `-32600`: on a
+/// listener whose table is three names, "not one of them" is the whole answer,
+/// and there is no request-shape advice to give.
+fn handle_mail_jsonrpc(req: &Value, ctx: &RequestCtx) -> Value {
+    let id = req.get("id").cloned().unwrap_or(Value::Null);
+    let method = req.get("method").and_then(Value::as_str).unwrap_or("");
+    let params = req.get("params").cloned().unwrap_or(Value::Null);
+
+    let result = mail_rpc(method, &params, ctx)
+        .unwrap_or_else(|| Err((-32601, format!("method not found: {method}"))));
+    let resp = match result {
+        Ok(value) => JsonRpcResponse::ok(id, value),
+        Err((code, message)) => JsonRpcResponse::err(id, code, message),
+    };
+    serde_json::to_value(&resp).expect("JsonRpcResponse always serializes")
+}
+
+fn handle_mail_jsonrpc_bytes(body: &[u8], ctx: &RequestCtx) -> Value {
+    match serde_json::from_slice::<Value>(body) {
+        Ok(req) => handle_mail_jsonrpc(&req, ctx),
         Err(e) => jsonrpc_error_value(-32700, format!("parse error: {e}")),
     }
 }
@@ -4850,8 +4979,63 @@ fn route(
     }
 }
 
+// ── The mail adapter's route (H1) ───────────────────────────────────────────
+
+/// Route one parsed request as the MAIL ADAPTER sees it. The same two paths
+/// [`route`] serves — `GET /.well-known/agent-card.json` and `POST /` — over a
+/// method table that holds three names and nothing else: every other method is
+/// `-32601`, because [`handle_mail_jsonrpc`] has no second table to fall
+/// through to.
+///
+/// The card is ALWAYS the stripped three-key shape ([`stripped_card`]), never
+/// the door's authorize-or-strip choice: the mail profile has no door-wide
+/// token concept, so there is no credentialed caller to hand the full card to,
+/// and the relay's skills inventory must not reach the open internet.
+///
+/// The Host header is never consulted — through a tunnel it carries the
+/// front's own hostname, which is not this process's business.
+fn route_mail(
+    req: &HttpRequest,
+    bind: &str,
+    port: u16,
+    audit_log: &Path,
+    origin: ConnOrigin,
+    registry: &Registry,
+    signed_caller: Option<SignedCaller<'_>>,
+) -> (u16, Vec<u8>, String) {
+    match req.path.as_str() {
+        "/.well-known/agent-card.json" => {
+            if req.method != "GET" {
+                return method_not_allowed(&req.method, &req.path);
+            }
+            let card = stripped_card(&agent_card(registry, bind, port));
+            (
+                200,
+                serde_json::to_vec(&card).unwrap_or_default(),
+                "a2a.agent-card".to_string(),
+            )
+        }
+        "/" => {
+            if req.method != "POST" {
+                return method_not_allowed(&req.method, &req.path);
+            }
+            let parsed = serde_json::from_slice::<Value>(&req.body).ok();
+            let parsed_method = parsed
+                .as_ref()
+                .and_then(|v| v.get("method").and_then(Value::as_str).map(str::to_string));
+            // No frame/history tie-break to offer: no mail method reads a
+            // frame tail or a history count.
+            let label = rpc_method_label(parsed_method.as_deref(), false, false);
+            let ctx = RequestCtx::mail_adapter(audit_log, origin, signed_caller);
+            let resp = handle_mail_jsonrpc_bytes(&req.body, &ctx);
+            let body = serde_json::to_vec(&resp).unwrap_or_default();
+            (200, body, format!("a2a.{label}"))
+        }
+        _ => not_found(&req.method, &req.path),
+    }
+}
+
 // ── Inbound bearer resolved via the secrets broker (task #84) ───────────────
-//
 // The token-FILE mechanism above (`resolve_token_file`/`read_expected_token`)
 // reads its value ONCE, at `a2a serve` launch, and holds it in memory for the
 // server's whole lifetime — fine for a file, since revoking it means editing
@@ -5125,10 +5309,85 @@ pub fn serve(
                 &spawn_agent,
                 &spawn_cwd,
                 &node_name,
-                &bearer_cfg,
+                Some(&bearer_cfg),
+                Listener::A2a,
                 registry,
             ) {
                 eprintln!("aoide a2a: connection error: {e}");
+            }
+        });
+    }
+    Ok(())
+}
+
+/// Serve the mail adapter (H1) — a second listener that is NOT the door.
+///
+/// It binds [`MAIL_ADAPTER_BIND`] and nothing else: there is no bind option,
+/// flag or env var that could move it off loopback, because the thing facing
+/// the mesh is a TLS-terminating front (cloudflared, a VPS, a tailnet) and the
+/// A2A door is never fronted by one. Everything it serves is [`route_mail`]'s
+/// table — `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding`, and the
+/// stripped card — so the conduct path (`message/send`'s inject and spawn arms,
+/// the SSE takeover, the pairing ceremony, `tasks/get`) is unreachable from
+/// this process by construction, not by refusal.
+///
+/// Shares the door's hostile-input hardening ([`MAX_BODY`], [`MAX_LINE`],
+/// [`MAX_HEADERS`], [`MAX_REQUEST`], [`MAX_CONN`]/[`IN_FLIGHT`]) and its
+/// per-request signature verification (and so its process-local nonce cache
+/// and the single audit log) — those are properties of the transport, not of
+/// the method table. Deliberately NOT shared: the inbound bearer (no token
+/// concept here), discovery advertising (an adapter is not a discoverable
+/// agent), and `message/stream`.
+pub fn serve_mail(port: u16, audit_log: &Path, registry: &'static Registry) -> std::io::Result<()> {
+    let listener = TcpListener::bind((MAIL_ADAPTER_BIND, port))?;
+    eprintln!(
+        "aoide mail serve: listening on http://{MAIL_ADAPTER_BIND}:{port}/ (loopback only; TLS \
+         terminates at the front)"
+    );
+
+    for incoming in listener.incoming() {
+        let mut stream = match incoming {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("aoide mail serve: accept error: {e}");
+                continue;
+            }
+        };
+
+        let prior = IN_FLIGHT.fetch_add(1, Ordering::SeqCst);
+        if prior >= MAX_CONN {
+            IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
+            let body = jsonrpc_error_value(
+                -32000,
+                "server busy: too many in-flight connections, try again shortly",
+            );
+            let body = serde_json::to_vec(&body).unwrap_or_default();
+            if let Err(e) = write_http_response(&mut stream, 503, &body) {
+                eprintln!("aoide mail serve: writing 503 (busy) response: {e}");
+            }
+            continue;
+        }
+
+        let audit_log = audit_log.to_path_buf();
+        std::thread::spawn(move || {
+            let _guard = ConnGuard; // released on every exit path, incl. panic
+            // `""` throughout the door-only string parameters: no method this
+            // listener serves reads a spawn command, a spawn cwd or an
+            // instance name (see `RequestCtx::mail_adapter`). `None` for the
+            // bearer config, for the same reason.
+            if let Err(e) = handle_connection(
+                stream,
+                MAIL_ADAPTER_BIND,
+                port,
+                &audit_log,
+                "",
+                "",
+                "",
+                None,
+                Listener::Mail,
+                registry,
+            ) {
+                eprintln!("aoide mail serve: connection error: {e}");
             }
         });
     }
@@ -5146,7 +5405,8 @@ fn handle_connection(
     spawn_agent: &str,
     spawn_cwd: &str,
     node_name: &str,
-    bearer_cfg: &InboundBearerConfig,
+    bearer_cfg: Option<&InboundBearerConfig>,
+    listener: Listener,
     registry: &Registry,
 ) -> std::io::Result<()> {
     // The connection's ORIGIN (CONTRACTS.md §6 amendment, 2026-08-14): TCP
@@ -5183,13 +5443,19 @@ fn handle_connection(
         }
     };
 
-    // task #84: resolve THIS connection's effective expected bearer fresh —
-    // AFTER a successful parse (a malformed request never touches the
-    // broker at all), never once at `a2a serve` launch when a broker secret
-    // is configured — see `resolve_inbound_bearer`'s own doc for the
-    // fail-closed/no-cache reasoning. `expected_token` is a local `String`
-    // that lives only for the rest of this one connection's handling.
-    let expected_token = resolve_inbound_bearer(bearer_cfg);
+    let expected_token = match (listener, bearer_cfg) {
+        // task #84: resolve THIS connection's effective expected bearer fresh —
+        // AFTER a successful parse (a malformed request never touches the
+        // broker at all), never once at `a2a serve` launch when a broker
+        // secret is configured — see `resolve_inbound_bearer`'s own doc for the
+        // fail-closed/no-cache reasoning. `expected_token` is a local `String`
+        // that lives only for the rest of this one connection's handling.
+        (Listener::A2a, Some(cfg)) => resolve_inbound_bearer(cfg),
+        // The mail adapter has no door token concept at all (H1): nothing is
+        // resolved, `expected_token` stays empty and `unauthorized()` never
+        // fires here — the three mail methods are signature-gated instead.
+        _ => String::new(),
+    };
 
     // P-P4 (`docs/architecture/PAIRING.md`'s "Wire authentication" section):
     // verify this request's signature headers, if any, EXACTLY ONCE here —
@@ -5247,42 +5513,47 @@ fn handle_connection(
     // stream open is audited as `Door::A2a` at start; `stream_task` audits its
     // close. (The 10s read-timeout set above is harmless here: `stream_task`
     // only writes the socket, never reads it again.)
-    if let Some(method) = streaming_method(&req) {
-        let _ = audit(
-            audit_log,
-            Door::A2a,
-            EventClass::Audit,
-            &format!("a2a.{method}"),
-            "open",
-            "SSE stream open",
-        );
-        return stream_task(
-            &mut writer,
+    if listener == Listener::A2a {
+        if let Some(method) = streaming_method(&req) {
+            let _ = audit(
+                audit_log,
+                Door::A2a,
+                EventClass::Audit,
+                &format!("a2a.{method}"),
+                "open",
+                "SSE stream open",
+            );
+            return stream_task(
+                &mut writer,
+                &req,
+                &method,
+                audit_log,
+                spawn_agent,
+                spawn_cwd,
+                origin,
+                &expected_token,
+                req.bearer.as_deref(),
+                signed_caller,
+            );
+        }
+    }
+
+    let (status, body, audit_cmd) = match listener {
+        Listener::A2a => route(
             &req,
-            &method,
+            bind,
+            port,
             audit_log,
             spawn_agent,
             spawn_cwd,
+            node_name,
             origin,
             &expected_token,
-            req.bearer.as_deref(),
+            registry,
             signed_caller,
-        );
-    }
-
-    let (status, body, audit_cmd) = route(
-        &req,
-        bind,
-        port,
-        audit_log,
-        spawn_agent,
-        spawn_cwd,
-        node_name,
-        origin,
-        &expected_token,
-        registry,
-        signed_caller,
-    );
+        ),
+        Listener::Mail => route_mail(&req, bind, port, audit_log, origin, registry, signed_caller),
+    };
 
     // Security/audit (CONTRACTS.md §6): every handled request routes through
     // the single audit log, same discipline as the CLI/MCP doors. The
@@ -5303,7 +5574,7 @@ fn handle_connection(
         EventClass::Audit,
         &audit_cmd,
         status_word,
-        &format!("HTTP {status}"),
+        &listener.audit_detail(status, origin),
     );
 
     write_http_response(&mut writer, status, &body)
@@ -14648,5 +14919,377 @@ mod tests {
         );
         assert_eq!(status["result"]["status"]["state"], "working");
         assert!(status["result"].get("history").is_none(), "{status}");
+    }
+
+    // ── H1: the mail adapter (`aoide mail serve`) ───────────────────────────
+    //
+    // The adapter is a second LISTENER, not a second door: these tests pin
+    // that its table is the three mail methods plus the stripped card, that
+    // every other method name is unreachable from it, that the card is
+    // stripped unconditionally, that `handle_connection`'s shared signed-request
+    // path still refuses an unsigned caller and a replayed nonce there, that it
+    // never looks at the Host header, and that it binds loopback.
+
+    /// A tiny registry standing in for the assembled one: enough implemented
+    /// commands that a NON-stripped card would leak a skills inventory.
+    fn full_card_registry() -> Registry {
+        let mut r = Registry::new();
+        let paths: [&'static [&'static str]; 3] = [&["message", "send"], &["tasks", "get"], &["mail", "deposit"]];
+        for path in paths {
+            r.insert(Command {
+                path,
+                summary: "a skill that must never reach the adapter's card",
+                args: &[],
+                flags: &[],
+                gated: false,
+                implemented: true,
+                internal: false,
+                exit_codes: (),
+                examples: &[],
+                available: || true,
+                handler: fake_handler,
+            });
+        }
+        r
+    }
+
+    /// Isolate `AOIDE_STATE_DIR` for one adapter test (the pattern every
+    /// signed-request test above already uses).
+    fn adapter_root(tag: &str) -> (std::path::PathBuf, Option<String>) {
+        let root = aoide_test_support::short_tmp(&format!(
+            "aoide-a2a-mail-adapter-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let saved = std::env::var("AOIDE_STATE_DIR").ok();
+        std::env::set_var("AOIDE_STATE_DIR", &root);
+        (root, saved)
+    }
+
+    fn adapter_cleanup(root: &std::path::Path, saved: Option<String>) {
+        let _ = std::fs::remove_dir_all(root);
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
+    /// One `HttpRequest` as the adapter's route sees it.
+    fn mail_req(method: &str, path: &str, body: &[u8]) -> HttpRequest {
+        HttpRequest {
+            method: method.to_string(),
+            path: path.to_string(),
+            body: body.to_vec(),
+            bearer: None,
+            signed_node: None,
+            signed_timestamp: None,
+            signed_nonce: None,
+            signed_signature: None,
+        }
+    }
+
+    #[test]
+    fn the_mail_route_serves_the_card_and_the_three_methods_and_nothing_else() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("route");
+        let audit_log = root.join("log");
+        let registry = full_card_registry();
+        let card = route_mail(
+            &mail_req("GET", "/.well-known/agent-card.json", b""),
+            MAIL_ADAPTER_BIND,
+            MAIL_ADAPTER_PORT_DEFAULT,
+            &audit_log,
+            ConnOrigin::Loopback,
+            &registry,
+            None,
+        );
+        assert_eq!(card.0, 200, "the card GET answers");
+
+        let unknown = route_mail(
+            &mail_req("GET", "/anything/else", b""),
+            MAIL_ADAPTER_BIND,
+            MAIL_ADAPTER_PORT_DEFAULT,
+            &audit_log,
+            ConnOrigin::Loopback,
+            &registry,
+            None,
+        );
+        assert_eq!(unknown.0, 404, "any other path is not found");
+        assert_eq!(unknown.2, "a2a.not-found");
+
+        let not_allowed = route_mail(
+            &mail_req("POST", "/.well-known/agent-card.json", b"{}"),
+            MAIL_ADAPTER_BIND,
+            MAIL_ADAPTER_PORT_DEFAULT,
+            &audit_log,
+            ConnOrigin::Loopback,
+            &registry,
+            None,
+        );
+        assert_eq!(not_allowed.0, 405, "the card is a GET");
+
+        // A mail method on `POST /` reaches the shared dispatcher and is
+        // labelled exactly as the door labels it (the same whitelist).
+        let poll = route_mail(
+            &mail_req(
+                "POST",
+                "/",
+                br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#,
+            ),
+            MAIL_ADAPTER_BIND,
+            MAIL_ADAPTER_PORT_DEFAULT,
+            &audit_log,
+            ConnOrigin::Loopback,
+            &registry,
+            None,
+        );
+        assert_eq!(poll.0, 200);
+        assert_eq!(poll.2, "a2a.aoide/mailPoll", "the adapter reuses the door's label whitelist");
+        let body: Value = serde_json::from_slice(&poll.1).unwrap();
+        assert_eq!(body["error"]["code"], -32010, "unsigned → the mail admission refusal: {body}");
+
+        adapter_cleanup(&root, saved);
+    }
+
+    #[test]
+    fn the_adapter_serves_a_stripped_card_even_with_a_full_registry() {
+        let registry = full_card_registry();
+        let full = agent_card(&registry, "127.0.0.1", MAIL_ADAPTER_PORT_DEFAULT);
+        assert!(full["skills"].as_array().unwrap().len() >= 3, "the fixture registry is not empty");
+
+        let (status, body, label) = route_mail(
+            &mail_req("GET", "/.well-known/agent-card.json", b""),
+            MAIL_ADAPTER_BIND,
+            MAIL_ADAPTER_PORT_DEFAULT,
+            Path::new("/dev/null"),
+            ConnOrigin::Loopback,
+            &registry,
+            None,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(label, "a2a.agent-card");
+        let card: Value = serde_json::from_slice(&body).unwrap();
+        let keys: Vec<&str> = card.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(
+            keys,
+            vec!["name", "protocolVersion", "url"],
+            "the adapter's card is the three-key shape, unconditionally: {card}"
+        );
+        assert_eq!(card["url"], format!("http://127.0.0.1:{MAIL_ADAPTER_PORT_DEFAULT}/"));
+    }
+
+    #[test]
+    fn every_non_mail_method_is_32601_on_the_adapter() {
+        let ctx = RequestCtx::mail_adapter(Path::new("/dev/null"), ConnOrigin::Loopback, None);
+        for method in [
+            "message/send",
+            "message/stream",
+            "tasks/get",
+            "tasks/resubscribe",
+            "aoide/graphSummary",
+            "aoide/pairRequest",
+            "aoide/pairReveal",
+            "aoide/pairPoll",
+            "state",
+            "events",
+            "control",
+            "credentials",
+        ] {
+            let resp = handle_mail_jsonrpc(&json!({ "jsonrpc": "2.0", "id": 7, "method": method }), &ctx);
+            assert_eq!(resp["error"]["code"], -32601, "{method} must not exist on the adapter: {resp}");
+            assert_eq!(resp["error"]["message"], format!("method not found: {method}"), "{resp}");
+            assert_eq!(resp["id"], 7, "the id is echoed, error or not");
+        }
+    }
+
+    #[test]
+    fn the_adapter_shares_the_signed_request_path_so_an_unsigned_poll_is_refused_and_audited() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("unsigned-poll");
+        let audit_log = root.join("log");
+
+        let resp = handle_mail_jsonrpc(
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "aoide/mailPoll", "params": { "node": "box-b" } }),
+            &RequestCtx::mail_adapter(&audit_log, ConnOrigin::Loopback, None),
+        );
+        assert_eq!(resp["error"]["code"], -32010, "{resp}");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("a2a.aoide/mailPoll"), "the refusal is audited: {log}");
+        assert!(log.contains("unauthorized"), "{log}");
+
+        adapter_cleanup(&root, saved);
+    }
+
+    #[test]
+    fn the_adapters_audit_detail_names_the_listener_and_the_origin_and_the_doors_does_not_change() {
+        assert_eq!(Listener::A2a.audit_detail(200, ConnOrigin::Loopback), "HTTP 200");
+        assert_eq!(
+            Listener::Mail.audit_detail(200, ConnOrigin::Loopback),
+            "HTTP 200 from loopback via mail-adapter"
+        );
+        assert_eq!(
+            Listener::Mail.audit_detail(200, ConnOrigin::Remote("10.0.0.5".parse().unwrap())),
+            "HTTP 200 from remote 10.0.0.5 via mail-adapter"
+        );
+        assert_eq!(Listener::Mail.audit_detail(200, ConnOrigin::Unknown), "HTTP 200 from unknown via mail-adapter");
+    }
+
+    /// A raw HTTP/1.1 request as bytes, with the four signed headers when a
+    /// key is given — the adapter's socket tests drive the REAL parse +
+    /// verify + route path rather than calling the pieces.
+    fn raw_request(host: &str, method: &str, path: &str, body: &[u8], signed: Option<(&aoide_storage::identity::Keypair, &str, i64, &str)>) -> Vec<u8> {
+        let mut head = format!("{method} {path} HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\n");
+        if let Some((kp, node, ts, nonce)) = signed {
+            let timestamp = aoide_storage::time::iso_utc_from_epoch(ts);
+            let canonical = aoide_storage::wire_auth::canonical_string(method, path, &timestamp, nonce, body);
+            let signature = aoide_storage::wire_auth::sign_hex(kp, canonical.as_bytes());
+            for (name, value) in [
+                (aoide_storage::wire_auth::HEADER_NODE, node.to_string()),
+                (aoide_storage::wire_auth::HEADER_TIMESTAMP, timestamp),
+                (aoide_storage::wire_auth::HEADER_NONCE, nonce.to_string()),
+                (aoide_storage::wire_auth::HEADER_SIGNATURE, signature),
+            ] {
+                head.push_str(&format!("{name}: {value}\r\n"));
+            }
+        }
+        head.push_str(&format!("Content-Length: {}\r\nConnection: close\r\n\r\n", body.len()));
+        let mut bytes = head.into_bytes();
+        bytes.extend_from_slice(body);
+        bytes
+    }
+
+    /// Send one raw request to a live listener and return the whole response.
+    fn send_raw(port: u16, request: &[u8]) -> String {
+        use std::io::{Read, Write};
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.write_all(request).unwrap();
+        let mut out = Vec::new();
+        stream.read_to_end(&mut out).unwrap();
+        String::from_utf8_lossy(&out).to_string()
+    }
+
+    /// A free loopback port (bind `:0`, read it back, drop) — the reuse race
+    /// is the same one every other loopback fixture in this tree accepts.
+    fn free_loopback_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    }
+
+    /// Raise a real `serve_mail` on a background thread and wait until it
+    /// answers a connect. The thread lives for the rest of the test process,
+    /// which is what `serve`'s own loop does by construction; the registry is
+    /// leaked because `serve_mail` takes it `&'static`, exactly as `a2a serve`
+    /// does.
+    fn raise_mail_adapter(port: u16) {
+        std::thread::spawn(move || {
+            let _ = serve_mail(port, Path::new("/dev/null"), Box::leak(Box::new(full_card_registry())));
+        });
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                return;
+            }
+            assert!(std::time::Instant::now() < deadline, "the adapter never came up on 127.0.0.1:{port}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn the_adapter_serves_over_its_own_socket_ignores_the_host_header_and_binds_loopback_only() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("socket");
+        let port = free_loopback_port();
+        raise_mail_adapter(port);
+
+        // A foreign Host — through cloudflared this is the tunnel hostname —
+        // is never consulted: the card still answers.
+        let card = send_raw(port, &raw_request("aoide.necoconeco.net", "GET", "/.well-known/agent-card.json", b"", None));
+        assert!(card.starts_with("HTTP/1.1 200 OK"), "{card}");
+        let body = card.split("\r\n\r\n").nth(1).unwrap();
+        let card_value: Value = serde_json::from_str(body).unwrap();
+        let keys: Vec<&str> = card_value.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys, vec!["name", "protocolVersion", "url"], "{card_value}");
+
+        // The same foreign Host on a mail POST reaches the mail arm.
+        let poll = send_raw(
+            port,
+            &raw_request(
+                "aoide.necoconeco.net",
+                "POST",
+                "/",
+                br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#,
+                None,
+            ),
+        );
+        assert!(poll.starts_with("HTTP/1.1 200 OK"), "{poll}");
+        let poll_body: Value = serde_json::from_str(poll.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(poll_body["error"]["code"], -32010, "{poll_body}");
+
+        // A door method over the same socket is refused by NAME — never
+        // reached, never routed.
+        let send = send_raw(
+            port,
+            &raw_request(
+                "aoide.necoconeco.net",
+                "POST",
+                "/",
+                br#"{"jsonrpc":"2.0","id":2,"method":"message/send","params":{"id":"x","message":{"text":"hi"}}}"#,
+                None,
+            ),
+        );
+        let send_body: Value = serde_json::from_str(send.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(send_body["error"]["code"], -32601, "{send_body}");
+
+        // The bind is `127.0.0.1` ONLY: the adapter's own port is not
+        // reachable at this host's routable address. Skip the negative when
+        // this box has no non-loopback IPv4 to try (a hermetic sandbox may
+        // not) — the positive half above plus the bind constant still hold.
+        if let Some(ip) = first_non_loopback_ipv4() {
+            let refused = std::net::TcpStream::connect_timeout(
+                &std::net::SocketAddr::from((ip, port)),
+                Duration::from_millis(500),
+            );
+            assert!(refused.is_err(), "the adapter must not answer on {ip}:{port} — it binds loopback only");
+        }
+
+        adapter_cleanup(&root, saved);
+    }
+
+    /// This host's first non-loopback IPv4, if it has one — the negative half
+    /// of the bind assertion. A box with only loopback returns `None` and the
+    /// test says so by skipping it.
+    fn first_non_loopback_ipv4() -> Option<std::net::Ipv4Addr> {
+        let probe = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+        probe.connect("192.0.2.1:9").ok()?; // TEST-NET-1: no packets leave
+        match probe.local_addr().ok()?.ip() {
+            std::net::IpAddr::V4(v4) if !v4.is_loopback() => Some(v4),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_replayed_signed_request_is_refused_over_the_adapter_socket_too() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("replay");
+        let port = free_loopback_port();
+        raise_mail_adapter(port);
+
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let nonce = unique_nonce("adapter-replay");
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#;
+
+        let first = send_raw(port, &raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", now, &nonce))));
+        let first_body: Value = serde_json::from_str(first.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert!(first_body.get("error").is_none(), "the first signed request must be admitted: {first_body}");
+        assert_eq!(first_body["result"]["envelopes"], json!([]), "{first_body}");
+
+        let second = send_raw(port, &raw_request("127.0.0.1", "POST", "/", body, Some((&kp, "box-b", now, &nonce))));
+        let second_body: Value = serde_json::from_str(second.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(second_body["error"]["code"], -32009, "the same nonce twice is a replay: {second_body}");
+
+        adapter_cleanup(&root, saved);
     }
 }
