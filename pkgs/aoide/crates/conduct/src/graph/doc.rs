@@ -1871,6 +1871,7 @@ mod tests {
             pubkey: None,
             verified: false,
             grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-14T00:00:00Z".into(),
         }])
@@ -1937,6 +1938,7 @@ mod tests {
             pubkey: None,
             verified: false,
             grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-14T00:00:00Z".into(),
         }])
@@ -1959,6 +1961,7 @@ mod tests {
             pubkey: None,
             verified: false,
             grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-14T00:00:00Z".into(),
         }])
@@ -1992,6 +1995,7 @@ mod tests {
             pubkey: None,
             verified: false,
             grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-14T00:00:00Z".into(),
         }])
@@ -2258,6 +2262,7 @@ mod tests {
             pubkey: Some(key.clone()),
             verified: true,
             grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-14T00:00:00Z".into(),
         }])
@@ -2304,6 +2309,7 @@ mod tests {
             pubkey: Some(key.clone()),
             verified: true,
             grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-14T00:00:00Z".into(),
         }])
@@ -2470,6 +2476,7 @@ mod tests {
             pubkey: Some(key_b.clone()),
             verified: true,
             grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-14T00:00:00Z".into(),
         }])

@@ -880,6 +880,7 @@ mod tests {
             pubkey: None,
             verified,
             grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: via.map(str::to_string),
             added_at: String::new(),
         }

@@ -911,6 +911,7 @@ fn handle_node_add(inv: &Invocation) -> Outcome {
         pubkey: None,
         verified: false,
         grants: aoide_storage::node_store::Grants::new(),
+        narrowed: aoide_storage::node_store::Grants::new(),
         via: via.as_ref().map(|v| v.to_string()),
         added_at: aoide_storage::time::now_iso_utc(),
     };
@@ -1061,6 +1062,15 @@ fn handle_node_allow(inv: &Invocation) -> Outcome {
         Err(aoide_storage::node_store::AllowError::UnknownNode) => {
             return Outcome::error(cmd, format!("no node named `{name}`"))
                 .with_data(json!({ "reason": "unknown-node", "name": name }));
+        }
+        Err(aoide_storage::node_store::AllowError::WidensCharter) => {
+            return Outcome::error(
+                cmd,
+                format!(
+                    "`{name}` is on mesh `{mesh}`'s charter, and that charter does not grant it `{cap}` — nothing local widens a charter grant; the operator's line in the charter must change (`aoide mesh charter sign {mesh}`), or narrow it here with `off`"
+                ),
+            )
+            .with_data(json!({ "reason": "widens-charter", "name": name, "cap": cap, "mesh": mesh }));
         }
     };
 
@@ -5521,6 +5531,7 @@ mod tests {
             pubkey: None,
             verified: false,
             grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-24T00:00:00Z".to_string(),
         }
@@ -8510,6 +8521,7 @@ mod tests {
             pubkey: None,
             verified: true,
             grants: aoide_storage::node_store::grants_in("home", &["message"]),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-09-07T00:00:00Z".to_string(),
         }

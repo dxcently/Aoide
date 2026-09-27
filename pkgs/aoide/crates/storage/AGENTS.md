@@ -248,7 +248,12 @@
   `config` key; a fact the system observes or commits gets a state file.
   Don't migrate an existing state field into `config` "for tidiness" — a
   `state/*.json` value is written by code and a config value is written by a
-  human, and the two have opposite ownership.
+  human, and the two have opposite ownership. One consequence P-CHARTER
+  added: a grant's SOURCE can be a file this box does not own (a signed
+  charter), so the record's `grants` entry for that mesh is inert and what
+  this box writes there is the REFUSAL (`narrowed`) — never copy the charter
+  into `grants` at accept time, which would make every later charter version
+  silently re-grant what an operator turned off.
 - **`config::SCHEMA` is the ONE place a config key is described — walk it,
   never restate it in a match arm.** The table carries each key's name,
   `ValueKind` vocabulary, summary, and a `read` fn projecting it off a typed

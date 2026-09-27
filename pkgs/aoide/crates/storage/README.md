@@ -297,7 +297,19 @@ by decision — no embedded database yet
   reported). `set_node_allow` (`node allow
   <name> <cap> on|off [--mesh <m>]`'s library half) is the only OTHER writer —
   idempotent, refuses an unknown node or an unknown capability (the
-  capability check runs first). `resolve_node` (decision 6) is the
+  capability check runs first), and **writes a different map in a charter
+  mesh**: `narrowed` is the per-mesh set of capabilities this box's door
+  refuses for a record's key even though the charter grants them
+  (`aoide_storage::charter::governing` decides which mesh is which), so `off`
+  records a refusal there instead of editing `grants`, and `on` clears one —
+  or is refused `AllowError::WidensCharter` when the charter's line for that
+  key does not grant the capability, because nothing local widens a charter
+  grant. `grants` keeps its meaning in a pair mesh, where there is nothing to
+  narrow; in a charter mesh a record's `grants` entry is inert (the charter's
+  line is the whole grant). `charter::governing` / `charter::grant_in_force`
+  are the trust-gated readers of a charter in force — `None` when no charter
+  governs the mesh OR when which operator key signs it cannot be decided, so a
+  config/state disagreement grants nothing rather than widening. `resolve_node` (decision 6) is the
   caller-identity ladder the A2A door keys off, returning WHICH `NodeRung`
   matched alongside the `Node`: a presented bearer against a node's own
   `token_file` first (`NodeRung::Token`), an origin address against that

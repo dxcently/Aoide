@@ -1232,6 +1232,7 @@ mod tests {
                 pubkey: Some("aa".to_string()),
                 verified: true,
                 grants: crate::node_store::grants_in("home", &["read"]),
+                narrowed: crate::node_store::Grants::new(),
                 via: None,
                 added_at: "2026-09-26T00:00:00Z".to_string(),
             });

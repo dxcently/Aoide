@@ -204,6 +204,19 @@ impl Charter {
     pub fn node_key(&self, node: &str) -> Option<String> {
         self.nodes.get(node).map(|line| line.key.clone())
     }
+
+    /// The capabilities this charter gives `key`, if it lists it. Keyed by the
+    /// KEY, never by a name: "one node, one identity key, in every mesh" — the
+    /// door resolves a caller by the key its own signature verified against
+    /// (#63 P-ID5), so a name that follows a rename must never widen or lose a
+    /// charter grant. Bare hex, case-insensitive, the same comparison
+    /// `aoide-server::a2a`'s record lookup makes.
+    pub fn grant_for_key(&self, key: &str) -> Option<&[String]> {
+        self.nodes
+            .values()
+            .find(|line| line.key.eq_ignore_ascii_case(key))
+            .map(|line| line.grant.as_slice())
+    }
 }
 
 /// `Charter`'s deserialization twin: the same document with the fields
@@ -731,6 +744,39 @@ fn accept_locked(
 pub fn in_force_charter(mesh: &str) -> Option<Charter> {
     let text = std::fs::read_to_string(in_force_path(mesh)).ok()?;
     parse(&text).ok()
+}
+
+/// The charter **governing** `mesh` at this node: in force on disk, for this
+/// mesh by name, and under an operator key this node can actually decide
+/// ([`trusted_operator`]). `None` for a pair mesh — the ordinary case, where
+/// the paired records are the source — and `None` for every way a mesh's
+/// operator key can become undecidable (config line against state record
+/// disagree, config unreadable): those leave NO charter in force rather than a
+/// guessed one, so a disagreement refuses rather than widens.
+///
+/// Distinct from [`in_force_charter`] on purpose: that one is the raw read the
+/// re-key comparison and the report want (they must see what is on disk even
+/// while a human is resolving an operator disagreement), and this one is the
+/// trust-gated read the DOOR wants.
+pub fn governing(mesh: &str) -> Option<Charter> {
+    if trusted_operator(mesh).is_err() {
+        return None;
+    }
+    let charter = in_force_charter(mesh)?;
+    (charter.mesh == mesh).then_some(charter)
+}
+
+/// The capabilities the charter governing `mesh` gives the key `key`, or
+/// `None` when no charter governs that mesh or `key` is not on it.
+///
+/// **The door's second source** (P-CHARTER, `docs/architecture/
+/// HTTPS-MESH-API.md` "Trust per mesh"): `aoide-server::a2a::grant_in_mesh`
+/// asks this for a request that NAMES this mesh. `None` is two different
+/// facts to that caller — "no charter here, ask the paired records" and "a
+/// charter governs and this key is not on it, so it holds nothing" — which is
+/// why the door asks [`governing`] for the first and this for the second.
+pub fn grant_in_force(mesh: &str, key: &str) -> Option<Vec<String>> {
+    governing(mesh)?.grant_for_key(key).map(<[String]>::to_vec)
 }
 
 /// The nodes `next` changes the identity key of, against the charter in force.

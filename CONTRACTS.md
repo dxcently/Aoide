@@ -7053,6 +7053,33 @@ a hop's `mesh` is checked, at the hop, against the zone clause. A request
 that names no mesh (a pre-charter peer) is evaluated in `[pairing]
 homeMesh`.
 
+**Where the grant COMES FROM (P-CHARTER).** `a2a::grant_in_mesh` has two
+sources and picks one at one place:
+
+| the request | a charter governing that mesh at this node? | the caller's grant |
+|---|---|---|
+| names no mesh | — (never matches a charter mesh) | the home mesh's paired record |
+| names a mesh | no | that mesh's paired records, unioned by key |
+| names a mesh | yes | the charter LINE for the caller's identity key, minus this box's local refusals |
+| names a mesh | yes, key not listed | nothing — a paired record in a charter mesh is inert |
+
+`aoide_storage::charter::governing` decides "yes", and is `None` when no
+charter is in force for the mesh OR when the mesh's operator key cannot be
+decided (§7's `operator-mismatch`): an undecidable operator leaves no charter
+in force rather than a guessed one, so the failed charter grants nothing and
+the mesh falls back to its paired records.
+
+**Local narrowing only.** `aoide node allow <name> <cap> off --mesh <m>`
+narrows a charter grant and wins over it. In a charter mesh that call writes
+`Node::narrowed[<m>]` (the per-mesh set of capabilities THIS door refuses for
+that key, whatever the charter grants) rather than editing `grants`, and the
+door subtracts it from the line; `on` clears a refusal, and is refused
+`widens-charter` when the line does not grant the capability at all —
+nothing local widens a charter grant. In a pair mesh neither applies and
+`grants` stays what it always was. A REMOVED charter line is revocation and
+refuses on the first request after the new version is received, whatever
+paired record the key also has.
+
 ### `aoide/binding` (P-SEAL, `docs/architecture/HTTPS-MESH-API.md`)
 
 `params` may carry the caller's own signed age binding; the result always

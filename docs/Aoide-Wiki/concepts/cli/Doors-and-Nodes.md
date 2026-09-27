@@ -620,7 +620,14 @@ aoide node allow <name> <cap> on|off [--mesh <mesh>]
   effective grants in a mesh are the UNION across those records — revoking a
   capability from the key means revoking it on every record sharing it. A
   record's old flat `allows` array is migrated into `grants[<home>]` on
-  load, byte-identical. The A2A door's Spawn arm reads the
+  load, byte-identical. **In a charter mesh** (a charter in force for the
+  named mesh, `aoide_storage::charter::governing`) the written field is
+  `narrowed`, not `grants`: the charter's line is the whole grant there, so
+  `off` records a refusal this box's door subtracts from that line and `on`
+  clears one. Nothing local widens a charter grant, so `on` for a capability
+  the line does not grant is refused (`widens-charter`, naming the sign step
+  that would have to change), and a paired record's `grants` entry in a
+  charter mesh is INERT whatever it says. The A2A door's Spawn arm reads the
   grant ([[A2A-Door]], [[Pairing-Ceremony#What approval commits]]).
 
 ### aoide node spawn

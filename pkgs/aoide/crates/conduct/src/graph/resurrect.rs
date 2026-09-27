@@ -1179,6 +1179,7 @@ mod tests {
             pubkey: None,
             verified: false,
             grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-27T00:00:00Z".to_string(),
         }

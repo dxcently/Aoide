@@ -865,43 +865,86 @@ impl Grant {
     }
 }
 
-/// **The ONE grant lookup in this door.** The caller's capabilities in
-/// `mesh`, and in no other mesh: `caller_key` is the stored public key the
-/// request's signature verified against (#63 P-ID5 — identity is the key, so
-/// a name that follows a rename can never widen or lose a grant), and `mesh`
-/// is the mesh the request acts in ([`effective_mesh`]).
+/// **The ONE grant lookup in this door.** The caller's capabilities in the
+/// mesh its request acts in, and in no other mesh: `caller_key` is the stored
+/// public key the request's signature verified against (#63 P-ID5 — identity
+/// is the key, so a name that follows a rename can never widen or lose a
+/// grant), and `named` is [`SignedCaller::mesh`], the mesh the request itself
+/// named, or `None` when it named none.
 ///
-/// **Today's only source is the paired records** (`state/nodes.json`,
-/// `Node::grants`): the door finds the verified record whose stored pubkey is
-/// `caller_key` and answers with that record's grant in this mesh. The
-/// charter is NOT consulted — no charter exists in the tree yet, and no
-/// arm may grow a second lookup path when one lands.
+/// **Two sources, chosen at this ONE place** (P-CHARTER,
+/// `docs/architecture/HTTPS-MESH-API.md` "Trust per mesh"):
 ///
-/// **A3 adds the charter line as a SECOND SOURCE BEHIND THIS SAME
-/// FUNCTION**, not beside it: the caller's charter line in a charter mesh
-/// (`docs/architecture/HTTPS-MESH-API.md` "Charters"), with the local
-/// narrowing this crate already reads from `nodes.json` winning over it
-/// (`aoide node allow <node> <cap> off --mesh <m>`; nothing local ever
-/// WIDENS a charter grant). Two constraints that add up to "shape it here,
-/// not at the call sites":
-/// - **One node, one identity key, in every mesh**: A3 resolves the same
-///   way, by `caller_key`, so its lookup must key on the key and never on a
-///   name.
-/// - **A request naming no mesh never matches a charter mesh**: the
-///   named/unnamed fact is [`effective_mesh`]'s caller's (`SignedCaller::
-///   mesh`), and A3 needs it — so the source choice cannot be hidden behind
-///   `mesh: &str` alone without losing the distinction. When A3 lands, it
-///   takes the named-ness as its own parameter here, at this one function,
-///   exactly as `effective_mesh` documents the rule today.
+/// ```text
+/// request named a mesh?
+///   no  ──────────────> the home mesh's PAIRED RECORDS only
+///                       (a request naming no mesh never matches a charter mesh)
+///   yes ──> does a charter GOVERN that mesh at this node?
+///             no  ──────> that mesh's PAIRED RECORDS (the ordinary pair mesh)
+///             yes ──────> the charter line for caller_key (by KEY, never by
+///                         name), MINUS this box's own `node allow … off --mesh`
+///                         refusals — and NOTHING when the key is not on the
+///                         line, whatever paired records it may also hold
+/// ```
 ///
-/// Reads the registry fresh on every call (never cached: revoking a grant
-/// takes effect on the very next request, the same stance `bearerSecret`
-/// holds). Twin records sharing one stored pubkey — a hand-edited registry
-/// only, and `verify_signed_request` already requires an exact-name header to
-/// resolve them — answer in REGISTRY ORDER, the tie-break CONTRACTS.md §7
-/// already documents for `resolve_node`'s ladder.
-fn grant_in_mesh(mesh: &str, caller_key: &str) -> Grant {
-    paired_grant(&aoide_storage::node_store::load_nodes(), mesh, caller_key)
+/// The subtraction is the design's "Local narrowing only": a node's own `aoide
+/// node allow <node> <cap> off --mesh <m>` narrows what its door grants in
+/// that mesh and wins over the charter, and nothing local widens a charter
+/// grant (a local `on` for a capability the line does not grant is refused at
+/// the write — `node_store::AllowError::WidensCharter`). It is read from
+/// [`aoide_storage::node_store::Node::refused`] and never from
+/// `Node::grants`: in a charter mesh a paired record's grant is INERT — the
+/// line is the whole grant — which is what makes a REMOVED line (revocation)
+/// refuse on the very next request whatever this box happened to pair with
+/// that key before.
+///
+/// Reads the registry and the charter fresh on every call (never cached:
+/// revoking a grant — locally, or by publishing a new charter version — takes
+/// effect on the very next request, the same stance `bearerSecret` holds).
+/// Twin records sharing one stored pubkey — a hand-edited registry only, and
+/// `verify_signed_request` already requires an exact-name header to resolve
+/// them — answer in REGISTRY ORDER, the tie-break CONTRACTS.md §7 already
+/// documents for `resolve_node`'s ladder.
+fn grant_in_mesh(named: Option<&str>, caller_key: &str) -> Grant {
+    let nodes = aoide_storage::node_store::load_nodes();
+    let governing = named
+        .map(str::trim)
+        .filter(|mesh| !mesh.is_empty())
+        .and_then(aoide_storage::charter::governing);
+    grant_from(&nodes, governing.as_ref(), named, caller_key)
+}
+
+/// [`grant_in_mesh`]'s pure core — the whole table without the disk reads, so
+/// both branches are provable against fixtures. `governing` is the charter
+/// that governs the mesh the request NAMED ([`aoide_storage::charter::
+/// governing`]), or `None` for a pair mesh, for a mesh no charter governs, and
+/// for every request that named no mesh at all.
+///
+/// The charter branch answers with the caller's LINE, keyed by `caller_key`
+/// (`Charter::grant_for_key`) — never the paired records, whatever this box
+/// has paired, which is what "a paired record in a charter mesh is inert"
+/// means in code. The refusals come from every same-key record's
+/// [`aoide_storage::node_store::Node::refused`] entry for that mesh, because
+/// two records with one key are one identity and a local refusal is per
+/// identity, exactly as `paired_grant`'s union is.
+fn grant_from(
+    nodes: &[aoide_storage::node_store::Node],
+    governing: Option<&aoide_storage::charter::Charter>,
+    named: Option<&str>,
+    caller_key: &str,
+) -> Grant {
+    let Some(charter) = governing else {
+        return paired_grant(nodes, &effective_mesh(named), caller_key);
+    };
+    let caps = charter.grant_for_key(caller_key).unwrap_or(&[]);
+    let refused = nodes
+        .iter()
+        .filter(|n| n.pubkey.as_deref().is_some_and(|k| !k.is_empty() && k.eq_ignore_ascii_case(caller_key)))
+        .flat_map(|n| n.refused(&charter.mesh).iter().cloned())
+        .collect::<std::collections::BTreeSet<_>>();
+    Grant {
+        caps: caps.iter().filter(|cap| !refused.contains(*cap)).cloned().collect(),
+    }
 }
 
 /// [`grant_in_mesh`]'s pure core — the same answer without the disk read, so
@@ -953,11 +996,12 @@ fn effective_mesh(named: Option<&str>) -> String {
 /// The caller's grant in the mesh its request acts in — the ONE place a call
 /// site turns a [`SignedCaller`] into a [`Grant`]. [`Grant::none`] when there
 /// is no caller at all (no signature headers, or a weaker rung, which
-/// produces no `SignedCaller` by construction); an unnamed request resolves
-/// through [`effective_mesh`] to the home mesh.
+/// produces no `SignedCaller` by construction); a request that named no mesh
+/// resolves through [`effective_mesh`] to the home mesh and through
+/// [`grant_from`] to its paired records.
 fn caller_grant(caller: Option<SignedCaller<'_>>) -> Grant {
     match caller {
-        Some(c) => grant_in_mesh(&effective_mesh(c.mesh), c.key),
+        Some(c) => grant_in_mesh(c.mesh, c.key),
         None => Grant::none(),
     }
 }
@@ -5630,6 +5674,7 @@ mod tests {
             pubkey: None,
             verified: false,
             grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-25T00:00:00Z".to_string(),
         }
@@ -10442,6 +10487,7 @@ mod tests {
             pubkey: None,
             verified: false,
             grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-14T00:00:00Z".into(),
         }])
@@ -10542,6 +10588,7 @@ mod tests {
             pubkey: None,
             verified: false,
             grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-18T00:00:00Z".into(),
         }])
@@ -11640,6 +11687,7 @@ mod tests {
             pubkey: None,
             verified: false,
             grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-20T00:00:00Z".into(),
         }])
@@ -14602,15 +14650,15 @@ mod tests {
         assert!(!paired_grant(std::slice::from_ref(&node), "away", "aa11").holds("spawn"));
 
         // And through the real lookup the door uses.
-        assert!(grant_in_mesh("away", "aa11").holds("read"));
-        assert!(!grant_in_mesh("home", "aa11").holds("read"));
-        assert!(grant_in_mesh("home", "aa11").holds("spawn"));
+        assert!(grant_in_mesh(Some("away"), "aa11").holds("read"));
+        assert!(!grant_in_mesh(Some("home"), "aa11").holds("read"));
+        assert!(grant_in_mesh(Some("home"), "aa11").holds("spawn"));
         assert!(
-            grant_in_mesh(&effective_mesh(None), "aa11").holds("spawn"),
+            grant_in_mesh(None, "aa11").holds("spawn"),
             "an unnamed request reads the HOME mesh's grant, and only that one"
         );
-        assert!(grant_in_mesh("never-declared", "aa11") == Grant::none(), "a mesh the record is not in grants nothing");
-        assert!(grant_in_mesh("home", "ff99") == Grant::none(), "a key no record holds grants nothing");
+        assert!(grant_in_mesh(Some("never-declared"), "aa11") == Grant::none(), "a mesh the record is not in grants nothing");
+        assert!(grant_in_mesh(Some("home"), "ff99") == Grant::none(), "a key no record holds grants nothing");
 
         // Review finding 6 / CONTRACTS.md §6: twin records sharing ONE key
         // answer by UNION, so a capability either twin grants is held, and a
@@ -14649,6 +14697,199 @@ mod tests {
     /// (a first cut spelled the name it searched for, which the search found
     /// in itself); the live answer to "which record is this caller" is
     /// `grant_in_mesh`, exercised by the gate tests above.
+
+    /// **The charter as the second source behind the one lookup** — every
+    /// P-CHARTER "Trust per mesh" bullet this slice owns, at the door:
+    ///
+    /// 1. a key listed on an ACCEPTED charter holds that line's grant in that
+    ///    mesh (`message` only, the line's default), with no paired record;
+    /// 2. an UNNAMED request is evaluated in the home mesh and only against a
+    ///    migrated paired record — "it never matches a charter mesh", even
+    ///    when the home mesh IS the charter mesh;
+    /// 3. a paired record in a charter mesh is INERT: for a listed key it
+    ///    neither widens nor narrows the line, and for a key the charter does
+    ///    not list it grants nothing there;
+    /// 4. local `node allow … off --mesh` NARROWS a charter grant and wins over
+    ///    it, and nothing local widens one (`on` is refused at the write);
+    /// 5. a REMOVED line (revocation) refuses on the first request after the
+    ///    new version is received, whatever this box paired with that key;
+    /// 6. a mesh whose config operator line and state record disagree leaves NO
+    ///    charter in force (`operator-mismatch`), so the charter stops granting
+    ///    anything at that mesh.
+    #[test]
+    fn the_charter_is_the_second_source_behind_the_one_lookup() {
+        use aoide_storage::node_store::{AllowChange, AllowError};
+
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_root = std::env::var("AOIDE_ROOT").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_config = std::env::var("AOIDE_CONFIG").ok();
+        let saved_node = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        let root = mail_deposit_root("charter-source");
+
+        // The operator's box roots `home` and pastes the one other machine's
+        // node line under `[nodes]` — no `grant` key, so the line's default.
+        charter_machine(&root, "operator", "opbox");
+        let init = aoide_storage::charter::init("home").unwrap();
+        let op_line = aoide_storage::charter::node_line().unwrap();
+        charter_machine(&root, "receiver", "receiverbox");
+        let receiver_line = aoide_storage::charter::node_line().unwrap();
+        // The keys the door will see are the ones the SIGNED charter carries.
+        let listed = aoide_storage::charter::parse(&format!(
+            "mesh = \"home\"\nversion = 1\nrelays = []\n\n[nodes]\n{op_line}\n{receiver_line}\n"
+        ))
+        .unwrap();
+        let op_key = listed.nodes["opbox"].key.clone();
+        let receiver_key = listed.nodes["receiverbox"].key.clone();
+
+        charter_machine(&root, "operator", "opbox");
+        let v1 = format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{op_line}\n{receiver_line}\n");
+        std::fs::write(aoide_storage::charter::source_path("home"), &v1).unwrap();
+        aoide_storage::charter::sign("home", None).unwrap();
+        let v1_bytes = std::fs::read(aoide_storage::charter::source_path("home")).unwrap();
+        let v1_sig = std::fs::read(aoide_storage::charter::source_sig_path("home")).unwrap();
+
+        // The receiving machine trusts ONLY the operator key, by its config
+        // line, and accepts v1 by file — no pairing, no registry entry.
+        charter_machine(&root, "receiver", "receiverbox");
+        std::fs::write(
+            root.join("receiver").join("config.toml"),
+            format!("[mesh.home]\noperator = \"ed25519:{}\"\n", init.operator),
+        )
+        .unwrap();
+        assert_eq!(aoide_storage::charter::accept(&v1_bytes, &v1_sig).unwrap().charter.version, 1);
+
+        // 1. The line IS the grant, and only in its own mesh.
+        assert!(aoide_storage::node_store::load_nodes().is_empty(), "nothing is paired on this box");
+        let grant = grant_in_mesh(Some("home"), &receiver_key);
+        assert!(grant.holds("message"), "a listed key holds its line's grant: {grant:?}");
+        assert!(!grant.holds("read"), "and nothing else — the line's only capability");
+        assert!(!grant.holds("spawn"));
+        assert!(grant_in_mesh(Some("home"), &op_key).holds("message"), "the operator's own machine is a node like any other");
+        assert!(
+            grant_in_mesh(Some("away"), &receiver_key) == Grant::none(),
+            "a mesh no charter governs and no record holds grants nothing"
+        );
+
+        // 2. Unnamed never matches a charter mesh — `home` IS one here.
+        assert!(
+            grant_in_mesh(None, &receiver_key) == Grant::none(),
+            "a request naming no mesh is evaluated against a migrated paired record only"
+        );
+
+        // 3. A paired record in a charter mesh is INERT.
+        let mut listed = fixture_node("receiverbox", "http://10.0.0.5:8710/", false);
+        listed.verified = true;
+        listed.pubkey = Some(receiver_key.clone());
+        listed.grants = std::collections::BTreeMap::from([
+            ("home".to_string(), vec!["read".to_string(), "spawn".to_string()]),
+            ("away".to_string(), vec!["read".to_string()]),
+        ]);
+        let mut unlisted = fixture_node("stranger", "http://10.0.0.6:8710/", false);
+        unlisted.verified = true;
+        unlisted.pubkey = Some("bb22".to_string());
+        unlisted.grants = std::collections::BTreeMap::from([
+            (
+                "home".to_string(),
+                vec!["read".to_string(), "spawn".to_string(), "message".to_string()],
+            ),
+            ("away".to_string(), vec!["read".to_string()]),
+        ]);
+        aoide_storage::node_store::save_nodes(&[listed.clone(), unlisted.clone()]).unwrap();
+        let grant = grant_in_mesh(Some("home"), &receiver_key);
+        assert!(grant.holds("message") && !grant.holds("read") && !grant.holds("spawn"), "the record is inert: {grant:?}");
+        assert!(
+            grant_in_mesh(Some("home"), "bb22") == Grant::none(),
+            "a key the charter does not list holds nothing in its mesh, paired record or not"
+        );
+        assert!(
+            grant_in_mesh(Some("away"), "bb22").holds("read"),
+            "while the SAME record's grant in a mesh no charter governs answers exactly as before"
+        );
+        assert!(
+            grant_in_mesh(Some("away"), &receiver_key).holds("read"),
+            "and the paired source still answers per mesh for a listed key, in the mesh the charter does not govern"
+        );
+
+        // 4. Local narrowing wins over the charter; nothing local widens one.
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        assert_eq!(
+            aoide_storage::node_store::set_node_allow(&mut nodes, "receiverbox", "message", false, "home").unwrap(),
+            AllowChange::Disabled
+        );
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+        assert!(
+            grant_in_mesh(Some("home"), &receiver_key) == Grant::none(),
+            "`off` narrows the charter's grant to nothing"
+        );
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        assert_eq!(
+            aoide_storage::node_store::set_node_allow(&mut nodes, "receiverbox", "read", true, "home").unwrap_err(),
+            AllowError::WidensCharter,
+            "the charter's line grants no `read`, and no local flag may add one"
+        );
+        assert_eq!(
+            aoide_storage::node_store::set_node_allow(&mut nodes, "receiverbox", "message", true, "home").unwrap(),
+            AllowChange::Enabled,
+            "while `on` clears the refusal this box's own `off` recorded — it never exceeds the charter"
+        );
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+        assert!(grant_in_mesh(Some("home"), &receiver_key).holds("message"), "the charter is the grant again");
+
+        // 6a. An operator disagreement leaves NO charter in force. (Asserted
+        // before the revocation below, while the line is still there to lose.)
+        std::fs::write(
+            root.join("receiver").join("config.toml"),
+            format!("[mesh.home]\noperator = \"ed25519:{receiver_key}\"\n"),
+        )
+        .unwrap();
+        assert!(
+            grant_in_mesh(Some("home"), &op_key) == Grant::none(),
+            "a listed key with no record holds nothing once the config line and the record disagree"
+        );
+        let fallen_back = grant_in_mesh(Some("home"), &receiver_key);
+        assert!(
+            fallen_back.holds("read") && !fallen_back.holds("message"),
+            "and the mesh falls back to its PAIRED records — the failed charter grants nothing: {fallen_back:?}"
+        );
+        std::fs::write(
+            root.join("receiver").join("config.toml"),
+            format!("[mesh.home]\noperator = \"ed25519:{}\"\n", init.operator),
+        )
+        .unwrap();
+        assert!(grant_in_mesh(Some("home"), &receiver_key).holds("message"), "and the charter answers again once resolved");
+
+        // 5. Revocation: v2 re-signed with the line DELETED.
+        charter_machine(&root, "operator", "opbox");
+        let v2 = format!("mesh = \"home\"\nversion = 1\nrelays = []\n\n[nodes]\n{op_line}\n");
+        std::fs::write(aoide_storage::charter::source_path("home"), &v2).unwrap();
+        aoide_storage::charter::sign("home", None).unwrap();
+        let v2_bytes = std::fs::read(aoide_storage::charter::source_path("home")).unwrap();
+        let v2_sig = std::fs::read(aoide_storage::charter::source_sig_path("home")).unwrap();
+
+        charter_machine(&root, "receiver", "receiverbox");
+        assert_eq!(aoide_storage::charter::accept(&v2_bytes, &v2_sig).unwrap().charter.version, 2);
+        assert!(
+            grant_in_mesh(Some("home"), &receiver_key) == Grant::none(),
+            "a removed line refuses on the FIRST request after the new version is received"
+        );
+        assert!(aoide_storage::charter::in_force_charter("home").unwrap().nodes.get("receiverbox").is_none());
+
+        let _ = std::fs::remove_dir_all(&root);
+        for (key, value) in [
+            ("AOIDE_ROOT", saved_root),
+            ("AOIDE_STATE_DIR", saved_state),
+            ("AOIDE_STAGE_DIR", saved_stage),
+            ("AOIDE_CONFIG", saved_config),
+            ("AOIDE_A2A_NODE_NAME", saved_node),
+        ] {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
 
     /// `tail` is read off `params.metadata` only, clamped to `1..=200`, and
     /// its absence is a plain status read.

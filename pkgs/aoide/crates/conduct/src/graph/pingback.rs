@@ -2746,6 +2746,7 @@ mod tests {
             pubkey: Some(remote_key()),
             verified: true,
             grants: aoide_storage::node_store::grants_in("home", &["read"]),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-09-25T00:00:00Z".into(),
         }])

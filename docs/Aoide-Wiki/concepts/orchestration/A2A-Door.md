@@ -195,6 +195,16 @@ to **rebuild time** instead.
   `aoide/graphSummary`), still `-32005`-gating them, and answers Inject's
   autogate question — it never reaches Spawn. Empty (the default) leaves
   the read arms open exactly as an untokenized server always was.
+- **Where the grant comes from.** Every gated arm asks one lookup,
+  `a2a::grant_in_mesh`, and it has two sources: the caller's PAIRED RECORD in
+  the mesh its signed request names, and — when a charter governs that mesh at
+  this node — the caller's line on that CHARTER, read by identity key and by
+  no name. A request that names no mesh is evaluated in the home mesh and only
+  against a paired record, so it never matches a charter mesh; a key a
+  charter does not list holds nothing in that mesh however it is paired. Local
+  `aoide node allow <name> <cap> off --mesh <m>` narrows a charter line and
+  wins over it; nothing local widens one. See
+  [[HTTPS-Mesh-API]]'s "Trust per mesh".
 - **A secrets-broker-resolved bearer takes precedence over the file.**
   `a2a serve --bearer-secret <name>` (or `AOIDE_A2A_BEARER_SECRET`) names a
   secret this door resolves through the local [[Secrets-Broker]] as consumer

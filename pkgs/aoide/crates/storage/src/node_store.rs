@@ -168,6 +168,35 @@ pub struct Node {
     /// THIS mesh", and the paired records below are its only source today.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub grants: Grants,
+    /// Per mesh, the capabilities this box's DOOR refuses for this record's
+    /// key **even though a charter grants them** — the local narrowing of
+    /// P-CHARTER's "Local narrowing only" rule
+    /// (`docs/architecture/HTTPS-MESH-API.md` "Trust per mesh": "a node's own
+    /// `aoide node allow <node> <cap> off --mesh <m>` narrows what its door
+    /// grants in that mesh, and wins over the charter. Nothing local widens a
+    /// charter grant").
+    ///
+    /// **Read only in a charter mesh** — the door subtracts it from the
+    /// charter's line for the same key (`aoide-server::a2a::grant_in_mesh`).
+    /// In a pair mesh there is nothing to subtract from, so [`Self::grants`]
+    /// stays the whole answer there and `off` keeps EDITING it, as it did
+    /// before the charter existed.
+    ///
+    /// The two maps are keyed alike and mean different things on purpose, and
+    /// the difference is what keeps a local narrowing durable: a `grants`
+    /// entry is a snapshot of what some source granted, so subtracting it
+    /// would erase the whole charter rather than one capability, and seeding
+    /// it from the charter would let every later charter version silently
+    /// re-grant what this box turned off. A REFUSAL is the only thing a local
+    /// door can add to a charter, so a refusal is what is stored.
+    ///
+    /// `#[serde(default)]` + `skip_serializing_if` is the same additive
+    /// discipline `hub`/`pubkey`/`via` hold: an old `nodes.json` deserializes
+    /// an empty map on every entry, and a node with no narrowing omits the
+    /// key entirely. Written ONLY by [`set_node_allow`], never a raw
+    /// `Node { .. }` literal outside this module.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub narrowed: Grants,
     /// The ssh-transport lane's marker (P-S4, `docs/architecture/
     /// PAIRING.md`'s Transport section): an `ssh://[user@]host[:port]`
     /// target ([`crate::tunnel::parse_via`]'s own shape) a cross-box call to
@@ -208,6 +237,14 @@ impl Node {
     /// scans the map itself.
     pub fn grant(&self, mesh: &str) -> &[String] {
         self.grants.get(mesh).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// The capabilities this box refuses in `mesh` whatever a charter grants
+    /// ([`Self::narrowed`]) — the empty slice when this box has narrowed
+    /// nothing there, which is every record until an operator turns something
+    /// off in a charter mesh. Pure.
+    pub fn refused(&self, mesh: &str) -> &[String] {
+        self.narrowed.get(mesh).map(Vec::as_slice).unwrap_or(&[])
     }
 }
 
@@ -558,6 +595,7 @@ pub fn upsert_paired_node(nodes: &mut Vec<Node>, name: &str, url: &str, pubkey_h
         pubkey: Some(pubkey_hex.to_string()),
         verified: true,
         grants: grants_in(mesh, &grant.iter().map(String::as_str).collect::<Vec<_>>()),
+        narrowed: Grants::new(),
         via: None,
         added_at: added_at.to_string(),
     });
@@ -607,6 +645,13 @@ pub enum AllowChange {
 pub enum AllowError {
     UnknownNode,
     UnknownCapability,
+    /// The mesh is a charter mesh and the charter's line for this record's key
+    /// does not grant `cap`, so there is nothing here for `on` to turn on:
+    /// **nothing local widens a charter grant**
+    /// (`docs/architecture/HTTPS-MESH-API.md` "Trust per mesh"). `off` is
+    /// always allowed in a charter mesh — it is the one direction a local door
+    /// has.
+    WidensCharter,
 }
 
 /// `node allow <name> <cap> on|off [--mesh <m>]` (P-P3, PAIRING.md decision
@@ -618,19 +663,26 @@ pub enum AllowError {
 /// OFF an already-absent one, is [`AllowChange::NoOp`] and writes nothing —
 /// mirrors [`set_hub`]/[`clear_hub`]'s exact idempotence discipline.
 ///
-/// **This is a narrowing switch in a charter mesh and a granting one in a
-/// pair mesh.** Today's only source of a caller's grant is a paired record
-/// (`aoide-server::a2a::grant_in_mesh`), so what is written here IS the
-/// grant the door reads, and `off` narrows it and wins. Once the charter is
-/// a second source (A3), a charter grant is not this box's to widen: the
-/// same call's `off` still narrows (the door subtracts what this map says),
-/// while an `on` there can only be a no-op against a line the operator did
-/// not grant. Nothing local ever widens a charter grant.
+/// **Which map it writes depends on whether a charter governs `mesh`**
+/// (`crate::charter::governing`), and that is the whole of "local narrowing
+/// only":
 ///
-/// Turning OFF the last capability of a mesh drops that mesh's entry rather
-/// than storing an empty list: "granted nothing here" and "not in this mesh"
-/// are the same grant, and an empty list is never written — the shape the
-/// pre-charter `allows` array already held.
+/// | mesh | `off` | `on` |
+/// |---|---|---|
+/// | pair | removes the cap from [`Node::grants`] — the door's source there | adds it to [`Node::grants`] |
+/// | charter | records the cap in [`Node::narrowed`]; the door subtracts it from the charter's line | clears the cap from [`Node::narrowed`], or refuses [`AllowError::WidensCharter`] if the charter's line does not grant it |
+///
+/// In a charter mesh `on` can never widen, and it cannot be a silent no-op
+/// either: an operator who typed it meant to grant something, so it answers
+/// [`AllowError::WidensCharter`] and names the line that would have to change.
+/// `off` for a capability the charter does not grant is a genuine
+/// [`AllowChange::NoOp`] — the door already refuses it.
+///
+/// Turning OFF the last capability of a mesh in a PAIR mesh drops that mesh's
+/// entry rather than storing an empty list: "granted nothing here" and "not in
+/// this mesh" are the same grant, and an empty list is never written — the
+/// shape the pre-charter `allows` array already held. A charter mesh's
+/// `narrowed` entry keeps the same shape for the same reason.
 pub fn set_node_allow(nodes: &mut [Node], name: &str, cap: &str, on: bool, mesh: &str) -> Result<AllowChange, AllowError> {
     if !valid_capability(cap) {
         return Err(AllowError::UnknownCapability);
@@ -638,6 +690,34 @@ pub fn set_node_allow(nodes: &mut [Node], name: &str, cap: &str, on: bool, mesh:
     let Some(p) = nodes.iter_mut().find(|p| p.name == name) else {
         return Err(AllowError::UnknownNode);
     };
+    let charter_grant = crate::charter::governing(mesh);
+    if let Some(charter) = &charter_grant {
+        let granted = p
+            .pubkey
+            .as_deref()
+            .and_then(|key| charter.grant_for_key(key))
+            .is_some_and(|caps| caps.iter().any(|c| c == cap));
+        if on && !granted {
+            return Err(AllowError::WidensCharter);
+        }
+        let entry = p.narrowed.entry(mesh.to_string()).or_default();
+        let has = entry.iter().any(|a| a == cap);
+        if on {
+            if !has {
+                return Ok(AllowChange::NoOp);
+            }
+            entry.retain(|a| a != cap);
+            if entry.is_empty() {
+                p.narrowed.remove(mesh);
+            }
+            return Ok(AllowChange::Enabled);
+        }
+        if !granted || has {
+            return Ok(AllowChange::NoOp);
+        }
+        entry.push(cap.to_string());
+        return Ok(AllowChange::Disabled);
+    }
     let entry = p.grants.entry(mesh.to_string()).or_default();
     let has = entry.iter().any(|a| a == cap);
     if on {
@@ -1060,6 +1140,7 @@ mod tests {
             pubkey: None,
             verified: false,
             grants: Grants::new(),
+            narrowed: Grants::new(),
             via: None,
             added_at: "2026-08-14T00:00:00Z".to_string(),
         }
