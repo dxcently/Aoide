@@ -2,11 +2,11 @@
 // dock's gadget column (WidgetSlot host — root is an Item that sizes itself
 // off its content, same as every other slot in this directory).
 //
-// Ported from the facet's PowerVitalsGadget.qml (per-song widget-slot
-// expansion, CONTRACTS.md §5) — ownership moved from the facet to sonata's
+// Ported from the shell's PowerVitalsGadget.qml (per-song widget-slot
+// expansion, CONTRACTS.md §5) — ownership moved from the shell to sonata's
 // score. Live: sonata's own `widgets/dock.qml` embeds
 // `WidgetSlot { slot: "power" }` in its gadget column (slots.md's wired
-// table). The facet's PowerVitalsGadget.qml stays in the tree but is no
+// table). The shell's PowerVitalsGadget.qml stays in the tree but is no
 // longer instantiated by anything.
 //
 import QtQuick

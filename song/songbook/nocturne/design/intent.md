@@ -16,7 +16,7 @@ committed bodies wholesale (identical structure/layout, only the palette
 differs). It declares one `vigil` dock widget (`widgets/vigil.qml`) as the
 only file this song authors beyond its notes. Not a real dressed song — no
 design intent beyond proving the pipeline. See `CONTRACTS.md` §5's "declared
-widget-type registry" subsection and `modules/facets/quickshell/qml/slots.md`'s
+widget-type registry" subsection and `pkgs/lyra-shell/qml/slots.md`'s
 "Declared slots" section for the mechanism this proves.
 
 ## Palette Rationale
@@ -35,7 +35,7 @@ widget-type registry" subsection and `modules/facets/quickshell/qml/slots.md`'s
 
 ## How to fill this rice
 
-- Slot catalog (which slots a host wires today, what each expects): `modules/facets/quickshell/qml/slots.md`
+- Slot catalog (which slots a host wires today, what each expects): `pkgs/lyra-shell/qml/slots.md`
 - Per-song widget contract: `CONTRACTS.md` §5, "Per-song flavor widgets"
 - Songbook playbook: `song/songbook/update-playbook.md`
 - Drop a `widgets/<slot>.qml` here to dress a slot — any file under `widgets/` becomes a slot named for its basename; nothing renders until a host surface embeds a `WidgetSlot` anchor for that name.

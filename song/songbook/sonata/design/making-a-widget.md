@@ -26,7 +26,7 @@ is a real number from a real file; every quote is a real line.
 Three widgets in this house were written weeks apart, by different passes, on
 three unrelated metaphors — a Tuscan temple stele
 (`widgets/notifications.qml`), a two-column temple porch
-(`modules/facets/quickshell/qml/AudioColonnade.qml`), and a papyrus scroll
+(`song/songbook/sonata/widgets/AudioColonnade.qml`), and a papyrus scroll
 (`widgets/calendar.qml`). Nothing in their concepts overlaps.
 
 Their part lists are the same list, in the same order, at the same sizes:
@@ -439,8 +439,8 @@ window".
 
 ## 10. Worked example (short) — `AudioColonnade.qml`, the bar-popout reference
 
-Facet-side (`modules/facets/quickshell/qml/AudioColonnade.qml`), not a song
-widget — but it is the live precedent for **a bar popout body**, so a new
+Song-side (`song/songbook/sonata/widgets/AudioColonnade.qml`), not the shell's
+QML — but it is the live precedent for **a bar popout body**, so a new
 popout should be read against it rather than against the bar itself.
 
 - Hosted BARE through `StelePopout` (khoa, 2026-07-31 standing direction: new

@@ -18,10 +18,10 @@
 // ── MODES — the tabs cut into the top rule ───────────────────────────────
 //   apps    every installed desktop entry (Quickshell's DesktopEntries),
 //           alphabetical at rest, fuzzy-ranked under a query.
-//   clip    clipboard history — the facet's `AoideClipboard` extra
+//   clip    clipboard history — the shell's `AoideClipboard` extra
 //           (`parsedEntries`, `refresh()`, `copyById(id)`), text only: an
 //           image entry shows its metadata line, never a thumbnail.
-//   ledger  the facet's `GrimoireLedger` extra (`song/stage/grimoire.json`,
+//   ledger  the shell's `GrimoireLedger` extra (`song/stage/grimoire.json`,
 //           CONTRACTS §4): the most-launched apps, count and age.
 // A mode whose extra is absent (the preview canvas passes both as null)
 // says so on its first row; nothing is faked.

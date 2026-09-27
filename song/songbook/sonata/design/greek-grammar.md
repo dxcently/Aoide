@@ -4,7 +4,7 @@
 
 The concrete kit an author picks from: faces, glyphs, type tiers, the opacity
 ladder, rule idioms, state treatments, and which `livery.*` role plays which
-part. Everything here is in live use in `widgets/*.qml` or the shared facet
+part. Everything here is in live use in `widgets/*.qml` or the shell's own
 chrome — nothing is aspirational.
 
 Companions: `making-a-widget.md` (how these pieces assemble into something

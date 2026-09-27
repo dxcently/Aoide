@@ -58,14 +58,14 @@ chain carries it.
 
 ## Cover
 
-`wallpaper` is null; the stylix facet bakes a deterministic graphite solid
+`wallpaper` is null; the stylix lane bakes a deterministic graphite solid
 from `palette.bg`.
 
 ## Known hazard, not fixed here
 
-The stylix facet pins `polarity = lib.mkDefault "light"`
-(`modules/facets/stylix/default.nix:214`). A song may not set it — that is
-a host/facet option, out of a song's reach under CONTRACTS §5. Quickshell
+The stylix lane pins `polarity = lib.mkDefault "light"`
+(`modules/dendrites/stylix.nix`). A song may not set it — that is
+a host/lane option, out of a song's reach under CONTRACTS §5. Quickshell
 surfaces read `livery.*` directly and render fully dark and correct under
 fugue regardless; Stylix-themed GTK/Qt apps may still pick light-variant
 chrome. The fix, if wanted, is a host line (`stylix.polarity = "dark";`) —
@@ -73,6 +73,6 @@ out of scope for this song.
 
 ## How to fill this rice further
 
-- Slot catalog: `modules/facets/quickshell/qml/slots.md`
+- Slot catalog: `pkgs/lyra-shell/qml/slots.md`
 - Per-song widget contract: `CONTRACTS.md` §5
 - Songbook playbook: `song/songbook/update-playbook.md`

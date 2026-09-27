@@ -1,6 +1,6 @@
 // herald.qml — cadenza's "herald" slot: the THIN window shell of the toast.
 //
-// Hosted by `SurfaceSlot` (modules/facets/quickshell/qml/slots.md): the root
+// Hosted by `SurfaceSlot` (pkgs/lyra-shell/qml/slots.md): the root
 // is a `PanelWindow` owning its layer surface. Everything drawn — the ledger
 // read, the dismiss clock, the blocks, the two commands — lives in
 // `HeraldBody.qml`, loaded BY URL (design/kit.md §1); the preview canvas

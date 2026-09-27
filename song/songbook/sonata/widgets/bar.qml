@@ -1,13 +1,13 @@
-// bar.qml — sonata's "bar" slot (was AoideBar.qml, moved out of the facet
+// bar.qml — sonata's "bar" slot (was AoideBar.qml, moved out of the shell
 // as of the widget-slot expansion, CONTRACTS.md §5). THE MEASURE — a
 // clean-slate redesign in the SONG vein.
 //
 // Whole-content slot, hosted by `WidgetSlot`, not `SurfaceSlot` — the bar's
-// `PanelWindow` stays in the facet (shell.qml); only its CONTENT is this
-// per-song widget. The song fully owns its own footprint: the facet reads
+// `PanelWindow` stays in the shell (shell.qml); only its CONTENT is this
+// per-song widget. The song fully owns its own footprint: the shell reads
 // this file's `implicitHeight` back and binds the `PanelWindow`'s own
 // `implicitHeight`/`exclusiveZone` to it (see shell.qml), rather than the
-// facet pinning a fixed height. Extras this file needs beyond the universal
+// shell pinning a fixed height. Extras this file needs beyond the universal
 // `livery`/`bridge`: `stagingEngine` (so its own embedded calendar
 // `WidgetSlot` can resolve), `powermenu` (the powermenu slot's live
 // `.item`, for the clef), `shared` (session state, optional).
@@ -15,7 +15,7 @@
 // (uppercase filename — carried by the build, never independently
 // resolvable as a slot), joined by `BarPopout`/`AudioColonnade` as of P1
 // and `StelePopout`/`SteleLayerPopout` as of P2. `WidgetSlot` alone stays
-// in the facet as shared, reusable chrome — reached via the
+// in the shell as shared, reusable chrome — reached via the
 // `import "../.."` below.
 //
 // Aoide is the muse of song, so the bar is one bar of music. The old
@@ -45,7 +45,7 @@
 // (clef, rests, note-marks) carry the ornament. It should read as sheet music.
 //
 // Geometry: `stripHeight` (36) is this song's own choice, read back by the
-// facet rather than pinned by it (see the widget-slot note above) — the
+// shell rather than pinned by it (see the widget-slot note above) — the
 // number happens to stay 36 for now, but the MECHANISM is dynamic, so a
 // future song's `bar.qml` is free to pick a different footprint. Everything
 // is drawn INSIDE the strip — no apron, no taller transparent surface (that
@@ -96,7 +96,7 @@
 //     the BEHAVIOUR of a small hover readout, not for its chrome.
 //   · `[ mixer ]` in the colonnade's ledger launches pavucontrol through
 //     `Quickshell.execDetached` (AoideClipboard's argv-only idiom). The
-//     package is added by the quickshell facet — it is that facet's widget
+//     package is added by the quickshell shell — it is that shell's widget
 //     that needs it.
 //
 // khoa, 2026-08-16 — THE CUE BECOMES A CONTROL, AND THE PILLARS GET ROSTERS.
@@ -168,13 +168,13 @@ import Quickshell.Services.Pipewire
 import Quickshell.Services.UPower
 import Quickshell.Services.SystemTray
 import Quickshell.Networking
-// Reaches the facet's shared, reusable `WidgetSlot` — none of it is
-// bar-specific content, so it stays in the facet rather than moving here.
+// Reaches the shell's shared, reusable `WidgetSlot` — none of it is
+// bar-specific content, so it stays in the shell rather than moving here.
 // BarPopout and AudioColonnade moved to sonata/widgets/ in P1, StelePopout
 // and SteleLayerPopout in P2, and all four resolve same-dir now.
 // Deployed-tree relative path: this file lands at $out/qml/songs/sonata/
-// bar.qml, so two levels up ($out/qml/songs/ → $out/qml/) is the facet's
-// own qml/ root (modules/facets/quickshell/default.nix's build walk fixes
+// bar.qml, so two levels up ($out/qml/songs/ → $out/qml/) is the shell's
+// own qml/ root (the lyra lane's build walk, modules/dendrites/lyra/default.nix, fixes
 // that depth by construction — see its own comment on the songs/ copy).
 import "../.."
 
@@ -516,7 +516,7 @@ component WorkspaceRow: Item {
 
     // The strip is 36px; the PanelWindow reserves exactly this — read back
     // dynamically now (shell.qml binds its exclusiveZone/implicitHeight off
-    // this value), not pinned by the facet. Everything is painted within it
+    // this value), not pinned by the shell. Everything is painted within it
     // — the clef included — so no apron is needed (windows do not jump).
     readonly property int stripHeight: 36
     implicitHeight: stripHeight

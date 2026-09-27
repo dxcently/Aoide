@@ -2,23 +2,23 @@
 // in the dock's gadget column (WidgetSlot host — root is an Item that sizes
 // itself off its content, same as every other slot in this directory).
 //
-// Ported from the facet's TerminalsGadget.qml (per-song widget-slot
-// expansion, CONTRACTS.md §5) — ownership moved from the facet to sonata's
+// Ported from the shell's TerminalsGadget.qml (per-song widget-slot
+// expansion, CONTRACTS.md §5) — ownership moved from the shell to sonata's
 // score. Live: sonata's own `widgets/dock.qml` embeds
 // `WidgetSlot { slot: "terminals" }` in its gadget column (slots.md's wired
-// table). The facet's TerminalsGadget.qml stays in the tree but is no
+// table). The shell's TerminalsGadget.qml stays in the tree but is no
 // longer instantiated by anything.
 //
 import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
-// Reaches the facet's shared components — MoodFaces (the kaomoji troupe)
+// Reaches the shell's shared components — MoodFaces (the kaomoji troupe)
 // and ScrollRail (the draggable scrollbar) — neither of which is
-// terminals-specific chrome, so they stay in the facet rather than moving
+// terminals-specific chrome, so they stay in the shell rather than moving
 // here. Deployed-tree relative path: this file lands at $out/qml/songs/
 // sonata/terminals.qml, so two levels up ($out/qml/songs/ → $out/qml/) is
-// the facet's own qml/ root (bar.qml idiom; see that file's own header).
+// the shell's own qml/ root (bar.qml idiom; see that file's own header).
 import "../.."
 
 // ── THE TERMINALS ────────────────────────────────────────────────────────────

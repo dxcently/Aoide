@@ -1,18 +1,18 @@
 // launcher.qml — sonata's "launcher" slot (was AoideLauncher.qml, moved out
-// of the facet as of the widget-slot expansion, CONTRACTS.md §5). Hosted by
+// of the shell as of the widget-slot expansion, CONTRACTS.md §5). Hosted by
 // `SurfaceSlot`, not `WidgetSlot` — this root is a `PanelWindow`, not an
 // `Item`; it owns its own layer, namespace, keyboard focus, and
 // GlobalShortcut, which travels with the slot (see
-// modules/facets/quickshell/qml/slots.md). Extras: `clipboard` (the
+// pkgs/lyra-shell/qml/slots.md). Extras: `clipboard` (the
 // AoideClipboard instance, unchanged) and `ledger` (GrimoireLedger — stays
-// in the facet, injected here, see below).
+// in the shell, injected here, see below).
 //
 // Quickshell-native application launcher — replaces rofi. A summoned overlay:
 // hidden by default, it drops onto the OVERLAY layer with an EXCLUSIVE keyboard
 // grab, filters the installed .desktop entries as you type, and launches the
 // chosen one. Trigger is a Hyprland GLOBAL shortcut (aoide:launcher) the
 // launcher registers in-process — the compositor binds SUPER+SPACE to it (see
-// modules/facets/compositor: `bind = SUPER, SPACE, global, aoide:launcher`).
+// modules/dendrites/compositor/hyprland: `bind = SUPER, SPACE, global, aoide:launcher`).
 // Escape / a click on the scrim / launching an app dismisses it. NONE of that
 // wiring has ever changed across the chrome redesigns — the trigger name,
 // keybind, and compositor namespace (`aoide-launcher`) are stable contracts.
@@ -74,7 +74,7 @@
 //     exactly the old whole-spread turn).
 //
 // ── The ledger — `song/stage/grimoire.json` (CONTRACTS.md §4) ──────────────
-// `GrimoireLedger.qml` stays in the facet (a data seam, not chrome) and is
+// `GrimoireLedger.qml` stays in the shell (a data seam, not chrome) and is
 // injected here as the `ledger` extra — shell.qml instantiates the ONE
 // instance and hands it to this slot's SurfaceSlot, the same way `clipboard`
 // arrives. Every successful launch calls `ledger.record`; page one — MOST
@@ -125,7 +125,7 @@ PanelWindow {
     required property var livery
     required property var bridge
     required property var clipboard
-    // The Grimoire's usage ledger — stays in the facet, injected as an extra
+    // The Grimoire's usage ledger — stays in the shell, injected as an extra
     // (see the ledger header note above); no longer instantiated locally.
     required property var ledger
 

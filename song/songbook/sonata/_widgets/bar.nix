@@ -1,13 +1,13 @@
 # sonata's `bar` slot — the top-edge widget, hosted by shell.qml's PanelWindow.
 #
-# `kind` is absent → null: `bar` is a facet-anchored slot (shell.qml embeds
+# `kind` is absent → null: `bar` is a shell-anchored slot (shell.qml embeds
 # `WidgetSlot { slot: "bar" }` directly, slots.md's own wired-slot table),
 # never a declared `arrangement.widgets` entry.
 #
 # `packages`: widgets/bar.qml shells out to `pactl` (`Quickshell.execDetached`,
 # the card-profile switch) and `pavucontrol` (the mixer launch). Both are
-# already carried by `modules/facets/quickshell/default.nix`'s
-# `environment.systemPackages` today (`pkgs.pavucontrol`, `pkgs.pulseaudio #
+# already carried by the lyra lane's own
+# `environment.systemPackages` (`modules/dendrites/lyra/default.nix`, `pkgs.pavucontrol`, `pkgs.pulseaudio #
 # for pactl only`) — this record names the same two packages so a later
 # consumer can derive the install list from the widget instead of a
 # hand-synced comment.

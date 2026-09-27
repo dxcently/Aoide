@@ -75,5 +75,5 @@ all, by the `//` override rather than merged into.
 
 ## Cover
 
-`aoide.livery.wallpaper = null` — the stylix facet bakes a deterministic
+`aoide.livery.wallpaper = null` — the stylix lane bakes a deterministic
 solid from `palette.bg`, same mechanism sonata and fugue use.

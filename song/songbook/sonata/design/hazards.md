@@ -83,7 +83,7 @@ Other glyph findings:
 - **`WidgetSlot` sizes itself off the loaded child**, which is backwards for a
   full-width surface. `bar.qml` binds `width: parent ? parent.width :
   implicitWidth` — under `Component.createObject(root, props)` its `parent` IS
-  the `WidgetSlot`, which the facet anchors to fill the window.
+  the `WidgetSlot`, which the shell anchors to fill the window.
 - **Toggling `visible` inside a centred layout makes the layout jump.**
   `powermenu.qml`'s laurel `♪` tick is anchored OUTSIDE the centring and
   cross-fades on `opacity` "so the name never jumps when the laurel arrives".
@@ -241,7 +241,7 @@ more robust idiom, not a fix for a broken binding.)
 - **`QsMenuAnchor.open()` hard-errors unless quickshell runs in QApplication
   mode** — `ERROR: Cannot call QsMenuAnchor.open() as quickshell was not
   started in QApplication mode.` The fix is `//@ pragma UseQApplication` at
-  the top of the ROOT file (`shell.qml`, facet-side) and a real
+  the top of the ROOT file (`shell.qml`, in the shell's own QML) and a real
   `aoide-quickshell.service` restart — a reload does not re-create the
   application object. No other behavior difference observed after the switch.
 - **`onlyMenu`/ItemIsMenu is NOT a usable discriminator for "click should

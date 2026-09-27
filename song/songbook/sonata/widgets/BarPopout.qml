@@ -7,7 +7,7 @@
 // surface, free to extend past the strip.
 //
 // Chrome: the same GadgetFrame ASCII box the dock gadgets wear (╔═[ TITLE ]═╗,
-// glass over compositor blur — the compositor facet's blur_popups layerrule
+// glass over compositor blur — the compositor shell's blur_popups layerrule
 // extends the aoide-bar blur to these popups). All colors from livery.
 //
 // Usage (children land in the frame body, GadgetFrame-style):

@@ -28,7 +28,7 @@ local directories. For a remote scheme like `qs:` it needs a `qmldir` that
 names the type. Without one it fails with `Pane is not a type` (unless the
 type happens to be in the component cache already). The nix build writes
 that qmldir for every uppercase helper
-(`modules/facets/quickshell/default.nix`, the "qmldir: register this song's
+(`modules/dendrites/lyra/default.nix`, the "qmldir: register this song's
 helper types" block). Two other paths into a running shell do **not** write
 one:
 

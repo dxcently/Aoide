@@ -1,6 +1,6 @@
 // launcher.qml — cadenza's "launcher" slot: the THIN window shell.
 //
-// Hosted by `SurfaceSlot` (modules/facets/quickshell/qml/slots.md): the root
+// Hosted by `SurfaceSlot` (pkgs/lyra-shell/qml/slots.md): the root
 // is a `PanelWindow` owning its layer, namespace, keyboard focus and global
 // shortcuts. Everything drawn lives in `LauncherBody.qml`, loaded BY URL
 // (design/kit.md §1) — the preview canvas refuses a PanelWindow root, so the
@@ -9,8 +9,8 @@
 // Contract (slots.md, the same one sonata's launcher keeps):
 //   · namespace `aoide-launcher`, layer Overlay, full-screen, no exclusive
 //     zone; keyboard focus Exclusive while shown.
-//   · extras `clipboard` (the facet's AoideClipboard) and `ledger` (the
-//     facet's GrimoireLedger), handed through to the body untouched.
+//   · extras `clipboard` (the shell's AoideClipboard) and `ledger` (the
+//     shell's GrimoireLedger), handed through to the body untouched.
 //   · `toggle()` / `show()` / `hide()` / `openClipboard()`.
 //   · GlobalShortcut `aoide:launcher` toggles (the compositor binds
 //     SUPER+SPACE to it); `aoide:clipboard` opens straight on the clip tab.

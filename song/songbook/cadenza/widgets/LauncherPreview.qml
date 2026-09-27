@@ -7,7 +7,7 @@
 //
 // The canvas hands every widget `clipboard: null, ledger: null` (both extras
 // reach the system), so this harness builds two inert stand-ins with the
-// SAME API the facet's AoideClipboard / GrimoireLedger expose
+// SAME API the shell's AoideClipboard / GrimoireLedger expose
 // (`parsedEntries`/`loading`/`loadError`/`refresh()`/`copyById()` and
 // `launches`/`count()`/`rankedIds()`/`record()`), holding sample data inline.
 // Neither touches cliphist, the ledger file or anything outside this item;
@@ -43,7 +43,7 @@ Item {
         { name: "ledgerEmpty", mode: "ledger", query: "",    clip: true,  led: false, emptyLedger: true }
     ]
 
-    // ── inert stand-ins, same API as the facet's extras ───────────────────
+    // ── inert stand-ins, same API as the shell's extras ───────────────────
     QtObject {
         id: clipStub
         property bool loading: false

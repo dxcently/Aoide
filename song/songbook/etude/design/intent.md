@@ -30,7 +30,7 @@ beyond that.
 
 ## How to fill this rice
 
-- Slot catalog (which slots a host wires today, what each expects): `modules/facets/quickshell/qml/slots.md`
+- Slot catalog (which slots a host wires today, what each expects): `pkgs/lyra-shell/qml/slots.md`
 - Per-song widget contract: `CONTRACTS.md` §5, "Per-song flavor widgets"
 - Songbook playbook: `song/songbook/update-playbook.md`
 - Drop a `widgets/<slot>.qml` here to dress a slot — any file under `widgets/` becomes a slot named for its basename; nothing renders until a host surface embeds a `WidgetSlot` anchor for that name.

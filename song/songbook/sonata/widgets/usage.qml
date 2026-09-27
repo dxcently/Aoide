@@ -2,13 +2,13 @@
 // the dock's gadget column (WidgetSlot host — root is an Item that sizes
 // itself off its content, same as every other slot in this directory).
 //
-// Ported from the facet's UsageGadget.qml (per-song widget-slot expansion,
-// CONTRACTS.md §5) — ownership moved from the facet to sonata's score. Live:
+// Ported from the shell's UsageGadget.qml (per-song widget-slot expansion,
+// CONTRACTS.md §5) — ownership moved from the shell to sonata's score. Live:
 // sonata's own `widgets/dock.qml` embeds `WidgetSlot { slot: "usage" }` in
-// its gadget column (slots.md's wired table). The facet's UsageGadget.qml
+// its gadget column (slots.md's wired table). The shell's UsageGadget.qml
 // stays in the tree but is no longer instantiated by anything.
 //
-// Through a WidgetSlot the old facet-host inversion (`UsageGadget { visible:
+// Through a WidgetSlot the old shell-host inversion (`UsageGadget { visible:
 // hasData }`, reaching into the child's own property) can't travel — the
 // slot sizes off THIS file's implicitHeight, so implicitHeight itself
 // carries the collapse: zero while hasData is false, the real content
@@ -62,7 +62,7 @@ Item {
     property string usagePath: (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/state/usage.json"
 
     // WidgetSlot._songProps() always passes bridge unconditionally (universal
-    // widget contract, slots.md) — promoted from the facet's nullable
+    // widget contract, slots.md) — promoted from the shell's nullable
     // `bridge: null` to required. Still used only for the OUTBOUND-only
     // (hazards §5) `refreshusage` command via refreshUsage(); the manual-refresh
     // click null-guards on it regardless.
