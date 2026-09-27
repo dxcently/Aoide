@@ -55,6 +55,13 @@ mutation re-stages `state/stage/graph.json`
 via `restage_graph` so the hot-reloaded document never drifts from the
 registries. The audit log resolves to `$AOIDE_ROOT/log` (default
 `~/.aoide/log`; `$AOIDE_AUDIT_LOG`, or the `--audit-log` flag, override).
+Every dispatch appends one record through `cli/src/dispatch.rs` — the
+house-wide per-command line, `command` the dotted path, status `ok|error` —
+and a command whose outcome carries detail the envelope does not writes a
+SECOND record of its own under the same command name: the shape `send`'s
+outcome record holds, and the one `resurrect`/`session pending approve|deny`
+share. `session pending approve` adds a third, because it re-drives the
+injection door in-process and that door audits its own line.
 
 Every command takes `--json`: without it the CLI prints the human `message`
 line (plus a `changed:` trailer); with it, an envelope `{status, command,
@@ -507,8 +514,9 @@ then names both misses (`no .aoide/project.json above <cwd> and no
 that gave one of the three flags without `--project` (e.g. `--id X` alone)
 never attempts a walk and gets the original `--project`-missing usage error
 instead. See "The project manifest" below for the file's shape and the
-per-spec revival rule; every invocation — including the empty-selection
-no-op — writes exactly one audit line.
+per-spec revival rule; every invocation — the empty-selection no-op included
+— writes its own `resurrect` outcome record, on top of the dispatcher's
+per-command record (the two-line shape above).
 
 **Flag mode (`--project`/`--all`/`--id`) — unchanged.**
 
@@ -726,7 +734,10 @@ aoide session pending approve <id> [--json]
   represents, in-process through `session_send` — the SAME door `session
   permit`'s verdict-typing already goes through — then removes the entry from
   `pending.json` under the stage lock. Resolution is the audit line, not a
-  persisted archive.
+  persisted archive: the resolution record under `session.pending.approve`
+  (the injected text as `untrusted_data`), the re-driven `send`'s own outcome
+  record, and the dispatcher's per-command record — three lines, the first
+  two being the shape `send` alone already writes.
 - **Output:** the inner `send` outcome. A malformed or out-of-range id
   fails cleanly (exit 1), leaving the entry untouched — never destroyed on
   failure.
@@ -739,7 +750,10 @@ aoide session pending deny <id> [--json]
 
 - **Reads:** `state/stage/pending.json`; `<id>` is the entry's list position.
 - **Writes:** removes the entry from `pending.json` under the stage lock —
-  injects nothing.
+  injects nothing. The drop is recorded: a resolution record under
+  `session.pending.deny`, status `denied`, with the dropped text as
+  `untrusted_data`, plus the dispatcher's per-command record (the two-line
+  shape above).
 - **Output:** `data: {id, sessionId}`. A malformed or out-of-range id fails
   cleanly, leaving the entry untouched.
 
