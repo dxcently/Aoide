@@ -18,7 +18,7 @@ updated: 2026-09-27
 - [[Gadget-Dock]] — the `AoidePanel.qml` left-edge dock: hot-edge hover, SUPER+G, four core gadgets plus an opt-in Usage stele, livery-only colour
 - [[Widget-Preview]] — `lyra preview`: the isolated design canvas for a song widget — any size, anchor, viewport and fixture, a stub bridge, never the live desktop
 - [[Lexicon]] — the whole vocabulary: the three Muses, the frozen/performed split, the machinery words, and why each word family was chosen
-- [[Snowflake-Anatomy]] — the flake's structural layers (nucleus / dendrites / facets / rime) and how the walker registers modules automatically
+- [[Snowflake-Anatomy]] — the flake's structural layers (nucleus / dendrites / aggregations / overrides) and how the catalogue registers modules
 - [[Clone-and-Run]] — installing Aoide: the `aoide`/`aoided` binaries by cargo (no nix), then clone + `aoide onboard`; the shared-history model for upstream updates and optional contributions
 - [[Self-Ricing]] — the rice lifecycle (compose → stage → lint → draft → declare), the songbook write-back, and the three-way `rice mode` gate
 - [[Song-Vocabulary]] — what each song term maps to in the performed half, and how replay makes a committed song host-agnostic

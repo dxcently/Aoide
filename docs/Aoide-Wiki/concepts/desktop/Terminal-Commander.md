@@ -163,7 +163,7 @@ Two ways to reach a terminal, both one hop:
 - **Click** reuses the existing session-jump flow — the correct window in one
   hop, no polling or secondary lookup.
 - **Keybind** is a [[Hyprland]] compositor bind (declared in the compositor
-  facet): cycle through agent terminals, or pop the roster for type-to-focus.
+  lane): cycle through agent terminals, or pop the roster for type-to-focus.
   Because binds are declarative nix, the keys ship with the rice and are
   rebindable like any other.
 

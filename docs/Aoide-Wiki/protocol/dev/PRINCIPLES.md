@@ -22,9 +22,10 @@ distillation, not a replacement for either.
 needs by name, and being removable without a trace. Nothing enters by being
 added to a list.**
 
-The repo already runs this way: the walkers discover `modules/dendrites/*`,
-`modules/facets/*`, `pkgs/*` and `song/songbook/*/rice.nix` by walking the
-tree. **Adding a capability is a new folder, never an edit to an import
+The repo already runs this way: the catalogue names every dendrite, and
+`modules/aggregations/*`, `modules/overrides/*`, `pkgs/*` and
+`song/songbook/*/rice.nix` are found by their own directories' shallow scans.
+**Adding a capability is a new file plus its one line, never an edit to an import
 list.**
 
 ### Instructions
@@ -35,7 +36,7 @@ list.**
   own declaration. Never switch a module on from outside it.
 - **Depend by name, never by import.** Ask for a service, a slot, a stage
   file, or a schema entry. Never import another module's implementation.
-- **Read only what you are given.** A facet reads the closed namespace
+- **Read only what you are given.** A paint lane reads the closed namespace
   whitelist and nothing else. No module reads another module.
 - **Give every effect an inverse.** A change that cannot be backed out is
   not finished.

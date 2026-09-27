@@ -49,9 +49,9 @@ its envelope when the window closes.
 $XDG_RUNTIME_DIR/aoide-preview/            the ISOLATED root (never under aoide/, the daemon's socket dir)
 ├─ song/stage/livery.json                  the song's committed livery + {"song": …}, or --livery's file
 ├─ state/stage/{sessions,projects,hooks,herald}.json    one fixture set, copied in
-├─ run/qml/*.qml                           COPIES of checkout modules/facets/quickshell/qml/*.qml
+├─ run/qml/*.qml                           COPIES of checkout pkgs/lyra-shell/qml/*.qml
 ├─ run/qml/songs/<song>/                   COPIES of checkout song/songbook/<song>/widgets/ (every song)
-├─ run/qml/icons/                          COPIES of checkout modules/facets/quickshell/icons/ (the toolbar's Iconoir glyphs)
+├─ run/qml/icons/                          COPIES of checkout pkgs/lyra-shell/icons/ (the toolbar's Iconoir glyphs)
 ├─ run/qml/songs/{manifest,registry}.json  copies of the deployed owner map
 ├─ preview.json                            the control file — the rail and `lyra preview set` write the same document
 └─ preview.pid                             one canvas per root; `--root` for a second
@@ -61,7 +61,7 @@ Everything under `run/qml/` is a copy, never a symlink into the checkout:
 a write through the root lands in the root. The checkout is the only place a
 widget is edited. `preview.json`'s `stage` map pairs each watched checkout
 file with its copy, and the canvas rewrites those copies before every
-reload (auto-reload, the Reload button, the `reload` IPC). A facet file
+reload (auto-reload, the Reload button, the `reload` IPC). A lane file
 edited outside the watch list needs `lyra preview --no-launch --root <root>`
 to re-stage; that rebuild merges into the existing control file. `--root`
 refuses `..` and anything at, under, or symlink-resolving into the live
@@ -76,8 +76,8 @@ holding Space (outside a text field or a Tab-focused control) turns left-drag in
 hand — it masks the annotation tool in use and never changes it; Ctrl+wheel
 zooms about the pointer; plain wheel reaches the widget; Fit, 1:1, a typed
 zoom, and `lyra preview set --zoom` reset the camera. The camera is a view,
-never written to `preview.json`. The toolbar's glyphs are the facet's
-`lyra icon resolve` output under `modules/facets/quickshell/icons/`, copied
+never written to `preview.json`. The toolbar's glyphs are the lane's
+`lyra icon resolve` output under `pkgs/lyra-shell/icons/`, copied
 into the root beside the QML and tinted from the chrome — no network, no icon
 font. Hovering a glyph shows its tooltip; every button is a Tab stop, focus
 shows the same tooltip, and Space or Return presses it. The anchor grid is
@@ -126,7 +126,7 @@ purpose and simply relaunches.
 | zoom | `fit` · number | `fit` = min(pane/viewport) capped at 1.0, never upscaling; a number scales exactly. Zoom scales the rendered viewport only — the widget lays out at logical size |
 | background | `livery` · `checker` | palette ground, or an 8 px checkerboard to see transparent edges |
 | fixture | a set name · a directory | copied into `state/stage/` by `lyra preview set --fixture`; widgets hot-reload through their own file watches |
-| palette (livery) | `live` · a song name · a livery file · a base16 scheme (`.json` or flat `.yaml`) | resolved through the livery engine (the document `lyra livery emit` writes for its `stage` target, fallbacks applied) into `song/stage/livery.json` with `song` injected; a bare base16 scheme gets its palette from CONTRACTS §1's column (bg=base00, fg=base05, accent=base0D, urgent=base08, hot=base0B), the reverse of the Stylix facet's synthesis. `live` is the resolved stage twin, host overrides included. Every widget recolours in place; a swatch strip shows the five roles and all sixteen base16 slots |
+| palette (livery) | `live` · a song name · a livery file · a base16 scheme (`.json` or flat `.yaml`) | resolved through the livery engine (the document `lyra livery emit` writes for its `stage` target, fallbacks applied) into `song/stage/livery.json` with `song` injected; a bare base16 scheme gets its palette from CONTRACTS §1's column (bg=base00, fg=base05, accent=base0D, urgent=base08, hot=base0B), the reverse of the Stylix lane's synthesis. `live` is the resolved stage twin, host overrides included. Every widget recolours in place; a swatch strip shows the five roles and all sixteen base16 slots |
 | auto-reload · reload · recreate | on/off · — · — | auto-reload watches every `*.qml` in the song's `widgets/` dir (the `watch` list) and rebuilds the canvas within a second of a save; reload does the same by hand (state returns from `preview.json`); recreate rebuilds only the widget item — an edited body needs a reload, since components are cached per URL |
 | declare | arm, then confirm | `lyra preview declare`: the previewed body becomes `song/songbook/<song>/widgets/<slot>.qml` when it came from elsewhere, and the previewed palette becomes the song's `livery.json` tiers when it is not the song's own — byte-identical is a no-op, git and the rebuild stay yours ([[Self-Ricing]]'s `rice declare` vocabulary) |
 | annotate | off · pick · rect · ellipse · arrow · line · note | pick outlines the element under the pointer and a click attaches the rail's note to it; the shapes sketch where something should go; every entry is saved to the root's `notes.json` in widget-local coordinates and read back by `lyra preview notes` with its element path and source `file:line` |
@@ -137,7 +137,7 @@ a relaunch resumes where the last one stopped.
 
 ## Fixture sets
 
-`modules/facets/quickshell/preview/fixtures/<set>/` holds the four stage
+`pkgs/lyra-shell/preview/fixtures/<set>/` holds the four stage
 files in their live shapes (CONTRACTS.md §4). Shipped sets: `empty` (no
 sessions), `one` (a single working agent), `many` (every kind and state,
 nested chains, several projects), `long-text` (over-long titles, models,

@@ -26,7 +26,7 @@ AoideOS is also a specialized widget maker: it integrates and launches the indep
 - [[Gadget-Dock]] — `AoidePanel.qml`, a left-edge panel holding four core gadgets (Conductor, Terminals, Meters, Power) plus an opt-in Usage stele; opens on hot-edge hover or SUPER+G
 - [[Controls]] — the day-to-day reference: `ad*` rebuild aliases, compositor keybinds, bar cell interactions, shell QoL aliases
 - [[Lexicon]] — the whole vocabulary in one place: the three Muses, the frozen/performed split, why each word family was chosen
-- [[Snowflake-Anatomy]] — the flake's structural layers (nucleus, dendrites, facets) and how the walker registers modules automatically
+- [[Snowflake-Anatomy]] — the flake's structural layers (nucleus, dendrites, aggregations, overrides) and how the catalogue registers modules
 - [[Clone-and-Run]] — the install model: clone upstream to `~/Aoide`, run `aoide onboard`; shared history enables clean upstream merges
 - [[Self-Ricing]] — the agent generates, lints, previews, and adopts rices; songbook write-back is the "self" in self-ricing
 - [[Song-Vocabulary]] — the performed-half naming map: key, melody, component tier, instruments, design, songbook, cover, chimes, stage, rehearsal, recording

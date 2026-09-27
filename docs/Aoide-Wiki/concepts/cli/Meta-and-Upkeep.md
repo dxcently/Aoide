@@ -232,7 +232,7 @@ lyra quickshell reload [--json]
 - **Notes:** not gated; best-effort — `not-running` (service absent: no IPC
   attempted) and `failed` are reported facts, never command failures; exit
   stays 0. This is the reload lane for dynamically-loaded widget QML
-  (`Qt.createComponent`) and facet-owned QML that Quickshell's own file
+  (`Qt.createComponent`) and lane-owned QML that Quickshell's own file
   watcher never tracks ([[Quickshell]]). Named `quickshell`, not `shell`,
   because a top-level `shell` command collided with the `--agent shell`
   flag value (see the module doc in

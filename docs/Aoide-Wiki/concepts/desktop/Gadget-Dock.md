@@ -11,20 +11,19 @@ The **gadget dock** (`agentWidgets`) is the desktop's at-a-glance conductor
 surface: a left-edge panel holding Aoide's orchestration/system gadgets,
 summoned on demand and distinct from the terminal/TUI DAG views.
 
-*Implementation: `modules/facets/quickshell/qml/AoidePanel.qml` plus the
-gadget files — see [[Quickshell]] and [[Codebase]]. Appearance is not specified
+*Implementation: `pkgs/lyra-shell/qml/SongGadgets.qml` over the song's own
+`widgets/dock.qml` and gadget bodies — see [[Quickshell]] and [[Codebase]].
+Appearance is not specified
 here: the dock re-skins with the active song, and rice design memory lives in
 the songbook ([[Self-Ricing]]), not on this page.*
 
-**Status: songbook migration landed, facet switch pending a rebuild.** Twin
-bodies for the dock and all five gadgets above, plus the wallpaper layer and
-its picker, already live at `song/songbook/sonata/widgets/{dock,conductor,
-terminals,meters,power,usage,wallpaper,wallpaper-picker}.qml`
-([[Song-Anatomy]]) — inert, since `shell.qml` still instantiates the facet
-originals above directly rather than through a `WidgetSlot`/`SurfaceSlot`
-anchor. Repointing it is the pending switch and needs a User rebuild; until
-it lands, this page's `modules/facets/quickshell/qml/` implementation notes
-describe what actually renders.
+**Status: the song's own bodies paint.** The dock and its gadgets are
+per-song widget bodies — `song/songbook/sonata/widgets/{dock,conductor,
+terminals,meters,power,usage,wallpaper,wallpaper-picker}.qml` plus the shared
+frame ([[Song-Anatomy]]) — resolved by slot NAME through the staging engine,
+with sonata as the fallback. The lane's `pkgs/lyra-shell/qml/` carries the
+mechanism (`SongGadgets.qml`, `GadgetFrame.qml`, `WidgetSlot.qml`), not a
+second copy of a body: a change to what renders lands in a song's file.
 
 ## What the dock holds
 

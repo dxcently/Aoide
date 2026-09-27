@@ -8,7 +8,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 # Clone-and-Run — Installing Aoide
 
-Aoide is a framework you clone and run. The upstream repo ships the shape-making machinery (engine, contracts, walker, facets, management tools) but never the shapes themselves. Your clone is your instance.
+Aoide is a framework you clone and run. The upstream repo ships the shape-making machinery (engine, contracts, catalogue, paint lanes, management tools) but never the shapes themselves. Your clone is your instance.
 
 ## Why Shared History
 

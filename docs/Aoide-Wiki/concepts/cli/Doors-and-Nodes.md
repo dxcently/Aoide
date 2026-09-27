@@ -111,7 +111,7 @@ lyra shellbridge [--run] [--json]
 
 - **Reads:** env `$XDG_RUNTIME_DIR` (socket parent; falls back to
   `/run/user/1000`), `$AOIDE_DEFAULT_SONG` (the rice-mode toggle's
-  declarative-direction song, baked in by `modules/nucleus/shellbridge.nix`);
+  declarative-direction song, baked in by `modules/dendrites/lyra/shellbridge.nix`);
   `song/stage/mode.json` (the toggle's current mode — rice staging, so it
   stays under `song/stage/`). Newline-delimited JSON commands on its socket
   (below).

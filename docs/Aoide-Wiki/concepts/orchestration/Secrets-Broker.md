@@ -258,7 +258,7 @@ if the invoking uid doesn't own the secrets home. The service's own `path`
 carries `bash`, `coreutils`, and `age` (the backend templates shell out to
 all three); `qrencode` and `zenity` are packaged for the operator's own
 shell (QR rendering for `secrets enroll`, and the popup surface, gated on
-the quickshell facet being enabled).
+the shell lane being enabled).
 
 The deployed service runs with `ProtectHome=true` — the broker has no
 business reading any operator's home directory — which is why the events

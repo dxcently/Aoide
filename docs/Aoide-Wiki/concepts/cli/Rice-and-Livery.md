@@ -152,7 +152,7 @@ lyra rice compose <name> [--from <song>] [--force] [--json]
   with a `_widgets/` shelf still needs a real checkout: resolving a shelf
   takes `composeSong` in the nix evaluator, which the templates fallback
   cannot run. `$AOIDE_SONG_TEMPLATES` is wired only onto lyra-execing units
-  (`modules/nucleus/shellbridge.nix`'s shellbridge service) plus
+  (`modules/dendrites/lyra/shellbridge.nix`'s shellbridge service) plus
   `modules/nucleus/aoided.nix`'s `environment.sessionVariables` (gated on
   `aoide.lyra.enable`) — core-only units don't carry it.
 
@@ -294,8 +294,9 @@ lyra rice mode draft <name> [--json]
   `livery.json` is routed — `cover set`/`stage/cover.json` are not. Drafts
   sit under the runtime root, outside the git checkout entirely; a
   `rice declare` copy lands them in the checkout, where `.gitignore`
-  (`song/songbook/*/drafts/`) keeps them untracked and `lib/checks.nix`
-  `noSongRead` bans nix-eval reads of them.
+  (`song/songbook/*/drafts/`) keeps them untracked, and the
+  `song-runtime-untracked` check fails the tree if a runtime dir under `song/`
+  is ever committed.
 
 ### lyra cover set
 

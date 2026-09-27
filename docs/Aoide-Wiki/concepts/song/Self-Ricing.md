@@ -115,8 +115,11 @@ still captures widget bodies alongside livery+cover on every mint, in every
 mode; it is the take store, not the draft mechanism, that remembers them.
 
 Outside the git checkout entirely — the runtime root owns
-`song/songbook/*/drafts/`, same as `song/stage/` — and banned from
-nix-eval reads (`lib/checks.nix`'s `noSongRead`): a draft is durable
+`song/songbook/*/drafts/`, same as `song/stage/` — and runtime state by
+construction: the `song-runtime-untracked` check
+(`lib/checks.nix`) fails if a `song/` runtime dir is ever committed, and a
+`rice declare` copy of a draft lands under a gitignored
+`song/songbook/*/drafts/`. A draft is durable
 scratch, never committed or declared truth. That distinction from the
 checkout's committed `song/songbook/<name>/` files is the entire point.
 
@@ -261,7 +264,7 @@ name, or with none: it re-pins `stage/livery.json` to the resolved song's
 declared notes FIRST (with no name, the DECLARED song — the song
 `song/declared/livery.json` names, the venue's activation-published twin of
 the committed notes with any `aoide.livery.override` already applied; only a
-host that never activated the facet falls back to the current stage's own
+host that never activated the lane falls back to the current stage's own
 song, the auto-resolve `rice mode stage` uses) and only writes the lock
 marker after that write succeeds, so the re-pin can never trip the lock it
 is about to set. This means a bare `rice mode declarative` **discards
@@ -306,7 +309,7 @@ A song may set `aoide.livery.geometry` — gaps, border size, rounding, and
 blur, every field optional — alongside its palette and window tiers; see
 [[livery#The geometry tier]] for the field list and the fallback/live-apply
 mechanism. A song that sets no geometry performs with the compositor
-facet's own defaults, unchanged.
+lane's own defaults, unchanged.
 
 ## The Shipped Baseline Is Guarded, Not Frozen
 
@@ -315,7 +318,7 @@ facet's own defaults, unchanged.
 naming no song performs no song: a host opts into the desktop by naming the
 song explicitly. A missing baseline is a loud nix eval failure, never a
 silent no-op. `sonata` is upstream-owned and
-evolving: like any other upstream-owned tree (nucleus, facets), upstream
+evolving: like any other upstream-owned tree (nucleus, dendrites), upstream
 MAY update or iterate on it.
 
 Every OTHER song — anything composed via `rice compose` under a name other
@@ -358,7 +361,7 @@ aoide.song = "sonata";
 
 **Replay** is performing a declared song at a different host: the song
 carries only livery (palette + component tiers), the host supplies its own
-specifics (hardware, monitors) and enabled instruments (facets, dendrites).
+specifics (hardware, monitors) and enabled instruments (dendrites).
 A host lacking an instrument does not sound that part.
 
 **Transpose** vs **replay**: transpose is same venue, new key (new

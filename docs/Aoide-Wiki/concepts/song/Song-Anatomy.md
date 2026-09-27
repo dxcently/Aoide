@@ -57,39 +57,41 @@ sits outside it under `$AOIDE_ROOT`, created on demand.
 
 ### `songbook/<name>/` — one song each
 
-A song self-registers by living here: `lib/mkHost.nix` walks `song/songbook/`
-alongside `modules/`, and each song's `rice.nix` guards itself with
-`lib.mkIf (config.aoide.song == "<name>")`, so committing a folder makes the
-song fleet-available with no import list to edit ([[Self-Ricing]],
-[[Snowflake-Anatomy]]). Songs present today: **`sonata`** (a LIGHT dusk key
-keyed from its own cover `song/covers/yuki-sonata.png` — the pianist on
-mirror-water at dusk — currently performed on yomi-strix). Each folder
+A song is SELECTED, not walked: a host record names what it performs
+(`song.declared`) and what it keeps built in to stage without a rebuild
+(`song.available`); `lib/songbook.nix` finds `song/songbook/<song>/` by one
+typed scan and `lib/aoideos.nix` wires exactly the selected songs' `rice.nix`
+files in, each guarding itself with
+`lib.mkIf (config.aoide.song == "<name>")` ([[Self-Ricing]],
+[[Snowflake-Anatomy]]). Songs committed today: `cadenza` (the phosphor key, a
+dark green-CRT console — the song **yomi-strix performs**), `sonata` (the
+shipped standard, a light Greek key with no cover: a marble ground baked from
+`palette.bg`), and the songs the songbook also carries — `etude`, `fugue`,
+`nocturne`, `quodlibet`. Each folder
 holds:
 
 | Subfolder/file | Holds |
 |---|---|
-| `rice.nix` | pure nix: sets `aoide.livery.*` (palette + base16 + component tiers + wallpaper) under the `aoide.song` guard. **Only** `aoide.livery` — no host options, no facet toggles — so one score replays at any venue (`CONTRACTS.md §5`, [[Song-Vocabulary#Replay — any song, any host]]). The wallpaper note points at a file in the shared `song/covers/` library (`../../covers/<file>`), not a per-song `assets/` dir. |
+| `rice.nix` | pure nix: sets `aoide.livery.*` (palette + base16 + component tiers + wallpaper) and `aoide.arrangement.*` under the `aoide.song` guard. **No** host options, no lane toggles — so one score replays at any venue (`CONTRACTS.md §5`, [[Song-Vocabulary#Replay — any song, any host]]). The wallpaper note points at a file in the shared `song/covers/` library (`../../covers/<file>`), not a per-song `assets/` dir. |
 | `livery.json` | the song's resolved livery values — the [[livery]] schema: `palette`, `base16`, `bar`/`notif`/`window`. |
 | `palette/` | this song's transpose keys — the palette variants `rice transpose <song> <key>` swaps among |
 | `sounds/` | notification + system sounds (the chimes dimension) |
 | `icons/` | per-song icon overrides |
 | `widgets/` | per-song widget bodies — QML files the staging engine resolves per slot ([[Widget-Maker#The staging engine — a song overrides desktop chrome]]) |
+| `_widgets/` | the widget RECORDS (one plain nix function per slot, rolled up by `_widgets/default.nix`, `lib/song.nix`) — what `borrow` hands a song that lends its bodies |
 | `design/` | the song's design memory — `intent.md` (palette rationale, iteration log), ingested like any content ([[Self-Ricing#Songbook Discipline — the "Self" in Self-Ricing]]) |
 
-**sonata's `widgets/` holds fourteen bodies today**: `bar`, `calendar`,
-`conductor`, `dock`, `herald`, `herald-center`, `launcher`, `meters`,
-`powermenu`, `power`, `terminals`, `usage`, `wallpaper`, `wallpaper-picker`.
-Six are wired to a live host anchor (`calendar`, `herald`, `herald-center`,
-`powermenu`, `launcher`, `bar` — `modules/facets/quickshell/qml/slots.md`);
-the other eight (`dock`, `conductor`, `terminals`, `meters`, `power`,
-`usage`, `wallpaper`, `wallpaper-picker`) are twins of facet originals still
-doing the live drawing, carried but unanchored until the facet switch lands
+**The song's `widgets/` is what paints.** Each surface resolves its body by slot
+NAME through the staging engine, falling back to sonata
+(`pkgs/lyra-shell/qml/slots.md` is the slot catalogue), so sonata carries the
+bodies its slots name — bar, calendar, conductor, dock, herald, herald-center,
+launcher, meters, powermenu, power, terminals, usage, wallpaper,
+wallpaper-picker, plus the frame/popout helpers they share
 ([[Gadget-Dock#What the dock holds]]). A content or sizing edit
-([[Widget-Maker#Sizing — content decides, never the screen]]) has to land on
-whichever file actually paints: the wired six take it directly in
-`widgets/`; the other eight take it in the facet original under
-`modules/facets/quickshell/qml/` — editing the `widgets/` twin changes
-nothing on screen until the switch lands.
+([[Widget-Maker#Sizing — content decides, never the screen]]) lands in the
+song's own `widgets/` file: the lane's `pkgs/lyra-shell/qml/` carries the
+song-blind skeleton, the slot/host mechanism, and the preview harness — never
+a second copy of a body.
 
 ### `songbook/` root — cross-cutting design memory
 
@@ -125,7 +127,7 @@ the runtime root (`$AOIDE_ROOT`, default `~/.aoide`):
 |---|---|---|---|
 | `livery.json` | the fully-resolved livery values (colours concrete, no `null`) | [[livery]] `emit stage` / `lyra rice stage` | `song/stage/` |
 | `cover.json` | the live wallpaper seed (seeded from the song's baked `wallpaper`) | Quickshell wallpaper layer | `song/stage/` |
-| `livery.json` | the DECLARED song's notes, venue `aoide.livery.override` applied, `"song"` naming it — the read-only twin the runtime writers re-derive that song from ([[livery]]) | the quickshell facet's `home.activation.aoideSeedStage` | `song/declared/` |
+| `livery.json` | the DECLARED song's notes, venue `aoide.livery.override` applied, `"song"` naming it — the read-only twin the runtime writers re-derive that song from ([[livery]]) | the lyra lane's `home.activation.aoideSeedStage` | `song/declared/` |
 | `sessions.json` | the agent-session roster (`sessionId, agent, windowAddress, workspace, cwd, state, startedAt`, optional `parentSessionId`) | [[shellbridge]] + `aoide session` | `state/stage/` |
 | `hooks.json` | live Claude Code hook phases | shellbridge + `aoide session` | `state/stage/` |
 | `projects.json` | the project-anchor registry | `aoide project` | `state/stage/` |
@@ -133,7 +135,7 @@ the runtime root (`$AOIDE_ROOT`, default `~/.aoide`):
 
 Which files are present is runtime-dependent (e.g. `cover.json` appears once a
 wallpaper is staged; `AOIDE_WALLPAPER` on the Quickshell unit re-seeds it across
-rebuilds — the facet bakes the song's `wallpaper` note into the unit env, see
+rebuilds — the quickshell unit bakes the song's `wallpaper` note into its env, see
 [[Quickshell]]). Both stage dirs resolve via the same `AOIDE_STAGE_DIR`
 absolute-path override, so relocating it relocates both trees at once; with
 no override each falls back to its own default under `$AOIDE_ROOT`
@@ -141,7 +143,7 @@ no override each falls back to its own default under `$AOIDE_ROOT`
 `$AOIDE_ROOT/state/stage`, itself `$AOIDE_STATE_DIR` when absolute else
 `$AOIDE_ROOT/state` — [[shellbridge]]). On first run the binaries migrate any
 pre-existing `~/Aoide/{song/stage,state,log}` trees into `$AOIDE_ROOT`
-(`fs::migrate_root_once`). The flake's `no-song-read` check forbids
+(`fs::migrate_root_once`). The flake's `song-runtime-untracked` check forbids
 any nix module reading `song/stage/` at build time, so runtime state can
 never become load-bearing for the build.
 
@@ -150,10 +152,10 @@ never become load-bearing for the build.
 ```
 $AOIDE_FLAKE_ROOT/song/  (dev git checkout — committed score, default ~/Aoide/song)
 ├── songbook/            committed songs + cross-cutting design memory
-│   ├── sonata/          the shipped standard — upstream-owned, evolving; the LIGHT dusk key, keyed from song/covers/yuki-sonata.png (selected)
+│   ├── sonata/          the shipped standard — upstream-owned, evolving; a LIGHT Greek key with no cover (a marble ground baked from palette.bg)
 │   │   ├── rice.nix · livery.json
 │   │   ├── palette/ · sounds/ · icons/ · widgets/ · design/
-│   ├── learnings.md · preferences.md · update-playbook.md   ← sparse today
+│   ├── learnings.md · update-playbook.md   ← sparse today
 ├── covers/              shared wallpaper library — yuki-sonata.png
 └── song.md              repo-local map of this tree
 
@@ -183,4 +185,4 @@ top-level `song/` dir. The lookup is the Song Map
 - [[Ricing-Protocol]] — the ricing protocol this page's per-song design memory
   supports
 - [[Widget-Maker]] — the staging engine, which resolves a song's `widgets/` files to live desktop chrome
-- [[Gadget-Dock]] — the dock/gadget bodies now twinned into sonata's `widgets/`, pending the facet switch
+- [[Gadget-Dock]] — the dock/gadget bodies, painted by the owning song's `widgets/`

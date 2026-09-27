@@ -23,7 +23,7 @@ MCP directly.
 
 ## Implementation
 
-The QML skeleton is shipped in `modules/facets/quickshell/qml/`. `shell.qml`
+The QML skeleton is shipped in `pkgs/lyra-shell/qml/`. `shell.qml`
 (a `ShellRoot`) instantiates four shared singletons — **`LiveryState`**
 (watches `stage/livery.json` via a `FileView`, re-binding every surface's
 colours in one pass on an atomic replace, the hot-reload), **`ShellBridge`**
@@ -34,11 +34,11 @@ QML), **`AoideIpc`** (the external-reload IPC target, below), and
 lives) — plus a plain `QtObject` holding cross-widget session state (the
 floating-gadget model, the hover-trace link).
 
-Two surfaces are facet-owned `Item`s wrapped in their own `PanelWindow`, one
+Two surfaces are lane-owned `Item`s wrapped in their own `PanelWindow`, one
 per output (a `Variants` delegate over `Quickshell.screens`, so each re-homes
 itself after an output blip): **`AoideWallpaper`** (the background layer,
 `WlrLayer.Background`) and the **bar** (`WlrLayer.Top`, exclusive height), whose content is a per-song
-widget loaded through `WidgetSlot` (`slot: "bar"`) rather than a facet
+widget loaded through `WidgetSlot` (`slot: "bar"`) rather than a lane
 component — the song owns its own footprint. **`AoidePanel`** (the
 [[Gadget-Dock]]) owns its PanelWindow, layer, and toggle shortcut
 internally. Three more surfaces are **`SurfaceSlot`**-rooted overlays —
@@ -50,13 +50,13 @@ a sized `Item`, since each slot's root IS its own `PanelWindow` rather than
 content parented into an existing layout. `SongSurfaces` hosts one more
 `SurfaceSlot` per surface-kind entry the active song's `aoide.arrangement`
 declares (empty for sonata today, so a no-op). `AoideClipboard` and
-`GrimoireLedger` are facet-owned utility singletons injected into the
+`GrimoireLedger` are lane-owned utility singletons injected into the
 launcher slot as extras; `AoideWallpaperPicker` is the `SUPER+W` wallpaper
 switcher.
 
 The repo root carries no `qml/` directory — widget source lives in
-`modules/facets/quickshell/qml/` and each active song's `widgets/`, and the
-facet's `home.activation.aoideDeployQml` rsyncs the built config tree
+`pkgs/lyra-shell/qml/` and each active song's `widgets/`, and the lyra lane's
+`home.activation.aoideDeployQml` rsyncs the built config tree
 (`rsync -a --delete --chmod=u+w`) into `$AOIDE_ROOT/run/qml/` (default
 `~/.aoide/run/qml/` — the runtime root, outside the git checkout), which
 Quickshell reads as its entry point (`quickshell -p
@@ -65,9 +65,9 @@ QML directly under `$AOIDE_ROOT/run/qml/` previews live without a rebuild, and
 every activation's rsync reasserts the store's build over any such edit —
 the same "switch is the truth, hot edits are the sketch" discipline as
 every other stage/preview seam. `hyprland.conf` is owned by
-home-manager's `wayland.windowManager.hyprland`: the compositor facet
-writes livery + keybind fragments with `mkBefore`, and the Quickshell
-facet appends its `exec-once` autostart with `mkAfter`, so the two facets
+home-manager's `wayland.windowManager.hyprland`: the compositor lane
+writes livery + keybind fragments with `mkBefore`, and the quickshell
+lane appends its `exec-once` autostart with `mkAfter`, so the two lanes
 compose the one config file without collision.
 
 ### IPC hot-reload — closing the dynamic-load gap
@@ -75,12 +75,12 @@ compose the one config file without collision.
 `LiveryState`'s `FileView` watch (above) covers exactly one tier:
 `stage/livery.json`. Quickshell's own built-in file watcher — the thing that
 would otherwise auto-reload on any QML edit — only tracks files reached
-through a static `import` statement; every song/facet widget loads
+through a static `import` statement; every song/lane widget loads
 dynamically via `Qt.createComponent(url)` (`WidgetSlot`/`SurfaceSlot`, see
-[[Widget-Maker]]), which that watcher never sees. Facet-owned QML unreachable
+[[Widget-Maker]]), which that watcher never sees. Lane-owned QML unreachable
 by static import sits in the same blind spot — `shell.qml`, `ShellBridge.qml`,
 `StagingEngine.qml`, `WidgetSlot.qml`, `SurfaceSlot.qml`. In practice this
-meant editing an existing widget body (or any of those facet files) never
+meant editing an existing widget body (or any of those lane files) never
 rendered until a full `systemctl --user restart aoide-quickshell.service` —
 found via live debugging.
 
@@ -145,8 +145,8 @@ frame label.
 
 ## The registry — nine declared, five with a live body
 
-The facet declares nine `owner = "quickshell"` surfaces
-(`modules/facets/quickshell/default.nix`: bar, notifications, launcher, osd,
+The lyra lane declares nine `owner = "quickshell"` surfaces
+(`modules/dendrites/lyra/default.nix`: bar, notifications, launcher, osd,
 lockscreen, greeter, wallpaper, agentWidgets, sessionGraph). Five have a
 live QML body today: **bar** (song `bar.qml` via `WidgetSlot`),
 **notifications** (dunst as daemon, the `herald`/`herald-center` popup and
@@ -165,7 +165,7 @@ Four are registry-only, with no QML anywhere in the repo:
 - **`osd`**, **`lockscreen`**, **`greeter`** — each is a stand-down
   declaration against [[Stylix]] (`aoide.surfaces.<name>.owner =
   "quickshell"` tells Stylix not to theme its own equivalent target) with no
-  facet or song QML implementing the surface. greetd launches Hyprland
+  lane or song QML implementing the surface. greetd launches Hyprland
   directly as a stub session command; the Quickshell greeter's greetd IPC
   session is unbuilt.
 - **`sessionGraph`** — declared but has no QML body: the standalone DAG
@@ -199,7 +199,7 @@ Two design decisions worth carrying forward:
   no such command today; flagged, not silently baked. See
   [[DEV]].
 
-The compositor facet also adds `aoide-launcher` to the blur / `ignore_alpha` /
+The compositor lane also adds `aoide-launcher` to the blur / `ignore_alpha` /
 hyprglass namespaces so the pane frosts like the bar and dock. Both the keybind
 and the blur rules are baked into `hyprland.conf`, so the launcher needs a gated
 `switch` to land live (the QML rsyncs into `$AOIDE_ROOT/run/qml/` the same way).
@@ -207,7 +207,7 @@ and the blur rules are baked into `hyprland.conf`, so the launcher needs a gated
 ## Session service & resilience
 
 The shell surface is started by the **`aoide-quickshell`** systemd *user*
-service, defined in `modules/facets/quickshell/default.nix`. The service is
+service, defined in `modules/dendrites/quickshell.nix`. The service is
 the session-assembly seam: it orders after `graphical-session.target` (so
 Quickshell inherits a valid Wayland env), logs to journald (`journalctl
 --user -u aoide-quickshell`), and respawns on crash. Three layers keep one
@@ -240,7 +240,7 @@ bound to `Quickshell.screens` or to the focused monitor re-homes by itself
 when the screen list comes back, and only an unbound singleton stays lost.
 
 **`aoide-quickshell-healthcheck.timer`**
-(`modules/facets/quickshell/default.nix`, gated on `aoide.lyra.enable`) is
+(`modules/dendrites/lyra/default.nix`, gated on `aoide.lyra.enable`) is
 the live watchdog: a oneshot `systemd.user.service` running `lyra quickshell
 healthcheck` (`pkgs/aoide/crates/song/src/health.rs`, [[Meta-and-Upkeep]])
 20s after the session comes up and every 15s thereafter.
@@ -253,7 +253,7 @@ desktop.
 The check asks two independent signals, in order, and they answer different
 questions. `hyprctl layers -j` is compared against what the active song
 DECLARED should be painted — `aoide.arrangement.surfaces`, published by the
-facet's build as `run/qml/songs/surfaces.json` (CONTRACTS.md §5): each
+lane's build as `run/qml/songs/surfaces.json` (CONTRACTS.md §5): each
 declared `aoide-<slot>` namespace must be mapped on every enabled output
 when it is `perMonitor`, and at least once otherwise. A declared surface
 that is missing is the user-visible failure, true right now, and it decides
@@ -272,7 +272,7 @@ unreported for 22 minutes on two hosts.
 The expectation is declared, never hardcoded, because the same watchdog
 runs on a host where waybar owns the bar: expecting `aoide-bar` there would
 restart a healthy desktop every fifteen minutes forever. A host whose song
-declares nothing, or whose facet has not yet published the file, falls back
+declares nothing, or whose lane has not yet published the file, falls back
 to the bare total — zero `aoide-*` surfaces anywhere is the blank desktop —
 which is what the check was before surfaces went per-output. A total cannot
 see a partial loss: the per-screen wallpaper (a `Variants` delegate over
