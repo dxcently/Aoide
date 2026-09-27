@@ -7,14 +7,21 @@
 > host: Linux runs every crate's tests, and native Windows now compiles ALL of
 > the core closure — `aoide-protocol`, `aoide-storage`, `aoide-secrets`,
 > `aoide-upkeep`, `aoide-client`, `aoide-conduct`, `aoide-server` and
-> `aoide-cli`, whose `aoide` binary builds there too, and runs the conducted
-> session itself on ConPTY. What still fails natively is a RUNTIME layer, not a
-> compile one: `aoide-server`'s lib is green there (266 passed / 0 failed / 5
-> ignored with reasons), `aoide-conduct` is green (931 / 0 / 0), and
-> `aoide-cli`'s targets are green; one `graph_residency_p_d6` binary is
-> contention-sensitive under full parallelism (recorded under "Next layer"),
-> and ONE `aoide-storage` test fails there deterministically and PRE-EXISTING
-> — `fs::tests::tightening_a_directory_strips_a_child_that_only_inherited_its_access`,
+> `aoide-cli`, whose `aoide` AND `aoided` binaries build there too, and runs
+> the conducted session itself on ConPTY. That host's tests are green per crate
+> — `aoide-server`'s lib 266 passed / 0 failed / 5 ignored with reasons,
+> `aoide-conduct` 931 / 0 / 0, `aoide-cli`'s targets 0 failed — and the
+> DAEMON is now measured there, not merely compiled: resident and alive past
+> 60 s from a scratch root, its control socket serving real CLI invocations,
+> the conducted session driven end to end, and the A2A, mail and MCP-stdio
+> doors answering (the run is named under "Evidence and limits"). What remains
+> open is per row, and named there: `boot_epoch` is Linux-only, so the pre-boot
+> reap signal and the boot-epoch-guarded auto-resume never fire off it; no
+> residency mechanism for that host exists in the tree; one
+> `graph_residency_p_d6` binary is contention-sensitive under full parallelism
+> (recorded under "Next layer"); and ONE `aoide-storage` test fails there
+> deterministically and PRE-EXISTING —
+> `fs::tests::tightening_a_directory_strips_a_child_that_only_inherited_its_access`,
 > which also fails at `724fe0f` itself on that box (see "Evidence and limits").
 > Every number below names the run it rests on.
 
@@ -78,7 +85,7 @@ Two classes follow from that, and every row below is one of them:
 | append-only feed file (create policy + tail identity) | `protocol/src/feed.rs`, private `protocol/src/feed_windows.rs` | required baseline for the algorithm (append · cap · truncate-in-place · tail); **policy by host, never silently weakened**, `pkgs/aoide/crates/protocol/README.md`'s `feed` entry names the seams — and `protocol/src/owner_only.rs` is that policy factored out for its second consumer, `aoide-storage`'s private-write and private-directory half. Unix: `chmod` to the caller's exact `create_mode`, `(dev, ino)` identity — unchanged. Native Windows: owner-only policy attached at creation and read back before the first payload byte (a filesystem that ignores ACLs refuses), an existing file validated on its own handle before truncate/append, reparse points refused, identity by native 128-bit file id; **`create_mode` is ADVISORY there and the policy is always a protected owner-only DACL**: there is no group reader on native Windows (no lyra/desktop surface) and no gid to name, so the broker's group-shared `0o640` feed is delivered STRICTER than it asks — that same user, nobody else — rather than refused, and a same-user `watch::Follower` sees the line the broker writes (asserted natively). Compile-checked for `x86_64-pc-windows-gnu` and exercised natively on ThinkChiyo with MSVC; see the bounded runtime evidence below. |
 | desktop / systemd capabilities in core | `hyprctl` window ops, `loginctl` lock gate, power actions, `notify-send`, `zenity`/`lyra` dialogs, `/run`+`/var/lib` deployment paths | optional host-specific — window ops gate on `HYPRLAND_INSTANCE_SIGNATURE` and degrade to `None`; power actions surface a spawn failure rather than a named refusal; paths are env-overridable placeholders, not POSIX shapes |
 | the `ssh` client this box runs | `client/src/tunnel.rs::ssh_program` (the ONE place the binary is chosen), `local_login`/`resolve_login` (the login half); the argv read it is guarded by is `looks_like_our_ssh` → `process_argv` | required, **named difference per host** — Unix runs the bare name `ssh` through `PATH` (the operator's own client); native Windows runs the OpenSSH client that ships with the OS, `%SystemRoot%\System32\OpenSSH\ssh.exe`, by FULL PATH (there `ssh` is not a name `PATH` is guaranteed to carry, and OpenSSH installs outside any standard directory) — refused by name when `%SystemRoot%` is unset, never a guessed `C:\Windows`. The login chain differs for the same reason: `$USER` → `$LOGNAME` on Unix, and `%USERNAME%` last on Windows, where the other two are not variables the OS sets. The identity read differs too — `/proc/<pid>/cmdline` (NUL-split) versus `win_proc::command_argv` (`ProcessCommandLineInformation` + this host's own `CommandLineToArgvW`) — and argv[0] is `ssh` on one host and `ssh.exe` (folded, either separator) on the other. Evidence: a native `ssh_program` assertion against this host's own file, and the tunnel tests that run a REAL `ssh.exe` against a loopback banner listener. **Two differences that do NOT follow from choosing the system binary, stated rather than implied**: (1) the path is the NATIVE one, so a 32-bit (WOW64) build would be redirected to `SysWOW64`, where OpenSSH is not installed — only `x86_64-pc-windows-msvc` is targeted today, so nothing here builds that way yet, and a future i686 target would have to answer it; (2) Win32-OpenSSH is still OpenSSH — it reads `%USERPROFILE%\.ssh\config`, its `known_hosts` and the ssh-agent pipe exactly as any other build does, so `BatchMode=yes`, the `-L` spec and the `authorized_keys` teaching all behave as the Unix arm documents; only the BINARY's location differs |
-| a node name this box gives itself | `storage/src/display.rs::local_node_name`, used by `storage/src/mail.rs` (`file_letter`/`file_receipt`/`mint_outbound_letter`/`mint_ack`/legacy migration), `storage/src/seal.rs` (the "is this container for me" and last-hop comparisons), `client/src/{letter_send,mail_wire}.rs` and `client/src/commands.rs`'s signed-header and pair-request names | required, **host-split by an OS fact rather than an API**: a node name in an address is grammar-lowercase (`^[a-z0-9][a-z0-9-]*$`) while an OS host name is case-PRESERVED and native Windows' DNS name is conventionally upper-case (`ThinkChiyo`, measured), so `local_host_name()` folded is the one name this box mints, declares and is looked up under. The raw name stays what a human is shown and what an ssh target spells. The limit is stated, not papered over: a host name carrying anything outside `[a-z0-9-]` still cannot BE a node name — refused by grammar, never mangled. NOT folded, deliberately: the mesh-charter and discovery self-name comparisons (`client/src/mesh.rs`, and the `is_self_target` callers in `client/src/commands.rs`) and `conductor`'s mailbox targets (`conductor/src/app.rs`, `conductor/src/lib.rs`'s `{local_host_name()}/{petname}`), each of which reads `local_host_name()` on BOTH sides — a peer-fed advertisement or an operator's charter names a box the same way this side does, so folding one side alone would break the comparison it exists for; the conductor sites are outside this slice's crates, and pre-existing on a host whose name differs in case. Evidence: `display::tests::local_node_name_is_the_local_host_name_folded` plus the mail/seal suites on ThinkChiyo, where the raw name is upper-case |
+| a node name this box gives itself | `storage/src/display.rs::local_node_name`, used by `storage/src/mail.rs` (`file_letter`/`file_receipt`/`mint_outbound_letter`/`mint_ack`/legacy migration), `storage/src/seal.rs` (the "is this container for me" and last-hop comparisons), `client/src/{letter_send,mail_wire}.rs` and `client/src/commands.rs`'s signed-header and pair-request names | required, **host-split by an OS fact rather than an API**: a node name in an address is grammar-lowercase (`^[a-z0-9][a-z0-9-]*$`) while an OS host name is case-PRESERVED and native Windows' DNS name is conventionally upper-case (`ThinkChiyo`, measured), so `local_host_name()` folded is the one name this box mints, declares and is looked up under. The raw name stays what a human is shown and what an ssh target spells. The limit is stated, not papered over: a host name carrying anything outside `[a-z0-9-]` still cannot BE a node name — refused by grammar, never mangled. NOT folded, deliberately: the mesh-charter and discovery self-name comparisons (`client/src/mesh.rs`, and the `is_self_target` callers in `client/src/commands.rs`) and `conductor`'s mailbox targets (`conductor/src/app.rs`, `conductor/src/lib.rs`'s `{local_host_name()}/{petname}`), each of which reads `local_host_name()` on BOTH sides — a peer-fed advertisement or an operator's charter names a box the same way this side does, so folding one side alone would break the comparison it exists for; the conductor sites are outside this slice's crates, and pre-existing on a host whose name differs in case. Evidence: `display::tests::local_node_name_is_the_local_host_name_folded` plus the mail/seal suites on ThinkChiyo, where the raw name is upper-case. **The scheme's own limit, measured where it will bite first**: a node name is an OS fact, so TWO nodes on ONE box compute the SAME name — native Windows' host name and the WSL instance's are the same computer name (`ThinkChiyo` raw, `thinkchiyo` folded, measured on both sides) — and every site that decides "is this for me" or "is this myself" by that name (the mail/seal container checks, the discovery self-target guard, the mesh drift comparison) cannot tell the two nodes apart. The escape already exists and is the whole chain's own input: `AOIDE_A2A_NODE_NAME` (read by `local_host_name`, therefore by the folded form too) set per node; it renames the RAW name with it, so the ssh target a `via` fallback spells is the override as well. |
 
 ## The seams this slice added, and what each one answers
 
@@ -95,7 +102,7 @@ remove.
 | `fs::detach(&mut Command)` | `aoide-storage` | The detached-spawn posture: `setsid(2)` in a `pre_exec` hook, or `DETACHED_PROCESS \| CREATE_NEW_PROCESS_GROUP` as a property of the spawn call. Asked by `conduct`'s `spawn_detached` and `a2a`'s handler spawn — the same pair in both, never two copies. |
 | `fs::create_new_private(path)` | `aoide-storage` | A write-once private file: `mode(0o600)` at creation on Unix; `owner_only::create_new` (policy attached by the creating call, read back before the first byte) on Windows, with `AlreadyExists` preserved. Asked by `conduct`'s instruction sidecar. |
 | `fs::{lock_exclusive, try_lock_exclusive, unlock}` | `aoide-storage` | The file lock, `flock` or `LockFileEx`. Widened from `pub(crate)` so `conduct`'s own probe (`codex_app::lock_is_held`) asks it rather than carrying a second `flock` call — that crate's `#[cfg(not(unix))] → None` refusal is deleted, not kept beside the seam. |
-| `win_unix::{UnixStream, UnixListener}` | `aoide-protocol` | The socket TYPE is the seam: every caller writes `use`-pairs keyed on `cfg(unix)`/`cfg(windows)` and no call site spells a platform. This slice added the missing surface the call sites needed: `set_nonblocking` on the listener (not only the stream), `try_clone` on the listener, `write_timeout` (the read-back half of `set_write_timeout`), and `impl AsRef<Path>` on `connect`/`bind` so an argument moves between hosts untouched. |
+| `win_unix::{UnixStream, UnixListener}` | `aoide-protocol` | The socket TYPE is the seam: every caller writes `use`-pairs keyed on `cfg(unix)`/`cfg(windows)` and no call site spells a platform. This slice added the missing surface the call sites needed: `set_nonblocking` on the listener (not only the stream), `try_clone` on the listener, `write_timeout` (the read-back half of `set_write_timeout`), and `impl AsRef<Path>` on `connect`/`bind` so an argument moves between hosts untouched. **What a LISTENER's mode propagates, measured the hard way**: Winsock's `accept` hands back a socket that INHERITS the listening socket's own properties — `FIONBIO`, and any asynchronous-event association — where `std`'s Unix `accept` does not; a listener armed non-blocking for a deadline accept loop (the delivery fixtures and conduct's injection inbox; the four production doors leave their listeners BLOCKING) therefore produced non-blocking CONNECTIONS on that host alone, and `set_read_timeout` (`SO_RCVTIMEO`), which a non-blocking socket ignores, answered `WSAEWOULDBLOCK` at once. The accept arm now clears the inherited flag best-effort, and the GUARANTEE is the deadline-bound read/write itself rather than that call: bounded whatever the socket's mode (`win_unix::tests::an_accepted_socket_is_blocking_even_when_the_listener_is_not`, `win_unix::tests::an_accepted_stream_with_no_budget_blocks_until_the_peer_writes`). |
 | `win_proc::{processes, parent_chain, command_argv, process_user_sid, current_user_sid}` | `aoide-protocol` | The process-table facts — parent, argv, exe name, token user — that Unix reads out of `/proc`. `conduct`'s `proc_argv`, `proc_comm` and `proc_has_children` answer through it; `proc_cwd` is the one fact with NO arm (a working directory needs the target's PEB) and says so by name, falling back to the record's stamped `cwd`. |
 | `test_support::{short_tmp, built_aoide_bin}` | `aoide-test-support` | Two fixture facts that are HOST facts. A socket path must fit `sun_path` (107 bytes on native Windows, against a ~36-byte temp prefix), so the tag is hashed rather than spelled; and a built binary's name carries this host's `EXE_SUFFIX`. Both were wrong in three separate copies before this slice — the bare-name one made the cli door fixture never launch a hook at all, which silently left the daemon's peer-pid verification UNEXERCISED on that host. |
 
@@ -210,6 +217,38 @@ now build their JSON with `serde_json`.
   `conductor` mailbox targets the node-name row above lists as deliberately NOT
   folded — each reads `local_host_name()` on BOTH sides of the match, so
   folding one side would break the very comparison it exists for.
+- **Run**: the daemon itself, on that host, launched from a scratch
+  `AOIDE_ROOT` (`C:\Users\dxcen\aoide-w7-probe`) with `XDG_RUNTIME_DIR`,
+  `AOIDE_STAGE_DIR`, `AOIDE_STATE_DIR` and `AOIDE_AUDIT_LOG` all under it and
+  non-default door ports (`AOIDE_A2A_PORT=18710`,
+  `AOIDE_MAIL_ADAPTER_PORT=18712`), at `ea257fc`.
+  `aoided.exe` started, bound `<scratch>/rt/aoide/aoided.sock`, wrote its feed
+  and its audit log, and was alive past 60 s with an empty stderr. That socket
+  served real CLI invocations, not just the unit tests': `aoide context --id
+  …` answered "aoided must be running to fetch agent context" with no daemon
+  and the daemon door's OWN audit record (`"door":"daemon","command":"context"`)
+  with one, and `aoide session reap` likewise carried a `daemon`-door record.
+  `aoide conduct --headless -- cmd.exe` registered on the roster
+  (`presence online`), `aoide send --id … --yes --submit -- "echo W7_INJECTED"`
+  delivered into the child's own console transcript (the echo ran, its output
+  appears in the per-session log the seam mirrors), an externally killed child
+  was noticed by the wrapper (`cmd exited -1` — `TerminateProcess`'s own code,
+  read through the seam) and a record whose pid had died was reaped
+  (`reaped dead session w7c (killed; running → done → dropped)`). The doors
+  run as their own processes on both hosts — the daemon spawns NONE of them
+  (its only child in that run was its own `conhost`) — and each answered from
+  that host: `aoide a2a serve` bound `127.0.0.1:18710` (`GET
+  /.well-known/agent-card.json` 200; a JSON-RPC `tasks/get` for an unknown id
+  `-32001 task not found`), `aoide mail serve` bound `127.0.0.1:18712`
+  (`aoide/mailPoll` without its node `-32602`), and `aoide mcp serve --stdio`
+  answered `initialize` (`aoide v0.0.26`) and `tools/list` (110 tools) over its
+  newline-delimited door.
+- **Not run, and it is a residency fact rather than a code one**: nothing on
+  that host keeps a daemon up across sessions. A daemon started there by
+  `Start-Process` inside an ssh session was alive at 60 s and GONE at the next
+  session — empty stderr, no stop record, socket file left behind — so an
+  ssh-launched daemon is not a resident one; the host's own logon/service
+  mechanism is unmeasured and nothing in the tree implements one.
 
 ## Next layer
 
