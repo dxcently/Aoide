@@ -192,6 +192,20 @@ machines. It is shaped like agenix: public keys in one file, one signer.
    mesh charter accept <file>`. Later versions arrive as letters. From then on the
    machine trusts every charter node with the charter's grants.
 
+   **A later version is spooled for every node on the charter, but it only
+   travels to the ones this box can DIAL — a node it has a record for.** The
+   charter's own `address` is not a route in this phase: turning a line's
+   `address` into a dial target is the router's job, at P-M4 (Transports and
+   relays; MAIL.md §Transit). So a version signed after a machine joined by
+   `--operator` or by file — the two non-LAN paths, which create no pairwise
+   record — WAITS in the signer's spool until either that machine is paired
+   (giving it a record to dial) or P-M4 routes charter addresses. The receive
+   half is already in place: the door admits and applies such a letter from an
+   origin it holds no record for (Connections and trust, above). `aoide mesh
+   charter sign` reports each spooled node as `drained` or `NOT DIALED — no
+   node record here`, so the wait is visible at the moment it is created
+   rather than only in `mail outbox` afterwards.
+
 **The file.** TOML, edited by the operator; the example is under Transports and
 relays. Keys:
 

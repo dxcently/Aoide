@@ -534,7 +534,7 @@ fn handle_charter_sign(inv: &Invocation) -> Outcome {
                     signed.fingerprint,
                     signed.spooled.len(),
                     rekey_note(&signed.rekeyed),
-                ),
+                ) + &render_spooled(&delivery),
             )
             .changed(vec![
                 signed.path.to_string_lossy().into_owned(),
@@ -650,7 +650,7 @@ fn handle_charter_reroot(inv: &Invocation) -> Outcome {
                     signed.mesh,
                     charter::operator_line(&signed.operator),
                     signed.fingerprint,
-                ),
+                ) + &render_spooled(&delivery),
             )
             .changed(vec![
                 charter::operator_key_path(&signed.mesh).to_string_lossy().into_owned(),
@@ -676,19 +676,70 @@ fn mesh_arg(inv: &Invocation) -> Option<&str> {
     inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty())
 }
 
-/// Drain what `sign`/`reroot` spooled, one node at a time, best-effort. The
-/// command has already reported the WRITE; a node that cannot be dialed is
-/// `mail outbox`'s story, exactly as it is for `mail send` (spec item 8) —
-/// and the entry stays spooled, because the charter reaching that node is not
-/// this command's promise to keep.
+/// Drain what `sign`/`reroot` spooled, one node at a time, best-effort, and
+/// report each one HONESTLY.
+///
+/// **A charter node this box holds no record for is not a drained node**
+/// (review N2). `drain_node` returns `Ok(())` for a name it has no
+/// `state/nodes.json` record for — correctly, since it has nothing to dial —
+/// and the first cut of this function mapped that `Ok` to `drained: true`,
+/// telling the operator a letter had gone out to a machine that was never
+/// contacted. The charter's `address` is not a dial target in this phase:
+/// nothing turns `NodeLine.address` into a route, and that read is P-M4's
+/// (`HTTPS-MESH-API.md` "Transits and relays"; `MAIL.md` §Transit). So the
+/// entry STAYS in the spool and this says so: `drained: false`, with a reason
+/// naming the two ways it will leave — a pairing that gives the node a record,
+/// or P-M4's router learning the charter's addresses.
+///
+/// A node WITH a record is unchanged: dialled, and its own `Err` reported.
 fn drain_spooled(spooled: &[String]) -> Vec<serde_json::Value> {
+    let known: std::collections::BTreeSet<String> = aoide_storage::node_store::load_nodes()
+        .into_iter()
+        .map(|node| node.name)
+        .collect();
     spooled
         .iter()
-        .map(|node| match crate::mail_wire::drain_node(node) {
-            Ok(()) => json!({ "node": node, "drained": true }),
-            Err(e) => json!({ "node": node, "drained": false, "error": e }),
+        .map(|node| {
+            if !known.contains(node) {
+                return json!({
+                    "node": node,
+                    "drained": false,
+                    "reason": "no-record",
+                    "detail": "this box holds no node record for it, so nothing was dialed — the entry waits in the spool until it is paired (giving it a record) or P-M4 routes charter addresses",
+                });
+            }
+            match crate::mail_wire::drain_node(node) {
+                Ok(()) => json!({ "node": node, "drained": true }),
+                Err(e) => json!({ "node": node, "drained": false, "error": e }),
+            }
         })
         .collect()
+}
+
+/// The human rendering of [`drain_spooled`]'s rows — one line per node, and
+/// `not dialed` for the record-less case rather than silence (review N2: the
+/// command's message has to say what its `--json` says).
+fn render_spooled(rows: &[serde_json::Value]) -> String {
+    if rows.is_empty() {
+        return String::new();
+    }
+    let mut lines = vec![format!("\nspooled to {} node(s):", rows.len())];
+    for row in rows {
+        let node = row["node"].as_str().unwrap_or("");
+        if row["drained"].as_bool() == Some(true) {
+            lines.push(format!("  {node}: drained now"));
+        } else if row["reason"].as_str() == Some("no-record") {
+            lines.push(format!(
+                "  {node}: NOT DIALED — no node record here (the entry waits in the spool until a pairing or P-M4's charter routing)"
+            ));
+        } else {
+            lines.push(format!(
+                "  {node}: queued — {}",
+                row["error"].as_str().unwrap_or("the drain did not complete")
+            ));
+        }
+    }
+    lines.join("\n")
 }
 
 /// The one sentence a re-key deserves wherever a charter is applied or signed.
@@ -766,6 +817,59 @@ mod tests {
             let missing = handle_charter_show(&inv(&["away"]));
             assert_eq!(missing.status, aoide_protocol::output::Status::Error, "{missing:?}");
             assert_eq!(missing.data.as_ref().unwrap()["reason"], "no-charter");
+        });
+    }
+
+    /// **A charter node this box has no record for is NOT reported as
+    /// drained** (re-review N2). `drain_node` returns `Ok(())` for a name it
+    /// cannot dial — correctly, there is nothing to dial — and the sign
+    /// command used to map that to `drained: true`, telling the operator a
+    /// letter had gone to a machine that was never contacted. The charter's
+    /// `address` becomes a route at P-M4, so until then the honest answer is
+    /// "not dialed, the entry waits".
+    #[test]
+    fn a_recordless_charter_node_is_reported_as_not_dialed() {
+        with_root("drain-no-record", |_dir| {
+            let init = charter::init("home").unwrap();
+            let line = charter::node_line().unwrap();
+            let src = format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{line}\n");
+            std::fs::write(charter::source_path("home"), &src).unwrap();
+            // `sign` spools one `charter` letter per OTHER charter node — and
+            // there is none here, so drive the reporter directly with a name
+            // this box holds no record for (the LAN/`--operator` join case).
+            let _ = init;
+            let rows = drain_spooled(&["laptop".to_string()]);
+            assert_eq!(rows[0]["node"], "laptop");
+            assert_eq!(
+                rows[0]["drained"],
+                false,
+                "nothing was dialled, so nothing may claim to be drained: {rows:?}"
+            );
+            assert_eq!(rows[0]["reason"], "no-record");
+            assert!(
+                rows[0]["detail"].as_str().unwrap().contains("P-M4"),
+                "and the reason names who routes it: {rows:?}"
+            );
+            let text = render_spooled(&rows);
+            assert!(text.contains("NOT DIALED"), "{text}");
+            assert!(text.contains("P-M4"), "{text}");
+
+            // A node WITH a record keeps the old answer: nothing to send, but
+            // the drain is a real (empty) pass over a real record.
+            let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
+            let mut nodes = aoide_storage::node_store::load_nodes();
+            aoide_storage::node_store::upsert_paired_node(
+                &mut nodes,
+                "peerbox",
+                "http://127.0.0.1:1/",
+                &kp.info().pubkey_hex,
+                &aoide_storage::time::now_iso_utc(),
+                &["message".to_string()],
+                "home",
+            );
+            aoide_storage::node_store::save_nodes(&nodes).unwrap();
+            let rows = drain_spooled(&["peerbox".to_string()]);
+            assert_eq!(rows[0]["drained"], true, "a dialled node still answers for itself: {rows:?}");
         });
     }
 }

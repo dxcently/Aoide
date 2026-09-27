@@ -7422,6 +7422,13 @@ spooled them.
 two triggers, and they are the same call:
 
 - **`aoide mail poll [<node>]`** — the explicit ask. With a `<node>` it dials
+  that node's record (`state/nodes.json`); a name this box holds NO record for
+  is not dialled at all, and a caller that reports the attempt (the charter
+  spool does: `client::charter::drain_spooled`) must say `no-record` rather
+  than claim a drain — a charter line's `address` is P-M4's to route, not a
+  dial target yet (§4's charter carriage). This is also how a
+  `mail poll` with no argument is scoped: the roster it walks is the record
+  set, so a charter node with no record is simply not asked.
   that node alone; a name this box is not paired with is refused BEFORE any
   dial (`unknown-node` for a name the registry has never seen,
   `unpaired-node` for one registered but never verified — the same two
