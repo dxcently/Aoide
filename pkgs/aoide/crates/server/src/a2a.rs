@@ -6442,7 +6442,7 @@ fn handle_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aoide_test_support::{accept_one, expect_delivery};
+    use aoide_test_support::{accept_one, expect_delivery, read_delivery};
     use serde_json::json;
 
     fn fake_handler(_inv: &Invocation) -> aoide_protocol::output::Outcome {
@@ -11394,12 +11394,16 @@ mod tests {
         /// What the door wrote into the session's socket, or `None` when
         /// nothing ever connected — which is what a HELD send looks like from
         /// the target's side. The listener is nonblocking, so the accept itself
-        /// is the delivery question.
+        /// is the delivery question: an immediate probe, never a wait — the
+        /// rig's `accept_one` would PANIC on exactly the held case this answers
+        /// `None` for. The READ is that rig's other half (`read_delivery`), so
+        /// a peer that connects and then goes silent fails THIS test inside the
+        /// budget instead of parking it, and every test queued behind
+        /// `env_lock` with it.
         fn delivered(&self) -> Option<String> {
             let (mut conn, _) = self.listener.accept().ok()?;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            Some(String::from_utf8_lossy(&buf).into_owned())
+            let bytes = read_delivery(&mut conn, "the rail's session socket receives the delivered message");
+            Some(String::from_utf8_lossy(&bytes).into_owned())
         }
 
         /// Break `config.toml` past parsing — the input review F6 is about. A
