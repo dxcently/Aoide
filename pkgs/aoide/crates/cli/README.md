@@ -50,6 +50,17 @@ child process with a fixed environment. Fixture teardown kills and waits for
 the child before restoring the test environment; lifecycle tests cover normal
 teardown and readiness failure.
 
+`mail_adapter_round_trip.rs` is the same child-process shape one capability
+over (H1): the RELAY is a real `aoide mail serve` child with its own
+`AOIDE_ROOT`, and this test process is the poller with a second one, because
+two isolated roots in one process would race the serve thread against the
+client calls reading the global env. Both sides carry hand-written VERIFIED
+node records (P-CHARTER supplies them in a real run), the relay presents
+itself under its own `AOIDE_A2A_NODE_NAME`, and the fixture ends by killing
+and waiting for the child before restoring the environment. `#[ignore]`'d
+like the node-connectivity pair: it needs real loopback TCP, real `curl` and
+the built binary.
+
 ## What it consumes
 
 `aoide-protocol`, `aoide-storage`, `aoide-conduct`, `aoide-client`,
