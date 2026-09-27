@@ -784,8 +784,12 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   THE MESH THE REQUEST NAMES (`grant_in_mesh`), checked only against `ctx.signed_caller`'s KEY-resolved
   node (`resolved: Option<&Node>`, `None` whenever the request carried no
   verified signature at all). `deposit_refusal` returns `-32010` for
-  BOTH its shapes (paired-but-not-`message`-allowed, told the exact `node
-  allow … message on` fix; everything else, told to pair then allow) —
+  ALL THREE of its shapes, and the P-CHARTER one PREEMPTS the other two (paired-but-not-`message`-allowed, told the exact `node
+  allow … message on` fix; everything else, told to pair then allow; and the FIRST of the three —
+   the mesh being charter-shaped with an undecidable operator key — told that,
+   told the reason word, pointed at `aoide mesh charter show`, with the
+   `trusted_operator` DETAIL (which names both operator keys) going to this
+   host's audit line and never to an ungated caller) —
   **`-32010` is deliberate and must never regress to `-32006` (Spawn's own
   code) or `-32007` (already `verify_signed_request`'s own incomplete-
   headers/signature-mismatch refusal code, CONTRACTS.md §6) — a new

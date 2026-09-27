@@ -635,7 +635,9 @@ aoide node allow <name> <cap> on|off [--mesh <mesh>]
   `off` records a refusal this box's door subtracts from that line and `on`
   clears one. Nothing local widens a charter grant, so `on` for a capability
   the line does not grant is refused (`widens-charter`, naming the sign step
-  that would have to change), and a paired record's `grants` entry in a
+  that would have to change — or, in the window where the mesh is
+  charter-shaped and its operator key is undecidable, naming THAT instead,
+  since no line can be read and the fix is to resolve the key), and a paired record's `grants` entry in a
   charter mesh is INERT whatever it says. The A2A door's Spawn arm reads the
   grant ([[A2A-Door]], [[Pairing-Ceremony#What approval commits]]).
 

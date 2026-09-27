@@ -7253,7 +7253,13 @@ above) to a node that is both `verified` and carries `"message"` in
 `grants[<the request's mesh>]`. A refusal is `-32010` — a NEW code: never
 `-32006` (Spawn's own)
 and never `-32007` (`verify_signed_request`'s own incomplete-headers/
-signature-mismatch refusal) — in one of two shapes: paired but missing
+signature-mismatch refusal) — in one of THREE shapes, the P-CHARTER one
+preempting the other two: the mesh is charter-shaped with an undecidable
+operator key (the refusal names the mesh, gives `trusted_operator`'s REASON word
+— `operator-mismatch` or an unreadable config — and points at `aoide mesh
+charter show <mesh>`; `mail_deposit` is not token-gated and not LAN-guarded, so
+the `trusted_operator` DETAIL, which names both operator keys, goes to the
+host's own audit line and never to the caller), paired but missing
 `message` (told the exact `node allow <name> message on` fix), or
 anything else at all (told to pair, then allow).
 

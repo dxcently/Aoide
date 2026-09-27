@@ -3086,18 +3086,26 @@ fn deposit_admitted(grant: &Grant) -> bool {
 /// The refusal every deposit attempt that fails [`deposit_admitted`]
 /// returns — a NEW, distinct code (never `-32006`, which stays `spawn`'s
 /// own; never `-32007`, already taken by `verify_signed_request`'s
-/// incomplete-headers/signature-mismatch refusals, CONTRACTS.md §6). Two
-/// shapes only (simpler than [`spawn_refusal`]'s three: no historical
-/// Token-rung caller to distinguish here) — paired-but-not-allowed in THIS
+/// incomplete-headers/signature-mismatch refusals, CONTRACTS.md §6). **Three
+/// shapes** (P-CHARTER's third added by review N5, and it PREEMPTS the other
+/// two):
+///
+/// 1. **the mesh is charter-shaped with an undecidable operator key** — no
+///    grant in it can be read at all, so the refusal names the mesh, says the
+///    key is undecidable, says WHY (the `trusted_operator` reason word only —
+///    the detail names both operator keys, so it goes to the audit line and
+///    never to an ungated caller), and points at `aoide mesh charter show`;
+/// 2. paired-but-not-allowed in THIS
 /// MESH, told the exact `node allow --mesh` fix AND where it runs (the
 /// RECEIVING host: the gift is the receiver's record of the sender, never the
 /// sender's own) plus the `mail outbox retry --refused` that then moves the
-/// parked letters; everything else (unpaired, unsigned, no resolution at all)
+/// parked letters;
+/// 3. everything else (unpaired, unsigned, no resolution at all)
 /// told to pair and allow. `mesh` is the mesh the request acted in, named in
 /// both the refusal and its fix: a grant in another mesh is not a grant here,
 /// and saying which mesh was read is the difference between a fixable refusal
 /// and a mystery.
-fn deposit_refusal(signed: Option<SignedCaller<'_>>, mesh: &str) -> (i64, String) {
+fn deposit_refusal(signed: Option<SignedCaller<'_>>, mesh: &str, audit_log: &Path) -> (i64, String) {
     // **A charter-shaped mesh whose operator key is undecidable is its own
     // refusal** (re-review N5). The generic text below tells the operator to
     // run `aoide node allow <name> message on --mesh <m>` — which in this
@@ -3106,10 +3114,22 @@ fn deposit_refusal(signed: Option<SignedCaller<'_>>, mesh: &str) -> (i64, String
     // say what is actually wrong, name the mesh, say WHY the key is
     // undecidable, and point at the one command that shows it.
     if aoide_storage::charter::charter_shaped(mesh) && aoide_storage::charter::governing(mesh).is_none() {
-        let why = match aoide_storage::charter::trusted_operator(mesh) {
-            Err(refusal) => format!("{}: {}", refusal.reason, refusal.detail),
-            Ok(_) => "the charter's operator key cannot be read".to_string(),
+        // The REASON word only reaches the caller: the refusal is returned by
+        // an ungated method, and `trusted_operator`'s detail names BOTH
+        // operator keys and which file holds which. The audit line carries the
+        // detail where an operator (and only an operator) will find it.
+        let (why, detail) = match aoide_storage::charter::trusted_operator(mesh) {
+            Err(refusal) => (refusal.reason.clone(), format!("{}: {}", refusal.reason, refusal.detail)),
+            Ok(_) => ("undecidable".to_string(), "the charter's operator key cannot be read".to_string()),
         };
+        let _ = audit(
+            audit_log,
+            Door::A2a,
+            EventClass::Audit,
+            "a2a.aoide/mailDeposit",
+            "unauthorized",
+            &format!("charter-shaped mesh `{mesh}` with an undecidable operator key — {detail}"),
+        );
         return (
             -32010,
             format!(
@@ -3118,7 +3138,7 @@ fn deposit_refusal(signed: Option<SignedCaller<'_>>, mesh: &str) -> (i64, String
                  resolved — the charter is the only trust there, so there is no paired-record fallback and \
                  no local `node allow … on --mesh {mesh}` that could widen it. See `aoide mesh charter show \
                  {mesh}` for the recorded key, where it is written down (config line vs state record), and \
-                 `aoide mesh` for the mesh's own row"
+                 `aoide mesh` for the mesh's own row (this host's own log carries the detail)"
             ),
         );
     }
@@ -3201,7 +3221,7 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
     let mesh = effective_mesh(ctx.signed_caller.and_then(|c| c.mesh));
     let grant = caller_grant(ctx.signed_caller);
     if !deposit_admitted(&grant) {
-        let (code, msg) = deposit_refusal(ctx.signed_caller, &mesh);
+        let (code, msg) = deposit_refusal(ctx.signed_caller, &mesh, ctx.audit_log);
         let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "unauthorized", &msg);
         return Err((code, msg));
     }
@@ -3462,7 +3482,7 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
     let charter_letter = container.purpose == aoide_storage::seal::PURPOSE_CHARTER
         && ctx.signed_caller.is_some();
     if !deposit_admitted(&grant) && !charter_letter {
-        let (code, msg) = deposit_refusal(ctx.signed_caller, &request_mesh);
+        let (code, msg) = deposit_refusal(ctx.signed_caller, &request_mesh, ctx.audit_log);
         let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "unauthorized", &msg);
         return Err((code, msg));
     }
@@ -3643,7 +3663,7 @@ fn node_binding(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
     let mesh = effective_mesh(ctx.signed_caller.and_then(|c| c.mesh));
     let grant = caller_grant(ctx.signed_caller);
     if !deposit_admitted(&grant) {
-        let (code, msg) = deposit_refusal(ctx.signed_caller, &mesh);
+        let (code, msg) = deposit_refusal(ctx.signed_caller, &mesh, ctx.audit_log);
         let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/binding", "unauthorized", &msg);
         return Err((code, msg));
     }
@@ -14170,11 +14190,16 @@ mod tests {
         let (code, message) = deposit_refusal(
             Some(SignedCaller { name: "box-a", key: &listed_key, mesh: Some("home") }),
             "home",
+            &root.join("log"),
         );
         assert_eq!(code, -32010);
         assert!(message.contains("CHARTER mesh"), "{message}");
         assert!(message.contains("UNDECIDABLE"), "{message}");
         assert!(message.contains("operator-mismatch"), "and says why: {message}");
+        assert!(
+            !message.contains(&state_key) && !message.contains(&config_key),
+            "and the two operator KEYS stay out of an ungated caller's refusal — they name this host's config and state: {message}"
+        );
         assert!(message.contains("mesh charter show home"), "and points at the one command that shows it: {message}");
         assert!(
             !message.contains("node allow box-a message on"),

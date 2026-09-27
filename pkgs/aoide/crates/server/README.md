@@ -486,7 +486,10 @@ the inbound half of the two-door contract (the outbound half is
   was introduced signature-only from the start. A refusal is `-32010` — a
   NEW code, distinct from both `-32006` (Spawn's own) and `-32007`
   (`verify_signed_request`'s own incomplete-headers/signature-mismatch
-  code) — in one of two shapes: paired-but-not-allowed (told the exact
+  code) — in one of THREE shapes, the P-CHARTER one preempting the other two: the mesh is
+   charter-shaped with an undecidable operator key (told that, told the reason
+   word, pointed at `aoide mesh charter show`; the operator keys themselves stay
+   in the host's audit line), paired-but-not-allowed (told the exact
   `node allow <name> message on` fix) or anything else (told to pair, then
   allow). Past the gate, the envelope's own content is entirely
   `aoide_storage::mail::deposit`'s job — recomputing `msgid`, verifying the
