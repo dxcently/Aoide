@@ -833,19 +833,32 @@ fn mesh_arg(inv: &Invocation) -> Option<&str> {
 ///
 /// A node WITH a record is unchanged: dialled, and its own `Err` reported.
 fn drain_spooled(spooled: &[String]) -> Vec<serde_json::Value> {
-    let known: std::collections::BTreeSet<String> = aoide_storage::node_store::load_nodes()
+    let known: std::collections::BTreeMap<String, bool> = aoide_storage::node_store::load_nodes()
         .into_iter()
-        .map(|node| node.name)
+        .map(|node| (node.name.clone(), node.never_dialled()))
         .collect();
     spooled
         .iter()
         .map(|node| {
-            if !known.contains(node) {
+            let Some(poll_only) = known.get(node) else {
                 return json!({
                     "node": node,
                     "drained": false,
                     "reason": "no-record",
                     "detail": "this box holds no node record for it, so nothing was dialed — the entry waits in the spool until it is paired (giving it a record) or P-M4 routes charter addresses",
+                });
+            };
+            // **A `poll` node is never dialled either** (confirm finding 6):
+            // `drain_node` returns `Ok(())` for it exactly as it does for an
+            // unknown name, so mapping that to `drained: true` told the same
+            // lie one arm over. Its held entry leaves through the FAR end's own
+            // `aoide mail poll`, which is worth saying out loud.
+            if *poll_only {
+                return json!({
+                    "node": node,
+                    "drained": false,
+                    "reason": "poll-only",
+                    "detail": "this node's address is `poll`, so this box never dials it — the entry waits for the far end's own `aoide mail poll`",
                 });
             }
             match crate::mail_wire::drain_node(node) {
@@ -871,6 +884,10 @@ fn render_spooled(rows: &[serde_json::Value]) -> String {
         } else if row["reason"].as_str() == Some("no-record") {
             lines.push(format!(
                 "  {node}: NOT DIALED — no node record here (the entry waits in the spool until a pairing or P-M4's charter routing)"
+            ));
+        } else if row["reason"].as_str() == Some("poll-only") {
+            lines.push(format!(
+                "  {node}: NOT DIALED — a `poll` node is never dialled (the entry waits for its own `aoide mail poll`)"
             ));
         } else {
             lines.push(format!(
@@ -1055,6 +1072,41 @@ mod tests {
             aoide_storage::node_store::save_nodes(&nodes).unwrap();
             let rows = drain_spooled(&["peerbox".to_string()]);
             assert_eq!(rows[0]["drained"], true, "a dialled node still answers for itself: {rows:?}");
+
+            // And a node WITH a record whose address is `poll` is its own
+            // answer (confirm finding 6): `drain_node` no-ops on it exactly as
+            // it does for an unknown name, and claiming `drained: true` there
+            // was the same lie one arm over.
+            let mut nodes = aoide_storage::node_store::load_nodes();
+            let mut poll_only = aoide_storage::node_store::Node {
+                url: aoide_storage::charter::DEFAULT_ADDRESS.to_string(),
+                ..aoide_storage::node_store::Node {
+                    name: "laptop".to_string(),
+                    url: String::new(),
+                    autogate: false,
+                    token_file: None,
+                    bearer_secret: None,
+                    hub: false,
+                    pubkey: Some(kp.info().pubkey_hex.clone()),
+                    verified: true,
+                    grants: aoide_storage::node_store::Grants::new(),
+                    narrowed: aoide_storage::node_store::Grants::new(),
+                    via: None,
+                    added_at: aoide_storage::time::now_iso_utc(),
+                }
+            };
+            poll_only.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+            nodes.push(poll_only);
+            aoide_storage::node_store::save_nodes(&nodes).unwrap();
+            let rows = drain_spooled(&["laptop".to_string()]);
+            assert_eq!(rows[0]["drained"], false, "{rows:?}");
+            assert_eq!(rows[0]["reason"], "poll-only");
+            assert!(
+                rows[0]["detail"].as_str().unwrap().contains("never dials it"),
+                "{rows:?}"
+            );
+            let text = render_spooled(&rows);
+            assert!(text.contains("a `poll` node is never dialled"), "{text}");
         });
     }
 }
