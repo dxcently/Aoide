@@ -1140,12 +1140,25 @@ fn rail_admits(
 
 /// [`rail_admits`] with the disk reads: the matched record judged by its HOME
 /// mesh, resolved and read exactly the way the door's grant lookup resolves it
-/// (`effective_mesh(None)` → `governing` → `charter_shaped`) and exactly once
-/// per matched record. The rail carries no signed mesh, so this is the only
-/// input it has — the same "the unnamed case is judged by home's rules" reading
+/// (`governing` → `charter_shaped`) and exactly once per matched record. The
+/// rail carries no signed mesh, so home is the only mesh it can be judged by —
+/// the same "the unnamed case is judged by home's rules" reading
 /// [`grant_in_mesh`] makes, applied to the rail instead of to the grant.
+///
+/// **Home is READ here, never guessed** (review F6):
+/// [`aoide_storage::config::home_mesh`] answers the built-in default when
+/// `config.toml` will not load, so a box whose real `homeMesh` is a charter
+/// mesh — with an unreadable config — would be judged by the DEFAULT mesh's
+/// (pair) rules and deliver on the record's flag again. The rail therefore
+/// reads [`aoide_storage::config::home_mesh_fallible`] and PENDS on `Err`:
+/// an unreadable config has no answer to give, and the whole charter rule is
+/// exactly what a guessed mesh name would step around. (`grant_in_mesh` still
+/// resolves the same way a named request's mesh is resolved — that is the
+/// grant lookup's own, door-wide question, not this rail's.)
 fn rail_admits_here(nodes: &[aoide_storage::node_store::Node], record: &aoide_storage::node_store::Node) -> bool {
-    let mesh = effective_mesh(None);
+    let Ok(mesh) = aoide_storage::config::home_mesh_fallible() else {
+        return false;
+    };
     let governing = aoide_storage::charter::governing(&mesh);
     let shaped = aoide_storage::charter::charter_shaped(&mesh);
     rail_admits(nodes, record, governing.as_ref(), shaped, &mesh)
@@ -11398,6 +11411,7 @@ mod tests {
     /// the tree, so a failing assertion cannot leak into the next test.
     struct RailBox {
         root: std::path::PathBuf,
+        config: std::path::PathBuf,
         stage: std::path::PathBuf,
         audit_log: std::path::PathBuf,
         listener: UnixListener,
@@ -11414,6 +11428,15 @@ mod tests {
             let mut buf = Vec::new();
             let _ = conn.read_to_end(&mut buf);
             Some(String::from_utf8_lossy(&buf).into_owned())
+        }
+
+        /// Break `config.toml` past parsing — the input review F6 is about. A
+        /// MISSING config is not a load error (`config::load` answers the
+        /// defaults), so the fence is about a config that exists and will not
+        /// read: this is that.
+        fn break_config(&self) {
+            std::fs::write(&self.config, "this is not a config at all ][\n").unwrap();
+            assert!(aoide_storage::config::load().is_err(), "the premise: the box's config no longer loads");
         }
 
         /// The queue this box holds — empty when a send was delivered (or
@@ -11456,7 +11479,7 @@ mod tests {
     const RAIL_SESSION: &str = "rail";
     const RAIL_PEER_ADDR: &str = "10.0.0.9";
 
-    fn rail_box(tag: &str, peer_url: &str, listed: bool, token: Option<&str>) -> RailBox {
+    fn rail_box(tag: &str, mesh: &str, peer_url: &str, listed: bool, token: Option<&str>) -> RailBox {
         let root = aoide_test_support::short_tmp(tag);
         let mut saved = Vec::new();
         for key in ["AOIDE_ROOT", "AOIDE_STATE_DIR", "AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_CONFIG"] {
@@ -11464,15 +11487,15 @@ mod tests {
         }
         std::env::remove_var("AOIDE_CONFIG");
 
-        // 1. An operator roots `home` and signs a charter naming the peer — or,
+        // 1. An operator roots `mesh` and signs a charter naming the peer — or,
         //    for `listed: false`, one that does not name it at all.
         charter_machine(&root, "operator", "opbox");
-        let init = aoide_storage::charter::init("home").unwrap();
+        let init = aoide_storage::charter::init(mesh).unwrap();
         let op_line = aoide_storage::charter::node_line().unwrap();
         charter_machine(&root, "peer", "peerbox");
         let peer_line = aoide_storage::charter::node_line().unwrap();
         let peer_key = aoide_storage::charter::parse(&format!(
-            "mesh = \"home\"\nversion = 1\nrelays = []\n\n[nodes]\n{peer_line}\n"
+            "mesh = \"{mesh}\"\nversion = 1\nrelays = []\n\n[nodes]\n{peer_line}\n"
         ))
         .unwrap()
         .nodes
@@ -11485,20 +11508,25 @@ mod tests {
         charter_machine(&root, "operator", "opbox");
         let named = if listed { format!("{op_line}\n{peer_line}\n") } else { format!("{op_line}\n") };
         std::fs::write(
-            aoide_storage::charter::source_path("home"),
-            format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{named}"),
+            aoide_storage::charter::source_path(mesh),
+            format!("mesh = \"{mesh}\"\nversion = 0\nrelays = []\n\n[nodes]\n{named}"),
         )
         .unwrap();
-        aoide_storage::charter::sign("home", None).unwrap();
-        let bytes = std::fs::read(aoide_storage::charter::source_path("home")).unwrap();
-        let sig = std::fs::read(aoide_storage::charter::source_sig_path("home")).unwrap();
+        aoide_storage::charter::sign(mesh, None).unwrap();
+        let bytes = std::fs::read(aoide_storage::charter::source_path(mesh)).unwrap();
+        let sig = std::fs::read(aoide_storage::charter::source_sig_path(mesh)).unwrap();
 
         // 2. The peer's box takes the charter and trusts ONLY the operator key
-        //    — no pairing with anybody, so `home` is a charter mesh here.
+        //    — no pairing with anybody, so `mesh` is a charter mesh here. It is
+        //    also the box's NAMED home: the rail carries no signed mesh, so
+        //    `[pairing] homeMesh` is the one that judges it.
         charter_machine(&root, "peer", "peerbox");
         std::fs::write(
             root.join("peer").join("config.toml"),
-            format!("[mesh.home]\noperator = \"ed25519:{}\"\n", init.operator),
+            format!(
+                "[pairing]\nhomeMesh = \"{mesh}\"\n\n[mesh.{mesh}]\noperator = \"ed25519:{}\"\n",
+                init.operator
+            ),
         )
         .unwrap();
         assert_eq!(aoide_storage::charter::accept(&bytes, &sig).unwrap().charter.version, 1);
@@ -11516,11 +11544,12 @@ mod tests {
 
         // 3. This box's record for the peer: `autogate` and `verified`, its key
         //    as the charter carries it, its own `token_file` where asked for,
-        //    and a stale grant in `home` so nothing here turns on that grant.
+        //    and a stale grant in the home mesh so nothing here turns on that
+        //    grant.
         let mut record = fixture_node("peerbox", peer_url, true);
         record.verified = true;
         record.pubkey = Some(peer_key);
-        record.grants = std::collections::BTreeMap::from([("home".to_string(), vec!["message".to_string()])]);
+        record.grants = aoide_storage::node_store::grants_in(mesh, &["message"]);
         if let Some(secret) = token {
             let path = box_root.join("node.token");
             std::fs::write(&path, format!("{secret}\n")).unwrap();
@@ -11542,7 +11571,14 @@ mod tests {
         )
         .unwrap();
 
-        RailBox { root, stage, audit_log: box_root.join("log"), listener, saved }
+        RailBox {
+            root,
+            config: box_root.join("config.toml"),
+            stage,
+            audit_log: box_root.join("log"),
+            listener,
+            saved,
+        }
     }
 
     /// The whole rail table, over one real box (identity, accepted charter,
@@ -11550,7 +11586,7 @@ mod tests {
     #[test]
     fn the_autogate_rail_reads_the_matched_record_against_its_home_mesh() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let boxed = rail_box("aoide-a2a-rail-table", &format!("http://{RAIL_PEER_ADDR}:8710/"), true, None);
+        let boxed = rail_box("aoide-a2a-rail-table", "home", &format!("http://{RAIL_PEER_ADDR}:8710/"), true, None);
         let record = aoide_storage::node_store::load_nodes().pop().unwrap();
         let listed = aoide_storage::charter::governing("home").expect("the box's accepted charter governs home");
         assert_eq!(
@@ -11634,7 +11670,7 @@ mod tests {
     #[test]
     fn a_record_the_home_charter_no_longer_lists_pends_its_autogated_send() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let boxed = rail_box("aoide-a2a-rail-gone", &format!("http://{RAIL_PEER_ADDR}:8710/"), false, None);
+        let boxed = rail_box("aoide-a2a-rail-gone", "home", &format!("http://{RAIL_PEER_ADDR}:8710/"), false, None);
 
         let result = boxed.send("removed-line", "", None, ConnOrigin::Remote(RAIL_PEER_ADDR.parse().unwrap()));
         assert!(result.is_ok(), "the door ANSWERS a rail it does not deliver for: {result:?}");
@@ -11653,7 +11689,7 @@ mod tests {
     #[test]
     fn a_key_the_home_charter_lists_still_autodelivers() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let boxed = rail_box("aoide-a2a-rail-listed", &format!("http://{RAIL_PEER_ADDR}:8710/"), true, None);
+        let boxed = rail_box("aoide-a2a-rail-listed", "home", &format!("http://{RAIL_PEER_ADDR}:8710/"), true, None);
 
         let result = boxed.send("listed-line", "", None, ConnOrigin::Remote(RAIL_PEER_ADDR.parse().unwrap()));
         assert!(result.is_ok(), "{result:?}");
@@ -11667,7 +11703,7 @@ mod tests {
     #[test]
     fn the_token_rail_reads_the_same_home_charter_as_the_address_rail() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let boxed = rail_box("aoide-a2a-rail-token", "http://192.0.2.99:8710/", false, Some("peer-secret"));
+        let boxed = rail_box("aoide-a2a-rail-token", "home", "http://192.0.2.99:8710/", false, Some("peer-secret"));
 
         let result = boxed.send(
             "token-line",
@@ -11689,7 +11725,7 @@ mod tests {
     #[test]
     fn a_charter_unlisted_record_reaches_the_queue_rather_than_the_uniform_guard() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let boxed = rail_box("aoide-a2a-rail-guard", "http://192.0.2.99:8710/", false, Some("peer-secret"));
+        let boxed = rail_box("aoide-a2a-rail-guard", "home", "http://192.0.2.99:8710/", false, Some("peer-secret"));
 
         let result = boxed.send(
             "guard-line",
@@ -11704,6 +11740,42 @@ mod tests {
             1,
             "reaching `pending.json` is the proof it went through the Inject arm, not the guard's synthetic Task"
         );
+    }
+
+    /// **A config that will not load PENDS the rail** (review F6):
+    /// `config::home_mesh` answers the built-in default when `config.toml` is
+    /// unreadable, so a box whose REAL home is a charter mesh would be judged
+    /// by the DEFAULT mesh's (pair) rules and deliver on the record's flag
+    /// again — one unreadable file stepping around the whole rule. The fence is
+    /// `home_mesh_fallible`: no answer, no delivery.
+    #[test]
+    fn an_unreadable_config_pends_the_rail_rather_than_guessing_the_default_mesh() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let url = format!("http://{RAIL_PEER_ADDR}:8710/");
+        let origin = ConnOrigin::Remote(RAIL_PEER_ADDR.parse().unwrap());
+
+        // This box's home is `fleet`, a charter mesh that lists the record; the
+        // DEFAULT mesh (`home`) is not shaped at all, which is exactly what a
+        // swallowed load error would silently judge the send by.
+        let loaded = rail_box("aoide-a2a-rail-cfg-loaded", "fleet", &url, true, None);
+        assert!(
+            loaded.send("cfg-line", "", None, origin).is_ok(),
+            "with a readable config the rail delivers, so the arm below is about the config alone"
+        );
+        assert_eq!(loaded.delivered().as_deref(), Some("cfg-line\r"), "named home, listed key: delivered");
+        assert!(loaded.pending().is_empty(), "and nothing was queued");
+        drop(loaded);
+
+        let broken = rail_box("aoide-a2a-rail-cfg-broken", "fleet", &url, true, None);
+        broken.break_config();
+        let result = broken.send("cfg-broken", "", None, origin);
+        assert!(result.is_ok(), "and it is answered, never refused: {result:?}");
+        assert_eq!(
+            broken.delivered(),
+            None,
+            "an unreadable config has no home mesh to judge by, so the rail PENDS rather than resolving to the default mesh's pair rules"
+        );
+        assert_eq!(broken.pending().len(), 1, "the knock still reaches the operator");
     }
 
     #[test]

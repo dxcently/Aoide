@@ -129,7 +129,10 @@ Rules:
   be on the charter's line with `message` (minus the box's own local narrowing);
   a charter-shaped home whose operator key is undecidable delivers nothing on
   this rail; a pair-mesh home keeps the record's own `autogate` flag as the
-  whole rule, as it always was. A record the charter does not answer for is held
+  whole rule, as it always was. A `config.toml` that will not load delivers
+  nothing here either: home is read through `home_mesh_fallible` (a swallowed
+  load error would judge the record by the built-in default mesh instead of the
+  real `[pairing] homeMesh`). A record the charter does not answer for is held
   PENDING — never refused — and the queue entry names it (`node:<name>`).
   `aoide mesh` reports those records on the home mesh's charter row.
 - **Local narrowing only.** A node's own `aoide node allow <node> <cap> off --mesh

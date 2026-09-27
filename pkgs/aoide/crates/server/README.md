@@ -443,10 +443,13 @@ the inbound half of the two-door contract (the outbound half is
   the two with no request signature behind them — a source ADDRESS resolving
   to an `autogate` record's `url`, or a presented bearer matching that record's
   own `tokenFile` — name no mesh, so `rail_admits` judges the MATCHED record by
-  its HOME mesh (`effective_mesh(None)`, the same resolution an unnamed request
-  gets): a charter governing home requires the record `verified` and its key on
-  the line with `message` (minus `Node::narrowed[home]`); a charter-shaped home
-  whose operator key is undecidable delivers nothing; a pair-mesh home keeps
+  its HOME mesh (`home_mesh_fallible`: the same name an unnamed request resolves
+  to, but READ rather than guessed): a charter governing home requires the record
+  `verified` and its key on the line with `message` (minus
+  `Node::narrowed[home]`); a charter-shaped home whose operator key is
+  undecidable delivers nothing; a `config.toml` that will not LOAD delivers
+  nothing either (review F6 — `home_mesh()` answers the built-in default there,
+  which would judge the send by the wrong mesh); a pair-mesh home keeps
   the record's own `autogate` flag as the whole rule. The match and the
   delivery are deliberately two booleans — `autogate_match` still exempts the
   caller from the #50 uniform guard, `deliver_match` is what

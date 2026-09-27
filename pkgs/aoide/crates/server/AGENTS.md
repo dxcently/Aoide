@@ -522,7 +522,13 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   synthetic `submitted` Task — no delivery, no queue entry, invisible to the
   operator — and the ruling is PENDING: never refused, never delivered.
   `rail_admits` reuses `grant_from` (the line minus `Node::narrowed[home]`), so
-  the rail cannot drift from the grant lookup. **`verified` is asked ONLY of a
+  the rail cannot drift from the grant lookup, and it reads HOME with
+  `config::home_mesh_fallible`, PENDS on `Err` — a `config.toml` that will not
+  load must not silently resolve to the built-in default mesh, which is how a
+  charter-governed box would otherwise be judged by a pair mesh's rules (review
+  F6). `grant_in_mesh` keeps `effective_mesh`/`home_mesh`'s tolerant resolution:
+  that is the named request's own door-wide question, deliberately not this
+  rail's. **`verified` is asked ONLY of a
   record claiming a charter LINE**, never of a keyless record the rail matched
   by address: `aoide node add --autogate` writes `verified: false` (a card
   fetch is reachability, never identity), so requiring it in a pair mesh would

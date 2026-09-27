@@ -7225,9 +7225,24 @@ mesh is:
 
 | the record the rail matched | home mesh | auto-delivers |
 |---|---|---|
+| any record | `config.toml` will not LOAD, so home cannot be read | **nothing** — held PENDING |
 | `autogate`, `verified`, key on the line with `message` | a charter GOVERNS it | yes — the line, minus this box's own `node allow … message off --mesh <home>` |
 | any record | charter-SHAPED, operator key undecidable | **nothing** — held PENDING |
 | any record | a PAIR mesh (nothing shaped for it) | yes — the record's own `autogate` flag, the whole rule, exactly as before |
+
+**Home is READ here, never guessed** (review F6). `config::home_mesh` answers
+the built-in default when `config.toml` is unreadable, so a box whose real
+`[pairing] homeMesh` is a charter mesh would otherwise be judged by the DEFAULT
+mesh's (pair) rules and deliver on the record's flag again — the rule stepped
+around by one unreadable file. The rail therefore resolves home with
+`config::home_mesh_fallible` and pends on `Err`: no answer, no delivery. A
+MISSING config is not an error (`config::load` answers the defaults, and
+`present: false`), so the fence is about a config that exists and will not read.
+A NAMED request is the other half of this ruling and is unchanged:
+`grant_in_mesh` resolves its mesh through `effective_mesh`/`home_mesh`, the
+door-wide grant question, where the same swallow is deliberate and NOT fixed
+here — the two are separate resolutions of the same name, and neither is the
+other's fallback.
 
 `a2a::rail_admits` is that table and `a2a::rail_admits_here` the disk read
 that feeds it (one governing/shaped resolution per matched record); the charter

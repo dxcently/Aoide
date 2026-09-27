@@ -330,7 +330,9 @@ through.
     own `node allow … message off --mesh <home>`; where home is charter-shaped
     with an undecidable operator key nothing on this rail delivers; where home
     is a pair mesh the record's own flag is the whole rule, exactly as it
-    always was. A record that does not answer falls to PENDING — never a
+    always was; and where `config.toml` will not load at all the rail PENDS
+    too — home is READ (`home_mesh_fallible`), never answered from the
+    built-in default. A record that does not answer falls to PENDING — never a
     refusal, never a delivery — so the knock still reaches the operator as an
     entry in `session pending list`, attributed `node:<name>`. `aoide mesh`
     lists, on the home mesh's charter row, the records this rail answers for.
