@@ -240,6 +240,21 @@ to **rebuild time** instead.
   (CONTRACTS.md §6's remote-parent rule, [[Node-Transport]]) — a shared
   secret could never tell two nodes apart, so identifying which node called
   needs one file per node, not one flag for the whole door.
+  **The match is not the delivery.** The address and token rails carry no
+  request signature, so they name no mesh: the door judges the record they
+  matched by its HOME mesh's rules (`aoide-server::a2a::rail_admits` — where a
+  charter governs `[pairing] homeMesh`, the record must be `verified` and its
+  key on the charter's line with `message`, minus this box's own
+  `node allow … off --mesh`; a charter-shaped home with an undecidable
+  operator key, or a `config.toml` that will not load, delivers nothing; a
+  pair-mesh home keeps the record's own flag as the whole rule). A record the
+  charter does not answer for is held PENDING — never refused — so the knock
+  reaches the operator as a `session pending list` entry attributed
+  `node:<name>`; the #50 uniform-response guard is still exempted by the
+  MATCH, which is what keeps that send a real pending entry instead of a
+  synthetic unqueued answer. The address rung is an address match with an
+  address match's limits (a first-match tie-break, live DNS, spoofable from
+  where it matches — CONTRACTS.md §6, review F5).
 - **The outbound direction has its own bearer.** `node add --bearer-secret
   <name>` records a secret THIS instance resolves through the local secrets
   broker, as consumer `a2a-client`, on every outbound call to that node —

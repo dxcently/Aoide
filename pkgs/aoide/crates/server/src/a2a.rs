@@ -16,8 +16,9 @@
 //!   - `POST /` — JSON-RPC 2.0: `tasks/get` (real), `message/send` (real —
 //!     inject into a known conductable session, or spawn a freshly conducted
 //!     one; [`decide_send_action`] below — a non-loopback Inject queues
-//!     pending unless the caller matches an `autogate` node, CONTRACTS.md §6
-//!     amendment 2026-08-14; see [`ConnOrigin`]/[`should_deliver_now`]),
+//!     pending unless its rails earn delivery (an `autogate` record's address
+//!     or token, judged by that record's HOME mesh; CONTRACTS.md §6 amendment
+//!     2026-08-14 and P-CHARTER; see [`ConnOrigin`]/[`should_deliver_now`]),
 //!     `aoide/graphSummary` (real — CONTRACTS.md §7: wraps
 //!     [`resolve_graph_document`] in the federation envelope; see
 //!     [`graph_summary`]), anything else → `-32601 method not found`.
@@ -355,8 +356,11 @@ pub enum ConnOrigin {
     /// trusted-by-bind-address default. UNCHANGED behavior: auto-delivers,
     /// exactly as before this amendment (hard regression requirement).
     Loopback,
-    /// A non-loopback peer IP — gated UNLESS it matches an `autogate`-marked
-    /// entry in `state/nodes.json`.
+    /// A non-loopback peer IP — gated UNLESS its rails earn auto-delivery:
+    /// the address must resolve to an `autogate` record in `state/nodes.json`
+    /// AND that record must answer under its HOME mesh's rules
+    /// ([`rail_admits`] — a pair mesh keeps the record's own flag as the whole
+    /// rule; a charter mesh wants its key on the line with `message`).
     Remote(IpAddr),
     /// The peer address could not be determined (e.g. `peer_addr()` failed).
     /// Fails SAFE: treated exactly like an unmatched [`Self::Remote`] — never
@@ -422,15 +426,20 @@ impl Listener {
 }
 
 /// Should an Inject auto-deliver (`--yes`) rather than queue pending? Pure —
-/// unit-tested directly; the one place I/O (`autogate_match`, a
-/// `state/nodes.json` lookup) enters is the caller. Loopback is
-/// unconditionally trusted (today's behavior, unchanged); a non-loopback or
-/// unknown-origin node only bypasses the queue when it matches an
-/// `autogate`-marked registry entry.
-fn should_deliver_now(origin: ConnOrigin, autogate_match: bool) -> bool {
+/// unit-tested directly; the one place I/O enters is the caller, which
+/// resolves `deliver_match` from the call's rails. Loopback is unconditionally
+/// trusted (today's behavior, unchanged); a non-loopback or unknown-origin
+/// caller only bypasses the queue when its rails EARNED delivery —
+/// `deliver_match` is [`message_send`]'s `sig_autogate || rail_delivers`, NOT
+/// the bare `autogate_match`: the unsigned rails' match is what exempts a
+/// caller from the #50 uniform-response guard, while the RECORD they matched
+/// is judged by its HOME mesh (`rail_admits`: the charter's line, the shaped
+/// fail-closed arm, or a pair mesh's own flag), so an `autogate` record a
+/// charter no longer lists arrives here `false` and PENDS.
+fn should_deliver_now(origin: ConnOrigin, deliver_match: bool) -> bool {
     match origin {
         ConnOrigin::Loopback => true,
-        ConnOrigin::Remote(_) => autogate_match,
+        ConnOrigin::Remote(_) => deliver_match,
         ConnOrigin::Unknown => false,
     }
 }
@@ -460,7 +469,7 @@ fn should_deliver_now(origin: ConnOrigin, autogate_match: bool) -> bool {
 //     `trustLoopback` bool to leave mis-set. A caller — local or not — must
 //     present the valid token to keep loopback's old free pass.
 //
-// Separately, [`aoide_storage::node_store::is_autogated_node_token`] restores
+// Separately, [`aoide_storage::node_store::autogated_node_token`] restores
 // PER-NODE identification for the non-loopback autogate match (replacing the
 // now-frequently-dead address match behind a proxy) — that one is keyed on
 // each registered node's OWN token, not this single server-wide expected
@@ -2694,9 +2703,9 @@ fn do_spawn(
 /// is byte-identical-when-off by construction, not merely by testing.
 ///
 /// - Inject's autogate match now folds TWO independent signals: the
-///   original address match ([`aoide_storage::node_store::is_autogated_node_addr`],
+///   original address match ([`aoide_storage::node_store::autogated_node_addr`],
 ///   dead behind any proxy) OR a per-node token match
-///   ([`aoide_storage::node_store::is_autogated_node_token`], survives one) —
+///   ([`aoide_storage::node_store::autogated_node_token`], survives one) —
 ///   either is sufficient, so an operator who has never set a node
 ///   `token_file` sees the exact original address-only behavior.
 /// - Inject's ORIGIN is [`effective_origin`]'d before reaching
@@ -2719,8 +2728,8 @@ fn do_spawn(
 /// resolve_node`] answers via one of two rungs — a presented bearer that
 /// matches a node's own `token_file` (survives a reverse proxy) or, failing
 /// that, the TCP-observed `origin` address against that node's registered
-/// `url` (the exact same two signals [`is_autogated_node_token`]/
-/// [`is_autogated_node_addr`] already fold for the unrelated autogate
+/// `url` (the exact same two signals [`autogated_node_token`]/
+/// [`autogated_node_addr`] already fold for the unrelated autogate
 /// question, just unfiltered by `autogate` and narrowed to ONE specific
 /// node). Spawn accepts ONLY the token rung — a bare address match resolves
 /// a node identity for attribution (Inject's `from` field, origin-stamping)
@@ -2778,7 +2787,7 @@ fn do_spawn(
 /// got queued into `pending.json` with no credential at all. A hard `-32005`
 /// here (mirroring Spawn) would be wrong instead: enrolled nodes authenticate
 /// via their OWN per-node token
-/// ([`aoide_storage::node_store::is_autogated_node_token`]), never the
+/// ([`aoide_storage::node_store::autogated_node_token`]), never the
 /// server-wide one, and outbound clients send no bearer whatsoever — see the
 /// grounding above. So the guard below fires only when NEITHER credential
 /// matches, and answers with the exact same synthetic `submitted` Task
