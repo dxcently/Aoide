@@ -6431,6 +6431,90 @@ mod tests {
         }
     }
 
+    /// The deadline every fixture in this module that EXPECTS a delivery
+    /// shares. Sized past every wait a legitimate delivery makes first —
+    /// `wait_ready`'s 2s quiescence window for a hookless target, plus
+    /// `SUBMIT_KEYSTROKE_DELAY`'s 300ms between the text and the submit key —
+    /// and short enough that a delivery this door WITHHELD fails its test
+    /// instead of parking the thread, and (under `env_lock`) the whole suite
+    /// queued behind it.
+    const DELIVERY_BUDGET: Duration = Duration::from_secs(10);
+
+    /// Accept ONE connection by [`DELIVERY_BUDGET`], panicking rather than
+    /// blocking forever when none arrives: a `message/send` the door withheld
+    /// — or dialled at another path — leaves this socket quiet, and an
+    /// unbounded `accept` turns exactly that into a hung test binary. `what`
+    /// is the fixture's own expectation in the test's own words, so the
+    /// failure names which arm broke rather than merely that a socket stayed
+    /// quiet. The returned stream carries the same budget as its read
+    /// timeout, so the other half — a peer that connects and then goes silent
+    /// — is bounded too. Written against the `cfg`-split `UnixListener`/
+    /// `UnixStream` (std's `std::os::unix::net` on Unix,
+    /// `aoide_protocol::win_unix` on native Windows), which is why every
+    /// delivery fixture here asks THIS instead of hand-rolling a thread body.
+    fn accept_one(listener: &UnixListener, what: &str) -> UnixStream {
+        listener.set_nonblocking(true).unwrap();
+        let deadline = Instant::now() + DELIVERY_BUDGET;
+        loop {
+            match listener.accept() {
+                Ok((conn, _)) => {
+                    conn.set_read_timeout(Some(DELIVERY_BUDGET)).unwrap();
+                    return conn;
+                }
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock
+                            | std::io::ErrorKind::TimedOut
+                            | std::io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    if Instant::now() >= deadline {
+                        panic!("{what}\n  — nothing connected to the fixture's control socket within {DELIVERY_BUDGET:?}");
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) => panic!("{what}\n  — the fixture's listener failed: {e}"),
+            }
+        }
+    }
+
+    /// The module's ONE delivery rig: wait, on its own thread — the door dials
+    /// while the test body drives it — for everything a DELIVERED target
+    /// receives on its control socket, up to the peer's close. Bounded on both
+    /// halves by [`accept_one`]; the payload is what the caller asserts on, so
+    /// a withheld delivery is a failed assertion with this message attached
+    /// instead of a suite that never returns.
+    fn expect_delivery(listener: UnixListener, what: &'static str) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut conn = accept_one(&listener, what);
+            let deadline = Instant::now() + DELIVERY_BUDGET;
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                let left = deadline.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    panic!(
+                        "{what}\n  — the deliverer connected, sent {} byte(s), and held the \
+                         connection open for {DELIVERY_BUDGET:?} without closing",
+                        buf.len()
+                    );
+                }
+                conn.set_read_timeout(Some(left)).unwrap();
+                match conn.read(&mut chunk) {
+                    Ok(0) => return buf,
+                    Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                    Err(e)
+                        if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) =>
+                    {
+                        continue
+                    }
+                    Err(e) => panic!("{what}\n  — reading the delivered payload failed: {e}"),
+                }
+            }
+        })
+    }
+
     // (a) AgentCard generation from a small fake schema.
     #[test]
     fn agent_card_only_advertises_implemented_commands_as_skills() {
@@ -10200,13 +10284,7 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "a loopback `message/send` with no token configured is DELIVERED");
 
         let audit_log = root.join("log");
         let params = serde_json::json!({
@@ -10285,13 +10363,7 @@ mod tests {
         // While the socket still exists, delivery is unaffected — byte-for-
         // byte the same as `loopback_message_send_still_auto_delivers_
         // exactly_as_before` above.
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "an inject into an existing socket is DELIVERED");
         let params = serde_json::json!({
             "message": { "parts": [{ "kind": "text", "text": "still here" }], "contextId": id }
         });
@@ -10385,13 +10457,7 @@ mod tests {
         // Arm 1 — an ordinary target on the door's own trusted loopback rung:
         // delivered, exactly as before this rule existed.
         let plain = listeners.iter().find(|(id, _)| *id == "plain-target").unwrap().1.try_clone().unwrap();
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = plain.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(plain, "the ordinary loopback target's message is DELIVERED");
         let result = message_send(
             &json!({ "message": { "parts": [{ "kind": "text", "text": "plain hello" }], "contextId": "plain-target" } }),
             &audit_log,
@@ -10470,13 +10536,7 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "an A2A-delivered message is DELIVERED and filed");
 
         let audit_log = root.join("log");
         let params = serde_json::json!({
@@ -10584,8 +10644,7 @@ mod tests {
         let listener = UnixListener::bind(&socket).unwrap();
 
         let acc = std::thread::spawn(move || {
-            use std::io::Read as _;
-            let (mut conn, _) = listener.accept().unwrap();
+            let mut conn = accept_one(&listener, "the spawned session's opening turn is typed");
             // Exactly the text, no more: the submit keystroke must NOT be
             // part of this write.
             let mut text = Vec::new();
@@ -10688,8 +10747,7 @@ mod tests {
 
         let expected = aoide_protocol::agents::CLAUDE_PROFILE.submit_key;
         let acc = std::thread::spawn(move || {
-            use std::io::Read as _;
-            let (mut conn, _) = listener.accept().unwrap();
+            let mut conn = accept_one(&listener, "the opening turn's text-then-keystroke write");
             let mut text = Vec::new();
             let mut chunk = [0u8; 64];
             while text.len() < "first turn".len() {
@@ -11177,13 +11235,7 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "a token-presenting loopback send is DELIVERED");
 
         let audit_log = root.join("log");
         let params = serde_json::json!({
@@ -11261,13 +11313,7 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "an autogated node's non-loopback send is DELIVERED");
 
         let audit_log = root.join("log");
         let params = serde_json::json!({
@@ -11362,13 +11408,7 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "an autogated node's token-matched send is DELIVERED");
 
         let audit_log = root.join("log");
         let params = serde_json::json!({
@@ -11532,13 +11572,7 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "a signed autogate node's loopback send is DELIVERED");
 
         let audit_log = root.join("log");
         let params = serde_json::json!({
@@ -11767,13 +11801,7 @@ mod tests {
         let (stage, audit_log, listener) =
             write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, false);
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "the parent's steer is DELIVERED with the node's autogate off");
 
         let key = PARENT_KEY.to_string();
         let result = message_send(
@@ -11817,13 +11845,7 @@ mod tests {
         let (stage, audit_log, listener) =
             write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, true);
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "the parent's steer is DELIVERED, not held pending");
 
         let key = PARENT_KEY.to_string();
         let result = message_send(
@@ -11873,29 +11895,7 @@ mod tests {
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
 
-        let acc = std::thread::spawn(move || {
-            // Bounded, so a delivery this door WITHHELD (a fixture whose grant
-            // no longer matches the rule) fails the assertion below instead of
-            // hanging the suite on an `accept` that never returns — and, under
-            // `env_lock`, hanging every other test queued behind it.
-            listener.set_nonblocking(true).unwrap();
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            while std::time::Instant::now() < deadline {
-                match listener.accept() {
-                    Ok((mut conn, _)) => {
-                        use std::io::Read as _;
-                        let mut buf = Vec::new();
-                        let _ = conn.read_to_end(&mut buf);
-                        return buf;
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                    }
-                    Err(e) => panic!("the fixture listener failed: {e}"),
-                }
-            }
-            Vec::new()
-        });
+        let acc = expect_delivery(listener, "a genuinely signed parent's steer is DELIVERED, not held pending");
         let result = message_send(
             &body,
             &audit_log,
@@ -12009,13 +12009,10 @@ mod tests {
         let (stage, audit_log, listener) =
             write_remote_parent_box(&root, "parent-node", PARENT_KEY, PARENT_SESSION, false);
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(
+            listener,
+            "the tunneled parent's steer is DELIVERED — the exemption keeps it off the Unknown arm",
+        );
 
         let key = PARENT_KEY.to_string();
         let result = message_send(
@@ -12349,13 +12346,7 @@ mod tests {
         };
         write_stage(&sessions_path(), &sf).unwrap();
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = real_listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(real_listener, "a loopback, tokenless send with no token configured is DELIVERED");
 
         let audit_log = root.join("log");
         // Loopback + no token configured: off-path, must auto-deliver exactly
