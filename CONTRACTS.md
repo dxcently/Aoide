@@ -7382,14 +7382,24 @@ server, no new port, no new file — a poll is a READ.
 lookup (the same shape-before-existence precedence `aoide/pairPoll`
 holds). **Admission** resolves the caller exactly as `mailDeposit` does —
 a verified per-request signature, key-resolved — and then requires BOTH
-`node_may_message` (paired, `verified`, `"message"` in this node's
-`allows`) AND `params.node` equal to the caller's own resolved name:
+`node_may_message` (paired, `verified`, `"message"` in the caller's grant for
+this mesh) AND `params.node` equal to the caller's own resolved name:
 MAIL.md §Wire's "the caller's verified identity must BE `node` (no polling
 on another's behalf)". A refusal is `-32010`, the SAME code the deposit arm
-mints (never `-32006`/`-32007`), in one of three shapes: the claim is not
-the signer (told both names), paired but `message` missing (told the exact
-`aoide node allow <name> message on` fix, which runs on the POLLED host),
-or no verified signature resolution at all (told to pair first).
+mints (never `-32006`/`-32007`), and it comes off the SAME helper the deposit
+arm uses (`charter_refusal`) so the two arms can never teach different fixes
+for one state: when the mesh is charter-SHAPED that refusal preempts the rest —
+an undecidable operator key (the deposit arm's N5 shape: the reason word to the
+caller, the detail naming both operator keys to the host's own audit line), or a
+charter IN FORCE whose line for the caller carries no `message`, which nothing
+local can fix (`aoide node allow … on --mesh <m>` answers `widens-charter`
+there; re-listing the key is the charter's OPERATOR signing a version that
+carries it, and `aoide mesh charter show <mesh>` reads what is in force). Only
+in a mesh no charter governs do the remaining shapes speak: the claim is not
+the signer (told both names), paired but `message` missing from the grant (told
+the exact `aoide node allow <name> message on --mesh <m>` fix, which runs on
+the POLLED host), or no verified signature resolution at all (told to pair
+first).
 
 **`down` is not enforced here yet.** It is declared in
 `[mesh.<name>.status]`, a declaration the door does not read until P-M4
@@ -7441,27 +7451,24 @@ spooled them.
 two triggers, and they are the same call:
 
 - **`aoide mail poll [<node>]`** — the explicit ask. With a `<node>` it dials
-  that node's record (`state/nodes.json`); a name this box holds NO record for
-  is not dialled at all, and a caller that reports the attempt (the charter
-  spool does: `client::charter::drain_spooled`) must say `no-record` rather
-  than claim a drain — a charter line's `address` is P-M4's to route, not a
-  dial target yet (§4's charter carriage). This is also how a
-  `mail poll` with no argument is scoped: the roster it walks is the record
-  set, so a charter node with no record is simply not asked.
   that node alone; a name this box is not paired with is refused BEFORE any
   dial (`unknown-node` for a name the registry has never seen,
   `unpaired-node` for one registered but never verified — the same two
   refusals `mail send`'s node branch makes). With no argument it asks every
   node `mail_wire::pollable_nodes` returns: registered, `verified`, and
-  carrying `message` in THIS box's own `allows` for it — the same gate a
-  letter has to clear to be spooled there, so "a node this box sends to" and
+  carrying `message` in THIS box's own per-mesh `grants` for it — the same gate
+  a letter has to clear to be spooled there, so "a node this box sends to" and
   "a node this box asks" stay one set. Per node the answer reports
   `polled`/`filed` or `unreachable`/`reason`; one node's failure never stops
   the sweep, and the command's own status reports that the ASK was made
   (write-is-the-report), never the far end's outcome. This is the receive
   trigger a node with nothing to send needs: an empty outbox never dials, so
   poll-on-contact alone can never reach it, and an OS timer driving this
-  command is H1's own scope.
+  command is H1's own scope. A charter line's `address` is P-M4's to route, not
+  a dial target yet (§4's charter carriage), so a charter node this box holds
+  no record for is simply not asked — and a caller that reports the attempt
+  (`client::charter::drain_spooled`) must say `no-record` rather than claim a
+  drain.
 - **poll-on-contact** — the end of any drain pass that actually reached a
   node (see MAIL.md §Outbox). The drain's dial policy is unchanged by the
   command above: a pass with nothing attemptable still dials nothing.
@@ -7529,8 +7536,8 @@ TLS-terminating front — a Cloudflare Tunnel, a VPS with public 443, a tailnet
   by `[pairing] homeMesh`'s own rules, and a charter-shaped mesh whose
   operator key is undecidable failing CLOSED. A revoked key is therefore
   refused through the adapter exactly as it is at the door — the difference
-  between the two listeners is the method table and the bind, and nothing
-  else.
+  between the two listeners is the method table, the bind, and sealing — and
+  nothing else on the admission path.
 - **The Host header is never consulted.** Through a tunnel it is the front's
   own hostname, which names nothing this process decides.
 - **Audit**: the door's own labels (`a2a.aoide/mailDeposit`,

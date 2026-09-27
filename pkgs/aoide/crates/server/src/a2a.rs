@@ -3199,19 +3199,36 @@ fn deposit_admitted(grant: &Grant) -> bool {
 /// both the refusal and its fix: a grant in another mesh is not a grant here,
 /// and saying which mesh was read is the difference between a fixable refusal
 /// and a mystery.
-fn deposit_refusal(signed: Option<SignedCaller<'_>>, mesh: &str, audit_log: &Path) -> (i64, String) {
-    // **A charter-shaped mesh whose operator key is undecidable is its own
-    // refusal** (re-review N5). The generic text below tells the operator to
-    // run `aoide node allow <name> message on --mesh <m>` — which in this
-    // window answers `widens-charter` and changes nothing, and which may name a
-    // caller that has no record here at all (a charter-resolved identity). So
-    // say what is actually wrong, name the mesh, say WHY the key is
-    // undecidable, and point at the one command that shows it.
-    if aoide_storage::charter::charter_shaped(mesh) && aoide_storage::charter::governing(mesh).is_none() {
-        // The REASON word only reaches the caller: the refusal is returned by
-        // an ungated method, and `trusted_operator`'s detail names BOTH
-        // operator keys and which file holds which. The audit line carries the
-        // detail where an operator (and only an operator) will find it.
+/// The refusal a **charter-shaped** mesh owes an ungranted caller — shared by
+/// both mail arms so they can never teach different fixes for the same state.
+/// They did: N5 gave `deposit_refusal` this arm and `poll_refusal` had none
+/// until H1's merge review, so the same box in the same state told a poller to
+/// run a command that answers `widens-charter` and changes nothing.
+///
+/// `None` when the mesh is not charter-shaped — the caller's own arm then
+/// speaks, and ITS `aoide node allow … on --mesh` teaching is correct there (a
+/// pair mesh's grant is editable locally). Two shapes when it is, because the
+/// fix differs:
+///
+/// - **the operator key is UNDECIDABLE** (`governing` is `None`): nothing in
+///   the mesh is granted to anybody until it resolves, so the refusal names
+///   the mesh, says WHY, and points at the one command that shows it;
+/// - **a charter is in force**: the caller's LINE is the whole grant. A
+///   missing or removed line is fixed by the charter's OPERATOR signing a new
+///   version that lists the key — never by `aoide node allow … on`, and never
+///   by anything this host does alone. Local narrowing can only take away
+///   (`… off`), so the fix travels with the charter.
+///
+/// `what` is the arm's own words ("mail deposit refused" / "mail poll
+/// refused"); `label` is the audit name the arm self-audits under. In the
+/// undecidable shape the DETAIL (both operator keys, and which file holds
+/// which) reaches the audit line only: the refusal is returned by an ungated
+/// method, so the caller sees the reason word, never the keys.
+fn charter_refusal(what: &str, mesh: &str, label: &str, audit_log: &Path) -> Option<(i64, String)> {
+    if !aoide_storage::charter::charter_shaped(mesh) {
+        return None;
+    }
+    if aoide_storage::charter::governing(mesh).is_none() {
         let (why, detail) = match aoide_storage::charter::trusted_operator(mesh) {
             Err(refusal) => (refusal.reason.clone(), format!("{}: {}", refusal.reason, refusal.detail)),
             Ok(_) => ("undecidable".to_string(), "the charter's operator key cannot be read".to_string()),
@@ -3220,21 +3237,47 @@ fn deposit_refusal(signed: Option<SignedCaller<'_>>, mesh: &str, audit_log: &Pat
             audit_log,
             Door::A2a,
             EventClass::Audit,
-            "a2a.aoide/mailDeposit",
+            label,
             "unauthorized",
             &format!("charter-shaped mesh `{mesh}` with an undecidable operator key — {detail}"),
         );
-        return (
+        return Some((
             -32010,
             format!(
-                "mail deposit refused: mesh `{mesh}` is a CHARTER mesh on this host and its operator key \
-                 is UNDECIDABLE right now ({why}). Nothing in that mesh is granted to anybody until it is \
-                 resolved — the charter is the only trust there, so there is no paired-record fallback and \
-                 no local `node allow … on --mesh {mesh}` that could widen it. See `aoide mesh charter show \
-                 {mesh}` for the recorded key, where it is written down (config line vs state record), and \
+                "{what}: mesh `{mesh}` is a CHARTER mesh on this host and its operator key is UNDECIDABLE \
+                 right now ({why}). Nothing in that mesh is granted to anybody until it is resolved — the \
+                 charter is the only trust there, so there is no paired-record fallback and no local \
+                 `node allow … on --mesh {mesh}` that could widen it. See `aoide mesh charter show {mesh}` \
+                 for the recorded key, where it is written down (config line vs state record), and \
                  `aoide mesh` for the mesh's own row (this host's own log carries the detail)"
             ),
-        );
+        ));
+    }
+    let _ = audit(
+        audit_log,
+        Door::A2a,
+        EventClass::Audit,
+        label,
+        "unauthorized",
+        &format!("charter-governed mesh `{mesh}`: the caller's line carries no `message`"),
+    );
+    Some((
+        -32010,
+        format!(
+            "{what}: mesh `{mesh}` is a CHARTER mesh on this host and the charter is what grants in it — \
+             the caller's line there carries no `message`, and nothing local can supply one: \
+             `aoide node allow … on --mesh {mesh}` answers `widens-charter` and changes nothing (narrowing \
+             a line with `… off` is the only local move). Re-listing the key is the charter's OPERATOR \
+             signing a new version that carries it, delivered to this host as a `mesh charter accept \
+             <file>` on the LAN, or as a charter letter once transit exists. `aoide mesh charter show \
+             {mesh}` reads the version in force"
+        ),
+    ))
+}
+
+fn deposit_refusal(signed: Option<SignedCaller<'_>>, mesh: &str, audit_log: &Path) -> (i64, String) {
+    if let Some(refusal) = charter_refusal("mail deposit refused", mesh, "a2a.aoide/mailDeposit", audit_log) {
+        return refusal;
     }
     match signed {
         Some(caller) => (
@@ -3443,7 +3486,16 @@ fn poll_admitted(caller: Option<SignedCaller<'_>>, grant: &Grant, claimed: &str)
 /// shapes: claiming a node this request is not signed as, paired but missing
 /// `message` (the same `node allow` fix deposit names), or no verified
 /// signature resolution at all.
-fn poll_refusal(caller: Option<SignedCaller<'_>>, mesh: &str, claimed: &str) -> (i64, String) {
+fn poll_refusal(caller: Option<SignedCaller<'_>>, mesh: &str, claimed: &str, audit_log: &Path) -> (i64, String) {
+    // The charter's own refusal comes FIRST, and it is the same function the
+    // deposit arm uses (H1's merge review, F1): in a charter-shaped mesh the
+    // generic text below teaches `aoide node allow <name> message on --mesh
+    // <m>`, which answers `widens-charter` there and changes nothing — and for
+    // a charter-RESOLVED caller (no record on this host at all) it names a node
+    // with no record to edit.
+    if let Some(refusal) = charter_refusal("mail poll refused", mesh, "a2a.aoide/mailPoll", audit_log) {
+        return refusal;
+    }
     match caller {
         Some(c) if c.name != claimed => (
             -32010,
@@ -3497,7 +3549,7 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
     let mesh = effective_mesh(ctx.signed_caller.and_then(|c| c.mesh));
     let grant = caller_grant(ctx.signed_caller);
     if !poll_admitted(ctx.signed_caller, &grant, &claimed) {
-        let (code, msg) = poll_refusal(ctx.signed_caller, &mesh, &claimed);
+        let (code, msg) = poll_refusal(ctx.signed_caller, &mesh, &claimed, ctx.audit_log);
         let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailPoll", "unauthorized", &msg);
         return Err((code, msg));
     }
@@ -5168,6 +5220,11 @@ fn rpc_method_label(parsed_method: Option<&str>, history_asked: bool, frame_aske
         Some("aoide/pairPoll") => "aoide/pairPoll",
         Some("aoide/mailDeposit") => "aoide/mailDeposit",
         Some("aoide/mailPoll") => "aoide/mailPoll",
+        // P-CHARTER: the door's own join read, named here so a `charterFetch`
+        // at the door does not audit as bare `a2a.rpc` (the adapter labels the
+        // same attempt `mail-adapter.refused aoide/charterFetch`, since it
+        // cannot serve it — the two listeners now disagree for a reason).
+        Some("aoide/charterFetch") => "aoide/charterFetch",
         Some("aoide/binding") => "aoide/binding",
         _ => "rpc",
     }
@@ -14559,6 +14616,67 @@ mod tests {
         }
     }
 
+    /// **Both mail arms refuse a charter-shaped mesh with the SAME text**
+    /// (H1's merge review, F1). They did not: `deposit_refusal` had review
+    /// N5's arm and `poll_refusal` had none, so the same box in the same state
+    /// told a poller to run a command that answers `widens-charter`. The two
+    /// now come off one helper (`charter_refusal`), and this pins the equality
+    /// rather than either text — a copy would break the moment one side is
+    /// edited.
+    #[test]
+    fn the_two_mail_arms_share_one_charter_refusal() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_root = std::env::var("AOIDE_ROOT").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = mail_deposit_root("shared-charter-refusal");
+
+        // Shaped, and the operator key undecidable: the config line contradicts
+        // the state record (`operator-mismatch`).
+        charter_machine(&root, "operator", "opbox");
+        let init = aoide_storage::charter::init("home").unwrap();
+        let line = aoide_storage::charter::node_line().unwrap();
+        let src = format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{line}\n");
+        std::fs::write(aoide_storage::charter::source_path("home"), &src).unwrap();
+        aoide_storage::charter::sign("home", None).unwrap();
+        let listed_key = aoide_storage::charter::parse(&src).unwrap().nodes["opbox"].key.clone();
+
+        charter_machine(&root, "receiver", "receiverbox");
+        aoide_storage::charter::trust_operator("home", &format!("ed25519:{}", "ab".repeat(32))).unwrap();
+        std::fs::write(
+            root.join("receiver").join("config.toml"),
+            format!("[mesh.home]\noperator = \"ed25519:{}\"\n", "cd".repeat(32)),
+        )
+        .unwrap();
+        assert!(aoide_storage::charter::charter_shaped("home") && aoide_storage::charter::governing("home").is_none());
+
+        let audit_log = root.join("log");
+        let caller = SignedCaller { name: "box-a", key: &listed_key, mesh: Some("home") };
+
+        let (deposit_code, deposit) = deposit_refusal(Some(caller), "home", &audit_log);
+        let (poll_code, poll) = poll_refusal(Some(caller), "home", "box-a", &audit_log);
+        assert_eq!(deposit_code, -32010);
+        assert_eq!(poll_code, -32010);
+        let body_of = |m: &str| m.replacen("mail deposit refused: ", "", 1).replacen("mail poll refused: ", "", 1);
+        assert_eq!(
+            body_of(&deposit),
+            body_of(&poll),
+            "one helper, one teaching — the arms differ only in their own words:\n{deposit}\n{poll}"
+        );
+        assert!(poll.contains("UNDECIDABLE") && poll.contains("mesh charter show home"), "{poll}");
+        assert!(!poll.contains("node allow box-a message on"), "and never the local `on` that cannot widen a charter: {poll}");
+
+        let _ = init;
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_root {
+            Some(v) => std::env::set_var("AOIDE_ROOT", v),
+            None => std::env::remove_var("AOIDE_ROOT"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
     /// **The door's refusal in a shaped mesh with an undecidable key is TAUGHT**
     /// (re-review N5): it names the mesh, says the operator key is undecidable
     /// and WHY (the `trusted_operator` reason), says there is no paired-record
@@ -16848,6 +16966,27 @@ mod tests {
         assert!(listed.get("error").is_none(), "a charter-listed key polls through the adapter: {listed}");
         assert_eq!(listed["result"]["envelopes"], json!([]), "{listed}");
 
+        // ADMITTED with NO RECORD AT ALL — the charter's IDENTITY rung
+        // (review F3): v1's line lists this key, so `verify_signed_request`
+        // resolves the caller from the charter itself, exactly as it would at
+        // the door. Nothing in this assertion touches the registry.
+        aoide_storage::node_store::save_nodes(&[]).unwrap();
+        let charter_resolved = answer(poll(&unique_nonce("adapter-charter-identity")));
+        assert!(
+            charter_resolved.get("error").is_none(),
+            "a charter-listed key resolves with no paired record, through the adapter: {charter_resolved}"
+        );
+        assert_eq!(charter_resolved["result"]["envelopes"], json!([]), "{charter_resolved}");
+
+        // Put the stale record back for the revocation half: the review N1
+        // loophole is a PAIRED grant that must not come back in once the
+        // charter stops listing the key.
+        let mut stale = fixture_node("receiverbox", "http://10.0.0.5:8710/", false);
+        stale.verified = true;
+        stale.pubkey = Some(receiver_key.clone());
+        stale.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+        aoide_storage::node_store::save_nodes(&[stale]).unwrap();
+
         // REVOKED: the operator signs v2 without this line, and the receiving
         // box accepts it. Same key, same stale paired grant, same listener.
         charter_machine(&root, "operator", "opbox");
@@ -16868,10 +17007,25 @@ mod tests {
             revoked["error"]["code"], -32010,
             "a removed line refuses on the next request, whatever paired grant the record still holds: {revoked}"
         );
+        let taught = revoked["error"]["message"].as_str().unwrap().to_string();
+        assert!(taught.contains("home"), "and names the mesh it was judged in: {revoked}");
+        // F1: the teaching is the CHARTER's, not the local `node allow … on`
+        // the generic arm emits — in a governed mesh that command answers
+        // `widens-charter` and changes nothing, so it would send the operator
+        // to a fix that cannot work.
         assert!(
-            revoked["error"]["message"].as_str().unwrap().contains("home"),
-            "and names the mesh it was judged in: {revoked}"
+            taught.contains("OPERATOR"),
+            "the fix travels with the charter's operator, not this host: {revoked}"
         );
+        assert!(
+            !taught.contains("on this (polled) host run"),
+            "and it does NOT teach the generic arm's `node allow … on` as the fix: {revoked}"
+        );
+        assert!(
+            taught.contains("widens-charter"),
+            "naming that local command only to say it cannot work here: {revoked}"
+        );
+        assert!(taught.contains("charter show"), "pointing at the read that shows the version: {revoked}");
 
         // With the stale record gone too, the key resolves NOWHERE at all —
         // fail-closed at the identity rung, still through the same listener.
@@ -16879,10 +17033,66 @@ mod tests {
         let unknown = answer(poll(&unique_nonce("adapter-charter-unknown")));
         assert_eq!(unknown["error"]["code"], -32007, "an unlisted, unpaired key resolves nobody: {unknown}");
 
-        // Both refusals are audited on the adapter's own lines.
+        // The audit trail, DISCRIMINATINGLY (review F2 — the bare `contains`
+        // pair this replaces was satisfied by the FIRST, ADMITTED poll alone,
+        // so deleting the refusal's own audit line would not have failed it).
         let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
-        assert!(log.contains("via mail-adapter"), "the refusals name the listener: {log}");
-        assert!(log.contains("a2a.aoide/mailPoll"), "{log}");
+        let lines: Vec<Value> = log
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str::<Value>(l).expect("an audit line is JSON"))
+            .collect();
+        let with = |command: &str| -> Vec<&Value> {
+            lines.iter().filter(|v| v["command"] == command).collect()
+        };
+        // 1. The -32010 refusal is audited by `mail_poll` ITSELF, under its own
+        //    label with the `unauthorized` status — the line that would vanish
+        //    if the function stopped auditing.
+        let poll_refusals: Vec<&Value> = with("a2a.aoide/mailPoll")
+            .into_iter()
+            .filter(|v| v["status"] == "unauthorized")
+            .collect();
+        assert_eq!(
+            poll_refusals.len(),
+            2,
+            "TWO lines: the shared helper's own charter detail (which never reaches the caller) and \
+             `mail_poll`'s refusal line (the taught text the caller read): {log}"
+        );
+        assert!(
+            poll_refusals
+                .iter()
+                .any(|v| v["message"].as_str().is_some_and(|m| m.contains("charter-governed mesh"))),
+            "the helper records which mesh state refused, and why: {log}"
+        );
+        assert!(
+            poll_refusals
+                .iter()
+                .any(|v| v["message"].as_str().is_some_and(|m| m.contains("CHARTER mesh"))),
+            "and the refusal itself is audited under the arm's own label: {log}"
+        );
+        // 2. Every ROUTED adapter line names its listener — the three answered
+        //    polls (listed, charter-resolved, then refused).
+        let routed: Vec<&Value> = with("a2a.aoide/mailPoll")
+            .into_iter()
+            .filter(|v| v["message"].as_str().is_some_and(|m| m.contains("via mail-adapter")))
+            .collect();
+        assert_eq!(
+            routed.len(),
+            3,
+            "each ROUTED mailPoll on the adapter is tagged with its listener: {log}"
+        );
+        // 3. The identity-rung refusal (-32007) happens BEFORE routing, so it
+        //    audits under `a2a.signed-request` — tagged by `audit_detail_with`,
+        //    which is the other half of the review's finding.
+        let pre_route: Vec<&Value> = with("a2a.signed-request")
+            .into_iter()
+            .filter(|v| v["message"].as_str().is_some_and(|m| m.contains("via mail-adapter")))
+            .collect();
+        assert_eq!(
+            pre_route.len(),
+            1,
+            "the pre-route refusal names its listener too: {log}"
+        );
 
         match saved_root {
             Some(v) => std::env::set_var("AOIDE_ROOT", v),
