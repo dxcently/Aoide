@@ -7163,11 +7163,17 @@ TLS-terminating front — a Cloudflare Tunnel, a VPS with public 443, a tailnet
   `message/send`, `tasks/get`, `message/stream`, `tasks/resubscribe`,
   `aoide/graphSummary`, the `pair*` ceremony and the SSE takeover are not
   compiled into this listener's path at all.
-- **Sealed only.** A plaintext (`envelope`) deposit here is refused as a
-  result carrying `sealed-required`, with one audit line: an HTTPS hop never
-  carries plaintext, and the receiver that still accepts one from an admitted
-  peer — deliberately, for the per-peer upgrade — is the SSH direct lane's.
-  A sealed `container` is the only shape this listener files.
+- **Sealed only, in both directions.** A plaintext (`envelope`) deposit here
+  is refused as a result carrying `sealed-required`, with one audit line: an
+  HTTPS hop never carries plaintext, and the receiver that still accepts one
+  from an admitted peer — deliberately, for the per-peer upgrade — is the SSH
+  direct lane's. A sealed `container` is the only shape this listener files.
+  The PULL direction is held to it too: an entry spooled toward a poller that
+  held no binding when it was written is **withheld** rather than handed over
+  as a plaintext envelope — it stays spooled, the answer names it in a
+  `withheld` list (`{msgid, reason: "sealed-required", detail}`), and the
+  audit line counts it. The door's own poll, which is not an HTTPS hop, hands
+  that same entry over unchanged.
 - **The card is the stripped three-key shape unconditionally** — `name`,
   `protocolVersion`, `url`. The door strips it only for an unauthorized caller;
   the mail profile has no door-wide token concept, so there is no caller to
@@ -7359,9 +7365,15 @@ scenario `--via` exists for (a loopback-bound door reachable only through
 the tunnel) — `node add` would fail verification before ever registering
 such a node if this one call bypassed the funnel. Either way `node add`
 registers the node under its LOGICAL `url`, never the rewritten one.
-**A record carrying an `https://` url AND a `via` is refused** — at both
-write paths (`node add --via`, `set_node_via`) and at the dial seam every
-outbound call resolves through, with the taught message
+**A record carrying an `https://` url AND a `via` is refused** — at all three
+call sites: `node add --via` (refused before its verification fetch, so
+nothing is dialled or registered), `set_node_via` (refused before the field
+is touched, so a refused call writes nothing — the pairing ceremony's own
+commit is a caller of this one, and there the url may be the peer's
+self-asserted `https://…` rather than one this box chose), and the dial seam
+every outbound URL resolves through (`aoide_client::commands::
+resolve_dial_url`, which is how a hand-edited `state/nodes.json` reaches it)
+— with the taught message
 `aoide_storage::node_store::transport_conflict` builds: the two fields name
 two transports at once, and together they would dial
 `https://127.0.0.1:<forward port>`, a TLS handshake into the far box's

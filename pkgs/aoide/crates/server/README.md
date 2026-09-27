@@ -572,7 +572,14 @@ the inbound half of the two-door contract (the outbound half is
   what a mail call means. Everything else is `-32601` by construction:
   `message/send` (inject and spawn), `tasks/get`, `graphSummary`, the `pair*`
   ceremony and the SSE takeover are not refused here, they are unreachable —
-  the functions behind them are never called from this process.
+  the functions behind them are never called from this process. A method name
+  it cannot serve audits under its OWN label (`a2a.mail-adapter.refused
+  message/send`), never a door method's name emitted by a listener that has no
+  such method; a mail method keeps the label the door emits for it.
+  `mailPoll` is sealed-only in the pull direction as well as `mailDeposit` in
+  the push one: an entry spooled toward a poller that held no binding is
+  WITHHELD (named in the answer's `withheld` list with `sealed-required`, and
+  counted in the audit line) instead of crossing an HTTPS hop in the clear.
   `handle_connection` takes a `Listener` (plus `Option<&InboundBearerConfig>`,
   `None` for the adapter) and is the ONE place that difference is checked, so
   the shared transport hardening (`MAX_BODY`/`MAX_LINE`/`MAX_HEADERS`/
@@ -581,7 +588,10 @@ the inbound half of the two-door contract (the outbound half is
   duplicated. Audit lines name their listener and the connection's origin
   (`HTTP {status} from loopback via mail-adapter`; the door's own detail stays
   exactly `HTTP {status}`) — the origin alone could not distinguish the two,
-  since a front dials this box from loopback. The Host header is never
+  since a front dials this box from loopback. That holds on the EARLY paths
+  too: a malformed request and a refused signature are tagged by the same
+  `Listener`, so an operator can attribute a hostile flood to the listener it
+  hit. The Host header is never
   consulted (through a tunnel it is the front's hostname, not this process's
   business).
 - `discovery` — the discovery advertisement's SEND half (P-P6 + task

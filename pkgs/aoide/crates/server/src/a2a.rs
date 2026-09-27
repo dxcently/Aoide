@@ -136,6 +136,13 @@ static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
 // What it may bind is therefore not a configurable property — it is the
 // capability itself.
 
+/// The taught word the mail adapter refuses plaintext with, in BOTH
+/// directions (CONTRACTS.md §6): a plaintext `envelope` deposit, and a
+/// plaintext entry the poll would otherwise hand over. One constant, so the
+/// deposit refusal, the poll's `withheld` reason and the audit line can never
+/// drift on it.
+const SEALED_REQUIRED: &str = "sealed-required";
+
 /// The address the mail adapter binds, ever and only. There is deliberately no
 /// `--bind`, no `aoide.mail.adapter.bindAddress` and no env var beside this
 /// one: a TLS-terminating front (cloudflared, a VPS, a tailnet) is what faces
@@ -397,6 +404,19 @@ impl Listener {
         match self {
             Listener::A2a => format!("HTTP {status}"),
             Listener::Mail => format!("HTTP {status} from {} via {MAIL_ADAPTER_AUDIT_TAG}", origin_spelling(origin)),
+        }
+    }
+
+    /// The same tag on a detail that is NOT an HTTP status — a refusal's own
+    /// taught message, or an attribution-drift note. The door's bytes are
+    /// unchanged; the adapter's name their listener and origin at the end, so
+    /// the two EARLY paths out of `handle_connection` (a malformed request and
+    /// a refused signature) are attributable to a listener as well as the
+    /// routed ones are.
+    fn audit_detail_with(self, detail: &str, origin: ConnOrigin) -> String {
+        match self {
+            Listener::A2a => detail.to_string(),
+            Listener::Mail => format!("{detail} (from {} via {MAIL_ADAPTER_AUDIT_TAG})", origin_spelling(origin)),
         }
     }
 }
@@ -3043,7 +3063,7 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
                       `aoide mail poll`); a plaintext envelope is accepted only from an admitted peer \
                       over the direct SSH lane, never through a relay or an HTTPS hop";
         let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "invalid", detail);
-        return Ok(json!({ "status": "refused", "reason": "sealed-required", "detail": detail }));
+        return Ok(json!({ "status": "refused", "reason": SEALED_REQUIRED, "detail": detail }));
     }
     let envelope: aoide_storage::mail::Envelope =
         match serde_json::from_value(params.get("envelope").cloned().unwrap_or(Value::Null)) {
@@ -3230,12 +3250,36 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
     // NOTHING.
     let mut containers: Vec<aoide_storage::seal::Container> = Vec::new();
     let mut envelopes: Vec<aoide_storage::mail::Envelope> = Vec::new();
+    // H1 (the branch review): sealed-only binds the PULL direction too. An
+    // entry spooled toward a poller that held no binding when it was written
+    // hands over as a plaintext envelope, and on the ADAPTER that is the one
+    // shape this listener must never carry — "no relay, hub or HTTPS hop ever
+    // carries plaintext" is an absolute (HTTPS-MESH-API.md), and the
+    // `exchange_bindings` at the top of every poll is deliberately
+    // best-effort, so nothing else could enforce it. Withheld, never
+    // answered: the entry stays spooled (that path writes nothing — see
+    // `hand_over`'s `Reseal::NoBinding` arm), and the answer NAMES it with
+    // the taught word, so an operator sees why their letters are not moving.
+    let mut withheld: Vec<Value> = Vec::new();
     for (_, offered) in payloads {
         match aoide_storage::outbox::hand_over(&poller, &offered.msgid)
             .map_err(|e| (-32603_i64, format!("internal error: {e}")))?
         {
             aoide_storage::outbox::HandOver::Container(container) => containers.push(*container),
-            aoide_storage::outbox::HandOver::Envelope(envelope) => envelopes.push(*envelope),
+            aoide_storage::outbox::HandOver::Envelope(envelope) => {
+                if ctx.sealed_only {
+                    withheld.push(json!({
+                        "msgid": envelope.msgid,
+                        "reason": SEALED_REQUIRED,
+                        "detail": "this listener hands over sealed containers only: an entry spooled toward \
+                                   you before you published an age binding cannot cross an HTTPS hop in the \
+                                   clear. Publish one (a signed `aoide/binding`, which a `aoide mail poll` \
+                                   exchanges) and poll again — the entry stays spooled until then",
+                    }));
+                } else {
+                    envelopes.push(*envelope);
+                }
+            }
             aoide_storage::outbox::HandOver::Nothing => {}
         }
     }
@@ -3247,12 +3291,23 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
         "a2a.aoide/mailPoll",
         "ok",
         &format!(
-            "node {poller} polled: {} container(s) and {} plaintext envelope(s) handed over",
+            "node {poller} polled: {} container(s) and {} plaintext envelope(s) handed over{}",
             containers.len(),
-            envelopes.len()
+            envelopes.len(),
+            if withheld.is_empty() {
+                String::new()
+            } else {
+                format!(", {} withheld ({SEALED_REQUIRED})", withheld.len())
+            }
         ),
     );
-    Ok(json!({ "containers": containers, "envelopes": envelopes }))
+    let mut answer = json!({ "containers": containers, "envelopes": envelopes });
+    if !withheld.is_empty() {
+        // Additive, and only when it bites: the door's own answer (which can
+        // never withhold) stays byte-identical.
+        answer["withheld"] = json!(withheld);
+    }
+    Ok(answer)
 }
 
 /// The sealed half of `aoide/mailDeposit` (P-SEAL): the same admission the
@@ -5049,15 +5104,36 @@ fn route_mail(
             let parsed_method = parsed
                 .as_ref()
                 .and_then(|v| v.get("method").and_then(Value::as_str).map(str::to_string));
-            // No frame/history tie-break to offer: no mail method reads a
-            // frame tail or a history count.
-            let label = rpc_method_label(parsed_method.as_deref(), false, false);
+            let label = mail_method_label(parsed_method.as_deref());
             let ctx = RequestCtx::mail_adapter(audit_log, origin, signed_caller);
             let resp = handle_mail_jsonrpc_bytes(&req.body, &ctx);
             let body = serde_json::to_vec(&resp).unwrap_or_default();
             (200, body, format!("a2a.{label}"))
         }
         _ => not_found(&req.method, &req.path),
+    }
+}
+
+/// The audit label for one adapter `POST /` body (H1). A mail method keeps the
+/// name the door emits for it, so a mail call reads identically wherever it
+/// landed. Anything else is a request this listener cannot serve, and it is
+/// labelled as exactly that — `mail-adapter.refused`, with the DOOR method
+/// name it tried to look like taken from the same closed whitelist the door's
+/// own label uses (never interpolated raw: a hostile body must not bloat the
+/// log or plant a label). A log reader scanning for `message/send` still finds
+/// the attempt, and sees at a glance that the adapter — a process with no such
+/// method — turned it away, rather than a door method name emitted by a
+/// listener that cannot serve it (the branch review's F5). Pure.
+fn mail_method_label(parsed_method: Option<&str>) -> String {
+    match parsed_method {
+        Some("aoide/mailDeposit") => "aoide/mailDeposit".to_string(),
+        Some("aoide/mailPoll") => "aoide/mailPoll".to_string(),
+        Some("aoide/binding") => "aoide/binding".to_string(),
+        Some(m) => match rpc_method_label(Some(m), false, false) {
+            "rpc" => "mail-adapter.refused".to_string(),
+            named => format!("mail-adapter.refused {named}"),
+        },
+        None => "mail-adapter.refused".to_string(),
     }
 }
 
@@ -5463,7 +5539,7 @@ fn handle_connection(
                 EventClass::Audit,
                 "a2a.bad-request",
                 "error",
-                &format!("HTTP {}", e.status),
+                &listener.audit_detail(e.status, origin),
             );
             return write_http_response(&mut writer, e.status, &body);
         }
@@ -5510,7 +5586,14 @@ fn handle_connection(
         SignedRequestOutcome::Unsigned => None,
         SignedRequestOutcome::Verified { resolved, key, claimed } => {
             if let Some(detail) = attribution_drift_detail(&claimed, &resolved) {
-                let _ = audit(audit_log, Door::A2a, EventClass::Audit, "a2a.signed-request", "attribution-drift", &detail);
+                let _ = audit(
+                    audit_log,
+                    Door::A2a,
+                    EventClass::Audit,
+                    "a2a.signed-request",
+                    "attribution-drift",
+                    &listener.audit_detail_with(&detail, origin),
+                );
             }
             Some((resolved, key))
         }
@@ -5523,7 +5606,7 @@ fn handle_connection(
                 EventClass::Audit,
                 "a2a.signed-request",
                 "unauthorized",
-                &message,
+                &listener.audit_detail_with(&message, origin),
             );
             return write_http_response(&mut writer, 200, &body);
         }
@@ -15149,6 +15232,63 @@ mod tests {
     }
 
     #[test]
+    fn the_adapter_poll_withholds_a_plaintext_entry_while_the_door_hands_it_over() {
+        // F1: sealed-only binds the pull direction. An entry spooled toward a
+        // poller that held no binding is the ONE shape a poll could put on an
+        // HTTPS hop in the clear, and `exchange_bindings` (best-effort, at the
+        // top of every poll) is not what enforces it — this is.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-withholds");
+        act_as(&root, "here");
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let audit_log = root.join("log");
+
+        // A `hold` entry (offered to every poll) toward a node this box holds
+        // NO binding for → `hand_over` can only answer with the plaintext.
+        let envelope =
+            aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "letter-bytes-must-not-cross").unwrap();
+        let msgid = envelope.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::held(envelope)).unwrap();
+
+        let params = json!({ "node": "box-b" });
+
+        // The ADAPTER: withheld, named, and nothing left this process.
+        let adapter = RequestCtx::mail_adapter(&audit_log, ConnOrigin::Loopback, Some(caller("box-b")));
+        let withheld = mail_poll(&params, &adapter).expect("a poll answer, not an error");
+        assert_eq!(withheld["envelopes"], json!([]), "no plaintext envelope is handed over: {withheld}");
+        assert_eq!(withheld["containers"], json!([]), "{withheld}");
+        assert_eq!(withheld["withheld"][0]["msgid"], msgid, "{withheld}");
+        assert_eq!(withheld["withheld"][0]["reason"], "sealed-required", "{withheld}");
+        assert!(
+            withheld["withheld"][0]["detail"].as_str().unwrap().contains("sealed-required")
+                || withheld["withheld"][0]["detail"].as_str().unwrap().contains("binding"),
+            "the withheld entry says what to do about it: {withheld}"
+        );
+        assert!(
+            !serde_json::to_string(&withheld).unwrap().contains("letter-bytes-must-not-cross"),
+            "the letter's own bytes never ride an adapter answer: {withheld}"
+        );
+        let still_spooled = aoide_storage::outbox::list_entries("box-b").unwrap();
+        assert_eq!(still_spooled.len(), 1, "a withheld entry STAYS spooled: {still_spooled:?}");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(
+            log.contains("1 withheld (sealed-required)"),
+            "the poll's own audit line counts what it refused to hand over: {log}"
+        );
+
+        // The DOOR — not an HTTPS hop — is unchanged: the same entry is handed
+        // over, with no `withheld` key at all.
+        let door = mail_deposit_ctx(&audit_log, Some("box-b"));
+        let handed = mail_poll(&params, &door).expect("a poll answer");
+        assert_eq!(handed["envelopes"][0]["text"], "letter-bytes-must-not-cross", "{handed}");
+        assert!(handed.get("withheld").is_none(), "the door's answer shape is untouched: {handed}");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    #[test]
     fn every_non_mail_method_is_32601_on_the_adapter() {
         let ctx = RequestCtx::mail_adapter(Path::new("/dev/null"), ConnOrigin::Loopback, None);
         for method in [
@@ -15248,10 +15388,12 @@ mod tests {
     /// answers a connect. The thread lives for the rest of the test process,
     /// which is what `serve`'s own loop does by construction; the registry is
     /// leaked because `serve_mail` takes it `&'static`, exactly as `a2a serve`
-    /// does.
-    fn raise_mail_adapter(port: u16) {
+    /// does. `audit_log` is the one the adapter writes through — a real file
+    /// for the tests that assert on its lines.
+    fn raise_mail_adapter(port: u16, audit_log: &Path) {
+        let audit_log = audit_log.to_path_buf();
         std::thread::spawn(move || {
-            let _ = serve_mail(port, Path::new("/dev/null"), Box::leak(Box::new(full_card_registry())));
+            let _ = serve_mail(port, &audit_log, Box::leak(Box::new(full_card_registry())));
         });
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
@@ -15268,7 +15410,7 @@ mod tests {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (root, saved) = adapter_root("socket");
         let port = free_loopback_port();
-        raise_mail_adapter(port);
+        raise_mail_adapter(port, Path::new("/dev/null"));
 
         // A foreign Host — through cloudflared this is the tunnel hostname —
         // is never consulted: the card still answers.
@@ -15337,11 +15479,142 @@ mod tests {
     }
 
     #[test]
+    fn the_adapters_early_paths_tag_their_audit_lines_with_the_listener() {
+        // F2: a malformed request and a refused signature are the two EARLY
+        // exits from `handle_connection`, and they used to write untagged
+        // details — exactly the lines an operator wants to attribute when a
+        // hostile flood hits the tunnel rather than the LAN.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("early-audit");
+        let audit_log = root.join("log");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, &audit_log);
+
+        // A malformed request line — a 400 with no JSON-RPC method to label.
+        let bad = send_raw(port, b"NOT-HTTP\r\n\r\n");
+        assert!(bad.starts_with("HTTP/1.1 400"), "{bad}");
+
+        // A signed request whose signature is garbage — refused before any
+        // dispatch, the fail-closed `-32007` path.
+        let kp = setup_signed_node_with_allows("box-b", &["message"]);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let mut forged = raw_request(
+            "127.0.0.1",
+            "POST",
+            "/",
+            br#"{"jsonrpc":"2.0","id":1,"method":"aoide/mailPoll","params":{"node":"box-b"}}"#,
+            Some((&kp, "box-b", now, &unique_nonce("early-audit"))),
+        );
+        let text = String::from_utf8_lossy(&forged).to_string();
+        let tampered = text.replace("X-Aoide-Signature: ", "X-Aoide-Signature: 00");
+        forged = tampered.into_bytes();
+        let refused = send_raw(port, &forged);
+        let refused_body: Value = serde_json::from_str(refused.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(refused_body["error"]["code"], -32007, "{refused_body}");
+
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        let bad_line = log.lines().find(|l| l.contains("a2a.bad-request")).unwrap_or_default();
+        assert!(bad_line.contains("via mail-adapter"), "the parse failure names its listener: {bad_line}");
+        assert!(bad_line.contains("from loopback"), "{bad_line}");
+        let sig_line = log.lines().find(|l| l.contains("a2a.signed-request")).unwrap_or_default();
+        assert!(sig_line.contains("via mail-adapter"), "the signature refusal names its listener: {sig_line}");
+
+        // The DOOR's bytes are unchanged on both paths — the tag is the
+        // adapter's alone.
+        assert_eq!(Listener::A2a.audit_detail(400, ConnOrigin::Loopback), "HTTP 400");
+        assert_eq!(Listener::A2a.audit_detail_with("boom", ConnOrigin::Loopback), "boom");
+        assert_eq!(Listener::Mail.audit_detail(400, ConnOrigin::Loopback), "HTTP 400 from loopback via mail-adapter");
+        assert_eq!(
+            Listener::Mail.audit_detail_with("boom", ConnOrigin::Unknown),
+            "boom (from unknown via mail-adapter)"
+        );
+
+        adapter_cleanup(&root, saved);
+    }
+
+    #[test]
+    fn a_non_mail_method_on_the_adapter_audits_under_its_own_label() {
+        // F5: the adapter used to label a door method name it cannot serve.
+        // A log reader scanning for `message/send` must find the attempt —
+        // marked as refused by a listener with no such method.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("refused-label");
+        let audit_log = root.join("log");
+        let registry = full_card_registry();
+
+        let (status, body, label) = route_mail(
+            &mail_req(
+                "POST",
+                "/",
+                br#"{"jsonrpc":"2.0","id":1,"method":"message/send","params":{"id":"x","message":{"text":"hi"}}}"#,
+            ),
+            MAIL_ADAPTER_BIND,
+            MAIL_ADAPTER_PORT_DEFAULT,
+            &audit_log,
+            ConnOrigin::Loopback,
+            &registry,
+            None,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(label, "a2a.mail-adapter.refused message/send", "the door's method name is never the label");
+        let body_val: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body_val["error"]["code"], -32601, "{body_val}");
+
+        // An unknown (or unparsable) method collapses rather than
+        // interpolating attacker-controlled text into the label.
+        let (_, _, unknown) = route_mail(
+            &mail_req("POST", "/", br#"{"jsonrpc":"2.0","id":1,"method":"../etc/passwd"}"#),
+            MAIL_ADAPTER_BIND,
+            MAIL_ADAPTER_PORT_DEFAULT,
+            &audit_log,
+            ConnOrigin::Loopback,
+            &registry,
+            None,
+        );
+        assert_eq!(unknown, "a2a.mail-adapter.refused", "a hostile method name is not interpolated");
+        assert_eq!(mail_method_label(None), "mail-adapter.refused");
+        assert_eq!(mail_method_label(Some("aoide/mailPoll")), "aoide/mailPoll");
+
+        // And it is what actually lands in the log, over a real socket.
+        let port = free_loopback_port();
+        raise_mail_adapter(port, &audit_log);
+        let sent = send_raw(
+            port,
+            &raw_request(
+                "aoide.necoconeco.net",
+                "POST",
+                "/",
+                br#"{"jsonrpc":"2.0","id":2,"method":"aoide/graphSummary"}"#,
+                None,
+            ),
+        );
+        assert!(sent.starts_with("HTTP/1.1 200"), "{sent}");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        let line = log
+            .lines()
+            .find(|l| l.contains("mail-adapter.refused"))
+            .unwrap_or_default();
+        assert!(
+            line.contains("a2a.mail-adapter.refused aoide/graphSummary"),
+            "the graphSummary attempt is named as refused BY THE ADAPTER: {line}"
+        );
+        assert!(
+            !log.lines().any(|l| l.contains(r#""command":"a2a.aoide/graphSummary""#)),
+            "no door method label is emitted by the adapter: {log}"
+        );
+
+        adapter_cleanup(&root, saved);
+    }
+
+    #[test]
     fn a_replayed_signed_request_is_refused_over_the_adapter_socket_too() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (root, saved) = adapter_root("replay");
         let port = free_loopback_port();
-        raise_mail_adapter(port);
+        raise_mail_adapter(port, Path::new("/dev/null"));
 
         let kp = setup_signed_node_with_allows("box-b", &["message"]);
         let now = std::time::SystemTime::now()
