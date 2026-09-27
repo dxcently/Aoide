@@ -986,44 +986,94 @@ pub fn trust_operator(mesh: &str, key_field: &str) -> Result<String, String> {
 /// command audits both fingerprints: replacing a mesh's root is exactly the
 /// event an operator has to be able to find afterwards).
 pub fn trust_operator_with(mesh: &str, key_field: &str, replace: bool) -> Result<(String, Option<String>), String> {
+    trust_operator_confirmed(mesh, key_field, replace, None)
+}
+
+/// [`trust_operator_with`] with a **change check** (confirm finding 3): the
+/// `trust_operator_with` decision is read, shown to a human (the LAN arm's
+/// fingerprint compare) and only then written, and the record can move in
+/// between — another process's `mesh join`, a hand edit — so the write
+/// re-reads inside the mesh's own lock and REFUSES if what it finds is not
+/// what the human was shown.
+///
+/// `seen` is the operator key the caller DISPLAYED, read from this same
+/// record: `Some("")` means "no record when I looked" (the first-use case),
+/// `Some(K)` means "it trusted K". `None` means the caller had nothing to show
+/// — the `--operator` arm, where the typed flag is the whole decision and there
+/// is no comparison to invalidate.
+///
+/// **The whole read-compare-write runs under `charter_lock_path`**, the same
+/// lock `accept` takes: without it two writers could each read the old record
+/// and write their own idea of it, and the version mark — the one value a
+/// replacement CARRIES — is read here and written there.
+pub fn trust_operator_confirmed(
+    mesh: &str,
+    key_field: &str,
+    replace: bool,
+    seen: Option<&str>,
+) -> Result<(String, Option<String>), String> {
     if !node_store::valid_node_name(mesh) {
         return Err(format!(
             "`{mesh}` is not a valid mesh name — lowercase letters, digits, and `-`, starting with a letter or digit"
         ));
     }
     let key = key_hex(key_field)?;
-    let mut trust = load_trust(mesh).map_err(|e| format!("this machine's trust record for `{mesh}` cannot be read: {e}"))?.unwrap_or_default();
-    let existing = if trust.operator.is_empty() { None } else { Some(trust.operator.clone()) };
-    if let Some(declared) = config_operator(mesh).map_err(|e| format!("config.toml cannot be read: {e}"))? {
-        if declared != key {
+    let locked = fs::lock_path(charter_lock_path(mesh), || {
+        let mut trust = load_trust(mesh)
+            .map_err(|e| format!("this machine's trust record for `{mesh}` cannot be read: {e}"))?
+            .unwrap_or_default();
+        let existing = if trust.operator.is_empty() { None } else { Some(trust.operator.clone()) };
+        // The change check, INSIDE the lock: what the caller showed must still
+        // be what is here.
+        if replace {
+            if let Some(seen) = seen {
+                let current = trust.operator.as_str();
+                if current != seen {
+                    return Err(format!(
+                        "mesh `{mesh}`'s trust record changed while this join was being confirmed: it now\n  \
+                         \ttrusts {}\n  \
+                         \tand the confirmation you gave was for\n  \
+                         \t{}.\n  \
+                         Nothing was written. Re-run the join and compare the fingerprint again — a record that \
+                         moves under a confirmation is exactly what this check exists for",
+                        if current.is_empty() { "nothing (no operator key recorded)".to_string() } else { fingerprint_of_key(current) },
+                        if seen.is_empty() { "nothing (no operator key recorded)".to_string() } else { fingerprint_of_key(seen) },
+                    ));
+                }
+            }
+        }
+        if let Some(declared) = config_operator(mesh).map_err(|e| format!("config.toml cannot be read: {e}"))? {
+            if declared != key {
+                return Err(format!(
+                    "config.toml declares `mesh.{mesh}.operator = \"ed25519:{declared}\"`, and you named `ed25519:{key}` — the two must agree, and config is the hand-edited source. Change the config line, or join with the key it names{}",
+                    if replace { " (a `--replace` still cannot disagree with a config line — resolve the file first)" } else { "" }
+                ));
+            }
+        }
+        let Some(existing) = existing else {
+            trust.operator = key.clone();
+            write_trust(mesh, &trust)?;
+            return Ok((key, None));
+        };
+        if existing == key {
+            return Ok((key, None));
+        }
+        if !replace {
             return Err(format!(
-                "config.toml declares `mesh.{mesh}.operator = \"ed25519:{declared}\"`, and you named `ed25519:{key}` — the two must agree, and config is the hand-edited source. Change the config line, or join with the key it names{}",
-                if replace { " (a `--replace` still cannot disagree with a config line — resolve the file first)" } else { "" }
+                "this machine already trusts operator {} for mesh `{mesh}`, and you named {}. Trust is REPLACED, never added: if the operator re-rooted that mesh (`aoide mesh charter reroot {mesh}` on their machine), take the new key with `aoide mesh join {mesh} --operator <new key> --replace` — it records the new key and carries this mesh's version high-water across. Without that flag nothing is written, because replacing a mesh's root is the operator's decision and never a typo's",
+                fingerprint_of_key(&existing),
+                fingerprint_of_key(&key)
             ));
         }
-    }
-    let Some(existing) = existing else {
+        // `--replace`: the mark comes across. The highest version this mesh has
+        // ever applied, under ANY key, becomes the new key's starting mark.
+        let carried = trust.versions.values().copied().max().unwrap_or(0);
         trust.operator = key.clone();
+        trust.versions.insert(key.clone(), carried);
         write_trust(mesh, &trust)?;
-        return Ok((key, None));
-    };
-    if existing == key {
-        return Ok((key, None));
-    }
-    if !replace {
-        return Err(format!(
-            "this machine already trusts operator {} for mesh `{mesh}`, and you named {}. Trust is REPLACED, never added: if the operator re-rooted that mesh (`aoide mesh charter reroot {mesh}` on their machine), take the new key with `aoide mesh join {mesh} --operator <new key> --replace` — it records the new key and carries this mesh's version high-water across. Without that flag nothing is written, because replacing a mesh's root is the operator's decision and never a typo's",
-            fingerprint_of_key(&existing),
-            fingerprint_of_key(&key)
-        ));
-    }
-    // `--replace`: the mark comes across. The highest version this mesh has
-    // ever applied, under ANY key, becomes the new key's starting mark.
-    let carried = trust.versions.values().copied().max().unwrap_or(0);
-    trust.operator = key.clone();
-    trust.versions.insert(key.clone(), carried);
-    write_trust(mesh, &trust)?;
-    Ok((key, Some(existing)))
+        Ok((key, Some(existing)))
+    });
+    locked.map_err(|e| format!("cannot lock mesh `{mesh}`'s own charter state: {e}"))?
 }
 
 /// What `init` did, for the command to print.
@@ -1434,6 +1484,56 @@ mod tests {
         ] {
             assert!(!is_local_network(addr), "`{addr}` is NOT a LAN address (or not an address at all)");
         }
+    }
+
+    /// **The confirmation and the write see the same record** (confirm finding
+    /// 3): the LAN arm reads the record to decide whether a comparison is
+    /// required and to show the human a fingerprint, and only then writes. The
+    /// write re-reads INSIDE the mesh's own lock and refuses if the record
+    /// moved in between, instead of silently destroying whatever appeared.
+    ///
+    /// Both halves are asserted here: the refusal when it moved, and the
+    /// carried high-water when it did not (the write path is the same one the
+    /// F1 test drives, so this only has to pin the new check).
+    #[test]
+    fn a_replacement_refuses_when_the_record_moved_since_the_comparison() {
+        let (_guard, _saver) = isolate();
+        let dir = machine_dir("join-change-check");
+        machine(&dir, "peerbox");
+        let k1 = "ab".repeat(32);
+        let k2 = "cd".repeat(32);
+
+        // The human was shown NOTHING (the record was empty when the LAN arm
+        // read it) and the record then gained a key: the confirmation is stale,
+        // and refusing is the whole point of the check.
+        trust_operator("home", &format!("ed25519:{k1}")).unwrap();
+        let err = trust_operator_confirmed("home", &format!("ed25519:{k2}"), true, Some("")).unwrap_err();
+        assert!(err.contains("changed while this join was being confirmed"), "{err}");
+        assert!(err.contains(&fingerprint_of_key(&k1)), "and names what the record now holds: {err}");
+        assert!(err.contains("nothing (no operator key recorded)"), "and what the confirmation was for: {err}");
+        assert!(err.contains("Nothing was written"), "{err}");
+        assert_eq!(load_trust("home").unwrap().unwrap().operator, k1, "and nothing was replaced");
+
+        // The human was shown K1 and the record still holds K1: the replace
+        // goes through, and — the F1 rule — the mark comes across.
+        let mut trust = load_trust("home").unwrap().unwrap();
+        trust.versions.insert(k1.clone(), 4);
+        write_trust("home", &trust).unwrap();
+        let (now, replaced) = trust_operator_confirmed("home", &format!("ed25519:{k2}"), true, Some(&k1)).unwrap();
+        assert_eq!(now, k2);
+        assert_eq!(replaced.as_deref(), Some(k1.as_str()));
+        assert_eq!(load_trust("home").unwrap().unwrap().versions.get(&k2), Some(&4), "the carried mark");
+
+        // And a record that moved to a THIRD key refuses too: what the human
+        // saw is what must still be there.
+        let err = trust_operator_confirmed("home", &format!("ed25519:{k1}"), true, Some(&k1)).unwrap_err();
+        assert!(err.contains("changed while this join was being confirmed"), "{err}");
+
+        // No `seen` (the `--operator` arm) skips the check by design: the
+        // typed flag is the decision and there is no comparison to stale.
+        assert!(trust_operator_with("home", &format!("ed25519:{k1}"), true).is_ok());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// **The trust-entry step writes STATE and never config.toml** — which is

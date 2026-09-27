@@ -872,8 +872,14 @@ does to enter a charter mesh ([[HTTPS-Mesh-API]] "Charters", step 4).
   (`aoide/charterFetch`), prints the key's fingerprint and the charter's
   version for the operator to compare with what the operator's own machine
   shows, then records the key and applies the charter. `--yes` skips that
-  comparison, which is the whole trust step here — this is a first-use
-  ceremony, and its authority is the human check, never the transport.
+  comparison for a FIRST-USE trust — the worst outcome there is taking a key
+  nobody checked — but never for a REPLACEMENT: when this machine already trusts
+  a different key, the same command destroys that record and the comparison is
+  required, so a scripted `--replace --yes` on the LAN arm is refused with a
+  taught error (non-zero) rather than silently swapping a root. The whole trust
+  step on this arm is the human check, never the transport; the write
+  re-reads the record under the mesh's own lock and refuses if it moved while
+  the operator was comparing.
 - **LAN only, and the rule is portable.** The peer must be a private (`10/8`,
   `172.16/12`, `192.168/16`, `fc00::/7`) or link-local (`169.254/16`,
   `fe80::/10`) address. **Loopback is refused**, and that is the point: a

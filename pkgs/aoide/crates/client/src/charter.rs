@@ -126,9 +126,12 @@ fn handle_charter_join(inv: &Invocation) -> Outcome {
     // adapter, a tailnet and an ssh tunnel are all refused before anything is
     // posted, so a join never travels further than the LAN it is meant for.
     let replace = inv.flag_present("replace");
-    let (operator_key, replaced, charter_pair) = match (&operator_flag, host_arg) {
+    let (operator_key, replaced, seen, charter_pair) = match (&operator_flag, host_arg) {
+        // The `--operator` arm has nothing to compare: the typed flag IS the
+        // decision, so it passes no `seen` and skips the change check (the
+        // write is still locked, so two joins cannot interleave).
         (Some(field), _) => match charter::trust_operator_with(mesh, field, replace) {
-            Ok((key, replaced)) => (key, replaced, None),
+            Ok((key, replaced)) => (key, replaced, None, None),
             Err(e) => return Outcome::error(cmd, e).with_data(json!({ "reason": "trust-refused", "mesh": mesh })),
         },
         (None, Some(host)) => {
@@ -209,13 +212,51 @@ fn handle_charter_join(inv: &Invocation) -> Outcome {
                     .ok()
                     .flatten()
                     .is_some_and(|trust| !trust.operator.is_empty() && trust.operator != key);
+            // The record as the human saw it — handed to the write, which
+            // re-reads it under the mesh's lock and refuses if it moved
+            // (confirm finding 3: the decision and the write must see the same
+            // record). `Some("")` is "no record when I looked".
+            let seen = charter::load_trust(mesh).ok().flatten().map(|t| t.operator).unwrap_or_default();
             if join_needs_confirm(inv.flag_present("yes"), will_replace) {
-                if !confirm_join(mesh, &fingerprint, version, will_replace) {
-                    return Outcome::ok(cmd, "not confirmed — nothing recorded".to_string())
-                        .with_data(json!({ "confirmed": false, "mesh": mesh }));
+                match confirm_join(mesh, &fingerprint, version, will_replace) {
+                    JoinConfirm::Confirmed => {}
+                    JoinConfirm::Declined => {
+                        // A required comparison that is DECLINED is a refusal:
+                        // non-zero, with what it means. An optional one keeps
+                        // the old "nothing recorded" success.
+                        if will_replace {
+                            return Outcome::error(
+                                cmd,
+                                format!(
+                                    "refused: joining mesh `{mesh}` with `--replace` REPLACES the operator key this machine \
+                                     already trusts, so the fingerprint comparison is required and was declined. Nothing was \
+                                     written"
+                                ),
+                            )
+                            .with_data(json!({ "reason": "confirm-declined", "mesh": mesh, "willReplace": will_replace }));
+                        }
+                        return Outcome::ok(cmd, "not confirmed — nothing recorded".to_string())
+                            .with_data(json!({ "confirmed": false, "mesh": mesh }));
+                    }
+                    JoinConfirm::NoTty => {
+                        if will_replace {
+                            return Outcome::error(
+                                cmd,
+                                format!(
+                                    "refused: joining mesh `{mesh}` with `--replace` needs the fingerprint compared by a person, \
+                                     and this is not an interactive terminal. Run it where you can compare {fingerprint} with the \
+                                     operator's machine — or, where the config IS hand-editable, use `aoide mesh join {mesh} \
+                                     --operator <new key> --replace`. Nothing was written"
+                                ),
+                            )
+                            .with_data(json!({ "reason": "confirm-needs-tty", "mesh": mesh, "willReplace": true }));
+                        }
+                        return Outcome::ok(cmd, "not confirmed — nothing interactive, nothing recorded".to_string())
+                            .with_data(json!({ "confirmed": false, "mesh": mesh }));
+                    }
                 }
             }
-            (key, None, Some((bytes, sig)))
+            (key, None, Some(seen), Some((bytes, sig)))
         }
         (None, None) => return Outcome::usage(cmd, USAGE),
     };
@@ -225,9 +266,11 @@ fn handle_charter_join(inv: &Invocation) -> Outcome {
     // recorded would be refused `unknown-operator` by this very machine. On
     // the non-LAN arm this already happened (`trust_operator_with` above); the
     // LAN arm reaches it here, AFTER the operator compared the fingerprint, so
-    // a replacement is never recorded before a human saw it.
+    // a replacement is never recorded before a human saw it — and it passes the
+    // record the human SAW, because the write re-reads it under the mesh's lock
+    // and refuses if it moved since (confirm finding 3).
     let field = format!("ed25519:{operator_key}");
-    let (trusted, replaced_here) = match charter::trust_operator_with(mesh, &field, replace) {
+    let (trusted, replaced_here) = match charter::trust_operator_confirmed(mesh, &field, replace, seen.as_deref()) {
         Ok((k, replaced)) => (k, replaced),
         Err(e) => return Outcome::error(cmd, e).with_data(json!({ "reason": "trust-refused", "mesh": mesh })),
     };
@@ -303,12 +346,26 @@ fn join_needs_confirm(yes: bool, will_replace: bool) -> bool {
     will_replace || !yes
 }
 
+/// What the LAN arm's comparison came back with. **A required comparison on a
+/// non-terminal is its own answer** (confirm finding 3): the first cut returned
+/// `Ok "not confirmed"` (exit 0) for a scripted re-root, which reads as success
+/// to a caller that only checks the status — a taught error is what a scripted
+/// refusal owes its caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JoinConfirm {
+    Confirmed,
+    Declined,
+    /// stdin is not an interactive terminal, so nobody could compare.
+    NoTty,
+}
+
 /// The LAN arm's one human gate: the operator key's fingerprint, printed for
 /// the operator to compare with what their own machine shows. Deliberately its
-/// own five lines rather than a shared prompt helper — this crate's prompts
+/// own six lines rather than a shared prompt helper — this crate's prompts
 /// are each shaped by what their own arm asks, and `--yes` skips exactly this
 /// one question and no other.
-fn confirm_join(mesh: &str, fingerprint: &str, version: u64, will_replace: bool) -> bool {
+fn confirm_join(mesh: &str, fingerprint: &str, version: u64, will_replace: bool) -> JoinConfirm {
+    use std::io::IsTerminal;
     let replacing = if will_replace {
         " This REPLACES the operator key this machine already trusts — compare it carefully."
     } else {
@@ -319,9 +376,16 @@ fn confirm_join(mesh: &str, fingerprint: &str, version: u64, will_replace: bool)
          Compare it with the fingerprint the operator's machine printed.{replacing} [y/N] "
     );
     let _ = std::io::Write::flush(&mut std::io::stderr());
+    if !std::io::stdin().is_terminal() {
+        return JoinConfirm::NoTty;
+    }
     let mut line = String::new();
     let read = std::io::stdin().lock().read_line(&mut line).unwrap_or(0);
-    read > 0 && matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+    if read > 0 && matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        JoinConfirm::Confirmed
+    } else {
+        JoinConfirm::Declined
+    }
 }
 
 /// `host`, `host:port`, `[v6]:port` or a bare address → (address text, port).
