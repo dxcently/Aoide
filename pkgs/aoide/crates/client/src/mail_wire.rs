@@ -615,6 +615,41 @@ pub fn exchange_bindings(node: &Node, named_mesh: Option<&str>) -> Result<aoide_
     Ok(theirs)
 }
 
+/// **Is this record's mail grant revoked by a charter** — i.e. is EVERY mesh
+/// it may be asked in a charter mesh whose line no longer lists its key?
+///
+/// The design's revocation rule is "deleting a line and re-signing is
+/// revocation. Each node applies the new version on receipt: its door refuses
+/// the removed key in that mesh, **its router stops routing to it**"
+/// (`docs/architecture/HTTPS-MESH-API.md` "Charters"). The door half is
+/// `a2a::grant_in_mesh`'s (a key the charter does not list holds nothing
+/// there); this is the routing half, on the one routing decision this client
+/// owns — who a bare `aoide mail poll` asks, and therefore who a held entry
+/// can ever leave through.
+///
+/// A record that also holds `message` in a mesh no charter governs (an
+/// ordinary pair mesh) is NOT revoked: nothing about that mesh changed, and
+/// this must never lock out a machine that is simply also on a charter.
+fn revoked_by_charter(node: &aoide_storage::node_store::Node) -> bool {
+    let meshes: Vec<&String> = node
+        .grants
+        .iter()
+        .filter(|(_, caps)| caps.iter().any(|c| c == "message"))
+        .map(|(mesh, _)| mesh)
+        .collect();
+    if meshes.is_empty() {
+        return false;
+    }
+    meshes.iter().all(|mesh| match aoide_storage::charter::governing(mesh) {
+        Some(charter) => node
+            .pubkey
+            .as_deref()
+            .is_none_or(|key| charter.grant_for_key(key).is_none()),
+        // A pair mesh: the charter has nothing to say about it.
+        None => false,
+    })
+}
+
 /// Every node `aoide mail poll` asks when it is given no argument:
 /// registered, `verified`, and carrying `message` in THIS box's own grants for
 /// it — **in ANY mesh**, not only the home one (review N3). The mesh a bare
@@ -637,6 +672,11 @@ pub fn exchange_bindings(node: &Node, named_mesh: Option<&str>) -> Result<aoide_
 /// asks. Its letters reach it through the relay's own spool and its own
 /// `aoide mail poll`; a bare `aoide mail poll` here asking it would be a dial
 /// that can only fail.
+///
+/// **A line the governing charter has REMOVED is not in it either**
+/// ([`revoked_by_charter`]): revocation's routing half, so a removed machine
+/// stops being asked on the very next poll rather than only being refused at
+/// its own door.
 pub fn pollable_nodes() -> Vec<String> {
     let mut out: Vec<String> = aoide_storage::node_store::load_nodes()
         .into_iter()
@@ -647,6 +687,7 @@ pub fn pollable_nodes() -> Vec<String> {
             // trusted in.
             node.verified
                 && !node.never_dialled()
+                && !revoked_by_charter(node)
                 && node.grants.values().any(|caps| caps.iter().any(|a| a == "message"))
         })
         .map(|node| node.name)
@@ -1410,6 +1451,65 @@ mod tests {
             "away",
             "and the poll's own mesh resolves to the one holding `message`, with no flag"
         );
+    }
+
+    /// **Revocation's routing half** (P-CHARTER): a charter version that
+    /// removes a node's line stops that node being a routing target on the
+    /// very next poll — its door refuses it (the door half, `a2a::
+    /// grant_in_mesh`) AND this client stops asking it (`revoked_by_charter`),
+    /// which is what `docs/architecture/HTTPS-MESH-API.md` means by "its
+    /// router stops routing to it". A record that also holds `message` in a
+    /// PAIR mesh is never locked out by a charter.
+    #[test]
+    fn a_charter_removed_line_stops_being_a_routing_target() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("charter-revoked-routing");
+
+        // The charter lists THIS box's own key — a real line, so the age
+        // binding verifies — and the record below carries that same key, which
+        // is what makes it a charter-listed node rather than a stray pairing.
+        let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
+        let listed_key = kp.info().pubkey_hex;
+        let _init = aoide_storage::charter::init("home").unwrap();
+        let line = aoide_storage::charter::node_line().unwrap();
+        let src = format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{line}\n");
+        std::fs::write(aoide_storage::charter::source_path("home"), &src).unwrap();
+        aoide_storage::charter::sign("home", None).unwrap();
+
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        aoide_storage::node_store::upsert_paired_node(
+            &mut nodes, "revokee", "http://127.0.0.1:1/", &listed_key,
+            &aoide_storage::time::now_iso_utc(), &["message".to_string()], "home",
+        );
+        aoide_storage::node_store::upsert_paired_node(
+            &mut nodes, "friend", "http://127.0.0.1:2/", &"ee".repeat(32),
+            &aoide_storage::time::now_iso_utc(), &["message".to_string()], "club",
+        );
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+
+        let listed = pollable_nodes();
+        assert!(listed.contains(&"revokee".to_string()), "a charter-listed line is a routing target: {listed:?}");
+        assert!(listed.contains(&"friend".to_string()), "and a pair mesh is untouched by any charter: {listed:?}");
+
+        // The operator re-signs with an EMPTY node list — the revocation — and
+        // this machine applies v2.
+        let src2 = format!("mesh = \"home\"\nversion = 1\nrelays = []\n\n[nodes]\n");
+        std::fs::write(aoide_storage::charter::source_path("home"), &src2).unwrap();
+        aoide_storage::charter::sign("home", None).unwrap();
+        assert_eq!(
+            aoide_storage::charter::in_force_charter("home").unwrap().version,
+            2,
+            "the operator re-signed and this box (the operator's own, in this fixture) applied it"
+        );
+
+        let after = pollable_nodes();
+        assert!(
+            !after.contains(&"revokee".to_string()),
+            "a removed line stops being routed to on the next poll: {after:?}"
+        );
+        assert!(after.contains(&"friend".to_string()), "while the pair mesh still routes: {after:?}");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
