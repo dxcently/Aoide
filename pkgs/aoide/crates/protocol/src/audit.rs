@@ -48,7 +48,23 @@ pub fn audit_log_path(inv: &crate::invocation::Invocation) -> PathBuf {
     default_audit_log()
 }
 
-/// The Aoide user's home (`$AOIDE_USER` → `/home/<user>`, else `$HOME`).
+/// The Aoide user's home — what [`default_audit_log`] and `aoide-storage`'s
+/// root resolve against when neither is overridden.
+///
+/// **Unix**: `$AOIDE_USER` → `/home/<user>` (the deployment variable the nix
+/// modules export), else `$HOME`, else the literal `/home/khoa` this chain
+/// shipped with.
+///
+/// **Native Windows**: `$USERPROFILE`, else `$HOMEDRIVE$HOMEPATH`, else the
+/// temp dir — the same last-resort shape `aoide_storage::runtime_dir` takes.
+/// Neither of the Unix chain's inputs is this host's answer: Windows never sets
+/// `$HOME` (a shell that invents one is not a host fact) and `$AOIDE_USER` is a
+/// Linux deployment variable, so honoring either would answer a path OFF THE
+/// CURRENT DRIVE — `\home\khoa\.aoide` under `C:\` — which is what this chain
+/// did before the arm existed (measured on ThinkChiyo: `aoide daemon` with
+/// `$HOME` cleared wrote `C:\home\khoa\.aoide\log`). A fabricated path is not
+/// the refusal convention's answer; the host's own per-user directory is.
+#[cfg(unix)]
 pub fn aoide_home() -> PathBuf {
     if let Ok(user) = std::env::var("AOIDE_USER") {
         if !user.is_empty() {
@@ -56,6 +72,19 @@ pub fn aoide_home() -> PathBuf {
         }
     }
     PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/home/khoa".into()))
+}
+
+#[cfg(windows)]
+pub fn aoide_home() -> PathBuf {
+    if let Some(profile) = std::env::var("USERPROFILE").ok().filter(|s| !s.is_empty()) {
+        return PathBuf::from(profile);
+    }
+    let drive = std::env::var("HOMEDRIVE").unwrap_or_default();
+    let rest = std::env::var("HOMEPATH").unwrap_or_default();
+    if !drive.is_empty() && !rest.is_empty() {
+        return PathBuf::from(format!("{drive}{rest}"));
+    }
+    std::env::temp_dir()
 }
 
 /// Which door an operation came through — both share one gate and one log.
@@ -374,5 +403,43 @@ mod tests {
         let stored = parsed["message"].as_str().unwrap();
         assert_eq!(stored, format!("{}{}", "a".repeat(511), STORED_MESSAGE_TRUNCATION_MARKER));
         std::fs::remove_dir_all(log.parent().unwrap()).ok();
+    }
+
+    /// The native home is THIS host's per-user directory, never the Unix
+    /// chain's answer — `$HOME` (which Windows does not set; a shell that
+    /// invents one is not a host fact) or `$AOIDE_USER` (a Linux deployment
+    /// variable). Both are set to decoys here and BOTH must lose: before this
+    /// arm existed the answer was `\home\khoa`, a path off the current drive,
+    /// which is the fabricated path this test refuses. The decoy for `$HOME`
+    /// is deliberately a path that does not exist, so a chain that consulted it
+    /// cannot pass by coincidence.
+    #[cfg(windows)]
+    #[test]
+    fn the_native_home_is_the_hosts_own_per_user_directory_never_a_unix_shape() {
+        let saved_profile = std::env::var("USERPROFILE").ok();
+        let saved_home = std::env::var("HOME").ok();
+        let saved_user = std::env::var("AOIDE_USER").ok();
+
+        let profile = std::env::temp_dir().join(format!("aoide-home-probe-{}", std::process::id()));
+        std::env::set_var("USERPROFILE", &profile);
+        std::env::set_var("HOME", r"C:\home\khoa");
+        std::env::set_var("AOIDE_USER", "khoa");
+        let answer = aoide_home();
+        assert_eq!(answer, profile, "the host's own per-user directory is the home");
+        assert!(!answer.to_string_lossy().contains("home\\khoa"), "never the Unix chain's shape: {answer:?}");
+        assert_eq!(default_audit_log(), profile.join(".aoide").join("log"), "and the root's default log rides it");
+
+        match saved_profile {
+            Some(v) => std::env::set_var("USERPROFILE", v),
+            None => std::env::remove_var("USERPROFILE"),
+        }
+        match saved_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        match saved_user {
+            Some(v) => std::env::set_var("AOIDE_USER", v),
+            None => std::env::remove_var("AOIDE_USER"),
+        }
     }
 }

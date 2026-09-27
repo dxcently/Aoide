@@ -207,11 +207,119 @@ aoided
   `ss -xlp | grep aoide` (or `pgrep -a aoided`) — and stop the one you started
   (`systemctl --user stop aoided`) when you are done with it.
 
-## 7. Windows (WSL)
+## 7. Windows
 
-WSL2 is the beta Windows path: it is a Linux box, and everything above runs on
-it unchanged. Native Windows is a separate, continuing portability lane and is
-not required for beta (`docs/architecture/CORE-POSIX.md`).
+Windows runs the core two ways, and when both run at once they are **two
+nodes**, not one node in two places: native Windows is a primary target
+(root `AGENTS.md`, `docs/architecture/CORE-POSIX.md`), WSL2 is the beta Linux
+path beside it.
+
+| you want | how |
+|---|---|
+| the core, native — `aoide`, `aoided`, no WSL/MSYS/Cygwin | § 7.1, then start it at logon (§ 7.2) |
+| the Linux path, and the AoideOS beta | § 7.3 — WSL2, everything above unchanged |
+
+### 7.1 Native Windows (core)
+
+Prerequisites are § 1's, on the host's own toolchain: rustup with
+`x86_64-pc-windows-msvc` (the MSVC linker `link.exe`; no MinGW, no MSYS), `git`,
+and a shell. Then § 3–§ 5 verbatim — `cargo install --path
+pkgs/aoide/crates/cli --bins --locked` lands
+`%USERPROFILE%\.cargo\bin\{aoide,aoided}.exe`, `aoide onboard` is idempotent the
+same way, and `aoide schema --json` is the version. Two things differ.
+
+**Paths.** There is no `/run/user/<uid>` and Windows does not set `$HOME`: the
+runtime dir (the sockets) defaults to `%LOCALAPPDATA%`, the user's home to
+`%USERPROFILE%`, and therefore the root to `%USERPROFILE%\.aoide` — the shape
+`~/.aoide` has on Linux. `AOIDE_ROOT`, `AOIDE_AUDIT_LOG`, `AOIDE_STAGE_DIR`,
+`AOIDE_STATE_DIR` and `XDG_RUNTIME_DIR` are overrides here too, so a check that
+must not touch live state sets all five.
+
+**One daemon, and its doors are other processes.** `aoided` binds a unix socket
+and **no TCP port**; `aoide a2a serve` (the door) and `aoide mcp serve --stdio`
+are separate processes, exactly as `aoide-a2a`/`aoide-mcp` are separate units on
+Linux. `aoided` spawns neither.
+
+### 7.2 Start `aoided` at logon — a per-user scheduled task
+
+The declared path on an AoideOS host is still the nix module
+(`pkgs/aoide/module/aoided.nix`); § 6 is the portable Linux equivalent. This is
+the portable Windows one: **per-user environment variables for the process's
+environment, and per-user logon tasks for its lifetime** — the OS's own
+equivalent of the unit's `Environment=` lines and its `[Install]` anchor.
+
+```powershell
+# 1. The environment the daemon and the door run with. User scope, because it
+#    must be there at every logon, for every process, with no shell involved.
+[Environment]::SetEnvironmentVariable('AOIDE_ROOT',      "$env:USERPROFILE\.aoide", 'User')
+[Environment]::SetEnvironmentVariable('AOIDE_AUDIT_LOG', "$env:USERPROFILE\.aoide\log", 'User')
+[Environment]::SetEnvironmentVariable('AOIDE_A2A_BIND',  '127.0.0.1', 'User')   # doors stay loopback-only
+[Environment]::SetEnvironmentVariable('AOIDE_A2A_NODE_NAME', 'thinkchiyo-win', 'User')  # a second node on one box needs its own name
+[Environment]::SetEnvironmentVariable('AOIDE_A2A_PORT',  '8720', 'User')        # ... and its own port
+[Environment]::SetEnvironmentVariable('AOIDE_MAIL_ADAPTER_PORT', '8722', 'User')
+
+# 2. Two tasks: the daemon, and the door beside it.
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+  -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 `
+  -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$exe     = "$env:USERPROFILE\.cargo\bin"
+Register-ScheduledTask -TaskName AoideAoided -Force -User $env:USERNAME -RunLevel Limited `
+  -Trigger $trigger -Settings $settings -Action (New-ScheduledTaskAction -Execute "$exe\aoided.exe")
+Register-ScheduledTask -TaskName AoideA2a -Force -User $env:USERNAME -RunLevel Limited `
+  -Trigger $trigger -Settings $settings -Action (New-ScheduledTaskAction -Execute "$exe\aoide.exe" -Argument 'a2a serve')
+
+# 3. Start them now, without logging out. (`Start-ScheduledTask`'s -TaskName is
+#    a single string, unlike Get-ScheduledTask's: pipe the tasks to it.)
+Get-ScheduledTask -TaskName AoideAoided, AoideA2a | Start-ScheduledTask
+
+# 4. Check.
+Get-ScheduledTask AoideAoided, AoideA2a | Get-ScheduledTaskInfo |
+  Select-Object TaskName, LastRunTime, LastTaskResult
+Get-NetTCPConnection -State Listen -LocalPort 8720
+Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8720/.well-known/agent-card.json |
+  Select-Object -ExpandProperty Content
+```
+
+- **`-ExecutionTimeLimit ([TimeSpan]::Zero)` is load-bearing.** The default is
+  three days, which would stop a resident daemon and restart it — a supervisor
+  that kills its own subject on a timer. Zero means "no limit".
+- **`-RunLevel Limited`** keeps the task unelevated: it runs as this user with
+  this user's own token, which is what the loopback-only door and the
+  audit log's ownership assume.
+- **The action carries a PATH, never an environment.** Task Scheduler hands the
+  process the user's own environment, which is why step 1 writes persistent user
+  variables; a value that must not be persistent belongs in a wrapper instead
+  (`-Execute cmd.exe -Argument '/c set AOIDE_X=… && aoided.exe'`), and a
+  wrapper is the honest choice only when the value is per-run.
+- **`-RestartCount`/`-RestartInterval`** are this host's `Restart=on-failure` /
+  `RestartSec=5s`. A clean exit under Task Scheduler is a task that has ended,
+  so the daemon's "never exits on its own" is what keeps the task active — the
+  same reason the unit is `Type=simple`.
+- **Lifetime, stated rather than implied.** A logon task's process runs in that
+  logon's session, so it starts at logon and ends when the session does —
+  the opposite of § 6's anchor note, where deliberately *no* `PartOf=` ties the
+  daemon to the desktop. A crash comes back in a minute; a logoff comes back at
+  the next logon. Running a daemon that outlives every logon on this host means
+  a service in session 0 with an S4U/service account, which is a different
+  install, not a flag here.
+- **A daemon started inside an ssh session is not resident.** Measured on
+  ThinkChiyo: `Start-Process ... aoided.exe` over ssh was alive at 60 s and gone
+  by the next session, with an empty stderr and no stop record. That is why the
+  task, not the ssh command, is the mechanism.
+- **The inverse is one command**: `Unregister-ScheduledTask -TaskName
+  AoideAoided, AoideA2a -Confirm:$false`, plus the same
+  `SetEnvironmentVariable(..., $null, 'User')` lines. Nothing else in the tree
+  knows these tasks exist.
+- **Two daemons, one pathname** — § 6's warning, in this host's spelling: a
+  resident `aoided` holds the socket inode at `<runtime dir>\aoide\aoided.sock`,
+  and a second one binds the same pathname, so before trusting the socket check
+  for a straggler (`Get-Process aoided`; `Get-ChildItem
+  $env:LOCALAPPDATA\aoide`) and stop the one you started.
+
+### 7.3 WSL2 — the Linux path
+
+WSL2 is a Linux box, and everything above runs on it unchanged.
 
 ```
 Windows host
@@ -220,6 +328,23 @@ Windows host
     ├── aoide / aoided in ~/.cargo/bin
     └── dials OUT over ssh  →  another node's loopback door
 ```
+
+**Two nodes on one box.** With § 7.1 running natively, the Windows node and the
+WSL node are separate nodes with separate records, and three collisions are
+already waiting for them:
+
+- **The name.** Both compute their node name from the same computer name (WSL
+  takes the Windows host name), so one side must set `AOIDE_A2A_NODE_NAME` — the
+  override the whole chain reads — or the two nodes' records, letters and
+  self-checks cannot tell each other apart.
+- **The port.** WSL2 forwards the VM's `127.0.0.1` listeners to the Windows
+  host's `127.0.0.1`, so a door on the same port on both sides contends for one
+  address. Give them different ports (§ 7.2's `8720`/`8722` for the native side,
+  `8710`/`8712` left to WSL).
+- **Direction.** Windows can dial the WSL door straight through that forwarding
+  (`aoide pair http://127.0.0.1:8710/`); the other way round the VM's
+  `127.0.0.1` is the VM's own loopback, so a WSL-side dial needs an ssh hop by
+  address. The one-box path is therefore: **Windows is the requester.**
 
 - **Keep the clone and `target/` on ext4, never `/mnt/c`.** `/mnt/c` is 9p
   (`type=v9fs`), measured at 169 MB/s fsync write against 1.3 GB/s on ext4, and
