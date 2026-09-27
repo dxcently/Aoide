@@ -670,7 +670,17 @@ fn parked_id_for(node: &str) -> Option<String> {
 /// a `via` is set, rewriting the dial to the tunnel's own local end. So
 /// `http://127.0.0.1:<default_a2a_port()>/` is both the correct logical url
 /// and exactly the record shape a paired node already carries.
-fn converge_one(cmd: &str, node: &str, hop: &str, finish: &crate::commands::PairFinish) -> ConvergeOutcome {
+///
+/// The MESH rides the request (P-CHARTER): a converge is the operator saying
+/// "these nodes belong to this mesh", and the node's own operator is not
+/// asked to guess it — the far end commits the same mesh by construction.
+fn converge_one(
+    cmd: &str,
+    node: &str,
+    hop: &str,
+    mesh: &str,
+    finish: &crate::commands::PairFinish,
+) -> ConvergeOutcome {
     let via = match aoide_storage::tunnel::parse_via(hop) {
         Ok(v) => v,
         // Unreachable through `config::load` (`validate_mesh` runs the same
@@ -688,6 +698,7 @@ fn converge_one(cmd: &str, node: &str, hop: &str, finish: &crate::commands::Pair
         self_via.as_deref(),
         Some(&via),
         Some(hop.to_string()),
+        Some(mesh),
         finish,
     );
     classify(&out, parked_id_for(node))
@@ -798,7 +809,7 @@ fn handle_mesh_pair(inv: &Invocation) -> Outcome {
     for planned in &plan {
         let outcome = match &planned.action {
             PlannedAction::Skip { reason } => ConvergeOutcome::Skipped { reason: reason.clone() },
-            PlannedAction::Pair { hop } => converge_one(cmd, &planned.node, hop, &finish),
+            PlannedAction::Pair { hop } => converge_one(cmd, &planned.node, hop, &section.name, &finish),
         };
         rows.push(ConvergeRow { node: planned.node.clone(), outcome });
     }
@@ -1570,6 +1581,7 @@ mod tests {
                 state: aoide_storage::pairing::OutboundState::AwaitingApproval,
                 tries: 0,
                 via: Some("ssh://khoa@h1".to_string()),
+                mesh: None,
             })
             .expect("parking writes to the scratch root");
             assert_eq!(parked_id_for("sakaki").as_deref(), Some("abc123"));

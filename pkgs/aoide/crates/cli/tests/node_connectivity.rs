@@ -577,6 +577,7 @@ fn node_pair_reject_on_an_outbound_entry_aborts_before_the_approvers_callback() 
         expires_at: expires,
         state: aoide_storage::pairing::OutboundState::AwaitingApproval,
         via: None,
+        mesh: None,
         tries: 0,
     };
     aoide_storage::pairing::park_outbound(entry).unwrap();
@@ -616,6 +617,7 @@ fn node_pair_reject_on_an_outbound_entry_aborts_after_the_approvers_callback() {
         expires_at: expires,
         state: aoide_storage::pairing::OutboundState::AwaitingApproval,
         via: None,
+        mesh: None,
         tries: 0,
     };
     aoide_storage::pairing::park_outbound(entry).unwrap();
@@ -696,6 +698,7 @@ fn node_pair_approve_on_an_outbound_entry_still_awaiting_the_nodes_own_approval_
         expires_at: expires,
         state: aoide_storage::pairing::OutboundState::AwaitingApproval,
         via: None,
+        mesh: None,
         tries: 0,
     };
     aoide_storage::pairing::park_outbound(entry).unwrap();
@@ -756,6 +759,7 @@ fn node_pair_approve_on_an_outbound_entry_awaiting_confirm_commits_with_the_repl
         // entry to this later, separate `pair <target>` invocation —
         // asserted below, committed onto the node record only here.
         via: Some("ssh://khoa@box-b".to_string()),
+        mesh: None,
         tries: 0,
     };
     aoide_storage::pairing::park_outbound(entry).unwrap();
@@ -814,6 +818,7 @@ fn node_pair_approve_on_an_outbound_entry_awaiting_confirm_with_yes_alone_is_the
         expires_at: expires,
         state: aoide_storage::pairing::OutboundState::AwaitingApproval,
         via: None,
+        mesh: None,
         tries: 0,
     };
     aoide_storage::pairing::park_outbound(entry).unwrap();
@@ -898,6 +903,7 @@ fn node_pair_approve_on_an_outbound_entry_with_no_via_leaves_a_previously_record
         // The re-pair itself carries NO via — a plain `pair <url>`
         // with no `--via` this time.
         via: None,
+        mesh: None,
         tries: 0,
     };
     aoide_storage::pairing::park_outbound(entry).unwrap();

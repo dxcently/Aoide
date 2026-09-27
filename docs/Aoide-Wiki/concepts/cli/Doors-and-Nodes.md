@@ -490,7 +490,7 @@ aoide node hub <name> [--clear]
 ```
 aoide pair [<name|url|id>] [--name <n>] [--via ssh://[user@]host[:port]]
             [--self-via ssh://[user@]host] [--secs N] [--wait SECS]
-            [--allow read,spawn] [--yes] [--json]
+            [--allow read,spawn] [--mesh <mesh>] [--yes] [--json]
 aoide pair reject <id|name>
 aoide pair watch [--popup] [--json]
 ```
@@ -505,7 +505,12 @@ outright at task #135 P3', hard cutover, no aliases.
   instance's ed25519 identity (`state/identity/`, minted lazily on first
   need — `ed25519.key` at 0600 inside the 0700 directory, never appearing
   in any output; `aoide identity` shows the pubkey and its colon-hex
-  fingerprint). `aoide pair` takes exactly ONE positional — a second is
+  fingerprint). **`--mesh <m>` names the mesh this pairing's grants land in
+  on BOTH sides** — it rides `aoide/pairRequest` (validated as a mesh name
+  there) and each leg's commit takes it above every local source, so the two
+  ends agree by construction; absent, each side resolves locally (the
+  target's sole known mesh, else `[pairing] homeMesh`) and a box that knows
+  more than one mesh for the target refuses rather than guessing. `aoide pair` takes exactly ONE positional — a second is
   refused outright, before any arm runs, naming the fold in the refusal,
   and the `reject`/`watch` subcommand names match BEFORE a bare hostname
   positional of the same spelling (a box named `reject` or `watch` pairs

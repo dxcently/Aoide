@@ -503,6 +503,31 @@ pub struct InboundPairingRequest {
     /// [`Self::requester_nonce_hex`] already holds.
     #[serde(rename = "selfVia", default, skip_serializing_if = "Option::is_none")]
     pub self_via: Option<String>,
+    /// The mesh the ceremony carries (P-CHARTER): the wire's `mesh`, straight
+    /// off `aoide/pairRequest`'s params, and the mesh this pairing's grant is
+    /// meant to land in ON BOTH SIDES.
+    ///
+    /// **This is the one field that makes the two ends agree by
+    /// construction.** A mesh is a trust scope, and each side used to resolve
+    /// it alone (the `--mesh` flag, else the target's known meshes, else the
+    /// home mesh) — so two operators naming different meshes landed an
+    /// ASYMMETRIC pair, each end holding the record in its own mesh and
+    /// granting nothing the other could read. The requester's choice now rides
+    /// the request, and the approver's commit takes it
+    /// (`aoide_client::commands::pairing_mesh` puts it above every local
+    /// source): the same mesh on both ends or no pairing at all.
+    ///
+    /// Same trust class as [`Self::url`] and [`Self::self_via`] — self-asserted
+    /// DATA, validated as a mesh NAME at park time and otherwise taken as
+    /// given, because the ceremony's authority is the typed code and the
+    /// pubkeys, never a field of the body. It is carried onto the parked entry
+    /// so `pair <id>` can show it beside the code and commit it.
+    /// `#[serde(default, skip_serializing_if = "Option::is_none")]` so a
+    /// parked entry predating this field loads `None` (and an old requester
+    /// that sends none commits exactly as before, resolving locally) — the
+    /// same additive discipline [`Self::self_via`] holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -620,11 +645,45 @@ pub fn park_inbound(
             approved: false,
             tries: 0,
             self_via: self_via.map(|s| s.to_string()),
+            mesh: None,
             binding: None,
         };
         requests.push(entry.clone());
         save_inbound(&requests)?;
         Ok((entry, evicted_id))
+    })
+}
+
+/// **Attach the mesh a parked inbound request names** (P-CHARTER) — the
+/// requester's `--mesh`, straight off `aoide/pairRequest`'s params, and the
+/// mesh `pair <id>`'s commit writes the grant into ON THIS SIDE TOO.
+///
+/// A separate writer, not a `park_inbound` argument, for the reason
+/// [`set_inbound_binding`] is: a meshless park is a LEGAL state — every
+/// requester older than P-CHARTER sends none, and such a pairing commits
+/// exactly as it always did by resolving the mesh locally — and threading it
+/// through parking would make every caller that has none, every test
+/// included, pay for a field it does not use. An unknown or expired id is a
+/// no-op, not an error.
+///
+/// The mesh is already VALIDATED as a mesh name at the door
+/// (`a2a::pair_request`), because it names a trust scope rather than a
+/// transport marker; this function records what arrived and nothing more.
+///
+/// **It deliberately does not sweep.** Every other writer here sweeps the
+/// queue as it writes, because each of them already owns the queue's
+/// lifetime; a field write must not, because then a caller whose clock is
+/// ahead of the parked entry — a test, or a box whose time moved — would turn
+/// "record this mesh" into a silent DELETION of the request it belongs to.
+/// The lookup is by id alone, and an unknown id is a no-op.
+pub fn set_inbound_mesh(id: &str, mesh: &str) -> Result<(), String> {
+    with_stage_lock(|| {
+        let mut requests = load_inbound_raw();
+        let Some(entry) = requests.iter_mut().find(|r| r.id == id) else {
+            return Ok(());
+        };
+        entry.mesh = Some(mesh.to_string());
+        save_inbound(&requests)
     })
 }
 
@@ -906,6 +965,21 @@ pub struct OutboundPairingRequest {
     /// additive discipline `state` above already holds) loads `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub via: Option<String>,
+    /// The mesh this ceremony carries (P-CHARTER), as named at REQUEST time —
+    /// `--mesh`, or none, in which case this side resolves it locally as it
+    /// always did. Stored here for the same reason [`Self::via`] is: the
+    /// node-record commit happens LATER, in a separate `aoide pair <id>`
+    /// invocation ([`mark_outbound_awaiting_confirm`] plus the requester's own
+    /// confirm), which has no other way to recover what this request stated.
+    /// The WIRE copy is what the approver parked; this one keeps THIS side's
+    /// commit in the same mesh. It is deliberately NOT learned from the
+    /// approver's answer: a pairing is symmetric because both ends state the
+    /// same mesh, and an approver that named a different one is exactly the
+    /// asymmetric pair PAIRING.md's "Mesh declaration" refuses to guess at.
+    /// `#[serde(default, skip_serializing_if = "Option::is_none")]`, the same
+    /// additive discipline every field above holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh: Option<String>,
     /// Typed-code approval, mutual-ceremony leg (module doc's
     /// `OutboundPairingRequest::tries` paragraph): how many WRONG reply
     /// codes have been entered against this entry so far — the exact
@@ -1880,6 +1954,7 @@ mod tests {
             requested_at: crate::time::iso_utc_from_epoch(now),
             expires_at: expires_at_from(now),
             state,
+            mesh: None,
             via: None,
             tries: 0,
         }
@@ -2505,6 +2580,7 @@ mod binding_carriage_tests {
             expires_at: expires_at_from(now_epoch),
             state: OutboundState::AwaitingApproval,
             via: None,
+            mesh: None,
             tries: 0,
         })
         .unwrap();

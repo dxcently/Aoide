@@ -3809,6 +3809,19 @@ fn emit_pairing_event(kind: &str, payload: Value) {
 /// and safe to reveal immediately since B moves SECOND (nothing of B's is
 /// fixed by a commitment A could exploit the way the reverse would be).
 ///
+/// **`mesh` (P-CHARTER) is the field that makes the two ends agree.** A mesh
+/// is a trust scope and each side used to resolve it alone, so two operators
+/// naming different meshes landed an asymmetric pair with the grant in a mesh
+/// the other end never reads. A's chosen mesh now rides the request and B's
+/// commit takes it as the mesh to write (`pairing_mesh` puts it above every
+/// local source). It is validated HERE as a mesh NAME
+/// ([`aoide_storage::node_store::valid_node_name`], the same grammar `--mesh`
+/// and `[mesh.<name>]` take) and refused `-32602` otherwise, because it names
+/// a trust scope rather than merely enriching a record; it is otherwise
+/// self-asserted DATA of the same class as `url`/`selfVia`, and it is shown
+/// beside the code at `pair <id>` so the operator's own typed confirmation is
+/// what actually authorizes it.
+///
 /// `name` is validated against [`aoide_storage::node_store::valid_node_name`]
 /// HERE, at park time — not merely at `node add`'s door the way a
 /// legacy-path name is — because `pair <id>` reuses this
@@ -3828,6 +3841,22 @@ fn pair_request(params: &Value, origin: ConnOrigin, audit_log: &Path) -> Result<
     // field is never load-bearing enough to refuse a pairing request over,
     // only to enrich the approver's eventual commit when present.
     let self_via = params.get("selfVia").and_then(Value::as_str).filter(|s| !s.is_empty());
+    // OPTIONAL (P-CHARTER), and unlike `selfVia` it IS validated: a mesh is a
+    // trust scope the approver's commit writes into, not a transport marker,
+    // so a shape that cannot be a mesh name is refused by name rather than
+    // silently dropped — absent (an old requester) still means `None`.
+    let mesh = match params.get("mesh").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+        Some(m) => {
+            if !aoide_storage::node_store::valid_node_name(m) {
+                return Err((
+                    -32602,
+                    format!("invalid params: mesh `{m}` is not a mesh name (`^[a-z0-9][a-z0-9-]*$`)"),
+                ));
+            }
+            Some(m)
+        }
+        None => None,
+    };
 
     if !valid_pubkey_hex(pubkey_hex) {
         return Err((-32602, "invalid params: pubkeyHex must be 64 hex characters".to_string()));
@@ -3885,6 +3914,15 @@ fn pair_request(params: &Value, origin: ConnOrigin, audit_log: &Path) -> Result<
         self_via,
     )
     .map_err(|e| (-32000_i64, e))?;
+
+    // P-CHARTER: the mesh the requester named, recorded right after parking
+    // (its own sibling writer, the shape `set_inbound_binding` below already
+    // holds). Best-effort like that one: a failure leaves the entry meshless,
+    // which is the pre-charter state — this side then resolves the mesh
+    // LOCALLY at commit, exactly as it did before the wire carried one.
+    if let Some(mesh) = mesh {
+        let _ = aoide_storage::pairing::set_inbound_mesh(&entry.id, mesh);
+    }
 
     // P-SEAL: attach the requester's binding after parking, never as part of
     // it — a request that carries none (an older aoide) parks and pairs
@@ -12817,6 +12855,7 @@ mod tests {
             expires_at: aoide_storage::pairing::expires_at_from(now_epoch),
             state: aoide_storage::pairing::OutboundState::AwaitingApproval,
             via: None,
+            mesh: None,
             tries: 0,
         })
         .unwrap();

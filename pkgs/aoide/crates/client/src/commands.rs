@@ -2079,25 +2079,28 @@ pub fn register_nodes(r: &mut Registry) {
 // ceremony's missing ABORT command: it removes the entry at either outbound
 // state, whether or not a poll has succeeded yet.
 
-/// The mesh a pairing commit lands its grant in (P-CHARTER): the `--mesh` the
-/// operator named, else the mesh this box already associates with the target,
-/// else the home mesh.
+/// The mesh a pairing commit lands its grant in (P-CHARTER): the mesh the
+/// CEREMONY carried, else the `--mesh` the operator named on this side, else
+/// the mesh this box already associates with the target, else the home mesh.
 ///
-/// **Both sides resolve this locally, exactly as they already resolve their
-/// own `grant`** ([`resolve_grant`]): the grant does not ride the pairing
-/// wire, and neither does the mesh — the ceremony's body carries `pubkeyHex`,
-/// `binding`, `commitHex`, `url` and `selfVia`, and each operator states the
-/// grant and the mesh on their own side. So a pair whose two operators name
-/// different meshes lands asymmetric, and the fix is the two operators naming
-/// the same one; `docs/architecture/PAIRING.md` states this as a known limit.
+/// **The wire's mesh comes first, and that is what makes a pair symmetric.**
+/// Both sides used to resolve this alone — exactly as they each still resolve
+/// their own `grant`, which does not ride the wire — so two operators naming
+/// different meshes landed an asymmetric pair, each end holding the record in
+/// its own mesh and granting nothing the other could read. The requester's
+/// choice now rides `aoide/pairRequest` (`InboundPairingRequest::mesh` on the
+/// approver's side, `OutboundPairingRequest::mesh` on the requester's), and
+/// `named` is where each leg passes it; the local sources below are the
+/// fallback for a pairing that named none at all, which is every request from
+/// a pre-P-CHARTER requester.
 ///
 /// What this box "knows" about the target is the record's own granted meshes
 /// ([`aoide_storage::node_store::granted_meshes`]) UNION the `[mesh.<name>]`
 /// names this config declares — a fresh pair has no record yet, and a declared
 /// mesh is exactly the operator's statement of where that node belongs. More
-/// than one known and no `--mesh` REFUSES ([`aoide_storage::node_store::
-/// resolve_mesh`]) rather than guessing: a wrong guess writes a grant in a
-/// mesh the door will never read.
+/// than one known and no name wins REFUSES
+/// ([`aoide_storage::node_store::resolve_mesh`]) rather than guessing: a wrong
+/// guess writes a grant in a mesh the door will never read.
 fn pairing_mesh(name: &str, named: Option<&str>) -> Result<String, String> {
     let mut known = aoide_storage::node_store::load_nodes()
         .into_iter()
@@ -2577,6 +2580,19 @@ fn pair_via_url(cmd: &str, inv: &Invocation, url: &str, usage: &str) -> Outcome 
         Ok(f) => f,
         Err(e) => return Outcome::usage(cmd, format!("{usage} — {e}")),
     };
+    // A mesh the operator names here rides the request (P-CHARTER), so the
+    // approver commits the SAME one — validated as a mesh name, since it names
+    // a trust scope and a typo would otherwise become a silently empty grant
+    // scope on the far side.
+    let mesh = match inv.flags.get("mesh").cloned().filter(|s| !s.is_empty()) {
+        Some(m) => {
+            if !aoide_storage::node_store::valid_node_name(&m) {
+                return Outcome::usage(cmd, format!("{usage} — `--mesh {m}` is not a mesh name (`^[a-z0-9][a-z0-9-]*$`)"));
+            }
+            Some(m)
+        }
+        None => None,
+    };
     if let Some(out) = refuse_detached_grant(cmd, &finish) {
         return out;
     }
@@ -2584,7 +2600,17 @@ fn pair_via_url(cmd: &str, inv: &Invocation, url: &str, usage: &str) -> Outcome 
         return out;
     }
 
-    run_pair_request(cmd, url, &name, &self_url, self_via.as_deref(), via.as_ref(), via.as_ref().map(|v| v.to_string()), &finish)
+    run_pair_request(
+        cmd,
+        url,
+        &name,
+        &self_url,
+        self_via.as_deref(),
+        via.as_ref(),
+        via.as_ref().map(|v| v.to_string()),
+        mesh.as_deref(),
+        &finish,
+    )
 }
 
 /// The requester's half of the ceremony, shared verbatim by
@@ -2631,6 +2657,7 @@ pub(crate) fn run_pair_request(
     self_via: Option<&str>,
     dial_via: Option<&aoide_storage::tunnel::Via>,
     record_via: Option<String>,
+    mesh: Option<&str>,
     finish: &PairFinish,
 ) -> Outcome {
     let (kp, _) = match aoide_storage::identity::load_or_mint() {
@@ -2664,6 +2691,7 @@ pub(crate) fn run_pair_request(
         &self_url,
         self_via,
         aoide_storage::seal::publish_binding().ok().as_ref(),
+        mesh,
     );
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let (code, resp_body) = match post_json_via(url, dial_via, name, &body_str, None, &[], 15) {
@@ -2727,6 +2755,7 @@ pub(crate) fn run_pair_request(
         expires_at: ack.expires_at.clone(),
         state: aoide_storage::pairing::OutboundState::AwaitingApproval,
         via: record_via,
+        mesh: mesh.map(str::to_string),
         tries: 0,
     };
     if let Err(e) = aoide_storage::pairing::park_outbound(outbound) {
@@ -3271,7 +3300,7 @@ pub(crate) fn approve_inbound(
     };
     let mut nodes = aoide_storage::node_store::load_nodes();
     let first_pairing = !nodes.iter().any(|p| p.name == entry.name && p.verified);
-    let mesh = match pairing_mesh(&entry.name, None) {
+    let mesh = match pairing_mesh(&entry.name, entry.mesh.as_deref()) {
         Ok(m) => m,
         Err(e) => return Outcome::error(cmd, e).with_data(json!({ "reason": "mesh-unresolved", "id": id })),
     };
@@ -3579,7 +3608,7 @@ pub(crate) fn commit_outbound(
 
     let mut nodes = aoide_storage::node_store::load_nodes();
     let first_pairing = !nodes.iter().any(|p| p.name == entry.name && p.verified);
-    let mesh = match pairing_mesh(&entry.name, None) {
+    let mesh = match pairing_mesh(&entry.name, entry.mesh.as_deref()) {
         Ok(m) => m,
         Err(e) => return Outcome::error(cmd, e).with_data(json!({ "reason": "mesh-unresolved", "id": id })),
     };
@@ -3950,7 +3979,18 @@ fn pair_via_hostname(cmd: &str, inv: &Invocation, target: &str, usage: &str) -> 
     if let Some(out) = refuse_code_on_new_request(cmd, &finish) {
         return out;
     }
-    pair_with_heard(cmd, &hit, via_flag.as_ref(), self_via_flag.as_deref(), &finish)
+    // The mesh the operator named (`--mesh`), validated here for the same
+    // reason the url arm validates it: it names a trust scope on the far side.
+    let mesh = match inv.flags.get("mesh").cloned().filter(|s| !s.is_empty()) {
+        Some(m) => {
+            if !aoide_storage::node_store::valid_node_name(&m) {
+                return Outcome::usage(cmd, format!("{usage} — `--mesh {m}` is not a mesh name (`^[a-z0-9][a-z0-9-]*$`)"));
+            }
+            Some(m)
+        }
+        None => None,
+    };
+    pair_with_heard(cmd, &hit, via_flag.as_ref(), self_via_flag.as_deref(), mesh.as_deref(), &finish)
 }
 
 /// The tail `pair`'s hostname arm ([`pair_via_hostname`]) and bare
@@ -3979,6 +4019,7 @@ fn pair_with_heard(
     hit: &crate::discover::Heard,
     via_flag: Option<&aoide_storage::tunnel::Via>,
     self_via_flag: Option<&str>,
+    mesh: Option<&str>,
     finish: &PairFinish,
 ) -> Outcome {
     let dial_url = format!("http://{}:{}/", hit.src_addr, default_a2a_port());
@@ -3988,7 +4029,17 @@ fn pair_with_heard(
     // for `default_self_via`'s outbound-route trick.
     let self_via = self_via_flag.map(|s| s.to_string()).or_else(|| default_self_via(&hit.src_addr));
     let (dial_via, record_via) = resolve_pair_vias(hit, via_flag);
-    run_pair_request(cmd, &dial_url, &hit.advertisement.name, &self_url, self_via.as_deref(), dial_via.as_ref(), record_via, &finish)
+    run_pair_request(
+        cmd,
+        &dial_url,
+        &hit.advertisement.name,
+        &self_url,
+        self_via.as_deref(),
+        dial_via.as_ref(),
+        record_via,
+        mesh,
+        &finish,
+    )
 }
 
 /// The pure decision [`pair_with_heard`] otherwise buries inline (P-PV1,
@@ -4356,7 +4407,7 @@ fn pair_overview(cmd: &str, inv: &Invocation) -> Outcome {
                 if let Some(out) = refuse_code_on_new_request(cmd, &finish) {
                     return out;
                 }
-                pair_with_heard(cmd, &h, None, None, &finish)
+                pair_with_heard(cmd, &h, None, None, None, &finish)
             }
         },
     }
@@ -4378,6 +4429,7 @@ pub fn register_pair(r: &mut Registry) {
             flag!("code", "string", "The typed code, scripted: on an INBOUND request, the pairing code read from the requester's screen; on an OUTBOUND one, the reply code read from the approver's screen. A wrong code counts one persisted try; the 3rd cumulative mismatch auto-denies an inbound request or auto-aborts an outbound one."),
             flag!("wait", "int", "Seconds to block for the far operator (default 600). On a new request: park, then poll until approved or the wait runs out. On a resume: the same poll loop. --wait 0 parks a new request and returns immediately, or polls a resumed one exactly once."),
             flag!("allow", "string", "The capabilities this commit grants the node, comma-separated (read, spawn) — overriding config.toml's `[pairing] defaultGrant`, and empty (--allow \"\") to grant nothing. First verification only: re-pairing an already-verified node never re-grants, so use `node allow` to change a live grant."),
+            flag!("mesh", "string", "The mesh this pairing's grants land in, ON BOTH SIDES — the one field that makes a pair symmetric, since each end used to resolve it alone and two operators naming different meshes landed a grant the other end could never read. It rides `aoide/pairRequest`; absent, each side resolves it locally (the target's sole known mesh, else config.toml's `[pairing] homeMesh`), and a box that knows more than one mesh for the target refuses rather than guessing."),
             flag!("yes", "bool", "Skip THIS side's own non-code confirmations — the sweep proceed prompt and the already-paired re-pair confirm. The final code gate, on either leg, still needs a real terminal prompt or --code; --yes alone there is a taught refusal, never a bypass."),
             flag!("name", "string", "URL target only: a local nickname for the other instance; defaults to a sanitized form of the URL's host."),
             flag!("via", "string", "An ssh://[user@]host[:port] transport marker — both the ceremony's own dial AND the resulting node's recorded via. Absent = direct dial."),
@@ -6609,14 +6661,14 @@ mod tests {
             let self_url = default_self_url();
 
             // `pair_via_url`'s own documented tail.
-            let direct = run_pair_request("pair", url, name, &self_url, None, None, None, &PairFinish::detached());
+            let direct = run_pair_request("pair", url, name, &self_url, None, None, None, None, &PairFinish::detached());
             // The same ceremony tail `pair_via_hostname` reaches on its
             // single-match branch — it composes an OBSERVED dial url first
             // (src_addr + `default_a2a_port`, P-S1/task #120) and passes
             // that, but the tail function is still this one; reproduced
             // here under the identical `pair` command name both arms
             // now share.
-            let via_hostname = run_pair_request("pair", url, name, &self_url, None, None, None, &PairFinish::detached());
+            let via_hostname = run_pair_request("pair", url, name, &self_url, None, None, None, None, &PairFinish::detached());
 
             assert_eq!(direct.status, aoide_protocol::output::Status::Error, "{direct:?}");
             assert_eq!(direct.command, "pair");
@@ -7412,6 +7464,7 @@ mod tests {
             expires_at: aoide_storage::pairing::expires_at_from(now),
             state: aoide_storage::pairing::OutboundState::AwaitingApproval,
             via: None,
+            mesh: None,
             tries: 0,
         }
     }
@@ -7950,6 +8003,48 @@ mod tests {
             let listed = aoide_storage::pairing::list_inbound(now_epoch);
             assert_eq!(listed.len(), 1, "an approved entry stays parked for the requester's poll (Design A)");
             assert!(listed[0].approved);
+        });
+    }
+
+    /// **The mesh rides the ceremony, and it wins** (P-CHARTER, item 3's
+    /// headline): an inbound entry that named `away` commits the resulting
+    /// record's grant in `away`, whatever this box would have resolved on its
+    /// own. Without the wire field the same pairing lands in the home mesh —
+    /// which is exactly the asymmetric pair the field exists to end (each end
+    /// resolving alone, two operators naming different meshes, a grant the
+    /// other end can never read).
+    #[test]
+    fn approve_inbound_commits_the_mesh_the_ceremony_carried() {
+        with_node_state("approve-inbound-wire-mesh", || {
+            let now_epoch = 1_700_000_000_i64;
+            let now = aoide_storage::time::iso_utc_from_epoch(now_epoch);
+            let (entry, sas) = parked_revealed_inbound(now_epoch);
+            let id = entry.id.clone();
+
+            // What the door records off the wire (`a2a::pair_request`'s own
+            // `set_inbound_mesh` call), and what `pair <id>` then reads.
+            aoide_storage::pairing::set_inbound_mesh(&id, "away").unwrap();
+            let fresh = aoide_storage::pairing::list_inbound(now_epoch)
+                .into_iter()
+                .find(|e| e.id == id)
+                .expect("the entry is still parked");
+            assert_eq!(fresh.mesh.as_deref(), Some("away"), "the parked entry carries the mesh it was sent");
+
+            let out = approve_inbound(CodeGate::Code(sas), "pair", &id, fresh, &now, now_epoch, None);
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+
+            let nodes = aoide_storage::node_store::load_nodes();
+            let record = nodes.iter().find(|n| n.name == "box-a").expect("the pairing committed");
+            assert!(
+                record.grant("away").iter().any(|c| c == "read"),
+                "the grant landed in the mesh the ceremony named: {:?}",
+                record.grants
+            );
+            assert!(
+                record.grant("home").is_empty(),
+                "and NOT in the home mesh, which is what resolving locally would have answered: {:?}",
+                record.grants
+            );
         });
     }
 

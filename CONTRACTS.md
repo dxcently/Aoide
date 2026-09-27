@@ -6411,7 +6411,7 @@ APPROVER's box (B)'s A2A door:
 { "jsonrpc": "2.0", "id": 1, "method": "aoide/pairRequest",
   "params": { "pubkeyHex": "<64 lowercase hex>", "name": "box-a",
               "commitHex": "<64 lowercase hex>", "url": "http://box-a:8710/",
-              "selfVia": "ssh://khoa@box-a" } }
+              "selfVia": "ssh://khoa@box-a", "mesh": "home" } }
 ```
 
 `pubkeyHex` is A's own ed25519 public key (P-P1's `identity::load_or_mint`,
@@ -6447,6 +6447,23 @@ has no way to derive a working `via` for A from the connection itself.
 (self-asserted DATA, a transport marker only; trust stays in pubkeys +
 SAS, never this field). Absent when A has no such claim, or when A
 predates this field; B never refuses a request over its absence.
+
+`mesh` (OPTIONAL, P-CHARTER) is the mesh this pairing's grant lands in, ON
+BOTH SIDES — `pair --mesh <m>` on either arm, else absent. It is the one
+field that makes a pair symmetric: each end used to resolve the mesh alone
+(`--mesh` on that side, else the target's known meshes, else
+`[pairing] homeMesh`), so two operators naming different meshes landed an
+asymmetric pair whose grant the other end could never read. B validates it as
+a mesh NAME (`valid_node_name`, the grammar `--mesh` and `[mesh.<name>]` take)
+and refuses `-32602` by name otherwise — it names a trust scope, not a
+transport marker — then records it on the parked entry
+(`pairing::set_inbound_mesh`, a sibling writer beside `park_inbound`, because
+a meshless park is the legal pre-charter shape every old requester sends).
+`pair <id>` on either leg commits it ABOVE every local source, so both ends
+write the same mesh. Same trust class as `url`/`selfVia` (self-asserted DATA;
+trust stays in pubkeys + the typed code), shown to the operator beside the
+code so the human gate covers it. Absent when A named none, or when A predates
+this field; B then resolves locally, exactly as it did before.
 
 B parks the request whole, `selfVia` included
 (`aoide_storage::pairing::park_inbound`, disk-persisted under

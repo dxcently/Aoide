@@ -824,9 +824,16 @@ never the inbound/serve half (that's `aoide-server`).
   operator relays that code to the requester, who types it into their
   own still-pending prompt to finish the ceremony.
   **`run_pair_request(cmd, url, name, self_url, self_via, dial_via,
-  record_via)` (P-P6, `dial_via`/`record_via` added P-S4, `self_via` added
-  P-PV1/task #131) is `pair_via_url`'s own body, extracted so
-  `pair_via_hostname` reaches it too — reused, never copied.**
+  record_via, mesh)` (P-P6, `dial_via`/`record_via` added P-S4, `self_via` added
+  P-PV1/task #131, `mesh` added P-CHARTER) is `pair_via_url`'s own body,
+  extracted so `pair_via_hostname` reaches it too — reused, never copied.**
+  `mesh` is the mesh the ceremony names, and it is the one thing that makes a
+  pair SYMMETRIC: it rides `aoide/pairRequest` (`node::build_pair_request_body`
+  adds the key only when the operator named one), the approver parks it on the
+  inbound entry through its own writer (`pairing::set_inbound_mesh`), and both
+  legs' commits pass it to `pairing_mesh`, which takes it ABOVE every local
+  source — so the two ends write the same mesh by construction, instead of each
+  resolving it alone and landing a grant the other end could never read.
   `pair_via_url` still owns every bit of
   `<url>`/`--name`/`--self-url`/`--self-via`/`--via` parsing and the
   `valid_node_name` check (a CLI-typed name needs it); `pair_via_hostname`
