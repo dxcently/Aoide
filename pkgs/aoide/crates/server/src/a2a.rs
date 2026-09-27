@@ -3029,6 +3029,22 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
     if params.get("container").map(|v| !v.is_null()).unwrap_or(false) {
         return deposit_sealed(params, ctx);
     }
+    // H1: the mail ADAPTER never carries plaintext — "no relay, hub or HTTPS
+    // hop ever carries plaintext" (HTTPS-MESH-API.md). A plaintext envelope
+    // still reaches a receiver over the direct SSH lane, deliberately (a peer
+    // running an older aoide has no binding to publish and must be able to
+    // deliver); an HTTPS hop is not that lane, so the upgrade is over before
+    // anyone builds a tunnel. Refused as a RESULT carrying the taught word
+    // (CONTRACTS.md §6), never a JSON-RPC error, and AUDITED — a downgrade
+    // attempt is exactly what an operator wants to see in the log.
+    if ctx.sealed_only {
+        let detail = "sealed-required: this listener carries sealed containers only — post the \
+                      `container` sealed to this node's age binding (`aoide/binding`, learned by a \
+                      `aoide mail poll`); a plaintext envelope is accepted only from an admitted peer \
+                      over the direct SSH lane, never through a relay or an HTTPS hop";
+        let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "invalid", detail);
+        return Ok(json!({ "status": "refused", "reason": "sealed-required", "detail": detail }));
+    }
     let envelope: aoide_storage::mail::Envelope =
         match serde_json::from_value(params.get("envelope").cloned().unwrap_or(Value::Null)) {
             Ok(e) => e,
@@ -3973,6 +3989,14 @@ struct RequestCtx<'a> {
     /// never re-verified here. `None` covers both "no signature headers at
     /// all" and "this ctx predates P-P4 in a test fixture."
     signed_caller: Option<SignedCaller<'a>>,
+    /// H1: is this request being answered by the mail ADAPTER rather than the
+    /// door? `false` on the door — byte-identical behavior, including the
+    /// plaintext envelope a destination with no binding still receives over
+    /// the direct SSH lane. `true` only in
+    /// [`RequestCtx::mail_adapter`], where `mail_deposit` refuses an
+    /// unsealed envelope with `sealed-required`: no relay, hub or HTTPS hop
+    /// ever carries plaintext.
+    sealed_only: bool,
 }
 
 impl<'a> RequestCtx<'a> {
@@ -3997,6 +4021,7 @@ impl<'a> RequestCtx<'a> {
             expected_token: "",
             presented_token: None,
             signed_caller,
+            sealed_only: true,
         }
     }
 }
@@ -4967,6 +4992,7 @@ fn route(
                     expected_token,
                     presented_token: req.bearer.as_deref(),
                     signed_caller,
+                    sealed_only: false,
                 };
                 let resp = handle_jsonrpc_bytes(&req.body, &ctx);
                 let body = serde_json::to_vec(&resp).unwrap_or_default();
@@ -5606,6 +5632,7 @@ mod tests {
             expected_token: "",
             presented_token: None,
             signed_caller: None,
+            sealed_only: false,
         }
     }
 
@@ -6898,6 +6925,7 @@ mod tests {
             expected_token: "s3cr3t",
             presented_token: presented,
             signed_caller: None,
+            sealed_only: false,
         };
         let get = json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": "s1" } });
         let sum = json!({ "jsonrpc": "2.0", "id": 2, "method": "aoide/graphSummary" });
@@ -13499,6 +13527,7 @@ mod tests {
             expected_token: "",
             presented_token: None,
             signed_caller: name.map(|name| SignedCaller { name, key: "aa11" }),
+            sealed_only: false,
         }
     }
 
@@ -15076,6 +15105,47 @@ mod tests {
             "the adapter's card is the three-key shape, unconditionally: {card}"
         );
         assert_eq!(card["url"], format!("http://127.0.0.1:{MAIL_ADAPTER_PORT_DEFAULT}/"));
+    }
+
+    #[test]
+    fn a_plaintext_envelope_is_refused_sealed_required_on_the_adapter_and_still_accepted_on_the_door() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("sealed-required");
+        act_as(&root, "here");
+        // The envelope's own ORIGIN is this box (a letter minted here), so the
+        // record that makes it verifiable is the local node's — the fixture
+        // the other plaintext-lane tests use.
+        let origin_name = setup_verifiable_origin(&["message"]);
+
+        let audit_log = root.join("log");
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "there", "bob", "hi").unwrap();
+        let params = json!({ "envelope": envelope });
+
+        // The adapter: refused as a RESULT carrying the taught word, audited,
+        // and nothing filed.
+        let adapter = RequestCtx::mail_adapter(&audit_log, ConnOrigin::Loopback, Some(caller(&origin_name)));
+        let refused = mail_deposit(&params, &adapter).expect("a refusal here is a result, not a JSON-RPC error");
+        assert_eq!(refused["status"], "refused", "{refused}");
+        assert_eq!(refused["reason"], "sealed-required", "{refused}");
+        assert!(refused["detail"].as_str().unwrap().contains("sealed-required"), "{refused}");
+        assert!(
+            aoide_storage::mail::read_base().unwrap().is_empty(),
+            "a refused plaintext envelope is never filed"
+        );
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("a2a.aoide/mailDeposit") && log.contains("sealed-required"), "{log}");
+
+        // The door — the SSH direct lane — is untouched: the same plaintext
+        // envelope from the same admitted peer still files, which is the
+        // per-peer upgrade path a destination with no binding depends on.
+        let door = mail_deposit_ctx(&audit_log, Some(&origin_name));
+        let filed = mail_deposit(&params, &door).expect("the direct lane still accepts a plaintext envelope");
+        assert_eq!(filed["status"], "accepted", "{filed}");
+        assert_eq!(aoide_storage::mail::read_base().unwrap().len(), 1, "the direct lane filed it");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
 
     #[test]

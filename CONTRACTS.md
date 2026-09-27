@@ -6918,6 +6918,14 @@ becomes two lists, `containers` and `envelopes`: a sealed entry hands over
 its container and NO plaintext, and only an entry spooled before the
 destination published a binding appears in `envelopes`.
 
+A plaintext envelope posted to the **mail adapter** (`aoide mail serve`,
+below) is refused with the taught word `sealed-required` — a REFUSED RESULT,
+the same kind of answer every step above gives, plus one audit line under
+`a2a.aoide/mailDeposit`. The receiver that keeps accepting a plaintext
+envelope from an admitted peer deliberately, for the per-peer upgrade, is
+the SSH direct lane's (HTTPS-MESH-API.md's "No plaintext fallback" ruling):
+no relay, hub or HTTPS hop ever carries plaintext.
+
 ### `aoide/binding` (P-SEAL, `docs/architecture/HTTPS-MESH-API.md`)
 
 `params` may carry the caller's own signed age binding; the result always
@@ -7155,6 +7163,11 @@ TLS-terminating front — a Cloudflare Tunnel, a VPS with public 443, a tailnet
   `message/send`, `tasks/get`, `message/stream`, `tasks/resubscribe`,
   `aoide/graphSummary`, the `pair*` ceremony and the SSE takeover are not
   compiled into this listener's path at all.
+- **Sealed only.** A plaintext (`envelope`) deposit here is refused as a
+  result carrying `sealed-required`, with one audit line: an HTTPS hop never
+  carries plaintext, and the receiver that still accepts one from an admitted
+  peer — deliberately, for the per-peer upgrade — is the SSH direct lane's.
+  A sealed `container` is the only shape this listener files.
 - **The card is the stripped three-key shape unconditionally** — `name`,
   `protocolVersion`, `url`. The door strips it only for an unauthorized caller;
   the mail profile has no door-wide token concept, so there is no caller to
@@ -7346,6 +7359,15 @@ scenario `--via` exists for (a loopback-bound door reachable only through
 the tunnel) — `node add` would fail verification before ever registering
 such a node if this one call bypassed the funnel. Either way `node add`
 registers the node under its LOGICAL `url`, never the rewritten one.
+**A record carrying an `https://` url AND a `via` is refused** — at both
+write paths (`node add --via`, `set_node_via`) and at the dial seam every
+outbound call resolves through, with the taught message
+`aoide_storage::node_store::transport_conflict` builds: the two fields name
+two transports at once, and together they would dial
+`https://127.0.0.1:<forward port>`, a TLS handshake into the far box's
+plain listener, on a port picked for `https`'s conventional 443 rather than
+the door's. An `https://` record is dialled directly, with no `via`; a
+`via` belongs to an `http://` url on the ssh lane.
 `set_node_via` is the only writer, a sibling to `upsert_paired_node` rather
 than a parameter on it — and a caller passing `None` means "nothing to
 record," never "clear a previously-set marker": a plain `aoide pair`

@@ -306,8 +306,47 @@ pub fn set_node_via(nodes: &mut [Node], name: &str, via: Option<&str>) -> Result
     let Some(p) = nodes.iter_mut().find(|p| p.name == name) else {
         return Err(format!("no node named `{name}`"));
     };
+    // H1: this is one of the two write paths that can create the
+    // `https`+`via` pair [`transport_conflict`] refuses to dial. Refused
+    // BEFORE the field is touched, so a refused call leaves the record
+    // exactly as it was.
+    if let Some(conflict) = transport_conflict(&p.name, &p.url, via) {
+        return Err(conflict);
+    }
     p.via = via.map(|s| s.to_string());
     Ok(())
+}
+
+/// The transport pair H1 makes unreachable: a record carrying BOTH an
+/// `https://` url and a `via`, `Some(<taught refusal>)` when it does.
+///
+/// `url` is the address a plain dial posts to; `via` is the internal loopback
+/// forward a call reaches this node THROUGH. Together they mean "dial
+/// `https://127.0.0.1:<forward port>`" — a TLS handshake aimed at the far
+/// box's plain-text listener, on a port chosen for `https`'s conventional
+/// 443 rather than the door's. Nothing ever produced the pair
+/// ([`crate::tunnel::parse_via`] accepts `ssh` only, and no node carried an
+/// `https://` url before H1), so refusing it costs nothing and spares an
+/// operator a handshake-shaped failure they cannot read.
+///
+/// Consulted in two places: the dial seam every outbound URL resolves through
+/// (`aoide_client::commands::resolve_dial_url` — which is also where a
+/// hand-written `nodes.json` lands) and the two write paths that could create
+/// it (`aoide node add --via`, [`set_node_via`]). `name` is only for the
+/// message. Pure.
+pub fn transport_conflict(name: &str, url: &str, via: Option<&str>) -> Option<String> {
+    let via = via?.trim();
+    let url = url.trim();
+    if via.is_empty() || !url.to_ascii_lowercase().starts_with("https://") {
+        return None;
+    }
+    Some(format!(
+        "node `{name}`'s record carries both an `https://` url (`{url}`) and a `via` (`{via}`) — \
+         an HTTPS node is dialled directly and a `via` is an ssh forward for a node reached over \
+         SSH, so together they would dial `https://127.0.0.1:<forward port>`, a TLS handshake into \
+         a plain listener. Keep one: an `https://` url with no `via` for the HTTPS transport, or \
+         `--via ssh://…` with an `http://…` url for the ssh lane"
+    ))
 }
 
 /// What [`set_node_allow`] actually did — mirrors [`HubChange`]'s "report
@@ -1406,5 +1445,39 @@ mod tests {
         let mut nodes = vec![fixture_node("alpha", "http://a/", false)];
         let err = set_node_via(&mut nodes, "ghost", Some("ssh://sakaki")).unwrap_err();
         assert!(err.contains("ghost"));
+    }
+
+    #[test]
+    fn transport_conflict_is_exactly_https_plus_a_via() {
+        // The one pair H1 refuses: two transports named at once. Everything
+        // else is a dialable record.
+        assert!(transport_conflict("b", "https://aoide.example/", None).is_none(), "https alone is the new lane");
+        assert!(transport_conflict("b", "http://10.0.0.5:8710/", Some("ssh://khoa@sakaki")).is_none(), "a via alone is today's ssh lane");
+        assert!(transport_conflict("b", "ssh://khoa@sakaki/", Some("ssh://khoa@sakaki")).is_none(), "even a url that LOOKS like a via");
+        assert!(transport_conflict("b", "http://a/", Some("")).is_none(), "an empty via names no transport");
+
+        let conflict = transport_conflict("b", "https://aoide.necoconeco.net/", Some("ssh://khoa@sakaki"))
+            .expect("https + via is refused");
+        assert!(conflict.contains("b"), "names the node: {conflict}");
+        assert!(conflict.contains("https://aoide.necoconeco.net/"), "names the url: {conflict}");
+        assert!(conflict.contains("ssh://khoa@sakaki"), "names the via: {conflict}");
+        assert!(conflict.contains("127.0.0.1"), "says what it would actually dial: {conflict}");
+    }
+
+    #[test]
+    fn set_node_via_refuses_the_https_pair_and_leaves_the_record_untouched() {
+        let mut https_node = fixture_node("alpha", "https://aoide.necoconeco.net/", false);
+        https_node.via = None;
+        let mut nodes = vec![https_node];
+
+        let err = set_node_via(&mut nodes, "alpha", Some("ssh://khoa@sakaki"))
+            .expect_err("an https url plus a via is refused at the write path too");
+        assert!(err.contains("https://"), "{err}");
+        assert_eq!(nodes[0].via, None, "a refused call writes nothing — checked BEFORE the field is touched");
+
+        // Clearing a via is never a conflict (it is what a fix looks like).
+        nodes[0].via = Some("ssh://khoa@sakaki".to_string());
+        assert!(set_node_via(&mut nodes, "alpha", None).is_ok());
+        assert_eq!(nodes[0].via, None);
     }
 }

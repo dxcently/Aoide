@@ -526,6 +526,16 @@ fn resolve_dial_url(
     let Some(via) = via else {
         return Ok(logical_url.to_string());
     };
+    // H1: a node record (or a `--via` override) naming two transports at once
+    // is refused BEFORE anything is dialled — `https` + a via would rewrite
+    // the authority to a loopback port and hand a TLS client a plain
+    // listener. See `aoide_storage::node_store::transport_conflict`'s own doc
+    // for why the pair exists at all and why it is this seam's business.
+    if let Some(conflict) =
+        aoide_storage::node_store::transport_conflict(tunnel_key, logical_url, Some(&via.to_string()))
+    {
+        return Err(conflict);
+    }
     let remote_port = remote_port_from_url(logical_url)?;
     let session_id = tunnel_session_id();
     let local_port = crate::tunnel::open_or_reuse(&session_id, tunnel_key, via, "127.0.0.1", remote_port)?;
@@ -807,6 +817,20 @@ fn handle_node_add(inv: &Invocation) -> Outcome {
             ),
         )
         .with_data(json!({ "reason": "invalid-name", "name": name }));
+    }
+    // H1: an `https://` url with a `via` names two transports at once and is
+    // refused here rather than at handshake time
+    // (`node_store::transport_conflict`'s own doc has the full reasoning) —
+    // before the verification fetch, so nothing is dialled and nothing is
+    // registered.
+    let via_spec = via.as_ref().map(|v| v.to_string());
+    if let Some(conflict) = aoide_storage::node_store::transport_conflict(&name, &url, via_spec.as_deref()) {
+        return Outcome::error(cmd, conflict).with_data(json!({
+            "reason": "transport-conflict",
+            "name": name,
+            "url": url,
+            "via": via_spec,
+        }));
     }
     let autogate = inv.flag_present("autogate");
     let no_verify = inv.flag_present("no-verify");
@@ -6656,6 +6680,69 @@ mod tests {
             let out = handle_node_add(&inv);
             assert_eq!(out.status, aoide_protocol::output::Status::Usage, "{out:?}");
             assert!(aoide_storage::node_store::load_nodes().is_empty(), "an invalid --via registers nothing");
+        });
+    }
+
+    #[test]
+    fn handle_node_add_with_an_https_url_and_a_via_is_refused_and_registers_nothing() {
+        // H1: the pair names two transports at once, so it is refused as a
+        // SHAPE error — before the AgentCard verification fetch (nothing is
+        // dialled) and before anything is written. No curl, no socket: the
+        // refusal happens strictly earlier than the verify block.
+        with_node_state("add-https-via", || {
+            let inv = Invocation {
+                path: vec!["node".to_string(), "add".to_string()],
+                args: vec!["relay".to_string(), "https://aoide.necoconeco.net/".to_string()],
+                flags: [("via".to_string(), "ssh://khoa@sakaki".to_string())].into_iter().collect(),
+                door: aoide_protocol::Door::Cli,
+            };
+            let out = handle_node_add(&inv);
+            assert_eq!(out.status, aoide_protocol::output::Status::Error, "{out:?}");
+            assert!(out.message.contains("https://aoide.necoconeco.net/"), "{}", out.message);
+            assert!(out.message.contains("ssh://khoa@sakaki"), "{}", out.message);
+            assert_eq!(
+                out.data.as_ref().unwrap()["reason"], "transport-conflict",
+                "the machine-readable reason"
+            );
+            assert!(
+                aoide_storage::node_store::load_nodes().is_empty(),
+                "a refused url+via pair registers nothing"
+            );
+        });
+    }
+
+    #[test]
+    fn a_hand_written_https_plus_via_record_is_refused_at_the_dial_seam() {
+        // The write paths above are not the only way in: an operator can
+        // hand-edit `state/nodes.json`. Every outbound call to that node
+        // resolves its url through `resolve_dial_url`, which refuses before
+        // any tunnel is opened or any byte is posted — so the failure is the
+        // taught one, never a TLS handshake into a plain listener.
+        with_node_state("dial-https-via", || {
+            let mut node = aoide_storage::node_store::Node {
+                name: "relay".to_string(),
+                url: "https://aoide.necoconeco.net/".to_string(),
+                autogate: false,
+                token_file: None,
+                bearer_secret: None,
+                hub: false,
+                pubkey: None,
+                verified: false,
+                allows: Vec::new(),
+                via: Some("ssh://khoa@sakaki".to_string()),
+                added_at: "2026-09-26T00:00:00Z".to_string(),
+            };
+            aoide_storage::node_store::save_nodes(&[node.clone()]).unwrap();
+
+            let err = post_json_to_node(&node, "{}", None, &[], 5).expect_err("must refuse");
+            assert!(err.contains("https://aoide.necoconeco.net/"), "{err}");
+            assert!(err.contains("ssh://khoa@sakaki"), "{err}");
+
+            // The same record with the via cleared is dialable again (it
+            // refuses for a network reason, not on the shape).
+            node.via = None;
+            let err = post_json_to_node(&node, "{}", None, &[], 5).expect_err("nothing listens there");
+            assert!(!err.contains("TLS handshake into"), "the shape refusal is gone once the via is: {err}");
         });
     }
 

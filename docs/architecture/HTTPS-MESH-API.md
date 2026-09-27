@@ -987,8 +987,8 @@ and keys are 0600. No at-rest secrecy is claimed.
 - A transit hop records node names, `msgid`, size and outcome only, and **never
   mailbox names**. A hub cannot know them and must not claim them.
 
-Refusals name their reason: `downgrade-refused`, `unverified-origin`, `bad-msgid`,
-`wrong-recipient`, `context-mismatch`, `addressing-mismatch`, `broken-chain`,
+Refusals name their reason: `downgrade-refused`, `sealed-required`, `unverified-origin`,
+`bad-msgid`, `wrong-recipient`, `context-mismatch`, `addressing-mismatch`, `broken-chain`,
 `stale-binding`, `key-retired`, `not-in-mesh`, `unknown-operator`, `stale-charter`,
 `operator-mismatch`, `not-a-member`, `stale-epoch`, `not-owner`, `stale-takeover`.
 
@@ -1092,11 +1092,14 @@ just another transport for sealed letters.
   enforces it.** Once a node holds a destination's binding it never sends that
   destination plaintext again — not the entry it spooled before the binding arrived
   (it re-seals that entry before dialing it), not on the push direction and not on
-  the pull one. The **receiver** keeps accepting a plaintext envelope from an
-  admitted peer, deliberately: a peer running an older aoide has no binding to
-  publish and must still be able to deliver, and refusing its plaintext would break
-  the per-peer upgrade in the direction that actually matters. So "no plaintext
-  fallback" is a property of what a sealed-aware node *sends*, never a door rule.
+  the pull one. On the **SSH direct lane** the receiver keeps accepting a plaintext
+  envelope from an admitted peer, deliberately: a peer running an older aoide has no
+  binding to publish and must still be able to deliver, and refusing its plaintext
+  would break the per-peer upgrade in the direction that actually matters. That
+  acceptance is the direct lane's own and stops there — the HTTPS adapter refuses a
+  plaintext envelope `sealed-required` — so "no plaintext fallback" is a property of
+  what a sealed-aware node *sends* plus of every hop that is not that lane, never a
+  rule the direct lane's own receiver needs.
 - **Grants move into meshes** as Trust per mesh describes: every existing paired
   record moves into the home mesh with its grant unchanged.
 
@@ -1159,8 +1162,11 @@ After the beta path, each only after its own review:
 
 7. **H2: state snapshots and WSS events**, after the reviewed end-to-end design.
 8. **H3: direct HTTPS edges (optional).** For a node that legitimately exposes a URL,
-   such as a VPS, with optional pins. It is never a routable Aoide door on a home
-   node.
+   such as a VPS, with optional pins, and this is where the pinning tests live: a bad
+   pin where one is declared is rejected here, and **never** on a hostname fronted by
+   a TLS-terminating front — pinning applies only where TLS is end to end, and no
+   test may assume a pin through Cloudflare. It is never a routable Aoide door on a
+   home node.
 9. **H4: typed control actions**, using existing policy and audit only, and only after
    the same reviewed end-to-end design.
 
@@ -1265,10 +1271,10 @@ scheduler (`aoide mail poll`).
   may re-spool one. No receipt chain.
 - **Windows and Linux, no SSH:** send, poll, fetch and ack work end to end with the
   relay node, with a `poll` node on each OS that has no SSH account or binary.
-- **Downgrade:** a plaintext request is refused with a taught error and an audit
-  line.
-- **Invalid credential, a bad pin where one is declared, and an unauthorized inbox**
-  are rejected, as in the plaintext profile's negative tests.
+- **Downgrade:** a plaintext request is refused with the taught word
+  `sealed-required` and an audit line.
+- **Invalid credential and an unauthorized inbox** are rejected, as in the
+  plaintext profile's negative tests.
 
 **P-M4 tests (relay side; the hop-chain and zone tests are MAIL.md P-M4's):**
 
