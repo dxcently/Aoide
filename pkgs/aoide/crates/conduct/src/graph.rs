@@ -48,6 +48,11 @@ pub(crate) mod identity;
 mod model;
 mod node_list;
 mod pending;
+// The PTY capability the conducted session runs on — the terminal a child
+// agent is spawned onto, plus the real console, the resize source and the
+// injection inbox it is multiplexed with. ONE seam with an arm per host
+// (`pty.rs`'s own table); `conduct.rs` is its only tenant.
+mod pty;
 // Addressing a session on ANOTHER node (P-RSA): the cached-graph resolution
 // `send --to <node>/<query>` and `session watch <node>/<query>` both stand on,
 // moved out of `send.rs` when the watch became the second caller — one

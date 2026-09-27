@@ -34,6 +34,17 @@ Aoide's session core: the PTY multiplexer (`aoide conduct`), the session DAG
 every terminal a tracked, conductable session (root `AGENTS.md`, "Conducting
 — aoide's headline"). Core, never `lyra` — headless-safe by construction.
 
+The conducted session's terminal is `graph/pty.rs`: **one seam with an arm per
+host** — `openpty`/`TIOCSCTTY`/`poll`/`termios` on Unix, `CreatePseudoConsole`
+with the `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE` attribute, `WSAEventSelect` and
+`WaitForMultipleObjects` on native Windows — behind one contract
+(`spawn_on_pty`, `Pty`, `PtyChild`, `Console`, `Inbox`, `wait_ready`).
+`graph/conduct.rs` multiplexes over it and owns the policy around it
+(registration, the log tee, the shell tick, the end vocabulary), so nothing
+there names an fd, a signal or a `HANDLE`. What differs by host is named in
+that module's own table, and each difference is a fact of the host rather than
+a stub: a signal-less host has no `Ended::Signal` variant at all.
+
 ## Named seams (what it exposes)
 
 - **The workspace ↔ project binding (§B)**: `graph/workspace.rs` implements

@@ -339,3 +339,52 @@ pub(crate) fn flag_invocation(path: &[&str], flags: &[(&str, &str)]) -> Invocati
         door: aoide_protocol::Door::Cli,
     }
 }
+
+/// Read a child's terminal until it exits (and its output is drained), the way
+/// `conduct::conduct_multiplex` does: only read what is there, never block on a
+/// console that outlives the child, and give the console its own settle window
+/// after the exit before believing it has nothing more. Shared by the two test
+/// modules that drive a pseudo console (`conduct`'s own Windows runs and
+/// `pty`'s), so the reader cannot drift from the loop it stands for.
+#[cfg(windows)]
+pub(in crate::graph) fn read_to_exit(
+    pty: &mut crate::graph::pty::Pty,
+    child: &mut crate::graph::pty::PtyChild,
+) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut buf = [0u8; 8192];
+    let mut exited_at: Option<std::time::Instant> = None;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        while pty.has_output() {
+            match pty.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    out.extend_from_slice(&buf[..n]);
+                    if exited_at.is_some() {
+                        exited_at = Some(std::time::Instant::now()); // quiet, not the clock, ends it
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        if child.exited() && !pty.has_output() {
+            let at = *exited_at.get_or_insert_with(std::time::Instant::now);
+            if at.elapsed() >= pty.after_exit_settle() {
+                return out;
+            }
+        }
+        assert!(std::time::Instant::now() < deadline, "the child never exited");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// The exit code a child ended with, or `None` for a status this process could
+/// not read (`Ended::Unknown`). Windows has no `Ended::Signal`.
+#[cfg(windows)]
+pub(in crate::graph) fn ended_code(child: &mut crate::graph::pty::PtyChild) -> Option<i32> {
+    match child.ended() {
+        crate::graph::pty::Ended::Code(code) => Some(code),
+        crate::graph::pty::Ended::Unknown => None,
+    }
+}

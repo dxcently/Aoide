@@ -2269,9 +2269,8 @@ mod tests {
     /// the old `agent`-only arm trusted.
     ///
     /// GATED on Unix, with its reason: the fixture's first half is a REAL
-    /// conducted child, and conducting needs a controlling tty — refused by
-    /// name on native Windows (ConPTY; see `conduct`'s own module note). The
-    /// CONTRACT this test covers is not lost there: its sibling
+    /// conducted child spawned from a `sh` script. The CONTRACT this test
+    /// covers is not lost on native Windows: its sibling
     /// `a_harness_parent_is_unreceptive_when_either_read_says_shell` drives the
     /// identical predicate over a record fixture with no PTY in it, and that
     /// one runs and passes on ThinkChiyo.

@@ -94,6 +94,52 @@ pub fn built_aoide_bin() -> PathBuf {
         bin.exists(),
         "expected a pre-built `aoide` binary at {bin:?} — run `cargo build --bin aoide` first"
     );
+    // **A STALE binary is worse than a missing one**, and it cost a whole round
+    // of native Windows diagnostics: the tests that spawn this binary kept an
+    // older executable from a tree that did not contain the code under test, so
+    // every measurement described that older tree. The check is a WARNING on
+    // the native Windows arm alone (where the tests spawn a separately-built
+    // `aoide`), and it compares the executable against the newest SOURCE file
+    // under `crates/`, never against the test binary: `cargo test` rebuilds the
+    // test while the executable is built by a separate command, so "the test is
+    // newer" is the normal state of a correct tree — measured, and a warning
+    // that fires there is a warning nobody reads. A source file newer than the
+    // executable is the one case that cannot cry wolf: it means the code moved
+    // on and this binary did not.
+    #[cfg(windows)]
+    {
+        static NEWEST_SOURCE: std::sync::OnceLock<Option<std::time::SystemTime>> =
+            std::sync::OnceLock::new();
+        let newest_source = *NEWEST_SOURCE.get_or_init(|| {
+            let crates_dir = profile_dir.parent()?.parent()?.join("crates");
+            let mut newest: Option<std::time::SystemTime> = None;
+            let mut stack = vec![crates_dir];
+            while let Some(dir) = stack.pop() {
+                let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        stack.push(path);
+                    } else if path.extension().is_some_and(|e| e == "rs") {
+                        if let Ok(t) = entry.metadata().and_then(|m| m.modified()) {
+                            newest = Some(newest.map_or(t, |n| n.max(t)));
+                        }
+                    }
+                }
+            }
+            newest
+        });
+        if let (Ok(bin_t), Some(source_t)) = (bin.metadata().and_then(|m| m.modified()), newest_source)
+        {
+            if bin_t < source_t {
+                eprintln!(
+                    "warning: the pre-built `aoide` binary at {bin:?} is OLDER than the newest \
+                     source under crates/ — it may predate the code under test, and a test that \
+                     spawns it would measure an older tree; run `cargo build --bin aoide` again"
+                );
+            }
+        }
+    }
     bin
 }
 

@@ -7,13 +7,16 @@
 > host: Linux runs every crate's tests, and native Windows now compiles ALL of
 > the core closure — `aoide-protocol`, `aoide-storage`, `aoide-secrets`,
 > `aoide-upkeep`, `aoide-client`, `aoide-conduct`, `aoide-server` and
-> `aoide-cli`, whose `aoide` binary builds there too. What still fails natively
-> is a RUNTIME layer, not a compile one: `aoide-server`'s lib is green there
-> (266 passed / 0 failed / 5 ignored with reasons), `aoide-conduct` is green
-> (922 / 0 / 0), and `aoide-cli`'s targets are green; one `graph_residency_p_d6`
-> binary is contention-sensitive under full parallelism (recorded under "Next
-> layer"). Every number below names the run it rests on (see "Evidence and
-> limits").
+> `aoide-cli`, whose `aoide` binary builds there too, and runs the conducted
+> session itself on ConPTY. What still fails natively is a RUNTIME layer, not a
+> compile one: `aoide-server`'s lib is green there (266 passed / 0 failed / 5
+> ignored with reasons), `aoide-conduct` is green (931 / 0 / 0), and
+> `aoide-cli`'s targets are green; one `graph_residency_p_d6` binary is
+> contention-sensitive under full parallelism (recorded under "Next layer"),
+> and ONE `aoide-storage` test fails there deterministically and PRE-EXISTING
+> — `fs::tests::tightening_a_directory_strips_a_child_that_only_inherited_its_access`,
+> which also fails at `724fe0f` itself on that box (see "Evidence and limits").
+> Every number below names the run it rests on.
 
 ## Targets
 
@@ -61,7 +64,7 @@ Two classes follow from that, and every row below is one of them:
 | shell interpreter for a stored command line | `protocol/src/host_shell.rs` (the one seam), called by `secrets/src/backend.rs::run_backend_command` (backend templates) and `upkeep/src/checklane.rs::run_verify` (`upkeep.verifyCommand`) | required; **one seam, one answer per host, in that host's own language**. Unix: `sh -c <line>`, the line as ONE argv element. Native Windows: `cmd /C <line>` with the line handed over VERBATIM (`CommandExt::raw_arg`) — `cmd` is not a `CommandLineToArgvW` program, it re-applies its own quote rules to `/C`'s remainder, so `arg`'s MSVC quoting mangles any line carrying inner quotes (measured natively: the identical `findstr "^" >…` exits 1 through `arg` and 0 through `raw_arg`; `"%COMSPEC%" /C exit 0` likewise). A template is written FOR a host's interpreter, so the shipped POSIX presets (`cat`, `age`, `pass`, `gopass`, `bw`, `sops`) are REFUSED BY NAME on native Windows at the spawn, with the template shown — never run under `cmd`, never silently stubbed. The separators are the template author's too: `cmd`'s builtins refuse a MIXED path (`type C:\a\b/file` is "The syntax of the command is incorrect.", measured). |
 | OS randomness | `protocol/src/host_random.rs` (the one seam), called by `secrets/src/enroll.rs::generate_secret` | required; Unix reads `/dev/urandom` (never blocking once the kernel CSPRNG is seeded), native Windows calls CNG's `BCryptGenRandom` with `BCRYPT_USE_SYSTEM_PREFERRED_RNG`. No pool, no seed, no fallback: a host that cannot hand out OS randomness fails, rather than quietly returning something weaker. |
 | verified process termination | `conduct/src/graph/actions.rs` (pidfd) | optional host-specific, **Linux**; taught refusal off Linux |
-| PTY / controlling tty | `conduct/src/graph/conduct.rs` (`spawn_on_pty`: `libc::openpty` + `setsid` + `TIOCSCTTY` + `dup2`; detached spawn through `std::os::unix::process::CommandExt::pre_exec` in `conduct/src/graph/spawn.rs`) | required for the interactive conduct channel — the PTY *is* the channel a managed task run's live view reads and `send` types into. **Remaining**: no non-Linux arm exists. Native Windows needs ConPTY (`CreatePseudoConsole`) for interactive parity, or a pipes-only transport for headless parity (no controlling tty, so `send`-injection and windowed launch are taught refusals naming the missing capability). A `cfg` branch alone proves nothing here. |
+| PTY / controlling tty | `conduct/src/graph/pty.rs` — the whole capability, one seam with an arm per host: `spawn_on_pty` (`openpty` + `setsid` + `TIOCSCTTY` + `dup2` on Unix; `CreatePseudoConsole` + the `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE` attribute on `CreateProcessW` on native Windows), `Pty` (read · write · resize · has-output · hung-up · close), `PtyChild`, `Console` (raw mode + the resize source), `Inbox` (the injection door, gated on the owner-only directory it binds in), `wait_ready` (the one readiness wait), `write_stdout` (the interactive pump's unbuffered sink); the detached, NON-PTY spawn is `std::os::unix::process::CommandExt::pre_exec` / `storage::fs::detach` in `conduct/src/graph/spawn.rs`, and `conduct/src/graph/conduct.rs` multiplexes over the seam and owns the policy | required for the interactive conduct channel — the pty *is* the channel a managed task run's live view reads and `send` types into. **Native on both hosts, and the whole channel is exercised there**: `a_pseudo_console_child_is_read_resized_typed_into_and_observed_to_exit`, `typing_into_the_pseudo_console_reaches_the_childs_own_stdin`, `a_resize_reaches_the_childs_own_console` (the child's own `mode con` reports the resized geometry), `the_childs_own_stdout_is_a_console_not_this_processs_pipe`, `conduct_runs_a_child_on_a_pseudo_console_and_resolves_its_session` (the whole command, headless: registered, mirrored into its log, resolved `done` with the child's real code) and **`a_connection_to_a_live_inbox_types_into_the_conducted_child` — a real `aoide conduct` child, a connection to its own inbox from another process, and the injected bytes asserted to arrive at the child's stdin**, which is the one run that proves the readiness wait can report the inbox (`aoide send`'s whole premise). Plus the mechanism probe `an_af_unix_connection_signals_the_inboxs_event_and_delivers_its_bytes` and the pure `ready_of_wait` table. **What differs by host, by name** (`pty.rs`'s own table): Windows has no signals, so `Ended::Signal` does not exist there and a Ctrl-C termination arrives as the SIGNED `exitCode` the record carries (`0xC000013A` is `-1073741510`); the deadline kill reaches the direct child only (`TerminateProcess` — Windows has no process groups, where Unix's `killpg` takes the child's whole group); `foreground_pgid()` answers `0` (no foreground process group exists), so a conducted SHELL's live cwd/command tick reads idle there; `hung_up()` answers `None` — the seam's shape, not a guessed `false` — because the pseudo console, not the child, holds the output pipe's write end and "a descendant is still attached" is not a question any call in this tree can ask, so `ptyHeldAfterExit` is never stamped there; and a reader must keep draining a pseudo console for a settle window after its client exits, because conhost renders on its own pipeline — a pty needs none. **That last one has an exception worth stating**: after the DIRECT child has exited the loop's own deadline is no longer consulted (the deadline governs a running child), and the settle clock resets on every byte, so a descendant that keeps writing holds the drain open — the same shape the Unix loop always had, and the reason "continuous output is never a reprieve" is true of the DEADLINE, not of the post-exit drain. **Remaining on native Windows**: the windowed launch and the focus-jump's compositor discovery, which degrade through their own "no adapter" path (they are Hyprland's), never a silent pretend. Five measured defects were found and fixed by these runs rather than by inspection: the attribute takes the console handle AS its value (the address leaves the child at `STATUS_DLL_INIT_FAILED`); the child's std streams are the CONSOLE's (`STARTF_USESTDHANDLES` with the three handles NULL and `bInheritHandles = FALSE` — the shape shipping ConPTY implementations use and the one the runs here prove, measured against two others: no `STARTF_USESTDHANDLES` at all loses the child's output to the pipe, and naming the console's pipe ends leaves the child with a redirected stdout (and, in the re-review's own measurement, no output at all)); the sizing call of `InitializeProcThreadAttributeList` FAILS by design, so testing its return refuses every spawn with `ERROR_INSUFFICIENT_BUFFER`; our own pipe ends close before `ClosePseudoConsole` (Microsoft's own deadlock warning); and the output pipe can never sit in the wait array — a synchronous anonymous pipe's read handle is always signalled, so it wins the wait forever and the inbox is never reported (`aoide send` typed into nothing until the pipe was polled instead). |
 | argv / `comm` / `cwd` / ancestry identity | `conduct/src/graph/conduct.rs` (`cwd`, `cmdline`, `comm`, `/proc/<pid>/task/<pid>/children`), `client/src/tunnel.rs::looks_like_our_ssh`, `storage/src/attest.rs::pid_starttime`/`parent_pid`/`pid_ancestry`, `secrets/src/peercred.rs::read_comm` | required; **host-split**. The sealed-credential pid-reuse defence reads starttime and ppid: `/proc/<pid>/stat` on Unix, `GetProcessTimes` + one `Toolhelp32` snapshot on native Windows (`storage/src/attest.rs` → `protocol/src/win_proc.rs`), where the start time is the creation `FILETIME` — the same fact in another unit, re-derived fresh and never trusted from the record, so the defence is real on both hosts. **The sealed-identity lane now verifies on native Windows too**: its channel is an `AF_UNIX` socket on both hosts (`std`'s on Unix, `protocol/src/win_unix.rs`'s native binding on Windows), so `storage/src/attest.rs::connect_bounded`/`daemon_seal_pubkey_hex` are ONE body with no second arm — the socket TYPE is the seam, and the refusal that used to stand there (`#[cfg(not(unix))] -> None`) is deleted rather than kept beside it. Evidence: the native fake-daemon round trip and the full `attested_caller` resolution, both un-gated from Unix and green on ThinkChiyo |
 | lock probe | `protocol/src/dialog.rs::probe_locker_running` | required; **host-split**: a `/proc` scan on Unix, one `Toolhelp32` snapshot on native Windows (`protocol/src/win_proc.rs`) matching the executable name exactly on Unix (`comm` is a byte string) and case-insensitively on native Windows (a file name there is), with Windows' own `.exe` suffix folded; an unreadable `/proc` — or a snapshot that cannot be taken — answers "not running". `probe_loginctl_locked` stays systemd-logind only, so the Windows gate reads the locker process alone |
 | boot epoch | `conduct/src/reap.rs::boot_epoch` (`/proc/stat` `btime`, reused by `server/src/daemon.rs`) | required; **remaining** — off Linux `boot_epoch` is `None`, so the pre-boot reap signal and the boot-epoch-guarded auto-resume never fire |
@@ -128,8 +131,9 @@ now build their JSON with `serde_json`.
 
 - **Run**: Linux tests on `x86_64-unknown-linux-gnu` for every crate in the
   closure — 177 (protocol) + 486 (storage) + 449 (+7 e2e) (secrets) + 31
-  (upkeep) + 338 (client) + 272 (server) + 75 (cli) + 974 (conduct) + 191
-  (conductor) + 213 (lyra), every one 0 failed, and `cargo test
+  (upkeep) + 339 (client) + 272 (server) + 75 (cli) + 975 (conduct) + 191
+  (conductor) + lyra's targets, every one 0 failed except the two named under
+  "Evidence and limits", and `cargo test
   --workspace --no-run` clean. The same tree on `x86_64-unknown-linux-gnu` is
   the ONLY place the crates that do not build natively yet are exercised at
   all, which is why their counts are stated here rather than dismissed; the
@@ -167,15 +171,22 @@ now build their JSON with `serde_json`.
   `aoide-server` and `aoide-cli` — builds on ThinkChiyo with native
   `x86_64-pc-windows-msvc` (Rust 1.98.1): `cargo check -p aoide-conduct
   -p aoide-server -p aoide-cli --all-targets` is **0 errors and 0 warnings**,
-  and `cargo build --bin aoide` produces the `aoide` binary there. Runtime, per
-  crate on that host: **922** (conduct, 0 failed) + **266** (server lib, 0
+  and `cargo build --bin aoide` produces the `aoide` binary there, and the
+  conducted session RUNS there (the ConPTY arm's four native tests, plus the
+  mechanism probe its wait stands on). Runtime, per
+  crate on that host: **931** (conduct, 0 failed, 0 ignored) + **266** (server lib, 0
   failed, 5 ignored with reasons) + 42/8/6 across cli's targets (0 failed), on
-  top of the five earlier crates' 199 + 488 + 366 + 2 + 32 + 313 passed / 0
-  failed. The same tree on `x86_64-unknown-linux-gnu` is 177 + 486 + 456 + 31 +
-  338 + 272 + 75 + 974 + 191 + 213, also 0 failed. **Where a native count is
+  top of the earlier crates' 199 (protocol) + 488/489 (storage — one
+  PRE-EXISTING failure, below) + 366 (secrets) + 32 (upkeep) + 314 (client)
+  passed. The same tree on `x86_64-unknown-linux-gnu` is 177 + 486 + 449 + 31 +
+  339 + 975 + 272 + 191 (conductor) + lyra's targets, also 0 failed — with
+  lyra's own two `preview_tools` failures named under "Evidence and limits".
+  **Where a native count is
   lower, the gates are in-file with their reasons** — this file's seam table and
-  the PTY row name each one, and the two counts that moved during this slice
-  moved only by the tests it added (storage +1 `path_is_under`, conduct +3 net).
+  the PTY row name each one, and every count that moved during this slice
+  moved only by the tests it added (storage +1 function, no test; conduct +5
+  native-only on Windows and +1 on Linux, none of them a count of an existing
+  test).
   The gate is the fixture: a POSIX `#!/bin/sh` script made executable with a
   mode (`CreateProcess` understands neither a shebang nor an extension-less
   name) — the gated groups are the `curl`-shim transport (14), the
@@ -217,9 +228,11 @@ Runtime, native, measured the same day:
 
 | crate | run | passed / failed / ignored |
 | --- | --- | --- |
-| `aoide-conduct` | `cargo test` | **922 / 0 / 0** |
+| `aoide-conduct` | `cargo test` | **931 / 0 / 0** |
 | `aoide-server` | `cargo test --lib` | **266 / 0 / 5** |
 | `aoide-cli` | `cargo test` | 42 (lib) · 8 (`daemon_dispatch_door`) · 6 (`graph_residency_p_d6`, single-threaded) — **0 failed** |
+| `aoide-storage` | `cargo test` | 488 / **1** / 0 — the one failure is pre-existing (below) |
+| `aoide-client` | `cargo test` | **314 / 0 / 0** |
 
 The five `ignored` on `aoide-server` are two proven host facts, not omissions:
 three `run_boot_auto_resume_*` tests (this file's own boot-epoch row: `boot_epoch`
@@ -230,14 +243,26 @@ the same class of reason: the door fixture there stores through the built-in
 native Windows, with native cover in `aoide-secrets`' own `cmd /C` template
 tests.
 
-**ConPTY / PTY remains the one named capability gap.** The PTY sites are
-`conduct/src/graph/conduct.rs`'s `spawn_on_pty` (`libc::openpty` + `setsid` +
-`TIOCSCTTY` + `dup2`) and `conduct/src/graph/spawn.rs`'s detached spawn — the
-latter now host-split through `aoide_storage::fs::detach` (which `a2a`'s handler
-spawn shares). No `CreatePseudoConsole` call exists anywhere in the tree, so
-what is missing is a capability, not a `cfg` branch: `aoide conduct` answers a
-taught refusal on native Windows naming ConPTY, and the detached, NON-PTY spawn
-is native (four green tests cover it, named in their own gate).
+**The PTY capability is native on both hosts, and it was the last named gap.**
+The seam is `conduct/src/graph/pty.rs`: `spawn_on_pty` (`libc::openpty` +
+`setsid` + `TIOCSCTTY` + `dup2` on Unix; `CreatePseudoConsole` with the
+`PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE` attribute on `CreateProcessW` on native
+Windows), plus `Pty`, `PtyChild`, `Console`, `Inbox` and `wait_ready` — one
+contract, an arm per host, with the host differences named in that module's own
+table rather than discovered at each call site. `aoide conduct` runs there
+(headless: registered, its output mirrored into the per-session log, resolved
+`done` with the child's real status), and four native runs on ThinkChiyo say so
+by name — the output read, a line typed into the child's own stdin, a resize
+the child's own `mode con` reports, and the whole command end to end — beside
+the mechanism probe that an `AF_UNIX` connection signals through
+`WSAEventSelect`/`WaitForMultipleObjects`. `conduct/src/graph/spawn.rs`'s
+detached, NON-PTY spawn stays host-split through `aoide_storage::fs::detach`
+(which `a2a`'s handler spawn shares) and is native with its own four tests. What
+remains host-specific on Windows is named in the row above and in `pty.rs`:
+no signals, no process group, no foreground pgid, no "a descendant still holds
+the console", and a post-exit settle window a pty does not need — the WINDOWED
+launch and the compositor's focus discovery are their own degradations, since
+they are Hyprland's, not this capability's.
 
 **One measured limit worth stating**: `aoide-cli`'s
 `graph_residency_p_d6` binary passes single-threaded (6/0/1) and passes each test
@@ -291,6 +316,25 @@ not a code defect; it is recorded rather than papered over.
   EOF `WriteFile` operation on this host; it does not prove behavior across
   every filesystem, payload size or failure mode. The daily operations ledger
   records the source hashes and evidence locations.
+- **One native failure is PRE-EXISTING, and this tree does not cause it:**
+  `aoide-storage`'s
+  `fs::tests::tightening_a_directory_strips_a_child_that_only_inherited_its_access`
+  fails deterministically on ThinkChiyo (three runs, `0 passed; 1 failed`), and
+  it fails identically with the mirror checked out at `724fe0f` itself: the
+  child file the host wrote keeps its inherited ACEs instead of being stripped
+  by the parent's tightened, protected policy. The "storage 488 / 0" this page
+  carried from the previous slice therefore does not reproduce on that box; the
+  test is named here rather than the number quietly kept.
+- **One `yomi` failure is PRE-EXISTING too:** `aoide-lyra`'s
+  `commands::preview_tools::tests::session_menu_qml_top_level_children_match_the_real_checkout`
+  and
+  `commands::preview_tools::tests::file_matched_node_children_resolve_positionally_against_the_real_session_menu_children`
+  compare hardcoded line numbers against the LIVE song (`flake_root()` is
+  `~/.aoide`'s `Aoide` checkout): they expect the top-level children at lines
+  67/134/165/179/186/187 and the file on disk has them at
+  138/205/236/250/257/258 — with that file byte-identical to this worktree's own
+  copy and unchanged since before this slice began. No `lyra` file is in this
+  slice's diff; those expectations belong to the lane that owns the song.
 - **Refusal convention**: where a capability is host-specific, the shape is
   the named refusal — `cfg(target_os)` on the existing body plus a non-host arm
   that keeps today's fail-closed semantics — never a fabricated uid/pid, never

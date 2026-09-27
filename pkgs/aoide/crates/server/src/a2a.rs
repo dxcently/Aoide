@@ -2148,7 +2148,7 @@ fn poll_bounded_exit(
 /// WRAPPER process (`aoide conduct`, launched by [`do_spawn`]'s own
 /// `cmd.spawn()`) exited before the liveness window closed — virtually
 /// always because ITS OWN attempt to exec the configured agent
-/// (`aoide-conduct::graph::conduct::spawn_on_pty`) failed, since that
+/// (`aoide-conduct::graph::pty::spawn_on_pty`) failed, since that
 /// function's own "spawn FIRST" discipline means a failed exec there returns
 /// almost instantly with no session ever registered. Names the configured
 /// program (never the full command line — no flag values, no env, no
