@@ -166,10 +166,16 @@ let
                 # aoided.nix): a user unit inherits the manager's environment as
                 # of the session's login, so an inherited
                 # `AOIDE_SONG_TEMPLATES` keeps pointing at the PREVIOUS build's
-                # songbook until the operator relogs — while the QML this unit
-                # starts execs `lyra` itself (`cover set`, the widget-maker's
-                # rail), which resolves the templates from exactly this
-                # environment. Declared here, a restart is enough. Gated on the
+                # songbook until the operator relogs. This unit spawns `lyra` —
+                # the QML it starts execs it (`lyra preview set` from the
+                # widget-maker canvas, `lyra cover set` from the wallpaper
+                # picker) — and any lyra whose STAGING path runs under this
+                # process tree resolves the shipped templates from this
+                # environment: `lyra rice stage`/`lyra reload` gated on
+                # `song/src/widgets.rs`'s `plan_stage`, and `rice compose --from`'s
+                # template fallback plus the first-stage seed in
+                # `song/src/commands/rice.rs`. (`cover set` never reads them.)
+                # Declared here, a restart is enough. Gated on the
                 # lyra dendrite for the same reason the nucleus delta is: a
                 # shell with no `lyra` installed has no reader for it.
                 ++ lib.optionals config.aoide.lyra.enable [
