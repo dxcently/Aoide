@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-08-29
+updated: 2026-09-27
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
@@ -59,14 +59,16 @@ adding, removing, or renaming a leaf shows as a deliberate diff against that
 snapshot.
 
 The command surface holds **64 leaves across the groups this page tracks**;
-`aoide schema --json | jq '.commands | length'` reports 103, since further
-commands exist that are not yet covered here: the `inbox` group, `who`,
+`aoide schema --json | jq '.commands | length'` reports 110, since further
+commands exist that are not yet covered here: the `mail` group (`mail`,
+`mail send`/`read`/`show`/`mark`/`rm`, `mail outbox`/`outbox rm`/`outbox
+retry`, `mail export`, `mail poll`, `mail serve`, `mail ring` —
+`docs/architecture/MAIL.md`),
 `events tail`, `identity` (the keypair read surface — [[Pairing-Ceremony]]),
 the `melete` group (`status`/`graph`/`call`),
 and the `node` group's `hub`/`allow`/`spawn`,
 `discover`/`advertise`/`list`, and the pairing ceremony — `pair <target>`
-with its `approve`/`reject`/`watch` subcommands plus `pending`
-([[Pairing-Ceremony]]). `lyra schema --json`
+with `pair reject`/`pair watch` beside it ([[Pairing-Ceremony]]). `lyra schema --json`
 carries the painted surface — see above.
 The per-command dev reference — signature, files read, files written,
 where output pipes to — lives at [[CLI-Reference]]; the table below sums
@@ -84,8 +86,8 @@ the groups it documents.
 | `graph`, `graph link` | 2 | real — the read/analysis lens the `graph` prefix kept |
 | `project add/remove/list` | 3 | real |
 | `workspace set/clear/list/root` | 4 | real — the compositor workspace ↔ project binding: a workspace carries its project, and a launcher reads its folder |
-| `session start/phase/end/hook/undying/permit/pending list/approve/deny/prune/reap` | 11 | real — `start`/`phase`/`end`/`hook` are `internal` (hook plumbing, hidden from `aoide guide`) |
-| `session` (bare — the undying picker) | 1 | real — cli+tty only; non-interactive reach steers to `session undying` |
+| `session start/phase/end/hook/grant/permit/pending list/approve/deny/prune/reap` | 11 | real — `start`/`phase`/`end`/`hook` are `internal` (hook plumbing, hidden from `aoide guide`) |
+| `session` (bare — the roster; `--hosts` groups by host) | 1 | real — the retired `who`'s pipeline: every registered node probed live, the cache the fallback |
 | `send`, `spawn`, `resurrect` | 3 | real |
 | `conduct` | 1 | real |
 | `adapter melete` | 1 | real |
@@ -163,14 +165,17 @@ render) and `graph link` — since command-defrag task #101 (Lane R) promoted
 everything that acts or manages lifecycle to its own top-level family:
 `project add`/`remove`/`list`, `session start`/`phase`/`end`/`hook` (takes
 `--agent <name>`, default `claude`; the payload maps through that harness's
-agent profile, [[Agent-Hooking]]), `session undying` (Lane U; renamed from
-its prototype name "carry"), bare `session` (Lane U, the undying picker —
-inquire multi-select over local and node-cached sessions), `session permit`,
+agent profile, [[Agent-Hooking]]), `session grant` (the grant family:
+`undying`, the mark renamed from its prototype name "carry", and the
+reaper's `exempt` — bare `session grant undying` opens the picker, an
+inquire multi-select over local and node-cached sessions), bare `session`
+(the roster — grouped by project, or by host under `--hosts`; it absorbed
+the retired `who`), `session permit`,
 `session pending list`/`approve`/`deny`, `session prune`, and bare
 `send`/`spawn`/`resurrect`. `session start`/`phase`/`end`/`hook` carry
 `internal: true` in the schema — hook plumbing a harness's own lifecycle
 drives, hidden from `aoide guide`'s human listing though still enumerated by
-`schema`/MCP/A2A; `session undying` and bare `session` are not internal.
+`schema`/MCP/A2A; `session grant` and bare `session` are not internal.
 Together these are the
 [[Session-Graph]] viewer and manager feeding the [[Terminal-Commander]]
 roster (see [[Agent-Hooking]] for the session-registration doors). `session
@@ -252,7 +257,8 @@ reachability is out of scope for this v0.
 - **`node list [--json]`** — the one-glance mesh roster: every known node
   (this host, registered nodes, advertising instances) with its running
   sessions beneath, marked `●`/`○`/`◆`; one bounded ~2 s sweep plus
-  `who`'s live probes; read-only.
+  the roster core's live probes (the same prober bare `session` renders
+  through); read-only.
 
 ### `conduct` and `conductor`
 
@@ -268,8 +274,9 @@ through the same `dispatch()` the CLI and MCP doors use.
 
 ### Open schema gap
 
-The compositor keybind `SUPER+ESCAPE` (lock) still invokes `aoide shell
-lock` — a command group not among the leaves (open thread). `SUPER+G` (dock
+The compositor keybind `SUPER+ESCAPE` (lock) still invokes the dead `shell
+lock` form — a command group not among the leaves of either binary (open
+thread). `SUPER+G` (dock
 toggle) is not part of this gap: like the launcher's `SUPER+SPACE` and the
 wallpaper picker's `SUPER+W`, it triggers an in-process Hyprland global
 shortcut the panel itself registers (`aoide:dock`), not a CLI command (see
@@ -307,11 +314,14 @@ shortcut the panel itself registers (`aoide:dock`), not a CLI command (see
 ## The second binary — `aoided`
 
 The same crate installs `aoided`, the daemon (see [[aoided]]). It shares
-the audit-log, gate, and neutral-event-stream code with the CLI, so `aoide
-daemon` and the standalone `aoided` binary reach the same code path; the
-standalone binary is what the systemd unit launches. `aoided --audit-log
-<path>` overrides the log location, else the `aoide.auditLog` default
-applies.
+the audit-log, gate, and neutral-event-stream code with the CLI, but it is
+not the same entry point: **`aoided` runs the resident loop**
+(`daemon::run_loop` — binds the control socket, ticks forever, which is what
+the systemd unit execs), while **`aoide daemon` runs the one-shot skeleton
+self-check** (`daemon::run` — audits, proves the default-deny subscription
+and the propose-only gate, prints one JSON envelope, exits). `aoided
+--audit-log <path>` overrides the log location, else the `aoide.auditLog`
+default applies. Starting it without nix: `docs/INSTALL.md` § 6.
 
 ## Related
 

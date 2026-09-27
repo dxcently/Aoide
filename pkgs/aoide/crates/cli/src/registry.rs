@@ -276,6 +276,12 @@ mod tests {
         // family, so it sorts between `mail.outbox.rm` and `mail.read`; no
         // other entry moves.
         //
+        // H1 adds `mail.serve` (+1) — the mail adapter, the second listener:
+        // a long-running server registering beside `a2a.serve` (its own
+        // sibling in `server/commands.rs`, the crate that owns both serve
+        // loops), sorting in the mail family between `mail.send` and
+        // `mail.show`.
+        //
         // Bumped by 1 for `project.edit` (multi-root projects) — the
         // exact-replacement editor for a project's root list, the
         // `project edit` that `records.rs`'s `Project.auto_resume` doc
@@ -306,6 +312,24 @@ mod tests {
         // the launcher's bare-path read of a bound project's first folder, the
         // second special-cased command here after the `secrets` value-printers
         // (`cli/README.md`'s named-seam list).
+        //
+        // Bumped by 4 for the P-CHARTER charter family
+        // (`mesh.charter.init`/`sign`/`accept`/`reroot`, registered from
+        // `aoide_client::charter`): one operator's machines, rooted once and
+        // signed by that operator's own key. They sort inside the existing
+        // `mesh.*` family, between bare `mesh` and `mesh.pair`. Net: 82 + 4
+        // = 86. Bumped by 1 more for `mesh.charter.show` (the same slice's
+        // read side: the charter in force and its status, which a charter
+        // applied by an unattended poll needs an operator to be able to see)
+        // — reached 87. Bumped by 1 for `mesh.join` (the trust-entry step every
+        // machine but the operator's own performs: one operator key, or one
+        // LAN ceremony) — reached 88.
+        //
+        // **The running total above is the CHAIN's history, not this list's
+        // length: the vec below holds 109 paths** (counted, review F7 — the
+        // chain lost count with it somewhere around "+1 for bare `node list`",
+        // and a comment that asserts a wrong number is worse than no number).
+        // Treat THIS line as the authority and the chain as the history.
         let mut expected: Vec<&str> = vec![
             "a2a.serve",
             "adapter.melete",
@@ -336,6 +360,7 @@ mod tests {
             "mail.ring",
             "mail.rm",
             "mail.send",
+            "mail.serve",
             "mail.show",
             "make",
             "mcp.serve",
@@ -343,6 +368,12 @@ mod tests {
             "melete.graph",
             "melete.status",
             "mesh",
+            "mesh.charter.accept",
+            "mesh.charter.init",
+            "mesh.charter.reroot",
+            "mesh.charter.show",
+            "mesh.charter.sign",
+            "mesh.join",
             "mesh.pair",
             "node.add",
             "node.advertise",

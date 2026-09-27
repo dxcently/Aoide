@@ -8,9 +8,24 @@
 //
 // What pane is open is steered from the preview ROOT, never a fixture path:
 // `$AOIDE_ROOT/bar-preview.json` (optional; absent = no pane)
-//     { "pane": "vol"|"bt"|"net"|"bat"|"tray"|"clock"|"jack"|"patch"|"",
+//     { "pane": "sound"|"net"|"bat"|"tray"|"clock"|"jack"|"",
 //       "jack": 2,            // with pane "jack": whose insight pane
-//       "lampMs": 600 }       // slow the lamp down to catch one mid-run
+//       "lampMs": 600,        // slow the lamp down to catch one mid-run
+//       "name": "scratch",    // with pane "jack": open the PROJECT row's
+//                             //   [+ new] field with this typed
+//       "click": { "action": "set"|"clear", "project": "melete", "new": false },
+//                             // with pane "jack": click that chip (the line
+//                             //   goes to the bridge below, never a socket)
+//       "riceClicks": 2,      // click the RICE cell that many times (one
+//                             //   bridge.toggleRiceMode in the canvas log,
+//                             //   the cell pending `…`)
+//       "reply": { "ok": false, "reason": "…", "message": "…" } }
+//                             // present: the bar gets a reply-stub bridge
+//                             //   whose workspaceAction answers THIS (and
+//                             //   logs the fields it got); absent: the
+//                             //   canvas's own stub bridge (no workspaceAction,
+//                             //   so the bar's sendCommand fallback, logged
+//                             //   in the canvas as bridge.sendCommand)
 // Everything else the bar reads, it reads itself (the root's stage files,
 // state/usage/now.json, Hyprland, the services) — this harness feeds it
 // nothing, so the live path and the preview path are the same bar.
@@ -30,6 +45,13 @@ Item {
     required property var bridge
     property var shared: null
     property var stagingEngine: null
+    // the canvas hands every slot's extras; accepted here so none warns, and
+    // not forwarded (the bar gets powermenu/dock null, see barLoader)
+    property var dock: null
+    property var powermenu: null
+    property var clipboard: null
+    property var ledger: null
+    property var stagePath: null
 
     implicitWidth: 1080
     implicitHeight: 28 + 420
@@ -54,11 +76,18 @@ Item {
         if (!b) return
         var c = harness.control || {}
         b.lampMs = c.lampMs > 0 ? c.lampMs : 600
+        b.bridge = c.reply ? replyStub : harness.bridge
+        b.wsPending = null
+        b.wsError = ""
         b.closePane()
         retry.tries = 0
         if (c.pane === "jack") Qt.callLater(function () { b.previewJack(c.jack || 1) })
         else if (c.pane) Qt.callLater(function () { b.previewPane(c.pane) })
         if (c.pane) retry.restart()
+        // the RICE cell: `riceClicks` clicks through the bar's own toggle (the
+        // first sends; the rest, and a second apply(), are swallowed while it
+        // is pending — the canvas log shows ONE bridge.toggleRiceMode)
+        for (var i = 0; i < (c.riceClicks || 0); i++) b.toggleRice()
     }
     // the jack row fills in when Hyprland's workspace list arrives, which can
     // land after the first apply(); retry briefly until the pane is up
@@ -69,9 +98,33 @@ Item {
         repeat: true
         onTriggered: {
             var b = barLoader.item, c = harness.control || {}
-            if (!b || !c.pane || b.openPane !== "" || ++tries > 20) { stop(); return }
+            if (b && c.pane && b.openPane !== "") { stop(); harness.afterOpen(); return }
+            if (!b || !c.pane || ++tries > 20) { stop(); return }
             if (c.pane === "jack") b.previewJack(c.jack || 1)
             else b.previewPane(c.pane)
+        }
+    }
+
+    // once the jack pane is up: the PROJECT row's steered states
+    function afterOpen() {
+        var b = barLoader.item, c = harness.control || {}
+        if (!b || c.pane !== "jack") return
+        if (typeof c.name === "string") b.previewNaming(c.name)
+        if (c.click) b.previewWsClick(c.click)
+    }
+
+    // The reply stub: the canvas bridge plus a workspaceAction answering the
+    // control file's `reply`, asynchronously like the canvas's own
+    // sessionAction stub. It forwards every other call to the canvas stub, so
+    // nothing here can reach a socket either.
+    property QtObject replyStub: QtObject {
+        function focusSession(id) { harness.bridge.focusSession(id) }
+        function toggleRiceMode() { harness.bridge.toggleRiceMode() }
+        function sendCommand(o) { harness.bridge.sendCommand(o) }
+        function workspaceAction(fields, cb) {
+            console.log("[BarPreview] bridge.workspaceAction " + JSON.stringify(fields))
+            var r = (harness.control || {}).reply || { ok: true }
+            if (cb) Qt.callLater(function () { cb(r) })
         }
     }
 

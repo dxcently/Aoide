@@ -76,14 +76,29 @@ lib.mkIf config.aoide.enable {
     # module). Default `"default.target"`: headless, with linger on, the
     # daemon and its doors come up at boot and stay resident. The lane that
     # brings a graphical session up sets `aoide.sessionTarget` to
-    # `"graphical-session.target"` instead, so the unit starts when the
-    # compositor is up and PartOf ties its lifetime to that session —
-    # anchoring to `default.target` there would leave no graphical-session
-    # target for a manually started daemon, and PartOf would propagate an
-    # immediate stop while BindsTo drags the a2a/mcp doors down with it.
+    # `"graphical-session.target"` instead, so the unit starts once the
+    # compositor is up and inherits a live session env — the desktop it
+    # serves is assembled there.
+    #
+    # The anchor decides when the daemon STARTS. It never owns its
+    # lifetime: this unit carries no `partOf`, and must not grow one. A
+    # desktop is a replaceable surface, the policy surface is not — a
+    # crashed shell (`aoide-quickshell` OOM-killed) took
+    # graphical-session.target down with it, `partOf` stopped aoided
+    # CLEANLY (so `Restart=on-failure` never fired), and `BindsTo` dragged
+    # the a2a/mcp doors down behind it: audit log, gate and doors stayed
+    # dead until someone started them by hand. `Restart=always` is not the
+    # fix — a stop systemd propagates is a deliberate one, and deliberate
+    # stops are not restarted.
+    #
+    # The tradeoff that buys it: after a desktop crash the SURVIVING process
+    # still holds the env it was started with (`WAYLAND_DISPLAY`,
+    # `HYPRLAND_INSTANCE_SIGNATURE` of the session that died), so anything
+    # the daemon launches into the desktop can aim at a stale socket until
+    # the next `systemctl --user restart aoided`. A gate that dies with a
+    # widget shell is the worse half of that trade.
     wantedBy = [ cfg.sessionTarget ];
     after = lib.optional (cfg.sessionTarget != "default.target") cfg.sessionTarget;
-    partOf = lib.optional (cfg.sessionTarget != "default.target") cfg.sessionTarget;
 
     # A minimal user unit's default PATH carries none of `ps`, `ssh` or
     # `curl`, and the daemon's own tick needs all three: one `ps` table

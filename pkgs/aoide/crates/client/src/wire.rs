@@ -225,6 +225,7 @@ mod tests {
             &timestamp,
             "nonce-claim-1",
             &signed_bytes,
+            Some("home"),
         );
         let signature = aoide_storage::wire_auth::sign_hex(&kp, canonical.as_bytes());
         assert!(aoide_storage::wire_auth::verify_signature_hex(
@@ -243,6 +244,7 @@ mod tests {
             &timestamp,
             "nonce-claim-1",
             &tampered_bytes,
+            Some("home"),
         );
         assert!(
             !aoide_storage::wire_auth::verify_signature_hex(

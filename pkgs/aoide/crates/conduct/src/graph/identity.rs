@@ -7,12 +7,11 @@
 //! `/proc` ancestry to find the (verified) sealed session it is running
 //! under.
 //!
-//! **`allow(dead_code)` on native Windows, stated once.** `is_self_originated`
-//! is called only from `conduct_multiplex`'s accept loop — the refused PTY
-//! capability there — so nothing on that host can reach it, and `#[cfg(unix)]`
-//! item-by-item is churn the ConPTY slice (W5) un-does. Scoped to `cfg(windows)`;
-//! Unix keeps every warning it had. `peer_cred` itself is live on BOTH hosts
-//! (the native arm goes through `win_unix`/`win_proc`), and so is
+//! **Both hosts reach this now.** `is_self_originated` is called from the
+//! injection inbox's own accept — `graph/pty`'s seam, live on both hosts — so
+//! the `allow(dead_code)` this module carried while the PTY was refused on
+//! native Windows is gone with the refusal. `peer_cred` itself is live on BOTH
+//! hosts (the native arm goes through `win_unix`/`win_proc`), and so is
 //! `attested_sender`.
 //!
 //! **Why `attested_sender` runs in the SENDER's own process, not at the
@@ -30,12 +29,10 @@
 //! which this phase does not do (scope fence: only the per-session socket
 //! + the send gate). `SO_PEERCRED` earns its keep at the accept side for a
 //! DIFFERENT, narrower property instead: [`peer_cred`] backs
-//! `conduct.rs`'s own self-injection refusal (a connecting pid that is a
+//! `pty.rs`'s own self-injection refusal (a connecting pid that is a
 //! descendant of the socket's OWN session gets dropped, unconditionally,
 //! un-bypassably — the replacement for the old client-side `is_self_send`
 //! guard, which only ever guarded well-behaved callers of `aoide send`).
-
-#![cfg_attr(windows, allow(dead_code))]
 
 use super::model::SessionRecord;
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -134,7 +131,7 @@ pub(crate) fn own_user() -> Option<PeerUser> {
 /// fact. Native Windows answers the same pair of facts through its own
 /// bindings (the arm below); every OTHER host gets the same UNIDENTIFIED `None`
 /// a failed read gives, and every caller keeps its existing posture:
-/// `shellbridge.rs`'s cross-user floor refuses, `conduct.rs`'s self-injection
+/// `shellbridge.rs`'s cross-user floor refuses, `pty.rs`'s self-injection
 /// guard sees not-self. A pid-less second mechanism is a design change to
 /// those gates, never a port.
 ///

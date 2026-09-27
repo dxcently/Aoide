@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-08-28
+updated: 2026-09-27
 tags: [aoide, daemon, orchestrator, policy]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -18,10 +18,17 @@ Security boundary: forwarded notification text is treated as untrusted input. Ad
 
 ## Implementation
 
-`aoided` ships as the second binary of the [[aoide-cli]] crate — `aoide daemon`
-and the standalone `aoided` reach the same code path. It runs as the `aoided`
-systemd **user** service (keyed into `graphical-session.target`), configured
-through four environment seams: `AOIDE_AUDIT_LOG` (the single audit-log path, from
+`aoided` ships as the second binary of the [[aoide-cli]] crate. It is not the
+same entry point as `aoide daemon` — that command runs the one-shot skeleton
+self-check (`daemon::run`) and exits, while `aoided` runs the resident loop
+(`daemon::run_loop`) that binds the control socket and ticks forever; they
+share the audit log, the gate and the event stream, not a call path. It runs
+as the `aoided` systemd **user** service, anchored through
+`aoide.sessionTarget` (`graphical-session.target` on a painting host,
+`default.target` headless): the anchor decides when it STARTS, never when it
+stops — the unit carries no `partOf`, so a dead desktop leaves the daemon, its
+audit log, its gate and its doors up. It is configured through four
+environment seams: `AOIDE_AUDIT_LOG` (the single audit-log path, from
 `aoide.auditLog`), `AOIDE_ROOT` (the runtime root, from `aoide.root`),
 `AOIDE_FLAKE_ROOT` (the dev checkout), and `AOIDE_USER`. The daemon resolves
 the log in order: `--audit-log` flag → `$AOIDE_AUDIT_LOG` → `$AOIDE_ROOT/log`

@@ -175,7 +175,8 @@ to **rebuild time** instead.
   `verify_signed_request` already verified is remote by construction (an
   ssh `-L` forward terminates at loopback on this end), so
   `origin_for_inject` strips `Loopback`'s free pass from it — and then the
-  node's own `autogate` flag or a matched remote-parent claim decides
+  node's own `autogate` flag, with `message` in the mesh the request signed
+  for, or a matched remote-parent claim decides
   delivery, never the arrival address ([[Node-Transport]]).
   This is the one interactive per-request gate the wire otherwise lacks —
   added for [[Node-Federation|node federation]]'s non-loopback case, which
@@ -195,6 +196,18 @@ to **rebuild time** instead.
   `aoide/graphSummary`), still `-32005`-gating them, and answers Inject's
   autogate question — it never reaches Spawn. Empty (the default) leaves
   the read arms open exactly as an untokenized server always was.
+- **Where the grant comes from.** Every gated arm asks one lookup,
+  `a2a::grant_in_mesh`, and it has two sources: the caller's PAIRED RECORD in
+  the mesh its signed request names, and — when a charter governs that mesh at
+  this node — the caller's line on that CHARTER, read by identity key and by
+  no name. A request that names no mesh is RESOLVED to the home mesh and then
+  judged by that mesh's rules like any other: the charter's line where one
+  governs, nothing at all where the mesh is charter-shaped with an undecidable
+  operator key, and paired records only where no charter is shaped for it. A
+  key a charter does not list holds nothing in that mesh however it is paired.
+  Local `aoide node allow <name> <cap> off --mesh <m>` narrows a charter line and
+  wins over it; nothing local widens one. See
+  [[HTTPS-Mesh-API]]'s "Trust per mesh".
 - **A secrets-broker-resolved bearer takes precedence over the file.**
   `a2a serve --bearer-secret <name>` (or `AOIDE_A2A_BEARER_SECRET`) names a
   secret this door resolves through the local [[Secrets-Broker]] as consumer
@@ -220,14 +233,31 @@ to **rebuild time** instead.
   `Node.tokenFile` (`state/nodes.json`, set via `node add --token-file
   <path>`) is a separate, per-node secret from the server-wide `tokenFile`
   above — a legacy escape for unpaired callers, like it.
-  `node_store::is_autogated_node_token` folds a presented token
+  `node_store::autogated_node_token` folds a presented token
   against every registered node's own token file, and Inject's autogate
   match is the OR of the address check, this token check, the
-  signature-rung `autogate` flag, and a matched remote-parent claim — the
+  signature-rung `autogate` flag (the flag opens that rail too; what it
+  delivers on is `message` in the mesh the request SIGNED for), and a
+  matched remote-parent claim — the
   node that spawned this very session steering its own child
   (CONTRACTS.md §6's remote-parent rule, [[Node-Transport]]) — a shared
   secret could never tell two nodes apart, so identifying which node called
   needs one file per node, not one flag for the whole door.
+  **The match is not the delivery.** The address and token rails carry no
+  request signature, so they name no mesh: the door judges the record they
+  matched by its HOME mesh's rules (`aoide-server::a2a::rail_admits` — where a
+  charter governs `[pairing] homeMesh`, the record must be `verified` and its
+  key on the charter's line with `message`, minus this box's own
+  `node allow … off --mesh`; a charter-shaped home with an undecidable
+  operator key, or a `config.toml` that will not load, delivers nothing; a
+  pair-mesh home keeps the record's own flag as the whole rule). A record the
+  charter does not answer for is held PENDING — never refused — so the knock
+  reaches the operator as a `session pending list` entry attributed
+  `node:<name>`; the #50 uniform-response guard is still exempted by the
+  MATCH, which is what keeps that send a real pending entry instead of a
+  synthetic unqueued answer. The address rung is an address match with an
+  address match's limits (a first-match tie-break, live DNS, spoofable from
+  where it matches — CONTRACTS.md §6, review F5).
 - **The outbound direction has its own bearer.** `node add --bearer-secret
   <name>` records a secret THIS instance resolves through the local secrets
   broker, as consumer `a2a-client`, on every outbound call to that node —

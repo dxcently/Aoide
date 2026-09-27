@@ -125,6 +125,7 @@
 pub mod addr;
 pub mod advertise;
 pub mod attest;
+pub mod charter;
 pub mod commands;
 pub mod config;
 pub mod display;

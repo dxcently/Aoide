@@ -1054,8 +1054,8 @@ mod tests {
     // end-to-end tests need the identical fixture; glob-imported above via
     // `use crate::graph::testutil::*;`.
 
-    /// GATED on Unix with its reason: the child is `conduct --headless`, refused
-    /// BY NAME on a host without a PTY (see
+    /// GATED on Unix with its reason: the child is a POSIX fixture (`sh -c`,
+    /// a `#!/bin/sh` shim and a mode), which `CreateProcess` cannot run (see
     /// `a_banner_containing_the_prompt_label_never_buys_a_verified_delivery`'s
     /// gate).
     #[cfg(unix)]
@@ -1175,8 +1175,8 @@ mod tests {
     /// actually registers, the spawned id lands in `state/undying.json` —
     /// the headless arm exercises this with no terminal needed, asserting on
     /// the undying store directly, never on a process.
-    /// GATED on Unix with its reason: the child is `conduct --headless`, refused
-    /// BY NAME on a host without a PTY (see
+    /// GATED on Unix with its reason: the child is a POSIX fixture (`sh -c`,
+    /// a `#!/bin/sh` shim and a mode), which `CreateProcess` cannot run (see
     /// `a_banner_containing_the_prompt_label_never_buys_a_verified_delivery`'s
     /// gate).
     #[cfg(unix)]
@@ -1272,8 +1272,8 @@ mod tests {
     /// recorded under the wrapper — fired through the REAL hook door
     /// (`session hook`) from a process whose `AOIDE_SESSION_ID` is the
     /// wrapper's, exactly as a harness's own hook subprocess runs.
-    /// GATED on Unix with its reason: the child is `conduct --headless`, refused
-    /// BY NAME on a host without a PTY (see
+    /// GATED on Unix with its reason: the child is a POSIX fixture (`sh -c`,
+    /// a `#!/bin/sh` shim and a mode), which `CreateProcess` cannot run (see
     /// `a_banner_containing_the_prompt_label_never_buys_a_verified_delivery`'s
     /// gate).
     #[cfg(unix)]
@@ -1347,8 +1347,8 @@ mod tests {
     /// is typed into it and the result says so. The shim echoes whatever it is
     /// handed, so a prompt typed anyway would be visible in its log — this test
     /// fails on an early inject, not merely on a missing status string.
-    /// GATED on Unix with its reason: the child is `conduct --headless`, refused
-    /// BY NAME on a host without a PTY (see
+    /// GATED on Unix with its reason: the child is a POSIX fixture (`sh -c`,
+    /// a `#!/bin/sh` shim and a mode), which `CreateProcess` cannot run (see
     /// `a_banner_containing_the_prompt_label_never_buys_a_verified_delivery`'s
     /// gate).
     #[cfg(unix)]
@@ -1503,9 +1503,9 @@ mod tests {
     /// `delivered` in ~393ms — the strongest claim, plus an inject before the
     /// prompt existed. It must now be `delivered-unverified`, and the claim
     /// must survive the settle window rather than jumping the queue.
-    /// GATED on Unix with its reason: the child this spawns is `conduct
-    /// --headless`, refused BY NAME on a host without a PTY (ConPTY is absent —
-    /// `conduct`'s module note). The detached, NON-PTY spawn is native and
+    /// GATED on Unix with its reason: the child is a POSIX fixture (`sh -c`, a
+    /// `#!/bin/sh` shim and a mode), which `CreateProcess` cannot run. The
+    /// detached, NON-PTY spawn is native and
     /// covered by `without_undying_flag_a_spawn_marks_nothing`,
     /// `plain_spawn_without_windowed_never_checks_the_display_or_template`,
     /// `spawn_of_a_nonexistent_binary_registers_no_ghost_session` and
@@ -1553,8 +1553,8 @@ mod tests {
     /// prompt is reported `not-ready` and NOTHING is typed (the shim echoes
     /// whatever it is handed, so an early inject would show up in its log) —
     /// never the review's 357ms-`delivered`.
-    /// GATED on Unix with its reason: the child is `conduct --headless`,
-    /// refused BY NAME on a host without a PTY (see
+    /// GATED on Unix with its reason: the child is a POSIX fixture (`sh -c`, a
+    /// `#!/bin/sh` shim and a mode), which `CreateProcess` cannot run (see
     /// `a_banner_containing_the_prompt_label_never_buys_a_verified_delivery`'s
     /// gate for the native cover of the detached spawn itself).
     #[cfg(unix)]
@@ -1613,8 +1613,8 @@ mod tests {
     /// banner and then spends seconds before its prompt. The tree cannot know
     /// when it is ready, so it says exactly that — `delivered-unverified` —
     /// never `delivered`.
-    /// GATED on Unix with its reason: the child is `conduct --headless`, refused
-    /// BY NAME on a host without a PTY (see
+    /// GATED on Unix with its reason: the child is a POSIX fixture (`sh -c`,
+    /// a `#!/bin/sh` shim and a mode), which `CreateProcess` cannot run (see
     /// `a_banner_containing_the_prompt_label_never_buys_a_verified_delivery`'s
     /// gate).
     #[cfg(unix)]

@@ -21,6 +21,13 @@
   itself. The lane that brings a graphical session up is the one that
   sets that option; nothing in this bundle needs to know which lane it
   is.
+- **An anchor starts a unit; it never owns its lifetime.** That same
+  `aoided` unit sets `wantedBy`/`after` from `aoide.sessionTarget` and
+  deliberately omits `partOf` — a graphical-session anchor must not stop
+  the policy surface when the desktop dies, and the doors `BindsTo` it, so
+  they would go down with it. Adding `partOf` back is the regression, not
+  the fix; the stale-env cost of surviving a desktop crash is the accepted
+  half of the trade.
 - **A new core unit is a new file plus one `imports` line.** Follow
   `default.nix`'s existing shape — never fold a new unit's options into
   `options.nix` itself, and never grow `default.nix` into anything but

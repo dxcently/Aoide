@@ -205,10 +205,12 @@ let
     ) "pkgs/ entries neither a package, shelved, nor self-flaked: ${builtins.toString strays}";
 
   # ── Check 6: no phantom commands in the agent docs ──────────────────────────
-  # The agent docs (root AGENTS.md + docs/agent/*.md) are the one place the
-  # command surface is still taught in hand-written prose — both binaries'
-  # guide texts are registry-derived, so they cannot drift and are not
-  # re-checked here. Every backticked invocation spelling those docs teach
+  # The docs — root AGENTS.md, docs/agent/*.md, docs/INSTALL.md and the wiki
+  # (docs/Aoide-Wiki/**, minus the ledgers/history/roadmap paths the file
+  # list below names and explains) — are the one place the command surface is
+  # still taught in hand-written prose; both binaries' guide texts are
+  # registry-derived, so they cannot drift and are not re-checked here. Every
+  # backticked invocation spelling those docs teach
   # (`aoide send …`, `lyra rice compose <name>`, …) must resolve against
   # the matching binary's `schema --json`, built from this checked-out source:
   # the spelled words must be a registered command path, or a prefix of one
@@ -219,8 +221,10 @@ let
   # Extraction is precision-over-recall: only inline code spans STARTING with
   # `aoide `/`lyra ` followed by a lowercase word count as teachings (a span
   # may wrap across a line break); the path walk stops at the first non-path
-  # token (`<args>`, `[flags]`, `--flags`, `--`, ellipses), and comment lines
-  # inside fenced code blocks are skipped. `src` is the flake's own store
+  # token (`<args>`, `[flags]`, `--flags`, `--`, ellipses), and both fenced
+  # delimiter lines and comment lines inside fences are blanked before pairing
+  # (a fence's own backticks are not span edges — left in, they shifted every
+  # span after them and hid real teachings). `src` is the flake's own store
   # copy, so like Check 4 this scopes to the COMMITTED tree; `aoidePkg` is
   # the self-flaked core package — `aoide` from its default output, `lyra`
   # from its `rice` output.
@@ -236,13 +240,23 @@ let
         my $text = do { local $/; <$fh> };
         close $fh;
 
-        # Blank out comment lines inside fenced code blocks, preserving
-        # offsets: fenced commentary may name a spelling without teaching it.
+        # Fenced code blocks. Both halves matter for span pairing:
+        #  - a DELIMITER line (````json`) is blanked wholesale, because its
+        #    own three backticks are not a span edge — left in, they pair
+        #    with the next backtick anywhere in the file and shift every
+        #    span after them, hiding real teachings from this check;
+        #  - comment lines INSIDE a fence are blanked too: fenced
+        #    commentary may name a spelling without teaching it.
+        # Offsets are preserved either way, so line numbers stay true.
         my @lines = split /\n/, $text, -1;
         my $fence = 0;
         for my $i (0 .. $#lines) {
           my $l = $lines[$i];
-          if ($l =~ /^\s*(```|~~~)/) { $fence = !$fence; next; }
+          if ($l =~ /^\s*(```|~~~)/) {
+            $lines[$i] = ' ' x length($l);
+            $fence = !$fence;
+            next;
+          }
           $lines[$i] = ' ' x length($l) if $fence && $l =~ /^\s*#/;
         }
         $text = join "\n", @lines;
@@ -288,9 +302,39 @@ let
           | jq -r '.commands[].path | join(" ")' > "$TMPDIR/lyra-paths"
 
         cd ${src}
-        for doc in AGENTS.md docs/agent/*.md; do
+        # The doc set: the agent docs (root AGENTS.md + docs/agent/*.md) plus
+        # INSTALL.md and the whole wiki — every hand-written place the command
+        # surface is still taught in prose.
+        #
+        # Excluded BY PATH, never by weakening the extraction above:
+        #   - docs/Aoide-Wiki/ingest/      the ingest log + index (a ledger,
+        #                                  append-only: it records what was
+        #                                  true then, spellings included)
+        #   - docs/Aoide-Wiki/references/  dated handoffs, audit reports and
+        #                                  design notes — history, same reason
+        #   - docs/Aoide-Wiki/concepts/desktop/Feature-Set.md
+        #                                  the AoideOS roadmap: its spans name
+        #                                  commands that do not exist yet and
+        #                                  every one is labelled "planned …
+        #                                  not in `aoide schema --json`", so
+        #                                  the matcher would read intent as a
+        #                                  teaching
+        #   - docs/Aoide-Wiki/concepts/desktop/Controls.md
+        #                                  the keybind table: three of its rows
+        #                                  report a DEAD CLI form as the point
+        #                                  ("no `shell` group exists in either
+        #                                  registry", "a retired command, so
+        #                                  the keybind is a no-op") — the dead
+        #                                  spelling is the content there
+        find AGENTS.md docs/agent docs/INSTALL.md docs/Aoide-Wiki -name '*.md' \
+          -not -path 'docs/Aoide-Wiki/ingest/*' \
+          -not -path 'docs/Aoide-Wiki/references/*' \
+          -not -path 'docs/Aoide-Wiki/concepts/desktop/Feature-Set.md' \
+          -not -path 'docs/Aoide-Wiki/concepts/desktop/Controls.md' \
+          | sort > "$TMPDIR/docs"
+        while IFS= read -r doc; do
           perl ${extract} "$doc"
-        done > "$TMPDIR/candidates"
+        done < "$TMPDIR/docs" > "$TMPDIR/candidates"
 
         status=0
         while IFS="$(printf '\t')" read -r file line bin words; do

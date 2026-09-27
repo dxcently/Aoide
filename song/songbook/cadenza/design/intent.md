@@ -27,7 +27,7 @@ Companion files: `coverage.md` (every bridged surface and cadenza's answer),
 
 Everything is a terminal. Every surface is a termui **pane**: a single-line
 rule (`┌─ TITLE ───┐ │ │ └───┘`) with the title cut into the top edge in
-phosphor green, content on a monospace character grid, no radius, no glass,
+phosphor green, content on a monospace character grid, no radius (the switchboard's round pads aside), no glass,
 no drop shadow, and one gradient only: the phosphor glowing just inside a
 pane's rule. Colour is spent the way a 16-colour terminal
 spends it: green is the default voice, amber is the one live thing, and a
@@ -43,9 +43,8 @@ At rest nothing moves.
 | **jack** | a workspace, drawn `[3]` on the switchboard | paint only; the data noun is core's *workspace* (an integer) |
 | **tie** | a real edge between two workspaces, kind `project` or `spawned` | core's noun (`graph.json` `ties`); the paint draws it as a tie line |
 | **trunk** | the bar's bottom rule; every tie line drops from it | paint only |
-| **pad** | the hollow ring under a tied jack where its tie lines meet it | paint only |
+| **pad** | the outline a jack's number sits in; on the cover, a copper ring | paint only |
 | **lamp** | the lit dash that runs a line when its activity advances | paint only; core publishes `activeAt` (until then, `hooks.json` `updatedAt`) |
-| **patch panel** | the bar-end map of agents, child wired to parent | paint only |
 | **track** | a copper line on the circuit-board cover | paint only |
 | **board** | the dock: the per-project message board | core's noun (`aoide project board`) |
 | **pane** | one termui box | paint only |
@@ -79,14 +78,16 @@ Conductor Channel).
 - A **borderless block** (termui's magenta one) holds a single message that
   is not a pane — a herald toast, one board item.
 - Panes are opaque `base00` at 0.94. Black glass, not frost.
-- **Inner glow:** the phosphor green (`title`) bleeds ~12px inward from all
-  four edges, fading to nothing — the phosphor lit just inside the tube's
-  frame (`refs/ref-inner-glow.png`). It is `title` whatever the rule's
-  colour, so a box at rest is lit too: it starts at 0.14 alpha at rest and
-  at 0.26 on a focused pane. Four static gradient `Rectangle`s drawn once by
-  the kit's Pane, behind the content: no shader, no blur, nothing redrawn
-  at rest, so it costs what tier-0 text glow costs. It is the only
-  gradient in the song.
+- **Inner glow:** the phosphor green (`title`) blooms inward from all four
+  edges and fades softly to nothing, visible ~28px in — the phosphor lit
+  just inside the tube's frame (`refs/ref-inner-glow.png`). It runs all the
+  way round, under the title and the stat too, and its corners are round and
+  even. It is `title` whatever the rule's colour, so a box at rest is lit
+  too; a focused pane's is about twice as bright. It is a gaussian baked
+  once by one `Canvas` in the kit's Pane, behind the content: painted on a
+  size or palette change only, never per frame. Focus and reveal move the
+  canvas's opacity and never repaint it. No shader, no live blur, nothing
+  redrawn at rest. It is the only soft fall-off in the song.
 
 ### Instruments (termui's widgets, re-drawn)
 | instrument | glyphs | used by |
@@ -107,7 +108,7 @@ the grid. Never an image, never an icon theme, never a tinted picture.
   ledger, herald, board).
 - It takes the colour of the value it labels. It never introduces a colour
   job of its own.
-- The glyphed bar cells: agents `󰚩 3/13`, CPU `󰍛 23%`, notifications
+- The glyphed bar cells: agents `󰚩 3/13`, notifications
   `󰂚 2`, volume `󰕾 62%` (`󰖁` muted), Bluetooth `󰂯` (`󰂲` off), network
   `󰈀` wired, `󰖩` wifi, `󰖪` none, battery `󰁹 88%` (the glyph follows the
   level), and the rice mode `󰏘 stg`. `⏻` stays. Pane titles keep their
@@ -228,39 +229,114 @@ One 28px line in the tmux/termui idiom, left to right:
 - `[⏻]` — the power key (opens `powermenu`).
 - the **switchboard** (§3.2), the widest element.
 - the active window title, dim, truncated.
-- right cells on the grid, glyphed per §2 Glyphs: `󰚩 3/5`,
-  `󰍛 23%`, `$ 4.20`, `󰂚 2` — each opens the board on its tab (OVERVIEW,
-  SYS, SYS, NOTIF); then `󰕾 62%` · `󰂯` · `󰈀` (their own small panes),
+- right cells on the grid, glyphed per §2 Glyphs: `󰚩 3/5` and `󰂚 2`,
+  each opening the board on its tab (OVERVIEW, NOTIF); then `󰕾 62% 󰂯`
+  (one cell, one pane: sound and bluetooth), `󰈀` (the network pane),
   `󰁹 88%`, the tray, `󰏘 stg` (the rice-mode toggle), and the clock
-  `14:02:31` (the calendar pane).
+  `14:02:31` (the calendar pane). CPU and spend are not on the bar; they
+  live on the board's SYS tab.
+- **The rice-mode toggle is one click.** A click sends the toggle once and
+  the cell reads a dim `󰏘 …` (padded to the word, so nothing moves) at
+  once; further clicks do nothing until the mode (`song/stage/mode.json`
+  `mode`, through `livery.riceMode`) actually changes, or 10s pass. A
+  switch reloads the shell; a toggle that changed nothing in 10s simply
+  returns the cell to its word and says no more.
+- **The sound + bluetooth pane.** One pane, two sections. SOUND: the output
+  and input with volume and mute (click toggles mute, wheel steps volume),
+  and the default device picker. BLUETOOTH: a power toggle `[on]`/`[off]`,
+  then the known devices, each row `󰂯 name  connected`/`paired` with a
+  click to connect or disconnect. With bluetooth off or no adapter, the
+  section says so in one dim line. The cell's `󰂯` is dim when bluetooth
+  is off, ink when on, title when a device is connected.
 - The bar's bottom rule is the **trunk**.
 
 ### 3.2 The switchboard (inside the bar)
-- Workspaces keep their numbers: jacks `[1] [2] [3] …`. Occupied jacks are
-  solid rule; empty jacks dim; the active jack accent; a jack with an
-  awaiting/blocked session red.
+- **Every jack is a pad.** Each workspace number sits inside a round pad,
+  the way a board's pads and vias are round: a 1px circle hugging a
+  one-digit number (the bar's text height across), stretched to a pill of
+  the same height for two digits. It is drawn for every jack whether or
+  not it is tied, so the row reads as a line of pads on a board. Pads are
+  the one rounded shape in the song; every pane and block keeps radius 0.
+  An occupied jack's pad is `ink` with the number `ink`; an empty
+  jack's pad and number are `dim`; the active jack's pad is filled `title`
+  with the number in `ground`; a jack with an awaiting/blocked session has
+  a red pad.
 - A bound jack carries its project after it, blue: `[2]aoide` (the core's
-  `workspaces[].project`).
+  `workspaces[].project`, the binding; an unbound jack carries none).
+- **Special workspaces draw no pad.** A negative workspace (`-98` scratch,
+  `-99`) is never a jack, whether the row comes from core's `workspaces` or
+  from the derivation, and a tie with a negative end is dropped from the
+  drawing. Their sessions still count in the agents and notification cells.
 - **Tie lines are a schematic**, drawn in the band between the jack row
   and the trunk (the bar's lower ~9px). Every line is 2px in phosphor fg
   (idle rule ink), never dim: a tie must read at 1:1.
-  - **Pads:** a tied jack gets a hollow pad `○` (a ~5px ring) centred
-    under its number. Untied jacks get none.
-  - **Bus:** a `project` tie is a solid wire on the pad row, joining the
-    pads directly. The core publishes a clique for a project shared by
+  - **Leads:** a tied jack's pad grows a short lead from the middle of its
+    bottom edge down into the band. Wires start and end on leads; an
+    untied jack's pad has none.
+  - **Bus:** a `project` tie is a solid wire on the first lane, joining
+    the leads directly. The core publishes a clique for a project shared by
     3+ jacks; the paint draws it as ONE bus through all of its pads, not
     n² lines.
-  - **Spawned wires:** a `spawned` tie drops from its pad, runs dashed on
-    a lower lane, and rises into the other pad — the schematic's
+  - **Spawned wires:** a `spawned` tie drops from its lead, runs dashed on
+    a lower lane, and rises into the other lead — the schematic's
     side-wire.
   - **Junctions:** a filled dot `●` marks every point where a wire meets
     another (a spawned wire leaving a bus, two buses meeting), the
     schematic convention; a plain crossing without a dot is not a
     connection.
-  - At most 2 lanes below the pad row; a further tie collapses into a
+  - At most 2 lanes below the jacks; a further tie collapses into a
     `+n` badge (cyan) on its left jack.
 - Lamps run on activity (§2 Motion).
+- **A working pad breathes.** While any session on a jack has `hooks.json`
+  phase `working`, its pad breathes slowly: the ring toward `bright`, a
+  faint `title` fill (the active pad's fill toward `bright`), 0 → 1 → 0
+  over 2s on a cosine, and it stops the moment no session on it works. It
+  follows the working state, never a tool call. One shared breath drives
+  every working pad, stepped at 12.5 fps (the bar redraws 12.5 times a
+  second while an agent works, not every vsync), and nothing runs when no
+  pad works. An urgent pad keeps its red ring; amber stays the lamp's. The
+  session's jack is the same join the ties use (below); no window, no
+  pulse.
+- **A send runs a lamp.** The core publishes recent conductor sends in
+  `graph.json` as `sends: [{from, to, at}]` (a short ring, newest last). An
+  entry new between two reads (never on the first read that carries a
+  ring, so a ring that appears never fires its backlog) runs a lamp from
+  the sender's jack to the receiver's: along a standing tie that joins the
+  two when one is laid, otherwise along a **transient** wire, `dim`, on a
+  lane free over the span (else down to the trunk and along it), drawn for
+  the lamp's run only and gone with it. It is never a tie. A send within
+  one jack, or with one end on no jack, lights that jack's own lamp.
+  Until core publishes `sends`, nothing runs.
 - Hovering a jack opens the **jack insight pane** (§3.4).
+- **Binding a jack to a project** happens in that pane, on its PROJECT row:
+  ```
+  ─ project ─────────────────────────
+  [aoide] [melete] [mneme] [clear]
+  [+ new]
+  name: scratch▏             ⏎ bind  esc
+  ✕ workspace 2 is not bound to any pr…
+  ```
+  One chip per registered project (`projects.json` order), the bound one lit
+  (a `title` band with `ground` text, the active pad's own fill), `[clear]`
+  while the jack is bound, and `[+ new]`. Every click sends ONE
+  `workspaceaction` line pinned to that pane's jack (`"workspace": N`), so
+  it binds the pad the pane belongs to, never the focused one: a chip is
+  `{action:"set", project, workspace}`, `[clear]` is `{action:"clear",
+  workspace}`, and `[+ new]` opens an inline `name:` field (Enter sends
+  `set` with `"new": true`, Escape or a click outside cancels; a name must be
+  non-empty, at most 40 characters, with no whitespace, no control
+  character and no leading `-`, and the field's hint says which rule a typed
+  name breaks). The bar layer never takes keys, so the field holds a
+  compositor focus grab on the pane's popup for exactly as long as it is
+  open. The clicked chip turns amber while the line is in flight; the lit
+  chip moves only when `graph.json` rewrites with the new `project`, and the
+  amber mark clears then or after 5s. When the bridge answers the line
+  (`bridge.workspaceAction`), an `ok: false` reply becomes one dim line with
+  core's own `message` (else `reason`), plain text. **Honest partial:** the
+  facet's bridge answers no `workspaceaction` today, so the line goes
+  fire-and-forget (`bridge.sendCommand`); success still shows through
+  `graph.json`, and a refusal says nothing: the amber mark just clears
+  after 5s.
 - **Where ties come from.** When `graph.json` carries the core's
   `workspaces`/`ties`/`activeAt`, the bar draws those. Until then it
   derives real ties from what is published today, and nothing else:
@@ -278,44 +354,77 @@ One 28px line in the tmux/termui idiom, left to right:
   over published facts, never a new fact (coverage.md records the bend).
   No edge is ever invented: no window, no jack; no edge, no tie.
 
-### 3.2a The patch panel (the bar's right end)
-A small live map of the agents, after the clock at the bar's right end,
-about 16 cells wide and the bar's full height.
-- Every live agent session (not shells) is a small **state lamp** dot
-  (§2 Instruments colours: working, awaiting, idle, stopped). Roots sit on
-  the upper row; a spawned child sits on the lower row under its parent;
-  2px `ink` wires join child to parent (`graph.json` `spawned` edges).
-- When a child's `hooks.json` `updatedAt` advances, a **lamp** (the same
-  amber dash as the switchboard's, shortened to fit) runs its wire from
-  child to parent: the agent reporting upward. A root's own activity
-  flashes its dot once. At most 6 lamps in flight at once; later ones
-  coalesce into the wire's lamp already running.
-- More agents than fit: the rightmost slot becomes `+n` (cyan).
-- Click opens the board on OVERVIEW. Hover shows a pane listing the
-  agents with their state, like the board's AGENTS pane.
-- This is activity, not message traffic: nothing published records one
-  agent sending another a message yet. When core's board feed lands
-  (S8–S10), a lamp can run per real message instead.
-- Nothing moves when no agent is active.
-
 ### 3.3 Dock → the board (`dock`, `aoide-dock`)
 A right-edge pane, full height under the bar, tabbed. The dock is cadenza's
 own board; it mounts none of sonata's gadget slots.
 
 ```
-┌─ BOARD ─────────────────────────────────────────┐
-│ OVERVIEW │ aoide │ melete │ mneme │ SYS │ NOTIF  │
-├─────────────────────────────────────────────────┤
+┌─ BOARD ───────────────────────────────────── 12 live [x] ┐
+│ OVERVIEW │ aoide │ melete │ mneme │ SYS │ NOTIF           │
+├──────────────────────────────────────────────────────────┤
 ```
 
-- **OVERVIEW** (first tab) — four panes on one screen: **AGENTS** (every
-  live agent: lamp, name, project, state, age; focus/send actions),
-  **PROJECTS** (registered projects, the jacks each is bound to, live
-  counts), **TERMINALS** (conducted terminals: name, cwd, jack), **MAIL**
+- **OVERVIEW** (first tab) — its panes stacked, the column scrolling when
+  long: **AGENTS** (the agent cards, grouped by project), **TERMINALS**
+  (the terminal cards), **PROJECTS** (registered projects, the jacks each
+  is bound to, live counts), and, once the mail read is published, **MAIL**
   (active mail threads: mailbox, subject, last sender, age).
-- **one tab per project** — the project's board feed (chatter, mail,
-  receipts, its summonses), with that project's own agents and terminals in
-  a narrow rail on the right, and the composer at the bottom.
+- **The cards** carry sonata's conductor and terminals data, field for
+  field, in termui rows; the look is cadenza's.
+  ```
+  aoide ────────────────────────────── 4 agt · 2 working · 361k tok
+  ● phase 5 slice S8 — the board read op                 [2]   #02
+    claude / claude-opus-5-5                                working
+    rook-lantern · …0001 · yomi · aoide
+    » land the board read op behind hasBoardFeed
+    ▸ Bash: cargo test -p aoide-conduct -- graph::ties
+    The ties block needs the spawned edge before the anchors edge,
+    otherwise the clique collapses into one bus; reading graph.rs…
+    ~/Aoide/…/crates/conduct        ctx ██████░░ 142k/200k  up 1h14m
+  ├─ ● subagent: read the mail store             up  16m   #2.1
+  │    general-purpose / claude-opus-5-5 · shiny-kite · …000a  working
+  │    » read the mail store index and list the open threads
+  │    ▸ Read: ~/.aoide/state/mail/index.json
+  │    Reading the index; three threads are open, the newest from…
+  │
+  └─ ◐ subagent: audit the fixtures              up   9m   #2.2
+       …
+       ! quick-wren wants to run Bash          [approve] [deny]
+  ```
+  - An **agent card** is one live session, nine lines, fixed: the title
+    (else the harness), the jack and the `#NN` ordinal; harness / model
+    and the state word; petname · short id · host · project; the prompt
+    (`»`); the current tool (`▸`, one line); the agent's words in a fixed
+    three-line box whose last line elides; then the cwd (the tail kept)
+    beside the context gauge and the time up. Streaming data never moves
+    it. The hook phase, when there is one, is the card's state.
+  - A **subagent** hangs under its nearest live main (its
+    `parentSessionId`, else the `graph.json` `spawned` edge), indented on
+    a tree limb (`├─` `└─`), six lines: no place line, no cwd, no gauge,
+    a two-line box, its `#NN.k` and time up on the title line.
+  - The **summons lane** is the one line that comes and goes: it exists
+    only while `herald.json` holds a permission summons for that session,
+    with `[approve] [deny]` answering through the NOTIF tab's own
+    `heraldverdict` (click only).
+  - Groups follow `projects.json`; sessions outside every project fall in
+    a dim **unanchored** group, and with no project registered there is no
+    group rule at all.
+  - A **terminal card** is one window, two lines: what runs in it (the
+    agent's title, else the harness; a bare shell's live command, else
+    `shell`), its state, jack and time up, then the cwd. The live agent in
+    a window wins over the shell hosting it.
+  - A click on a card focuses its window (a subagent's, its parent's). A
+    right-click, or `j`/`k`, selects a card and opens its action line:
+    focus, project, undying, kill (kill asks `y/N`; subagents cannot be
+    killed).
+  - Only lamps move: a working or awaiting card's lamp breathes (2s), off
+    one shared step at 12.5 fps that stops when nothing works or waits.
+- **one tab per project** — today that project's agent cards (its mains,
+  their subagents under them) and its terminal cards as two panes across
+  the full width. Once the board feed is published, the
+  project's feed (chatter, mail, receipts, its summonses) takes the left,
+  the agents and terminals move to a narrow rail on the right, and, once
+  posting is published, the composer sits at the bottom.
   ```
   │ 14:02 rook      ● turn settled               │ ● rook     │
   │ 14:02 minerva   ◐ Bash: cargo test           │ ◐ minerva  │
@@ -324,31 +433,51 @@ own board; it mounts none of sonata's gadget slots.
   ├──────────────────────────────────────────────┴────────────┤
   │ to: aoide ▾ │ > _                                          │
   ```
-- **SYS** — machine and spend on one tab: CPU/memory gauges and per-jack
-  sparklines (`state/usage/now.json`), and token/cost usage — the account
-  block (`state/usage.json`, real today) plus per-workspace/project totals
-  from the new store.
+- **SYS** — machine and spend on one tab: the machine's CPU and memory
+  gauges (the kernel's `/proc/stat` and `/proc/meminfo`, read as sonata's
+  meters reads them), the account block (`state/usage.json`), and, once
+  `state/usage/now.json` is published, per-jack sparklines and
+  per-workspace/project token and cost totals. The account block carries
+  the Claude limit gauges and, when the user has opted in, usage.json's
+  `ollama` block as one more gauge row, `OLLAMA … month`: the share of the
+  month's included credits, the track stopping at 100% while the figure
+  keeps counting in orange past it (no reset date, no dollars — Ollama
+  publishes neither). `ok: false` draws one dim `ollama: <error>` line; no
+  `ollama` key draws nothing.
 - **NOTIF** — the herald: toasts and summonses as borderless blocks, quoted
   plain text, `[y] approve [n] deny` on a summons (the existing
   `heraldverdict` / `heralddismiss` commands, nothing else).
-- Opened exactly as sonata's dock is (`toggle()` from the bar, `SUPER+G`);
-  the bar's cells open it on a named tab.
+- **Opening** is sonata's dock's: `toggle()` from `SUPER+G`, and the bar's
+  cells open it on a named tab.
+- **Closing**, any of: the `[x]` cut into the BOARD rule beside the stat
+  (dim at rest, `title` on hover); Escape; `SUPER+G`; the bar cell of the
+  tab already showing (a cell toggles: on another tab it switches); a click
+  anywhere off the board. The last is a transparent full-screen catcher
+  (`aoide-dock-scrim`), one layer under the board and clear of the bar's
+  reserved zone, mapped only while the board is up. It draws nothing and
+  consumes the click that closes: that click does not reach the window
+  under it. The bar is outside it and stays clickable.
 
 **Untrusted text (house rule 4).** Every board `text`, `summary`, `body`,
 `subject` is rendered `Text.PlainText`, never linkified, never actionable.
 The composer is never pre-filled from an item.
 
-**Until the seams land:**
-| part | real today | honest empty until |
+**Until the seams land.** A part whose source is not published is not
+drawn at all: no "bridge not wired" pane on the live board. Each hidden
+part keeps its code behind one switch in `BoardBody.qml`, false until the
+source exists; turning the part back on is that one line, and the fixture
+harness (`BoardPreview.qml`) flips them to show the full board.
+| part | real today | hidden until (switch) |
 |---|---|---|
-| OVERVIEW agents / terminals | `sessions.json` | — |
-| OVERVIEW projects | `projects.json` (bindings column empty) | S1 for bindings |
-| OVERVIEW mail | — | `no mail view — bridge not wired` until S9/S10 |
-| project tabs (names) | `projects.json` | — |
-| project feed | — | `no feed — bridge not wired` until S8/S10 |
-| composer | drawn disabled, `post: bridge not wired` | S11 (agents), S12 (project) |
-| SYS account usage | `state/usage.json` | — |
-| SYS CPU/mem, per-jack tokens/cost | — | `no usage data — bridge not wired` until S5/S6 |
+| OVERVIEW agent + terminal cards | `sessions.json`, `hooks.json`, `herald.json` summonses, `graph.json` `spawned` edges | — |
+| OVERVIEW projects | `projects.json` (bindings column `—`) | S1 fills the bindings |
+| OVERVIEW mail | — | S9/S10 (`hasMailRead`) |
+| project tabs: agent + terminal cards | `projects.json`, `sessions.json`, `hooks.json`, `herald.json`, `graph.json` | — |
+| project feed | — | S8/S10 (`hasBoardFeed`) |
+| composer | — | S11 agents, S12 project (`hasBoardPost`); drawn disabled until `boardpost` exists |
+| SYS machine CPU/mem | `/proc/stat`, `/proc/meminfo` | — |
+| SYS account usage | `state/usage.json` (its `ollama` block only when opted in) | — |
+| SYS per-jack CPU/mem/tokens/cost | — | S5/S6 (`hasJackUsage`) |
 | NOTIF | `stage/herald.json` | — |
 
 ### 3.4 The jack insight pane
@@ -364,6 +493,14 @@ list is real (Hyprland + `sessions.json`), the numbers read `no usage data
 A centred command pane: `> ` prompt, fuzzy list with `[n]` indices, modes as
 tabs in the rule (`apps │ clip │ ledger`) — clipboard and the grimoire ledger
 stay the facet data seams they are.
+- **Search first, then the number.** A query is searched in every mode,
+  digits included: apps and ledger match an app's name AND its desktop id
+  (so `2048` finds 2048), clip matches the preview text. Only when a query
+  that is wholly a positive integer n finds NOTHING in the current mode, and
+  n is no more than that mode's list at rest, does it name a row: the list
+  at rest shows, row n takes the selected styling (the one amber `[n]`),
+  and Enter fires row n. Any real match always wins; a number past the list
+  is a plain "no match".
 
 ### 3.6 Power menu (`powermenu`, `aoide-powermenu`)
 A centred pane like a shell prompt: `┌─ SHUTDOWN ─┐` with `[l] lock
@@ -389,9 +526,20 @@ The wallpaper is a still image of a circuit board under the tube.
   never a slot) renders it from the livery with a fixed seed, and the
   preview canvas shoots it at each monitor's size into
   `cover/pcb-<w>x<h>.png`. Regenerating after a palette change is one shot.
-- Static. Nothing moves on the wallpaper; the moving parts are the lamps.
+- Static today. Nothing moves on the wallpaper; the moving parts are the
+  lamps.
 - Live: `lyra cover set <abs path>` (a hot swap). Declaring it into
   `aoide.livery.wallpaper` for the rebuild is the User's to admit.
+- **The live board (waits on a core wallpaper slot).** The agent map
+  belongs on the cover, not the bar. Once the facet anchors a song-owned
+  `wallpaper` slot, cadenza's `wallpaper.qml` draws `CoverPcb` live with a
+  fresh seed at every shell start, and each live agent takes one pad near
+  the edge: its ring lit in its state colour, a spawned child's pad joined
+  to its parent's by a track. When a child's `hooks.json` `updatedAt`
+  advances, a lamp runs that track from child to parent; a root's own
+  activity flashes its pad. At most 6 lamps at once, coalescing. Nothing
+  moves when no agent is active. Until the slot lands there is no agent
+  map; the board's AGENTS pane is the list (coverage.md).
 
 ## 4. Preview fixtures
 
@@ -446,3 +594,28 @@ reads a fixture path.
   core does (§3.2); a patch panel of agents with lamps on activity at the
   bar's right end (§3.2a); a circuit-board cover (§3.9); and an inner
   border glow on every pane after a reference shot (`refs/ref-inner-glow.png`).
+- 2026-09-26 — khoa: the agent dots after the clock confused; the agent
+  map moves to a live cover once core anchors a wallpaper slot (§3.9), and
+  leaves the bar now. CPU and spend leave the bar for the board's SYS tab.
+  Every jack becomes a pad with its number inside, tied or not (§3.2).
+  Sound and bluetooth share one cell and one pane, with a bluetooth power
+  toggle and per-device connect (§3.1).
+- 2026-09-26 — khoa: the jack pads are round (a circle, a pill for two
+  digits), like a board's pads; the only rounded shape in the song.
+- 2026-09-26 — khoa: a jack's pad breathes slowly while a session on it
+  works (per state, not per tool call), and a conductor send runs a lamp
+  from the sender's jack to the receiver's, on a transient wire when no
+  tie joins them, read from core's coming `graph.json` `sends` (§3.2).
+- 2026-09-26 — khoa: the board shows agents and subagents as cards, with
+  the data sonata's conductor and terminals cards show, drawn in cadenza's
+  theme, on OVERVIEW and every project tab (§3.3 "The cards").
+- 2026-09-26 — khoa: core's workspace binding is live, so a jack binds from
+  its insight pane (a PROJECT row of chips, `[clear]`, an inline `[+ new]`
+  name, one `workspaceaction` line pinned to that jack); special (negative)
+  workspaces draw no pad; the switchboard fixture follows core's project
+  rule (explicit > owner > workspace default > cwd) (§3.2).
+- 2026-09-26 — khoa: a digits-only launcher query still searches first
+  (names and desktop ids); only when it finds nothing does `n` name row n,
+  lit amber, and Enter fire it (§3.5). The RICE cell turns a dim `…` on the
+  click and swallows further clicks until the mode changes or 10s pass, so
+  a double click can no longer send two toggles (§3.1).

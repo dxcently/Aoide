@@ -1280,7 +1280,16 @@ fn deliver_remote_with(
                 Ok(from) => (from, String::new()),
                 Err(e) => (None, format!("\nnot claiming parent: {e}")),
             };
-            match aoide_client::commands::send_message_to_node(node, &text, &remote_id, from.as_deref())
+            // P-CHARTER: the mesh this delivery acts in. `send`'s target is a
+            // NODE (`node/query`), so the record resolves it — the `--mesh`
+            // typed, else the sole mesh holding `message`, else the home mesh;
+            // a genuine tie refuses, naming the meshes.
+            let named_mesh = aoide_client::commands::request_mesh(node, inv.flags.get("mesh").map(String::as_str), "message");
+            let named_mesh = match named_mesh {
+                Ok(m) => Some(m),
+                Err(e) => return Outcome::error(cmd, format!("--mesh: {e}")).with_data(serde_json::json!({ "reason": "mesh-ambiguous" })),
+            };
+            match aoide_client::commands::send_message_to_node(node, &text, &remote_id, from.as_deref(), named_mesh.as_deref())
             {
                 Ok(response) => {
                     let out = Outcome::ok(
@@ -2552,6 +2561,7 @@ mod tests {
     use crate::graph::doc::prune_done;
     use crate::graph::model::{hooks_path, merged_sessions, HooksFile, SessionRecord};
     use crate::graph::testutil::*;
+    use aoide_test_support::{accept_one, expect_delivery, read_delivery};
 
     #[test]
     fn parent_autogate_decision_is_exact_and_guarded() {
@@ -2665,13 +2675,7 @@ mod tests {
         );
 
         // Accept + read the injected payload to EOF in a thread.
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "a `--yes` send reaches the target's socket");
 
         let out = session_send(&send_invocation(
             &["hello", "world"],
@@ -2740,14 +2744,7 @@ mod tests {
             None,
         );
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
-
+        let acc = expect_delivery(listener, "a `session:<id>` target's send is DELIVERED");
         // The exact id `graph --json` would emit for this session.
         let prefixed = format!("session:{id}");
         let out = session_send(&send_invocation(
@@ -2820,13 +2817,7 @@ mod tests {
             None,
         );
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "a delivered local send reaches the socket and the mailbase");
         let out = session_send(&send_invocation(&["do", "the", "thing"], &[("id", id), ("yes", "true")]));
         let _ = acc.join().unwrap();
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
@@ -2944,12 +2935,13 @@ mod tests {
         // leaves that name STANDING rather than merely never setting one.
         let acc = std::thread::spawn(move || {
             let mut seen = Vec::new();
-            for _ in 0..2 {
-                let (mut conn, _) = listener.accept().unwrap();
-                use std::io::Read as _;
-                let mut buf = Vec::new();
-                let _ = conn.read_to_end(&mut buf);
-                seen.push(String::from_utf8_lossy(&buf).into_owned());
+            for what in [
+                "the steer reaches the target's socket",
+                "the verdict keystroke reaches the target's socket",
+            ] {
+                let mut conn = accept_one(&listener, what);
+                let got = read_delivery(&mut conn, what);
+                seen.push(String::from_utf8_lossy(&got).into_owned());
             }
             seen
         });
@@ -3099,13 +3091,7 @@ mod tests {
             None,
         );
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "the prefixed payload is DELIVERED");
 
         let out = session_send(&send_invocation(
             &["fix", "the", "reaper"],
@@ -3180,13 +3166,7 @@ mod tests {
             None,
         );
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "the shell target's bytes are DELIVERED verbatim");
 
         let out = session_send(&send_invocation(
             &["fix", "the", "reaper"],
@@ -3249,13 +3229,7 @@ mod tests {
             None,
         );
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "a self-attributed send is DELIVERED unprefixed");
 
         let out = session_send(&send_invocation(
             &["echo", "hello"],
@@ -3313,13 +3287,7 @@ mod tests {
             None,
         );
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "a permit-shaped keystroke is DELIVERED with no prefix");
 
         let out = session_send(&send_invocation(
             &["2"],
@@ -3377,13 +3345,7 @@ mod tests {
             None,
         );
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "the smuggled-newline send is DELIVERED as one submitted line");
 
         let out = session_send(&send_invocation(
             &["ship", "it"],
@@ -3445,13 +3407,7 @@ mod tests {
             None,
         );
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "a kimi target's send is DELIVERED with CR");
 
         let out = session_send(&send_invocation(
             &["hello", "world"],
@@ -3489,8 +3445,10 @@ mod tests {
         let listener = UnixListener::bind(&socket).unwrap();
 
         let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
             use std::io::Read as _;
+            // Bounded accept + a read budget on the stream (`accept_one`), so a
+            // write that never lands fails this test rather than parking it.
+            let mut conn = accept_one(&listener, "the two ordered writes reach the peer");
             let mut first = [0u8; 256];
             let n1 = conn.read(&mut first).unwrap();
             let mut second = [0u8; 256];
@@ -3525,7 +3483,7 @@ mod tests {
     #[test]
     fn write_delivery_is_one_write_when_submit_is_not_set() {
         // The non-submit path is untouched: no `submit_key` write happens at
-        // all, so an acceptor's `read_to_end` (blocking until the sender's
+        // all, so an acceptor's read to EOF (blocking until the sender's
         // `UnixStream` drops and closes its half of the connection) sees
         // exactly the text and nothing trails it.
         let root = unique_stage("write-delivery-one-write");
@@ -3533,19 +3491,13 @@ mod tests {
         let socket = root.join("s.sock");
         let listener = UnixListener::bind(&socket).unwrap();
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "the one write arrives as one delivery");
 
         {
             let mut stream = UnixStream::connect(&socket).unwrap();
             write_delivery(&mut stream, b"hello world", false, "\r", std::time::Duration::ZERO)
                 .unwrap();
-        } // drop closes the stream, unblocking the acceptor's read_to_end.
+        } // drop closes the stream, ending the acceptor's read.
         let got = acc.join().unwrap();
 
         assert_eq!(
@@ -3596,13 +3548,7 @@ mod tests {
                 None,
             );
 
-            let acc = std::thread::spawn(move || {
-                let (mut conn, _) = listener.accept().unwrap();
-                use std::io::Read as _;
-                let mut buf = Vec::new();
-                let _ = conn.read_to_end(&mut buf);
-                buf
-            });
+            let acc = expect_delivery(listener, "an unregistered agent's send is DELIVERED with CR");
 
             let out = session_send(&send_invocation(
                 &["hello", "world"],
@@ -3662,13 +3608,7 @@ mod tests {
             None,
         );
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "the smuggled-CR send is DELIVERED as one submitted line");
 
         let out = session_send(&send_invocation(
             &["ship", "it"],
@@ -3747,13 +3687,7 @@ mod tests {
             aoide_storage::display::short_tail(sender_id)
         );
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "the petnamed sender's prefixed payload is DELIVERED");
 
         let out = session_send(&send_invocation(
             &["ship", "it"],
@@ -3811,13 +3745,7 @@ mod tests {
             None,
         );
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "the raw-id fallback payload is DELIVERED");
 
         let out = session_send(&send_invocation(
             &["ship", "it"],
@@ -3984,13 +3912,7 @@ mod tests {
             None,
         );
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "a parent's send is DELIVERED without `--yes`");
 
         // No --yes: delivery is authorised purely by the parent relationship,
         // resolved via the REAL sealed-ancestry pipeline.
@@ -4080,13 +4002,7 @@ mod tests {
 
         // (a) sender and target share a live parent, no --yes, no env autogate,
         // sender is NOT the target's parent → DELIVERED, sibling label.
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "a sibling's send is DELIVERED");
         let out = deliver_local_with(
             &send_invocation(&["hey", "sib"], &[("id", target)]),
             target,
@@ -4193,13 +4109,7 @@ mod tests {
             None,
         );
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "a self-attested sender's payload still reaches the socket");
 
         // The resolver truthfully attests the sender AS the target itself —
         // exactly what a genuinely self-connecting process's kernel identity
@@ -4209,7 +4119,7 @@ mod tests {
             id,
             |_sessions| Some(id.to_string()),
         );
-        acc.join().unwrap(); // the stand-in listener accepts unconditionally — this test is
+        acc.join().unwrap(); // the stand-in listener takes the delivery — this test is
                               // about the GATE's own arithmetic, not the real receiver's block.
 
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
@@ -4532,7 +4442,8 @@ mod tests {
             hub: false,
             pubkey: None,
             verified: false,
-            allows: Vec::new(),
+            grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-21T00:00:00Z".to_string(),
         }
@@ -4626,13 +4537,7 @@ mod tests {
             write_stage(&sessions_path(), &f).unwrap();
         }
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "a `--to <petname>` send is DELIVERED down the `--id` path");
 
         let out = session_send(&send_invocation(
             &["hello", "world"],

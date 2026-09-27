@@ -7,13 +7,19 @@
       "roots": [
         "/home/user/Aoide"
       ],
-      "lead": "f3000000-0000-4000-8000-000000000001"
+      "lead": "f3000000-0000-4000-8000-000000000001",
+      "workspaces": [
+        2
+      ]
     },
     {
       "name": "melete",
       "path": "/home/user/melete",
       "roots": [
         "/home/user/melete"
+      ],
+      "workspaces": [
+        7
       ]
     },
     {
@@ -21,6 +27,9 @@
       "path": "/home/user/mneme",
       "roots": [
         "/home/user/mneme"
+      ],
+      "workspaces": [
+        8
       ]
     }
   ]

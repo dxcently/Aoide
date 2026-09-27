@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-07-25
-updated: 2026-08-27
+updated: 2026-09-27
 tags: [aoide, onboarding, deployment]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -21,11 +21,25 @@ Aoide is a framework you clone and run. The upstream repo ships the shape-making
 ## Install in Two Steps
 
 ```
-git clone <upstream> ~/Aoide
+git clone <upstream-url> ~/Aoide       # `-b main` when the source is a bundle
 cd ~/Aoide && aoide onboard
 ```
 
-That is the complete install. `onboard` is a CLI-door command and runs from inside the checkout: it performs the core half itself, delegates the nix half to `lyra onboard` when the `lyra` binary resolves, and finishes by printing the four-tier agent guide ([[Agent-Interface]]).
+Those two lines install the **distribution** — the clone, the host line, the
+songbook. They do not install `aoide` itself: the binary comes from the
+checkout with cargo, no nix, and that step has one page of its own,
+`docs/INSTALL.md` (prerequisites, the clone, `cargo install --path
+pkgs/aoide/crates/cli --bins --locked`, first boot, the smoke test, starting
+`aoided`). Read it first; nothing below presumes a binary the page never
+installs.
+
+With `aoide` on `PATH`, the two lines above are the whole thing. `onboard` is
+a CLI-door command and runs from inside a checkout: it performs the core half
+itself, delegates the nix half to `lyra onboard` when the `lyra` binary
+resolves, and finishes by printing the four-tier agent guide
+([[Agent-Interface]]). On a box with no nix and no `lyra` it says so and stops
+— *"lyra: not found ... core setup is complete"* — and the core half is
+installed either way.
 
 ## First-Boot Onboarding Flow
 
@@ -44,6 +58,13 @@ If the `lyra` binary resolves, `onboard` then delegates the nix half to `lyra on
 Re-running `lyra onboard` warns and backs the old file up to `<out>.bak`; a file it did not generate is refused, never overwritten.
 
 **Done-state check**: bar shows agent session + connection state; a notification round-trips agent → center; `aoide schema --json` validates.
+
+On a NixOS host the daemon is started for you: `pkgs/aoide/module/aoided.nix` writes
+the `aoided` systemd **user** unit and `modules/nucleus/aoided.nix` anchors it to
+`aoide.sessionTarget`. That module is the declared path. Off nix — a plain Linux
+box, a container, WSL2 — there is no unit file, and `docs/INSTALL.md` § 6 carries
+the portable equivalent (the unit body, its four environment seams, and the
+no-systemd fallback).
 
 ## Self-Update
 

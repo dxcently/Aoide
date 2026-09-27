@@ -5,13 +5,15 @@ routes; it holds no rule bodies. Read in this order:
 
 1. `AGENTS.md` (repo root) — the core-vs-paint boundary, the nine house
    rules, the docs layering. Read before acting.
-2. `docs/agent/session.md` — the mechanical checklist a working session
+2. `docs/INSTALL.md` — installing the `aoide`/`aoided` binaries (cargo, no
+   nix), first boot, and starting the daemon; the one install page.
+3. `docs/agent/session.md` — the mechanical checklist a working session
    follows here.
-3. `CONTRACTS.md` — the versioned interfaces: note schema, dendrite shape,
+4. `CONTRACTS.md` — the versioned interfaces: note schema, dendrite shape,
    `schema --json`, stage files.
-4. `docs/Aoide-Wiki/ingest/index.md` — the wiki's table of contents; every
+5. `docs/Aoide-Wiki/ingest/index.md` — the wiki's table of contents; every
    concept and entity in long form.
-5. `aoide guide` / `lyra guide` — the same orientation printed by the binary
+6. `aoide guide` / `lyra guide` — the same orientation printed by the binary
    at runtime, for a session with no checkout in view.
-6. `aoide schema --json` / `lyra schema --json` — the machine-readable
+7. `aoide schema --json` / `lyra schema --json` — the machine-readable
    command surface; the ground truth for what each binary can do.

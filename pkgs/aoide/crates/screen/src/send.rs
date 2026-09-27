@@ -241,6 +241,7 @@ pub fn send(inv: &Invocation) -> Outcome {
 mod tests {
     use super::*;
     use aoide_protocol::Door;
+    use aoide_test_support::expect_delivery;
 
     fn test_invocation(args: &[&str], flags: &[(&str, &str)]) -> Invocation {
         Invocation {
@@ -511,13 +512,7 @@ mod tests {
         let listener = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
         write_conductable_session(id, &socket_path);
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "a `--yes` screen send is DELIVERED to the target's socket");
 
         let capture = root.join("shot.png");
         std::fs::write(&capture, b"fake").unwrap();

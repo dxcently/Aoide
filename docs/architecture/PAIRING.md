@@ -345,13 +345,33 @@ Per-request detached signature replaces bearer comparison for paired
 nodes:
 
 - Headers: node name (attribution only — see below), timestamp, nonce,
-  signature. Signature is
+  signature, and the mesh the request acts in (P-CHARTER). Signature is
   ed25519 over a canonical string binding method, path, timestamp,
-  nonce, and the body digest (`sha2`). The executor writes the exact
-  canonical form into CONTRACTS §6 in the same commit that lands it.
+  nonce, the body digest (`sha2`), and — when the request names one —
+  that mesh, as a sixth field appended after the digest. The executor
+  writes the exact canonical form into CONTRACTS §6 in the same commit
+  that lands it.
 - Replay guard: timestamp window (±120s default) + a bounded nonce
   cache. Clock skew beyond the window earns a taught error naming
   the skew.
+- **The wire is one-way across the mesh field, and there is no fallback.**
+  A `< 0.0.26` verifier rebuilds five fields and has no mesh arm, so every
+  signed command from a `>= 0.0.26` node to a `< 0.0.26` one is refused
+  `-32007` "signature verification failed", while the same command from the
+  older node to the newer one works (the `None` arm, judged in
+  `[pairing] homeMesh`). The ceremony itself crosses both ways — its own
+  signatures carry no mesh — so a cross-version pair succeeds and is
+  ONE-WAY: the older node commands the newer one and not the reverse, which
+  `node list` cannot show. Accepting both encodings for a release would need
+  a fallback on the refusal, and whoever can answer with that refusal could
+  strip the mesh from the signed bytes and have the request judged in the
+  receiving box's home mesh — the exact re-aiming the sixth field is for. So
+  the remedy is upgrading every node (CONTRACTS.md §6 "Mixed versions", the
+  pin in `aoide-storage::wire_auth::tests`). The same release's
+  `state/nodes.json` is one-way too, and destructive in the older
+  direction: a `< 0.0.26` binary writes the whole registry from a model with
+  no `grants`/`narrowed`, so its first write erases per-mesh grants
+  (CONTRACTS.md §4's rollback-scope paragraph, §7's `grants` record).
 - Unpaired callers keep today's door-wide bearer path (read arms
   only, per decision 6). Fail-closed discipline mirrors #84
   (sentinel on resolve failure, constant-time comparisons where
@@ -364,10 +384,13 @@ nodes:
   request whose signature this door already verified is, by
   construction, never a local caller, so it is treated as remote for
   the auto-deliver-vs-pending question regardless of which address it
-  arrived from: `state/nodes.json`'s per-node `autogate` flag, or the
-  remote-parent rule below, decides whether a signed node's send still
-  auto-delivers — never the connection origin. An unsigned request's
-  loopback trust is unaffected —
+  arrived from: `state/nodes.json`'s per-node `autogate` flag AND the
+  caller's grant in the mesh its own request SIGNED for (P-CHARTER: the flag
+  opens the rail, and `message` on the charter's line — or on the paired
+  record, where no charter is shaped — is what the flag then delivers on;
+  CONTRACTS.md §6's rail table), or the remote-parent rule below, decides
+  whether a signed node's send still auto-delivers — never the connection
+  origin. An unsigned request's loopback trust is unaffected —
   this narrowing only ever removes a free pass a signature was never
   entitled to in the first place.
 - **A remote parent steers the child it spawned, and the tunnel is its
@@ -752,7 +775,9 @@ forward is a pipe, not a party to the protocol.
   trust — it is a remote node by construction, and `a2a.rs::origin_for_
   inject` strips loopback's free pass from it before the delivery decision
   runs (CONTRACTS.md §6). A signature-rung `autogate` flag restores
-  auto-delivery for a node the operator already marked that way, exactly
+  auto-delivery for a node the operator already marked that way — the flag
+  AND the caller's grant in the mesh its request SIGNED for (P-CHARTER: the
+  flag opens the rail, `message` is what it delivers on) — exactly
   the like-for-like an operator's existing grant expects, and a matched
   remote-parent claim does the same for the node that spawned this very
   session — the tunneled parent is the shape that rule exists to serve.
@@ -764,14 +789,36 @@ forward is a pipe, not a party to the protocol.
 A named mesh (`config.toml`'s `[mesh.<name>]`, task #135 P4, CONTRACTS.md
 §4) is intent, not a second identity model. It is an operator's own
 bookkeeping — "these are the boxes I expect to belong to this mesh,
-reached at these hops" — recorded once, on one instance, never transmitted:
-nothing in the ceremony, the wire (§"Wire authentication" above), or any
-A2A payload carries a mesh name, and `node_store::Node` gains no field for
-it. The mesh itself stays exactly what the Kill-list below already
-settled — the closure of pairwise, individually-verified records — and a
-declared mesh only ever describes a NAMED EXPECTATION over that same
-closure, never a new object standing in front of it. Declaring one changes
-nothing about how a node is paired, verified, or reached.
+reached at these hops" — recorded once, on one instance, never transmitted
+by the ceremony. The mesh itself stays exactly what the Kill-list below
+already settled — the closure of pairwise, individually-verified records —
+and a declared mesh only ever describes a NAMED EXPECTATION over that same
+closure, never a new object standing in front of it.
+
+**P-CHARTER makes a mesh a trust scope, so two things above are no longer
+true.** A signed request now names the mesh it acts in, inside its
+per-request signature (`X-Aoide-Mesh`, `wire_auth::canonical_string`'s sixth
+field), and `node_store::Node` carries `grants` — one capability set PER
+MESH, with `allows` migrated into the home mesh (`[pairing] homeMesh`,
+default `home`). The door reads one mesh's grant per request
+(`aoide-server::a2a::grant_in_mesh`), and a grant given in one mesh holds
+only there.
+
+**The pairing's own mesh rides the ceremony** (P-CHARTER): `aoide pair …
+--mesh <m>` names it, the request's body carries it (`aoide/pairRequest`'s
+optional `mesh`, validated as a mesh name at the door and written onto the
+parked entry IN THE SAME WRITE as the park itself — `park_inbound_with_mesh`,
+so a park that lands always carries its mesh), and BOTH ends' commits take it
+— above every local source (`--mesh` on that side, the target's known meshes,
+the home mesh) — so the two sides agree by construction. A pairing that names
+none is the pre-charter shape and still works: each side resolves the mesh
+locally, exactly as before, and a box that knows more than one mesh for a
+target refuses rather than guessing.
+
+The mesh is self-asserted DATA of the same class as `url` and `selfVia` —
+validated for SHAPE, never trusted for authority (trust stays in pubkeys + the
+typed code) — and the operator sees it beside the code, so the human gate that
+authorizes a pairing covers it too.
 
 `aoide mesh` (`aoide_client::mesh`) is the read side: it compares a
 declaration against the live registry and reports where they diverge — a

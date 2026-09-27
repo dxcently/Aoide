@@ -1,21 +1,31 @@
 // BoardSys.qml — the board's SYS tab (intent §3.3): machine and spend on one
 // tab.
 //
-//   ┌─ MACHINE ──────────────────────────── 14:02:30 ┐   now.json totals
-//   ┌─ JACKS ───────────────────────────────────── 6 ┐   per-jack sparklines
-//   ┌─ TOKENS BY JACK ───────────────────────────────┐   bar chart
+//   ┌─ MACHINE ──────────────────────────────────────┐   /proc CPU + memory
+//   ┌─ JACKS ───────────────────────────────────── 6 ┐   per-jack sparklines  ┐ hasJackUsage
+//   ┌─ TOKENS BY JACK ───────────────────────────────┐   bar chart            ┘
 //   ┌─ ACCOUNT ──────────────────────────── [r] 3m ──┐   state/usage.json
 //
 // A HELPER (uppercase — never a slot), loaded by URL from BoardBody.
 //
-// MACHINE / JACKS / TOKENS read `board.usageNow` — `state/usage/now.json`
-// (§C, `by: "workspace"`), which does not exist until S5/S6; until then each
-// says `no usage data — bridge not wired`. `tokens: null` and `costUsd: null`
-// mean UNKNOWN and draw `—`, never 0; `costPartial` draws the figure orange
-// with a `~`. ACCOUNT reads `state/usage.json` (real today) through
-// `livery.usagePath`; `[r]` asks the daemon to re-run the poller
-// (`bridge.refreshUsage`) — the file watch picks the answer up.
+// MACHINE is the whole machine's CPU and memory, read from the kernel's own
+// ledgers (`/proc/stat`, `/proc/meminfo`) on a 2s tick exactly as sonata's
+// meters slot reads them — files, never a process; the tick runs only while
+// this tab is loaded and the board is open. A host without them says so.
+//
+// The per-jack numbers — JACKS, TOKENS BY JACK and MACHINE's attributed /
+// unattributed lines — read `board.usageNow` (`state/usage/now.json`, §C,
+// `by: "workspace"`), which is not published until S5/S6. They are hidden
+// while `board.hasJackUsage` is false. With it on: `tokens: null` and
+// `costUsd: null` mean UNKNOWN and draw `—`, never 0; `costPartial` draws
+// the figure orange with a `~`. ACCOUNT reads `state/usage.json` (real
+// today) through `livery.usagePath`; `[r]` asks the daemon to re-run the
+// poller (`bridge.refreshUsage`) — the file watch picks the answer up. Its
+// opt-in `ollama` block ({ok, monthly.utilization} or {ok:false, error})
+// adds one OLLAMA month gauge (the track clamps at 100%, the figure goes
+// orange past it) or one dim `ollama: <error>` line; absent, nothing.
 import QtQuick
+import Quickshell.Io
 
 Item {
     id: root
@@ -34,10 +44,57 @@ Item {
         }
     }
 
-    readonly property var now: board.usageNow
+    readonly property bool jackOn: board.hasJackUsage
+    readonly property var now: jackOn ? board.usageNow : null
     readonly property var rows: (now && now.rows) ? now.rows.slice().sort(function (a, b) {
         return (a.workspace || 0) - (b.workspace || 0) }) : []
     readonly property bool hasNow: rows.length > 0
+
+    // ── the machine: /proc, as sonata's meters reads it ───────────────────
+    property real cpuPct: -1           // -1 until two samples exist
+    property real memUsed: 0           // bytes
+    property real memTotal: 0
+    property bool procRead: false      // a ledger answered at least once
+    property real _prevTotal: -1
+    property real _prevIdle: -1
+    FileView { id: statFile; path: "/proc/stat"; blockLoading: true; printErrors: false }
+    FileView { id: memFile; path: "/proc/meminfo"; blockLoading: true; printErrors: false }
+    function sample() {
+        statFile.reload(); memFile.reload()
+        try {
+            var line = ("" + (statFile.text() || "")).split("\n")[0].trim().split(/\s+/)
+            if (line[0] === "cpu") {
+                var total = 0, idle = 0
+                for (var i = 1; i < line.length; i++) {
+                    var v = parseInt(line[i]); if (isNaN(v)) continue
+                    total += v
+                    if (i === 4 || i === 5) idle += v          // idle + iowait
+                }
+                if (root._prevTotal >= 0 && total > root._prevTotal)
+                    root.cpuPct = Math.max(0, Math.min(100, (1 - (idle - root._prevIdle) / (total - root._prevTotal)) * 100))
+                root._prevTotal = total; root._prevIdle = idle
+                root.procRead = true
+            }
+        } catch (e) {}
+        try {
+            var kv = {}, ls = ("" + (memFile.text() || "")).split("\n")
+            for (var j = 0; j < ls.length; j++) {
+                var m = ls[j].match(/^(\w+):\s+(\d+)/)
+                if (m) kv[m[1]] = parseInt(m[2]) * 1024
+            }
+            if (kv.MemTotal > 0) {
+                var avail = kv.MemAvailable !== undefined ? kv.MemAvailable
+                          : (kv.MemFree || 0) + (kv.Buffers || 0) + (kv.Cached || 0)
+                root.memTotal = kv.MemTotal; root.memUsed = kv.MemTotal - avail
+                root.procRead = true
+            }
+        } catch (e) {}
+    }
+    Timer {
+        interval: 2000; repeat: true; triggeredOnStart: true
+        running: root.board.open
+        onTriggered: root.sample()
+    }
     readonly property bool procOk: !!(now && now.process && now.process.ok)
 
     function tokensOf(r) {
@@ -83,6 +140,16 @@ Item {
         return out
     }
     readonly property bool credits: liveOk && !!live.extraUsage && live.extraUsage.isEnabled === true
+    // the opt-in ollama block: absent → nothing drawn; ok:false → one dim
+    // line; otherwise the month's share of included credits (0–100+, no
+    // reset date, no dollars — Ollama publishes neither)
+    readonly property var ollama: (acct && acct.ollama) ? acct.ollama : null
+    readonly property bool ollamaOk: !!ollama && ollama.ok === true
+    readonly property real ollamaPct: {
+        var u = ollamaOk && ollama.monthly ? Number(ollama.monthly.utilization) : NaN
+        return isNaN(u) ? 0 : Math.max(0, u)
+    }
+    readonly property int ollamaRows: ollama ? 1 : 0
     property bool refreshing: false
     Timer { id: refreshCool; interval: 4000; onTriggered: root.refreshing = false }
     onAcctChanged: { refreshing = false; refreshCool.stop() }
@@ -115,11 +182,13 @@ Item {
                 props: ({ title: "machine", glow: "bloom",
                           stat: Qt.binding(() => root.hasNow ? root.clock(root.now.sampledAt) : ""),
                           statColor: root.kit.dim,
-                          rows: Qt.binding(() => root.hasNow ? 3 : 1),
+                          rows: Qt.binding(() => (root.procRead ? 2 : 1) + (root.hasNow ? 2 : 0)),
                           content: machineBody })
             }
+            // JACKS + TOKENS BY JACK: hidden until now.json is published
             Use {
                 width: col.width
+                visible: root.jackOn
                 kit: root.kit; helper: "Pane"
                 props: ({ title: "jacks", glow: "bloom",
                           stat: Qt.binding(() => root.hasNow ? "" + root.rows.length : ""),
@@ -128,6 +197,7 @@ Item {
             }
             Use {
                 width: col.width
+                visible: root.jackOn
                 kit: root.kit; helper: "Pane"
                 props: ({ title: "tokens by jack", glow: "bloom",
                           rows: Qt.binding(() => root.hasNow ? 7 : 1),
@@ -139,7 +209,7 @@ Item {
                 props: ({ title: "account", glow: "bloom",
                           stat: Qt.binding(() => root.refreshing ? "[r] …" : "[r] " + (root.acct && root.acct.fetchedAt ? root.board.age(root.acct.fetchedAt) : "—")),
                           statColor: root.kit.dim,
-                          rows: Qt.binding(() => !root.acct ? 1 : (root.liveOk ? root.caps.length : 1) + (root.credits ? 1 : 0) + (root.local ? 3 : 0)),
+                          rows: Qt.binding(() => !root.acct ? 1 : (root.liveOk ? root.caps.length : 1) + (root.credits ? 1 : 0) + root.ollamaRows + (root.local ? 3 : 0)),
                           content: accountBody })
                 MouseArea {
                     // the [r] cut into the rule
@@ -158,23 +228,39 @@ Item {
         Column {
             width: parent ? parent.width : 0
             readonly property int w: root.kit.fit(width)
+            // the whole machine, from /proc
             Text {
-                visible: !root.hasNow
-                text: "no usage data — bridge not wired"
+                visible: !root.procRead
+                text: "cpu / memory ledgers unavailable on this host"
                 color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
             }
-            Use {
-                visible: root.hasNow && root.procOk
-                kit: root.kit; helper: "Gauge"
-                props: ({ label: "CPU", labelCells: 5, cells: 24, warnAt: 0.6, urgentAt: 0.9,
-                          value: Qt.binding(() => Math.min(1, root.cpuTotal / 100)),
-                          valueText: Qt.binding(() => root.cpuTotal.toFixed(1) + "%") })
+            Row {
+                visible: root.procRead
+                Use {
+                    kit: root.kit; helper: "Gauge"
+                    props: ({ label: "CPU", labelCells: 5, cells: 24, warnAt: 0.6, urgentAt: 0.9,
+                              value: Qt.binding(() => Math.max(0, root.cpuPct) / 100),
+                              valueText: Qt.binding(() => root.cpuPct < 0 ? "…" : root.cpuPct.toFixed(0) + "%") })
+                }
             }
             Row {
+                visible: root.procRead
+                Use {
+                    kit: root.kit; helper: "Gauge"
+                    props: ({ label: "MEM", labelCells: 5, cells: 24, warnAt: 0.75, urgentAt: 0.9,
+                              value: Qt.binding(() => root.memTotal > 0 ? root.memUsed / root.memTotal : 0) })
+                }
+                Text {
+                    text: "  " + root.board.bytes(root.memUsed) + " / " + root.board.bytes(root.memTotal)
+                    color: root.kit.number; font: root.kit.font; textFormat: Text.PlainText
+                }
+            }
+            // per-session attribution (now.json; only with hasJackUsage)
+            Row {
                 visible: root.hasNow && root.procOk
-                Text { text: root.kit.padR("MEM", 5); color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText }
-                Text { text: root.board.bytes(root.rssTotal); color: root.kit.number; font: root.kit.font; textFormat: Text.PlainText }
-                Text { text: " rss across attributed sessions"; color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText }
+                Text { text: root.kit.padR("ATTR", 7); color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText }
+                Text { text: root.cpuTotal.toFixed(1) + "% · " + root.board.bytes(root.rssTotal); color: root.kit.number; font: root.kit.font; textFormat: Text.PlainText }
+                Text { text: "   across attributed sessions"; color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText }
             }
             Text {
                 visible: root.hasNow && !root.procOk
@@ -207,7 +293,7 @@ Item {
             readonly property int spark: Math.max(6, Math.floor((w - 12 - 2 * 11) / 2))
             Text {
                 visible: !root.hasNow
-                text: "no usage data — bridge not wired"
+                text: "no usage data yet"
                 color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
             }
             Repeater {
@@ -270,7 +356,7 @@ Item {
             implicitHeight: root.hasNow ? root.kit.lines(7) : root.kit.cellH
             Text {
                 visible: !root.hasNow
-                text: "no usage data — bridge not wired"
+                text: "no usage data yet"
                 color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
             }
             Use {
@@ -326,6 +412,33 @@ Item {
                     text: root.credits ? root.money(root.live.extraUsage.usedCredits) + " / " + root.money(root.live.extraUsage.monthlyLimit) : ""
                     color: root.kit.number; font: root.kit.font; textFormat: Text.PlainText
                 }
+            }
+            // ollama (opt-in): the track stops at 100%, the figure does not
+            Row {
+                visible: root.ollamaOk
+                Use {
+                    kit: root.kit; helper: "Gauge"
+                    props: ({ label: "OLLAMA", labelCells: 10, cells: 22, warnAt: 0.6, urgentAt: 0.85,
+                              showPct: false,
+                              value: Qt.binding(() => Math.min(1, root.ollamaPct / 100)) })
+                }
+                Text {
+                    text: root.kit.padL(Math.round(root.ollamaPct) + "%", 5)
+                    color: root.ollamaPct > 100 ? root.kit.warn : root.kit.number
+                    font: root.kit.font; textFormat: Text.PlainText
+                }
+                Text {
+                    text: "  month"
+                    color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
+                }
+            }
+            Text {
+                visible: !!root.ollama && !root.ollamaOk
+                width: parent.width; elide: Text.ElideRight
+                text: root.ollama && !root.ollamaOk
+                      ? "ollama: " + ("" + (root.ollama.error || "unavailable")).replace(/[\u0000-\u001f\u007f]+/g, " ")
+                      : ""
+                color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
             }
             Text {
                 visible: !!root.local

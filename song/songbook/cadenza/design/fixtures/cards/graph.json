@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "0",
+  "nodes": [
+    { "id": "project:aoide", "kind": "project", "name": "aoide", "path": "/home/user/Aoide" },
+    { "id": "session:c4000000-0000-4000-8000-000000000001", "kind": "session" },
+    { "id": "session:sub:c400000000000a", "kind": "session" },
+    { "id": "session:sub:c400000000000b", "kind": "session" }
+  ],
+  "edges": [
+    { "from": "session:c4000000-0000-4000-8000-000000000001", "kind": "spawned", "to": "session:sub:c400000000000a" },
+    { "from": "session:c4000000-0000-4000-8000-000000000001", "kind": "spawned", "to": "session:sub:c400000000000b" },
+    { "from": "project:aoide", "kind": "anchors", "to": "session:c4000000-0000-4000-8000-000000000001" },
+    { "from": "project:aoide", "kind": "anchors", "to": "session:c4000000-0000-4000-8000-000000000002" }
+  ],
+  "workspaces": [],
+  "ties": []
+}

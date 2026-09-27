@@ -54,6 +54,7 @@
 //! mailbase, and neither may reach into the other's half.
 
 pub mod adapter;
+pub mod charter;
 pub mod commands;
 pub mod context;
 pub mod daemon;

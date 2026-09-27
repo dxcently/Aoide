@@ -13,14 +13,51 @@
 //! depend on this crate — neither may depend on the other (`server` must
 //! never depend on `client`) — so the shared `Node`/registry/cache shapes and
 //! the autogate-address match live here, the one crate both already sit atop.
+//!
+//! **Grants are per mesh (P-CHARTER).** Each record carries
+//! [`Node::grants`], a map from mesh name to capability set, and the door
+//! reads one mesh's entry per request (`aoide-server::a2a::grant_in_mesh`).
+//! A `state/nodes.json` written before this — whose records carried a flat
+//! `allows` array — is migrated on load by [`migrate_grants`]: every record's
+//! `allows` becomes its grant in the home mesh ([`crate::config::
+//! home_mesh`], `[pairing] homeMesh`, default `home`), unchanged and in
+//! order.
+//!
+//! **The migration is one-way, and that is deliberate.** The first
+//! `save_nodes` after a migrated load writes `grants` and drops `allows`
+//! (`migrate_grants` removes the key, and nothing in this module can write
+//! it back), so an older binary — one that knows only `allows` — reading
+//! that file sees no capability set for any record and refuses every gated
+//! request. That is the fail-closed direction: an un-upgraded reader loses
+//! grants it cannot understand and stops, rather than reading a file whose
+//! trust scope it would mis-split. **No compatibility write exists, on
+//! purpose** — a second on-disk copy of the same grants is exactly the
+//! drifting duplicate `Node::grants`' doc refuses, and a downgrade path
+//! would be a downgrade path.
 
 use crate::fs::{atomic_write, state_dir};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 
 /// `state/nodes.json` schema version (CONTRACTS.md §7, v0).
 pub const NODES_VERSION: &str = "0";
+
+/// One record's capability grants, keyed by the mesh each holds in —
+/// [`Node::grants`]'s own type, named once so a signature or a fixture says
+/// `Grants` rather than re-spelling the map. See [`Node::grants`] for the
+/// whole rule.
+pub type Grants = BTreeMap<String, Vec<String>>;
+
+/// Build a one-entry [`Grants`] for `mesh` — the shape every fixture and
+/// every single-mesh writer wants, so none of them hand-rolls a map.
+pub fn grants_in(mesh: &str, caps: &[&str]) -> Grants {
+    if caps.is_empty() {
+        return Grants::new();
+    }
+    BTreeMap::from([(mesh.to_string(), caps.iter().map(|c| c.to_string()).collect())])
+}
 
 /// How long a pulled node cache stays `fresh` before `build_graph`'s fold
 /// (`aoide-conduct`) treats it as stale, in seconds. A single named constant
@@ -35,9 +72,26 @@ pub struct Node {
     pub url: String,
     /// The cross-device analogue of `graph send`'s "sender is the target's
     /// own parent" autogate rule (`conduct/graph/send.rs`): a node marked
-    /// `true` here skips the non-loopback pending queue on INBOUND
-    /// `message/send` (CONTRACTS.md §6 amendment). Defaults false — an
-    /// unmarked/unknown sender is never autogated.
+    /// `true` here whose record the door's unsigned rail resolves (by `url`
+    /// address, or by its own `token_file`) skips the non-loopback pending
+    /// queue on INBOUND `message/send` (CONTRACTS.md §6 amendment). Defaults
+    /// false — an unmarked/unknown sender is never autogated.
+    ///
+    /// **The flag is what opens the rail; it is not the whole trust.** The
+    /// rail is unsigned, so it names no mesh: the door judges the matched
+    /// record by its HOME mesh's rules
+    /// (`aoide-server::a2a::rail_admits`) — where a charter governs home, the
+    /// record's key must be on that charter's line with `message` (and the
+    /// record verified), and where home is charter-shaped with an undecidable
+    /// operator key the send is held PENDING whatever this flag says. Only in
+    /// a PAIR mesh is this flag the whole rule, exactly as it always was.
+    ///
+    /// **For a SIGNATURE-resolved caller the flag is likewise only the
+    /// opener**: the door also reads `message` in the mesh that request signed
+    /// for (`aoide-server::a2a`'s `sig_autogate` = this flag AND
+    /// `may_message(&caller_grant(..))`, P-CHARTER), so the same flag on the
+    /// same record delivers in a mesh the caller holds `message` in and pends
+    /// in one it does not.
     #[serde(default)]
     pub autogate: bool,
     /// Path to a file (on THIS instance) holding the shared secret this node
@@ -45,7 +99,7 @@ pub struct Node {
     /// `message/send` — how the door tells WHICH registered node is calling
     /// once IP alone can't (CONTRACTS.md §6 amendment, 2026-08-18: behind any
     /// reverse proxy/tunnel every caller is `127.0.0.1`, so the
-    /// [`is_autogated_node_addr`] IP match is permanently dead there). Absent
+    /// [`autogated_node_addr`] IP match is permanently dead there). Absent
     /// by default — an unmarked node authenticates by address only, exactly
     /// as before this field existed.
     #[serde(rename = "tokenFile", default, skip_serializing_if = "Option::is_none")]
@@ -99,23 +153,67 @@ pub struct Node {
     /// spawn arm requires (P-P3, decision 6, `a2a.rs::spawn_admitted`).
     #[serde(default, skip_serializing_if = "is_false")]
     pub verified: bool,
-    /// This node's capability set (P-P3, `docs/architecture/PAIRING.md`
-    /// decision 5) — a CLOSED vocabulary ([`NODE_CAPABILITIES`]), never a
-    /// per-capability serde bool scatter (the kill-list). `"spawn"` gates
-    /// the A2A door's spawn arm (decision 6); `"read"` is reserved for a
-    /// future graph/who-summary gate over A2A, not read by anything yet;
-    /// `"message"` (messaging plan P-M2, `docs/architecture/MAIL.md`) gates
-    /// `aoide/mailDeposit` — a paired node lacking it is refused before its
-    /// envelope is ever looked at (`a2a.rs::deposit_admitted`). Empty for
-    /// every unpaired node (today's every `node add` entry) and
-    /// for a legacy `nodes.json` predating this field — same
-    /// `#[serde(default)]`+`skip_serializing_if` discipline `hub`/`verified`
-    /// already hold. Set ONLY by [`upsert_paired_node`] (the ceremony's
-    /// default-stamp, on first pairing) and [`set_node_allow`] (`node allow
-    /// <name> <cap> on|off`) — never a raw `Node { .. }` literal outside
-    /// this module.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub allows: Vec<String>,
+    /// This node's capability grants, KEYED BY THE MESH each holds in
+    /// (P-CHARTER, `docs/architecture/HTTPS-MESH-API.md` "Trust per mesh"):
+    /// a mesh is a routing zone AND a trust scope, so a grant is given in one
+    /// mesh and holds only there — a machine trusted in one mesh gains
+    /// nothing in another, even when both meshes contain the same third
+    /// machine. Values come from the CLOSED vocabulary
+    /// ([`NODE_CAPABILITIES`]), never a per-capability serde bool scatter
+    /// (the kill-list). `"spawn"` gates the A2A door's spawn arm
+    /// (`a2a.rs::spawn_admitted`); `"message"` gates `aoide/mailDeposit` and
+    /// `aoide/mailPoll` (`a2a.rs::deposit_admitted`); `"read"` gates the
+    /// output-read arms (`a2a.rs::output_read_admitted`).
+    ///
+    /// **This one record holds every mesh's grant.** Identity is not per
+    /// mesh — one node, one identity key, in every mesh — and
+    /// `state/nodes.json` is keyed by name alone, so the same machine
+    /// declared in three meshes has ONE record whose map has three entries.
+    ///
+    /// Empty for every unpaired node (every `node add` entry) and for a
+    /// record whose pairing granted nothing — a mesh entry with an empty list
+    /// is never written, the same "an empty grant writes no key" shape the
+    /// pre-charter `allows` array held. Written ONLY by
+    /// [`upsert_paired_node`] (the ceremony's default-stamp, on first
+    /// pairing, in the mesh that pairing named) and [`set_node_allow`]
+    /// (`node allow <name> <cap> on|off [--mesh <m>]`) — never a raw
+    /// `Node { .. }` literal outside this module.
+    ///
+    /// **Read through [`grant_in_mesh`] on the door's side**
+    /// (`aoide-server::a2a::grant_in_mesh`) and never by scanning this map
+    /// from a policy site: one function answers "what may this caller do in
+    /// THIS mesh", and the paired records below are its only source today.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub grants: Grants,
+    /// Per mesh, the capabilities this box's DOOR refuses for this record's
+    /// key **even though a charter grants them** — the local narrowing of
+    /// P-CHARTER's "Local narrowing only" rule
+    /// (`docs/architecture/HTTPS-MESH-API.md` "Trust per mesh": "a node's own
+    /// `aoide node allow <node> <cap> off --mesh <m>` narrows what its door
+    /// grants in that mesh, and wins over the charter. Nothing local widens a
+    /// charter grant").
+    ///
+    /// **Read only in a charter mesh** — the door subtracts it from the
+    /// charter's line for the same key (`aoide-server::a2a::grant_in_mesh`).
+    /// In a pair mesh there is nothing to subtract from, so [`Self::grants`]
+    /// stays the whole answer there and `off` keeps EDITING it, as it did
+    /// before the charter existed.
+    ///
+    /// The two maps are keyed alike and mean different things on purpose, and
+    /// the difference is what keeps a local narrowing durable: a `grants`
+    /// entry is a snapshot of what some source granted, so subtracting it
+    /// would erase the whole charter rather than one capability, and seeding
+    /// it from the charter would let every later charter version silently
+    /// re-grant what this box turned off. A REFUSAL is the only thing a local
+    /// door can add to a charter, so a refusal is what is stored.
+    ///
+    /// `#[serde(default)]` + `skip_serializing_if` is the same additive
+    /// discipline `hub`/`pubkey`/`via` hold: an old `nodes.json` deserializes
+    /// an empty map on every entry, and a node with no narrowing omits the
+    /// key entirely. Written ONLY by [`set_node_allow`], never a raw
+    /// `Node { .. }` literal outside this module.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub narrowed: Grants,
     /// The ssh-transport lane's marker (P-S4, `docs/architecture/
     /// PAIRING.md`'s Transport section): an `ssh://[user@]host[:port]`
     /// target ([`crate::tunnel::parse_via`]'s own shape) a cross-box call to
@@ -149,6 +247,126 @@ pub fn valid_capability(cap: &str) -> bool {
     NODE_CAPABILITIES.contains(&cap)
 }
 
+impl Node {
+    /// This record's grant in `mesh` — the empty slice when it holds nothing
+    /// there, which is also what a node in no mesh at all answers. Pure; the
+    /// door wraps this in a `Grant` behind `grant_in_mesh` so no policy site
+    /// scans the map itself.
+    pub fn grant(&self, mesh: &str) -> &[String] {
+        self.grants.get(mesh).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// The capabilities this box refuses in `mesh` whatever a charter grants
+    /// ([`Self::narrowed`]) — the empty slice when this box has narrowed
+    /// nothing there, which is every record until an operator turns something
+    /// off in a charter mesh. Pure.
+    pub fn refused(&self, mesh: &str) -> &[String] {
+        self.narrowed.get(mesh).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// **Is this record's address the third member of the design's transport
+    /// grammar** — `poll`, "it has no address: the node connects out to its
+    /// mesh's relay, deposits, and polls for its own letters"
+    /// (`docs/architecture/HTTPS-MESH-API.md` "Transports and relays")?
+    ///
+    /// The ONE predicate behind "a hub never dials a `poll` node": a mail path
+    /// that would otherwise dial this record asks this and holds instead
+    /// (`aoide_client::mail_wire`). Addressed by SCHEME, exactly as the design
+    /// says ("a node's address selects the transport by URL scheme") — so this
+    /// is a scheme test and never a hostname one, and a node with no such
+    /// address is dialled as before. Pure, and total for any string.
+    pub fn never_dialled(&self) -> bool {
+        self.url.trim().eq_ignore_ascii_case(crate::charter::DEFAULT_ADDRESS)
+    }
+}
+
+/// Which mesh a LOCAL command acts in when the operator named none — the
+/// rule `aoide pair --mesh`, `aoide node allow --mesh` and every outbound
+/// signed request share, and the one P-CHARTER's "one node, one key, several
+/// meshes" needs to stay usable.
+///
+/// **`cap` is what makes it a rule rather than a guess** (review N2/N3/N4/N12,
+/// one rule): a request is asking for a CAPABILITY — `message` for a mail
+/// deposit, poll, ack or binding exchange; `read` for a frame, a ping-back
+/// history or a roster probe; `spawn` for a spawn — so the mesh that matters
+/// is the one where the record actually holds it. Order:
+///
+/// 1. `named` wins (and must be a mesh name, [`valid_node_name`]'s grammar, so
+///    a typo cannot become a silently empty grant scope);
+/// 2. else the SOLE mesh `grants` holds `cap` in;
+/// 3. else `home`, when `home` is among the meshes that hold it — the
+///    pre-charter default, and the only unambiguous choice when several do;
+/// 4. else [`resolve_mesh_any`]'s old answer (home when nothing holds it —
+///    the door then refuses with the grant error, which is the honest one);
+/// 5. and a REFUSAL, naming them, when the record holds `cap` in two meshes
+///    that do not include the home mesh: one is not more likely than the
+///    other, and guessing would silently address a grant the operator did not
+///    mean.
+///
+/// Steps 2-3 are what let a peer trusted only in `away` be reached with no
+/// flag at all — and what keeps a two-mesh record reachable when only ONE of
+/// its meshes carries the capability the call needs. Pure, so the whole table
+/// is a unit test.
+pub fn resolve_mesh(named: Option<&str>, grants: &Grants, home: &str, cap: &str) -> Result<String, String> {
+    if let Some(m) = named.map(str::trim).filter(|m| !m.is_empty()) {
+        if !valid_node_name(m) {
+            return Err(format!(
+                "`{m}` is not a valid mesh name — expected the same shape a mesh nickname takes: \
+                 lowercase letters, digits, and `-`, starting with a letter or digit"
+            ));
+        }
+        return Ok(m.to_string());
+    }
+    let holders: Vec<&String> = grants
+        .iter()
+        .filter(|(_, caps)| caps.iter().any(|c| c == cap))
+        .map(|(mesh, _)| mesh)
+        .collect();
+    match holders.as_slice() {
+        [only] => Ok((*only).clone()),
+        [] => resolve_mesh_any(None, &grants.keys().cloned().collect(), home),
+        _ if holders.iter().any(|m| m.as_str() == home) => Ok(home.to_string()),
+        several => Err(format!(
+            "this box holds `{cap}` for the target in {} meshes ({}) and none of them is the home mesh \
+             `{home}`, so the command has to say which one it acts in — add `--mesh <name>`",
+            several.len(),
+            several.iter().map(|m| m.as_str()).collect::<Vec<_>>().join(", ")
+        )),
+    }
+}
+
+/// The mesh-name-only form of [`resolve_mesh`], for the two callers that have
+/// no capability to ask about: `aoide pair` (the grant does not exist yet) and
+/// `aoide node allow`'s own ambiguity check (which is deciding what to WRITE,
+/// so no existing capability can pick for it). `named` wins; else `known`'s
+/// sole entry; else the home mesh; more than one known is an error naming them.
+pub fn resolve_mesh_any(named: Option<&str>, known: &BTreeSet<String>, home: &str) -> Result<String, String> {
+    if let Some(m) = named.map(str::trim).filter(|m| !m.is_empty()) {
+        if !valid_node_name(m) {
+            return Err(format!(
+                "`{m}` is not a valid mesh name — expected the same shape a mesh nickname takes: \
+                 lowercase letters, digits, and `-`, starting with a letter or digit"
+            ));
+        }
+        return Ok(m.to_string());
+    }
+    match known.len() {
+        0 => Ok(home.to_string()),
+        1 => Ok(known.iter().next().expect("len 1").clone()),
+        n => Err(format!(
+            "this box knows {n} meshes for the target ({}), so the command has to say which one it \
+             acts in — add `--mesh <name>`",
+            known.iter().cloned().collect::<Vec<_>>().join(", ")
+        )),
+    }
+}
+
+/// The meshes a record is trusted in — [`Node::grants`]'s keys, the `known`
+/// set [`resolve_mesh`] answers from. Pure.
+pub fn granted_meshes(node: &Node) -> BTreeSet<String> {
+    node.grants.keys().cloned().collect()
+}
+
 /// `skip_serializing_if` helper for a plain (non-`Option`) `bool` field whose
 /// common case is `false` — mirrors `records.rs`'s own private `is_false`
 /// (not reused directly: that one is private to its module, and a node's
@@ -177,13 +395,185 @@ pub fn nodes_path() -> std::path::PathBuf {
 
 /// Read the registry, tolerating a missing/corrupt/wrong-shape file as an
 /// empty list — an absent file is simply "no nodes registered", never an
-/// error.
+/// error. Pre-charter records are folded into per-mesh grants here
+/// ([`migrate_grants`]); nothing outside this function sees the old shape.
 pub fn load_nodes() -> Vec<Node> {
     match std::fs::read_to_string(nodes_path()) {
-        Ok(raw) => serde_json::from_str::<NodeRegistry>(&raw)
-            .map(|r| r.nodes)
-            .unwrap_or_default(),
+        Ok(raw) => {
+            // P-CHARTER (review finding 7): the migration targets the home
+            // mesh the CONFIG names. A config that will not parse has no
+            // answer to give, and guessing the built-in default would fold
+            // every record into a mesh the operator never named — so the
+            // fold is skipped entirely, grants read as empty (fail closed,
+            // no gate can be satisfied by a guess) and the skip is reported.
+            // `allows` on disk is left exactly as it is; the next successful
+            // load migrates it.
+            let home = crate::config::home_mesh_fallible().ok();
+            let migration = match home.as_deref() {
+                Some(home) => migrate_grants(&raw, home),
+                None => Migration {
+                    registry: parse_registry(&raw).unwrap_or_default(),
+                    skipped: vec!["the config does not load, so pre-charter grants were NOT migrated — \
+                                   fix `config.toml`; every record reads as grantless until it does"
+                        .to_string()],
+                },
+            };
+            report_skips(&migration.skipped);
+            migration.registry.nodes
+        }
         Err(_) => Vec::new(),
+    }
+}
+
+/// What one load's migration found, and everything it could not read. The
+/// skips are REPORTED (`load_nodes` prints each distinct one once per
+/// process) rather than swallowed: a registry that quietly loses a grant is
+/// how an operator spends an afternoon on a door that refuses and a file
+/// that looks fine.
+#[derive(Debug, Clone, Default)]
+pub struct Migration {
+    pub registry: NodeRegistry,
+    /// One line per thing skipped, each naming the record it was about.
+    pub skipped: Vec<String>,
+}
+
+/// Read `nodes.json`'s text into a registry, folding every record's
+/// pre-charter `allows` array into `grants[home]` — the ONE place the old
+/// shape is understood.
+///
+/// **One-shot and idempotent, without a marker file.** The old key's mere
+/// presence IS the "not yet migrated?" test (the discipline
+/// `crate::mail::migrate_if_needed` established, where the old file's
+/// existence plays that part): the fold removes `allows` from the record, so
+/// a second call over its own output — or a call over a file any later
+/// `save_nodes` wrote, which has no `allows` at all — does nothing. There is
+/// no marker to go stale and no rename to half-finish; the rewrite itself is
+/// the next `save_nodes`, which every mutating command already performs.
+///
+/// **The grant is carried BYTE-IDENTICAL** (HTTPS-MESH-API.md "Migration":
+/// "Its `allows` becomes its grant there, unchanged, so every trusted peer
+/// keeps exactly what it had"): each capability string is moved as the JSON
+/// value it was, in the order it was, and a record that already held a grant
+/// for the home mesh keeps it — the legacy caps are unioned in and never
+/// dropped. A record with no `allows` (every record any current code wrote)
+/// is untouched.
+///
+/// Reads are pure: this returns the migrated registry and writes nothing.
+/// A read path that rewrote the operator's registry would migrate a live
+/// host's state behind their back (`fs::root`'s own warning about
+/// migrations hung off shared low-level callers); the migration lands on disk
+/// on the next save.
+pub fn migrate_grants(raw: &str, home: &str) -> Migration {
+    let mut skipped: Vec<String> = Vec::new();
+    let Ok(mut value) = serde_json::from_str::<Value>(raw) else {
+        skipped.push("state/nodes.json is not readable JSON — read as an empty registry".to_string());
+        return Migration { registry: NodeRegistry::default(), skipped };
+    };
+    let Some(nodes) = value.get_mut("nodes").and_then(Value::as_array_mut) else {
+        skipped.push("state/nodes.json has no `nodes` array — read as an empty registry".to_string());
+        return Migration { registry: NodeRegistry::default(), skipped };
+    };
+    for (i, node) in nodes.iter_mut().enumerate() {
+        let Some(obj) = node.as_object_mut() else {
+            skipped.push(format!("node #{i} is not an object — skipped"));
+            continue;
+        };
+        let who = obj
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("#{i}"));
+        // The legacy key: a well-formed array folds into `grants[home]`; ANY
+        // other shape is dropped WITH the record's grant reported (finding
+        // 13 — the pre-charter contract is "every trusted peer keeps exactly
+        // what it had", and a malformed array has nothing to keep).
+        match obj.remove("allows") {
+            None => {}
+            Some(Value::Array(caps)) if caps.iter().all(Value::is_string) => {
+                let grants = obj.entry("grants").or_insert_with(|| Value::Object(serde_json::Map::new()));
+                if let Some(grants) = grants.as_object_mut() {
+                    let entry = grants.entry(home).or_insert_with(|| Value::Array(Vec::new()));
+                    if let Some(entry) = entry.as_array_mut() {
+                        for cap in caps {
+                            if !entry.contains(&cap) {
+                                entry.push(cap);
+                            }
+                        }
+                    }
+                }
+            }
+            Some(bad) => skipped.push(format!(
+                "node `{who}`: `allows` is {bad}, not an array of capability strings — that record's grant is dropped, the record and every other record are kept"
+            )),
+        }
+        // `grants` itself: a value this build cannot read empties THIS
+        // record's grants and nothing else (finding 3). The record keeps
+        // every other field — `autogate`, `tokenFile`, `bearerSecret`, `hub`,
+        // `via` — which is the whole point: a bad grant must not take the
+        // roster with it.
+        match obj.get("grants") {
+            None => {}
+            Some(Value::Object(m)) => {
+                // Review N9: only the MALFORMED ENTRY is dropped — the
+                // hand-edited `{"home":["read"],"away":"read"}` keeps home's
+                // `read` and loses only `away`, which is what the
+                // field-by-field contract asks for.
+                let bad: Vec<String> = m
+                    .iter()
+                    .filter(|(_, caps)| !caps.as_array().is_some_and(|a| a.iter().all(Value::is_string)))
+                    .map(|(mesh, _)| mesh.clone())
+                    .collect();
+                if !bad.is_empty() {
+                    skipped.push(format!(
+                        "node `{who}`: `grants` entries {bad:?} are not arrays of capability strings — those \
+                         entries are dropped, the record's other meshes and every other record are kept"
+                    ));
+                    if let Some(grants) = obj.get_mut("grants").and_then(Value::as_object_mut) {
+                        for mesh in &bad {
+                            grants.remove(mesh);
+                        }
+                    }
+                }
+            }
+            Some(_) => {
+                skipped.push(format!(
+                    "node `{who}`: `grants` is not an object — that record's grant is dropped, the record and every other record are kept"
+                ));
+                obj.remove("grants");
+            }
+        }
+    }
+    match parse_registry(&serde_json::to_string(&value).unwrap_or_default()) {
+        Some(registry) => Migration { registry, skipped },
+        None => {
+            skipped.push("state/nodes.json could not be read as a registry — read as empty".to_string());
+            Migration { registry: NodeRegistry::default(), skipped }
+        }
+    }
+}
+
+/// Parse registry text as a [`NodeRegistry`], `None` when the shape is
+/// wrong — the ONE place the file's top-level shape is decided.
+fn parse_registry(raw: &str) -> Option<NodeRegistry> {
+    serde_json::from_str::<NodeRegistry>(raw).ok()
+}
+
+/// Print each distinct skip line ONCE per process. A load runs per request
+/// on the door's path, so an unreported skip would either flood the log or
+/// be seen once and never again; this is the middle: the operator sees the
+/// exact record and reason, and a busy process writes the line once.
+fn report_skips(skipped: &[String]) {
+    if skipped.is_empty() {
+        return;
+    }
+    static SEEN: std::sync::OnceLock<std::sync::Mutex<std::collections::BTreeSet<String>>> =
+        std::sync::OnceLock::new();
+    let seen = SEEN.get_or_init(|| std::sync::Mutex::new(std::collections::BTreeSet::new()));
+    let mut seen = seen.lock().unwrap_or_else(|e| e.into_inner());
+    for line in skipped {
+        if seen.insert(line.clone()) {
+            eprintln!("aoide: node registry: {line}");
+        }
     }
 }
 
@@ -255,19 +645,27 @@ pub enum PairChange {
 /// Re-pairing an EXISTING node (decision: "replaces key material
 /// only after the same SAS confirmation, never silently" — the caller's own
 /// confirmation gate, not this function's) touches `pubkey`/`verified`/`url`
-/// always, but `allows` ONLY when the node was NOT already verified before
+/// always, but `grants` ONLY when the node was NOT already verified before
 /// this call — a key rotation on an ALREADY-paired node must never silently
 /// re-grant a capability an operator revoked via `node allow ... off`
-/// (P-P3), so `allows` (like `autogate`/`token_file`/`bearer_secret`/`hub`)
+/// (P-P3), so `grants` (like `autogate`/`token_file`/`bearer_secret`/`hub`)
 /// is left exactly as it was once a node has been verified at least once.
-pub fn upsert_paired_node(nodes: &mut Vec<Node>, name: &str, url: &str, pubkey_hex: &str, added_at: &str, grant: &[String]) -> PairChange {
+///
+/// **`mesh` is the mesh this pairing names** (P-CHARTER): the grant lands as
+/// that mesh's entry, so the same record can later hold a different grant in
+/// another mesh. Both sides of one ceremony are expected to name the same
+/// mesh — each resolves it locally, exactly as each already resolves its own
+/// grant (`aoide-client`'s `resolve_grant`), so the mesh is not carried on
+/// the wire. An empty `grant` writes no entry at all (an empty grant is
+/// never stored — `Node::grants`).
+pub fn upsert_paired_node(nodes: &mut Vec<Node>, name: &str, url: &str, pubkey_hex: &str, added_at: &str, grant: &[String], mesh: &str) -> PairChange {
     if let Some(p) = nodes.iter_mut().find(|p| p.name == name) {
         let first_pairing = !p.verified;
         p.pubkey = Some(pubkey_hex.to_string());
         p.verified = true;
         p.url = url.to_string();
-        if first_pairing {
-            p.allows = grant.to_vec();
+        if first_pairing && !grant.is_empty() {
+            p.grants.insert(mesh.to_string(), grant.to_vec());
         }
         return PairChange::Updated;
     }
@@ -280,7 +678,8 @@ pub fn upsert_paired_node(nodes: &mut Vec<Node>, name: &str, url: &str, pubkey_h
         hub: false,
         pubkey: Some(pubkey_hex.to_string()),
         verified: true,
-        allows: grant.to_vec(),
+        grants: grants_in(mesh, &grant.iter().map(String::as_str).collect::<Vec<_>>()),
+        narrowed: Grants::new(),
         via: None,
         added_at: added_at.to_string(),
     });
@@ -306,8 +705,47 @@ pub fn set_node_via(nodes: &mut [Node], name: &str, via: Option<&str>) -> Result
     let Some(p) = nodes.iter_mut().find(|p| p.name == name) else {
         return Err(format!("no node named `{name}`"));
     };
+    // H1: this is one of the two write paths that can create the
+    // `https`+`via` pair [`transport_conflict`] refuses to dial. Refused
+    // BEFORE the field is touched, so a refused call leaves the record
+    // exactly as it was.
+    if let Some(conflict) = transport_conflict(&p.name, &p.url, via) {
+        return Err(conflict);
+    }
     p.via = via.map(|s| s.to_string());
     Ok(())
+}
+
+/// The transport pair H1 makes unreachable: a record carrying BOTH an
+/// `https://` url and a `via`, `Some(<taught refusal>)` when it does.
+///
+/// `url` is the address a plain dial posts to; `via` is the internal loopback
+/// forward a call reaches this node THROUGH. Together they mean "dial
+/// `https://127.0.0.1:<forward port>`" — a TLS handshake aimed at the far
+/// box's plain-text listener, on a port chosen for `https`'s conventional
+/// 443 rather than the door's. Nothing ever produced the pair
+/// ([`crate::tunnel::parse_via`] accepts `ssh` only, and no node carried an
+/// `https://` url before H1), so refusing it costs nothing and spares an
+/// operator a handshake-shaped failure they cannot read.
+///
+/// Consulted in two places: the dial seam every outbound URL resolves through
+/// (`aoide_client::commands::resolve_dial_url` — which is also where a
+/// hand-written `nodes.json` lands) and the two write paths that could create
+/// it (`aoide node add --via`, [`set_node_via`]). `name` is only for the
+/// message. Pure.
+pub fn transport_conflict(name: &str, url: &str, via: Option<&str>) -> Option<String> {
+    let via = via?.trim();
+    let url = url.trim();
+    if via.is_empty() || !url.to_ascii_lowercase().starts_with("https://") {
+        return None;
+    }
+    Some(format!(
+        "node `{name}`'s record carries both an `https://` url (`{url}`) and a `via` (`{via}`) — \
+         an HTTPS node is dialled directly and a `via` is an ssh forward for a node reached over \
+         SSH, so together they would dial `https://127.0.0.1:<forward port>`, a TLS handshake into \
+         a plain listener. Keep one: an `https://` url with no `via` for the HTTPS transport, or \
+         `--via ssh://…` with an `http://…` url for the ssh lane"
+    ))
 }
 
 /// What [`set_node_allow`] actually did — mirrors [`HubChange`]'s "report
@@ -330,35 +768,108 @@ pub enum AllowChange {
 pub enum AllowError {
     UnknownNode,
     UnknownCapability,
+    /// The mesh is a charter mesh and the charter's line for this record's key
+    /// does not grant `cap`, so there is nothing here for `on` to turn on:
+    /// **nothing local widens a charter grant**
+    /// (`docs/architecture/HTTPS-MESH-API.md` "Trust per mesh"). `off` is
+    /// always allowed in a charter mesh — it is the one direction a local door
+    /// has.
+    WidensCharter,
 }
 
-/// `node allow <name> <cap> on|off` (P-P3, PAIRING.md decision 5): flip one
-/// capability in `name`'s `allows` set. The capability is validated against
-/// [`NODE_CAPABILITIES`] BEFORE the node lookup — an unknown cap is refused
-/// the same way regardless of whether `name` exists, never a per-capability
-/// bool field (the kill-list). Idempotent either direction: turning ON an
-/// already-present capability, or OFF an already-absent one, is
-/// [`AllowChange::NoOp`] and writes nothing — mirrors [`set_hub`]/
-/// [`clear_hub`]'s exact idempotence discipline.
-pub fn set_node_allow(nodes: &mut [Node], name: &str, cap: &str, on: bool) -> Result<AllowChange, AllowError> {
+/// `node allow <name> <cap> on|off [--mesh <m>]` (P-P3, PAIRING.md decision
+/// 5; per mesh from P-CHARTER): flip one capability in `name`'s grant for
+/// `mesh`. The capability is validated against [`NODE_CAPABILITIES`] BEFORE
+/// the node lookup — an unknown cap is refused the same way regardless of
+/// whether `name` exists, never a per-capability bool field (the kill-list).
+/// Idempotent either direction: turning ON an already-present capability, or
+/// OFF an already-absent one, is [`AllowChange::NoOp`] and writes nothing —
+/// mirrors [`set_hub`]/[`clear_hub`]'s exact idempotence discipline.
+///
+/// **Which map it writes depends on whether a charter governs `mesh`**
+/// (`crate::charter::governing`), and that is the whole of "local narrowing
+/// only":
+///
+/// | mesh | `off` | `on` |
+/// |---|---|---|
+/// | pair | removes the cap from [`Node::grants`] — the door's source there | adds it to [`Node::grants`] |
+/// | charter (key decidable) | records the cap in [`Node::narrowed`]; the door subtracts it from the charter's line | clears the cap from [`Node::narrowed`], or refuses [`AllowError::WidensCharter`] if the charter's line does not grant it |
+/// | charter-SHAPED, operator key UNDECIDABLE | [`AllowChange::NoOp`] — it records NOTHING, because there is no line to narrow against (`granted` is false, so the call falls to the no-op arm) | refuses [`AllowError::WidensCharter`] |
+///
+/// **The branch is `charter_shaped`, not "a charter governs"** (review F2/N5):
+/// a shaped mesh whose operator key is undecidable is not a licence to widen
+/// locally through the paired record. In that window `on` can never widen, and
+/// it cannot be a silent no-op either — an operator who typed it meant to grant
+/// something, so it answers [`AllowError::WidensCharter`]. `off` there is a
+/// genuine no-op that writes nothing: there is no decidable line for it to
+/// narrow, and the door already refuses the capability (in a pair mesh `off`
+/// for a capability the record does not hold is a no-op for the same reason —
+/// the door already refuses it).
+///
+/// Turning OFF the last capability of a mesh in a PAIR mesh drops that mesh's
+/// entry rather than storing an empty list: "granted nothing here" and "not in
+/// this mesh" are the same grant, and an empty list is never written — the
+/// shape the pre-charter `allows` array already held. A charter mesh's
+/// `narrowed` entry keeps the same shape for the same reason.
+pub fn set_node_allow(nodes: &mut [Node], name: &str, cap: &str, on: bool, mesh: &str) -> Result<AllowChange, AllowError> {
     if !valid_capability(cap) {
         return Err(AllowError::UnknownCapability);
     }
     let Some(p) = nodes.iter_mut().find(|p| p.name == name) else {
         return Err(AllowError::UnknownNode);
     };
-    let has = p.allows.iter().any(|a| a == cap);
+    let charter_shaped = crate::charter::charter_shaped(mesh);
+    if charter_shaped {
+        // F2: the branch is on CHARTER-SHAPED, not on "the key is decidable
+        // right now". A shaped mesh whose operator key is undecidable must not
+        // become a licence to widen locally through the paired record — `on`
+        // answers `WidensCharter` (always, since no line is readable), while
+        // `off` finds `granted` false and is a genuine no-op that writes
+        // nothing (there is no line for it to narrow against).
+        let granted = crate::charter::governing(mesh)
+            .and_then(|charter| {
+                p.pubkey
+                    .as_deref()
+                    .and_then(|key| charter.grant_for_key(key).map(<[String]>::to_vec))
+            })
+            .is_some_and(|caps| caps.iter().any(|c| c == cap));
+        if on && !granted {
+            return Err(AllowError::WidensCharter);
+        }
+        let entry = p.narrowed.entry(mesh.to_string()).or_default();
+        let has = entry.iter().any(|a| a == cap);
+        if on {
+            if !has {
+                return Ok(AllowChange::NoOp);
+            }
+            entry.retain(|a| a != cap);
+            if entry.is_empty() {
+                p.narrowed.remove(mesh);
+            }
+            return Ok(AllowChange::Enabled);
+        }
+        if !granted || has {
+            return Ok(AllowChange::NoOp);
+        }
+        entry.push(cap.to_string());
+        return Ok(AllowChange::Disabled);
+    }
+    let entry = p.grants.entry(mesh.to_string()).or_default();
+    let has = entry.iter().any(|a| a == cap);
     if on {
         if has {
             return Ok(AllowChange::NoOp);
         }
-        p.allows.push(cap.to_string());
+        entry.push(cap.to_string());
         Ok(AllowChange::Enabled)
     } else {
         if !has {
             return Ok(AllowChange::NoOp);
         }
-        p.allows.retain(|a| a != cap);
+        entry.retain(|a| a != cap);
+        if entry.is_empty() {
+            p.grants.remove(mesh);
+        }
         Ok(AllowChange::Disabled)
     }
 }
@@ -370,7 +881,7 @@ pub fn set_node_allow(nodes: &mut [Node], name: &str, cap: &str, on: bool) -> Re
 /// door from that address, or who merely sits behind the same NAT/proxy as
 /// the real node. `Token` is possession of that node's own `token_file`
 /// secret — it survives any reverse proxy/NAT, the same reason
-/// [`is_autogated_node_token`] is preferred over the address check for
+/// [`autogated_node_token`] is preferred over the address check for
 /// autogate, but it is still a bare shared secret: not bound to any one
 /// request, replayable, and identical across every request the true node
 /// or an impersonator ever sends. `Signature` (P-P4,
@@ -406,7 +917,7 @@ pub enum NodeRung {
 /// Resolve the CALLING node's identity (P-P3, PAIRING.md decision 6) — the
 /// specific registered [`Node`] a caller's presented credential names, PLUS
 /// which [`NodeRung`] matched, independent of that node's own `autogate`
-/// flag. Unlike [`is_autogated_node_token`]/[`is_autogated_node_addr`]
+/// flag. Unlike [`autogated_node_token`]/[`autogated_node_addr`]
 /// (which fold ONLY over `autogate`-marked nodes, for the unrelated "skip
 /// the pending queue" question), this looks at EVERY registered node — a
 /// gate that needs to know WHICH node is calling (not merely "does some
@@ -415,7 +926,7 @@ pub enum NodeRung {
 /// Ladder, first match wins, first REGISTRY-ORDER match within a rung: a
 /// presented bearer token that matches a node's OWN `token_file`
 /// ([`token_bytes_eq`], the mechanism that survives a reverse proxy — same
-/// precedence [`is_autogated_node_token`]'s own doc gives it) is tried
+/// precedence [`autogated_node_token`]'s own doc gives it) is tried
 /// FIRST (`NodeRung::Token` on a hit); failing that, an `addr` whose host
 /// resolves against a node's registered `url` ([`node_url_matches_addr`])
 /// is tried second (`NodeRung::Addr` on a hit). `None` for an unmatched
@@ -615,25 +1126,45 @@ fn node_url_matches_addr(url: &str, addr: IpAddr) -> bool {
         .unwrap_or(false)
 }
 
-/// Does `addr` belong to a node explicitly marked `autogate: true`? The pure
-/// per-node match ([`node_url_matches_addr`]) is what's actually
-/// unit-testable without DNS; this just folds it over the registered,
-/// autogate-marked subset.
-pub fn is_autogated_node_addr(nodes: &[Node], addr: IpAddr) -> bool {
-    nodes.iter().filter(|p| p.autogate).any(|p| node_url_matches_addr(&p.url, addr))
+/// The record an inbound connection's ADDRESS resolves to on the unsigned
+/// autogate rail: the first registered record (registry order — the tie-break
+/// [`resolve_node`]'s ladder already holds) that is marked `autogate` AND
+/// whose `url` host resolves to `addr`. `None` when no record does.
+///
+/// **A match is not a delivery.** This rail carries no signature, so it has no
+/// mesh of its own to read a grant in; the door therefore judges the matched
+/// RECORD by its HOME mesh's rules (`aoide-server::a2a::rail_admits`: the
+/// charter line for its key where a charter governs home, nothing where home
+/// is charter-shaped or its config will not load, and the record's own
+/// `autogate` flag where home is a pair mesh). What this function answers is
+/// only WHICH record the connection resolved to, and it is what lets the door
+/// ask that second question at all — the trust decision is the door's, and
+/// always was. The door's own "did the rail match anything" is
+/// `.is_some()` on this result, so the fold has no second name to drift
+/// against (review F7: the `is_autogated_node_*` predicates it used to carry
+/// were dead API).
+///
+/// `nodes`' own registry order is the whole tie-break, which is why a host
+/// that resolves to TWO records (one on the charter's line, one not) delivers
+/// on whichever of them comes first. Accepted: the rung is an address match,
+/// and `node_url_matches_addr` asks the live resolver for a hostname `url`, so
+/// the admitted address set is whatever DNS says at that moment
+/// ([`NodeRung::Addr`]'s own doc carries the full statement).
+pub fn autogated_node_addr(nodes: &[Node], addr: IpAddr) -> Option<&Node> {
+    nodes.iter().find(|p| p.autogate && node_url_matches_addr(&p.url, addr))
 }
 
 // ── Per-node token identification (CONTRACTS.md §6 amendment, 2026-08-18) ───
 //
-// [`is_autogated_node_addr`] above is the address-based match this crate
+// [`autogated_node_addr`] above is the address-based match this crate
 // shipped with (§6, 2026-08-14) — still here, still checked first, still the
 // ONLY check when no node has ever set `token_file` (so a registry with no
 // tokens configured resolves identically to before this amendment). But
 // behind any reverse proxy or tunnel, `peer_addr()` on the SERVER's end is
 // the proxy's own loopback address for every caller, so IP can no longer
 // tell two nodes apart. A per-node token is the identity signal that
-// survives a proxy: [`is_autogated_node_token`] below is the same autogate
-// fold as [`is_autogated_node_addr`], keyed on a presented bearer token
+// survives a proxy: [`autogated_node_token`] below is the same autogate
+// fold as [`autogated_node_addr`], keyed on a presented bearer token
 // instead of a source address.
 
 /// Length-independent byte compare for a secret: unlike `==`/`eq`, the
@@ -655,24 +1186,30 @@ pub fn token_bytes_eq(expected: &str, presented: &str) -> bool {
     diff == 0
 }
 
-/// Does `presented` (an inbound `Authorization: Bearer <token>` value) match
-/// an autogate-marked node's OWN token (`Node.token_file`, read fresh off
-/// disk — a node's token can rotate without restarting `a2a serve`)? Mirrors
-/// [`is_autogated_node_addr`]'s fold exactly, keyed on token identity instead
-/// of address. A node with no `token_file` set never matches (tolerant —
-/// same "absent means uninvolved" stance as an unmatched address), and a
-/// node whose file is missing/unreadable at match time never matches either
-/// (fails safe, never a panic/error).
-pub fn is_autogated_node_token(nodes: &[Node], presented: &str) -> bool {
-    nodes
-        .iter()
-        .filter(|p| p.autogate)
-        .filter_map(|p| p.token_file.as_deref())
-        .any(|path| {
-            std::fs::read_to_string(path)
+/// The record a presented bearer token resolves to on the unsigned autogate
+/// rail: the first registered autogate-marked record (registry order, the same
+/// tie-break [`autogated_node_addr`] holds) whose OWN `token_file` holds
+/// `presented`. Mirrors [`autogated_node_addr`]'s fold exactly, keyed on token
+/// identity instead of address — which is what survives a reverse proxy or
+/// tunnel, where every caller's source address is the front's own. A node with
+/// no `token_file` set never matches (tolerant — same "absent means
+/// uninvolved" stance as an unmatched address), and a node whose file is
+/// missing/unreadable at match time never matches either (fails safe, never a
+/// panic/error).
+///
+/// **A match is not a delivery**: the door judges the matched record by its
+/// HOME mesh's rules ([`autogated_node_addr`] has the full statement — the
+/// charter's line where a charter governs home, nothing where home is
+/// charter-shaped, the record's own `autogate` flag where home is a pair mesh).
+pub fn autogated_node_token<'a>(nodes: &'a [Node], presented: &str) -> Option<&'a Node> {
+    nodes.iter().find(|p| {
+        p.autogate
+            && p.token_file
+                .as_deref()
+                .and_then(|path| std::fs::read_to_string(path).ok())
                 .map(|raw| token_bytes_eq(raw.trim(), presented))
                 .unwrap_or(false)
-        })
+    })
 }
 
 // ── Node cache: the last-pulled `aoide/graphSummary` response ───────────────
@@ -764,7 +1301,8 @@ mod tests {
             hub: false,
             pubkey: None,
             verified: false,
-            allows: Vec::new(),
+            grants: Grants::new(),
+            narrowed: Grants::new(),
             via: None,
             added_at: "2026-08-14T00:00:00Z".to_string(),
         }
@@ -976,13 +1514,17 @@ mod tests {
         let untrusted_ip: IpAddr = "10.0.0.6".parse().unwrap();
         let stranger_ip: IpAddr = "10.0.0.9".parse().unwrap();
 
-        assert!(is_autogated_node_addr(&nodes, trusted_ip), "the autogate-marked node's own address matches");
+        assert_eq!(
+            autogated_node_addr(&nodes, trusted_ip).map(|p| p.name.as_str()),
+            Some("trusted"),
+            "the autogate-marked node's own address matches, and the RECORD is what comes back"
+        );
         assert!(
-            !is_autogated_node_addr(&nodes, untrusted_ip),
+            autogated_node_addr(&nodes, untrusted_ip).is_none(),
             "a registered but NOT autogate-marked node never matches"
         );
-        assert!(!is_autogated_node_addr(&nodes, stranger_ip), "an unregistered address never matches");
-        assert!(!is_autogated_node_addr(&[], trusted_ip), "an empty registry matches nothing");
+        assert!(autogated_node_addr(&nodes, stranger_ip).is_none(), "an unregistered address never matches");
+        assert!(autogated_node_addr(&[], trusted_ip).is_none(), "an empty registry matches nothing");
     }
 
     // ── Node cache round-trip + staleness ────────────────────────────────────
@@ -1073,7 +1615,7 @@ mod tests {
     }
 
     #[test]
-    fn is_autogated_node_token_matches_only_an_autogated_nodes_own_token_file() {
+    fn autogated_node_token_matches_only_an_autogated_nodes_own_token_file() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!("aoide-node-token-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1100,10 +1642,17 @@ mod tests {
 
         let nodes = vec![trusted, no_token_autogate, broken, untrusted];
 
-        assert!(is_autogated_node_token(&nodes, "trusted-secret"), "matches the autogate-marked node's own token");
-        assert!(!is_autogated_node_token(&nodes, "untrusted-secret"), "an autogate-marked node's token never matches a NON-autogated node's secret");
-        assert!(!is_autogated_node_token(&nodes, "wrong"), "an unrecognised token matches nothing");
-        assert!(!is_autogated_node_token(&[], "trusted-secret"), "an empty registry matches nothing");
+        assert_eq!(
+            autogated_node_token(&nodes, "trusted-secret").map(|p| p.name.as_str()),
+            Some("trusted"),
+            "matches the autogate-marked node's own token, and the RECORD is what comes back"
+        );
+        assert!(
+            autogated_node_token(&nodes, "untrusted-secret").is_none(),
+            "an autogate-marked node's token never matches a NON-autogated node's secret"
+        );
+        assert!(autogated_node_token(&nodes, "wrong").is_none(), "an unrecognised token matches nothing");
+        assert!(autogated_node_token(&[], "trusted-secret").is_none(), "an empty registry matches nothing");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1138,19 +1687,20 @@ mod tests {
     }
 
     // ── `upsert_paired_node` (the pairing ceremony's one write site for
-    // ── pubkey/verified/default allows, P-P2 + P-P3) ─────────────────────────
+    // ── pubkey/verified/default grants, P-P2 + P-P3 + P-CHARTER) ─────────────
 
     #[test]
     fn upsert_paired_node_inserts_a_fresh_verified_entry_with_unpaired_fields_at_default() {
         let mut nodes: Vec<Node> = Vec::new();
-        let change = upsert_paired_node(&mut nodes, "box-b", "http://b/", "deadbeef", "2026-08-25T00:00:00Z", &["read".to_string()]);
+        let change = upsert_paired_node(&mut nodes, "box-b", "http://b/", "deadbeef", "2026-08-25T00:00:00Z", &["read".to_string()], "home");
         assert_eq!(change, PairChange::Inserted);
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].name, "box-b");
         assert_eq!(nodes[0].url, "http://b/");
         assert_eq!(nodes[0].pubkey.as_deref(), Some("deadbeef"));
         assert!(nodes[0].verified);
-        assert_eq!(nodes[0].allows, vec!["read".to_string()], "a fresh pairing stamps EXACTLY the grant the caller resolved, never a literal of its own");
+        assert_eq!(nodes[0].grant("home"), ["read".to_string()], "a fresh pairing stamps EXACTLY the grant the caller resolved, never a literal of its own");
+        assert!(nodes[0].grant("away").is_empty(), "the grant lands in the mesh the pairing named and NOWHERE else");
         assert!(!nodes[0].autogate, "a fresh paired node is never autogated by construction");
         assert!(nodes[0].token_file.is_none());
         assert!(nodes[0].bearer_secret.is_none());
@@ -1158,28 +1708,38 @@ mod tests {
     }
 
     #[test]
-    fn upsert_paired_node_on_a_never_before_verified_name_replaces_pubkey_verified_url_and_stamps_default_allows() {
+    fn upsert_paired_node_on_a_never_before_verified_name_replaces_pubkey_verified_url_and_stamps_the_grant() {
         let mut existing = fixture_node("box-b", "http://old-b/", true);
         existing.token_file = Some("/tmp/tok".to_string());
         existing.bearer_secret = Some("secret-name".to_string());
-        // `existing.verified` is false (fixture default) and `allows` is
+        // `existing.verified` is false (fixture default) and `grants` is
         // empty — an unpaired `node add` entry pairing for the FIRST time.
         let mut nodes = vec![existing];
 
-        let change = upsert_paired_node(&mut nodes, "box-b", "http://new-b/", "cafef00d", "2026-08-25T00:00:00Z", &["read".to_string(), "spawn".to_string()]);
+        let change = upsert_paired_node(&mut nodes, "box-b", "http://new-b/", "cafef00d", "2026-08-25T00:00:00Z", &["read".to_string(), "spawn".to_string()], "away");
         assert_eq!(change, PairChange::Updated);
         assert_eq!(nodes.len(), 1, "re-pairing never duplicates the entry");
         assert_eq!(nodes[0].url, "http://new-b/", "url is replaced");
         assert_eq!(nodes[0].pubkey.as_deref(), Some("cafef00d"));
         assert!(nodes[0].verified);
-        assert_eq!(nodes[0].allows, vec!["read".to_string(), "spawn".to_string()], "first-time verification stamps the caller's grant same as a fresh insert — here a widened one");
+        assert_eq!(nodes[0].grant("away"), ["read".to_string(), "spawn".to_string()], "first-time verification stamps the caller's grant same as a fresh insert — here a widened one, in the named mesh");
         assert!(nodes[0].autogate, "autogate is untouched by re-pairing");
         assert_eq!(nodes[0].token_file.as_deref(), Some("/tmp/tok"), "token_file untouched");
         assert_eq!(nodes[0].bearer_secret.as_deref(), Some("secret-name"), "bearer_secret untouched");
     }
 
     #[test]
-    fn upsert_paired_node_on_an_already_verified_name_never_resets_allows() {
+    fn a_pairing_that_grants_nothing_writes_no_mesh_entry_and_no_grants_key_at_all() {
+        let mut nodes: Vec<Node> = Vec::new();
+        upsert_paired_node(&mut nodes, "box-b", "http://b/", "deadbeef", "2026-08-25T00:00:00Z", &[], "home");
+        assert!(nodes[0].verified, "verified is the ceremony's outcome; the grant is what it hands out");
+        assert!(nodes[0].grants.is_empty());
+        let v = serde_json::to_value(&nodes[0]).unwrap();
+        assert!(v.get("grants").is_none(), "an empty grant map is omitted, not written as `{{}}`: {v}");
+    }
+
+    #[test]
+    fn upsert_paired_node_on_an_already_verified_name_never_resets_a_grant() {
         // A key rotation (re-pairing) on a node that was ALREADY verified —
         // its operator may have since revoked `spawn` via `node allow ...
         // off`; re-pairing must never silently re-grant it — not even when
@@ -1188,38 +1748,204 @@ mod tests {
         let mut existing = fixture_node("box-b", "http://old-b/", false);
         existing.verified = true;
         existing.pubkey = Some("oldkey".to_string());
-        existing.allows = vec!["read".to_string()]; // spawn already revoked.
+        existing.grants = grants_in("home", &["read"]); // spawn already revoked.
         let mut nodes = vec![existing];
 
-        let change = upsert_paired_node(&mut nodes, "box-b", "http://new-b/", "newkey", "2026-08-25T00:00:00Z", &["read".to_string(), "spawn".to_string()]);
+        let change = upsert_paired_node(&mut nodes, "box-b", "http://new-b/", "newkey", "2026-08-25T00:00:00Z", &["read".to_string(), "spawn".to_string()], "away");
         assert_eq!(change, PairChange::Updated);
         assert_eq!(nodes[0].pubkey.as_deref(), Some("newkey"), "key material still rotates");
         assert!(nodes[0].verified);
-        assert_eq!(nodes[0].allows, vec!["read".to_string()], "already-verified node's allows survive a key rotation untouched — a revoked spawn stays revoked, even against a wider grant on this very call");
+        assert_eq!(nodes[0].grant("home"), ["read".to_string()], "an already-verified node's grant survives a key rotation untouched — a revoked spawn stays revoked, even against a wider grant on this very call");
+        assert!(nodes[0].grant("away").is_empty(), "and the re-pair does not mint a grant in the mesh it named either");
     }
 
-    // ── `allows` — P-P3 additive field ────────────────────────────────────────
+    // ── `grants` — P-CHARTER's per-mesh capability map ───────────────────────
 
     #[test]
-    fn allows_round_trips_and_omits_when_empty() {
+    fn grants_round_trip_per_mesh_and_omit_when_empty() {
         let mut node = fixture_node("alpha", "http://a/", false);
         let v = serde_json::to_value(&node).unwrap();
-        assert!(v.get("allows").is_none(), "an empty allows set is omitted, not written as `[]`");
+        assert!(v.get("grants").is_none(), "an empty grant map is omitted, not written as `{{}}`");
 
-        node.allows = vec!["read".to_string(), "spawn".to_string()];
+        node.grants = BTreeMap::from([
+            ("away".to_string(), vec!["spawn".to_string()]),
+            ("home".to_string(), vec!["read".to_string(), "message".to_string()]),
+        ]);
         let v2 = serde_json::to_value(&node).unwrap();
-        assert_eq!(v2["allows"], serde_json::json!(["read", "spawn"]));
+        assert_eq!(v2["grants"]["home"], serde_json::json!(["read", "message"]));
+        assert_eq!(v2["grants"]["away"], serde_json::json!(["spawn"]));
+        assert!(v2.get("allows").is_none(), "the pre-charter key is NEVER written: {v2}");
         let back: Node = serde_json::from_value(v2).unwrap();
-        assert_eq!(back.allows, vec!["read".to_string(), "spawn".to_string()]);
+        assert_eq!(back.grant("home"), ["read".to_string(), "message".to_string()]);
+        assert_eq!(back.grant("away"), ["spawn".to_string()]);
+        assert_eq!(back.grant("nowhere"), [] as [String; 0], "a mesh the record is not in grants nothing");
     }
 
     #[test]
-    fn a_legacy_nodes_json_predating_allows_loads_an_empty_set() {
-        let old_shape = serde_json::json!({
-            "name": "gamma", "url": "http://c/", "autogate": false, "addedAt": "2026-08-14T00:00:00Z"
-        });
-        let back: Node = serde_json::from_value(old_shape).unwrap();
-        assert!(back.allows.is_empty());
+    fn a_nodes_json_predating_grants_migrates_every_allows_into_the_home_mesh_byte_identical() {
+        // The exact pre-P-CHARTER shape, with the capabilities in a
+        // deliberate non-alphabetical order so "unchanged" is provable and
+        // not just "the same set".
+        let raw = r#"{
+          "schemaVersion": "0",
+          "nodes": [
+            { "name": "sakaki", "url": "http://s/", "verified": true, "pubkey": "aa",
+              "allows": ["spawn", "read"] },
+            { "name": "plain", "url": "http://p/", "addedAt": "2026-08-14T00:00:00Z" }
+          ]
+        }"#;
+        let reg = migrate_grants(raw, "home").registry;
+        assert_eq!(reg.nodes.len(), 2);
+        assert_eq!(reg.nodes[0].grant("home"), ["spawn".to_string(), "read".to_string()], "every existing paired record lands in the home mesh with its grant byte-identical — same elements, same order");
+        assert!(reg.nodes[1].grants.is_empty(), "a keyless, grantless record is untouched");
+        assert_eq!(reg.nodes[1].url, "http://p/", "and nothing else about a record moves");
+    }
+
+    /// **Review finding 3.** One malformed value must cost ONE record its
+    /// grant — never the roster. Before the fix the whole file parsed to a
+    /// `Default` registry (three records became zero), and since the
+    /// migration is one-way the next write destroyed it for good.
+    #[test]
+    fn a_malformed_grant_value_drops_only_that_records_grant_and_reports_it() {
+        let raw = r#"{
+          "schemaVersion": "0",
+          "nodes": [
+            { "name": "sakaki", "url": "http://s/", "verified": true, "pubkey": "aa", "allows": ["read"] },
+            { "name": "broken", "url": "http://b/", "verified": true, "pubkey": "bb", "autogate": true, "grants": [] },
+            { "name": "other", "url": "http://o/", "verified": true, "pubkey": "cc", "grants": { "home": ["message"] } }
+          ]
+        }"#;
+        let m = migrate_grants(raw, "home");
+        assert_eq!(m.registry.nodes.len(), 3, "every record is kept: a bad grant is not a bad roster");
+        assert_eq!(m.registry.nodes[0].grant("home"), ["read".to_string()], "the legacy record still migrated");
+        assert!(m.registry.nodes[1].grants.is_empty(), "the broken record fails CLOSED — it holds nothing");
+        assert!(m.registry.nodes[1].autogate, "and keeps every other field: autogate, via, token/bearer, hub");
+        assert_eq!(m.registry.nodes[2].grant("home"), ["message".to_string()], "the good record is untouched");
+        assert_eq!(m.skipped.len(), 1, "the skip is reported: {:?}", m.skipped);
+        assert!(m.skipped[0].contains("broken"), "{}", m.skipped[0]);
+
+        // The same for a `grants` value whose MESH entry is the wrong shape.
+        let raw = r#"{"nodes":[{"name":"broken","url":"http://b/","verified":true,"grants":{"home":"read"}}]}"#;
+        let m = migrate_grants(raw, "home");
+        assert_eq!(m.registry.nodes.len(), 1);
+        assert!(m.registry.nodes[0].grants.is_empty());
+        assert_eq!(m.skipped.len(), 1, "{:?}", m.skipped);
+
+        // Review N9: ONE bad entry, and the record's OTHER meshes survive it.
+        let raw = r#"{"nodes":[{"name":"half","url":"http://h/","verified":true,
+                       "grants":{"home":["read"],"away":"read"}}]}"#;
+        let m = migrate_grants(raw, "home");
+        assert_eq!(
+            m.registry.nodes[0].grant("home"),
+            ["read".to_string()],
+            "the well-formed entry is kept — the removal is per ENTRY, not per record"
+        );
+        assert!(m.registry.nodes[0].grant("away").is_empty(), "and the malformed one is gone");
+        assert_eq!(m.skipped.len(), 1, "{:?}", m.skipped);
+        assert!(m.skipped[0].contains("away"), "{}", m.skipped[0]);
+    }
+
+    /// Review finding 13: a malformed LEGACY value is reported too — the
+    /// migration's contract is "every trusted peer keeps exactly what it
+    /// had", and a record whose `allows` is `"read"` (a string, not an
+    /// array) has a grant this build cannot read.
+    #[test]
+    fn a_malformed_legacy_allows_is_reported_and_costs_only_that_record_its_grant() {
+        let raw = r#"{"nodes":[
+            {"name":"s","url":"http://s/","verified":true,"allows":"read"},
+            {"name":"t","url":"http://t/","verified":true,"allows":["spawn"]}]}"#;
+        let m = migrate_grants(raw, "home");
+        assert_eq!(m.registry.nodes.len(), 2);
+        assert!(m.registry.nodes[0].grants.is_empty(), "unreadable: that record holds nothing");
+        assert_eq!(m.registry.nodes[1].grant("home"), ["spawn".to_string()], "the readable one migrated");
+        assert_eq!(m.skipped.len(), 1, "{:?}", m.skipped);
+        assert!(m.skipped[0].contains("`s`"), "{}", m.skipped[0]);
+    }
+
+    #[test]
+    fn the_grant_migration_is_idempotent_and_drops_the_legacy_key_every_time() {
+        let raw = r#"{"nodes":[{"name":"sakaki","url":"http://s/","allows":["read"]}]}"#;
+        let once = migrate_grants(raw, "home").registry;
+        assert_eq!(once.nodes[0].grant("home"), ["read".to_string()]);
+
+        // The migration's own output is what a later `save_nodes` writes —
+        // folding it again (and again) must change nothing, which is what
+        // makes this safe to run on every load with no marker file.
+        let written = serde_json::to_string(&NodeRegistry {
+            schema_version: NODES_VERSION.to_string(),
+            nodes: once.nodes.clone(),
+        })
+        .unwrap();
+        assert!(!written.contains("allows"), "the legacy key is gone from what gets written back: {written}");
+        let twice = migrate_grants(&written, "home").registry;
+        assert_eq!(twice.nodes[0].grant("home"), ["read".to_string()]);
+        assert_eq!(twice.nodes[0].grants, once.nodes[0].grants);
+    }
+
+    #[test]
+    fn migration_unions_a_legacy_allows_into_an_existing_home_grant_rather_than_dropping_either() {
+        // Only reachable from a hand-edited file (nothing wrote both keys),
+        // but the fold must not silently lose a capability when it happens.
+        let raw = r#"{"nodes":[{"name":"sakaki","url":"http://s/","allows":["read"],
+                       "grants":{"home":["spawn"]}}]}"#;
+        let reg = migrate_grants(raw, "home").registry;
+        let mut caps = reg.nodes[0].grant("home").to_vec();
+        caps.sort();
+        assert_eq!(caps, ["read".to_string(), "spawn".to_string()]);
+    }
+
+    #[test]
+    fn migration_honours_a_non_default_home_mesh_and_a_corrupt_file_stays_empty() {
+        let raw = r#"{"nodes":[{"name":"sakaki","url":"http://s/","allows":["read"]}]}"#;
+        let reg = migrate_grants(raw, "fleet").registry;
+        assert_eq!(reg.nodes[0].grant("fleet"), ["read".to_string()]);
+        assert!(reg.nodes[0].grant("home").is_empty(), "the home mesh is [pairing] homeMesh, not a literal");
+
+        let broken = migrate_grants("not json at all", "home");
+        assert!(broken.registry.nodes.is_empty(), "a corrupt FILE is still an empty registry…");
+        assert_eq!(broken.skipped.len(), 1, "…and now says so: {:?}", broken.skipped);
+        assert!(migrate_grants(r#"{"nodes":"not-an-array"}"#, "home").registry.nodes.is_empty());
+    }
+
+    /// Review finding 7's second half: a config that will not parse must not
+    /// trigger the fold at all — a guess would migrate every record into a
+    /// mesh the operator never named, and the migration cannot be taken back.
+    #[test]
+    fn an_unreadable_config_skips_the_migration_and_says_so() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_root = std::env::var("AOIDE_ROOT").ok();
+        let saved_cfg = std::env::var(crate::config::ENV_CONFIG).ok();
+        let root = aoide_test_support::unique_tmp("nodes-bad-config");
+        std::env::set_var("AOIDE_ROOT", &root);
+        std::env::remove_var(crate::config::ENV_CONFIG);
+        let cfg_dir = root.join("state").parent().unwrap().to_path_buf();
+        let _ = std::fs::create_dir_all(&cfg_dir);
+        let _ = std::fs::create_dir_all(crate::fs::state_dir());
+        let config_path = crate::fs::root().join("config.toml");
+        std::fs::write(&config_path, "not = valid = toml\n").unwrap();
+        std::fs::write(
+            nodes_path(),
+            r#"{"nodes":[{"name":"sakaki","url":"http://s/","verified":true,"allows":["read"]}]}"#,
+        )
+        .unwrap();
+
+        let nodes = load_nodes();
+        assert_eq!(nodes.len(), 1, "the record is kept");
+        assert!(nodes[0].grants.is_empty(), "and holds nothing: no guess about where its grant lives");
+        assert_eq!(
+            std::fs::read_to_string(nodes_path()).unwrap().matches("allows").count(),
+            1,
+            "the file is left exactly as it was — the legacy key is still there for the next good load"
+        );
+
+        match saved_cfg {
+            Some(v) => std::env::set_var(crate::config::ENV_CONFIG, v),
+            None => std::env::remove_var(crate::config::ENV_CONFIG),
+        }
+        match saved_root {
+            Some(v) => std::env::set_var("AOIDE_ROOT", v),
+            None => std::env::remove_var("AOIDE_ROOT"),
+        }
     }
 
     #[test]
@@ -1232,34 +1958,137 @@ mod tests {
         assert!(!valid_capability("Spawn"), "case-sensitive — the closed set is exact strings");
     }
 
-    // ── `set_node_allow` (`node allow <name> <cap> on|off`) ──────────────────
+    // ── `set_node_allow` (`node allow <name> <cap> on|off [--mesh <m>]`) ─────
 
     #[test]
     fn set_node_allow_enables_and_disables_idempotently() {
         let mut nodes = vec![fixture_node("alpha", "http://a/", false)];
 
-        assert_eq!(set_node_allow(&mut nodes, "alpha", "spawn", true), Ok(AllowChange::Enabled));
-        assert_eq!(nodes[0].allows, vec!["spawn".to_string()]);
+        assert_eq!(set_node_allow(&mut nodes, "alpha", "spawn", true, "home"), Ok(AllowChange::Enabled));
+        assert_eq!(nodes[0].grant("home"), ["spawn".to_string()]);
         // Re-enabling the same cap is a no-op — nothing duplicated.
-        assert_eq!(set_node_allow(&mut nodes, "alpha", "spawn", true), Ok(AllowChange::NoOp));
-        assert_eq!(nodes[0].allows, vec!["spawn".to_string()]);
+        assert_eq!(set_node_allow(&mut nodes, "alpha", "spawn", true, "home"), Ok(AllowChange::NoOp));
+        assert_eq!(nodes[0].grant("home"), ["spawn".to_string()]);
 
-        assert_eq!(set_node_allow(&mut nodes, "alpha", "spawn", false), Ok(AllowChange::Disabled));
-        assert!(nodes[0].allows.is_empty());
+        assert_eq!(set_node_allow(&mut nodes, "alpha", "spawn", false, "home"), Ok(AllowChange::Disabled));
+        assert!(nodes[0].grant("home").is_empty());
+        assert!(nodes[0].grants.is_empty(), "the last capability leaving a mesh drops its entry entirely — an empty grant is never stored");
         // Disabling an already-absent cap is also a no-op.
-        assert_eq!(set_node_allow(&mut nodes, "alpha", "spawn", false), Ok(AllowChange::NoOp));
+        assert_eq!(set_node_allow(&mut nodes, "alpha", "spawn", false, "home"), Ok(AllowChange::NoOp));
+    }
+
+    #[test]
+    fn set_node_allow_touches_one_mesh_and_leaves_every_other_alone() {
+        let mut nodes = vec![fixture_node("alpha", "http://a/", false)];
+        set_node_allow(&mut nodes, "alpha", "read", true, "home").unwrap();
+        set_node_allow(&mut nodes, "alpha", "spawn", true, "away").unwrap();
+
+        set_node_allow(&mut nodes, "alpha", "read", false, "home").unwrap();
+        assert!(nodes[0].grant("home").is_empty(), "the narrowing lands where it was aimed");
+        assert_eq!(nodes[0].grant("away"), ["spawn".to_string()], "and the other mesh's grant is untouched");
     }
 
     #[test]
     fn set_node_allow_refuses_an_unknown_node_or_an_unknown_capability() {
         let mut nodes = vec![fixture_node("alpha", "http://a/", false)];
-        assert_eq!(set_node_allow(&mut nodes, "ghost", "spawn", true), Err(AllowError::UnknownNode));
-        assert_eq!(set_node_allow(&mut nodes, "alpha", "write", true), Err(AllowError::UnknownCapability));
+        assert_eq!(set_node_allow(&mut nodes, "ghost", "spawn", true, "home"), Err(AllowError::UnknownNode));
+        assert_eq!(set_node_allow(&mut nodes, "alpha", "write", true, "home"), Err(AllowError::UnknownCapability));
         // An unknown capability is refused even against an unknown node —
         // the capability check runs first, so it never depends on the
         // registry's own contents.
-        assert_eq!(set_node_allow(&mut nodes, "ghost", "write", true), Err(AllowError::UnknownCapability));
-        assert!(nodes[0].allows.is_empty(), "no refusal mutates the registry");
+        assert_eq!(set_node_allow(&mut nodes, "ghost", "write", true, "home"), Err(AllowError::UnknownCapability));
+        assert!(nodes[0].grants.is_empty(), "no refusal mutates the registry");
+    }
+
+    // ── `resolve_mesh` (which mesh a bare command acts in) ───────────────────
+
+    /// Review N2/N3/N4/N12, ONE RULE: the mesh that matters is the one where
+    /// the record holds THE CAPABILITY THE CALL NEEDS.
+    #[test]
+    fn a_bare_request_resolves_to_the_mesh_that_holds_the_capability_it_needs() {
+        // Two meshes, `message` in one: a mail call resolves with no flag —
+        // the peer trusted only outside the home mesh stays reachable.
+        let mail_only_away = grants_in("away", &["message"]);
+        assert_eq!(resolve_mesh(None, &mail_only_away, "home", "message").unwrap(), "away");
+        // The SAME record for a `read` call: no mesh holds it, so the answer is
+        // the record's sole mesh (the old no-capability fallback) and the door
+        // refuses on the grant — the honest error, not a silent re-aim.
+        assert_eq!(resolve_mesh(None, &mail_only_away, "home", "read").unwrap(), "away");
+
+        // Both meshes hold it, home among them: home, the pre-charter default.
+        let both = BTreeMap::from([
+            ("away".to_string(), vec!["read".to_string()]),
+            ("home".to_string(), vec!["read".to_string()]),
+        ]);
+        assert_eq!(resolve_mesh(None, &both, "home", "read").unwrap(), "home");
+
+        // Two NON-home meshes hold it: refuse, naming them (a guess would
+        // address a grant the operator did not mean).
+        let two_away = BTreeMap::from([
+            ("club".to_string(), vec!["read".to_string()]),
+            ("fleet".to_string(), vec!["read".to_string()]),
+        ]);
+        let err = resolve_mesh(None, &two_away, "home", "read").unwrap_err();
+        assert!(err.contains("club") && err.contains("fleet"), "{err}");
+        assert!(err.contains("--mesh"), "{err}");
+
+        // And `read` in one mesh while `message` sits in another: each call
+        // finds its own.
+        let split = BTreeMap::from([
+            ("away".to_string(), vec!["read".to_string()]),
+            ("home".to_string(), vec!["message".to_string()]),
+        ]);
+        assert_eq!(resolve_mesh(None, &split, "home", "read").unwrap(), "away", "the read surface resolves to the mesh that holds `read`");
+        assert_eq!(resolve_mesh(None, &split, "home", "message").unwrap(), "home");
+    }
+
+    #[test]
+    fn a_named_mesh_always_wins_even_when_the_target_has_exactly_one() {
+        let grants = grants_in("home", &["read"]);
+        assert_eq!(resolve_mesh(Some("away"), &grants, "home", "read").unwrap(), "away");
+        assert_eq!(
+            resolve_mesh(Some("  away  "), &Grants::new(), "home", "read").unwrap(),
+            "away",
+            "the flag is trimmed, and names the mesh even when nothing is granted in it"
+        );
+    }
+
+    #[test]
+    fn a_bare_command_takes_the_sole_mesh_a_node_is_trusted_in_else_the_home_mesh() {
+        let one = grants_in("away", &["read"]);
+        assert_eq!(resolve_mesh(None, &one, "home", "read").unwrap(), "away");
+        assert_eq!(
+            resolve_mesh(None, &Grants::new(), "home", "read").unwrap(),
+            "home",
+            "no grant anywhere falls back to the home mesh, the same one pre-charter grants migrated into"
+        );
+        assert_eq!(resolve_mesh(Some(""), &one, "home", "read").unwrap(), "away", "an empty --mesh is the same as naming none");
+    }
+
+    #[test]
+    fn the_name_only_form_still_answers_the_two_callers_that_have_no_capability_to_ask_about() {
+        let one: BTreeSet<String> = ["away".to_string()].into_iter().collect();
+        assert_eq!(resolve_mesh_any(None, &one, "home").unwrap(), "away");
+        assert_eq!(resolve_mesh_any(None, &BTreeSet::new(), "home").unwrap(), "home");
+        let many: BTreeSet<String> = ["away".to_string(), "home".to_string()].into_iter().collect();
+        assert!(resolve_mesh_any(None, &many, "home").is_err(), "a pair still refuses an ambiguous box");
+    }
+
+    #[test]
+    fn an_unnameable_mesh_is_refused_rather_than_becoming_an_empty_grant_scope() {
+        let err = resolve_mesh(Some("Not Valid"), &Grants::new(), "home", "read").unwrap_err();
+        assert!(err.contains("Not Valid"), "{err}");
+    }
+
+    #[test]
+    fn granted_meshes_are_exactly_the_grant_maps_keys() {
+        let mut node = fixture_node("alpha", "http://a/", false);
+        assert!(granted_meshes(&node).is_empty());
+        node.grants = BTreeMap::from([
+            ("away".to_string(), vec!["read".to_string()]),
+            ("home".to_string(), vec!["spawn".to_string()]),
+        ]);
+        assert_eq!(granted_meshes(&node), ["away".to_string(), "home".to_string()].into_iter().collect());
     }
 
     // ── `resolve_node` (P-P3 decision 6's identity ladder) ────────────────────
@@ -1273,7 +2102,8 @@ mod tests {
         std::fs::write(&token_path, "secret-b\n").unwrap();
 
         // NOT autogate-marked — resolve_node must still find it by token,
-        // unlike is_autogated_node_token which would refuse it.
+        // unlike `autogated_node_token`, whose fold is over `autogate`-marked
+        // records only, and which would refuse it.
         let mut paired = fixture_node("box-b", "http://10.0.0.5:8710/", false);
         paired.verified = true;
         paired.token_file = Some(token_path.to_string_lossy().into_owned());
@@ -1384,7 +2214,7 @@ mod tests {
     #[test]
     fn upsert_paired_node_leaves_via_none_on_a_fresh_insert() {
         let mut nodes: Vec<Node> = Vec::new();
-        upsert_paired_node(&mut nodes, "box-b", "http://b/", "deadbeef", "2026-08-25T00:00:00Z", &["read".to_string()]);
+        upsert_paired_node(&mut nodes, "box-b", "http://b/", "deadbeef", "2026-08-25T00:00:00Z", &["read".to_string()], "home");
         assert_eq!(nodes[0].via, None, "a fresh pairing stamps no via — set_node_via is the only writer");
     }
 
@@ -1406,5 +2236,39 @@ mod tests {
         let mut nodes = vec![fixture_node("alpha", "http://a/", false)];
         let err = set_node_via(&mut nodes, "ghost", Some("ssh://sakaki")).unwrap_err();
         assert!(err.contains("ghost"));
+    }
+
+    #[test]
+    fn transport_conflict_is_exactly_https_plus_a_via() {
+        // The one pair H1 refuses: two transports named at once. Everything
+        // else is a dialable record.
+        assert!(transport_conflict("b", "https://aoide.example/", None).is_none(), "https alone is the new lane");
+        assert!(transport_conflict("b", "http://10.0.0.5:8710/", Some("ssh://khoa@sakaki")).is_none(), "a via alone is today's ssh lane");
+        assert!(transport_conflict("b", "ssh://khoa@sakaki/", Some("ssh://khoa@sakaki")).is_none(), "even a url that LOOKS like a via");
+        assert!(transport_conflict("b", "http://a/", Some("")).is_none(), "an empty via names no transport");
+
+        let conflict = transport_conflict("b", "https://aoide.necoconeco.net/", Some("ssh://khoa@sakaki"))
+            .expect("https + via is refused");
+        assert!(conflict.contains("b"), "names the node: {conflict}");
+        assert!(conflict.contains("https://aoide.necoconeco.net/"), "names the url: {conflict}");
+        assert!(conflict.contains("ssh://khoa@sakaki"), "names the via: {conflict}");
+        assert!(conflict.contains("127.0.0.1"), "says what it would actually dial: {conflict}");
+    }
+
+    #[test]
+    fn set_node_via_refuses_the_https_pair_and_leaves_the_record_untouched() {
+        let mut https_node = fixture_node("alpha", "https://aoide.necoconeco.net/", false);
+        https_node.via = None;
+        let mut nodes = vec![https_node];
+
+        let err = set_node_via(&mut nodes, "alpha", Some("ssh://khoa@sakaki"))
+            .expect_err("an https url plus a via is refused at the write path too");
+        assert!(err.contains("https://"), "{err}");
+        assert_eq!(nodes[0].via, None, "a refused call writes nothing — checked BEFORE the field is touched");
+
+        // Clearing a via is never a conflict (it is what a fix looks like).
+        nodes[0].via = Some("ssh://khoa@sakaki".to_string());
+        assert!(set_node_via(&mut nodes, "alpha", None).is_ok());
+        assert_eq!(nodes[0].via, None);
     }
 }

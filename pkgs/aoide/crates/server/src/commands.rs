@@ -73,6 +73,28 @@ fn handle_a2a_serve(inv: &Invocation) -> Outcome {
     }
 }
 
+/// `mail serve`'s handler (H1) — `handle_a2a_serve`'s exact shape, one
+/// listener over. On the Cli door this is only ever reached via `run_cli`'s
+/// special-case (dispatch first, to record the launch, THEN block in the accept
+/// loop); on any other door it never blocks that door, it just reports how to
+/// raise the adapter.
+fn handle_mail_serve(inv: &Invocation) -> Outcome {
+    let port = crate::a2a::resolve_mail_adapter_port(inv);
+    match inv.door {
+        Door::Cli => Outcome::ok(
+            "mail.serve",
+            format!("raising the mail adapter on http://127.0.0.1:{port}/ (loopback only)"),
+        )
+        .with_data(json!({ "interactive": true, "port": port })),
+        _ => Outcome::ok(
+            "mail.serve",
+            "mail serve is a long-running server; run `aoide mail serve` from a terminal or the \
+             aoide-mail-adapter systemd unit (not over this door)",
+        )
+        .with_data(json!({ "interactive": true, "door": "non-cli" })),
+    }
+}
+
 fn handle_daemon(inv: &Invocation) -> Outcome {
     let log = aoide_protocol::audit_log_path(inv);
     let status = crate::daemon::run(log);
@@ -132,6 +154,21 @@ pub fn register_a2a_serve(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_a2a_serve,
+    ));
+}
+
+/// `mail serve`, registered directly after `a2a serve` — its sibling listener
+/// (H1): the loopback mail adapter a TLS-terminating front points at, whose
+/// whole method set is the three mail methods and the stripped card.
+pub fn register_mail_serve(r: &mut Registry) {
+    r.insert(cmd!(
+        path: ["mail", "serve"],
+        summary: "Run the mail-only adapter (H1): the loopback listener a TLS-terminating front points at, serving aoide/mailDeposit, aoide/mailPoll, aoide/binding and the stripped AgentCard, and no other method. Binds 127.0.0.1 only, off by default.",
+        args: [],
+        flags: [flag!("port", "int", "Override the mail adapter's loopback port (default 8712 / AOIDE_MAIL_ADAPTER_PORT).")],
+        gated: false,
+        implemented: true,
+        handler: handle_mail_serve,
     ));
 }
 

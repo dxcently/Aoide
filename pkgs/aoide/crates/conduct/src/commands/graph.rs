@@ -220,6 +220,7 @@ pub fn register(r: &mut Registry) {
             flag!("yes", "bool", "Authorise delivery now (else the send is held pending approval). No-op for a --to remote send — the receiving node gates its own delivery."),
             flag!("from", "string", "Sender attribution override for the delivered provenance prefix (default: AOIDE_SESSION_ID). ATTRIBUTION ONLY, not authentication — unauthenticated and as spoofable as the env var it defaults from."),
             flag!("to", "string", "Target by name instead of --id: a local session id/tail4/petname/host-role-petname line, or node/<query> to resolve against a registered node's CACHED graph and deliver over A2A message/send. Mutually exclusive with --id."),
+            flag!("mesh", "string", "For a `node/<query>` target: the mesh this request acts in (P-CHARTER) — the far door reads the caller's grant in it. Absent = the node's sole granted mesh, else `[pairing] homeMesh`; required when that node is trusted in more than one mesh. Unused by a local send."),
         ],
         gated: false,
         implemented: true,

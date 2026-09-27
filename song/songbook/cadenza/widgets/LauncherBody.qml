@@ -38,13 +38,18 @@
 //
 // ── KEYS ──────────────────────────────────────────────────────────────────
 // Typing filters. ↑/↓, Ctrl+J/K move; PgUp/PgDn move a page; ⏎ fires the
-// selected row; Tab / Shift+Tab (and Ctrl+L/H) cycle the mode; Esc clears
-// the query first, then asks the shell to close (`dismissed`). Hover
-// selects, click fires; a click on the scrim closes.
+// selected row. A number is searched like any text (app names AND desktop
+// ids, so "2048" finds 2048). Only when a query that is wholly a positive
+// integer n finds NOTHING in the mode, and n ≤ the mode's list at rest, is
+// it a row number: the list at rest shows, row n is lit, ⏎ fires row n,
+// and the arrows wait until the number is gone. Any real match wins.
+// Tab / Shift+Tab (and Ctrl+L/H) cycle the mode; Esc clears the query
+// first, then asks the shell to close (`dismissed`). Hover selects, click
+// fires; a click on the scrim closes.
 //
 // ── COLOUR ────────────────────────────────────────────────────────────────
-// One amber thing: the selected row's [n]. Indices at rest are dim; the
-// query's hits in a name are `match` (white-hot); the text cursor is a
+// One amber thing: the lit row's [n] (row n under the number fallback,
+// else the selection). Indices at rest are dim; the query's hits in a name are `match` (white-hot); the text cursor is a
 // static ink underline, so the index keeps amber to itself. Counts are
 // `number`, glosses and ages `dim`, a failed clipboard read `urgent`.
 import QtQuick
@@ -118,8 +123,9 @@ Item {
 
     // ── fuzzy ranking ─────────────────────────────────────────────────────
     // rank 0 prefix · 1 word-start substring · 2 substring · 3 subsequence
-    // (the fuzzy tier) · 4 keyword · 5 generic name / comment. `hits` are
-    // the matched character indices in `name` (tiers 0–3), for the highlight.
+    // (the fuzzy tier) · 4 desktop id or keyword · 5 generic name / comment.
+    // `hits` are the matched character indices in `name` (tiers 0–3), for
+    // the highlight. The id (`org.gnome.Nautilus`, `2048`) is haystack, never drawn.
     function fuzzy(name, q, extra) {
         var n = name.toLowerCase()
         var at = n.indexOf(q)
@@ -134,6 +140,7 @@ Item {
             if (n.charAt(i) === q.charAt(j)) { hits.push(i); j++ }
         if (j === q.length) return { rank: 3, hits: hits }
         if (extra) {
+            if (("" + (extra.id || "")).toLowerCase().indexOf(q) >= 0) return { rank: 4, hits: [] }
             var kws = extra.keywords || []
             for (i = 0; i < kws.length; i++)
                 if (("" + kws[i]).toLowerCase().indexOf(q) >= 0) return { rank: 4, hits: [] }
@@ -191,9 +198,11 @@ Item {
     }
     function countOf(id) { return root.ledger ? root.ledger.count(id) : 0 }
 
-    readonly property var appsList: {
+    // Each mode's rows for a lowercased, trimmed query `qq` ("" = the list at
+    // rest, unfiltered).
+    function appsFor(qq) {
         var out = [], i, e
-        if (!root.searching) {
+        if (qq.length === 0) {
             for (i = 0; i < root.apps.length; i++) {
                 e = root.apps[i]
                 out.push({ entry: e, name: "" + (e.name || e.id), hits: [] })
@@ -207,7 +216,7 @@ Item {
         for (i = 0; i < root.apps.length; i++) {
             e = root.apps[i]
             var name = "" + (e.name || e.id)
-            var f = root.fuzzy(name, root.q, e)
+            var f = root.fuzzy(name, qq, e)
             if (f) out.push({ entry: e, name: name, hits: f.hits, rank: f.rank, count: root.countOf(e.id) })
         }
         out.sort(function (a, b) {
@@ -219,7 +228,7 @@ Item {
         return out
     }
 
-    readonly property var ledgerList: {
+    function ledgerFor(qq) {
         if (!root.ledger) return []
         var ids = root.ledger.rankedIds()
         var launches = root.ledger.launches || {}
@@ -228,7 +237,7 @@ Item {
             var e = root.appsById[ids[i]]
             if (!e) continue                     // uninstalled since: not launchable
             var name = "" + (e.name || e.id)
-            var f = root.searching ? root.fuzzy(name, root.q, e) : { hits: [] }
+            var f = qq.length > 0 ? root.fuzzy(name, qq, e) : { hits: [] }
             if (!f) continue
             var rec = launches[ids[i]] || {}
             out.push({ entry: e, name: name, hits: f.hits,
@@ -237,7 +246,7 @@ Item {
         return out
     }
 
-    readonly property var clipList: {
+    function clipFor(qq) {
         if (!root.clipboard) return []
         var all = root.clipboard.parsedEntries || []
         var out = []
@@ -245,22 +254,46 @@ Item {
             var it = all[i]
             if (!it) continue
             var p = "" + (it.preview || "")
-            var at = root.searching ? p.toLowerCase().indexOf(root.q) : -1
-            if (root.searching && at < 0) continue
+            var at = qq.length > 0 ? p.toLowerCase().indexOf(qq) : -1
+            if (qq.length > 0 && at < 0) continue
             var hits = []
-            for (var k = 0; at >= 0 && k < root.q.length; k++) hits.push(at + k)
+            for (var k = 0; at >= 0 && k < qq.length; k++) hits.push(at + k)
             out.push({ id: "" + it.id, image: it.kind === "image", name: p, hits: hits })
         }
         return out
     }
 
+    function listFor(qq) {
+        return root.mode === "clip" ? root.clipFor(qq)
+             : root.mode === "ledger" ? root.ledgerFor(qq)
+             : root.appsFor(qq)
+    }
+
+    // what the query finds in the current mode (the list at rest when empty)
+    readonly property var found: root.listFor(root.q)
+
+    // ── the number fallback ───────────────────────────────────────────────
+    // A number is searched like any text first (names AND desktop ids, so
+    // "2048" finds 2048). Only when the query is wholly a positive integer n
+    // (trimmed), the search finds NOTHING in this mode, and n is no more than
+    // the mode's list at rest, does n name a row: the list at rest shows,
+    // row n wears the selection, and ⏎ fires it. Any real match wins.
+    readonly property int pick: {
+        if (root.found.length > 0 || !/^[0-9]+$/.test(root.q)) return 0
+        var n = parseInt(root.q, 10)
+        return (n >= 1 && n <= root.restList.length) ? n : 0
+    }
+    // the list at rest, built only while a digits-only query found nothing
+    readonly property var restList: (root.found.length === 0 && /^[0-9]+$/.test(root.q))
+            ? root.listFor("") : []
+    // the one lit row, and the row ⏎ fires: the pick, else the selection
+    readonly property int litRow: root.pick > 0 ? root.pick - 1 : root.sel
+
     readonly property var totalCount: root.mode === "clip"
             ? (root.clipboard ? (root.clipboard.parsedEntries || []).length : 0)
             : root.mode === "ledger" ? (root.ledger ? root.ledger.rankedIds().length : 0)
             : root.apps.length
-    readonly property var list: root.mode === "clip" ? root.clipList
-                              : root.mode === "ledger" ? root.ledgerList
-                              : root.appsList
+    readonly property var list: root.pick > 0 ? root.restList : root.found
     onListChanged: if (root.sel >= root.list.length) root.sel = Math.max(0, root.list.length - 1)
     onQueryChanged: root.sel = 0
 
@@ -287,7 +320,7 @@ Item {
     // ── actions ───────────────────────────────────────────────────────────
     function move(d) {
         var n = root.list.length
-        if (n === 0) return
+        if (n === 0 || root.pick > 0) return      // a number fallback owns the lit row
         root.sel = Math.max(0, Math.min(n - 1, root.sel + d))
     }
     function fire(i) {
@@ -316,7 +349,7 @@ Item {
         else if (k === Qt.Key_Up || (ctrl && k === Qt.Key_K)) root.move(-1)
         else if (k === Qt.Key_PageDown) root.move(root.listRows)
         else if (k === Qt.Key_PageUp) root.move(-root.listRows)
-        else if (k === Qt.Key_Return || k === Qt.Key_Enter) root.fire(root.sel)
+        else if (k === Qt.Key_Return || k === Qt.Key_Enter) root.fire(root.litRow)
         else if (k === Qt.Key_Backtab || (ctrl && k === Qt.Key_H)) root.cycleMode(-1)
         else if (k === Qt.Key_Tab || (ctrl && k === Qt.Key_L)) root.cycleMode(1)
         else if (k === Qt.Key_Escape) {
@@ -485,15 +518,15 @@ Item {
                     boundsBehavior: Flickable.StopAtBounds
                     Connections {
                         target: root
-                        function onSelChanged() {
-                            if (root.sel >= 0 && root.sel < lv.count) lv.positionViewAtIndex(root.sel, ListView.Contain)
+                        function onLitRowChanged() {
+                            Qt.callLater(function () { if (root.litRow >= 0 && root.litRow < lv.count) lv.positionViewAtIndex(root.litRow, ListView.Contain) })
                         }
                     }
                     delegate: Item {
                         id: row
                         required property var modelData
                         required property int index
-                        readonly property bool lit: root.sel === row.index
+                        readonly property bool lit: root.litRow === row.index
                         readonly property int digits: String(root.list.length).length
                         width: lv.width
                         height: root.kit.cellH

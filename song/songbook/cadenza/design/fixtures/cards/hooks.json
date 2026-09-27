@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "0",
+  "hooks": [
+    { "sessionId": "c4000000-0000-4000-8000-000000000001", "phase": "working", "updatedAt": "2026-09-26T16:20:30Z" },
+    { "sessionId": "sub:c400000000000a", "phase": "working", "updatedAt": "2026-09-26T16:20:31Z" },
+    { "sessionId": "sub:c400000000000b", "phase": "awaiting", "updatedAt": "2026-09-26T16:19:00Z" },
+    { "sessionId": "c4000000-0000-4000-8000-000000000002", "phase": "awaiting", "updatedAt": "2026-09-26T16:18:20Z" }
+  ]
+}

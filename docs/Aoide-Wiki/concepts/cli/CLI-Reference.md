@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-29
+updated: 2026-09-27
 tags: [aoide, cli, reference, schema]
 ---
 
@@ -58,20 +58,21 @@ start at [[aoide-cli]] and the group pages linked below.
   `graph`/`graph link` (the read/analysis lens), `project add/list/remove`,
   `workspace set/clear/list/root` (the compositor workspace ↔ project binding;
   `root` prints one bare path for a launcher),
-  `session start/phase/end/hook/undying/permit/pending list/approve/deny/
-  prune/reap`, bare `session` (the undying picker), bare `send`/`spawn`/
+  `session start/phase/end/hook/grant/permit/pending list/approve/deny/
+  prune/reap`, bare `session` (the roster — by project, or by host under
+  `--hosts`), bare `send`/`spawn`/
   `resurrect` (bare `resurrect` also walks up to a `.aoide/project.json`
-  manifest), `conduct`, and `inbox list/read/clear` (the receive half of
-  `send`).
+  manifest), `conduct`, and `mail`/`mail read`/`mail poll` (the receive half
+  of `send`).
   Stage files: `state/stage/{sessions,hooks,projects,graph,pending,
-  herald}.json`, `state/inbox.json`; control sockets at
+  herald}.json`; the mailbase at `state/mail/base.jsonl`; control sockets at
   `$XDG_RUNTIME_DIR/aoide/session-<id>.sock`.
 - [[Screen-Commands|Screen-Commands]] — computer use: `screen info/
   shot/ocr/diff/send` and the nine `screen point` commands. Captures and sidecars
   in `state/captures/`; pointer position in `state/pointer-pos.json`.
 - [[Doors-and-Nodes|Doors-and-Nodes]] — the other doors:
   `mcp serve`, `daemon`, `events tail`, `shellbridge`, `adapter melete`,
-  `conductor` (signature + pointer to [[Conductor-TUI]]), `who`, `a2a serve`,
+  `conductor` (signature + pointer to [[Conductor-TUI]]), `a2a serve`,
   and the `node` federation group (the outbound A2A client). Registries:
   `state/nodes.json`, `state/node-cache/<name>.json`.
 - [[Conductor-TUI|Conductor-TUI]] — the `aoide conductor` interactive

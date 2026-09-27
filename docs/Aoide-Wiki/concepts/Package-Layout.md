@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-01
-updated: 2026-08-28
+updated: 2026-09-27
 tags: [aoide, architecture, rust, cli, crate, blueprint]
 ---
 
@@ -59,10 +59,10 @@ songbook manifest).
 | crate | charter | app | commands it registers |
 |---|---|---|---|
 | **protocol** | The contract: registry, schema doc, `Outcome` envelope + exit codes, `Door`, audit event classes, A2A-JSON-RPC/MCP wire types, the `cmd!`/`arg!`/`flag!` registration macros. Every door depends on it; it depends on nothing aoide-specific. | both | none (library) |
-| **conduct** | The session core: PTY-backed `conduct` wrap, the session DAG, hook ingestion, liveness reaping. Also owns the `shellbridge`/`herald` implementation files (a deliberate charter exception — both are entangled with core internals even though their CLI commands register into `lyra`). | both | aoide: `conduct`, `graph.*` (20), `hooks.install`, `who`; lyra: `shellbridge`, `herald.push` |
+| **conduct** | The session core: PTY-backed `conduct` wrap, the session DAG, hook ingestion, liveness reaping. Also owns the `shellbridge`/`herald` implementation files (a deliberate charter exception — both are entangled with core internals even though their CLI commands register into `lyra`). | both | aoide: `conduct`, `graph.*` (20), `hooks.install`, `session` (bare — the roster; the retired `who`'s pipeline); lyra: `shellbridge`, `herald.push` |
 | **server** | `aoided` and the door serve-loops: MCP-over-stdio, A2A JSON-RPC/HTTP/SSE, listeners, sessions, snapshots, the audit sink. Untrusted input stops here. | aoide | `daemon`, `a2a.serve` |
-| **client** | Outbound: the A2A client registry + send, the melete adapter, transports that drive external agents and speak to `aoided`. | aoide | `adapter.melete`, `a2a.agent.*` (4), `node.*` (5) |
-| **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, migrations. File-first (seed → build; a real embedded store is the open question below). | aoide | `usage`, `inbox.*` (3) |
+| **client** | Outbound: the A2A client registry + send, the melete adapter, transports that drive external agents and speak to `aoided`. | aoide | `adapter.melete`, `context`, `pair`/`pair.reject`/`pair.watch` (3), `node.*` (9), `mesh.*` (8), `melete.*` (3), `mail.*` (11 — `mail ring` registers from `conduct`, `mail serve` from `server`) |
+| **storage** | Durable session data + memory persistence: session store, transcript index, stage/state files, the mailbase store, migrations. File-first (seed → build; a real embedded store is the open question below). | aoide | `usage`, `identity`, `config` + `config.set` (4) |
 | **secrets** | The credential broker: a socket-only daemon under its own uid, TOTP-gated parked resolves, `file`/`age` backends, `secrets watch`/`--popup`. See [[Secrets-Broker]]. | aoide | `secrets.*` (17) |
 | **conductor** | The session-DAG TUI (ratatui: app/ui/graphview/theme). Depends on `{protocol, conduct, storage}` via a dependency-injection seam (`App` takes a `DispatchFn`), never on `server`. | aoide | `conductor` |
 | **upkeep** | Mechanical integrity, the working-tree half: `soundcheck` polices gitignored/uncommitted state (`result`, `state/`, stray root files) that `nix flake check` structurally cannot see. Report-only, forever — never moves, deletes, formats, or repairs. | aoide | `soundcheck` |

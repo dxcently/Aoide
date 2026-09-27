@@ -1578,6 +1578,7 @@ mod sealed_spool_tests {
             &kp.info().pubkey_hex,
             &crate::time::now_iso_utc(),
             &["message".to_string()],
+            "home",
         );
         crate::node_store::save_nodes(&nodes).unwrap();
         let binding = crate::seal::publish_binding().unwrap();
@@ -1586,8 +1587,8 @@ mod sealed_spool_tests {
         let container = crate::seal::seal_envelope(
             &envelope,
             &binding,
-            "",
-            "",
+            &envelope.header.origin_mesh,
+            &envelope.header.origin_mesh,
             &me,
             &crate::time::now_iso_utc(),
         )
@@ -1617,7 +1618,7 @@ mod sealed_spool_tests {
         let reread = list_entries("elsewhere").unwrap();
         assert_eq!(reread.len(), 1);
         let container = reread[0].container.clone().expect("still sealed");
-        match crate::seal::deposit_container(&container).unwrap() {
+        match crate::seal::deposit_container(&container, "home").unwrap() {
             crate::seal::ContainerOutcome::Opened { envelope: opened, .. } => {
                 assert_eq!(opened.text, body, "the body survived, inside ct");
             }

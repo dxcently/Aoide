@@ -7,6 +7,9 @@ the packaging placeholders. **The core flake's exports
 change to what the core exports is the one case that also touches `lib/`
 and `tests/`.
 
+This page is the nix half — modules, options, the flake. Installing the
+`aoide`/`aoided` binaries themselves needs no nix and is `docs/INSTALL.md`.
+
 Verify at any point:
 
 ```
@@ -332,9 +335,12 @@ See `tests/README.md` for why Rust's own tests do NOT live here.
 - `song-shape` — every walked `song/songbook/**` path is a `rice.nix`
   (host-agnostic song discipline; CONTRACTS.md §5).
 - `phantom-commands` — every backticked `aoide …`/`lyra …` spelling in
-  `AGENTS.md` + `docs/agent/*.md` resolves against the binaries' `schema
-  --json`, built from the checked-out source (no doc may teach a command the
-  registry no longer carries).
+  `AGENTS.md`, `docs/agent/*.md`, `docs/INSTALL.md` and the wiki
+  (`docs/Aoide-Wiki/**/*.md`, minus the ingest ledger, the `references/`
+  history, the `Feature-Set.md` roadmap and the `Controls.md` dead-keybind
+  report — `lib/checks.nix` names each exclusion and why) resolves against
+  the binaries' `schema --json`, built from the checked-out source (no doc
+  may teach a command the registry no longer carries).
 - `nix-independence` — the core crate closure, derived from
   `pkgs/aoide/Cargo.toml` and walked from `crates/cli`, never reaches
   `aoide-song`/`aoide-screen`/`aoide-lyra` and never shells out to nix

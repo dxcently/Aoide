@@ -44,6 +44,56 @@
   Deleting `seal.rs` and the workspace `Cargo.toml`'s one `age` line removes
   the dependency from the tree, which is the test this module has to keep
   passing.
+- **The charter's frames live in `seal.rs` too, and `charter.rs` builds none of
+  its own.** `charter_sig_input`, `charter_sig_frame` and `charter_payload` are
+  where the label table is; `charter` calls them. A new charter frame adds a
+  label in `seal.rs` and nothing else changes.
+- **`accept` checks the digest BEFORE the signature and BEFORE the parse, and
+  writes nothing until every step has passed.** The order is the point: a
+  touched file (a trailing newline, a formatter, a line-ending change) must
+  answer `charter-tampered` and never "this node does not trust the key", and a
+  refusal must leave no charter, no `.sig`, no version mark and no re-key mark
+  behind. `trust.json` that exists but does not parse is an ERROR, never "no
+  record" — reading it as nothing would silently reset the trusted key and the
+  high-water mark.
+- **One apply per mesh, one write order, and the mark last.** `accept`'s
+  read-modify-write of `charter.toml`/`.sig`/`trust.json` runs entirely under
+  `fs::lock_path(charter_lock_path(mesh))` — the door is thread-per-connection
+  and a poll process can run beside it, and two applies that both read the old
+  mark let the OLDER version win the write (a revocation silently un-applied).
+  Under that lock the order is `.sig` → charter → mark: a failure between them
+  leaves a detectable pair or an unclaimed application, never a silent success,
+  and it is refused `local-io` (the charter was fine; this node could not finish
+  writing it) rather than with one of the four words that answer for the
+  charter.
+- **`init` and `reroot` refuse before they change anything.** `init` refuses on
+  a machine that already trusts an operator for that mesh (config line or state
+  record) and mints nothing — that machine is a node, not its root. `reroot`
+  checks `trusted_operator` FIRST and refuses before minting, bumping or
+  signing when a config line pins the key it is about to replace (the line and
+  the record would disagree, and even the new charter would be refused), naming
+  `aoide mesh join --operator` as the trust-entry step.
+- **A `charter` kind is never filed, in either lane.** The container path
+  applies it; `mail::deposit` refuses a PLAINTEXT envelope with that kind
+  (`not-correspondence`), because it carries no charter at all.
+- **The charter arm's zone check reads SIGNED values only.** The mesh the
+  carrier's own envelope signed (`ctx.origin_mesh`) is compared against the
+  mesh inside the operator's signature input, and a disagreement is refused
+  `zone-violation` after the charter is applied — the charter's authority is
+  the operator signature, and the letter's routing claim never overrides it.
+  The hop-mutable `container.mesh` is NOT read there: a relay flipping one
+  unsigned byte must neither admit a charter nor refuse one.
+- **`sign` is the last write to a charter file.** The signature covers the
+  digest of the operator's own bytes, so anything that rewrites the file after
+  `sign` invalidates it. Never normalize on read to make a touched file verify.
+- **The config operator line and the state record are two sources that must
+  agree.** `charter::trusted_operator` is the one reader; a disagreement is
+  `operator-mismatch` and refuses every charter for that mesh until a human
+  resolves it. Do not let one silently win.
+- **`state/operator/<mesh>.key` is a mesh root, not a node key.** It signs
+  charters (and later board takeovers) and nothing else, it is never the
+  identity key even on the machine that is both, and `reroot` DELETES the old
+  one — trust is replaced, not added, so nothing archives it.
 - **No private key ever enters a `Serialize`/`Deserialize` type here, and
   `seal.rs` enforces that on itself.** The age key is the stock
   `AGE-SECRET-KEY-1…` text at `state/identity/age.key`, `0600`, beside
@@ -207,13 +257,31 @@
   time — there is no equivalent for a directory).
 - **`config` holds INTENT; every other module here holds STATE — never move
   a value across that line (task #135 P-C).** `config.toml` records what an
-  operator WANTS ahead of anything happening; `nodes.json`'s records/allows/
+  operator WANTS ahead of anything happening; `nodes.json`'s records/grants/
   hub, the pairing park queues, `advertise.json`'s switch, `undying.json`
   record what HAPPENED. A new decision an operator makes UP FRONT gets a
   `config` key; a fact the system observes or commits gets a state file.
   Don't migrate an existing state field into `config` "for tidiness" — a
   `state/*.json` value is written by code and a config value is written by a
-  human, and the two have opposite ownership.
+  human, and the two have opposite ownership. One consequence P-CHARTER
+  added: a grant's SOURCE can be a file this box does not own (a signed
+  charter), so the record's `grants` entry for that mesh is inert and what
+  this box writes there is the REFUSAL (`narrowed`) — never copy the charter
+  into `grants` at accept time, which would make every later charter version
+  silently re-grant what an operator turned off.
+- **`autogated_node_addr`/`autogated_node_token` return the MATCHED record,
+  and a match is never a trust decision.** They answer only "which `autogate`
+  record does this address/bearer resolve to" (registry order, the same
+  tie-break `resolve_node` uses), so the door can ask its second question —
+  whether that record earns auto-delivery under its HOME mesh's rules
+  (`aoide-server::a2a::rail_admits`, which reads the charter and
+  `Node::narrowed` the door already reads). **Don't fold a grant, a charter or
+  a `verified` check into these folds:** the door's #50 guard exemption asks
+  "did the rail match" as `.is_some()` on the record, and narrowing the MATCH
+  would answer a charter-unlisted caller with the guard's synthetic
+  `submitted` Task (no delivery, no queue entry) instead of the PENDING entry
+  the rail's ruling asks for. `Node.autogate`'s own field doc carries the same
+  statement.
 - **`config::SCHEMA` is the ONE place a config key is described — walk it,
   never restate it in a match arm.** The table carries each key's name,
   `ValueKind` vocabulary, summary, and a `read` fn projecting it off a typed
@@ -474,7 +542,7 @@
   all when the ceremony resolved an actual via; a re-pair that named none
   leaves a previously-recorded `via` (e.g. one `aoide pair`'s hostname arm set) exactly
   as it was, the same untouched-unless-named stance `upsert_paired_node`
-  itself holds for `autogate`/`tokenFile`/`bearerSecret`/`hub`/`allows`.
+  itself holds for `autogate`/`tokenFile`/`bearerSecret`/`hub`/`grants`.
 - **`pairing`'s request ids are deliberately NOT `state/stage/pending.json`'s
   array-position ids.** A pairing correlation must survive the requester's
   CLI process exiting and an async `aoide/pairPoll` (Design A, task #119 —

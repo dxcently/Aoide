@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-09-03
+updated: 2026-09-27
 tags: [aoide, cli, mcp, a2a, node, daemon]
 ---
 
@@ -12,7 +12,8 @@ surface: the stdio [[Agent-Interface|MCP]] façade (`mcp serve` — `lyra mcp
 serve` is the same façade over lyra's own 48-path registry), the [[aoided]]
 policy skeleton (`daemon`, `events tail`, `adapter melete`), the desktop
 state bridge (`shellbridge`), the interactive session UI (`conductor`,
-detailed at [[Conductor-TUI]]), live presence (`who`), the [[A2A-Door]]
+detailed at [[Conductor-TUI]]), live presence (bare `session` — the roster,
+grouped by project or by host; documented on [[Graph-and-Conduct]]), the [[A2A-Door]]
 server (`a2a serve`), and [[Node-Federation]] (`node *`) — the node family is
 also the outbound A2A client, driving remote instances over the same wire.
 Handlers are spread across
@@ -255,29 +256,6 @@ aoide events tail [--class <c1,c2,…>] [--json]
   `dismissed`/`expired`, name-only) and the hand-edit watcher over the
   broker-owned stage files. See [[aoided]].
 
-### aoide who
-
-```
-aoide who [<filter>] [--all] [--json]
-```
-
-- **Reads:** every registered node, probed LIVE on every invocation — one
-  thread per node, bounded by curl's own `--max-time` inside
-  `aoide_client::commands::pull_node_live` (~2 s/node). A projection, never
-  a store: it never writes `state/node-cache/<name>.json`; the cache
-  (`state/node-cache/<name>.json`) is consulted only as the fallback for a
-  node this invocation's live probe fails to reach, so an unreachable node
-  still renders. `<filter>` resolves through `storage::addr::resolve`
-  first (a local id/tail4/petname, a host/role/petname line, or
-  `node/<rest>`), falling back to a substring match.
-- **Writes:** nothing.
-- **Output:** a Unicode roster; `--json` emits the structured presence
-  document. Node presence: `online` / `unreachable` / `never-pulled`.
-  Session presence: `online` / `stale` / `done` (`done` omitted without
-  `--all`).
-- **Notes:** not gated. `<filter>` narrows what is DISPLAYED only — every
-  registered node is probed regardless. See [[Node-Federation]].
-
 ### aoide a2a serve
 
 ```
@@ -335,12 +313,17 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
     signal (unauthenticated → never auto-delivers). Spawn answers to
     pairing alone: the caller must resolve on the Signature rung — a
     verified per-request signature against some `verified` node's stored
-    pubkey — with `spawn` in that record's `allows`; every refusal is
+    pubkey — with `spawn` among the caller's grants IN THE MESH ITS REQUEST
+    NAMES; every refusal is
     `-32006` with a shape-specific taught message (pair first / sign the
-    request / `node allow <name> spawn on`), and the door-wide bearer
+    request / `node allow <name> spawn on --mesh <m>`), and the door-wide bearer
     never reaches the spawn arm. Signed-request failures carry their own
     codes — `-32007` (malformed or unverifiable signature, partial header
-    set), `-32008` (timestamp skew), `-32009` (nonce replay). Spawn unconfigured →
+    set), `-32008` (timestamp skew), `-32009` (nonce replay). **A signed
+    request from a `>= 0.0.26` node to a `< 0.0.26` door is always this
+    `-32007`**: the sixth (mesh) field of the canonical string has no arm in
+    the older verifier, which rebuilds five fields and compares bytes
+    ([[Node-Federation#Mixed versions — the wire is one-way]]). Spawn unconfigured →
     `-32004`; session not conductable → `-32004`; unknown contextId →
     `-32001`. A held-pending send returns a `submitted` Task immediately.
   - `aoide/graphSummary` — `{schemaVersion: "0", instance: {name, url,
@@ -357,7 +340,7 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
     (past that a fast 503). Unknown method → `-32601`, parse error → `-32700`.
 - **Notes:** not gated at the CLI level; the security model is bind-address +
   the rebuild-gated `aoide.a2a.spawnAgent` option + the pairing gate on Spawn
-  (Signature rung + `allows`) + the optional bearer token on the read arms.
+  (Signature rung + the caller's grant in the request's mesh) + the optional bearer token on the read arms.
   A client never supplies a command — the spawn path only ever launches the
   operator-configured executable, which must also appear on the unit's PATH
   via `aoide.a2a.spawnPath` (a bare-word `spawnAgent` can't resolve
@@ -367,7 +350,7 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
 ### aoide node add
 
 ```
-aoide node add <name> <url> [--autogate] [--no-verify]
+aoide node add <name> <url|poll> [--autogate] [--no-verify]
                [--via ssh://[user@]host[:port]]
                [--token-file <path>] [--bearer-secret <name>] [--json]
 ```
@@ -376,7 +359,11 @@ aoide node add <name> <url> [--autogate] [--no-verify]
   (`curl` GET on the resolved card URL) before registering anything — a node
   that fails the fetch is never added; `--no-verify` skips the fetch for a
   node that serves no card (reachability, never identity — the record lands
-  `verified: false` either way). `--via ssh://[user@]host[:port]` records an
+  `verified: false` either way). `poll` is the third member of the address
+  grammar and names the ABSENCE of an inbound transport: it is legal here, it
+  skips the fetch for the same reason `--no-verify` does, and every mail path
+  then HOLDS entries toward that node and never dials it ([[HTTPS-Mesh-API]]
+  "Transports and relays", `Node::never_dialled`). `--via ssh://[user@]host[:port]` records an
   ssh-transport marker: every later call dials through a lazily opened ssh
   forward instead of `url` directly ([[Node-Transport]]). Name must match
   `^[a-z0-9][a-z0-9-]*$` (it is joined into `state/node-cache/<name>.json`;
@@ -396,7 +383,7 @@ aoide node add <name> <url> [--autogate] [--no-verify]
   the [[Secrets-Broker|secrets broker]] (consumer `a2a-client`, fresh on
   every request, never cached) and presents as `Authorization: Bearer
   <value>` on every outbound call to that node's own A2A door (`node pull`,
-  `send --to`, `who`'s live probe). Absent by default — an unmarked
+  `send --to`, the roster's live probe). Absent by default — an unmarked
   node's outbound calls carry no bearer header, unchanged. A resolve
   failure fails that outbound call outright rather than sending it
   unauthenticated. See [[Node-Federation]].
@@ -449,8 +436,10 @@ aoide node status [--json]
 - **Reads:** `state/nodes.json` plus each node's `state/node-cache/<name>.json`.
 - **Output:** the human line stays a terse `"<n> node(s) registered"`; `--json`
   carries the full row per node — `{nodes: [{name, url, autogate, tokenFile?,
-  bearerSecret?, hub, pubkey?, verified, allows, addedAt, state, fetchedAt,
-  error}]}`. `state` is `fresh` (pulled within the 300 s TTL and not marked
+  bearerSecret?, hub, pubkey?, verified, grants, addedAt, state, fetchedAt,
+  error}], homeMesh}` (`grants` is a map of mesh → capability set, P-CHARTER;
+  `homeMesh` is `[pairing] homeMesh`, so a `--json`-only consumer never has to
+  restate the rule). `state` is `fresh` (pulled within the 300 s TTL and not marked
   stale), `stale`, or `never-pulled` — the same three-way classification the
   graph fold uses, so this and the DAG never disagree. This is the deep
   per-node registry view; `node list` (below) is the one-glance roster and
@@ -481,9 +470,10 @@ aoide node hub <name> [--clear]
 ### aoide pair
 
 ```
-aoide pair [<name|url|id>] [--name <n>] [--via ssh://[user@]host[:port]]
-            [--self-via ssh://[user@]host] [--secs N] [--wait SECS]
-            [--allow read,spawn] [--yes] [--json]
+aoide pair [<name|url|id>] [--name <n>] [--code <code>]
+            [--via ssh://[user@]host[:port]] [--self-url <url>]
+            [--self-via ssh://[user@]host] [--mesh <mesh>]
+            [--secs N] [--wait SECS] [--allow read,spawn] [--yes] [--json]
 aoide pair reject <id|name>
 aoide pair watch [--popup] [--json]
 ```
@@ -498,7 +488,12 @@ outright at task #135 P3', hard cutover, no aliases.
   instance's ed25519 identity (`state/identity/`, minted lazily on first
   need — `ed25519.key` at 0600 inside the 0700 directory, never appearing
   in any output; `aoide identity` shows the pubkey and its colon-hex
-  fingerprint). `aoide pair` takes exactly ONE positional — a second is
+  fingerprint). **`--mesh <m>` names the mesh this pairing's grants land in
+  on BOTH sides** — it rides `aoide/pairRequest` (validated as a mesh name
+  there) and each leg's commit takes it above every local source, so the two
+  ends agree by construction; absent, each side resolves locally (the
+  target's sole known mesh, else `[pairing] homeMesh`) and a box that knows
+  more than one mesh for the target refuses rather than guessing. `aoide pair` takes exactly ONE positional — a second is
   refused outright, before any arm runs, naming the fold in the refusal,
   and the `reject`/`watch` subcommand names match BEFORE a bare hostname
   positional of the same spelling (a box named `reject` or `watch` pairs
@@ -543,7 +538,10 @@ outright at task #135 P3', hard cutover, no aliases.
   half; approving commits a `pubkey`/`verified` node record into
   `state/nodes.json` (`node_store::upsert_paired_node`, stamping
   `config.toml`'s `[pairing] defaultGrant` or the commit's own
-  `--allow`), dispatching by direction — inbound queue first, then
+  `--allow` into the ceremony's mesh, `grants[<mesh>]`, ON A FIRST
+  VERIFICATION ONLY — a re-pair re-grants nothing, and the commit's own
+  outcome says which it was: `grantStamped` beside `grantRequested`),
+  dispatching by direction — inbound queue first, then
   outbound — so the requester's own confirm is a SECOND `aoide pair`
   against the outbound queue, the one that polls. When the parked
   request carries the requester's `selfVia` claim, the inbound commit
@@ -595,23 +593,39 @@ outright at task #135 P3', hard cutover, no aliases.
 ### aoide node allow
 
 ```
-aoide node allow <name> <cap> on|off
+aoide node allow <name> <cap> on|off [--mesh <mesh>]
 ```
 
 - **Reads/Writes:** `state/nodes.json` — flips one capability in the
-  node's closed `allows` set (`NODE_CAPABILITIES`: `"read"` / `"spawn"`).
+  node's closed grant FOR ONE MESH (`NODE_CAPABILITIES`: `"read"` /
+  `"spawn"` / `"message"`). `--mesh` names the mesh it lands in; absent it
+  is the node's sole granted mesh, else `[pairing] homeMesh` — and a node
+  trusted in more than one mesh REFUSES, naming them, rather than guessing.
+  With no flag to give, a grant is given in one mesh and holds only there:
+  the door reads the caller's grant in the mesh its signed request names and
+  in no other ([[A2A-Door]], `grant_in_mesh`).
 - **Output:** idempotent — `on` an already-granted or `off` an
   already-revoked capability reports a no-op, never an error. An unknown
   capability string is refused before the node lookup; an unknown node
   name is refused after it — a distinct taught error for each.
-- **Notes:** the only writer of `allows` besides the pairing ceremony's
+- **Notes:** the only writer of `grants` besides the pairing ceremony's
   own first-verification stamp; re-pairing never re-runs it, so a revoked
   capability survives a key rotation. When several verified records share
   one pubkey (one remote instance paired under two names), the key's
-  effective grants are the UNION across those records — revoking a
-  capability from the key means revoking it on every record sharing it.
-  The A2A door's Spawn arm reads the
-  set ([[A2A-Door]], [[Pairing-Ceremony#What approval commits]]).
+  effective grants in a mesh are the UNION across those records — revoking a
+  capability from the key means revoking it on every record sharing it. A
+  record's old flat `allows` array is migrated into `grants[<home>]` on
+  load, byte-identical. **In a charter mesh** (a charter in force for the
+  named mesh, `aoide_storage::charter::governing`) the written field is
+  `narrowed`, not `grants`: the charter's line is the whole grant there, so
+  `off` records a refusal this box's door subtracts from that line and `on`
+  clears one. Nothing local widens a charter grant, so `on` for a capability
+  the line does not grant is refused (`widens-charter`, naming the sign step
+  that would have to change — or, in the window where the mesh is
+  charter-shaped and its operator key is undecidable, naming THAT instead,
+  since no line can be read and the fix is to resolve the key), and a paired record's `grants` entry in a
+  charter mesh is INERT whatever it says. The A2A door's Spawn arm reads the
+  grant ([[A2A-Door]], [[Pairing-Ceremony#What approval commits]]).
 
 ### aoide node spawn
 
@@ -694,11 +708,11 @@ aoide node list [--json]
 ```
 
 - **Reads:** `state/nodes.json`, the pull caches, and the LAN — presence
-  and sessions from `who`'s own live-probe-with-cache-fallback core (one
-  bounded ~2 s probe per node, in parallel) plus ONE bounded ~2 s
-  discovery sweep run concurrently with the probes
+  and sessions from the roster core's own live-probe-with-cache-fallback
+  pipeline (one bounded ~2 s probe per node, in parallel) plus ONE bounded
+  ~2 s discovery sweep run concurrently with the probes
   (`aoide-conduct::graph::node_list`; lives in `aoide-conduct` because the
-  roster folds `who`'s probe core, which `aoide-client` cannot depend on).
+  roster folds that core, which `aoide-client` cannot depend on).
 - **Writes:** nothing — not `state/nodes.json`, not `state/node-cache/`.
 - **Output:** the one-glance mesh roster — one row per known node (this
   host first, then every registered node, then every advertising instance
@@ -733,14 +747,38 @@ aoide mesh [--json]
   `via-mismatch` (verified, but the recorded `via` does not match the
   declared hop; a recorded `via` of none is the severe case — a call then
   dials the node's bare address directly, commonly this box's own
-  loopback). A node that matches gets no line. A separate trailing line
+  loopback). A node that matches gets no line. Each mesh's header says which
+  source answers a caller's grant there — `source: charter v<N>
+  (SHA256:…)` or `source: paired records` — and a **charter row** follows for
+  every mesh with a charter in force, declared or not: its version, the
+  operator key's fingerprint, where this node's trust in that key is written
+  (`config`/`state`/`both`/`none`), whether it is HONOURED here (an
+  `operator-mismatch` is reported as not honoured, because nothing about that
+  mesh is decidable while it holds), the re-keyed nodes the last applied
+  version changed, and which of this box's own paired records are INERT in
+  that mesh (a charter's line is what the door reads, so a record's own grant
+  entry is reported rather than left to look live). A separate trailing line
   lists any verified node named in no declared mesh — reported, never
   accused, no drift count, no suggested action. A mesh whose declared keys
   do not include this box's own name gets one more note line saying so —
   never a drift row, never counted in `declared`. `--json` emits the same
-  comparison structured under `data.report`:
-  `{"sections": [{"name", "grant", "sameOperator", "declared",
-  "selfDeclared", "rows": [{"node", "class", …}]}], "undeclared": [...]}`.
+  comparison structured under `data.report` (one shape, the same one the
+  P-CHARTER subsection below repeats): `{"sections": [{"name", "source",
+  "grant", "sameOperatorNote"?, "grants", "declared", "selfDeclared", "rows":
+  [{"node", "class", …}]}], "undeclared": [...], "charters": []}`.
+- **`--json` (P-CHARTER).** `data.report` is
+  `{"sections": [{"name", "source", "grant", "sameOperatorNote"?,
+  "grants", "declared", "selfDeclared", "rows": [{"node", "class", …}]}],
+  "undeclared": [...], "charters": [CharterRow]}` — `source` is
+  `"charter"`/`"paired"`, and each `CharterRow` is
+  `{"mesh", "declared", "version", "operator", "operatorKey", "trust",
+  "trusted", "highWater", "rekeyed": [{"node", "from", "to", "version",
+  "at"}], "inert": [...], "autogated": [...], "nodes"}` where `operator` is
+  the `SHA256:` fingerprint and `operatorKey` the bare hex. `autogated`
+  names this box's records whose unsigned address/token rail answers by THIS
+  charter — populated on the HOME mesh's row only (`[pairing] homeMesh`: the
+  rail carries no signed mesh, so no other mesh judges it) and empty
+  elsewhere.
 - **Notes:** unlike `node list`'s roster above, this reads only what a
   human explicitly named in `[mesh.<name>]` — an unregistered or
   undeclared node never appears as a row, only in `undeclared`. Drift is
@@ -760,6 +798,96 @@ aoide mesh [--json]
   that actually populates `state/nodes.json`, and
   `docs/architecture/PAIRING.md`'s "Mesh declaration" section for why this
   stays intent, never a wire-level object.
+
+### aoide mesh charter
+
+```
+aoide mesh charter init <mesh>
+aoide mesh charter sign <mesh> [--file <path>]
+aoide mesh charter accept <file>
+aoide mesh charter reroot <mesh>
+aoide mesh charter show [<mesh>]
+```
+
+The operator's side of a charter mesh — one operator key signs a machine list
+([[HTTPS-Mesh-API]] "Charters"). `init` roots a mesh on the operator's machine
+(mints `state/operator/<mesh>.key`, 0600, never printed, never in the nix
+store) and writes an empty source at `$AOIDE_ROOT/charters/<mesh>.toml`;
+`sign` validates the source, writes the next version into it, signs those exact
+bytes, applies the charter here and spools it to every node on it — **the same
+file it signs is the last write to it, ever** (a formatter or a trailing
+newline invalidates the signature; the fix is to sign again); `accept` applies
+one carried by hand; `reroot` replaces a lost or compromised operator key.
+
+- **`show [<mesh>]`** prints the charter IN FORCE at this node with its status:
+  the version, the operator key AND its `SHA256:` fingerprint, where this
+  node's trust in that key is written down (`config` line, `state` record,
+  `both`, or `none`), whether it is HONOURED here — a config/state
+  disagreement is `operator-mismatch`, and no charter governs the mesh while
+  it holds — the high-water version applied under that key, the mesh's relays,
+  every node line (name, key fingerprint, address, grant) and the RE-KEYED
+  nodes the last applied version changed. With no argument it prints every
+  mesh with a charter on disk; a named mesh with none is a taught
+  `no-charter` refusal, never an empty report.
+- **`--json` (P-CHARTER).** `data.meshes` is a list of
+  `{"mesh", "version", "operatorKey", "operator", "trust", "honoured",
+  "highWater", "relays", "nodes": [{"name", "key", "fingerprint", "address",
+  "grant"}], "rekeyed", "paths": {"charter", "trust", "source"}}`.
+- **Notes:** all five are local reads/writes of this node's own state plus the
+  operator's source file; none is a wire call. `init` never overwrites an
+  existing source, and `show` never writes anything.
+
+### aoide mesh join
+
+```
+aoide mesh join <mesh> (--operator ed25519:<hex> | <host>[:port]) [--replace] [--yes] [--json]
+```
+
+**The trust-entry step** — the one thing every machine but the operator's own
+does to enter a charter mesh ([[HTTPS-Mesh-API]] "Charters", step 4).
+
+- **`--operator <key>`** records the operator line in state
+  (`state/mesh/<mesh>/trust.json`) and nothing else: **never `config.toml`**,
+  because `[mesh.<name>] operator` is a key the pre-P-CHARTER binary refuses
+  to parse, and a machine that rolls back to it must still be able to read its
+  own config. A machine that already trusts a DIFFERENT key for the mesh is
+  refused, naming the flag that resolves it: the operator re-rooted the mesh
+  (`aoide mesh charter reroot` on their machine), so the machine takes the new
+  key with `--replace` — which records it and carries the version high-water
+  across, so the new key's first charter must still beat every version this
+  mesh has applied. Replacing a mesh's root is the operator's decision, never a
+  typo's, which is why the flag has to be typed.
+- **`<host>`** runs the one local-network ceremony: it asks the operator's
+  machine for the operator key and the charter in force
+  (`aoide/charterFetch`), prints the key's fingerprint and the charter's
+  version for the operator to compare with what the operator's own machine
+  shows, then records the key and applies the charter. `--yes` skips that
+  comparison for a FIRST-USE trust — the worst outcome there is taking a key
+  nobody checked — but never for a REPLACEMENT: when this machine already trusts
+  a different key, the same command destroys that record and the comparison is
+  required, so a scripted `--replace --yes` on the LAN arm is refused with a
+  taught error (non-zero) rather than silently swapping a root. The whole trust
+  step on this arm is the human check, never the transport; the write
+  re-reads the record under the mesh's own lock and refuses if it moved while
+  the operator was comparing.
+- **LAN only, and the rule is portable.** The peer must be a private (`10/8`,
+  `172.16/12`, `192.168/16`, `fc00::/7`) or link-local (`169.254/16`,
+  `fe80::/10`) address. **Loopback is refused**, and that is the point: a
+  relayed forward and an ssh tunnel both arrive as loopback, so admitting
+  loopback would admit every relay. The rule is a property of the ADDRESS and
+  nothing else — no interface table, no route lookup, no `/proc`, no per-OS
+  branch — so the same peer is admitted or refused identically everywhere.
+  The cost, stated: a same-LAN box reached *through* a tunnel, and a tailnet
+  or VPS-mediated peer, are refused here — both have non-LAN paths
+  (`--operator`, `mesh charter accept`).
+- **Writes:** `state/mesh/<mesh>/trust.json` (and, on the LAN arm, the
+  charter in force under `state/mesh/<mesh>/`). **No `state/nodes.json` entry
+  is ever created** — the charter is the mesh's node list, and a join is not a
+  pairing.
+- **Output:** the mesh, the operator key and its fingerprint, and the charter
+  version applied. `--json` emits
+  `{"mesh", "operator", "fingerprint", "charter": {"version", "nodes",
+  "rekeyed": [...]}}`.
 
 ### aoide mesh pair
 

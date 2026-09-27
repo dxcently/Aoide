@@ -316,7 +316,7 @@ tool-list-parity tests; the conduct crate's graph domain
 (`crates/conduct/src/graph/{model,doc,common,commands,window,session_store,
 conduct,send}.rs`) carries handlers for all 20 commands the bare `graph`
 render, `graph link`, the `project`/`session` families, bare `session` (the
-undying picker), and bare `send`/`spawn`/`resurrect` register into: cycle
+roster — grouped by project, or by host under `--hosts`), and bare `send`/`spawn`/`resurrect` register into: cycle
 rejection, anchoring, a
 deterministic render snapshot, edge shape, prune orphan-clearing,
 unknown-field round-trip, a serialized stage-dir precedence test, and the
@@ -340,8 +340,8 @@ stage files, and a live socket accept loop — `focuswindow`); the melete-adapte
 subscription, metadata-only notification boundary); all four livery emitters; the
 QML shell skeleton; the baked Stylix and compositor fan-outs; and the whole
 graph/session/project surface — 20 commands (bare `graph`, `graph link`,
-`project add/remove/list`, `session start/phase/end/hook/undying/permit/
-pending list/approve/deny/prune/reap`, bare `session` (the undying picker),
+`project add/remove/list`, `session start/phase/end/hook/grant/permit/
+pending list/approve/deny/prune/reap`, bare `session` (the roster),
 bare `send`/`spawn`/`resurrect`),
 none a stub (see
 [[Session-Graph]]) — plus the separate

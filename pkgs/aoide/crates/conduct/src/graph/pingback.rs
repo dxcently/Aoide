@@ -1393,7 +1393,7 @@ fn fetch_history(
     after: u64,
     tunnel_key: &str,
 ) -> Result<RingRead, FrameReadError> {
-    let value = aoide_client::commands::task_history_on_node(node, id, after, tunnel_key)?;
+    let value = aoide_client::commands::task_history_on_node(node, id, after, tunnel_key, None)?;
     serde_json::from_value::<RingRead>(value).map_err(|e| FrameReadError {
         code: None,
         message: format!("the far node's ping-back read did not parse: {e}"),
@@ -1564,7 +1564,7 @@ mod tests {
     use crate::graph::model::{load_stage, sessions_path, write_stage, SessionsFile};
     use crate::graph::session_store::{do_session_start, stamp_headless};
     use crate::graph::testutil::*;
-    use std::io::Read as _;
+    use aoide_test_support::{accept_one, read_delivery};
     #[cfg(unix)]
     use std::os::unix::net::UnixListener;
     #[cfg(windows)]
@@ -2038,10 +2038,11 @@ mod tests {
     }
 
     fn read_all(listener: UnixListener) -> Vec<u8> {
-        let (mut conn, _) = listener.accept().unwrap();
-        let mut buf = Vec::new();
-        let _ = conn.read_to_end(&mut buf);
-        buf
+        // The bounded rig (`aoide_test_support`): a payload this pass never
+        // writes must fail the test rather than park its `accept` — and, under
+        // `env_lock`, the whole suite queued behind it.
+        let mut conn = accept_one(&listener, "the pass under test delivers to the fixture's socket");
+        read_delivery(&mut conn, "the pass under test delivers to the fixture's socket")
     }
 
     /// A `TurnSettled` record with an arbitrary id — the shape a test uses to
@@ -2269,9 +2270,8 @@ mod tests {
     /// the old `agent`-only arm trusted.
     ///
     /// GATED on Unix, with its reason: the fixture's first half is a REAL
-    /// conducted child, and conducting needs a controlling tty — refused by
-    /// name on native Windows (ConPTY; see `conduct`'s own module note). The
-    /// CONTRACT this test covers is not lost there: its sibling
+    /// conducted child spawned from a `sh` script. The CONTRACT this test
+    /// covers is not lost on native Windows: its sibling
     /// `a_harness_parent_is_unreceptive_when_either_read_says_shell` drives the
     /// identical predicate over a record fixture with no PTY in it, and that
     /// one runs and passes on ThinkChiyo.
@@ -2745,7 +2745,8 @@ mod tests {
             hub: false,
             pubkey: Some(remote_key()),
             verified: true,
-            allows: vec!["read".into()],
+            grants: aoide_storage::node_store::grants_in("home", &["read"]),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-09-25T00:00:00Z".into(),
         }])

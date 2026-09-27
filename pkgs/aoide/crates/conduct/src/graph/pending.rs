@@ -424,6 +424,7 @@ mod tests {
     use crate::graph::send::session_send;
     use crate::graph::session_store::do_session_start;
     use crate::graph::testutil::*;
+    use aoide_test_support::expect_delivery;
     #[cfg(unix)]
     use std::os::unix::net::UnixListener;
     #[cfg(windows)]
@@ -612,13 +613,7 @@ mod tests {
         )
         .unwrap();
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "an approved entry re-drives the injection door");
 
         let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
         let got = acc.join().unwrap();
@@ -683,13 +678,7 @@ mod tests {
         // Nothing in the mailbase yet — the entry is only PENDING.
         assert!(aoide_storage::mail::read_base().unwrap().is_empty());
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "an approved entry's delivery is filed into the mailbase");
         let out = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
         let _ = acc.join().unwrap();
         assert_eq!(out.status, Status::Ok, "msg: {}", out.message);
@@ -749,13 +738,7 @@ mod tests {
         // Approve under a DIFFERENT sender B.
         std::env::set_var("AOIDE_SESSION_ID", "sender-b");
         listener.set_nonblocking(false).unwrap();
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "the original queuer's attribution reaches the socket");
         let approved = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
         let got = acc.join().unwrap();
         assert_eq!(approved.status, Status::Ok, "msg: {}", approved.message);
@@ -815,13 +798,7 @@ mod tests {
         // Approve under a REAL, non-empty sender.
         std::env::set_var("AOIDE_SESSION_ID", "approver-x");
         listener.set_nonblocking(false).unwrap();
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "an anonymous entry's delivery wears no approver name");
         let approved = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
         let got = acc.join().unwrap();
         assert_eq!(approved.status, Status::Ok, "msg: {}", approved.message);
@@ -880,13 +857,7 @@ mod tests {
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["from"], Value::Null, "no attribution on a legacy entry");
 
-        let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
-        });
+        let acc = expect_delivery(listener, "a legacy entry's delivery carries no prefix");
         let approved = pending_approve(&pending_invocation(&["session", "pending", "approve"], &["0"]));
         let got = acc.join().unwrap();
         assert_eq!(approved.status, Status::Ok, "msg: {}", approved.message);

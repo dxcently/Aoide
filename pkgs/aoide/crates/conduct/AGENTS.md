@@ -12,18 +12,52 @@ identity (`win_unix::peer_pid` + `win_proc::process_user_sid`), and
 and verbatim-stripped), `detach`, `link_dir`, `lock_exclusive` family and
 `create_new_private`.
 
-**The PTY capability is refused BY NAME on native Windows**, never stubbed:
-`spawn_on_pty`, the raw-mode guard, the winsize ioctls, the poll multiplexer and
-`session_conduct` itself are `#[cfg(unix)]`, and the Windows arm of
-`session_conduct` returns a taught refusal naming ConPTY
-(`CreatePseudoConsole`) as the missing capability — interactive and `--headless`
-alike. **Fifteen** tests in `graph/conduct.rs` are gated for it (all fifteen gate
-texts cite `session_conduct`/the PTY), and **53 tests crate-wide** are gated on
-this host; the arithmetic is `974 − 53 + 1 = 922` — 974 defined on Linux, minus
-53 that only run where a PTY exists, plus the one Windows-only test that proves
-the refusal itself
-(`conduct_refuses_by_name_and_registers_no_session_on_a_host_without_a_pty`),
-which is the measured 922 of a chiyo run. The DETACHED, non-PTY spawn is native
+**The PTY capability is native on BOTH hosts, one seam with an arm per host:**
+`graph/pty.rs` holds `spawn_on_pty` (`libc::openpty` + `setsid` + `TIOCSCTTY` +
+`dup2` on Unix; `CreatePseudoConsole` + the `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`
+attribute on `CreateProcessW` on native Windows), `Pty`, `PtyChild`, `Console`,
+`Inbox` and `wait_ready` — with the host differences named in that module's own
+table (no signals, so no `Ended::Signal`; the deadline kill reaches the direct
+child only; `foreground_pgid()` answers `0`; `hung_up()` answers `None` — the
+shape the caller needs, so a host that cannot answer stamps no fact; the child's
+streams are the console's own, `STARTF_USESTDHANDLES` with NULL handles and
+`bInheritHandles = FALSE`; the output pipe is POLLED rather than waited on, and
+so is any stdin that is not a console — a pipe's read handle is always signalled
+— while a console's stdin is the one the wait itself answers; and a
+settle window after the client exits that a pty does not need). `graph/conduct.rs`
+multiplexes over the seam and owns the policy, and `session_conduct` runs on
+both hosts. **The Windows-only tests are the ones that prove it** — the seam's
+seven (output read, a typed line at the child's own stdin, a resize the child's
+own `mode con` reports, the child's stdout being a console rather than our pipe,
+an inbox directory bound owner-only, a failed spawn leaking no handle, and the
+`ready_of_wait` table) plus the command's own runs end to end: a pseudo-console
+child read/resized/typed-into/observed, a typed line at the child's stdin, a
+resize the child's own `mode con` reports, **a live inbox connection delivering
+bytes to the conducted child**, **a piped stdin forwarding its producer's bytes
+to it**, and the whole headless command resolved `done`.
+**The arithmetic, defined − gated = run**: Linux defines **976** and a ThinkChiyo
+run reports **933** (both measured, the runs named in `CORE-POSIX.md`); the
+43-test gap is the crate's host-gated set — **58** tests need a POSIX fixture and
+**15** are Windows-only — each gate naming its own reason in place. The gates are the fixture
+groups rather than a number to be trusted: a `#!/bin/sh` script or shim and its
+mode (the curl transport, the `zenity`/`lyra` dialogs, `sh`-based conduct
+children), `fork`/`SO_PEERCRED`/`setsid` facts, `/proc` reads, `socat`-style
+doors, and the SIGTERM-survivor pair — each naming its own reason in place. The
+fifteen Windows-only ones are the seam's seven (`ready_of_wait`'s table, a
+failed spawn's handle count, the child's stdout being a console, the inbox
+directory bound owner-only, the `AF_UNIX` signal probe, command-line quoting,
+the environment block), the command's seven end-to-end runs (a pseudo-console
+child read/resized/typed-into/observed, a typed line at the child's stdin, a
+resize the child's own `mode con` reports, **a live inbox connection delivering
+bytes to the conducted child**, **a piped stdin forwarding its producer's bytes
+to it**, **an interactive session over a piped stdin typing the injected line
+into its child**, and the whole headless command resolved `done`)
+and the pre-existing `identity.rs` peer test that runs only where
+`SIO_AF_UNIX_GETPEERPID` exists. The Unix side gains one of its own: the
+hung-up-stdin run (`a_hung_up_stdin_is_reported_ready_so_the_loop_latches_its_eof`,
+`pty.rs`), the failing-first proof that `poll(2)`'s `POLLHUP` — never `POLLIN` —
+is what keeps `producer | aoide conduct` from spinning once its producer exits.
+The DETACHED, non-PTY spawn is native
 (`aoide_storage::fs::detach`), and its four green tests are named in the gate
 text of the tests that do need a conducted child.
 
@@ -32,7 +66,14 @@ A fixture that pastes a path into hand-built JSON or creates a file/dir with
 (escape them — `send`'s `jp`, or build with `serde_json`), a feed's DACL must be
 owner-only, and a socket path must fit `sun_path` (use
 `aoide_test_support::short_tmp`). Each of those three cost real diagnosis time
-once; none of them is a style preference.
+once; none of them is a style preference. One more of the same kind: a fixture
+that binds a listener and waits for a delivery reads it through
+`aoide_test_support`'s bounded rig (`expect_delivery`/`accept_one`/
+`read_delivery`), never a hand-rolled `accept`/`read_to_end` thread — a
+delivery this crate withholds (a held-pending send, a ring that never fires)
+would otherwise park that thread, and under `env_lock` every test queued
+behind it, instead of failing the one test with the fixture's own expectation
+in the message.
 
 - **Session actions preserve identity and scope.** Project assignment changes
   `project`, never `cwd` or ancestry. Termination is local daemon-only:

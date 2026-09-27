@@ -29,11 +29,12 @@
   # `aoide.song`, which every `rice.nix` self-gates on. `available` is what it
   # builds in to STAGE without a rebuild but does not perform.
   #
-  # yomi builds in sonata and nothing else: the shipped standard, the one song
-  # this machine has performed since the beginning. The other committed rices
-  # are reached from the machine's own songbook (`aoide rice stage <n>`), which
-  # this host's songbook already holds — that is the point of the split.
-  song.declared = "sonata";
+  # yomi performs cadenza and nothing else: the phosphor key, a green-CRT termui
+  # console — the song this machine has performed since the switch that made it
+  # the reference rig. The other committed rices are reached from the machine's
+  # own songbook (`aoide rice stage <n>`), which this host's songbook already
+  # holds — that is the point of the split.
+  song.declared = "cadenza";
   song.available = [ ];
 
   # ── People ─────────────────────────────────────────────────────────────────

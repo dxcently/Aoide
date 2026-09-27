@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-28
-updated: 2026-08-29
+updated: 2026-09-27
 tags: [aoide, agent, a2a, orchestration, node, security]
 ---
 
@@ -144,9 +144,10 @@ out of band; A's own confirm gates on this code, never the first.
 
 ## The command surface
 
-`aoide pair [<name|url|id>] [--name <n>] [--via ssh://[user@]host[:port]]
-[--self-via ssh://[user@]host] [--secs N] [--wait SECS]
-[--allow read,spawn] [--yes]` / `aoide pair reject <id|name>` /
+`aoide pair [<name|url|id>] [--name <n>] [--code <code>]
+[--via ssh://[user@]host[:port]] [--self-url <url>]
+[--self-via ssh://[user@]host] [--mesh <mesh>] [--secs N] [--wait SECS]
+[--allow read,spawn] [--yes] [--json]` / `aoide pair reject <id|name>` /
 `aoide pair watch [--popup] [--json]`, registered together in
 `register_pair` — one smart verb (`handle_pair`) dispatching on its
 optional target:
@@ -305,10 +306,14 @@ until an explicit approve.
 
 A fully approved request is the ceremony's entire grant:
 `node_store::upsert_paired_node` commits a node record carrying
-`pubkey`, `verified: true`, and an `allows` set drawn from the closed
-capability vocabulary `NODE_CAPABILITIES` — `config.toml`'s `[pairing]
+`pubkey`, `verified: true`, and a capability set drawn from the closed
+vocabulary `NODE_CAPABILITIES` — `config.toml`'s `[pairing]
 defaultGrant` (`["read"]` by default), or the `--allow` typed on that one
-`aoide pair`. When the parked
+`aoide pair` — stamped in the mesh the ceremony named (`grants[<mesh>]`,
+P-CHARTER), which is the home mesh for a pairing that named none. Each
+commit's own outcome data names both halves of it: `grantRequested` (the
+set that invocation asked for) and `grantStamped` (`false` on a
+re-pairing, where the on-disk grant is deliberately untouched). When the parked
 request carries the requester's optional `selfVia` claim (its
 self-asserted `ssh://[user@]host` reach-back hop — self-asserted data, a
 transport marker only, never a source of trust), the approver's commit
@@ -325,11 +330,21 @@ identity IS the key: inbound signed requests resolve by whichever verified
 record's stored pubkey verifies the signature, the claimed name demoted to
 attribution plus an exact-name tiebreak among same-key records
 ([[Node-Federation]]'s Signature rung). The record is what the [[A2A-Door]]'s gates read: Spawn
-admits only a caller resolved through the Signature rung whose `allows`
+admits only a caller resolved through the Signature rung whose grant in the
+mesh the request SIGNED for
 contains `"spawn"` (`a2a.rs::spawn_admitted`), and a signed node's
 per-request ed25519 signature is the wire authentication the ceremony's
 verified key anchors. See
 [[Node-Federation#Security — pairing is the verification path]].
+
+**Across versions the pair still succeeds, and it is one-way.** The
+ceremony's own signatures carry no mesh, so a pair between a `0.0.26` node
+and an older one completes on both sides — while every signed command from
+the newer node to the older one is refused `-32007`, and the reverse works
+([[Node-Federation#Mixed versions — the wire is one-way]]). `node list`
+cannot show the difference, so treat a cross-version pair as one-directional
+until both ends are upgraded; upgrading every node is the only remedy, and
+there is no fallback by design.
 
 ## Legacy escapes
 

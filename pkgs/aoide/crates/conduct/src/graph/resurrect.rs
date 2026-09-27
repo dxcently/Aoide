@@ -1178,7 +1178,8 @@ mod tests {
             hub: false,
             pubkey: None,
             verified: false,
-            allows: Vec::new(),
+            grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-27T00:00:00Z".to_string(),
         }
@@ -1498,7 +1499,8 @@ mod tests {
     /// exits 0 the instant it's exec'd; the point of this test is the undying
     /// transfer, not registration, which `resurrect_one` never gates it on.
     /// GATED on Unix with its reason: the revived session is `conduct
-    /// --headless`, refused BY NAME on a host without a PTY (see
+    /// --headless`, whose fixture is a POSIX child (`sh -c`, a `#!/bin/sh` shim
+    /// and a mode) that `CreateProcess` cannot run (see
     /// `a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect`'s gate).
     #[cfg(unix)]
     #[test]
@@ -1593,8 +1595,9 @@ mod tests {
     /// gate's job, per this module's own doc (top of file), never this
     /// crate's.
     /// GATED on Unix with its reason: a resurrect revives the session by
-    /// spawning `conduct --headless`, refused BY NAME on a host without a PTY
-    /// (ConPTY is absent). The detached, NON-PTY spawn is native, and its cover
+    /// spawning `conduct --headless`, whose fixture here is a POSIX `sh -c`
+    /// child (a shebang script and a mode), which `CreateProcess` cannot run.
+    /// The detached, NON-PTY spawn is native, and its cover
     /// is `spawn`'s four green tests, named in their own gate.
     #[cfg(unix)]
     #[test]
@@ -1673,7 +1676,8 @@ mod tests {
     /// only fires when the old id is currently undying, and by the second
     /// call it no longer is.
     /// GATED on Unix with its reason: the revived session is `conduct
-    /// --headless`, refused BY NAME on a host without a PTY (see
+    /// --headless`, whose fixture is a POSIX child (`sh -c`, a `#!/bin/sh` shim
+    /// and a mode) that `CreateProcess` cannot run (see
     /// `a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect`'s gate).
     #[cfg(unix)]
     #[test]
@@ -2047,7 +2051,8 @@ mod tests {
     /// mark_from_old_to_new` already uses) rather than needing any
     /// `projects.json` registration at all.
     /// GATED on Unix with its reason: the revived session is `conduct
-    /// --headless`, refused BY NAME on a host without a PTY (see
+    /// --headless`, whose fixture is a POSIX child (`sh -c`, a `#!/bin/sh` shim
+    /// and a mode) that `CreateProcess` cannot run (see
     /// `a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect`'s gate).
     #[cfg(unix)]
     #[test]
@@ -2090,7 +2095,8 @@ mod tests {
     /// (`no-such-harness`) would otherwise fail with no default launch, but
     /// a `command` on the spec still clean-spawns it.
     /// GATED on Unix with its reason: the revived session is `conduct
-    /// --headless`, refused BY NAME on a host without a PTY (see
+    /// --headless`, whose fixture is a POSIX child (`sh -c`, a `#!/bin/sh` shim
+    /// and a mode) that `CreateProcess` cannot run (see
     /// `a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect`'s gate).
     #[cfg(unix)]
     #[test]
@@ -2276,7 +2282,8 @@ mod tests {
     /// LOCAL spec's own clean-spawn in the same invocation, the same
     /// per-spec isolation every other row in this loop already holds.
     /// GATED on Unix with its reason: the revived session is `conduct
-    /// --headless`, refused BY NAME on a host without a PTY (see
+    /// --headless`, whose fixture is a POSIX child (`sh -c`, a `#!/bin/sh` shim
+    /// and a mode) that `CreateProcess` cannot run (see
     /// `a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect`'s gate).
     #[cfg(unix)]
     #[test]
@@ -2365,7 +2372,8 @@ mod tests {
     /// resolution — the same per-candidate isolation the flag-mode loop
     /// already holds, now proven at the per-SPEC level.
     /// GATED on Unix with its reason: the revived session is `conduct
-    /// --headless`, refused BY NAME on a host without a PTY (see
+    /// --headless`, whose fixture is a POSIX child (`sh -c`, a `#!/bin/sh` shim
+    /// and a mode) that `CreateProcess` cannot run (see
     /// `a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect`'s gate).
     #[cfg(unix)]
     #[test]
@@ -2488,7 +2496,8 @@ mod tests {
     /// `disposition: "revived-from-ledger"` (never `"clean-spawned"`,
     /// proving enrichment — not a fresh launch — is what actually fired).
     /// GATED on Unix with its reason: the revived session is `conduct
-    /// --headless`, refused BY NAME on a host without a PTY (see
+    /// --headless`, whose fixture is a POSIX child (`sh -c`, a `#!/bin/sh` shim
+    /// and a mode) that `CreateProcess` cannot run (see
     /// `a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect`'s gate).
     #[cfg(unix)]
     #[test]
@@ -2542,7 +2551,8 @@ mod tests {
     /// its freshly clean-spawned session undying, same as the enriched
     /// path above.
     /// GATED on Unix with its reason: the revived session is `conduct
-    /// --headless`, refused BY NAME on a host without a PTY (see
+    /// --headless`, whose fixture is a POSIX child (`sh -c`, a `#!/bin/sh` shim
+    /// and a mode) that `CreateProcess` cannot run (see
     /// `a_node_origin_ledger_entry_never_derails_an_ordinary_resurrect`'s gate).
     #[cfg(unix)]
     #[test]

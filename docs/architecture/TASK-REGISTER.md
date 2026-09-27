@@ -2099,26 +2099,151 @@ project/parent inheritance across local/remote/app/subagents;
 - The shared liveness probe and socket-address layout are repaired.
   `docs/architecture/CORE-POSIX.md` owns the remaining capability matrix;
   source guards and Linux tests do not prove non-Linux runtime support.
-- Status: incomplete — the remaining layer is `aoide-conduct` alone (measured
-  on ThinkChiyo: 108 errors in its lib, 227 in its lib test, ALL of them there;
-  `aoide-client` is 0 errors and its 313 native tests pass after this slice).
-  Native Windows now has: `aoide-protocol`, `aoide-storage`, `aoide-secrets`,
-  `aoide-upkeep` and `aoide-client` building AND testing there, the daemon's
-  seal-pubkey channel live on both hosts (the non-Linux peer-identity refusal
-  this line used to record is DELETED, not kept beside a second arm), and the
-  process acts — end a pid, wait for it, read its argv — behind one seam each.
-  What is still host-specific is stated per row in `docs/architecture/
-  CORE-POSIX.md`, including the arms that promise less than their siblings
-  (Windows' `TerminateProcess` cannot be trapped where `SIGTERM` can) and the
-  contracts that have no native test yet (the transport's response cap).
-  `aoide-server` and `aoide-cli` were NOT independently re-measured: they
-  depend on `aoide-conduct`, so cargo cannot build them while it fails.
-- The managed task wrapper (`spawn --task`, `session watch`) is Linux-only for
-  the same reasons: its live view reads a conduct-owned PTY transcript, and both
-  its record writes and its delivery cursor ride the stage lock. Its earliest
-  honest Windows point is headless parity over a pipes-only transport, after
-  `CORE-POSIX.md`'s matrix prerequisites are met — no part of the wrapper claims
-  Windows support today.
+- Status: the COMPILE layer is closed and the RUNTIME layer is now measured,
+  not inferred. Every crate of the closure — `aoide-protocol`,
+  `aoide-storage`, `aoide-secrets`, `aoide-upkeep`, `aoide-client`,
+  `aoide-conduct`, `aoide-server`, `aoide-cli` — builds AND tests on native
+  Windows (the per-crate counts live in `docs/architecture/CORE-POSIX.md`'s
+  "Next layer" table), the `aoide` AND `aoided` binaries build there, the PTY
+  seam is native on both hosts (ConPTY on `CreateProcessW`), and a
+  deadline-bound read or write is bounded there whatever the socket's mode
+  (Winsock's `accept` hands back a socket that inherits the listener's
+  `FIONBIO`, and the budget — not the mode — is the guarantee). What this lane
+  measured on ThinkChiyo at `ea257fc` from a scratch `AOIDE_ROOT` and
+  `XDG_RUNTIME_DIR` under it, on non-default door ports: `aoided.exe` resident
+  and alive past 60 s with its control socket, feed and audit log under that
+  root; that socket serving REAL CLI invocations (a `context` and a `session
+  reap`, each carrying the daemon door's own audit record — `aoide graph` and
+  `aoide schema --json` are answered in-process from the stage projection and
+  the assembled registry, so neither is a daemon hop); `aoide conduct
+  --headless -- cmd.exe` registered on the roster, `send --submit` typed into
+  it and executed by the child's own console transcript, an externally killed
+  child noticed by the wrapper, a dead-pid record reaped
+  (`running → done → dropped`); `aoide a2a serve` bound on loopback answering
+  its AgentCard and a JSON-RPC `tasks/get`; `aoide mail serve` bound on its own
+  loopback port answering JSON-RPC; `aoide mcp serve --stdio` answering
+  `initialize`/`tools/list`.
+- Status, what is still open: `boot_epoch` is Linux-only, so the pre-boot reap
+  signal and the boot-epoch-guarded auto-resume never fire off Linux;
+  `aoide-storage`'s
+  `fs::tests::tightening_a_directory_strips_a_child_that_only_inherited_its_access`
+  fails there deterministically and PRE-EXISTING (it fails at `724fe0f` too);
+  one `graph_residency_p_d6` binary is contention-sensitive under full
+  parallelism; and the arms that promise less than their siblings are the ones
+  `CORE-POSIX.md`'s rows name (`TerminateProcess` where `SIGTERM` would be
+  trappable, no process group, no foreground pgid, no "a descendant still holds
+  the console", a post-exit settle window a pty does not need).
+- The daemon spawns NEITHER door. `aoide-mcp` and `aoide-a2a` are separate
+  processes on both hosts (`modules/nucleus/aoided.nix`'s units, `aoide mcp
+  serve --stdio` / `aoide a2a serve`), and `aoided`'s only child in that run
+  was its own console host — so "native aoided runs resident" needs those
+  processes run BESIDE it, never under it.
+- Residency on Windows: an install path, exercised end to end. The tree ships
+  no Windows unit — the only declared mechanism is Linux's (the systemd user
+  unit `pkgs/aoide/module/aoided.nix`, `Type=simple`, `Restart=on-failure`,
+  anchored to the session target, with its sibling door units in
+  `modules/nucleus/aoided.nix`) — so the portable equivalent lives in
+  `docs/INSTALL.md` § 7.2: one per-user logon task per process (the daemon, the
+  door), the environment in persistent user variables, restart-on-failure
+  settings and NO execution time limit (the three-day default would stop a
+  resident daemon). Installed on ThinkChiyo as `AoideAoided` + `AoideA2a` from
+  `%USERPROFILE%\.cargo\bin` with the real root `%USERPROFILE%\.aoide`, named
+  `AOIDE_A2A_NODE_NAME=thinkchiyo-win` on `AOIDE_A2A_PORT=8720`: `Get-ScheduledTask
+  … | Start-ScheduledTask` brought both up with no logout, the door answered
+  `http://127.0.0.1:8720/.well-known/agent-card.json` with **200** (103 skills),
+  `aoide node list` named this host `thinkchiyo-win`, and a LATER ssh session
+  found both processes still running under their tasks. No command was added for
+  it: the capability is shell-reachable already, it is one file at the OS's own
+  conventional path with a one-command inverse, and a core verb writing into a
+  host's scheduler would be deployment logic inside the portable binary.
+  `aoide identity` minted this node's keypair (`state\identity`) — pairing needs
+  one, and that node had none.
+- Native<->WSL pairing on ONE box (the two nodes ThinkChiyo runs) is COMPLETE,
+  measured end to end, and the WSL side is now supervised rather than
+  hand-started. Its checkout `~/src/aoide` was fast-forwarded `724fe0f5` → main
+  (clean: no stash, no unpushed commit, one untracked operator seed preserved)
+  and `cargo install --path pkgs/aoide/crates/cli --bins --locked --root
+  ~/.local` put 0.0.26 in `~/.local/bin` — cargo refuses to clobber an existing
+  install without `--force`, by name. The User's `aoided.service` runs the
+  daemon again and a hand-written `aoide-a2a.service` twin (`BindsTo`/`After`
+  aoided, bind 127.0.0.1, port 8710) serves the door; both `enable`d, both
+  `active`, the door's AgentCard 200 from inside the VM and from Windows
+  localhost (WSL2's own forwarding). The hand-started daemon retired cleanly:
+  `kill -INT` was a NO-OP because THAT process had SIGINT ignored (`SigIgn` bit
+  set — an asynchronous job in a non-interactive shell), so `kill -TERM` is what
+  ended it, after which the socket belonged to the unit's pid alone. The
+  ceremony then ran with the native Windows node as requester:
+  `aoide pair http://127.0.0.1:8710/ --name thinkchiyo`, approved on the WSL
+  side with the code it showed and finished from the requester with the reply
+  code — two nodes named per the ruling, `thinkchiyo` (WSL, 8710) and
+  `thinkchiyo-win` (native, 8720). Mail proved both directions: Windows→WSL
+  DELIVERED on the send (the sender's outbox empty right after, the letter read
+  on the WSL side as from `thinkchiyo-win`), WSL→Windows HELD (`mail send
+  --hold`: "a drain never dials it; it leaves when thinkchiyo-win polls") and
+  then pulled by ONE bare `aoide mail poll` on the native side ("polled 1
+  node(s): 1 envelope(s) filed"), which also carried that node's receipt back.
+- What the ceremony taught twice, and both are docs now rather than
+  workarounds: a pair stamps the DEFAULT grant (`read` on a stock config) into
+  the mesh both ends agreed (unset ⇒ `home`), so the first deposit was refused
+  with its own fix in the message ("its grant in mesh `home` does not include
+  `message` — on this (receiving) host run `aoide node allow thinkchiyo-win
+  message on --mesh home`, then … `aoide mail outbox retry --refused`"); and a
+  URL-dialled peer is nicknamed after the URL's sanitized host unless `--name`
+  is passed, which the receiver refuses ("addressing-mismatch: container is
+  addressed to `127-0-0-1`, not this node"). A re-pair with `--name thinkchiyo`
+  fixed the second — a node record's name IS the wire address, and no command
+  renames one.
+- Residue, stated rather than tidied: the WSL node cannot dial the native one at
+  all (its self-url `http://thinkchiyo-win:8720/` names no address that VM can
+  resolve, and the door it would reach is loopback-only), so anything the WSL
+  side INITIATES — a `now`-flavor letter, a receipt's own drain — sits in its
+  outbox as `transport: could not reach the agent` while the same content
+  reaches the native side on the poll. The ruled shape therefore covers letters
+  marked `--hold` AND receipts handed over on the poll; the sender's own
+  bookkeeping does not learn the poll carried it.
+- The upgrade's one cross-version consequence, measured: `aoide node pull` from
+  the WSL node now answers `signature verification failed` for `yomi-strix`,
+  whose live daemon is `/nix/store/…-aoide-0.0.25/bin/aoided` (started
+  2026-09-27 02:46). The pairing RECORD is intact (name, pubkey, `verified`,
+  `via: ssh://khoa@192.168.1.175`) and the transport works (`ssh` into that host
+  succeeds) — the response-signature rail changed inside 0.0.26, so a mixed
+  0.0.26/0.0.25 mesh fails its live operations until the older side moves. Not
+  this lane's to fix (that rebuild is User-gated); named because the ruled
+  upgrade is what exposed it.
+- The managed task wrapper (`spawn --task`, `session watch`) claims no Windows
+  support today. Its two named prerequisites — the conduct-owned PTY
+  transcript its live view reads, and the stage lock its record writes and
+  delivery cursor ride — are native on both hosts now; the wrapper's own
+  commands are UNMEASURED there, so its earliest honest Windows point is a
+  measurement, not a rewrite.
+- The ruled one-box path, in full: Windows is the REQUESTER and the WSL door is
+  the approver, so the ceremony dials `http://127.0.0.1:8710/` through WSL2's
+  own localhost forwarding (measured: the VM's `127.0.0.1` listeners surface on
+  Windows `127.0.0.1`, for its sshd and its python/qemu listeners alike) and
+  nothing ever dials inward. The discovery arm (`pair <hostname>`) is REFUSED on
+  one box by its own self-pair guard (a loopback source address, or an
+  advertisement named this instance's own), so the explicit URL is the arm; the
+  LAN guard refuses a LOOPBACK peer for `aoide/charterFetch` (`-32007` — a
+  relayed forward and an ssh tunnel both arrive as loopback, which is why that
+  rule exists), so the mesh comes in by `mesh join --operator <key>` or
+  `charter accept <file>` instead. Two collisions the pair must be given
+  answers to, both already measured: the two nodes compute the SAME node name
+  (one computer name, folded — resolved by ruling: `AOIDE_A2A_NODE_NAME`, the
+  native side `thinkchiyo-win`) and door port `8710` is contested on one
+  loopback exactly as `127.0.0.1:22` already is (resolved the same way:
+  `AOIDE_A2A_PORT=8720` native, 8710 left to WSL). The WSL->Windows hop needs
+  nothing for the ruled direction: that node holds its letters and this one
+  polls, and a WSL-side dial INTO the Windows door would need an address and a
+  key Windows sshd does not authorize today (`administrators_authorized_keys`,
+  one key, `khoa@yomi-strix`).
+- Next, in order: (1) bring yomi's `aoided` to 0.0.26 (its own User-gated
+  rebuild/activation) so the WSL↔yomi live rail verifies again — the pairing and
+  the mesh need no re-pairing, the wire version does; (2) decide whether a
+  WSL-INITIATED drain is wanted on one box, which takes a WSL→Windows address
+  (a LAN-bound door, or an ssh hop with a key that host's sshd would have to
+  authorize — one key today, `khoa@yomi-strix`, and neither is ruled); (3) the
+  `boot_epoch` row's non-Linux arm; (4) the managed-task wrapper's native
+  measurement.
 
 ## 29. HTTPS mesh with end-to-end encrypted letters
 

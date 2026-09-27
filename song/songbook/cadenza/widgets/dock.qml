@@ -10,7 +10,15 @@
 //   namespace `aoide-dock`, layer Overlay; extras `shared`, `stagingEngine`
 //   toggle()          shell.qml's SUPER+G (`aoide:dock`) and the bar
 //   openTab(tab)      the bar's cells: "overview" | "sys" | "notif" |
-//                     "project:<name>" — opens the board on that tab
+//                     "project:<name>" — opens the board on that tab; on an
+//                     open board already on that tab it closes it
+//
+// ── Closing ──────────────────────────────────────────────────────────────
+// Escape (the body), the `[x]` in the board's top rule (the body's
+// closeRequested), SUPER+G, the bar cell of the tab already showing, and a
+// click anywhere off the board: `catcher` below, a transparent full-screen
+// layer (`aoide-dock-scrim`) one layer under the board and clear of the
+// bar's zone, mapped only while the board is shown.
 //   open              readable: is the board up
 //   show() / hide()   the same pair sonata's dock exposes
 //
@@ -44,7 +52,10 @@ PanelWindow {
     function show()   { root.shown = true }
     function hide()   { root.shown = false }
     function toggle() { root.shown = !root.shown }
+    // a bar cell toggles: the open board already on that tab closes; on
+    // another tab it switches; a shut board opens on the tab
     function openTab(tab) {
+        if (root.shown && body.item && body.item.tab === "" + tab) { root.hide(); return }
         if (body.item) body.item.openTab(tab)
         else root._pendingTab = "" + tab
         root.shown = true
@@ -98,4 +109,28 @@ PanelWindow {
         function onCloseRequested() { root.hide() }
     }
     onShownChanged: if (root.shown && body.item) body.item.forceActiveFocus()
+
+    // ── the catcher: a click off the board closes it ─────────────────────
+    // A second layer surface, mapped only while the board is shown: full
+    // screen on the board's output, one layer BELOW it (Top; the board is
+    // Overlay), transparent, drawing nothing, taking every pointer button.
+    // `exclusiveZone: 0` keeps it out of the bar's reserved zone, so the bar
+    // stays clickable (a bar cell reaches `openTab` and toggles). The click
+    // that closes is consumed: it does not reach the window under it.
+    PanelWindow {
+        id: catcher
+        screen: root.screen
+        visible: root.shown
+        anchors { top: true; bottom: true; left: true; right: true }
+        exclusiveZone: 0
+        color: "transparent"
+        WlrLayershell.layer: WlrLayer.Top
+        WlrLayershell.namespace: "aoide-dock-scrim"
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.AllButtons
+            onPressed: root.hide()
+        }
+    }
 }

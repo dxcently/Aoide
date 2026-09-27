@@ -96,16 +96,16 @@ the panel/family name normalizes.
 - **STATUS (`5`)** — read-only: stage status, both trees (`App::stage` for
   `state/stage/`, `App::rice_stage` for `song/stage/`).
 - **ROSTER (`6`)** — presence over this box's own sessions plus every
-  registered node. Rows are `who --json`'s `Outcome.data`, dispatched
+  registered node. Rows are `session --hosts --json`'s `Outcome.data`, dispatched
   through the same injected `DispatchFn` and parsed into a flattened row
-  list — never re-derived. `who` performs a LIVE network probe of every
+  list — never re-derived. `session --hosts` performs a LIVE network probe of every
   registered node (~2 s/node, parallel) on every invocation, so this pane
   throttles: it re-dispatches at most every ~15 s (`ROSTER_THROTTLE`) while
   visible, never on every ~500 ms tick; `r` forces one fetch regardless of
   the throttle window (a no-op while a fetch is already in flight). The
   dispatch runs on its own `std::thread`, reporting back over an `mpsc`
   channel the tick loop polls without blocking — the one dispatch in this
-  crate that skips the synchronous `App::dispatch`, since `who` never
+  crate that skips the synchronous `App::dispatch`, since the roster never
   mutates anything and its live probes would otherwise freeze the tick
   loop. `s` on a selected session row opens the compose prompt, pre-labeled
   with that row's own display-grammar label, and on submit dispatches
@@ -142,7 +142,7 @@ Every mutating keypress builds an `Invocation` and passes it to the injected
 `DispatchFn`, so it is audited exactly like a typed command: `session prune`,
 `project add`, `project remove`, `graph link`, `send --to
 <target> --yes` (ROSTER compose), `session pending approve`, `session pending
-deny`. Reads (`who`, `session pending list`, the stage-file loads) never
+deny`. Reads (`session --hosts`, `session pending list`, the stage-file loads) never
 dispatch — they call the pure graph functions and stage-file loaders
 directly. Cue-session on a live window is the one exception on the write
 side too: it calls `focus_session` directly rather than dispatching `graph
@@ -151,7 +151,7 @@ own audit line by hand so the one-audit-log invariant still holds.
 
 ## Two behaviours a reader will hit
 
-- **ROSTER's `who` throttles.** A stale cache fetches immediately on
+- **ROSTER's `session --hosts` throttles.** A stale cache fetches immediately on
   switching into the pane; otherwise a fetch fires at most every ~15 s
   while the pane is visible. `r` overrides the window unconditionally.
 - **`session pending list`'s `id` is an array position, not a stable id** —

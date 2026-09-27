@@ -302,10 +302,10 @@
           # pkgs/ discovery completeness — see lib/pkgs.nix's `strayEntries`
           # and lib/checks.nix's Check 5.
           discovery = checks.discovery pkgsWalk.strayEntries;
-          # No phantom commands in the agent docs — every backticked
-          # `aoide …`/`lyra …` spelling in AGENTS.md + docs/agent/*.md
-          # resolves against the binaries built from this source (see
-          # lib/checks.nix's Check 6).
+          # No phantom commands in the docs — every backticked
+          # `aoide …`/`lyra …` spelling in AGENTS.md + docs/agent/*.md,
+          # INSTALL.md and the wiki resolves against the binaries built from
+          # this source (see lib/checks.nix's Check 6).
           phantom-commands = checks.phantomCommands self inputs.aoide.packages.${system}.default;
           # Core's crate closure (derived from pkgs/aoide/Cargo.toml, walked
           # from crates/cli) never reaches aoide-song/aoide-screen/aoide-lyra

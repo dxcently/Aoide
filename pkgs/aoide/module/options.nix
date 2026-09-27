@@ -96,10 +96,12 @@ in
       type = types.str;
       default = "default.target";
       description = ''
-        The systemd user target `aoided` anchors to. `default.target` on a
+        The systemd user target `aoided` STARTS with. `default.target` on a
         headless box, so the daemon and its doors come up at boot with
-        linger on; a painting host names its session target instead and the
-        unit follows the session's lifetime.
+        linger on; a painting host names its own session target instead,
+        and the unit starts once that target is reached — while keeping
+        its lifetime its own: the anchor sets no `partOf`, so a dead
+        desktop never stops the policy surface.
       '';
     };
   };

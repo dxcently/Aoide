@@ -67,6 +67,7 @@ use crate::fs;
 use crate::time::now_iso_utc;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::io;
 use std::path::PathBuf;
 
@@ -101,19 +102,28 @@ pub struct IdentityInfo {
     #[serde(rename = "pubkeyHex")]
     pub pubkey_hex: String,
     pub fingerprint: String,
+    /// The DURABLE fingerprint (P-CHARTER): `SHA256:<lowercase hex>` over the
+    /// raw 32-byte **identity** public key. It is the value every other
+    /// machine compares out of band and the value a node line prints —
+    /// distinct from [`Self::fingerprint`] (the short local display label,
+    /// never compared across machines) and from an age key's own
+    /// fingerprint ([`crate::seal::age_fingerprint`], over a different key).
+    #[serde(rename = "nodeFingerprint")]
+    pub node_fingerprint: String,
     #[serde(rename = "createdAt")]
     pub created_at: String,
 }
 
 impl Keypair {
-    /// This keypair's public info (hex pubkey, fingerprint, mint time) —
-    /// safe to serialize/print/send anywhere; derives nothing but the
+    /// This keypair's public info (hex pubkey, both fingerprints, mint time)
+    /// — safe to serialize/print/send anywhere; derives nothing but the
     /// PUBLIC key from `signing_key`.
     pub fn info(&self) -> IdentityInfo {
         let vk = self.signing_key.verifying_key();
         IdentityInfo {
             pubkey_hex: hex_encode(vk.as_bytes()),
             fingerprint: fingerprint(vk.as_bytes()),
+            node_fingerprint: node_fingerprint(vk.as_bytes()),
             created_at: self.created_at.clone(),
         }
     }
@@ -157,6 +167,18 @@ fn fingerprint(pubkey: &[u8]) -> String {
         .join(":")
 }
 
+/// The DURABLE fingerprint of an ed25519 public key: `SHA256:<lowercase
+/// hex>` over its raw 32 bytes (P-CHARTER, `HTTPS-MESH-API.md` "Keys").
+///
+/// This is the value two operators compare out of band, the value a node
+/// line prints, and the one storage keys by — never [`fingerprint`], the
+/// short local display label above. Over an operator key it is computed the
+/// same way (the operator key is an ed25519 key too), which is why this takes
+/// the raw key rather than a [`Keypair`].
+pub fn node_fingerprint(pubkey: &[u8]) -> String {
+    format!("SHA256:{}", hex_encode(&Sha256::digest(pubkey)))
+}
+
 /// Load this instance's keypair, minting one lazily on first need. Returns
 /// `(keypair, minted)` — `minted` is `true` only the FIRST time this ever
 /// runs against a given state dir (the `aoide identity` handler's `changed`
@@ -198,44 +220,78 @@ pub fn load_or_mint() -> io::Result<(Keypair, bool)> {
                 false,
             ))
         }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => mint(),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            let (pair, minted) = load_or_mint_seed_file(&kp)?;
+            fs::atomic_write(&created_at_path(), &pair.created_at)?;
+            Ok((pair, minted))
+        }
         Err(e) => Err(e),
     }
 }
 
-/// Mint a fresh keypair and write both identity files. Private, called only
-/// from [`load_or_mint`]'s not-found branch — every other caller goes
-/// through the idempotent `load_or_mint`.
-fn mint() -> io::Result<(Keypair, bool)> {
-    // Locks the directory itself down to 0700 — `atomic_write_private`
-    // below only ever secures the FILE it writes; nothing else in this
-    // crate secured `identity/` as a directory, so on a state dir whose
-    // default mode is whatever `create_dir_all` leaves it at (0755 under
-    // this box's normal umask), the directory's entries would stay
-    // world-listable even with `ed25519.key` itself locked to 0600
-    // (review rider — RIDER 1).
-    fs::secure_private_dir(&identity_dir())?;
-
-    let mut seed = [0u8; 32];
-    getrandom::fill(&mut seed)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("system RNG unavailable: {e}")))?;
-    let signing_key = SigningKey::from_bytes(&seed);
-
-    fs::atomic_write_private(&key_path(), &seed)?;
-    let created_at = now_iso_utc();
-    fs::atomic_write(&created_at_path(), &created_at)?;
-
-    Ok((
-        Keypair {
-            signing_key,
-            created_at,
-        },
-        true,
-    ))
+/// Load or mint a raw 32-byte ed25519 seed at `path` — [`load_or_mint`]'s own
+/// at-rest discipline (parent directory secured `0700`,
+/// [`fs::atomic_write_private`], a present but malformed file refused rather
+/// than overwritten), reachable for a SECOND key. `load_or_mint`'s caller is
+/// this node's identity; P-CHARTER's is `state/operator/<mesh>.key`, the mesh
+/// operator's key, which is stored "0600 beside the identity key's
+/// discipline" and is never the identity key even on the machine that is both.
+///
+/// `created_at` comes back as the mint instant for a freshly minted key and as
+/// "now" for a loaded one: only [`load_or_mint`] has a sidecar to read a real
+/// mint time from, and nothing reads the operator key's.
+pub fn load_or_mint_seed_file(path: &std::path::Path) -> io::Result<(Keypair, bool)> {
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            let seed: [u8; 32] = bytes.as_slice().try_into().map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "{}: expected a 32-byte ed25519 seed, found {} bytes — refusing to mint over an existing key file",
+                        path.display(),
+                        bytes.len()
+                    ),
+                )
+            })?;
+            Ok((
+                Keypair {
+                    signing_key: SigningKey::from_bytes(&seed),
+                    created_at: now_iso_utc(),
+                },
+                false,
+            ))
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            // Locks the directory itself down to 0700 — `atomic_write_private`
+            // below only ever secures the FILE it writes; nothing else in this
+            // crate secured `identity/` as a directory, so on a state dir whose
+            // default mode is whatever `create_dir_all` leaves it at (0755 under
+            // this box's normal umask), the directory's entries would stay
+            // world-listable even with the key file locked to 0600 (review
+            // rider — RIDER 1). The operator key's own directory needs the same
+            // treatment for the same reason.
+            if let Some(dir) = path.parent() {
+                fs::secure_private_dir(dir)?;
+            }
+            let mut seed = [0u8; 32];
+            getrandom::fill(&mut seed)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("system RNG unavailable: {e}")))?;
+            fs::atomic_write_private(path, &seed)?;
+            Ok((
+                Keypair {
+                    signing_key: SigningKey::from_bytes(&seed),
+                    created_at: now_iso_utc(),
+                },
+                true,
+            ))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Mint a fresh keypair that lives ONLY in this process's memory — never
-/// written to disk. This is [`mint`]'s ON-DISK-write-free twin, added for
+/// written to disk. This is [`load_or_mint_seed_file`]'s ON-DISK-write-free
+/// twin, added for
 /// LANE IDENTITY P-ID1's sealed session credential (`docs/architecture/
 /// CONTRACTS.md`'s identity section): under OQ1-A the daemon's seal-signing
 /// key must NOT be [`load_or_mint`]'s own on-disk key, because that file is
@@ -247,7 +303,8 @@ fn mint() -> io::Result<(Keypair, bool)> {
 /// default) — see the daemon-side caller's own doc for the full trust-root
 /// note.
 ///
-/// Same keygen as [`mint`] (a fresh 32-byte seed off the system RNG via
+/// Same keygen as [`load_or_mint_seed_file`] (a fresh 32-byte seed off the
+/// system RNG via
 /// `getrandom::fill`), minus BOTH disk writes — no `identity/` dir, no
 /// `ed25519.key`, no `created_at` sidecar; `created_at` is simply "now",
 /// since there is no file to have minted it earlier. The caller is expected

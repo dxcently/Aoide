@@ -921,7 +921,7 @@ fn fetch_frame(
     id: &str,
     tail: usize,
 ) -> Result<Frame, FrameReadError> {
-    let value = aoide_client::commands::task_get_on_node(node, id, tail as u64)?;
+    let value = aoide_client::commands::task_get_on_node(node, id, tail as u64, None)?;
     serde_json::from_value::<Frame>(value).map_err(|e| FrameReadError {
         code: None,
         message: format!("the far node's frame did not parse: {e}"),
@@ -1910,7 +1910,8 @@ mod tests {
             hub: false,
             pubkey: None,
             verified: false,
-            allows: Vec::new(),
+            grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-09-21T00:00:00Z".to_string(),
         }

@@ -9,7 +9,7 @@
 //! | the accept side | `UnixListener::bind`/`accept`/`incoming` | the same (`bind`/`listen`/`accept`) |
 //! | the read/write halves | `Read`/`Write` | `Read`/`Write` (`recv`/`send`) |
 //! | a second handle | `try_clone` (`dup`) | `try_clone` (`WSADuplicateSocketW`+`WSASocketW`) |
-//! | read/write deadlines | `set_read_timeout`/`set_write_timeout` | the same (`SO_RCVTIMEO`/`SO_SNDTIMEO`) |
+//! | read/write deadlines | `set_read_timeout`/`set_write_timeout` | the same (`SO_RCVTIMEO`/`SO_SNDTIMEO`), **enforced by this module on a socket whose mode ignores them**: a budgeted read or write that answers `WouldBlock` waits its budget out (`select`, residual deadline anchored at the first refusal) and reports `TimedOut` — never `WouldBlock` to a caller that asked for a bound |
 //! | half-close | `shutdown(Shutdown)` | the same (`shutdown`/`SD_*`) |
 //! | a connected pair | `UnixStream::pair` (`socketpair`) | `UnixStream::pair` (a private listener) |
 //! | the caller's identity | `getsockopt(SO_PEERCRED)` | `UnixStream::peer_pid` (`SIO_AF_UNIX_GETPEERPID`) |
@@ -500,6 +500,17 @@ impl UnixStream {
         Ok(())
     }
 
+    /// The `SOCKET` itself, for the one thing a socket cannot be asked in
+    /// bytes: waiting on it. A caller that must arm a Winsock EVENT for this
+    /// socket (`WSAEventSelect`) needs the handle, and there is no
+    /// `AsRawSocket`-shaped trait on this type — the `cfg(windows)` arm of
+    /// `conduct`'s injection inbox is the only caller. Read-only borrowing
+    /// accessor: the socket's ownership does not move, and closing it stays
+    /// this type's `Drop`.
+    pub fn as_raw_socket(&self) -> SOCKET {
+        self.sock
+    }
+
     /// Wait until `sock` is writable or `timeout` runs out — `select`'s write
     /// set, which is Winsock's way to wait on a socket's state. `false` is
     /// the timeout, never an error.
@@ -542,6 +553,30 @@ impl UnixStream {
 /// One `recv` into `buf`, off the raw socket — the body both `Read` impls
 /// below share, because a `&UnixStream` cannot hand out a `&mut UnixStream`
 /// for the owned impl to borrow.
+///
+/// **A read budget decides the read, mode or no mode, and it is spent ONCE.**
+/// Winsock's `accept` inherits a non-blocking flag from its listener (cleared at
+/// accept now, but a caller may arm non-blocking afterwards), and `SO_RCVTIMEO`
+/// — what `set_read_timeout` sets — is ignored by a non-blocking socket. So when
+/// a socket that HAS a budget answers `WouldBlock`, this waits that budget out
+/// with `select` and tries again, against a residual deadline anchored at the
+/// FIRST `WouldBlock`: `WouldBlock` is never returned to a caller that asked for
+/// a bounded read, the wait is never restarted (a socket whose own
+/// `SO_RCVTIMEO` expiry already answered `WouldBlock` cannot spend the budget
+/// twice), and a `select` wake that finds no bytes in the end reports
+/// `TimedOut` — the verdict `SO_RCVTIMEO` gives a blocking socket. With no
+/// budget set nothing changes, and a socket that blocks never reaches the
+/// fallback at all.
+///
+/// The retry LOOPS on what is left of that same deadline rather than trying
+/// once: a wake is not a promise of bytes (a twin handle minted by `try_clone`
+/// can take them from the same receive queue, or `select` can wake for a peer's
+/// close), and a retry that answered `WouldBlock` would hand a caller that asked
+/// for a bound exactly the error this exists to keep from it. That branch cannot
+/// be forced deterministically — it needs the bytes taken between the wait and
+/// the retry, or a wake with nothing behind it — so no test pins it; the loop's
+/// shape is what makes it safe, and the budget (never restarted) is what bounds
+/// it.
 fn recv_into(sock: SOCKET, buf: &mut [u8]) -> io::Result<usize> {
     if buf.is_empty() {
         return Ok(0);
@@ -549,13 +584,126 @@ fn recv_into(sock: SOCKET, buf: &mut [u8]) -> io::Result<usize> {
     let want = buf.len().min(i32::MAX as usize) as i32;
     let n = unsafe { recv(sock, buf.as_mut_ptr(), want, 0) };
     if n == SOCKET_ERROR {
-        return Err(last_error());
+        let err = last_error();
+        if err.kind() == io::ErrorKind::WouldBlock {
+            if let Some(budget) = read_timeout_of(sock) {
+                // ONE deadline, anchored at the FIRST refusal: every wake is not
+                // a promise of bytes (a twin handle may have taken them, or the
+                // peer may have closed), so the retry loops on what is LEFT of
+                // the budget and `WouldBlock` is never handed to a caller that
+                // asked for a bound.
+                let deadline = std::time::Instant::now() + budget;
+                loop {
+                    wait_for_bytes(sock, deadline)?;
+                    let n = unsafe { recv(sock, buf.as_mut_ptr(), want, 0) };
+                    if n == SOCKET_ERROR {
+                        let e = last_error();
+                        if e.kind() == io::ErrorKind::WouldBlock {
+                            continue; // a wake with nothing behind it
+                        }
+                        return Err(e);
+                    }
+                    return Ok(n as usize);
+                }
+            }
+        }
+        return Err(err);
     }
     // 0 is the orderly shutdown, exactly as `read(2)` reports it.
     Ok(n as usize)
 }
 
-/// One `send` out of `buf`, off the raw socket — `recv_into`'s write half.
+/// Wait for `sock` to become readable, looping on what is LEFT of `deadline`
+/// (`select` may wake for a peer's close, or a twin handle may take the bytes
+/// first, and one wake is not a promise of data). `TimedOut` once the deadline
+/// is gone — the same verdict `SO_RCVTIMEO` gives a blocking socket.
+fn wait_for_bytes(sock: SOCKET, deadline: std::time::Instant) -> io::Result<()> {
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the read budget elapsed with no bytes",
+            ));
+        }
+        let mut read: FD_SET = zeroed();
+        read.fd_count = 1;
+        read.fd_array[0] = sock;
+        let tv = TIMEVAL {
+            tv_sec: i32::try_from(left.as_secs()).unwrap_or(i32::MAX),
+            tv_usec: i32::try_from(left.subsec_micros()).unwrap_or(999_999),
+        };
+        let rc = unsafe { select(0, &mut read, std::ptr::null_mut(), std::ptr::null_mut(), &tv) };
+        if rc == SOCKET_ERROR {
+            return Err(last_error());
+        }
+        if rc > 0 {
+            return Ok(());
+        }
+    }
+}
+
+/// Wait out `budget` for `sock` to become WRITABLE — [`wait_for_bytes`]'s write
+/// twin, because `SO_SNDTIMEO` is ignored by a non-blocking socket exactly as
+/// `SO_RCVTIMEO` is, and a full send buffer must not turn a bounded write into
+/// an instant `WouldBlock`.
+/// Wait for `sock` to become WRITABLE before `deadline` — [`wait_for_bytes`]'s
+/// write twin, because `SO_SNDTIMEO` is ignored by a non-blocking socket exactly
+/// as `SO_RCVTIMEO` is, and a full send buffer must not turn a bounded write
+/// into an instant `WouldBlock`.
+fn wait_for_writable(sock: SOCKET, deadline: std::time::Instant) -> io::Result<()> {
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the write budget elapsed with the socket still full",
+            ));
+        }
+        let mut write: FD_SET = zeroed();
+        write.fd_count = 1;
+        write.fd_array[0] = sock;
+        let tv = TIMEVAL {
+            tv_sec: i32::try_from(left.as_secs()).unwrap_or(i32::MAX),
+            tv_usec: i32::try_from(left.subsec_micros()).unwrap_or(999_999),
+        };
+        let rc = unsafe { select(0, std::ptr::null_mut(), &mut write, std::ptr::null_mut(), &tv) };
+        if rc == SOCKET_ERROR {
+            return Err(last_error());
+        }
+        if rc > 0 {
+            return Ok(());
+        }
+    }
+}
+
+/// `SO_RCVTIMEO`, as the duration a caller set — `None` when it set none
+/// (Winsock's own `0`, "wait for ever"). The getter half of
+/// [`UnixStream::set_read_timeout`], asked only by [`recv_into`]'s fallback.
+fn read_timeout_of(sock: SOCKET) -> Option<Duration> {
+    let mut millis: u32 = 0;
+    let mut len = std::mem::size_of::<u32>() as i32;
+    let rc = unsafe {
+        getsockopt(
+            sock,
+            SOL_SOCKET,
+            SO_RCVTIMEO,
+            &mut millis as *mut u32 as *mut u8,
+            &mut len,
+        )
+    };
+    if rc == SOCKET_ERROR || millis == 0 {
+        return None;
+    }
+    Some(Duration::from_millis(millis as u64))
+}
+
+/// One `send` out of `buf`, off the raw socket — `recv_into`'s write half, and
+/// it keeps the same promise for the same reason: a socket that HAS a send
+/// budget and answers `WouldBlock` (a full buffer) waits that budget out and
+/// tries again, so a bounded write cannot fail instantly where Unix blocks or
+/// honours `SO_SNDTIMEO`. Without a budget, or on a socket that blocks, nothing
+/// changes.
 fn send_from(sock: SOCKET, buf: &[u8]) -> io::Result<usize> {
     if buf.is_empty() {
         return Ok(0);
@@ -563,9 +711,51 @@ fn send_from(sock: SOCKET, buf: &[u8]) -> io::Result<usize> {
     let want = buf.len().min(i32::MAX as usize) as i32;
     let n = unsafe { send(sock, buf.as_ptr(), want, 0) };
     if n == SOCKET_ERROR {
-        return Err(last_error());
+        let err = last_error();
+        if err.kind() == io::ErrorKind::WouldBlock {
+            if let Some(budget) = write_timeout_of(sock) {
+                // [`recv_into`]'s own shape on the write side: one deadline,
+                // anchored at the first refusal, and a retry that loops on what
+                // is LEFT of it — `WouldBlock` is never handed to a caller that
+                // asked for a bound.
+                let deadline = std::time::Instant::now() + budget;
+                loop {
+                    wait_for_writable(sock, deadline)?;
+                    let n = unsafe { send(sock, buf.as_ptr(), want, 0) };
+                    if n == SOCKET_ERROR {
+                        let e = last_error();
+                        if e.kind() == io::ErrorKind::WouldBlock {
+                            continue; // a wake with nothing behind it
+                        }
+                        return Err(e);
+                    }
+                    return Ok(n as usize);
+                }
+            }
+        }
+        return Err(err);
     }
     Ok(n as usize)
+}
+
+/// `SO_SNDTIMEO` as the duration a caller set — [`read_timeout_of`]'s write
+/// twin, asked only by [`send_from`]'s fallback.
+fn write_timeout_of(sock: SOCKET) -> Option<Duration> {
+    let mut millis: u32 = 0;
+    let mut len = std::mem::size_of::<u32>() as i32;
+    let rc = unsafe {
+        getsockopt(
+            sock,
+            SOL_SOCKET,
+            SO_SNDTIMEO,
+            &mut millis as *mut u32 as *mut u8,
+            &mut len,
+        )
+    };
+    if rc == SOCKET_ERROR || millis == 0 {
+        return None;
+    }
+    Some(Duration::from_millis(millis as u64))
 }
 
 impl Read for UnixStream {
@@ -668,7 +858,44 @@ impl UnixListener {
         if sock == INVALID_SOCKET {
             return Err(last_error());
         }
-        Ok((UnixStream { sock }, sockaddr_of(&addr, len)))
+        // **What is guaranteed here, and what is not** — both halves measured on
+        // ThinkChiyo, because the host refuses one case and honours the rest.
+        //
+        // Winsock's `accept` hands back a socket that inherits the listening
+        // socket's properties — including `FIONBIO`, and including any
+        // asynchronous-event association — where `std`'s
+        // `UnixListener::accept` on Unix does not. A listener armed non-blocking
+        // for a deadline accept loop (the delivery fixtures and `conduct`'s
+        // injection inbox are the two in this tree; the four production doors —
+        // `server`'s daemon and mcp listeners, `secrets`' broker, `conduct`'s
+        // shellbridge — leave their listeners blocking and are unaffected)
+        // therefore produced non-blocking CONNECTIONS on Windows alone, and a
+        // caller's `set_read_timeout` (`SO_RCVTIMEO`, which a non-blocking
+        // socket ignores) answered `WSAEWOULDBLOCK` at once instead of waiting
+        // its own budget: measured, a delivery fixture's second read of a
+        // two-write protocol got `WouldBlock` (10035) some 300 ms before the
+        // byte was due, and the server suite's two opening-turn tests failed on
+        // it.
+        //
+        // `ioctlsocket(FIONBIO, 0)` returns 0 with no error on a plain accepted
+        // stream from a non-blocking listener, on a listener, and on a connected
+        // client (probe, verbatim). It is REFUSED — `WSAEINVAL`, and `?` here
+        // makes `accept` fail outright, taking three conduct inbox tests red —
+        // on an accepted stream whose LISTENER had a `WSAEventSelect`
+        // association armed, which is exactly the injection inbox's own shape
+        // (`accept` inherits that association too). So the clear is best-effort
+        // by measurement, not by timidity, and the GUARANTEE a caller can rely
+        // on is the budget: [`recv_into`] and [`send_from`] honour
+        // `set_read_timeout`/`set_write_timeout` whatever the socket's mode,
+        // spending the budget once and reporting `TimedOut` — never
+        // `WouldBlock` — to a caller that asked for a bound. A caller that reads
+        // with NO budget from a stream inherited from an event-armed
+        // non-blocking listener must own its own mode; the four production doors
+        // read from blocking listeners, so they are blocking by construction,
+        // and the inbox reads raw `recv` under its own event.
+        let stream = UnixStream { sock };
+        let _ = stream.set_nonblocking(false);
+        Ok((stream, sockaddr_of(&addr, len)))
     }
 
     /// An iterator over accepted connections — `for conn in listener.incoming()`
@@ -714,6 +941,13 @@ impl UnixListener {
             return Err(last_error());
         }
         Ok(())
+    }
+
+    /// The listening `SOCKET`, for [`UnixStream::as_raw_socket`]'s own reason:
+    /// a caller that waits on the accept door with a Winsock EVENT (rather
+    /// than polling it) needs the handle itself.
+    pub fn as_raw_socket(&self) -> SOCKET {
+        self.sock
     }
 }
 
@@ -779,6 +1013,114 @@ mod tests {
         ));
         crate::owner_only::ensure_private_dir(&dir).expect("a private scratch directory");
         dir
+    }
+
+    /// **A read budget decides the read, whatever the accepted socket's mode
+    /// turned out to be.** Winsock's `accept` inherits the listener's `FIONBIO`
+    /// (and an event association) where `std`'s `UnixListener::accept` on Unix
+    /// does not, so a listener armed non-blocking for a deadline accept loop
+    /// used to yield non-blocking CONNECTIONS on this host alone — and a
+    /// caller's `set_read_timeout` (`SO_RCVTIMEO`, which a non-blocking socket
+    /// ignores) answered `WSAEWOULDBLOCK` at once instead of waiting its budget.
+    /// This pins the contract that holds on either branch of that host question:
+    /// the read is bounded by the caller's own timeout (`TimedOut`, never
+    /// `WouldBlock`), and the budget is SPENT ONCE (the elapsed window below).
+    /// The accept clear itself is pinned by
+    /// `an_accepted_stream_with_no_budget_blocks_until_the_peer_writes`.
+    #[test]
+    fn an_accepted_socket_is_blocking_even_when_the_listener_is_not() {
+        let dir = scratch("accept-blocking");
+        let path = dir.join("door.sock");
+        let listener = UnixListener::bind(&path).expect("bind");
+        listener.set_nonblocking(true).expect("the deadline accept loop's own arm");
+        let server = std::thread::spawn(move || {
+            let mut conn = None;
+            for _ in 0..200 {
+                match listener.accept() {
+                    Ok((c, _)) => {
+                        conn = Some(c);
+                        break;
+                    }
+                    Err(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                }
+            }
+            conn
+        });
+        let mut client = UnixStream::connect(&path).expect("connect");
+        let mut conn = server.join().unwrap().expect("the listener accepted");
+
+        conn.set_read_timeout(Some(std::time::Duration::from_millis(200))).expect("a bounded read");
+        let mut buf = [0u8; 8];
+        let started = std::time::Instant::now();
+        let err = conn.read(&mut buf).expect_err("nothing was written yet");
+        let spent = started.elapsed();
+        assert_ne!(
+            err.kind(),
+            std::io::ErrorKind::WouldBlock,
+            "a non-blocking accepted socket answers WouldBlock at once and ignores SO_RCVTIMEO — \
+             the inheritance this test exists to stop"
+        );
+        assert_eq!(
+            err.kind(),
+            std::io::ErrorKind::TimedOut,
+            "the caller's own read budget is what must decide: {err:?}"
+        );
+        // And the budget is SPENT ONCE: a read that restarted its wait (or
+        // that returned early) would land outside this window.
+        assert!(
+            spent >= std::time::Duration::from_millis(200),
+            "the read gave up in {spent:?}, sooner than the 200ms budget it was given"
+        );
+        assert!(
+            spent < std::time::Duration::from_millis(400),
+            "the read burned {spent:?} — the budget must not be restarted into twice its value"
+        );
+
+        use std::io::Write as _;
+        client.write_all(b"x").expect("the client can still write");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **The property the accept clear exists for, pinned by itself** — and the
+    /// shape the four production doors actually have: an accepted stream with
+    /// NO read budget, whose first read must BLOCK until data arrives (which is
+    /// what Unix does), not answer `WouldBlock` because the listener it came
+    /// from was armed non-blocking. A separate thread writes after a beat, so a
+    /// socket that answered at once would be caught with an empty read.
+    #[test]
+    fn an_accepted_stream_with_no_budget_blocks_until_the_peer_writes() {
+        let dir = scratch("accept-no-budget");
+        let path = dir.join("door.sock");
+        let listener = UnixListener::bind(&path).expect("bind");
+        listener.set_nonblocking(true).expect("the deadline accept loop's own arm");
+        let server = std::thread::spawn(move || {
+            let mut conn = None;
+            for _ in 0..200 {
+                match listener.accept() {
+                    Ok((c, _)) => {
+                        conn = Some(c);
+                        break;
+                    }
+                    Err(_) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                }
+            }
+            conn
+        });
+        let mut client = UnixStream::connect(&path).expect("connect");
+        let mut conn = server.join().unwrap().expect("the listener accepted");
+
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            use std::io::Write as _;
+            client.write_all(b"late").expect("the peer writes");
+            client
+        });
+
+        let mut buf = [0u8; 8];
+        let n = conn.read(&mut buf).expect("an unbudgeted read must BLOCK, not answer WouldBlock");
+        assert_eq!(&buf[..n], b"late", "the bytes the peer sent after the beat");
+        let _ = writer.join();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The one place this module overrides its own dependency, pinned so a
