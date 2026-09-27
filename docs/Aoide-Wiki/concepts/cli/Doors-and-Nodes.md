@@ -335,9 +335,10 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
     signal (unauthenticated → never auto-delivers). Spawn answers to
     pairing alone: the caller must resolve on the Signature rung — a
     verified per-request signature against some `verified` node's stored
-    pubkey — with `spawn` in that record's `allows`; every refusal is
+    pubkey — with `spawn` among the caller's grants IN THE MESH ITS REQUEST
+    NAMES; every refusal is
     `-32006` with a shape-specific taught message (pair first / sign the
-    request / `node allow <name> spawn on`), and the door-wide bearer
+    request / `node allow <name> spawn on --mesh <m>`), and the door-wide bearer
     never reaches the spawn arm. Signed-request failures carry their own
     codes — `-32007` (malformed or unverifiable signature, partial header
     set), `-32008` (timestamp skew), `-32009` (nonce replay). Spawn unconfigured →
@@ -357,7 +358,7 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
     (past that a fast 503). Unknown method → `-32601`, parse error → `-32700`.
 - **Notes:** not gated at the CLI level; the security model is bind-address +
   the rebuild-gated `aoide.a2a.spawnAgent` option + the pairing gate on Spawn
-  (Signature rung + `allows`) + the optional bearer token on the read arms.
+  (Signature rung + the caller's grant in the request's mesh) + the optional bearer token on the read arms.
   A client never supplies a command — the spawn path only ever launches the
   operator-configured executable, which must also appear on the unit's PATH
   via `aoide.a2a.spawnPath` (a bare-word `spawnAgent` can't resolve
@@ -449,8 +450,10 @@ aoide node status [--json]
 - **Reads:** `state/nodes.json` plus each node's `state/node-cache/<name>.json`.
 - **Output:** the human line stays a terse `"<n> node(s) registered"`; `--json`
   carries the full row per node — `{nodes: [{name, url, autogate, tokenFile?,
-  bearerSecret?, hub, pubkey?, verified, allows, addedAt, state, fetchedAt,
-  error}]}`. `state` is `fresh` (pulled within the 300 s TTL and not marked
+  bearerSecret?, hub, pubkey?, verified, grants, addedAt, state, fetchedAt,
+  error}], homeMesh}` (`grants` is a map of mesh → capability set, P-CHARTER;
+  `homeMesh` is `[pairing] homeMesh`, so a `--json`-only consumer never has to
+  restate the rule). `state` is `fresh` (pulled within the 300 s TTL and not marked
   stale), `stale`, or `never-pulled` — the same three-way classification the
   graph fold uses, so this and the DAG never disagree. This is the deep
   per-node registry view; `node list` (below) is the one-glance roster and
@@ -595,23 +598,30 @@ outright at task #135 P3', hard cutover, no aliases.
 ### aoide node allow
 
 ```
-aoide node allow <name> <cap> on|off
+aoide node allow <name> <cap> on|off [--mesh <mesh>]
 ```
 
 - **Reads/Writes:** `state/nodes.json` — flips one capability in the
-  node's closed `allows` set (`NODE_CAPABILITIES`: `"read"` / `"spawn"`).
+  node's closed grant FOR ONE MESH (`NODE_CAPABILITIES`: `"read"` /
+  `"spawn"` / `"message"`). `--mesh` names the mesh it lands in; absent it
+  is the node's sole granted mesh, else `[pairing] homeMesh` — and a node
+  trusted in more than one mesh REFUSES, naming them, rather than guessing.
+  With no flag to give, a grant is given in one mesh and holds only there:
+  the door reads the caller's grant in the mesh its signed request names and
+  in no other ([[A2A-Door]], `grant_in_mesh`).
 - **Output:** idempotent — `on` an already-granted or `off` an
   already-revoked capability reports a no-op, never an error. An unknown
   capability string is refused before the node lookup; an unknown node
   name is refused after it — a distinct taught error for each.
-- **Notes:** the only writer of `allows` besides the pairing ceremony's
+- **Notes:** the only writer of `grants` besides the pairing ceremony's
   own first-verification stamp; re-pairing never re-runs it, so a revoked
   capability survives a key rotation. When several verified records share
   one pubkey (one remote instance paired under two names), the key's
-  effective grants are the UNION across those records — revoking a
-  capability from the key means revoking it on every record sharing it.
-  The A2A door's Spawn arm reads the
-  set ([[A2A-Door]], [[Pairing-Ceremony#What approval commits]]).
+  effective grants in a mesh are the UNION across those records — revoking a
+  capability from the key means revoking it on every record sharing it. A
+  record's old flat `allows` array is migrated into `grants[<home>]` on
+  load, byte-identical. The A2A door's Spawn arm reads the
+  grant ([[A2A-Door]], [[Pairing-Ceremony#What approval commits]]).
 
 ### aoide node spawn
 

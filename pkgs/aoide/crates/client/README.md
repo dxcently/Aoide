@@ -614,7 +614,8 @@ never the inbound/serve half (that's `aoide-server`).
   mailboxes), `state/mail-export/` by default, advancing no cursor and
   writing no note whose bytes already match (see the `mail_export` module
   bullet and MAIL.md "Export") —
-  `handle_node_allow` (`node allow <name> <cap> on|off`, P-P3, `docs/
+  `handle_node_allow` (`node allow <name> <cap> on|off [--mesh <m>]`, P-P3, per
+  mesh since P-CHARTER, `docs/
   architecture/PAIRING.md` decision 5) is a thin wire around
   `aoide_storage::node_store::set_node_allow` — idempotent, refuses an
   unknown node or an unknown capability with distinct taught errors, no

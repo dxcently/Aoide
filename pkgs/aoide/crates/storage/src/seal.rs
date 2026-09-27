@@ -1367,7 +1367,23 @@ impl std::fmt::Debug for ContainerOutcome {
 /// the hop branch is a caller that spools the container onward without
 /// calling it. P-SEAL's only transport is the direct lane, so the hop
 /// branch is exercised in tests rather than in the field.
-pub fn deposit_container(container: &Container) -> Result<ContainerOutcome, String> {
+/// Do two mesh names mean the same mesh? An EMPTY name is "unnamed", which
+/// every reader resolves to the home mesh (`config::home_mesh`) — so a
+/// pre-charter container (`origin_mesh: ""`) and a request signed for the
+/// home mesh agree, and a named container and an unnamed request do NOT
+/// (the request is the one that has to say where it acts). Pure.
+fn mesh_matches(container_mesh: &str, request_mesh: &str) -> bool {
+    let named = |m: &str| !m.trim().is_empty();
+    match (named(container_mesh), named(request_mesh)) {
+        (false, false) => true,
+        (true, true) => container_mesh.eq_ignore_ascii_case(request_mesh),
+        _ => false,
+    }
+}
+
+/// `aoide/mailDeposit`'s sealed half (P-SEAL): verify the container and hand
+/// the inner envelope back for filing.
+pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<ContainerOutcome, String> {
     let refusal = |reason: &str, detail: String| ContainerOutcome::Refused {
         reason: reason.to_string(),
         detail,
@@ -1427,6 +1443,33 @@ pub fn deposit_container(container: &Container) -> Result<ContainerOutcome, Stri
     }
     if !wire_auth::verify_signature_hex(recorded, &outer_bytes(&ctx, &ct), &container.sig) {
         return Ok(refusal("unverified-origin", "the outer signature does not verify".to_string()));
+    }
+
+    // 4. The mesh the letter is carried in, checked AFTER the origin
+    //    signature and against SIGNED values only (review finding 4, and the
+    //    design ruling it carries): `ctx.origin_mesh` is signed by the
+    //    origin, and `request_mesh` is the mesh the caller's own per-request
+    //    signature covers — the two must agree, because on the direct lane
+    //    the carrier IS the origin. `container.mesh` is deliberately NOT an
+    //    input: it is hop-mutable by design (HTTPS-MESH-API.md "Container":
+    //    `originMesh` is immutable inside `ctx`, `mesh` is hop-mutable
+    //    outside it), so consulting it here would let any spooling relay or
+    //    TLS edge turn an accepted deposit into a permanent refusal by
+    //    flipping one unsigned byte — and would give the sender a field to
+    //    lie in. P-M4's transit is where a hop's `mesh` is checked, at the
+    //    hop, against the zone clause.
+    //
+    //    This is the same refusal shape the door returns, one layer down:
+    //    the letter rides ONE mesh and its grant is read there.
+    if !mesh_matches(&ctx.origin_mesh, request_mesh) {
+        return Ok(refusal(
+            "mesh-mismatch",
+            format!(
+                "the container was minted in mesh `{}` but this request is signed for mesh `{request_mesh}` \
+                 — a letter rides one mesh, and its grant is read there",
+                ctx.origin_mesh
+            ),
+        ));
     }
 
     // 5. Dedup, before anything is opened.
@@ -1980,7 +2023,7 @@ mod tests {
         let kp = identity_keypair();
         let peer_key = kp.info().pubkey_hex.clone();
         let mut nodes = node_store::load_nodes();
-        node_store::upsert_paired_node(&mut nodes, "peer", "ssh://peer", &peer_key, &now_iso_utc(), &["message".to_string()]);
+        node_store::upsert_paired_node(&mut nodes, "peer", "ssh://peer", &peer_key, &now_iso_utc(), &["message".to_string()], "home");
         node_store::save_nodes(&nodes).unwrap();
 
         // The peer signs its own binding: sign with a keypair whose public
@@ -2059,6 +2102,13 @@ mod container_tests {
     use super::*;
     use aoide_test_support::EnvSaver;
 
+    /// Same shim as `tests`': the fixture container rides the home mesh, so
+    /// the request mesh that agrees with it is `"home"`. Tests that need a
+    /// different request mesh call `super::deposit_container` directly.
+    fn deposit_container(container: &Container) -> Result<ContainerOutcome, String> {
+        super::deposit_container(container, &container.origin_mesh)
+    }
+
     fn env(dir: &std::path::Path) {
         std::env::set_var("AOIDE_STATE_DIR", dir);
         std::env::set_var("AOIDE_ROOT", dir);
@@ -2089,11 +2139,20 @@ mod container_tests {
             &kp.info().pubkey_hex,
             &now_iso_utc(),
             &["message".to_string()],
+            "home",
         );
         node_store::save_nodes(&nodes).unwrap();
         let binding = publish_binding().unwrap();
         let envelope = mail::mint_outbound_letter("alice", &me, "bob", &body).unwrap();
-        let container = seal_envelope(&envelope, &binding, "", "", &me, &now_iso_utc()).unwrap();
+        let container = seal_envelope(
+            &envelope,
+            &binding,
+            &envelope.header.origin_mesh,
+            &envelope.header.origin_mesh,
+            &me,
+            &now_iso_utc(),
+        )
+        .unwrap();
         (container, envelope)
     }
 
@@ -2134,6 +2193,55 @@ mod container_tests {
 
     /// M1 (the branch review): the gate means **admitted AND filed**, so it
     /// only ever answers for a container whose letter is actually on disk.
+    /// **Review finding 1.** A letter to a peer trusted ONLY outside the home
+    /// mesh must be minted in that mesh — `origin_mesh` is signed into the
+    /// header, so a mint that always said home (or `""`) left the sender with
+    /// a letter the receiver could never accept, and a taught error ("sign the
+    /// deposit for the mesh the container carries") the shipped client could
+    /// not act on. Mint and request now derive the mesh from one rule, so the
+    /// peer receives it.
+    #[test]
+    fn a_letter_to_a_peer_trusted_only_outside_the_home_mesh_is_minted_and_deposited_there() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let dir = aoide_test_support::unique_tmp("mesh-away-deposit");
+        std::fs::create_dir_all(&dir).unwrap();
+        env(&dir);
+        let me = crate::display::local_node_name();
+        let (kp, _) = identity::load_or_mint().unwrap();
+        let mut nodes = node_store::load_nodes();
+        node_store::upsert_paired_node(
+            &mut nodes,
+            &me,
+            "ssh://self",
+            &kp.info().pubkey_hex,
+            &now_iso_utc(),
+            &["message".to_string()],
+            "away",
+        );
+        node_store::save_nodes(&nodes).unwrap();
+        let binding = publish_binding().unwrap();
+
+        let envelope = mail::mint_outbound_letter("alice", &me, "bob", "a letter for another mesh").unwrap();
+        assert_eq!(
+            envelope.header.origin_mesh, "away",
+            "the mint names the mesh the destination's record is trusted in — the same one the request will be signed for"
+        );
+
+        let container =
+            seal_envelope(&envelope, &binding, &envelope.header.origin_mesh, &envelope.header.origin_mesh, &me, &now_iso_utc()).unwrap();
+        assert_eq!(container.mesh, "away", "and the container rides it too");
+        assert!(
+            matches!(super::deposit_container(&container, "away").unwrap(), ContainerOutcome::Opened { .. }),
+            "the receiver accepts it in the mesh it was minted in"
+        );
+        assert_eq!(
+            reason(&super::deposit_container(&container, "home").unwrap()),
+            "mesh-mismatch",
+            "and only there: a request naming another mesh is refused, so the grant cannot be borrowed across meshes"
+        );
+    }
+
     #[test]
     fn a_filed_container_is_a_gated_duplicate_that_never_opens_again() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -2191,7 +2299,7 @@ mod container_tests {
 
         for attempt in 1..=3 {
             assert_eq!(
-                reason(&deposit_container(&broken).unwrap()),
+                reason(&super::deposit_container(&broken, "somewhere-else").unwrap()),
                 CONTEXT_MISMATCH,
                 "attempt {attempt} answers the taught word, not `duplicate`"
             );
@@ -2446,7 +2554,10 @@ mod container_tests {
         resigned.ct = hex_encode(&ct);
         resigned.origin_mesh = "somewhere-else".to_string();
         resigned.sig = wire_auth::sign_hex(&kp, &outer_bytes(&other, &ct));
-        assert_eq!(reason(&deposit_container(&resigned).unwrap()), CONTEXT_MISMATCH);
+        // The request names the mesh the tampered container claims, so the
+        // MESH rule (P-CHARTER) is satisfied and the tamper is caught by the
+        // ctx comparison it is aimed at — one refusal word per finding.
+        assert_eq!(reason(&super::deposit_container(&resigned, "somewhere-else").unwrap()), CONTEXT_MISMATCH);
     }
 
     #[test]
@@ -2507,7 +2618,7 @@ mod container_tests {
         let gen1_binding = publish_binding().unwrap();
         let me = crate::display::local_node_name();
         let second_letter = mail::mint_outbound_letter("alice", &me, "bob", "second body").unwrap();
-        let to_gen1 = seal_envelope(&second_letter, &gen1_binding, "", "", &me, &now_iso_utc()).unwrap();
+        let to_gen1 = seal_envelope(&second_letter, &gen1_binding, &second_letter.header.origin_mesh, &second_letter.header.origin_mesh, &me, &now_iso_utc()).unwrap();
         assert_eq!(to_gen1.to.age, container.to.age);
         let _ = rotate_age_key().unwrap();
 
@@ -2518,7 +2629,7 @@ mod container_tests {
         // key is `key-retired` rather than a bare open failure — the one
         // case an operator can act on.
         let third_letter = mail::mint_outbound_letter("alice", &me, "bob", "third body").unwrap();
-        let to_retired = seal_envelope(&third_letter, &gen1_binding, "", "", &me, &now_iso_utc()).unwrap();
+        let to_retired = seal_envelope(&third_letter, &gen1_binding, &third_letter.header.origin_mesh, &third_letter.header.origin_mesh, &me, &now_iso_utc()).unwrap();
         let closed = crate::time::shift_iso_utc(&now_iso_utc(), -60);
         std::fs::write(retired_until_path(1), format!("{closed}\n")).unwrap();
         assert_eq!(reason(&deposit_container(&to_retired).unwrap()), OPEN_KEY_RETIRED);
@@ -2531,7 +2642,7 @@ mod container_tests {
         // tombstone keeps the address, so the origin's retry loop still
         // learns `key-retired` — which is the whole point of keeping it.
         let fifth_letter = mail::mint_outbound_letter("alice", &me, "bob", "fifth body").unwrap();
-        let fifth = seal_envelope(&fifth_letter, &gen1_binding, "", "", &me, &now_iso_utc()).unwrap();
+        let fifth = seal_envelope(&fifth_letter, &gen1_binding, &fifth_letter.header.origin_mesh, &fifth_letter.header.origin_mesh, &me, &now_iso_utc()).unwrap();
         assert_eq!(
             reason(&deposit_container(&fifth).unwrap()),
             OPEN_KEY_RETIRED,
@@ -2547,6 +2658,11 @@ mod container_tests {
 mod review_fix_tests {
     use super::*;
     use aoide_test_support::EnvSaver;
+
+    /// Same shim: the fixtures here ride the home mesh too.
+    fn deposit_container(container: &Container) -> Result<ContainerOutcome, String> {
+        super::deposit_container(container, &container.origin_mesh)
+    }
 
     fn env(dir: &std::path::Path) {
         std::env::set_var("AOIDE_STATE_DIR", dir);
@@ -2572,6 +2688,7 @@ mod review_fix_tests {
             &old_key.info().pubkey_hex,
             &now_iso_utc(),
             &["message".to_string()],
+            "home",
         );
         node_store::save_nodes(&nodes).unwrap();
         let now = now_iso_utc();
@@ -2591,6 +2708,7 @@ mod review_fix_tests {
             &new_key.info().pubkey_hex,
             &now_iso_utc(),
             &["message".to_string()],
+            "home",
         );
         node_store::save_nodes(&nodes).unwrap();
         let fresh = mint_binding(&new_key, "age1newkey", 1, &now, &end).unwrap();
@@ -2623,7 +2741,7 @@ mod review_fix_tests {
         let kp = identity::mint_ephemeral().unwrap();
         let mut nodes = node_store::load_nodes();
         // `node add` path: registered, pubkey None, unverified.
-        node_store::upsert_paired_node(&mut nodes, "peer", "ssh://peer", "", &now_iso_utc(), &[]);
+        node_store::upsert_paired_node(&mut nodes, "peer", "ssh://peer", "", &now_iso_utc(), &[], "home");
         if let Some(n) = nodes.iter_mut().find(|n| n.name == "peer") {
             n.pubkey = None;
         }
@@ -2660,6 +2778,7 @@ mod review_fix_tests {
                 &key,
                 &now_iso_utc(),
                 &["message".to_string()],
+                "home",
             );
         }
         node_store::save_nodes(&nodes).unwrap();
@@ -2757,11 +2876,19 @@ mod review_fix_tests {
         let me = crate::display::local_node_name();
         let (kp, _) = identity::load_or_mint().unwrap();
         let mut nodes = node_store::load_nodes();
-        node_store::upsert_paired_node(&mut nodes, &me, "ssh://self", &kp.info().pubkey_hex, &now_iso_utc(), &["message".to_string()]);
+        node_store::upsert_paired_node(&mut nodes, &me, "ssh://self", &kp.info().pubkey_hex, &now_iso_utc(), &["message".to_string()], "home");
         node_store::save_nodes(&nodes).unwrap();
         let binding = publish_binding().unwrap();
         let envelope = mail::mint_outbound_letter("alice", &me, "bob", "filed and safe").unwrap();
-        let container = seal_envelope(&envelope, &binding, "", "", &me, &now_iso_utc()).unwrap();
+        let container = seal_envelope(
+            &envelope,
+            &binding,
+            &envelope.header.origin_mesh,
+            &envelope.header.origin_mesh,
+            &me,
+            &now_iso_utc(),
+        )
+        .unwrap();
 
         let ContainerOutcome::Opened { envelope: opened, .. } = deposit_container(&container).unwrap() else {
             panic!("opens");

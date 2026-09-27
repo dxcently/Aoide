@@ -830,6 +830,7 @@ fn handle_config_set(inv: &Invocation) -> Outcome {
                 crate::config::SetRefusal::BadValue { .. } => "config-bad-value",
                 crate::config::SetRefusal::Unloadable { .. } => "config-unloadable",
                 crate::config::SetRefusal::Io { .. } => "config-io-failed",
+                crate::config::SetRefusal::StrandsGrants { .. } => "config-strands-grants",
             };
             Outcome::error(cmd, refusal.to_string())
                 .with_data(json!({ "reason": reason, "key": key }))
@@ -843,6 +844,50 @@ mod tests {
     use super::*;
     use aoide_test_support::*;
     use aoide_protocol::output::Status;
+
+    /// **Review finding 7, the CLI face.** A refused `config set
+    /// pairing.homeMesh` must answer its own reason code, so a script can
+    /// tell "this would strand live grants" from "no such key" without
+    /// matching prose.
+    #[test]
+    fn config_set_answers_config_strands_grants_when_it_would_strand_them() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_ROOT", "AOIDE_CONFIG"]);
+        let root = unique_tmp("config-strands-cli");
+        std::fs::create_dir_all(&root).unwrap();
+        std::env::set_var("AOIDE_ROOT", &root);
+        std::env::remove_var("AOIDE_CONFIG");
+        std::fs::create_dir_all(crate::fs::state_dir()).unwrap();
+
+        let mut nodes = crate::node_store::load_nodes();
+        nodes.push(crate::node_store::Node {
+            name: "peer-box".to_string(),
+            url: "http://p/".to_string(),
+            autogate: false,
+            token_file: None,
+            bearer_secret: None,
+            hub: false,
+            pubkey: Some("aa".to_string()),
+            verified: true,
+            grants: crate::node_store::grants_in("home", &["read"]),
+            via: None,
+            added_at: "2026-09-26T00:00:00Z".to_string(),
+        });
+        crate::node_store::save_nodes(&nodes).unwrap();
+
+        let out = handle_config_set(&Invocation {
+            path: vec!["config".to_string(), "set".to_string()],
+            args: vec!["pairing.homeMesh".to_string(), "fleet".to_string()],
+            flags: std::collections::BTreeMap::new(),
+            door: aoide_protocol::Door::Cli,
+        });
+        assert_eq!(out.status, Status::Error, "{out:?}");
+        assert_eq!(
+            out.data.as_ref().and_then(|d| d.get("reason")).and_then(|v| v.as_str()),
+            Some("config-strands-grants"),
+            "{out:?}"
+        );
+    }
 
     fn assistant_line(ts: &str, model: &str, input: u64, cache_creation: u64, cache_read: u64, output: u64) -> String {
         json!({

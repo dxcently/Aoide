@@ -946,6 +946,15 @@ mod tests {
     use super::*;
     use crate::mail::{Address, Header};
 
+    /// Same shim as `seal`'s own test modules: the fixture container rides
+    /// the home mesh, so the request mesh that agrees with it is `"home"` —
+    /// this one is unused today (the one caller names it outright), kept only
+    /// if a second call site appears.
+    #[allow(dead_code)]
+    fn deposit_container(container: &crate::seal::Container) -> Result<crate::seal::ContainerOutcome, String> {
+        crate::seal::deposit_container(container, &container.origin_mesh)
+    }
+
     fn root(tag: &str) -> (aoide_test_support::EnvSaver, std::path::PathBuf) {
         aoide_test_support::isolated_mail_root(tag)
     }
@@ -1578,6 +1587,7 @@ mod sealed_spool_tests {
             &kp.info().pubkey_hex,
             &crate::time::now_iso_utc(),
             &["message".to_string()],
+            "home",
         );
         crate::node_store::save_nodes(&nodes).unwrap();
         let binding = crate::seal::publish_binding().unwrap();
@@ -1586,8 +1596,8 @@ mod sealed_spool_tests {
         let container = crate::seal::seal_envelope(
             &envelope,
             &binding,
-            "",
-            "",
+            &envelope.header.origin_mesh,
+            &envelope.header.origin_mesh,
             &me,
             &crate::time::now_iso_utc(),
         )
@@ -1617,7 +1627,7 @@ mod sealed_spool_tests {
         let reread = list_entries("elsewhere").unwrap();
         assert_eq!(reread.len(), 1);
         let container = reread[0].container.clone().expect("still sealed");
-        match crate::seal::deposit_container(&container).unwrap() {
+        match crate::seal::deposit_container(&container, &container.origin_mesh).unwrap() {
             crate::seal::ContainerOutcome::Opened { envelope: opened, .. } => {
                 assert_eq!(opened.text, body, "the body survived, inside ct");
             }

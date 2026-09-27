@@ -1057,7 +1057,7 @@ pub(super) fn session_roster_with(inv: &Invocation, pull: PullFn) -> Outcome {
 /// on the `conduct → client` edge) and hands off to
 /// [`session_roster_with`].
 pub fn session_roster(inv: &Invocation) -> Outcome {
-    let pull: PullFn = Arc::new(|p: &Node| aoide_client::commands::pull_node_live(p, NODE_PROBE_TIMEOUT_SECS));
+    let pull: PullFn = Arc::new(|p: &Node| aoide_client::commands::pull_node_live(p, NODE_PROBE_TIMEOUT_SECS, None));
     session_roster_with(inv, pull)
 }
 
@@ -1076,7 +1076,7 @@ mod tests {
             hub: false,
             pubkey: None,
             verified: false,
-            allows: Vec::new(),
+            grants: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-14T00:00:00Z".to_string(),
         }
@@ -1177,7 +1177,7 @@ mod tests {
             hub: false,
             pubkey: Some(key.clone()),
             verified: true,
-            allows: Vec::new(),
+            grants: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-14T00:00:00Z".into(),
         }])

@@ -1160,6 +1160,7 @@ section lands with the consumer that reads it, never ahead of one:
 # Comments are the point of the format: this is the one file a human edits.
 [pairing]
 defaultGrant = ["read"]
+homeMesh = "home"
 
 [upkeep]
 verifyCommand = "nix build --no-link .#checks.x86_64-linux.fmt .#checks.x86_64-linux.nix-lint"
@@ -1182,6 +1183,14 @@ sakaki = "ssh://khoa@192.168.1.202"
   `resolve_grant`) unless that invocation named `--allow`; a config that does
   not load REFUSES the commit rather than falling back to the built-in
   default, because the one file carrying grants must fail loudly.
+- `pairing.homeMesh` (string, default `"home"`) — the mesh that owns this
+  box's pre-charter grants, and the mesh a signed request that names no mesh
+  is evaluated in. It is where §7's one-shot migration folds every record's
+  old `allows` into `grants[<home>]`, and it is the fallback
+  `aoide_storage::node_store::resolve_mesh` answers a bare `node allow`/
+  outbound request with when nothing else names one. Validated as a mesh
+  name (the same grammar a `[mesh.<name>]` key takes), so a typo fails at
+  load instead of becoming a silently empty grant scope.
 - `upkeep.verifyCommand` (string, default `""`) — the shell command the
   check lane (`aoide session hook`'s SessionStart/Stop wiring,
   `aoide_upkeep::checklane`) runs to answer "is the working tree clean": a
@@ -6088,10 +6097,13 @@ for a cheaper reason:
    candidates hold the same PROVEN key, so the tiebreak picks among
    equally-AUTHENTICATED records — it never elevates a name to identity);
    no exact-name match → `-32007` "ambiguous signer", a taught refusal —
-   the records' `allows`/`autogate` may differ, so guessing is never
+   the records' grants/`autogate` may differ, so guessing is never
    allowed. AuthZ consequence, stated plainly: the key's holder can claim
-   whichever twin's name it likes, so a key's effective grant set is the
-   UNION across every record sharing it — revoking a capability from a
+   whichever twin's name it likes, so a key's effective grant set IN A MESH
+   is the UNION across every record sharing it — `aoide-server::a2a::
+   paired_grant` computes exactly that, taking the union of every verified
+   record whose stored pubkey equals the caller's over the mesh the request
+   named. Revoking a capability from a
    key means revoking it on EVERY such record, or `node remove`-ing the
    duplicates.
 7. **Replay guard, nonce half**: `(verifying pubkey, nonce)` has not been
@@ -7027,6 +7039,20 @@ becomes two lists, `containers` and `envelopes`: a sealed entry hands over
 its container and NO plaintext, and only an entry spooled before the
 destination published a binding appears in `envelopes`.
 
+**The mesh rule (P-CHARTER).** Every signed request names the mesh it acts
+in, inside its per-request signature (`X-Aoide-Mesh`, a sixth field of
+`wire_auth::canonical_string`), and the caller's grant is read in that mesh
+and no other. For a deposit, the request's mesh is compared with the
+container's **`ctx.originMesh`** — the SIGNED one — inside
+`seal::deposit_container`, AFTER the origin signature verifies; a mismatch
+is refused with `mesh-mismatch`. The container's own `mesh` field is
+deliberately NOT an admission input: it is hop-mutable by design, so a
+spooling relay or a TLS edge could otherwise turn an accepted deposit into
+a permanent refusal by flipping one unsigned byte. P-M4's transit is where
+a hop's `mesh` is checked, at the hop, against the zone clause. A request
+that names no mesh (a pre-charter peer) is evaluated in `[pairing]
+homeMesh`.
+
 ### `aoide/binding` (P-SEAL, `docs/architecture/HTTPS-MESH-API.md`)
 
 `params` may carry the caller's own signed age binding; the result always
@@ -7305,7 +7331,7 @@ fields they do not know.
   "schemaVersion": "0",
   "nodes": [
     { "name": "yomi-strix", "url": "http://yomi-strix:8710/", "autogate": false, "addedAt": "2026-08-14T00:00:00Z" },
-    { "name": "watching-node", "url": "http://watching-node:8710/", "autogate": false, "addedAt": "2026-08-24T00:00:00Z", "pubkey": "a1b2…", "verified": true, "allows": ["read", "spawn"] }
+    { "name": "watching-node", "url": "http://watching-node:8710/", "autogate": false, "addedAt": "2026-08-24T00:00:00Z", "pubkey": "a1b2…", "verified": true, "grants": { "home": ["read", "spawn"] } }
   ]
 }
 ```
@@ -7330,28 +7356,30 @@ it never reads or writes this file directly, only
 `aoide_storage::pairing`'s own parked-request state, the same source
 `upsert_paired_node` itself commits from.
 
-`allows` (array of strings, additive per P-P3, `docs/architecture/
-PAIRING.md` decision 5; omitted from the wire when empty) is a CLOSED
-capability set — `aoide_storage::node_store::NODE_CAPABILITIES` = `"read"`,
-`"spawn"`, `"message"` (P-M2), never a per-capability serde bool scatter.
-`upsert_paired_node`
-stamps it the moment a node FIRST becomes `verified` (both ceremony commit
-sites — `approve_inbound` and `approve_outbound`) from the grant its caller
-resolved: `config.toml`'s `[pairing] defaultGrant` (`["read"]` by default),
-or the `--allow` typed on that commit,
-and leaves it untouched on a LATER re-pairing of an already-verified
-name — a revoked capability survives key rotation. An unpaired (`node add`)
-node and a legacy record predating this field both load `allows: []`. The
-A2A door's Spawn arm (§6's P-P3/P-P4 amendments above) was the first
-thing gating on it, and its Message arm (`aoide/mailDeposit`, P-M2, §6
-above) now gates on it identically one capability over: each requires
-that node to be `verified` with its own capability string in `allows`
-**AND** the caller to have resolved via the SIGNATURE rung specifically
-(§6's P-P4 amendment) — neither the address rung nor the (now-
-insufficient) token rung, regardless of `allows`. `node
-allow <name> <cap> on|off` (§3's command list, §7's CLI surface below) is
-the ONLY other writer — idempotent, refuses an unknown node or an unknown
-capability.
+`grants` (object of mesh → array of strings, P-CHARTER, omitted from the
+wire when empty) is a node's capability set **per mesh** — a mesh is a trust
+scope, so a grant is given in one and holds only there, and the same record
+carries every mesh's grant because identity is not per mesh (one node, one
+identity key, in every mesh). Its values are a CLOSED capability set —
+`aoide_storage::node_store::NODE_CAPABILITIES` = `"read"`, `"spawn"`,
+`"message"`, never a per-capability serde bool scatter. Each mesh's entry is
+the same vocabulary the pre-charter `allows` array held, and an EMPTY list is
+never stored: "granted nothing here" and "not in this mesh" are the same
+grant. `aoide-server::a2a::grant_in_mesh(mesh, caller_key)` is the ONE lookup
+the door reads it through, keyed on the stored pubkey the request's signature
+verified (#63 P-ID5) and on the mesh the request named — an unnamed request
+(the pre-charter five-field signature) acts in the home mesh
+(`[pairing] homeMesh`, default `home`), where `allows` now lives.
+
+**The migration is one-way.** A `nodes.json` written before per-mesh grants
+loads with every record's `allows` folded into `grants[<home>]`, unchanged
+and in order (`aoide_storage::node_store::migrate_grants`, one-shot and
+idempotent: the legacy key's presence is the "not yet migrated?" test, and the
+fold removes it). The first `save_nodes` after that writes `grants` and no
+`allows`, so an older binary reading the file sees no capability set for any
+record and refuses every gated request. There is no compatibility write and
+no downgrade path: a fail-closed refusal is the intended direction, and a
+second on-disk copy of the same grants would be a drifting duplicate.
 
 `resolve_node(nodes, addr, presented_token)` (`aoide_storage::node_store`,
 P-P3 decision 6) is the caller-identity ladder for the TWO unsigned rungs

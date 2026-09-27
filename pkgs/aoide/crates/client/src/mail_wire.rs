@@ -87,7 +87,14 @@ enum SignedCall {
 /// [`crate::commands::spawn_on_node_via`]'s exact shape (resolve bearer,
 /// sign, POST, parse, check `error`) with no `--via` override — a drain is
 /// never given one; it only ever dials `node.via` as recorded.
-fn post_signed(node: &Node, method: &str, params: Value) -> SignedCall {
+///
+/// `mesh` is the mesh the request acts in — the CONTAINER's own `mesh` for a
+/// deposit (a sealed letter's zone is a property of the letter, and the door
+/// refuses a deposit whose request names a different mesh than the container
+/// carries), and `None` for the node-addressed calls, which resolve it from
+/// the record (`crate::commands::request_mesh`: the node's sole mesh, else
+/// the home mesh).
+fn post_signed(node: &Node, method: &str, params: Value, mesh: Option<&str>) -> SignedCall {
     let body = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
     let body_str = serde_json::to_string(&body).unwrap_or_default();
 
@@ -95,7 +102,7 @@ fn post_signed(node: &Node, method: &str, params: Value) -> SignedCall {
         Ok(b) => b,
         Err(e) => return SignedCall::TransportFailed(format!("bearer resolve: {e}")),
     };
-    let extra_headers = match crate::commands::sign_headers_for_node(node, &body_str) {
+    let extra_headers = match crate::commands::sign_headers_for_node(node, &body_str, mesh) {
         Ok(h) => h,
         Err(e) => return SignedCall::TransportFailed(format!("signing: {e}")),
     };
@@ -157,7 +164,15 @@ fn attempt_deposit(node: &Node, entry: &aoide_storage::outbox::OutboxEntry) -> D
         Some(container) => json!({ "container": container }),
         None => json!({ "envelope": entry.envelope }),
     };
-    let result = match post_signed(node, "aoide/mailDeposit", params) {
+    // The mesh this request acts in: the one resolved for `node` — the
+    // operator's `--mesh`, else the destination's SOLE granted mesh, else the
+    // home mesh — passed to BOTH halves below, so the signature and the
+    // deposit agree by construction. A plaintext entry (no container) takes
+    // the same value: its envelope carries whatever mesh it was minted in,
+    // and `deposit_container` compares the container's SIGNED `originMesh`
+    // with this on the sealed path.
+    let mesh = entry.container.as_ref().map(|c| c.mesh.as_str());
+    let result = match post_signed(node, "aoide/mailDeposit", params, mesh) {
         SignedCall::Result(result) => result,
         SignedCall::Refused(detail) => return DepositAttempt::Refused(detail),
         SignedCall::TransportFailed(reason) => return DepositAttempt::TransportFailed(reason),
@@ -247,8 +262,17 @@ pub fn settle_deposit(envelope: &Envelope, outcome: &aoide_storage::mail::Deposi
 /// goes back to), spool it into that origin's outbox, and best-effort drain
 /// that node once.
 fn spool_and_drain_ack(envelope: &Envelope, acked_msgid: &str) {
-    let Ok(ack) = aoide_storage::mail::mint_ack(&envelope.header.to.name, envelope.header.from.clone(), acked_msgid)
-    else {
+    // P-CHARTER: the ack rides the mesh the letter arrived in — the incoming
+    // envelope's own signed `origin_mesh` — so the receipt is depositable
+    // exactly where the letter was (review finding 1 covers acks too: an ack
+    // minted unnamed while its request is signed for another mesh can never
+    // land).
+    let Ok(ack) = aoide_storage::mail::mint_ack_in_mesh(
+        &envelope.header.to.name,
+        envelope.header.from.clone(),
+        acked_msgid,
+        &envelope.header.origin_mesh,
+    ) else {
         return;
     };
     let origin_node = envelope.header.from.node.clone();
@@ -351,7 +375,7 @@ pub fn spool_entry(
 /// `Err` is the honest "we could not ask" — a refused or unreachable poll.
 /// Nothing is recorded on the spool either way: a poll writes nothing, and
 /// the entries the far end did not hand over are the far end's own state.
-pub fn poll_node(node_name: &str) -> Result<usize, String> {
+pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<usize, String> {
     let nodes = aoide_storage::node_store::load_nodes();
     let Some(node) = nodes.iter().find(|n| n.name == node_name) else {
         return Ok(0);
@@ -359,14 +383,21 @@ pub fn poll_node(node_name: &str) -> Result<usize, String> {
     // P-SEAL: publish our binding and learn theirs before taking anything
     // over, so a node that has just published one never hands us plaintext
     // it did not have to.
-    let _ = exchange_bindings(node);
+    let _ = exchange_bindings(node, named);
+    // P-CHARTER: the ONE mesh this poll acts in — resolved from the record
+    // (its sole granted mesh, else the home mesh; a record trusted in several
+    // meshes refuses, naming them, until the operator says which with
+    // `mail poll --mesh`). It is used for BOTH halves below: the request is
+    // SIGNED with it, and a handed-over container is verified against the
+    // mesh the letter was minted in, so the two cannot disagree.
+    let mesh = crate::commands::request_mesh(node, named).map_err(|e| format!("mesh: {e}"))?;
     // The calling node's own name in the mail protocol — the ADDRESS form
     // (`display::local_node_name`), the same one every envelope this box mints
     // stamps and the same one a peer's poll is answered against. A raw OS host
     // name would not match on a host whose name is case-preserved (native
     // Windows' is upper-case — measured red against the folded fixture).
     let params = json!({ "node": aoide_storage::display::local_node_name() });
-    let result = match post_signed(node, "aoide/mailPoll", params) {
+    let result = match post_signed(node, "aoide/mailPoll", params, Some(&mesh)) {
         SignedCall::Result(result) => result,
         SignedCall::Refused(detail) => return Err(detail),
         SignedCall::TransportFailed(reason) => return Err(reason),
@@ -381,7 +412,11 @@ pub fn poll_node(node_name: &str) -> Result<usize, String> {
         let Ok(container) = serde_json::from_value::<aoide_storage::seal::Container>(container.clone()) else {
             continue;
         };
-        let outcome = match aoide_storage::seal::deposit_container(&container) {
+        // The poll's own mesh: the request was SIGNED with it (above), and the
+        // container is verified against it here — `deposit_container` compares
+        // the container's SIGNED `originMesh` with this, so a letter minted for
+        // another mesh is refused on the pull side exactly as on the push side.
+        let outcome = match aoide_storage::seal::deposit_container(&container, &mesh) {
             Ok(outcome) => outcome,
             Err(_) => continue,
         };
@@ -506,10 +541,10 @@ pub fn poll_node(node_name: &str) -> Result<usize, String> {
 /// this call cannot learn is simply not learned; a binding already stored
 /// is never downgraded, because `learn_binding` refuses a generation that is
 /// not above the high-water mark.
-pub fn exchange_bindings(node: &Node) -> Result<aoide_storage::seal::Binding, String> {
+pub fn exchange_bindings(node: &Node, named_mesh: Option<&str>) -> Result<aoide_storage::seal::Binding, String> {
     let mine = aoide_storage::seal::publish_binding()?;
     let params = json!({ "binding": mine });
-    let result = match post_signed(node, "aoide/binding", params) {
+    let result = match post_signed(node, "aoide/binding", params, named_mesh) {
         SignedCall::Result(result) => result,
         SignedCall::Refused(detail) => return Err(detail),
         SignedCall::TransportFailed(reason) => return Err(reason),
@@ -540,9 +575,10 @@ pub fn exchange_bindings(node: &Node) -> Result<aoide_storage::seal::Binding, St
 /// P-M4's declared `down`/`hold` status narrows this set further, at the same
 /// predicate the door's own admission uses.
 pub fn pollable_nodes() -> Vec<String> {
+    let home = aoide_storage::config::home_mesh();
     let mut out: Vec<String> = aoide_storage::node_store::load_nodes()
         .into_iter()
-        .filter(|node| node.verified && node.allows.iter().any(|a| a == "message"))
+        .filter(|node| node.verified && node.grant(&home).iter().any(|a| a == "message"))
         .map(|node| node.name)
         .collect();
     out.sort();
@@ -594,7 +630,12 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
     // place. Best-effort: a peer with no `aoide/binding` method answers
     // "method not found", which is exactly the un-upgraded peer this pass
     // must still send plaintext to.
-    let _ = exchange_bindings(node);
+    //
+    // P-CHARTER: it rides the mesh this drain's own deposits are signed for
+    // (`drain_node` resolves it once, below, from the record's grant) — the
+    // door reads the caller's `message` grant in that same mesh.
+    let mesh = crate::commands::request_mesh(node, None).unwrap_or_default();
+    let _ = exchange_bindings(node, Some(&mesh));
 
     let now_epoch = unix_now();
     if let Some(link) = aoide_storage::outbox::read_link_state(node_name)? {
@@ -692,7 +733,7 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
     // whatever the deposit half found, and an unreachable-but-answering node
     // is not a local failure.
     if contacted {
-        let _ = poll_node(node_name);
+        let _ = poll_node(node_name, None);
     }
     Ok(())
 }
@@ -751,7 +792,7 @@ mod tests {
             hub: false,
             pubkey: None,
             verified: false,
-            allows: Vec::new(),
+            grants: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-09-07T00:00:00Z".to_string(),
         }
@@ -1164,7 +1205,7 @@ mod tests {
         let mut node = unpaired_node(&me);
         node.pubkey = Some(kp.info().pubkey_hex.clone());
         node.verified = true;
-        node.allows = vec!["message".to_string()];
+        node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
         let mut nodes = aoide_storage::node_store::load_nodes();
         aoide_storage::node_store::insert_node(&mut nodes, node);
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
@@ -1287,8 +1328,8 @@ mod tests {
             recording_door(r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#, poll_answer(&[letter]));
         register_relay(format!("http://127.0.0.1:{port}/"));
 
-        assert_eq!(poll_node("relay").unwrap(), 1, "the first poll files the letter");
-        assert_eq!(poll_node("relay").unwrap(), 0, "a re-poll before the ack files nothing a second time");
+        assert_eq!(poll_node("relay", None).unwrap(), 1, "the first poll files the letter");
+        assert_eq!(poll_node("relay", None).unwrap(), 0, "a re-poll before the ack files nothing a second time");
 
         assert_eq!(aoide_storage::mail::read_base().unwrap().len(), 1, "one letter, however many polls");
         let acks = aoide_storage::outbox::list_entries(&me).unwrap();
@@ -1313,7 +1354,7 @@ mod tests {
         let held_msgid = held.msgid.clone();
         aoide_storage::outbox::write_entry("relay", &OutboxEntry::held(held)).unwrap();
 
-        let err = poll_node("relay").expect_err("a dead node cannot be polled");
+        let err = poll_node("relay", None).expect_err("a dead node cannot be polled");
         assert!(err.contains("transport") || !err.is_empty(), "the reason is carried, not swallowed: {err}");
 
         let rows = aoide_storage::outbox::list_entries("relay").unwrap();
@@ -1354,6 +1395,7 @@ mod tests {
             &bkp.info().pubkey_hex,
             &aoide_storage::time::now_iso_utc(),
             &["message".to_string()],
+            "home",
         );
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
         assert!(aoide_storage::seal::binding_for("liveb").is_none(), "B has published nothing yet");
@@ -1432,6 +1474,7 @@ mod tests {
             &kp.info().pubkey_hex,
             &now,
             &["message".to_string()],
+            "home",
         );
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
         let expired = aoide_storage::seal::mint_binding(&kp, "age1expired", 1, &past, &closed).unwrap();
@@ -1502,6 +1545,7 @@ mod tests {
             &kp.info().pubkey_hex,
             &aoide_storage::time::now_iso_utc(),
             &["message".to_string()],
+            "home",
         );
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
@@ -1558,6 +1602,7 @@ mod tests {
             &kp.info().pubkey_hex,
             &aoide_storage::time::now_iso_utc(),
             &["message".to_string()],
+            "home",
         );
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
@@ -1625,6 +1670,7 @@ mod tests {
             &kp.info().pubkey_hex,
             &aoide_storage::time::now_iso_utc(),
             &["message".to_string()],
+            "home",
         );
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
         let text = |n: usize| format!("letter {n}");
@@ -1697,7 +1743,7 @@ mod tests {
 
         let node = "peerbox";
         let entry = OutboxEntry::fresh(
-            aoide_storage::mail::mint_charter_letter(node, "charter home v1").unwrap(),
+            aoide_storage::mail::mint_charter_letter(node, "charter home v1", "home").unwrap(),
         );
         aoide_storage::outbox::write_entry(node, &entry).unwrap();
 

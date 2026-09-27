@@ -1015,7 +1015,7 @@ pub fn spool(charter: &Charter, file_bytes: &[u8], sig_bytes: &[u8]) -> Result<V
             continue;
         }
         let text = format!("charter {} v{}", charter.mesh, charter.version);
-        let envelope = mail::mint_charter_letter(name, &text)?;
+        let envelope = mail::mint_charter_letter(name, &text, &charter.mesh)?;
         let container = seal::seal_charter(
             file_bytes,
             sig_bytes,
@@ -1514,7 +1514,7 @@ mod tests {
             crate::node_store::load_nodes().iter().all(|n| n.name != "opbox"),
             "the origin is unknown to this node"
         );
-        let digest = match seal::deposit_container(&container).unwrap() {
+        let digest = match seal::deposit_container(&container, &container.origin_mesh).unwrap() {
             seal::ContainerOutcome::Applied { mesh, version, digest, .. } => {
                 assert_eq!(mesh, "home");
                 assert_eq!(version, 1);
@@ -1528,7 +1528,7 @@ mod tests {
         // The caller records it once it is applied, and then a re-offer is a
         // duplicate with no second apply.
         seal::record_admitted(&container, &digest).unwrap();
-        match seal::deposit_container(&container).unwrap() {
+        match seal::deposit_container(&container, &container.origin_mesh).unwrap() {
             seal::ContainerOutcome::Duplicate { filed_letter } => {
                 assert!(!filed_letter, "a charter is never filed, so it never owes an ack");
             }
@@ -1540,7 +1540,7 @@ mod tests {
         // already on, and is refused `stale-charter` — the charter is in force
         // either way and nothing is written a second time.
         std::fs::remove_file(crate::mail::mail_dir().join("containers.jsonl")).unwrap();
-        let refusal = match seal::deposit_container(&container).unwrap() {
+        let refusal = match seal::deposit_container(&container, &container.origin_mesh).unwrap() {
             seal::ContainerOutcome::Refused { reason, detail } => Refusal::new(&reason, detail),
             other => panic!("expected a refusal once the record is gone, got {other:?}"),
         };
@@ -1583,7 +1583,7 @@ mod tests {
         init("home").unwrap();
         let before = load_trust("home").unwrap().unwrap();
 
-        let refusal = match seal::deposit_container(&container).unwrap() {
+        let refusal = match seal::deposit_container(&container, &container.origin_mesh).unwrap() {
             seal::ContainerOutcome::Refused { reason, detail } => Refusal::new(&reason, detail),
             other => panic!("expected a refusal, got {other:?}"),
         };
@@ -1725,7 +1725,7 @@ mod tests {
 
         machine(&peer, "peerbox");
         trust_operator_line(&peer, "home", &rooted.operator);
-        match seal::deposit_container(&container).unwrap() {
+        match seal::deposit_container(&container, &container.origin_mesh).unwrap() {
             seal::ContainerOutcome::Refused { reason, detail } => {
                 assert_eq!(reason, seal::ZONE_VIOLATION, "{detail}");
                 assert!(detail.contains("elsewhere"), "and names the zone it actually arrived in: {detail}");

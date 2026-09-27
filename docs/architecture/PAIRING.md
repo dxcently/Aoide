@@ -764,14 +764,30 @@ forward is a pipe, not a party to the protocol.
 A named mesh (`config.toml`'s `[mesh.<name>]`, task #135 P4, CONTRACTS.md
 §4) is intent, not a second identity model. It is an operator's own
 bookkeeping — "these are the boxes I expect to belong to this mesh,
-reached at these hops" — recorded once, on one instance, never transmitted:
-nothing in the ceremony, the wire (§"Wire authentication" above), or any
-A2A payload carries a mesh name, and `node_store::Node` gains no field for
-it. The mesh itself stays exactly what the Kill-list below already
-settled — the closure of pairwise, individually-verified records — and a
-declared mesh only ever describes a NAMED EXPECTATION over that same
-closure, never a new object standing in front of it. Declaring one changes
-nothing about how a node is paired, verified, or reached.
+reached at these hops" — recorded once, on one instance, never transmitted
+by the ceremony. The mesh itself stays exactly what the Kill-list below
+already settled — the closure of pairwise, individually-verified records —
+and a declared mesh only ever describes a NAMED EXPECTATION over that same
+closure, never a new object standing in front of it.
+
+**P-CHARTER makes a mesh a trust scope, so two things above are no longer
+true.** A signed request now names the mesh it acts in, inside its
+per-request signature (`X-Aoide-Mesh`, `wire_auth::canonical_string`'s sixth
+field), and `node_store::Node` carries `grants` — one capability set PER
+MESH, with `allows` migrated into the home mesh (`[pairing] homeMesh`,
+default `home`). The door reads one mesh's grant per request
+(`aoide-server::a2a::grant_in_mesh`), and a grant given in one mesh holds
+only there.
+
+**Known limit, and it is A3's to close: the pairing's own mesh is resolved
+LOCALLY on each side.** The ceremony's body still carries no mesh — each
+operator states the mesh (and the grant) on their own side, exactly as each
+already resolves `[pairing] defaultGrant` locally — so two operators naming
+different meshes land an asymmetric pair, with each end holding the record
+in its own mesh. `aoide pair` takes no `--mesh` flag in the P-CHARTER slice
+the trust model landed in; a box that knows more than one mesh for a target
+REFUSES the pair rather than guessing. A3 carries the mesh on the pairing
+wire, which makes the two sides agree by construction.
 
 `aoide mesh` (`aoide_client::mesh`) is the read side: it compares a
 declaration against the live registry and reports where they diverge — a
