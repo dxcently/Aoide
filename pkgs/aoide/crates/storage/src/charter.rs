@@ -945,6 +945,34 @@ pub fn is_local_network(addr: &str) -> bool {
 /// root is `reroot` on the operator's machine plus one join per node, and a
 /// typo must not be able to do it.
 pub fn trust_operator(mesh: &str, key_field: &str) -> Result<String, String> {
+    trust_operator_with(mesh, key_field, false).map(|(key, _)| key)
+}
+
+/// [`trust_operator`] with the operator's explicit `--replace` (P-CHARTER,
+/// review F1): **the one arm a re-rooted mesh needs, and the reason the flag
+/// exists.**
+///
+/// A leaked or lost operator key is replaced on the operator's machine
+/// (`mesh charter reroot`), and every OTHER machine then has to take the new
+/// key — the design's "one touch per machine", which this command is. Without
+/// this arm that touch was impossible: `trust_operator` refused a different
+/// key, the config line (when it exists) produces `operator-mismatch`, and the
+/// only escape was hand-editing `state/mesh/<mesh>/trust.json` — the one thing
+/// both refusals forbid, because the version mark lives there. The refusal now
+/// names the flag instead.
+///
+/// **The version high-water CARRIES ACROSS.** `trust.json` marks versions per
+/// operator key, so a naive replacement would restart the new key at zero and
+/// accept a replayed v1 as "the first version under the new key". Instead the
+/// new key starts at the mesh's HIGHEST mark of any key, so the first charter
+/// a replaced node accepts must beat every version that mesh has ever applied —
+/// strictly stronger than the old mark, and still above the old key's last
+/// version, which is what makes a late old-key charter refuse.
+///
+/// Returns the key trusted, and the key it REPLACED when it replaced one (the
+/// command audits both fingerprints: replacing a mesh's root is exactly the
+/// event an operator has to be able to find afterwards).
+pub fn trust_operator_with(mesh: &str, key_field: &str, replace: bool) -> Result<(String, Option<String>), String> {
     if !node_store::valid_node_name(mesh) {
         return Err(format!(
             "`{mesh}` is not a valid mesh name — lowercase letters, digits, and `-`, starting with a letter or digit"
@@ -956,22 +984,33 @@ pub fn trust_operator(mesh: &str, key_field: &str) -> Result<String, String> {
     if let Some(declared) = config_operator(mesh).map_err(|e| format!("config.toml cannot be read: {e}"))? {
         if declared != key {
             return Err(format!(
-                "config.toml declares `mesh.{mesh}.operator = \"ed25519:{declared}\"`, and you named `ed25519:{key}` — the two must agree, and config is the hand-edited source. Change the config line, or join with the key it names"
+                "config.toml declares `mesh.{mesh}.operator = \"ed25519:{declared}\"`, and you named `ed25519:{key}` — the two must agree, and config is the hand-edited source. Change the config line, or join with the key it names{}",
+                if replace { " (a `--replace` still cannot disagree with a config line — resolve the file first)" } else { "" }
             ));
         }
     }
-    if let Some(existing) = existing {
-        if existing != key {
-            return Err(format!(
-                "this machine already trusts operator {} for mesh `{mesh}`. Trust is REPLACED, never added, and only by the operator: run `aoide mesh charter reroot {mesh}` on the operator's machine, then join each node again",
-                fingerprint_of_key(&existing)
-            ));
-        }
-        return Ok(key);
+    let Some(existing) = existing else {
+        trust.operator = key.clone();
+        write_trust(mesh, &trust)?;
+        return Ok((key, None));
+    };
+    if existing == key {
+        return Ok((key, None));
     }
+    if !replace {
+        return Err(format!(
+            "this machine already trusts operator {} for mesh `{mesh}`, and you named {}. Trust is REPLACED, never added: if the operator re-rooted that mesh (`aoide mesh charter reroot {mesh}` on their machine), take the new key with `aoide mesh join {mesh} --operator <new key> --replace` — it records the new key and carries this mesh's version high-water across. Without that flag nothing is written, because replacing a mesh's root is the operator's decision and never a typo's",
+            fingerprint_of_key(&existing),
+            fingerprint_of_key(&key)
+        ));
+    }
+    // `--replace`: the mark comes across. The highest version this mesh has
+    // ever applied, under ANY key, becomes the new key's starting mark.
+    let carried = trust.versions.values().copied().max().unwrap_or(0);
     trust.operator = key.clone();
+    trust.versions.insert(key.clone(), carried);
     write_trust(mesh, &trust)?;
-    Ok(key)
+    Ok((key, Some(existing)))
 }
 
 /// What `init` did, for the command to print.
@@ -1174,13 +1213,13 @@ pub fn reroot(mesh: &str) -> Result<Signed, String> {
         Ok(_) => {
             return Err(format!(
                 "this machine's config declares mesh.{mesh}.operator, which pins the key a re-root is about to replace: the line and this node's record would disagree and every charter for `{mesh}` — including the new one — would be refused `operator-mismatch`. Nothing was minted, bumped or signed.\n  \
-                 Take the new key the way every other machine does: its own `[mesh.{mesh}] operator` line, or `aoide mesh join {mesh} --operator <key>` on a host whose config is not hand-editable (that command is the trust-per-mesh slice's, and this build has no other way to record a key). Never edit `state/mesh/{mesh}/trust.json`: it holds the version mark. Or run the re-root on a machine that declares no operator line for `{mesh}`"
+                 Take the new key the way every other machine does: its own `[mesh.{mesh}] operator` line, or, on a host whose config is not hand-editable, `aoide mesh join {mesh} --operator <new key> --replace` — the flag is what tells that command the change is the OPERATOR'S (it carries this mesh's version high-water across, so the new key's first charter must still beat every version applied here). Never edit `state/mesh/{mesh}/trust.json`: it holds the version mark. Or run the re-root on a machine that declares no operator line for `{mesh}`"
             ));
         }
         Err(refusal) => {
             return Err(format!(
                 "this machine's own trust for mesh `{mesh}` does not hold together, so a re-root will not bury it under a third key: {refusal}\n  \
-                 Bring the config line and this node's record back into agreement first — the same trust-entry step that put the key there: `aoide mesh join {mesh} --operator <key>` (the trust-per-mesh slice's), or the `[mesh.{mesh}] operator` line itself — then re-root. Never edit `state/mesh/{mesh}/trust.json`: it holds the version mark"
+                 Bring the config line and this node's record back into agreement first — the same trust-entry step that put the key there: `aoide mesh join {mesh} --operator <key>` (add `--replace` when the key is genuinely changing), or the `[mesh.{mesh}] operator` line itself — then re-root. Never edit `state/mesh/{mesh}/trust.json`: it holds the version mark"
             ))
         }
     }
@@ -1768,12 +1807,45 @@ mod tests {
 
         // Changing its config line alone is NOT enough: the record still holds
         // K1, so the two disagree and every charter for the mesh stops. The
-        // resolution is that machine's own trust-entry step — A3's
-        // `aoide mesh join --operator` — and this test does not fake it by
-        // reaching into private state, because there is nothing to reach for.
+        // resolution is that machine's own trust-entry step, driven below —
+        // and until review F1 that step REFUSED the very replacement these two
+        // error strings name, which left hand-editing `state/mesh/home/
+        // trust.json` as the only escape (the one thing both forbid, because
+        // the version mark lives there).
         trust_operator_line(&peer, "home", &k2);
         let refusal = accept(&k2_v3, &k2_v3_sig).unwrap_err();
         assert_eq!(refusal.reason, OPERATOR_MISMATCH, "{}", refusal.detail);
+
+        // **The node's half of a re-root (review F1).** Without `--replace` the
+        // refusal names the flag; with it, the key is replaced AND the version
+        // high-water carries across, so the new key's first charter still has
+        // to beat the old key's last version — a fresh key is not a licence to
+        // replay an old one.
+        let err = trust_operator_with("home", &format!("ed25519:{k2}"), false).unwrap_err();
+        assert!(err.contains("--replace"), "the refusal names the flag that resolves it: {err}");
+        assert!(err.contains(&fingerprint_of_key(&k1)), "and the key it would replace: {err}");
+
+        let (now, replaced) = trust_operator_with("home", &format!("ed25519:{k2}"), true).unwrap();
+        assert_eq!(now, k2);
+        assert_eq!(replaced.as_deref(), Some(k1.as_str()), "the command audits BOTH fingerprints from this");
+        let trust = load_trust("home").unwrap().unwrap();
+        assert_eq!(trust.operator, k2);
+        assert_eq!(
+            trust.versions.get(&k2),
+            Some(&1),
+            "the high-water came ACROSS: the new key starts at the highest version this mesh ever applied"
+        );
+        assert_eq!(trust.versions.get(&k1), Some(&1), "and the old key's mark is left where it was");
+
+        // Now the charter that could not land a moment ago does — and a replay
+        // of it is still stale, because the carried mark is a real mark.
+        let accepted = accept(&k2_v3, &k2_v3_sig).unwrap();
+        assert_eq!(accepted.charter.version, 3, "v3 is above the carried mark");
+        assert_eq!(
+            accept(&k2_v3, &k2_v3_sig).unwrap_err().reason,
+            STALE_CHARTER,
+            "and a replay of it is stale, exactly as before"
+        );
 
         // A machine TOLD the new key by its config line, with no record to
         // disagree with, takes the new version and refuses the old key.

@@ -859,8 +859,12 @@ does to enter a charter mesh ([[HTTPS-Mesh-API]] "Charters", step 4).
   because `[mesh.<name>] operator` is a key the pre-P-CHARTER binary refuses
   to parse, and a machine that rolls back to it must still be able to read its
   own config. A machine that already trusts a DIFFERENT key for the mesh is
-  refused, naming `reroot` — replacing a mesh's root is the operator's
-  decision, never a typo's.
+  refused, naming the flag that resolves it: the operator re-rooted the mesh
+  (`aoide mesh charter reroot` on their machine), so the machine takes the new
+  key with `--replace` — which records it and carries the version high-water
+  across, so the new key's first charter must still beat every version this
+  mesh has applied. Replacing a mesh's root is the operator's decision, never a
+  typo's, which is why the flag has to be typed.
 - **`<host>`** runs the one local-network ceremony: it asks the operator's
   machine for the operator key and the charter in force
   (`aoide/charterFetch`), prints the key's fingerprint and the charter's

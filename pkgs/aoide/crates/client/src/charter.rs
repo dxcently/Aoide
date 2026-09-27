@@ -89,7 +89,8 @@ pub fn register(r: &mut Registry) {
             arg!("host", "string", false, "The operator's machine on the local network — a bare host/IP (`sakaki`, `192.168.1.158`), or host:port; the door port defaults to AOIDE_A2A_PORT, else 8710. Omitted: --operator is required instead."),
         ],
         flags: [
-            flag!("operator", "string", "The operator line the operator's machine printed (`ed25519:<hex>`) — the non-LAN path, no dial at all. Refused when the machine already trusts a different key for this mesh."),
+            flag!("operator", "string", "The operator line the operator's machine printed (`ed25519:<hex>`) — the non-LAN path, no dial at all. Refused when the machine already trusts a different key for this mesh, unless --replace says the change is the operator's."),
+            flag!("replace", "bool", "The key this mesh's operator key is CHANGING to, deliberately: a re-root (`aoide mesh charter reroot`) on the operator's machine plus this flag on every other machine is the whole recovery from a leaked or lost operator key. It records the new key and CARRIES THE VERSION HIGH-WATER ACROSS, so the first charter the new key signs must still beat every version this mesh has applied — a replaced node cannot be walked back to an older version by a fresh key. Never a default: without it, a different key is refused, because replacing a mesh's root is the operator's decision and never a typo's."),
             flag!("yes", "bool", "Skip the fingerprint confirm on the LAN arm. The fingerprint is the whole trust step there (this is a first-use ceremony), so skipping it commits to a key nobody compared — the same stance `pair --yes` takes on pairing's codes."),
         ],
         gated: false,
@@ -124,9 +125,10 @@ fn handle_charter_join(inv: &Invocation) -> Outcome {
     // ceremony is a local-network one by definition: a relay, the HTTPS
     // adapter, a tailnet and an ssh tunnel are all refused before anything is
     // posted, so a join never travels further than the LAN it is meant for.
-    let (operator_key, charter_pair) = match (&operator_flag, host_arg) {
-        (Some(field), _) => match charter::trust_operator(mesh, field) {
-            Ok(key) => (key, None),
+    let replace = inv.flag_present("replace");
+    let (operator_key, replaced, charter_pair) = match (&operator_flag, host_arg) {
+        (Some(field), _) => match charter::trust_operator_with(mesh, field, replace) {
+            Ok((key, replaced)) => (key, replaced, None),
             Err(e) => return Outcome::error(cmd, e).with_data(json!({ "reason": "trust-refused", "mesh": mesh })),
         },
         (None, Some(host)) => {
@@ -201,25 +203,53 @@ fn handle_charter_join(inv: &Invocation) -> Outcome {
                         .with_data(json!({ "confirmed": false, "mesh": mesh }));
                 }
             }
-            (key, Some((bytes, sig)))
+            (key, None, Some((bytes, sig)))
         }
         (None, None) => return Outcome::usage(cmd, USAGE),
     };
 
     // Record the trust FIRST and only then apply: `accept` reads the operator
     // key it must verify under, so a charter applied before its key is
-    // recorded would be refused `unknown-operator` by this very machine.
+    // recorded would be refused `unknown-operator` by this very machine. On
+    // the non-LAN arm this already happened (`trust_operator_with` above); the
+    // LAN arm reaches it here, AFTER the operator compared the fingerprint, so
+    // a replacement is never recorded before a human saw it.
     let field = format!("ed25519:{operator_key}");
-    let trusted = match charter::trust_operator(mesh, &field) {
-        Ok(k) => k,
+    let (trusted, replaced_here) = match charter::trust_operator_with(mesh, &field, replace) {
+        Ok((k, replaced)) => (k, replaced),
         Err(e) => return Outcome::error(cmd, e).with_data(json!({ "reason": "trust-refused", "mesh": mesh })),
     };
+    let replaced = replaced.or(replaced_here);
+
+    // Replacing a mesh's root is the event an operator has to be able to find
+    // afterwards, so both fingerprints are audited — the one that was trusted
+    // and the one that now is.
+    if let Some(old) = &replaced {
+        let _ = audit(
+            &default_audit_log(),
+            Door::Cli,
+            EventClass::Audit,
+            "mesh.join",
+            "operator-replaced",
+            &format!(
+                "mesh `{mesh}`: operator {} replaced by {} (the version high-water carried across)",
+                charter::fingerprint_of_key(old),
+                charter::fingerprint_of_key(&trusted)
+            ),
+        );
+    }
 
     let mut applied = serde_json::Value::Null;
     let mut message = format!(
         "joined mesh `{mesh}` — this machine now trusts operator {} (recorded in state, never in config.toml)",
         charter::fingerprint_of_key(&trusted)
     );
+    if let Some(old) = &replaced {
+        message.push_str(&format!(
+            "\nREPLACED operator {} — the version high-water carried across, so the first charter the new key signs must still beat every version applied here",
+            charter::fingerprint_of_key(old)
+        ));
+    }
     if let Some((bytes, sig)) = charter_pair {
         match charter::accept(&bytes, &sig) {
             Ok(accepted) => {
@@ -612,7 +642,7 @@ fn handle_charter_reroot(inv: &Invocation) -> Outcome {
             Outcome::ok(
                 cmd,
                 format!(
-                    "mesh `{}` re-rooted and signed v{} under the new key. Every other machine keeps working on its last charter until it takes the new key the way it took the first — its own trust-entry step: the same line in `[mesh.{}]`, or `aoide mesh join {} --operator <key>` on a host whose config is not hand-editable (the trust-per-mesh slice's; it is the ONLY way to record a key, and a re-rooted machine whose config line alone changes stops on `operator-mismatch` until the record follows). Never edit `state/mesh/{}/trust.json` — that is where the version mark lives.\n  {}\n  # operator fingerprint {}",
+                    "mesh `{}` re-rooted and signed v{} under the new key. Every other machine keeps working on its last charter until it takes the new key the way it took the first — its own trust-entry step: the same line in `[mesh.{}]`, or, on a host whose config is not hand-editable, `aoide mesh join {} --operator <new key> --replace` (`--replace` is what tells that command the change is the OPERATOR'S, and it carries this mesh's version high-water across, so the new key's first charter must still beat every version applied here; without it that command refuses a different key, and a config line changed ALONE stops on `operator-mismatch` until the record follows). Never edit `state/mesh/{}/trust.json` — that is where the version mark lives.\n  {}\n  # operator fingerprint {}",
                     signed.mesh,
                     signed.version,
                     signed.mesh,

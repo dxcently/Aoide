@@ -363,9 +363,12 @@ the new key. The cost:
 - every machine must trust the new key the way it trusted the first: one config line
   or one LAN join per machine. That is each machine's own trust-entry step, and on a
   host whose config is not hand-editable it is `aoide mesh join <mesh> --operator
-  <key>`, which records the key in state — **never** an edit of
-  `state/mesh/<mesh>/trust.json`, which is where the version mark lives and where a
-  hand edit would silently reset it;
+  <new key> --replace`, which records the key in state and CARRIES THE VERSION
+  HIGH-WATER ACROSS (the new key's first charter must still beat every version that
+  mesh has applied) — **never** an edit of `state/mesh/<mesh>/trust.json`, which is
+  where the version mark lives and where a hand edit would silently reset it.
+  `--replace` is what makes the change the operator's: without it a different key is
+  refused, by name, and the refusal points at the flag;
 - **on the operator's own machine, `reroot` refuses up front if its config declares
   the mesh's operator key**, because that line pins the key the re-root is about to
   replace: the line and the record would disagree and even the new charter would be
