@@ -1386,7 +1386,7 @@ mod tests {
             "192.168.1.158",
             "169.254.10.10",
             "fd00::1",
-            "fc00::abxd".replace('x', "0").as_str(),
+            "fc00::ab0d",
             "fe80::1",
             // IPv4-mapped, the form a dual-stack (`--bind [::]`) door sees
             // every v4 caller in: classified by the v4 it maps to, never by

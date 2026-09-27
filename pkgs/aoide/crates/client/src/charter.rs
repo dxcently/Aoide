@@ -90,7 +90,7 @@ pub fn register(r: &mut Registry) {
         ],
         flags: [
             flag!("operator", "string", "The operator line the operator's machine printed (`ed25519:<hex>`) — the non-LAN path, no dial at all. Refused when the machine already trusts a different key for this mesh, unless --replace says the change is the operator's."),
-            flag!("replace", "bool", "The key this mesh's operator key is CHANGING to, deliberately: a re-root (`aoide mesh charter reroot`) on the operator's machine plus this flag on every other machine is the whole recovery from a leaked or lost operator key. It records the new key and CARRIES THE VERSION HIGH-WATER ACROSS, so the first charter the new key signs must still beat every version this mesh has applied — a replaced node cannot be walked back to an older version by a fresh key. Never a default: without it, a different key is refused, because replacing a mesh's root is the operator's decision and never a typo's."),
+            flag!("replace", "bool", "The key this mesh's operator key is CHANGING to, deliberately: a re-root (`aoide mesh charter reroot`) on the operator's machine plus this flag on every other machine is the whole recovery from a leaked or lost operator key. It records the new key and CARRIES THE VERSION HIGH-WATER ACROSS, so the first charter the new key signs must still beat every version this mesh has applied — a replaced node cannot be walked back to an older version by a fresh key. Never a default: without it, a different key is refused, because replacing a mesh's root is the operator's decision and never a typo's. On the LAN arm a replacement ALWAYS asks for the fingerprint comparison, --yes included: that flag skips a first-time confirm, never a destructive one."),
             flag!("yes", "bool", "Skip the fingerprint confirm on the LAN arm. The fingerprint is the whole trust step there (this is a first-use ceremony), so skipping it commits to a key nobody compared — the same stance `pair --yes` takes on pairing's codes."),
         ],
         gated: false,
@@ -108,7 +108,7 @@ pub fn register(r: &mut Registry) {
 /// pairwise record").
 fn handle_charter_join(inv: &Invocation) -> Outcome {
     let cmd = "mesh.join";
-    const USAGE: &str = "usage: aoide mesh join <mesh> (--operator ed25519:<hex> | <host>[:port]) [--yes] [--json]";
+    const USAGE: &str = "usage: aoide mesh join <mesh> (--operator ed25519:<hex> | <host>[:port]) [--replace] [--yes] [--json]";
     let Some(mesh) = inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()) else {
         return Outcome::usage(cmd, USAGE);
     };
@@ -197,8 +197,20 @@ fn handle_charter_join(inv: &Invocation) -> Outcome {
             // is recorded. This is a first-use ceremony, and its authority is
             // that comparison — never the transport, never the LAN guard.
             let fingerprint = charter::fingerprint_of_key(&key);
-            if !inv.flag_present("yes") {
-                if !confirm_join(mesh, &fingerprint, version) {
+            // **A REPLACEMENT is always confirmed** (re-review N4): `--yes`
+            // skips a first-use comparison, where the worst outcome is taking a
+            // key nobody checked, but when this machine ALREADY trusts a
+            // different key the same command DESTROYS that record. The
+            // fingerprint is the only trust step on this arm, so replacing a
+            // mesh's root with a key nobody compared is the one thing the flag
+            // may not skip.
+            let will_replace = replace
+                && charter::load_trust(mesh)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|trust| !trust.operator.is_empty() && trust.operator != key);
+            if join_needs_confirm(inv.flag_present("yes"), will_replace) {
+                if !confirm_join(mesh, &fingerprint, version, will_replace) {
                     return Outcome::ok(cmd, "not confirmed — nothing recorded".to_string())
                         .with_data(json!({ "confirmed": false, "mesh": mesh }));
                 }
@@ -281,15 +293,30 @@ fn handle_charter_join(inv: &Invocation) -> Outcome {
     }))
 }
 
+/// **Does this join need the operator's own comparison?** `--yes` skips it for
+/// a FIRST-TIME trust (the worst outcome is taking a key nobody checked), but
+/// never for a replacement: when this machine already trusts a different key
+/// for the mesh, the same command destroys that record, and on the LAN arm the
+/// fingerprint is the only trust step there is. Pure, so the rule is provable
+/// without a tty.
+fn join_needs_confirm(yes: bool, will_replace: bool) -> bool {
+    will_replace || !yes
+}
+
 /// The LAN arm's one human gate: the operator key's fingerprint, printed for
 /// the operator to compare with what their own machine shows. Deliberately its
 /// own five lines rather than a shared prompt helper — this crate's prompts
 /// are each shaped by what their own arm asks, and `--yes` skips exactly this
 /// one question and no other.
-fn confirm_join(mesh: &str, fingerprint: &str, version: u64) -> bool {
+fn confirm_join(mesh: &str, fingerprint: &str, version: u64, will_replace: bool) -> bool {
+    let replacing = if will_replace {
+        " This REPLACES the operator key this machine already trusts — compare it carefully."
+    } else {
+        ""
+    };
     eprint!(
         "join mesh `{mesh}` with operator key {fingerprint} (charter v{version})? \
-         Compare it with the fingerprint the operator's machine printed. [y/N] "
+         Compare it with the fingerprint the operator's machine printed.{replacing} [y/N] "
     );
     let _ = std::io::Write::flush(&mut std::io::stderr());
     let mut line = String::new();
@@ -781,6 +808,20 @@ mod tests {
             flags: Default::default(),
             door: Door::Cli,
         }
+    }
+
+    /// **A replacement always asks** (re-review N4): `--yes` skips a
+    /// first-time comparison, never a destructive one. The predicate is pure so
+    /// the rule is provable without a tty.
+    #[test]
+    fn a_join_confirms_always_when_it_would_replace_and_otherwise_only_without_yes() {
+        assert!(join_needs_confirm(false, false), "no --yes: first-use still asks");
+        assert!(!join_needs_confirm(true, false), "--yes skips a first-use comparison");
+        assert!(
+            join_needs_confirm(true, true),
+            "--yes may NOT skip the comparison when the join REPLACES the operator key this machine trusts"
+        );
+        assert!(join_needs_confirm(false, true));
     }
 
     /// **The read side of the charter** (P-CHARTER, surfaces slice):

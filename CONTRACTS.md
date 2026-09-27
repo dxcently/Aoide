@@ -701,8 +701,13 @@ count.
   whose config read fails. `--json`'s `data.report` shape: `{"sections":
   [{"name", "source", "grant", "sameOperatorNote"?, "grants", "declared",
   "selfDeclared", "rows": [{"node", "class", …}]}], "undeclared": [...],
-  "charters": [{"mesh", "declared", "version", "operator", "operatorKey",
-  "trust", "trusted", "highWater", "rekeyed", "inert", "nodes"}]}`.
+  "charters": [{"mesh", "declared", "inForce", "version", "operator",
+  "operatorKey", "trust", "trusted", "highWater", "rekeyed", "inert",
+  "nodes"}]}` — `inForce` says whether a charter DOCUMENT is readable here
+  (`false` with a row present means the mesh is charter-shaped without one: an
+  operator key recorded by a join that has not accepted anything yet, or a
+  stored document that no longer parses, and such a mesh refuses every request
+  rather than falling back to the paired records).
   **P-CHARTER changed this shape non-additively**: the section's
   `sameOperator` BOOLEAN is gone, replaced by `sameOperatorNote` (an optional
   string, present only while a config still declares the retired key) — a

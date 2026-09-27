@@ -848,7 +848,7 @@ one carried by hand; `reroot` replaces a lost or compromised operator key.
 ### aoide mesh join
 
 ```
-aoide mesh join <mesh> (--operator ed25519:<hex> | <host>[:port]) [--yes] [--json]
+aoide mesh join <mesh> (--operator ed25519:<hex> | <host>[:port]) [--replace] [--yes] [--json]
 ```
 
 **The trust-entry step** — the one thing every machine but the operator's own
