@@ -23,8 +23,9 @@ the bar a live reflection of the agent's execution phase.
 
 ## Implementation
 
-shellbridge runs as the `shellbridge` systemd user service via `aoide
-shellbridge --run`, a sub-command of the [[aoide-cli]] binary. Its socket
+shellbridge runs as the `shellbridge` systemd user service via `lyra
+shellbridge --run` (the `lyra` binary's sub-command; `modules/nucleus/
+shellbridge.nix`'s `ExecStart`), not the core `aoide` binary. Its socket
 path is a hard contract, never computed independently:
 `$XDG_RUNTIME_DIR/aoide/shellbridge.sock` (the unit's `RuntimeDirectory=aoide`
 creates the directory). It publishes two atomically-written stage files

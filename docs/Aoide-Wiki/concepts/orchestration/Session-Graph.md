@@ -566,9 +566,9 @@ after the Lane R cutover, alongside the bare render).
 
 The dock's `SUPER+G` toggle and the launcher's `SUPER+SPACE` both resolve
 in-process (Hyprland global shortcuts the QML registers itself) rather than
-through an `aoide shell` CLI command; only `SUPER+ESCAPE` (lock) still execs
-an `aoide shell lock` command absent from the schema (open thread, see
-[[aoide-cli]]).
+through a `shell` CLI command — no such group exists in either binary's
+registry; only `SUPER+ESCAPE` (lock) still execs the dead `shell lock` form
+(open thread, see [[aoide-cli]]).
 
 ## Related
 

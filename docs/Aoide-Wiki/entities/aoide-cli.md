@@ -274,8 +274,9 @@ through the same `dispatch()` the CLI and MCP doors use.
 
 ### Open schema gap
 
-The compositor keybind `SUPER+ESCAPE` (lock) still invokes `aoide shell
-lock` — a command group not among the leaves (open thread). `SUPER+G` (dock
+The compositor keybind `SUPER+ESCAPE` (lock) still invokes the dead `shell
+lock` form — a command group not among the leaves of either binary (open
+thread). `SUPER+G` (dock
 toggle) is not part of this gap: like the launcher's `SUPER+SPACE` and the
 wallpaper picker's `SUPER+W`, it triggers an in-process Hyprland global
 shortcut the panel itself registers (`aoide:dock`), not a CLI command (see

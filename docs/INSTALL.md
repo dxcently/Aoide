@@ -107,7 +107,7 @@ aoide guide                           # the four-tier agent onboarding
 ```
 
 There is **no `aoide --version`** (unknown flags print the usage block) and
-**no `aoide doctor`**. `schema --json` is the version *and* the machine-readable
+**no `doctor` subcommand**. `schema --json` is the version *and* the machine-readable
 command surface; `soundcheck` is the mechanical-integrity check. Together they
 are what "is this install healthy" means.
 

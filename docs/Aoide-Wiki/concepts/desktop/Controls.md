@@ -43,7 +43,7 @@ modifier.
 | Keybind | Action |
 |---|---|
 | `SUPER + SPACE` | Toggle the launcher — a Hyprland global shortcut (`global, aoide:launcher`) reaching the QML surface directly; no CLI command. |
-| `SUPER + W` | Toggle the wallpaper picker (`global, aoide:wallpaper`); picking a cover shells `aoide cover set <path>`. |
+| `SUPER + W` | Toggle the wallpaper picker (`global, aoide:wallpaper`); picking a cover shells `lyra cover set <path>`. |
 | `SUPER + G` | Toggle the gadget dock (`global, aoide:dock`) — see [[Gadget-Dock]]. |
 | `SUPER + C` | Toggle clipboard history — opens the launcher on its clipboard chapter (`global, aoide:clipboard`). |
 | `SUPER + ESCAPE` | Lock the screen — `exec, aoide shell lock`; no `shell` command group exists in either binary's registry, so this binding is dead (report only, not repointed). |
