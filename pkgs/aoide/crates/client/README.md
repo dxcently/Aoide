@@ -670,7 +670,11 @@ never the inbound/serve half (that's `aoide-server`).
   refusal happens BEFORE the code gate so nobody types a code this side will
   decline to commit. `grant_note` exists because a `--allow` on a RE-pairing
   legitimately does nothing (`upsert_paired_node` never re-grants), and that
-  must not be silent —
+  must not be silent: the commit's own data carries BOTH halves —
+  `grantRequested` (the set this invocation asked for, which is what the
+  field used to be called) and `grantStamped` (`false` on a re-pairing, where
+  the on-disk grant is untouched) — so no consumer, operator or report can
+  read a request as a grant.
   `default_self_url`/`default_self_via` are this group's own local helpers
   (their own doc comments in `commands.rs` state what each derives and how
   `--self-url`/`--self-via` override them; D5/M3 — `default_self_via` claims

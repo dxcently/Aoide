@@ -3381,7 +3381,7 @@ pub(crate) fn approve_inbound(
         ),
     )
     .changed(vec![aoide_storage::node_store::nodes_path().to_string_lossy().into_owned()])
-    .with_data(json!({ "confirmed": true, "sas": sas, "replySas": reply_sas, "node": entry.name, "pubkeyHex": entry.pubkey_hex, "direction": "inbound", "grant": allows, "grantStamped": first_pairing }))
+    .with_data(json!({ "confirmed": true, "sas": sas, "replySas": reply_sas, "node": entry.name, "pubkeyHex": entry.pubkey_hex, "direction": "inbound", "grantRequested": allows, "grantStamped": first_pairing }))
 }
 
 /// The REQUESTER's poll-then-confirm-then-commit half of `pair
@@ -3699,7 +3699,7 @@ pub(crate) fn commit_outbound(
     };
     Outcome::ok(cmd, format!("{word} `{}` (reply code {reply_sas}) — verified{}", entry.name, grant_note(first_pairing, allows)))
         .changed(vec![aoide_storage::node_store::nodes_path().to_string_lossy().into_owned()])
-        .with_data(json!({ "confirmed": true, "replySas": reply_sas, "node": entry.name, "pubkeyHex": entry.pubkey_hex, "direction": "outbound", "grant": allows, "grantStamped": first_pairing }))
+        .with_data(json!({ "confirmed": true, "replySas": reply_sas, "node": entry.name, "pubkeyHex": entry.pubkey_hex, "direction": "outbound", "grantRequested": allows, "grantStamped": first_pairing }))
 }
 
 /// `pair reject <id|name>` — a clean refusal: removes the parked entry
@@ -8293,6 +8293,73 @@ mod tests {
             );
             assert!(out.message.contains("grant unchanged"), "a --allow that did nothing must never be silent: {}", out.message);
             assert!(out.message.contains("node allow"), "and it names the command that does change a live grant: {}", out.message);
+        });
+    }
+
+    /// **The data half of the same rule, and the reason the field is named
+    /// `grantRequested`.** The message above was always truthful; the JSON was
+    /// not. It carried `"grant": <the RESOLVED set>` beside `"grantStamped":
+    /// false`, so a consumer, an agent or a report that read `grant` alone
+    /// concluded the set had landed — which is exactly how a live proof
+    /// (2026-09-27) came to describe a re-pair as having granted `message`
+    /// when only a hand-run `node allow` had. A rename, not an omission: the
+    /// shape stays fixed (one key per question, always present) and the key
+    /// now says which question it answers.
+    #[test]
+    fn a_re_pair_reports_the_grant_it_requested_and_not_a_grant_it_made() {
+        with_node_state("grant-requested-not-stamped", || {
+            let now_epoch = 1_700_000_000_i64;
+            approve_the_one_inbound(now_epoch, None);
+            assert_eq!(aoide_storage::node_store::load_nodes()[0].grant("home"), ["read".to_string()]);
+
+            let out = approve_the_one_inbound(now_epoch, Some(&["message".to_string()]));
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+            let data = out.data.as_ref().expect("a commit carries its own data");
+
+            assert_eq!(data.get("grantStamped").and_then(Value::as_bool), Some(false), "a re-pairing stamps nothing: {data}");
+            assert_eq!(
+                data.get("grantRequested"),
+                Some(&json!(["message"])),
+                "the data names what this invocation ASKED for: {data}"
+            );
+            assert!(
+                data.get("grant").is_none(),
+                "and never a bare `grant` a reader could mistake for the live set: {data}"
+            );
+            assert_eq!(
+                aoide_storage::node_store::load_nodes()[0].grant("home"),
+                vec!["read".to_string()],
+                "while the on-disk grant is genuinely untouched"
+            );
+
+            // The other half: a FIRST verification stamps, and the SAME field
+            // reports the set that landed — one key answers both commits, on
+            // the requester's leg too.
+            let pubkey_b = "b".repeat(64);
+            let entry = awaiting_confirm_outbound("beefcafe", &pubkey_b);
+            aoide_storage::pairing::park_outbound(entry.clone()).unwrap();
+            let now = aoide_storage::time::now_iso_utc();
+            let now_epoch_out = aoide_storage::time::parse_iso_utc(&now).unwrap();
+            let code = expected_reply_sas(&pubkey_b).replace('-', "");
+            let fresh = commit_outbound(
+                CodeGate::Code(code),
+                "pair",
+                "beefcafe",
+                entry,
+                &now,
+                now_epoch_out,
+                &["message".to_string()],
+            );
+            let fresh_data = fresh.data.as_ref().expect("a commit carries its own data");
+            assert_eq!(fresh.status, aoide_protocol::output::Status::Ok, "{fresh:?}");
+            assert_eq!(fresh_data.get("grantStamped").and_then(Value::as_bool), Some(true), "{fresh_data}");
+            assert_eq!(fresh_data.get("grantRequested"), Some(&json!(["message"])), "{fresh_data}");
+            assert!(fresh_data.get("grant").is_none(), "the old spelling is gone from both legs: {fresh_data}");
+            assert_eq!(
+                aoide_storage::node_store::load_nodes().iter().find(|n| n.name == "box-b").expect("the requester's own record").grant("home"),
+                vec!["message".to_string()],
+                "and on a FIRST verification the requested set really is the stamped one"
+            );
         });
     }
 
