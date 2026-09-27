@@ -438,6 +438,24 @@ the inbound half of the two-door contract (the outbound half is
   shell target is never auto-delivered to by the loopback rung or the
   remote-parent rung either, and the hold is audited
   `a2a.message/send`/`status:"shell-wrapped"` with no bytes on the wire.
+  **The two UNSIGNED autogate rails answer to the charter too (A3 review
+  finding 4).** `message_send`'s Inject arm carries three auto-delivery rails;
+  the two with no request signature behind them — a source ADDRESS resolving
+  to an `autogate` record's `url`, or a presented bearer matching that record's
+  own `tokenFile` — name no mesh, so `rail_admits` judges the MATCHED record by
+  its HOME mesh (`effective_mesh(None)`, the same resolution an unnamed request
+  gets): a charter governing home requires the record `verified` and its key on
+  the line with `message` (minus `Node::narrowed[home]`); a charter-shaped home
+  whose operator key is undecidable delivers nothing; a pair-mesh home keeps
+  the record's own `autogate` flag as the whole rule. The match and the
+  delivery are deliberately two booleans — `autogate_match` still exempts the
+  caller from the #50 uniform guard, `deliver_match` is what
+  `should_deliver_now` reads — so a record the charter does not answer for is
+  held PENDING (queued, attributed `node:<name>`), never answered with the
+  guard's synthetic `submitted` Task and never refused. `verified` is asked
+  only of a record that claims a charter LINE, since `aoide node add
+  --autogate` writes `verified: false` and requiring it in a pair mesh would
+  delete the rail rather than harden it.
   **`tasks/get` reads a session's watch frame (P-RSA S6, CONTRACTS.md §6).**
   `params.metadata["aoide/frame"]` asks for the frame the local
   `session watch` renders; it rides as one `data` artifact, and is answered

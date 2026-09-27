@@ -319,6 +319,21 @@ through.
     One thing overrides every rail of it: a TARGET conducting a shell, whose
     line is held pending whoever asks (`shell-wrapped`, N1) — a submitted
     line in a shell's input runs. `CONTRACTS.md` §6 carries the full rule.
+  - **Autogate record — a registered node's own sends.** The same door's third
+    delivery rail, and the only one behind neither a signature nor a parent
+    claim: the Inject arm auto-delivers a send whose source ADDRESS resolves to
+    an `autogate` record's `url`, or whose presented bearer matches that
+    record's own `TokenFile`. It names no mesh (there is no signed request to
+    name one), so the door judges the matched RECORD by its HOME mesh's rules —
+    where a charter governs `[pairing] homeMesh`, the record must be `verified`
+    and its key must be on the charter's line with `message`, minus this box's
+    own `node allow … message off --mesh <home>`; where home is charter-shaped
+    with an undecidable operator key nothing on this rail delivers; where home
+    is a pair mesh the record's own flag is the whole rule, exactly as it
+    always was. A record that does not answer falls to PENDING — never a
+    refusal, never a delivery — so the knock still reaches the operator as an
+    entry in `session pending list`, attributed `node:<name>`. `aoide mesh`
+    lists, on the home mesh's charter row, the records this rail answers for.
 - **Sender provenance.** A delivered payload that NAMES the node (carries a
   letter — a real message, not a bare keystroke answer) is prefixed on its
   first line with `from <sender>: `, where `<sender>` resolves from

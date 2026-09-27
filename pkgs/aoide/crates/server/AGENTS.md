@@ -511,6 +511,33 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   is the restoration; `origin_for_inject_is_the_identity_function_when_unsigned`
   and `origin_for_inject_downgrades_loopback_once_the_request_is_signed`
   pin the pure predicate directly.
+- **The two UNSIGNED autogate rails are judged by the matched record's HOME
+  mesh, and the MATCH is not the DELIVERY — two booleans, never one (A3 review
+  finding 4).** `ip_rail`/`token_rail` (the records
+  `aoide_storage::node_store::autogated_node_addr`/`autogated_node_token`
+  return) fold into `autogate_match`, which is what exempts a caller from the
+  #50 uniform-response guard; `rail_admits_here` → `rail_admits` →
+  `deliver_match` is what `should_deliver_now` reads. Folding the charter into
+  `autogate_match` would answer a charter-unlisted caller with the guard's
+  synthetic `submitted` Task — no delivery, no queue entry, invisible to the
+  operator — and the ruling is PENDING: never refused, never delivered.
+  `rail_admits` reuses `grant_from` (the line minus `Node::narrowed[home]`), so
+  the rail cannot drift from the grant lookup. **`verified` is asked ONLY of a
+  record claiming a charter LINE**, never of a keyless record the rail matched
+  by address: `aoide node add --autogate` writes `verified: false` (a card
+  fetch is reachability, never identity), so requiring it in a pair mesh would
+  delete the rail rather than harden it. A pair mesh is otherwise untouched —
+  the record's own flag is the whole rule — and loopback is untouched
+  (`should_deliver_now(Loopback, _)` reads neither boolean). Tests:
+  `the_autogate_rail_reads_the_matched_record_against_its_home_mesh` (the whole
+  table over one real box, plus the disk reads),
+  `a_record_the_home_charter_no_longer_lists_pends_its_autogated_send` and
+  `the_token_rail_reads_the_same_home_charter_as_the_address_rail` (the
+  finding, end to end), `a_key_the_home_charter_lists_still_autodelivers` (the
+  other half of the rule), and
+  `a_charter_unlisted_record_reaches_the_queue_rather_than_the_uniform_guard`
+  (the split itself: reaching `pending.json` is what proves the guard was
+  exempted by the MATCH).
 - **A REMOTE PARENT steers the child it spawned without pending — the
   claim's second consumer, riding exactly those two rails (P-RSA S5,
   CONTRACTS.md §6).** `remote_parent_match(caller, claim, target)` is the whole

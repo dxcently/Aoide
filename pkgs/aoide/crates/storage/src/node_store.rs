@@ -72,9 +72,19 @@ pub struct Node {
     pub url: String,
     /// The cross-device analogue of `graph send`'s "sender is the target's
     /// own parent" autogate rule (`conduct/graph/send.rs`): a node marked
-    /// `true` here skips the non-loopback pending queue on INBOUND
-    /// `message/send` (CONTRACTS.md §6 amendment). Defaults false — an
-    /// unmarked/unknown sender is never autogated.
+    /// `true` here whose record the door's unsigned rail resolves (by `url`
+    /// address, or by its own `token_file`) skips the non-loopback pending
+    /// queue on INBOUND `message/send` (CONTRACTS.md §6 amendment). Defaults
+    /// false — an unmarked/unknown sender is never autogated.
+    ///
+    /// **The flag is what opens the rail; it is not the whole trust.** The
+    /// rail is unsigned, so it names no mesh: the door judges the matched
+    /// record by its HOME mesh's rules
+    /// (`aoide-server::a2a::rail_admits`) — where a charter governs home, the
+    /// record's key must be on that charter's line with `message` (and the
+    /// record verified), and where home is charter-shaped with an undecidable
+    /// operator key the send is held PENDING whatever this flag says. Only in
+    /// a PAIR mesh is this flag the whole rule, exactly as it always was.
     #[serde(default)]
     pub autogate: bool,
     /// Path to a file (on THIS instance) holding the shared secret this node
@@ -1109,12 +1119,30 @@ fn node_url_matches_addr(url: &str, addr: IpAddr) -> bool {
         .unwrap_or(false)
 }
 
-/// Does `addr` belong to a node explicitly marked `autogate: true`? The pure
-/// per-node match ([`node_url_matches_addr`]) is what's actually
-/// unit-testable without DNS; this just folds it over the registered,
-/// autogate-marked subset.
+/// The record an inbound connection's ADDRESS resolves to on the unsigned
+/// autogate rail: the first registered record (registry order — the tie-break
+/// [`resolve_node`]'s ladder already holds) that is marked `autogate` AND
+/// whose `url` host resolves to `addr`. `None` when no record does.
+///
+/// **A match is not a delivery.** This rail carries no signature, so it has no
+/// mesh of its own to read a grant in; the door therefore judges the matched
+/// RECORD by its HOME mesh's rules (`aoide-server::a2a::rail_admits`: the
+/// charter line for its key where a charter governs home, nothing where home
+/// is charter-shaped, and the record's own `autogate` flag where home is a
+/// pair mesh). What this function answers is only WHICH record the connection
+/// resolved to, and it is what lets the door ask that second question at all —
+/// the trust decision is the door's, and always was.
+pub fn autogated_node_addr(nodes: &[Node], addr: IpAddr) -> Option<&Node> {
+    nodes.iter().find(|p| p.autogate && node_url_matches_addr(&p.url, addr))
+}
+
+/// Did the address rail match any record? The pure per-node match
+/// ([`node_url_matches_addr`]) is what's actually unit-testable without DNS;
+/// this just folds it over the registered, autogate-marked subset. See
+/// [`autogated_node_addr`] for the record itself, and for why a match is not a
+/// delivery.
 pub fn is_autogated_node_addr(nodes: &[Node], addr: IpAddr) -> bool {
-    nodes.iter().filter(|p| p.autogate).any(|p| node_url_matches_addr(&p.url, addr))
+    autogated_node_addr(nodes, addr).is_some()
 }
 
 // ── Per-node token identification (CONTRACTS.md §6 amendment, 2026-08-18) ───
@@ -1149,24 +1177,37 @@ pub fn token_bytes_eq(expected: &str, presented: &str) -> bool {
     diff == 0
 }
 
-/// Does `presented` (an inbound `Authorization: Bearer <token>` value) match
-/// an autogate-marked node's OWN token (`Node.token_file`, read fresh off
-/// disk — a node's token can rotate without restarting `a2a serve`)? Mirrors
-/// [`is_autogated_node_addr`]'s fold exactly, keyed on token identity instead
-/// of address. A node with no `token_file` set never matches (tolerant —
-/// same "absent means uninvolved" stance as an unmatched address), and a
-/// node whose file is missing/unreadable at match time never matches either
-/// (fails safe, never a panic/error).
-pub fn is_autogated_node_token(nodes: &[Node], presented: &str) -> bool {
-    nodes
-        .iter()
-        .filter(|p| p.autogate)
-        .filter_map(|p| p.token_file.as_deref())
-        .any(|path| {
-            std::fs::read_to_string(path)
+/// The record a presented bearer token resolves to on the unsigned autogate
+/// rail: the first registered autogate-marked record (registry order, the same
+/// tie-break [`autogated_node_addr`] holds) whose OWN `token_file` holds
+/// `presented`. Mirrors [`autogated_node_addr`]'s fold exactly, keyed on token
+/// identity instead of address — which is what survives a reverse proxy or
+/// tunnel, where every caller's source address is the front's own. A node with
+/// no `token_file` set never matches (tolerant — same "absent means
+/// uninvolved" stance as an unmatched address), and a node whose file is
+/// missing/unreadable at match time never matches either (fails safe, never a
+/// panic/error).
+///
+/// **A match is not a delivery**: the door judges the matched record by its
+/// HOME mesh's rules ([`autogated_node_addr`] has the full statement — the
+/// charter's line where a charter governs home, nothing where home is
+/// charter-shaped, the record's own `autogate` flag where home is a pair mesh).
+pub fn autogated_node_token<'a>(nodes: &'a [Node], presented: &str) -> Option<&'a Node> {
+    nodes.iter().find(|p| {
+        p.autogate
+            && p.token_file
+                .as_deref()
+                .and_then(|path| std::fs::read_to_string(path).ok())
                 .map(|raw| token_bytes_eq(raw.trim(), presented))
                 .unwrap_or(false)
-        })
+    })
+}
+
+/// Did the token rail match any record? [`autogated_node_token`]'s fold as a
+/// predicate; see it for the record itself and for why a match is not a
+/// delivery.
+pub fn is_autogated_node_token(nodes: &[Node], presented: &str) -> bool {
+    autogated_node_token(nodes, presented).is_some()
 }
 
 // ── Node cache: the last-pulled `aoide/graphSummary` response ───────────────

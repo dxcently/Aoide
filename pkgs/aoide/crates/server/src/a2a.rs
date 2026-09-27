@@ -1094,6 +1094,63 @@ fn paired_grant(nodes: &[aoide_storage::node_store::Node], mesh: &str, caller_ke
     Grant { caps }
 }
 
+/// **Does the record the UNSIGNED autogate rail resolved earn auto-delivery**
+/// — judged by the record's HOME mesh, because that rail carries no signed
+/// mesh of its own (the A3 review's finding 4; the same "judge the unnamed
+/// request by home" ruling [`effective_mesh`] implements).
+///
+/// ```text
+/// the record is judged by HOME's rules, never by the request (there is none):
+///   charter governs home ──> the record is VERIFIED, and its key is on the
+///                            charter's line WITH `message`, minus this box's
+///                            own `node allow … message off --mesh <home>`
+///   home charter-shaped,
+///   no decidable operator ─> NOTHING (pending — an undecidable key fails closed)
+///   home is a pair mesh ───> the record's own `autogate` flag, exactly as before
+/// ```
+///
+/// The third arm is deliberately NOT `paired_grant`: the pair mesh's rail rule
+/// has always been the operator's per-record flag, and this phase moves no
+/// pair-mesh behaviour. `verified` is required of a record that claims a
+/// charter LINE — a claim about a KEY — and never of a keyless record the rail
+/// matched by address: `node add --autogate` writes `verified: false`, so
+/// requiring it there would delete the rail rather than harden it.
+///
+/// The charter arm reuses [`grant_from`], so "the line minus local narrowing"
+/// has ONE implementation and the rail cannot drift from the door's own grant
+/// lookup. `record.verified` is asked of the MATCHED record — the one whose
+/// address or token the request presented — which is deliberately stricter
+/// than the identity-key union `grant_from` folds for refusals: the rail
+/// resolves a record, not a key.
+fn rail_admits(
+    nodes: &[aoide_storage::node_store::Node],
+    record: &aoide_storage::node_store::Node,
+    governing: Option<&aoide_storage::charter::Charter>,
+    shaped: bool,
+    mesh: &str,
+) -> bool {
+    if governing.is_none() {
+        return !shaped && record.autogate;
+    }
+    let Some(key) = record.pubkey.as_deref().filter(|k| !k.is_empty()) else {
+        return false;
+    };
+    record.verified && may_message(&grant_from(nodes, governing, shaped, mesh, key))
+}
+
+/// [`rail_admits`] with the disk reads: the matched record judged by its HOME
+/// mesh, resolved and read exactly the way the door's grant lookup resolves it
+/// (`effective_mesh(None)` → `governing` → `charter_shaped`) and exactly once
+/// per matched record. The rail carries no signed mesh, so this is the only
+/// input it has — the same "the unnamed case is judged by home's rules" reading
+/// [`grant_in_mesh`] makes, applied to the rail instead of to the grant.
+fn rail_admits_here(nodes: &[aoide_storage::node_store::Node], record: &aoide_storage::node_store::Node) -> bool {
+    let mesh = effective_mesh(None);
+    let governing = aoide_storage::charter::governing(&mesh);
+    let shaped = aoide_storage::charter::charter_shaped(&mesh);
+    rail_admits(nodes, record, governing.as_ref(), shaped, &mesh)
+}
+
 /// The mesh a request acts in: the one it NAMED, or the home mesh
 /// ([`aoide_storage::config::home_mesh`], `[pairing] homeMesh`, default
 /// `home`) when it named none. The single place the unnamed case becomes a
@@ -2822,28 +2879,47 @@ fn message_send(
     // signature no longer rides `ConnOrigin::Loopback`'s free pass (see
     // `origin_for_inject`). `ip_autogate`/`token_autogate` are unchanged
     // from before this amendment.
-    let ip_autogate = match origin {
-        ConnOrigin::Remote(ip) => aoide_storage::node_store::is_autogated_node_addr(&nodes, ip),
-        ConnOrigin::Loopback | ConnOrigin::Unknown => false,
+    let ip_rail = match origin {
+        ConnOrigin::Remote(ip) => aoide_storage::node_store::autogated_node_addr(&nodes, ip),
+        ConnOrigin::Loopback | ConnOrigin::Unknown => None,
     };
-    let token_autogate = presented_token
-        .map(|t| aoide_storage::node_store::is_autogated_node_token(&nodes, t))
-        .unwrap_or(false);
+    let token_rail = presented_token.and_then(|t| aoide_storage::node_store::autogated_node_token(&nodes, t));
+    let ip_autogate = ip_rail.is_some();
+    let token_autogate = token_rail.is_some();
     // P-CHARTER (review finding 5): `autogate` is a per-RECORD flag, and a
     // record can be marked in one mesh while the request names another — so
     // the signature rail asks the mesh too: the caller must hold `message`
     // IN THE MESH ITS REQUEST NAMES. Without this, a caller the operator
     // marked autogate skips the pending review queue while naming a mesh it
     // holds nothing in, which is per-mesh trust leaking on the delivery rail.
-    // The addr/token rails are untouched: they resolve no signature, so they
-    // have no signed mesh to read a grant in, and they were never per-mesh
-    // grant-bearing (they admit only their own `autogate`-marked records).
     let sig_autogate = matches!(
         resolved_node,
         Some((node, aoide_storage::node_store::NodeRung::Signature))
             if node.autogate && may_message(&caller_grant(signed_caller))
     );
+    // P-CHARTER (the A3 review's finding 4): the two UNSIGNED rails ask the
+    // mesh as well, read at the record's HOME mesh because that is the only
+    // mesh such a request has (`effective_mesh(None)` — it carries no signed
+    // mesh to name another). Two booleans, deliberately:
+    //
+    //   `autogate_match` = the rails MATCHED a record → the door admits the
+    //     caller (the #50 uniform-response guard's exemption, unchanged);
+    //   `rail_delivers`  = that record earns auto-delivery under home's rules
+    //     → Inject's delivery decision (`should_deliver_now`), and nothing
+    //     else.
+    //
+    // Folding the second into the first would be the wrong fix twice over: a
+    // charter-removed key would land on the guard's synthetic `submitted`
+    // Task (never queued, never seen by the operator) instead of PENDING, and
+    // the match itself — an enrolled record presenting its own address or
+    // token — is not what the charter judges. The ruling is "never refused
+    // outright, never delivered": pending, on both.
+    let rail_delivers = ip_rail
+        .into_iter()
+        .chain(token_rail)
+        .any(|record| rail_admits_here(&nodes, record));
     let autogate_match = ip_autogate || token_autogate || sig_autogate;
+    let deliver_match = sig_autogate || rail_delivers;
 
     // Uniform-response guard (see the amendment above) — mirrors
     // `decide_send_action`'s OWN `spawn_asked`/`context_id` split exactly
@@ -2981,7 +3057,7 @@ fn message_send(
             // label it was handed. Paid only where it can matter: a decision
             // that was going to pend anyway is left alone, and its audit line
             // is not written.
-            let door_delivers = should_deliver_now(eff_origin, autogate_match || remote_parent_hit);
+            let door_delivers = should_deliver_now(eff_origin, deliver_match || remote_parent_hit);
             let shell_target = door_delivers && session_wrapped_is_a_shell(&session_id);
             if shell_target {
                 let _ = audit(
@@ -11300,6 +11376,334 @@ mod tests {
             Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
             None => std::env::remove_var("AOIDE_STATE_DIR"),
         }
+    }
+
+    // ── P-CHARTER: the unsigned autogate rail answers to the charter ────────
+    //
+    // The A3 confirm review's finding 4, and the ruling it was handed: the
+    // addr/token rails matched a record's `autogate` flag and nothing else, so
+    // a machine whose charter line was REMOVED — its record still `autogate` —
+    // kept auto-delivering while its HOME mesh was a charter mesh. The rail
+    // carries no signed mesh, so the record is judged by home's rules, and a
+    // record that does not answer falls to PENDING: never refused outright,
+    // never delivered.
+
+    /// One box for those tests: `home` rooted by an operator, a charter that
+    /// LISTS the peer's line or omits it, the peer's record (`autogate`,
+    /// `verified`, that key, its own `token_file` when asked for, and a STALE
+    /// `grants[home]` either way — so a rail that still read the record would
+    /// deliver on it), and one conductable session behind a NONBLOCKING
+    /// listener. A delivery is read back off that listener afterwards; a held
+    /// send simply never connects. `Drop` restores the environment and removes
+    /// the tree, so a failing assertion cannot leak into the next test.
+    struct RailBox {
+        root: std::path::PathBuf,
+        stage: std::path::PathBuf,
+        audit_log: std::path::PathBuf,
+        listener: UnixListener,
+        saved: Vec<(&'static str, Option<String>)>,
+    }
+
+    impl RailBox {
+        /// What the door wrote into the session's socket, or `None` when
+        /// nothing ever connected — which is what a HELD send looks like from
+        /// the target's side. The listener is nonblocking, so the accept itself
+        /// is the delivery question.
+        fn delivered(&self) -> Option<String> {
+            let (mut conn, _) = self.listener.accept().ok()?;
+            let mut buf = Vec::new();
+            let _ = conn.read_to_end(&mut buf);
+            Some(String::from_utf8_lossy(&buf).into_owned())
+        }
+
+        /// The queue this box holds — empty when a send was delivered (or
+        /// swallowed by the uniform-response guard, which never touches it).
+        fn pending(&self) -> Vec<serde_json::Value> {
+            let Ok(text) = std::fs::read_to_string(self.stage.join("pending.json")) else {
+                return Vec::new();
+            };
+            serde_json::from_str::<serde_json::Value>(&text)
+                .ok()
+                .and_then(|v| v["pending"].as_array().cloned())
+                .unwrap_or_default()
+        }
+
+        /// The `message/send` this box receives from the peer's address —
+        /// the exact call `handle_connection`'s Inject arm makes.
+        fn send(&self, text: &str, expected_token: &str, presented_token: Option<&str>, origin: ConnOrigin) -> Result<Value, (i64, String)> {
+            let params = json!({
+                "message": { "parts": [{ "kind": "text", "text": text }], "contextId": RAIL_SESSION }
+            });
+            message_send(&params, &self.audit_log, "", "", origin, expected_token, presented_token, None)
+        }
+    }
+
+    impl Drop for RailBox {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+            for (key, value) in &self.saved {
+                match value {
+                    Some(v) => std::env::set_var(key, v),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    /// The session every [`RailBox`] exposes, and the address its record
+    /// resolves to. Short on purpose: `XDG_RUNTIME_DIR` is the box's own root,
+    /// so this id's socket path has to fit `sun_path`.
+    const RAIL_SESSION: &str = "rail";
+    const RAIL_PEER_ADDR: &str = "10.0.0.9";
+
+    fn rail_box(tag: &str, peer_url: &str, listed: bool, token: Option<&str>) -> RailBox {
+        let root = aoide_test_support::short_tmp(tag);
+        let mut saved = Vec::new();
+        for key in ["AOIDE_ROOT", "AOIDE_STATE_DIR", "AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR", "AOIDE_CONFIG"] {
+            saved.push((key, std::env::var(key).ok()));
+        }
+        std::env::remove_var("AOIDE_CONFIG");
+
+        // 1. An operator roots `home` and signs a charter naming the peer — or,
+        //    for `listed: false`, one that does not name it at all.
+        charter_machine(&root, "operator", "opbox");
+        let init = aoide_storage::charter::init("home").unwrap();
+        let op_line = aoide_storage::charter::node_line().unwrap();
+        charter_machine(&root, "peer", "peerbox");
+        let peer_line = aoide_storage::charter::node_line().unwrap();
+        let peer_key = aoide_storage::charter::parse(&format!(
+            "mesh = \"home\"\nversion = 1\nrelays = []\n\n[nodes]\n{peer_line}\n"
+        ))
+        .unwrap()
+        .nodes
+        .values()
+        .next()
+        .unwrap()
+        .key
+        .clone();
+
+        charter_machine(&root, "operator", "opbox");
+        let named = if listed { format!("{op_line}\n{peer_line}\n") } else { format!("{op_line}\n") };
+        std::fs::write(
+            aoide_storage::charter::source_path("home"),
+            format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{named}"),
+        )
+        .unwrap();
+        aoide_storage::charter::sign("home", None).unwrap();
+        let bytes = std::fs::read(aoide_storage::charter::source_path("home")).unwrap();
+        let sig = std::fs::read(aoide_storage::charter::source_sig_path("home")).unwrap();
+
+        // 2. The peer's box takes the charter and trusts ONLY the operator key
+        //    — no pairing with anybody, so `home` is a charter mesh here.
+        charter_machine(&root, "peer", "peerbox");
+        std::fs::write(
+            root.join("peer").join("config.toml"),
+            format!("[mesh.home]\noperator = \"ed25519:{}\"\n", init.operator),
+        )
+        .unwrap();
+        assert_eq!(aoide_storage::charter::accept(&bytes, &sig).unwrap().charter.version, 1);
+
+        // From here on the peer's machine IS the box under test: the accepted
+        // charter lives in its state, and every path the door reads is this
+        // one's.
+        let box_root = root.join("peer");
+        std::env::set_var("AOIDE_ROOT", &box_root);
+        std::env::set_var("AOIDE_STATE_DIR", box_root.join("state"));
+        std::env::set_var("AOIDE_STAGE_DIR", box_root.join("stage"));
+        std::env::set_var("XDG_RUNTIME_DIR", &box_root);
+        let stage = box_root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+
+        // 3. This box's record for the peer: `autogate` and `verified`, its key
+        //    as the charter carries it, its own `token_file` where asked for,
+        //    and a stale grant in `home` so nothing here turns on that grant.
+        let mut record = fixture_node("peerbox", peer_url, true);
+        record.verified = true;
+        record.pubkey = Some(peer_key);
+        record.grants = std::collections::BTreeMap::from([("home".to_string(), vec!["message".to_string()])]);
+        if let Some(secret) = token {
+            let path = box_root.join("node.token");
+            std::fs::write(&path, format!("{secret}\n")).unwrap();
+            record.token_file = Some(path.to_string_lossy().into_owned());
+        }
+        aoide_storage::node_store::save_nodes(&[record]).unwrap();
+
+        // 4. One conductable session, listening and NOT accepting yet.
+        let socket = aoide_conduct::graph::conduct_socket_path(RAIL_SESSION);
+        std::fs::create_dir_all(socket.parent().unwrap()).unwrap();
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        write_stage(
+            &sessions_path(),
+            &SessionsFile {
+                schema_version: "0".to_string(),
+                sessions: vec![conductable_session(RAIL_SESSION, &socket)],
+            },
+        )
+        .unwrap();
+
+        RailBox { root, stage, audit_log: box_root.join("log"), listener, saved }
+    }
+
+    /// The whole rail table, over one real box (identity, accepted charter,
+    /// record): which record the UNSIGNED rails deliver for, judged by home.
+    #[test]
+    fn the_autogate_rail_reads_the_matched_record_against_its_home_mesh() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let boxed = rail_box("aoide-a2a-rail-table", &format!("http://{RAIL_PEER_ADDR}:8710/"), true, None);
+        let record = aoide_storage::node_store::load_nodes().pop().unwrap();
+        let listed = aoide_storage::charter::governing("home").expect("the box's accepted charter governs home");
+        assert_eq!(
+            listed.nodes.keys().collect::<Vec<_>>(),
+            vec!["opbox", "peerbox"],
+            "the fixture's charter names the peer, by key"
+        );
+        let on = |record: &aoide_storage::node_store::Node| {
+            rail_admits(std::slice::from_ref(record), record, Some(&listed), false, "home")
+        };
+
+        assert!(on(&record), "a listed, verified record with `message` on its line delivers");
+        assert!(rail_admits_here(&[record.clone()], &record), "and the door's own disk reads agree");
+
+        let mut narrowed = record.clone();
+        narrowed.narrowed = std::collections::BTreeMap::from([("home".to_string(), vec!["message".to_string()])]);
+        assert!(
+            !on(&narrowed),
+            "`node allow peerbox message off --mesh home` narrows the charter, and the rail reads the narrowed answer"
+        );
+        assert!(on(&record), "and the narrowing belongs to the record, not to the line");
+
+        let mut read_only = listed.clone();
+        read_only.nodes.values_mut().find(|l| l.key == record.pubkey.clone().unwrap()).unwrap().grant =
+            vec!["read".to_string()];
+        assert!(
+            !rail_admits(std::slice::from_ref(&record), &record, Some(&read_only), false, "home"),
+            "a line that grants `read` and not `message` never auto-delivers a send"
+        );
+
+        // The finding's machine: the line is GONE, the record still `autogate`
+        // and still carrying the grant it was paired with.
+        let mut gone = listed.clone();
+        gone.nodes.clear();
+        assert!(
+            !rail_admits(std::slice::from_ref(&record), &record, Some(&gone), false, "home"),
+            "a key the charter no longer lists is not on the rail, whatever its record still says"
+        );
+
+        let mut unverified = record.clone();
+        unverified.verified = false;
+        assert!(!on(&unverified), "a record claiming a line it cannot be verified against does not deliver");
+
+        // `node add --autogate`'s own shape: `verified: false`, no key at all.
+        // It can claim no line, so a charter mesh pends it.
+        let keyless = fixture_node("hand-added", &format!("http://{RAIL_PEER_ADDR}:8710/"), true);
+        assert!(!on(&keyless), "a keyless record has no line to be on");
+
+        // F2's fail-closed arm: charter-shaped, operator key undecidable.
+        assert!(
+            !rail_admits(std::slice::from_ref(&record), &record, None, true, "home"),
+            "a charter mesh whose operator key cannot be decided delivers nothing"
+        );
+
+        // And the pair mesh, untouched: the flag decides, no charter is read.
+        assert!(
+            rail_admits(std::slice::from_ref(&keyless), &keyless, None, false, "home"),
+            "with no charter shaped for home the record's own flag is the whole rule, as before"
+        );
+        let quiet = fixture_node("quiet", &format!("http://{RAIL_PEER_ADDR}:8710/"), false);
+        assert!(
+            !rail_admits(std::slice::from_ref(&quiet), &quiet, None, false, "home"),
+            "an unmarked record was never autogated"
+        );
+
+        // Shaped with no decidable operator, THROUGH the disk reads: a document
+        // this node cannot honour is a charter mesh, and the rail delivers
+        // nothing in it (the same fail-closed arm `grant_from` takes).
+        std::fs::write(aoide_storage::charter::in_force_path("home"), "not a charter at all").unwrap();
+        assert!(aoide_storage::charter::charter_shaped("home"), "a document on disk is what SHAPES the mesh");
+        assert!(
+            !rail_admits_here(&[record.clone()], &record),
+            "charter-shaped with an undecidable operator key pends the rail (F2's fail-closed arm)"
+        );
+        assert!(boxed.pending().is_empty(), "and asking the question queues nothing");
+    }
+
+    /// **The finding, end to end.** A record a charter listed and no longer
+    /// does, still marked `autogate`: its send is held PENDING — not delivered,
+    /// and not refused either.
+    #[test]
+    fn a_record_the_home_charter_no_longer_lists_pends_its_autogated_send() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let boxed = rail_box("aoide-a2a-rail-gone", &format!("http://{RAIL_PEER_ADDR}:8710/"), false, None);
+
+        let result = boxed.send("removed-line", "", None, ConnOrigin::Remote(RAIL_PEER_ADDR.parse().unwrap()));
+        assert!(result.is_ok(), "the door ANSWERS a rail it does not deliver for: {result:?}");
+        assert_eq!(boxed.delivered(), None, "a record off the charter's line does not auto-deliver");
+        let pending = boxed.pending();
+        assert_eq!(pending.len(), 1, "it falls to the operator's queue instead: {pending:?}");
+        assert_eq!(
+            pending[0]["from"], "node:peerbox",
+            "and the queue says who knocked: {pending:?}"
+        );
+    }
+
+    /// The other half of the same rule: a key the charter DOES list with
+    /// `message` delivers exactly as an autogated record always did — the
+    /// charter narrows the rail, it does not close it.
+    #[test]
+    fn a_key_the_home_charter_lists_still_autodelivers() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let boxed = rail_box("aoide-a2a-rail-listed", &format!("http://{RAIL_PEER_ADDR}:8710/"), true, None);
+
+        let result = boxed.send("listed-line", "", None, ConnOrigin::Remote(RAIL_PEER_ADDR.parse().unwrap()));
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(boxed.delivered().as_deref(), Some("listed-line\r"), "the line's `message` is what the rail delivers on");
+        assert!(boxed.pending().is_empty(), "and nothing was queued");
+    }
+
+    /// The TOKEN rail is the same question, one rung over: a per-node token
+    /// that survives a proxy is not a way around the charter. The record's
+    /// address does not match here at all, so the token is the only match.
+    #[test]
+    fn the_token_rail_reads_the_same_home_charter_as_the_address_rail() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let boxed = rail_box("aoide-a2a-rail-token", "http://192.0.2.99:8710/", false, Some("peer-secret"));
+
+        let result = boxed.send(
+            "token-line",
+            "",
+            Some("peer-secret"),
+            ConnOrigin::Remote(RAIL_PEER_ADDR.parse().unwrap()),
+        );
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(boxed.delivered(), None, "the token matched the record and the record is off the line");
+        assert_eq!(boxed.pending().len(), 1, "so it pends, exactly as the address rail does");
+    }
+
+    /// **Pending, not refused, and not swallowed.** With a door-wide token
+    /// configured the #50 guard would answer a context-id send that matched
+    /// nothing with a synthetic `submitted` Task and never touch the queue — so
+    /// a charter-unlisted record that still matches the rail must reach the
+    /// real Inject machinery and queue, or the send would vanish. The match is
+    /// what exempts the guard; the charter decides delivery, and nothing else.
+    #[test]
+    fn a_charter_unlisted_record_reaches_the_queue_rather_than_the_uniform_guard() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let boxed = rail_box("aoide-a2a-rail-guard", "http://192.0.2.99:8710/", false, Some("peer-secret"));
+
+        let result = boxed.send(
+            "guard-line",
+            "door-wide-secret",
+            Some("peer-secret"),
+            ConnOrigin::Remote(RAIL_PEER_ADDR.parse().unwrap()),
+        );
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(boxed.delivered(), None, "a door-wide bearer it does not hold, and a record off the line");
+        assert_eq!(
+            boxed.pending().len(),
+            1,
+            "reaching `pending.json` is the proof it went through the Inject arm, not the guard's synthetic Task"
+        );
     }
 
     #[test]

@@ -5739,7 +5739,10 @@ conductable session with zero approval. Fixed in `a2a.rs::do_inject` /
 - A **remote** origin auto-delivers ONLY when it matches a node explicitly
   marked `"autogate": true` in `state/nodes.json` (§7 below) — the
   cross-device analogue of `send`'s local "sender is the target's own
-  parent" autogate rule. An unmarked/unknown remote sender is held
+  parent" autogate rule. The flag is what opens the rail, not the whole
+  trust: the matched record is judged by its HOME mesh's rules, so where a
+  charter governs that mesh its key must be on the charter's line (P-CHARTER,
+  the rail table below). An unmarked/unknown remote sender is held
   **pending**, reusing `send`'s EXISTING `pending.json` queue
   machinery verbatim (`conduct::graph::send::session_send`'s own gate — no
   second pending-queue implementation). The synchronous JSON-RPC response
@@ -7210,6 +7213,45 @@ nothing local widens a charter grant. In a pair mesh neither applies and
 `grants` stays what it always was. A REMOVED charter line is revocation and
 refuses on the first request after the new version is received, whatever
 paired record the key also has.
+
+**The UNSIGNED autogate rail answers to the same charter** (the A3 review's
+finding 4). `message/send`'s Inject arm carries three auto-delivery rails, and
+the two unsigned ones — a source ADDRESS resolving to an `autogate` record's
+`url`, or a presented bearer matching that record's own `tokenFile`
+(§6's 2026-08-18 amendment) — sit behind no request signature at all, so they
+name no mesh. They are judged by the record the rail MATCHED, by its HOME
+mesh, resolved with `effective_mesh(None)` exactly as a request that names no
+mesh is:
+
+| the record the rail matched | home mesh | auto-delivers |
+|---|---|---|
+| `autogate`, `verified`, key on the line with `message` | a charter GOVERNS it | yes — the line, minus this box's own `node allow … message off --mesh <home>` |
+| any record | charter-SHAPED, operator key undecidable | **nothing** — held PENDING |
+| any record | a PAIR mesh (nothing shaped for it) | yes — the record's own `autogate` flag, the whole rule, exactly as before |
+
+`a2a::rail_admits` is that table and `a2a::rail_admits_here` the disk read
+that feeds it (one governing/shaped resolution per matched record); the charter
+arm is `grant_from`, so "the line minus local narrowing" has ONE
+implementation and the rail cannot drift from the grant lookup.
+**`verified` is asked only of a record that claims a charter LINE**, never of a
+keyless record the rail matched by address: `aoide node add --autogate` writes
+`verified: false` (a card fetch is reachability, never identity), so requiring
+it in a pair mesh would delete the rail rather than harden it. The third rail —
+the signature rung (`NodeRung::Signature` on an `autogate` record, finding 5) —
+already reads the grant in the request's SIGNED mesh, and is unchanged. Loopback
+delivery is unchanged too: `should_deliver_now(Loopback, _)` consults neither
+rail.
+
+**A rail that does not deliver PENDS; it is not refused.** The match and the
+delivery are two booleans in the Inject arm, deliberately: `autogate_match` is
+what exempts a caller from the #50 uniform-response guard (a registered record
+presenting its own address or token is not an unauthenticated stranger whose
+`contextId` answer must be uniform), and only `deliver_match` feeds
+`should_deliver_now`. Folding the charter's judgement into the match would
+answer a charter-unlisted caller with the guard's synthetic `submitted` Task —
+neither delivered nor queued, and invisible to the operator — instead of the
+approval queue, whose entry still carries the `node:<name>` attribution its
+`from` field would have had.
 
 ### `aoide/binding` (P-SEAL, `docs/architecture/HTTPS-MESH-API.md`)
 
