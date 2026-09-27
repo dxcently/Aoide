@@ -175,7 +175,8 @@ to **rebuild time** instead.
   `verify_signed_request` already verified is remote by construction (an
   ssh `-L` forward terminates at loopback on this end), so
   `origin_for_inject` strips `Loopback`'s free pass from it — and then the
-  node's own `autogate` flag or a matched remote-parent claim decides
+  node's own `autogate` flag, with `message` in the mesh the request signed
+  for, or a matched remote-parent claim decides
   delivery, never the arrival address ([[Node-Transport]]).
   This is the one interactive per-request gate the wire otherwise lacks —
   added for [[Node-Federation|node federation]]'s non-loopback case, which
