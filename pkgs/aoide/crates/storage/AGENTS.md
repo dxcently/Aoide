@@ -264,11 +264,12 @@
   whether that record earns auto-delivery under its HOME mesh's rules
   (`aoide-server::a2a::rail_admits`, which reads the charter and
   `Node::narrowed` the door already reads). **Don't fold a grant, a charter or
-  a `verified` check into these folds:** the `is_autogated_node_*` predicates
-  are the door's #50 guard exemption, and narrowing them there would answer a
-  charter-unlisted caller with the guard's synthetic `submitted` Task (no
-  delivery, no queue entry) instead of the PENDING entry the rail's ruling
-  asks for. `Node.autogate`'s own field doc carries the same statement.
+  a `verified` check into these folds:** the door's #50 guard exemption asks
+  "did the rail match" as `.is_some()` on the record, and narrowing the MATCH
+  would answer a charter-unlisted caller with the guard's synthetic
+  `submitted` Task (no delivery, no queue entry) instead of the PENDING entry
+  the rail's ruling asks for. `Node.autogate`'s own field doc carries the same
+  statement.
 - **`config::SCHEMA` is the ONE place a config key is described — walk it,
   never restate it in a match arm.** The table carries each key's name,
   `ValueKind` vocabulary, summary, and a `read` fn projecting it off a typed

@@ -386,7 +386,7 @@ the inbound half of the two-door contract (the outbound half is
   resolve_node`'s own two-rung ladder (a node's own `token_file` —
   `NodeRung::Token` — else the TCP origin against a node's `url` —
   `NodeRung::Addr`, the SAME identification the door's
-  `is_autogated_node_addr`/`is_autogated_node_token` already fold, just
+  `autogated_node_addr`/`autogated_node_token` already fold, just
   unfiltered by `autogate` and narrowed to one named node) even on a
   registry-lookup miss. Neither the `Addr` nor the (now-insufficient)
   `Token` resolution reaches Spawn any more — a bare TCP-source-IP-vs-`url`

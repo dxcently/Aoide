@@ -5829,7 +5829,7 @@ that command being non-empty. Fixed in `a2a.rs`:
   per-node secret from the server-wide `tokenFile` above — it resurrects the
   `autogate` flag's original intent (§7) by letting a token, not an
   IP, say WHICH registered node is calling. `aoide_storage::node_store::
-  is_autogated_node_token` folds this the same way `is_autogated_node_addr`
+  autogated_node_token` folds this the same way `autogated_node_addr`
   already did; Inject's `autogate_match` is now the OR of both checks, so an
   operator who never sets a node's `tokenFile` sees the original
   address-only match, unchanged. This is a per-node credential, not one
@@ -5910,7 +5910,7 @@ shape alone (`-32001 task not found` vs a `submitted`/injected Task — an
 `do_inject`, which could still **write `pending.json`** with zero credential
 presented at all. A hard `-32005` here, mirroring Spawn, would be the WRONG
 fix: enrolled nodes authenticate this call via their OWN per-node token
-(`Node.tokenFile` / `is_autogated_node_token`, 2026-08-19 amendment above),
+(`Node.tokenFile` / `autogated_node_token`, 2026-08-19 amendment above),
 never the server-wide one, and aoide's own outbound clients send no bearer
 by default (`commands.rs`/`wire.rs` — a per-node `Node.bearerSecret`, set via
 `node add --bearer-secret <name>` and resolved fresh through the secrets
@@ -5976,8 +5976,8 @@ message_send`:
 - `resolve_node(nodes, addr, presented_token)` (`aoide_storage::node_store`)
   is the caller-identity ladder — a presented bearer matched against ANY
   registered node's own `tokenFile` first, the connection's origin address
-  matched against a node's `url` second — unlike `is_autogated_node_token`/
-  `is_autogated_node_addr` above, it checks EVERY registered node, not only
+  matched against a node's `url` second — unlike `autogated_node_token`/
+  `autogated_node_addr` above, it checks EVERY registered node, not only
   ones marked `autogate`, since "which node is this" is a different
   question from "should this node skip the pending queue." It returns
   WHICH rung matched alongside the node (`NodeRung::Token` /
@@ -7244,6 +7244,22 @@ door-wide grant question, where the same swallow is deliberate and NOT fixed
 here — the two are separate resolutions of the same name, and neither is the
 other's fallback.
 
+**The address rung is an ADDRESS match, with an address match's limits**
+(review F5; unchanged by this ruling, and inherent to the rung).
+`autogated_node_addr` returns the FIRST registry-order record whose `url` host
+resolves to the peer, so with two records on one host the send delivers on
+whichever comes first — listed first ⇒ delivered, unlisted first ⇒ PENDING —
+and only one of those two directions is fail-closed. `node_url_matches_addr`
+asks the live resolver for a hostname `url`, so the admitted address set is
+whatever DNS answers at that moment; anyone who is at, NAT'd behind, proxied
+with, or landing on a listed record's address is auto-delivered as that
+record, whatever key is really sending. It fails CLOSED in the shapes that do
+not parse: an IPv4-mapped/unmapped mismatch is a non-match, and an IPv6-literal
+`url` (`[::1]`, bare `2001:db8::1`) never matches at all. Accepted by design —
+[`NodeRung::Addr`] is "spoofable by anyone who can reach the door from that
+address" (§7), and before this ruling every one of those cases DELIVERED; this
+narrowing is what makes the first of them pend.
+
 `a2a::rail_admits` is that table and `a2a::rail_admits_here` the disk read
 that feeds it (one governing/shaped resolution per matched record); the charter
 arm is `grant_from`, so "the line minus local narrowing" has ONE
@@ -7701,8 +7717,8 @@ P-P3 decision 6) is the caller-identity ladder for the TWO unsigned rungs
 — a presented bearer matched against ANY registered node's own `tokenFile`
 first (`NodeRung::Token` on a hit), the connection's origin address matched
 against a node's `url` second (`NodeRung::Addr` on a hit); it returns which
-rung matched alongside the `Node`. Unlike `is_autogated_node_token`/
-`is_autogated_node_addr` (§6's 2026-08-19 amendment), it checks every
+rung matched alongside the `Node`. Unlike `autogated_node_token`/
+`autogated_node_addr` (§6's 2026-08-19 amendment), it checks every
 registered node, not only ones marked `autogate` — "which node is this" is
 a different question from "should this node skip the pending queue." The
 three rungs `NodeRung` now carries are NOT interchangeable strength:

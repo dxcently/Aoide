@@ -232,7 +232,7 @@ to **rebuild time** instead.
   `Node.tokenFile` (`state/nodes.json`, set via `node add --token-file
   <path>`) is a separate, per-node secret from the server-wide `tokenFile`
   above — a legacy escape for unpaired callers, like it.
-  `node_store::is_autogated_node_token` folds a presented token
+  `node_store::autogated_node_token` folds a presented token
   against every registered node's own token file, and Inject's autogate
   match is the OR of the address check, this token check, the
   signature-rung `autogate` flag, and a matched remote-parent claim — the

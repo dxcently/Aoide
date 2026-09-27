@@ -92,7 +92,7 @@ pub struct Node {
     /// `message/send` — how the door tells WHICH registered node is calling
     /// once IP alone can't (CONTRACTS.md §6 amendment, 2026-08-18: behind any
     /// reverse proxy/tunnel every caller is `127.0.0.1`, so the
-    /// [`is_autogated_node_addr`] IP match is permanently dead there). Absent
+    /// [`autogated_node_addr`] IP match is permanently dead there). Absent
     /// by default — an unmarked node authenticates by address only, exactly
     /// as before this field existed.
     #[serde(rename = "tokenFile", default, skip_serializing_if = "Option::is_none")]
@@ -874,7 +874,7 @@ pub fn set_node_allow(nodes: &mut [Node], name: &str, cap: &str, on: bool, mesh:
 /// door from that address, or who merely sits behind the same NAT/proxy as
 /// the real node. `Token` is possession of that node's own `token_file`
 /// secret — it survives any reverse proxy/NAT, the same reason
-/// [`is_autogated_node_token`] is preferred over the address check for
+/// [`autogated_node_token`] is preferred over the address check for
 /// autogate, but it is still a bare shared secret: not bound to any one
 /// request, replayable, and identical across every request the true node
 /// or an impersonator ever sends. `Signature` (P-P4,
@@ -910,7 +910,7 @@ pub enum NodeRung {
 /// Resolve the CALLING node's identity (P-P3, PAIRING.md decision 6) — the
 /// specific registered [`Node`] a caller's presented credential names, PLUS
 /// which [`NodeRung`] matched, independent of that node's own `autogate`
-/// flag. Unlike [`is_autogated_node_token`]/[`is_autogated_node_addr`]
+/// flag. Unlike [`autogated_node_token`]/[`autogated_node_addr`]
 /// (which fold ONLY over `autogate`-marked nodes, for the unrelated "skip
 /// the pending queue" question), this looks at EVERY registered node — a
 /// gate that needs to know WHICH node is calling (not merely "does some
@@ -919,7 +919,7 @@ pub enum NodeRung {
 /// Ladder, first match wins, first REGISTRY-ORDER match within a rung: a
 /// presented bearer token that matches a node's OWN `token_file`
 /// ([`token_bytes_eq`], the mechanism that survives a reverse proxy — same
-/// precedence [`is_autogated_node_token`]'s own doc gives it) is tried
+/// precedence [`autogated_node_token`]'s own doc gives it) is tried
 /// FIRST (`NodeRung::Token` on a hit); failing that, an `addr` whose host
 /// resolves against a node's registered `url` ([`node_url_matches_addr`])
 /// is tried second (`NodeRung::Addr` on a hit). `None` for an unmatched
@@ -1128,34 +1128,36 @@ fn node_url_matches_addr(url: &str, addr: IpAddr) -> bool {
 /// mesh of its own to read a grant in; the door therefore judges the matched
 /// RECORD by its HOME mesh's rules (`aoide-server::a2a::rail_admits`: the
 /// charter line for its key where a charter governs home, nothing where home
-/// is charter-shaped, and the record's own `autogate` flag where home is a
-/// pair mesh). What this function answers is only WHICH record the connection
-/// resolved to, and it is what lets the door ask that second question at all —
-/// the trust decision is the door's, and always was.
+/// is charter-shaped or its config will not load, and the record's own
+/// `autogate` flag where home is a pair mesh). What this function answers is
+/// only WHICH record the connection resolved to, and it is what lets the door
+/// ask that second question at all — the trust decision is the door's, and
+/// always was. The door's own "did the rail match anything" is
+/// `.is_some()` on this result, so the fold has no second name to drift
+/// against (review F7: the `is_autogated_node_*` predicates it used to carry
+/// were dead API).
+///
+/// `nodes`' own registry order is the whole tie-break, which is why a host
+/// that resolves to TWO records (one on the charter's line, one not) delivers
+/// on whichever of them comes first. Accepted: the rung is an address match,
+/// and `node_url_matches_addr` asks the live resolver for a hostname `url`, so
+/// the admitted address set is whatever DNS says at that moment
+/// ([`NodeRung::Addr`]'s own doc carries the full statement).
 pub fn autogated_node_addr(nodes: &[Node], addr: IpAddr) -> Option<&Node> {
     nodes.iter().find(|p| p.autogate && node_url_matches_addr(&p.url, addr))
 }
 
-/// Did the address rail match any record? The pure per-node match
-/// ([`node_url_matches_addr`]) is what's actually unit-testable without DNS;
-/// this just folds it over the registered, autogate-marked subset. See
-/// [`autogated_node_addr`] for the record itself, and for why a match is not a
-/// delivery.
-pub fn is_autogated_node_addr(nodes: &[Node], addr: IpAddr) -> bool {
-    autogated_node_addr(nodes, addr).is_some()
-}
-
 // ── Per-node token identification (CONTRACTS.md §6 amendment, 2026-08-18) ───
 //
-// [`is_autogated_node_addr`] above is the address-based match this crate
+// [`autogated_node_addr`] above is the address-based match this crate
 // shipped with (§6, 2026-08-14) — still here, still checked first, still the
 // ONLY check when no node has ever set `token_file` (so a registry with no
 // tokens configured resolves identically to before this amendment). But
 // behind any reverse proxy or tunnel, `peer_addr()` on the SERVER's end is
 // the proxy's own loopback address for every caller, so IP can no longer
 // tell two nodes apart. A per-node token is the identity signal that
-// survives a proxy: [`is_autogated_node_token`] below is the same autogate
-// fold as [`is_autogated_node_addr`], keyed on a presented bearer token
+// survives a proxy: [`autogated_node_token`] below is the same autogate
+// fold as [`autogated_node_addr`], keyed on a presented bearer token
 // instead of a source address.
 
 /// Length-independent byte compare for a secret: unlike `==`/`eq`, the
@@ -1201,13 +1203,6 @@ pub fn autogated_node_token<'a>(nodes: &'a [Node], presented: &str) -> Option<&'
                 .map(|raw| token_bytes_eq(raw.trim(), presented))
                 .unwrap_or(false)
     })
-}
-
-/// Did the token rail match any record? [`autogated_node_token`]'s fold as a
-/// predicate; see it for the record itself and for why a match is not a
-/// delivery.
-pub fn is_autogated_node_token(nodes: &[Node], presented: &str) -> bool {
-    autogated_node_token(nodes, presented).is_some()
 }
 
 // ── Node cache: the last-pulled `aoide/graphSummary` response ───────────────
@@ -1512,13 +1507,17 @@ mod tests {
         let untrusted_ip: IpAddr = "10.0.0.6".parse().unwrap();
         let stranger_ip: IpAddr = "10.0.0.9".parse().unwrap();
 
-        assert!(is_autogated_node_addr(&nodes, trusted_ip), "the autogate-marked node's own address matches");
+        assert_eq!(
+            autogated_node_addr(&nodes, trusted_ip).map(|p| p.name.as_str()),
+            Some("trusted"),
+            "the autogate-marked node's own address matches, and the RECORD is what comes back"
+        );
         assert!(
-            !is_autogated_node_addr(&nodes, untrusted_ip),
+            autogated_node_addr(&nodes, untrusted_ip).is_none(),
             "a registered but NOT autogate-marked node never matches"
         );
-        assert!(!is_autogated_node_addr(&nodes, stranger_ip), "an unregistered address never matches");
-        assert!(!is_autogated_node_addr(&[], trusted_ip), "an empty registry matches nothing");
+        assert!(autogated_node_addr(&nodes, stranger_ip).is_none(), "an unregistered address never matches");
+        assert!(autogated_node_addr(&[], trusted_ip).is_none(), "an empty registry matches nothing");
     }
 
     // ── Node cache round-trip + staleness ────────────────────────────────────
@@ -1609,7 +1608,7 @@ mod tests {
     }
 
     #[test]
-    fn is_autogated_node_token_matches_only_an_autogated_nodes_own_token_file() {
+    fn autogated_node_token_matches_only_an_autogated_nodes_own_token_file() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!("aoide-node-token-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1636,10 +1635,17 @@ mod tests {
 
         let nodes = vec![trusted, no_token_autogate, broken, untrusted];
 
-        assert!(is_autogated_node_token(&nodes, "trusted-secret"), "matches the autogate-marked node's own token");
-        assert!(!is_autogated_node_token(&nodes, "untrusted-secret"), "an autogate-marked node's token never matches a NON-autogated node's secret");
-        assert!(!is_autogated_node_token(&nodes, "wrong"), "an unrecognised token matches nothing");
-        assert!(!is_autogated_node_token(&[], "trusted-secret"), "an empty registry matches nothing");
+        assert_eq!(
+            autogated_node_token(&nodes, "trusted-secret").map(|p| p.name.as_str()),
+            Some("trusted"),
+            "matches the autogate-marked node's own token, and the RECORD is what comes back"
+        );
+        assert!(
+            autogated_node_token(&nodes, "untrusted-secret").is_none(),
+            "an autogate-marked node's token never matches a NON-autogated node's secret"
+        );
+        assert!(autogated_node_token(&nodes, "wrong").is_none(), "an unrecognised token matches nothing");
+        assert!(autogated_node_token(&[], "trusted-secret").is_none(), "an empty registry matches nothing");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2089,7 +2095,8 @@ mod tests {
         std::fs::write(&token_path, "secret-b\n").unwrap();
 
         // NOT autogate-marked — resolve_node must still find it by token,
-        // unlike is_autogated_node_token which would refuse it.
+        // unlike `autogated_node_token`, whose fold is over `autogate`-marked
+        // records only, and which would refuse it.
         let mut paired = fixture_node("box-b", "http://10.0.0.5:8710/", false);
         paired.verified = true;
         paired.token_file = Some(token_path.to_string_lossy().into_owned());
