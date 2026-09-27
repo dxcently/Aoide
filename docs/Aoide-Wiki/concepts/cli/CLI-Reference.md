@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-29
+updated: 2026-09-27
 tags: [aoide, cli, reference, schema]
 ---
 
@@ -61,10 +61,10 @@ start at [[aoide-cli]] and the group pages linked below.
   `session start/phase/end/hook/undying/permit/pending list/approve/deny/
   prune/reap`, bare `session` (the undying picker), bare `send`/`spawn`/
   `resurrect` (bare `resurrect` also walks up to a `.aoide/project.json`
-  manifest), `conduct`, and `inbox list/read/clear` (the receive half of
-  `send`).
+  manifest), `conduct`, and `mail`/`mail read`/`mail poll` (the receive half
+  of `send`).
   Stage files: `state/stage/{sessions,hooks,projects,graph,pending,
-  herald}.json`, `state/inbox.json`; control sockets at
+  herald}.json`; the mailbase at `state/mail/base.jsonl`; control sockets at
   `$XDG_RUNTIME_DIR/aoide/session-<id>.sock`.
 - [[Screen-Commands|Screen-Commands]] — computer use: `screen info/
   shot/ocr/diff/send` and the nine `screen point` commands. Captures and sidecars

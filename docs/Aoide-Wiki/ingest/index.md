@@ -1,6 +1,6 @@
 ---
 type: index
-updated: 2026-09-07
+updated: 2026-09-27
 ---
 
 # Aoide — Index
@@ -19,7 +19,7 @@ updated: 2026-09-07
 - [[Widget-Preview]] — `lyra preview`: the isolated design canvas for a song widget — any size, anchor, viewport and fixture, a stub bridge, never the live desktop
 - [[Lexicon]] — the whole vocabulary: the three Muses, the frozen/performed split, the machinery words, and why each word family was chosen
 - [[Snowflake-Anatomy]] — the flake's structural layers (nucleus / dendrites / facets / rime) and how the walker registers modules automatically
-- [[Clone-and-Run]] — installing Aoide: clone, `aoide onboard`; the shared-history model for upstream updates and optional contributions
+- [[Clone-and-Run]] — installing Aoide: the `aoide`/`aoided` binaries by cargo (no nix), then clone + `aoide onboard`; the shared-history model for upstream updates and optional contributions
 - [[Self-Ricing]] — the rice lifecycle (compose → stage → lint → draft → declare), the songbook write-back, and the three-way `rice mode` gate
 - [[Song-Vocabulary]] — what each song term maps to in the performed half, and how replay makes a committed song host-agnostic
 - [[Song-Anatomy]] — what every `song/` subfolder is for, committed score vs gitignored runtime, who writes each, and the six stage files

@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-26
-updated: 2026-08-29
+updated: 2026-09-27
 aliases: [aoide binary, aoide command]
 tags: [aoide, cli, agent, mcp, rust]
 ---
@@ -59,14 +59,16 @@ adding, removing, or renaming a leaf shows as a deliberate diff against that
 snapshot.
 
 The command surface holds **64 leaves across the groups this page tracks**;
-`aoide schema --json | jq '.commands | length'` reports 103, since further
-commands exist that are not yet covered here: the `inbox` group, `who`,
+`aoide schema --json | jq '.commands | length'` reports 110, since further
+commands exist that are not yet covered here: the `mail` group (`mail`,
+`mail send`/`read`/`show`/`mark`/`rm`, `mail outbox`/`outbox rm`/`outbox
+retry`, `mail export`, `mail poll`, `mail serve`, `mail ring` —
+`docs/architecture/MAIL.md`), `who`,
 `events tail`, `identity` (the keypair read surface — [[Pairing-Ceremony]]),
 the `melete` group (`status`/`graph`/`call`),
 and the `node` group's `hub`/`allow`/`spawn`,
 `discover`/`advertise`/`list`, and the pairing ceremony — `pair <target>`
-with its `approve`/`reject`/`watch` subcommands plus `pending`
-([[Pairing-Ceremony]]). `lyra schema --json`
+with `pair reject`/`pair watch` beside it ([[Pairing-Ceremony]]). `lyra schema --json`
 carries the painted surface — see above.
 The per-command dev reference — signature, files read, files written,
 where output pipes to — lives at [[CLI-Reference]]; the table below sums
@@ -307,11 +309,14 @@ shortcut the panel itself registers (`aoide:dock`), not a CLI command (see
 ## The second binary — `aoided`
 
 The same crate installs `aoided`, the daemon (see [[aoided]]). It shares
-the audit-log, gate, and neutral-event-stream code with the CLI, so `aoide
-daemon` and the standalone `aoided` binary reach the same code path; the
-standalone binary is what the systemd unit launches. `aoided --audit-log
-<path>` overrides the log location, else the `aoide.auditLog` default
-applies.
+the audit-log, gate, and neutral-event-stream code with the CLI, but it is
+not the same entry point: **`aoided` runs the resident loop**
+(`daemon::run_loop` — binds the control socket, ticks forever, which is what
+the systemd unit execs), while **`aoide daemon` runs the one-shot skeleton
+self-check** (`daemon::run` — audits, proves the default-deny subscription
+and the propose-only gate, prints one JSON envelope, exits). `aoided
+--audit-log <path>` overrides the log location, else the `aoide.auditLog`
+default applies. Starting it without nix: `docs/INSTALL.md` § 6.
 
 ## Related
 

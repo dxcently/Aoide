@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-28
-updated: 2026-08-29
+updated: 2026-09-27
 tags: [aoide, agent, a2a, orchestration, node, security]
 ---
 
@@ -144,9 +144,10 @@ out of band; A's own confirm gates on this code, never the first.
 
 ## The command surface
 
-`aoide pair [<name|url|id>] [--name <n>] [--via ssh://[user@]host[:port]]
-[--self-via ssh://[user@]host] [--secs N] [--wait SECS]
-[--allow read,spawn] [--yes]` / `aoide pair reject <id|name>` /
+`aoide pair [<name|url|id>] [--name <n>] [--code <code>]
+[--via ssh://[user@]host[:port]] [--self-url <url>]
+[--self-via ssh://[user@]host] [--mesh <mesh>] [--secs N] [--wait SECS]
+[--allow read,spawn] [--yes] [--json]` / `aoide pair reject <id|name>` /
 `aoide pair watch [--popup] [--json]`, registered together in
 `register_pair` — one smart verb (`handle_pair`) dispatching on its
 optional target:
