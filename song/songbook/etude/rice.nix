@@ -24,7 +24,7 @@
     # ── Arrangement — declares one brand-new surface-kind widget type ───────
     # Proves the Phase 1-5 registry pipeline end-to-end: this walks into
     # registry.json (build-time walk + `rice stage` hot-sync) and the
-    # compositor facet's layerrules; song/songbook/etude/widgets/demo.qml is
+    # compositor lane's layerrules; song/songbook/etude/widgets/demo.qml is
     # the widget body.
     aoide.arrangement.widgets.demo = {
       kind = "surface";

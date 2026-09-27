@@ -86,7 +86,7 @@ in
     };
 
     # ── Cover-art note ────────────────────────────────────────────────────────
-    # null → the stylix facet bakes a deterministic graphite solid from
+    # null → the stylix lane bakes a deterministic graphite solid from
     # palette.bg, same mechanism sonata uses.
     aoide.livery.wallpaper = null;
   };

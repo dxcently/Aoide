@@ -6,7 +6,7 @@
 # one-hot trace — the single blaze the grammar reserves for the live/traced
 # element. Aegean blue steps back to a preview/info role. The look is a temple
 # in daylight: pale stone, dark ink, gold-and-terracotta chrome. There is no
-# cover — the wallpaper note is null, so the stylix facet bakes a deterministic
+# cover — the wallpaper note is null, so the stylix lane bakes a deterministic
 # bright-marble solid from palette.bg (the default song's mechanism). The
 # typographic-Greek house grammar this key wears is in design/greek-grammar.md
 # (sonata's own grammar, a deliberate divergence from the default song's
@@ -41,12 +41,12 @@ in
     # bar/wallpaper are one mapped layer surface PER enabled output (each is a
     # `Variants` delegate over Quickshell.screens in shell.qml); dock is a
     # single column, wherever it lands. These declare an EXPECTATION and
-    # instantiate nothing: all three are facet-owned windows hardcoded in the
+    # instantiate nothing: all three are shell-owned windows hardcoded in the
     # shell — never `arrangement.widgets` entries, which would stand up a
     # second copy of each.
     #
     # Declaration is for PERSISTENTLY mapped surfaces ONLY. Everything else in
-    # this facet — launcher, osd, lockscreen, greeter, the `*Preview` surfaces,
+    # this shell — launcher, osd, lockscreen, greeter, the `*Preview` surfaces,
     # and any declared flavor widget — is summoned on demand and must NOT be
     # declared, or a consumer would read a CLOSED surface as a lost one.
     aoide.arrangement.surfaces = {
@@ -120,9 +120,9 @@ in
     };
 
     # ── Cover-art note ─────────────────────────────────────────────────────
-    # null → the stylix facet bakes a DETERMINISTIC bright-marble solid from
+    # null → the stylix lane bakes a DETERMINISTIC bright-marble solid from
     # palette.bg (#f2ebde) — the same null-wallpaper-to-solid mechanism the
-    # stylix facet applies to any song with no cover note. The retired
+    # stylix lane applies to any song with no cover note. The retired
     # covers/yuki-sonata.png reference is dropped: sonata's colours fit the
     # Greek theme, not a photograph (khoa). The wallpaper switcher handles photos
     # live; the song's DEFAULT ground is a clean bright marble field, which keeps

@@ -12,8 +12,8 @@ is a repo-local map, not a replacement for either.
 song/
 ├── songbook/                   committed score — per-song homes + cross-cutting design memory
 │   │                              (sonata, the shipped baseline, is upstream-owned + evolving, like
-│   │                              nucleus/facets; every OTHER song is clone-owned, never adopted-over)
-│   ├── <name>/                  one song per folder, e.g. sonata (self-registers — no import list)
+│   │                              nucleus/dendrites; every OTHER song is clone-owned, never adopted-over)
+│   ├── <name>/                  one song per folder, e.g. sonata (found by one typed scan, built in only when a host selects it)
 │   │   ├── rice.nix                pure nix: sets ONLY aoide.livery.*, guarded by aoide.song == "<name>"
 │   │   ├── livery.json             this song's resolved livery values
 │   │   ├── palette/                (planned) transpose keys — variants `rice transpose` swaps among
@@ -54,7 +54,7 @@ stage/livery.json   ◄── also: `aoide rice preview` stages this ephemerally
         │                                                  atomic writes only)
         │  FileView watches the file; onFileChanged → reload()
         ▼
-qml/LiveryState.qml    (singleton — mirrored under modules/facets/quickshell/qml/)
+qml/LiveryState.qml    (singleton — shipped by pkgs/lyra-shell/qml/)
    hot-reload: every widget's binding updates in one pass, no QML restart
         │
         ▼
@@ -75,8 +75,8 @@ covers/<name>                              stage/cover.json
    (immutable store path via AOIDE_WALLPAPER) if cover.json is absent/garbage
 ```
 
-The `no-song-read` flake check forbids any nix module reading `stage/` at
-build time — runtime state can never become load-bearing for the build.
+The `song-runtime-untracked` flake check fails the tree if a `song/` runtime
+dir is committed, so runtime state can never become load-bearing for the build.
 
 ## Creation vs. application
 
@@ -86,7 +86,7 @@ build time — runtime state can never become load-bearing for the build.
 | **Application** (performing an adopted song) | nothing — pure selection | `songbook/<song>/rice.nix` fanned into `stage/livery.json` at build/preview time |
 
 The swap is one line, host-agnostic (no other edit needed — a song sets
-only `aoide.livery`, no host options, no facet toggles):
+only `aoide.livery`, no host options, no lane toggles):
 
 ```nix
 # hosts/<host>/default.nix

@@ -16,7 +16,7 @@
 {
   config = lib.mkIf (config.aoide.song == "cadenza") {
 
-    # ── Expected paint — the three facet-owned surfaces cadenza keeps mapped ──
+    # ── Expected paint — the three shell-owned surfaces cadenza keeps mapped ──
     # Same declaration as sonata: bar/wallpaper per output, the dock (the
     # message board) a single surface. On-demand surfaces are not declared.
     aoide.arrangement.surfaces = {
@@ -84,7 +84,7 @@
     };
 
     # ── Cover-art note ───────────────────────────────────────────────────────
-    # null → the stylix facet bakes a solid field from palette.bg: the tube.
+    # null → the stylix lane bakes a solid field from palette.bg: the tube.
     aoide.livery.wallpaper = null;
   };
 }

@@ -95,7 +95,7 @@ in
     };
 
     # ── Cover-art note ────────────────────────────────────────────────────────
-    # null → the stylix facet bakes a deterministic violet solid from
+    # null → the stylix lane bakes a deterministic violet solid from
     # palette.bg, same mechanism sonata and fugue use.
     aoide.livery.wallpaper = null;
   };
