@@ -640,13 +640,21 @@ fn revoked_by_charter(node: &aoide_storage::node_store::Node) -> bool {
     if meshes.is_empty() {
         return false;
     }
-    meshes.iter().all(|mesh| match aoide_storage::charter::governing(mesh) {
-        Some(charter) => node
-            .pubkey
-            .as_deref()
-            .is_none_or(|key| charter.grant_for_key(key).is_none()),
+    meshes.iter().all(|mesh| {
+        // F2: a mesh a charter was accepted for is a charter mesh even while
+        // its operator key is undecidable, and a charter mesh's unlisted key
+        // is not routable — the fail-closed side, not the paired fallback.
+        if aoide_storage::charter::charter_shaped(mesh) {
+            return match aoide_storage::charter::governing(mesh) {
+                Some(charter) => node
+                    .pubkey
+                    .as_deref()
+                    .is_none_or(|key| charter.grant_for_key(key).is_none()),
+                None => true,
+            };
+        }
         // A pair mesh: the charter has nothing to say about it.
-        None => false,
+        false
     })
 }
 

@@ -237,6 +237,14 @@ pub struct CharterRow {
     /// file has state and no declaration — so this says whether the section
     /// above is about the same mesh, never whether the charter is real.
     pub declared: bool,
+    /// Is a charter DOCUMENT in force here (parsed, from
+    /// `state/mesh/<mesh>/charter.toml`)? `false` with a row present means the
+    /// mesh is charter-SHAPED without a document this node can read — an
+    /// operator key is recorded (a join that has not yet accepted anything) or
+    /// the stored document no longer parses. The door refuses everything in
+    /// such a mesh rather than falling back to the paired records (review F2).
+    #[serde(rename = "inForce")]
+    pub in_force: bool,
     /// The version in force.
     pub version: u64,
     /// The operator key's durable fingerprint (`SHA256:<hex>`,
@@ -365,18 +373,26 @@ pub fn report(meshes: &BTreeMap<String, Mesh>, nodes: &[Node], local_name: &str)
 /// must be able to say `trusted: false` about a charter the door would refuse
 /// to honour rather than hiding it.
 pub fn charter_rows(declared: &BTreeSet<String>, nodes: &[Node]) -> Vec<CharterRow> {
+    let mut names: BTreeSet<String> = declared.iter().cloned().collect();
+    names.extend(aoide_storage::charter::meshes_with_state());
     let mut out = Vec::new();
-    for mesh in aoide_storage::charter::meshes_with_state() {
-        let Some(charter) = aoide_storage::charter::in_force_charter(&mesh) else {
+    for mesh in names {
+        // F2: the row is on CHARTER-SHAPED, so a mesh whose operator key is
+        // undecidable still reports itself as a charter mesh (`trusted: false`,
+        // and no `inForce` document where none parses) instead of vanishing
+        // from the report while the door refuses everything in it.
+        if !aoide_storage::charter::charter_shaped(&mesh) {
             continue;
-        };
+        }
+        let in_force = aoide_storage::charter::in_force_charter(&mesh);
         let trust = aoide_storage::charter::load_trust(&mesh).ok().flatten().unwrap_or_default();
         let config_line = aoide_storage::charter::config_operator(&mesh).ok().flatten();
         let state_key = Some(trust.operator.clone()).filter(|k| !k.is_empty());
         out.push(CharterRow {
             declared: declared.contains(&mesh),
-            mesh: charter.mesh.clone(),
-            version: charter.version,
+            mesh: mesh.clone(),
+            in_force: in_force.is_some(),
+            version: in_force.as_ref().map(|c| c.version).unwrap_or(0),
             operator: aoide_storage::charter::fingerprint_of_key(&trust.operator),
             operator_key: trust.operator.clone(),
             trust: match (&config_line, &state_key) {
@@ -403,7 +419,7 @@ pub fn charter_rows(declared: &BTreeSet<String>, nodes: &[Node]) -> Vec<CharterR
                 .filter(|n| n.verified && !n.grant(&mesh).is_empty())
                 .map(|n| n.name.clone())
                 .collect(),
-            nodes: charter.nodes.len(),
+            nodes: in_force.as_ref().map(|c| c.nodes.len()).unwrap_or(0),
         });
     }
     out
@@ -481,7 +497,11 @@ fn render_charter(charter: &CharterRow) -> String {
     let mut line = format!(
         "charter {} v{} — operator {} (trust: {}, {}){}",
         charter.mesh,
-        charter.version,
+        if charter.in_force {
+            charter.version.to_string()
+        } else {
+            "none in force".to_string()
+        },
         charter.operator,
         charter.trust,
         if charter.trusted { "honoured" } else { "NOT HONOURED — resolve the operator key" },

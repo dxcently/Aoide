@@ -127,21 +127,24 @@ pub fn mesh_state_dir(mesh: &str) -> PathBuf {
     fs::state_dir().join("mesh").join(mesh)
 }
 
-/// Every mesh with a charter ON DISK at this node — `state/mesh/*/charter.toml`,
-/// sorted. The one directory read this module does, and it exists for exactly
-/// one reason: `aoide mesh` must report a charter mesh the config never
-/// declared (a machine that took its first charter by file, or by a LAN join,
-/// has state and no `[mesh.<name>]` row). A path that cannot be listed is an
-/// empty list, never an error — this is a REPORT's read, and a report that
-/// refuses to render because a directory is missing is worse than one that
-/// says nothing about it.
+/// Every mesh with charter STATE on disk at this node — `state/mesh/*/` holding
+/// a `charter.toml` (a charter in force, or one that no longer parses) or a
+/// `trust.json` (an operator key this machine records, which is what a
+/// `mesh join` writes before any charter has been accepted), sorted. The one
+/// directory read this module does, and it exists for exactly one reason:
+/// `aoide mesh` must report a charter-shaped mesh the config never declared —
+/// a machine that took its first charter by file, joined over the LAN, or
+/// joined by operator key alone has state and no `[mesh.<name>]` row. A path
+/// that cannot be listed is an empty list, never an error — this is a
+/// REPORT's read, and a report that refuses to render because a directory is
+/// missing is worse than one that says nothing about it.
 pub fn meshes_with_state() -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(fs::state_dir().join("mesh")) else {
         return Vec::new();
     };
     let mut out: Vec<String> = entries
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().join("charter.toml").is_file())
+        .filter(|e| e.path().join("charter.toml").is_file() || e.path().join("trust.json").is_file())
         .filter_map(|e| e.file_name().into_string().ok())
         .collect();
     out.sort();
@@ -765,6 +768,39 @@ fn accept_locked(
 pub fn in_force_charter(mesh: &str) -> Option<Charter> {
     let text = std::fs::read_to_string(in_force_path(mesh)).ok()?;
     parse(&text).ok()
+}
+
+/// **Is this mesh CHARTER-SHAPED** — has a charter been accepted for it at
+/// this node (a charter on disk, or a trust record naming an operator), quite
+/// apart from whether the operator key can be DECIDED right now?
+///
+/// This is the distinction review F2 forced, and it is a security one: a mesh
+/// with a charter is a charter mesh even while its operator key is
+/// undecidable, and a charter mesh's rule is "the charter is the only trust in
+/// this mesh — a key the charter does not list is not trusted in it, whatever
+/// a pairing says" (`docs/architecture/HTTPS-MESH-API.md` "Trust per mesh").
+/// Collapsing the two — which [`governing`] alone does — makes every charter
+/// invariant (revocation, the local-narrowing ceiling, routing) fail OPEN
+/// through the pre-charter paired records the moment a config line is typo'd
+/// or disagrees, or a config fails to load at all.
+///
+/// **So this reads STATE ONLY and never `config.toml`**: a config that cannot
+/// be read must leave the mesh charter-shaped (and therefore failing closed),
+/// not silently resolve to "no charter here". The door refuses everything in a
+/// shaped mesh whose operator key is undecidable
+/// (`aoide-server::a2a::grant_from`), `node allow … on` keeps answering
+/// `WidensCharter`, and `revoked_by_charter` treats it as not routable.
+///
+/// `false` for a mesh nothing was ever accepted for — the ordinary pair mesh,
+/// where the paired records are the source and always were.
+pub fn charter_shaped(mesh: &str) -> bool {
+    if in_force_path(mesh).is_file() {
+        return true;
+    }
+    load_trust(mesh)
+        .ok()
+        .flatten()
+        .is_some_and(|trust| !trust.operator.is_empty())
 }
 
 /// The charter **governing** `mesh` at this node: in force on disk, for this

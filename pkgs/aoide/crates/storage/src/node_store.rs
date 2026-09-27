@@ -757,12 +757,18 @@ pub fn set_node_allow(nodes: &mut [Node], name: &str, cap: &str, on: bool, mesh:
     let Some(p) = nodes.iter_mut().find(|p| p.name == name) else {
         return Err(AllowError::UnknownNode);
     };
-    let charter_grant = crate::charter::governing(mesh);
-    if let Some(charter) = &charter_grant {
-        let granted = p
-            .pubkey
-            .as_deref()
-            .and_then(|key| charter.grant_for_key(key))
+    let charter_shaped = crate::charter::charter_shaped(mesh);
+    if charter_shaped {
+        // F2: the branch is on CHARTER-SHAPED, not on "the key is decidable
+        // right now". A shaped mesh whose operator key is undecidable must not
+        // become a licence to widen locally through the paired record — `on`
+        // answers `WidensCharter` and `off` still records the refusal.
+        let granted = crate::charter::governing(mesh)
+            .and_then(|charter| {
+                p.pubkey
+                    .as_deref()
+                    .and_then(|key| charter.grant_for_key(key).map(<[String]>::to_vec))
+            })
             .is_some_and(|caps| caps.iter().any(|c| c == cap));
         if on && !granted {
             return Err(AllowError::WidensCharter);

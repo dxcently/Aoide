@@ -907,11 +907,14 @@ impl Grant {
 /// documents for `resolve_node`'s ladder.
 fn grant_in_mesh(named: Option<&str>, caller_key: &str) -> Grant {
     let nodes = aoide_storage::node_store::load_nodes();
-    let governing = named
-        .map(str::trim)
-        .filter(|mesh| !mesh.is_empty())
-        .and_then(aoide_storage::charter::governing);
-    grant_from(&nodes, governing.as_ref(), named, caller_key)
+    let named_mesh = named.map(str::trim).filter(|mesh| !mesh.is_empty());
+    let governing = named_mesh.and_then(aoide_storage::charter::governing);
+    // F2: a mesh a charter was accepted for is a charter mesh even while its
+    // operator key is undecidable, and a charter mesh never falls back to the
+    // pre-charter source — that fallback is how a revoked or unlisted key got
+    // back in through a stale pairing.
+    let shaped = named_mesh.is_some_and(aoide_storage::charter::charter_shaped);
+    grant_from(&nodes, governing.as_ref(), shaped, named, caller_key)
 }
 
 /// [`grant_in_mesh`]'s pure core — the whole table without the disk reads, so
@@ -930,10 +933,20 @@ fn grant_in_mesh(named: Option<&str>, caller_key: &str) -> Grant {
 fn grant_from(
     nodes: &[aoide_storage::node_store::Node],
     governing: Option<&aoide_storage::charter::Charter>,
+    shaped: bool,
     named: Option<&str>,
     caller_key: &str,
 ) -> Grant {
     let Some(charter) = governing else {
+        // **Charter-shaped with an undecidable operator key fails CLOSED**
+        // (review F2): the mesh's trust is a charter's, and a charter that
+        // cannot be honoured right now grants nothing — never the paired
+        // records, which is what a revoked key would come back through. The
+        // operator faces a taught refusal and `aoide mesh` reports the mesh as
+        // charter-shaped with `trusted: false`.
+        if shaped {
+            return Grant::none();
+        }
         return paired_grant(nodes, &effective_mesh(named), caller_key);
     };
     let caps = charter.grant_for_key(caller_key).unwrap_or(&[]);
@@ -15140,21 +15153,42 @@ mod tests {
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
         assert!(grant_in_mesh(Some("home"), &receiver_key).holds("message"), "the charter is the grant again");
 
-        // 6a. An operator disagreement leaves NO charter in force. (Asserted
-        // before the revocation below, while the line is still there to lose.)
+        // 6a. An operator disagreement leaves the mesh CHARTER-SHAPED and its
+        // operator key UNDECIDABLE — and a shaped mesh fails CLOSED (review
+        // F2): every request in it is refused, including one whose key has a
+        // paired record with a grant in this mesh. There is no fallback to the
+        // pre-charter source while a charter is shaped for the mesh, because
+        // that fallback is what let a revoked or unlisted key back in.
         std::fs::write(
             root.join("receiver").join("config.toml"),
             format!("[mesh.home]\noperator = \"ed25519:{receiver_key}\"\n"),
         )
         .unwrap();
         assert!(
+            aoide_storage::charter::charter_shaped("home"),
+            "the mesh is charter-shaped: a charter was accepted for it, whatever the config line now says"
+        );
+        assert!(
             grant_in_mesh(Some("home"), &op_key) == Grant::none(),
             "a listed key with no record holds nothing once the config line and the record disagree"
         );
-        let fallen_back = grant_in_mesh(Some("home"), &receiver_key);
         assert!(
-            fallen_back.holds("read") && !fallen_back.holds("message"),
-            "and the mesh falls back to its PAIRED records — the failed charter grants nothing: {fallen_back:?}"
+            grant_in_mesh(Some("home"), &receiver_key) == Grant::none(),
+            "and a key WITH a paired record does not fall back to it either: {grant:?}"
+        );
+        // And nothing local may widen while the key is undecidable: `on` still
+        // answers WidensCharter rather than pushing a capability into grants.
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        let before = nodes.iter().find(|n| n.name == "receiverbox").unwrap().grants.clone();
+        assert_eq!(
+            aoide_storage::node_store::set_node_allow(&mut nodes, "receiverbox", "spawn", true, "home").unwrap_err(),
+            AllowError::WidensCharter,
+            "a charter-shaped mesh whose operator key is undecidable is not a licence to widen locally"
+        );
+        assert_eq!(
+            nodes.iter().find(|n| n.name == "receiverbox").unwrap().grants,
+            before,
+            "and the refused call wrote nothing into the paired record"
         );
         std::fs::write(
             root.join("receiver").join("config.toml"),

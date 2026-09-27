@@ -7147,18 +7147,33 @@ refused.
 **Where the grant COMES FROM (P-CHARTER).** `a2a::grant_in_mesh` has two
 sources and picks one at one place:
 
-| the request | a charter governing that mesh at this node? | the caller's grant |
+| the request | is the mesh charter-SHAPED here? | the caller's grant |
 |---|---|---|
 | names no mesh | — (never matches a charter mesh) | the home mesh's paired record |
 | names a mesh | no | that mesh's paired records, unioned by key |
-| names a mesh | yes | the charter LINE for the caller's identity key, minus this box's local refusals |
-| names a mesh | yes, key not listed | nothing — a paired record in a charter mesh is inert |
+| names a mesh | yes, and the charter governs | the charter LINE for the caller's identity key, minus this box's local refusals |
+| names a mesh | yes, key not listed on the line | nothing — a paired record in a charter mesh is inert |
+| names a mesh | yes, but the operator key is UNDECIDABLE | **nothing** — every request in that mesh is refused |
 
-`aoide_storage::charter::governing` decides "yes", and is `None` when no
-charter is in force for the mesh OR when the mesh's operator key cannot be
-decided (§7's `operator-mismatch`): an undecidable operator leaves no charter
-in force rather than a guessed one, so the failed charter grants nothing and
-the mesh falls back to its paired records.
+`aoide_storage::charter::charter_shaped` decides "is the mesh charter-shaped"
+(a charter was accepted for it — a document on disk, or a trust record naming
+an operator — and it reads STATE ONLY, never `config.toml`, so a config that
+cannot be read leaves the mesh shaped rather than silently resolving to "no
+charter here"). `charter::governing` decides "and can we honour it", and is
+`None` while the mesh's operator key cannot be decided (§7's
+`operator-mismatch`).
+
+**A shaped mesh whose operator key is undecidable fails CLOSED** (review F2):
+the mesh's trust is a charter's, and a charter that cannot be honoured right
+now grants nothing — never the pre-charter paired records, which is the door a
+revoked or unlisted key would otherwise come back through. The same split
+holds at the other three sites that used to ask only "does a charter govern":
+`aoide node allow … on --mesh` keeps answering `WidensCharter` in a shaped mesh
+whatever the key's state (`Node::narrowed` still takes the `off`), and
+`mail_wire::revoked_by_charter` treats a shaped-but-undecidable mesh as not
+routable. `mesh --json` reports such a mesh as a charter row with
+`trusted: false` and `inForce` saying whether a document is readable, rather
+than going quiet or claiming the paired records are live.
 
 **Local narrowing only.** `aoide node allow <name> <cap> off --mesh <m>`
 narrows a charter grant and wins over it. In a charter mesh that call writes
