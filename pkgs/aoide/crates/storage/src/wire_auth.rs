@@ -164,14 +164,27 @@ fn hex_decode(s: &str) -> Option<Vec<u8>> {
 /// **`mesh` is the sixth field when a request names one** (P-CHARTER): the
 /// mesh the request acts in, appended AFTER the body digest — so the
 /// pre-charter five-field string is a strict PREFIX of every string this
-/// function now builds, and `None` reproduces it byte for byte. That is the
-/// whole compatibility story: an un-upgraded peer has no mesh to name, signs
-/// the five fields it knows, and its request is verified by the same
-/// `None` arm; an upgraded peer names a mesh and its signature covers it, so
-/// the mesh a request acts in cannot be changed in flight by anyone who
-/// cannot re-sign. The two forms never collide: the prefix is short by one
-/// `\x00`-terminated field, and the empty mesh is not a name
-/// (`HEADER_MESH`'s doc).
+/// function now builds, and `None` reproduces it byte for byte. An
+/// un-upgraded peer has no mesh to name, signs the five fields it knows, and
+/// its request is verified here by the same `None` arm; an upgraded peer
+/// names a mesh and its signature covers it, so the mesh a request acts in
+/// cannot be changed in flight by anyone who cannot re-sign. The two forms
+/// never collide: the prefix is short by one `\x00`-terminated field, and the
+/// empty mesh is not a name (`HEADER_MESH`'s doc).
+///
+/// **A prefix is not compatibility, and this half is one-way** (the
+/// `wire_encoding_skew` pin, `tests::wire_encoding_skew_the_five_and_six_field_signatures_never_interchange`):
+/// the `None` arm accepts an OLD signer, and that is the only direction the
+/// prefix buys. Every signature this build makes covers six fields, and a
+/// pre-charter VERIFIER rebuilds five — so a signed request from >= 0.0.26 to
+/// < 0.0.26 is refused `-32007` "signature verification failed", always, for
+/// every signed command. There is deliberately NO compat arm (the User's
+/// ruling, `CONTRACTS.md` §6 "Mixed versions"): accepting both encodings for
+/// one release needs a fallback, and whoever can produce that fallback — a
+/// relay, a MITM, or the receiving peer itself — could strip the mesh from
+/// the signed bytes and have the request judged in the receiving box's home
+/// mesh, which is exactly the re-aiming the sixth field exists to stop. The
+/// remedy is upgrading every node; the mesh binding is worth the wall.
 ///
 /// Pinned by `tests::canonical_string_stability_vectors_never_drift` (both
 /// forms) — a future change to the field order, the separator, the
@@ -264,6 +277,57 @@ mod tests {
         );
         assert!(new.starts_with(&old), "the pre-charter bytes are a strict prefix: {old:?} vs {new:?}");
         assert_ne!(old, new);
+    }
+
+    /// **The wire-encoding skew (`wire_encoding_skew`), pinned as a SIGNATURE
+    /// fact and not just a byte fact.** The prefix property above is useless
+    /// to a verifier: `verify_signature_hex` compares the signature against
+    /// the bytes IT rebuilt, so two encodings mean one request fails — and
+    /// which one fails is an asymmetry this test fixes in place, because the
+    /// 0.0.26 release shipped believing the pair was mutually readable.
+    ///
+    /// - a signature made over the SIX-field (mesh-bearing) string does NOT
+    ///   verify against the five-field string a pre-charter verifier rebuilds:
+    ///   that is the wall a 0.0.26 **signer** hits on a 0.0.25 door, refuted
+    ///   `-32007` "signature verification failed" (`a2a.rs`,
+    ///   `verify_signed_request`'s empty-candidate arm);
+    /// - a signature made over the FIVE-field string DOES verify against the
+    ///   same five-field string: that is why a pre-charter signer still reaches
+    ///   a 0.0.26 door (the `None` arm), and why the pair itself crosses in
+    ///   both directions while every signed command is one-way.
+    ///
+    /// No compat arm exists or is wanted (the User's ruling): accepting both
+    /// encodings would let a fallback — triggered by anyone who can answer with
+    /// the refusal — strip the mesh from the signed bytes and have the request
+    /// judged in the receiving box's home mesh instead. So the two forms are
+    /// pinned as mutually exclusive here, in the crate that owns the encoding,
+    /// and a future change that makes them interchangeable is a red test rather
+    /// than a silent widening of every request's mesh binding.
+    #[test]
+    fn wire_encoding_skew_the_five_and_six_field_signatures_never_interchange() {
+        let kp = identity::mint_ephemeral().unwrap();
+        let pubkey_hex = kp.info().pubkey_hex;
+        let body = br#"{"jsonrpc":"2.0","id":1,"method":"aoide/graphSummary","params":{}}"#;
+
+        // What a >= 0.0.26 client signs: the mesh is a signed field.
+        let ours = canonical_string("POST", "/", "2026-08-25T00:00:00Z", "abcd1234", body, Some("home"));
+        let our_sig = sign_hex(&kp, ours.as_bytes());
+        // What a < 0.0.26 client signs, and what a < 0.0.26 verifier rebuilds:
+        // five fields, with no mesh concept to append.
+        let theirs = canonical_string("POST", "/", "2026-08-25T00:00:00Z", "abcd1234", body, None);
+        let their_sig = sign_hex(&kp, theirs.as_bytes());
+
+        assert!(verify_signature_hex(&pubkey_hex, ours.as_bytes(), &our_sig));
+        assert!(verify_signature_hex(&pubkey_hex, theirs.as_bytes(), &their_sig));
+
+        assert!(
+            !verify_signature_hex(&pubkey_hex, theirs.as_bytes(), &our_sig),
+            "a mesh-bearing signature MUST fail a pre-charter verifier: this is the 0.0.26 -> 0.0.25 wall"
+        );
+        assert!(
+            !verify_signature_hex(&pubkey_hex, ours.as_bytes(), &their_sig),
+            "and a pre-charter signature must never be accepted as a mesh-bearing one"
+        );
     }
 
     /// The mesh is a SIGNED field, not a label: two requests differing only

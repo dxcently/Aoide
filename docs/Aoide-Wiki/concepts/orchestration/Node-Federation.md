@@ -230,8 +230,14 @@ a remote send never sits in the sender's local pending queue. `--to` and
 
 The [[Pairing-Ceremony]] is the only verification between two instances:
 a completed pair commits a `verified: true` node record carrying the
-node's ed25519 pubkey and a closed `allows` set (`config.toml`'s
-`[pairing] defaultGrant`, `["read"]` by default), and the door's per-request gates read that record.
+node's ed25519 pubkey and a closed capability set in the mesh that ceremony
+named (`grants[<mesh>]` — `config.toml`'s `[pairing] defaultGrant`,
+`["read"]` by default, or the commit's own `--allow`), stamped the first
+time the record becomes verified and never again (a re-pairing re-grants
+nothing), and the door's per-request gates read that record. In a charter
+mesh the charter's own line for the key is the grant instead
+(`docs/architecture/HTTPS-MESH-API.md`, "Trust per mesh").
+
 `node_store::resolve_node` answers "who is this caller" on a ladder of
 rungs (`CONTRACTS.md` §6 "Legacy escapes"):
 
@@ -240,9 +246,11 @@ rungs (`CONTRACTS.md` §6 "Legacy escapes"):
   nonce, and the request body's sha256 hex digest — each field trimmed,
   lowercased, NUL-separated including after the last
   (`aoide_storage::wire_auth::canonical_string`, pinned vectors in
-  CONTRACTS.md §6) — carried on four headers (`X-Aoide-Node`,
-  `X-Aoide-Timestamp`, `X-Aoide-Nonce`, `X-Aoide-Signature`) that arrive
-  together or not at all: a partial set is refused `-32007`, never
+  CONTRACTS.md §6), plus the MESH the request acts in as a sixth field
+  when it names one — carried on five headers (`X-Aoide-Node`,
+  `X-Aoide-Timestamp`, `X-Aoide-Nonce`, `X-Aoide-Signature`,
+  `X-Aoide-Mesh`) that arrive together or not at all: a partial set is
+  refused `-32007`, never
   downgraded to the lower rungs. **Identity IS the key; the name is a
   label (#63 P-ID5).** The caller is the record whose stored `pubkey`
   verifies the signature — `a2a.rs::verify_signed_request` tries it
@@ -250,7 +258,8 @@ rungs (`CONTRACTS.md` §6 "Legacy escapes"):
   never the record `X-Aoide-Node` names. That header carries the signer's
   claimed SELF name for display/attribution only: a claimed-vs-resolved
   mismatch is audited as attribution drift, and the RESOLVED name wins
-  everywhere downstream — the `allows` lookup, the `node:<name>` origin
+  everywhere downstream — the grant lookup in the mesh the request signed
+  for, the `node:<name>` origin
   stamp, the autogate question — so renaming a node locally never breaks
   its inbound signed requests. No verifying key is one `-32007`
   "signature verification failed" whether the key is unknown, the node
@@ -314,6 +323,42 @@ pending-queue entries, and a spawned session's record as
 `origin: "node:<name>"` — the RESOLVED name (attribution drift audited
 aside), write-once and door-stamped per [[Session-Graph]]'s identity
 section.
+
+### Mixed versions — the wire is one-way
+
+A signed request names the mesh it acts in as a sixth field of the canonical
+string, and a verifier compares BYTES: it rebuilds the string itself and
+checks the signature against that, never against anything carried on the
+wire. So a mesh-bearing signature does not verify against the five-field
+string a pre-`0.0.26` door rebuilds — and that door has no mesh arm at all,
+so nothing it does can accept one.
+
+| | `>= 0.0.26` → `< 0.0.26` | `< 0.0.26` → `>= 0.0.26` |
+| --- | --- | --- |
+| the pairing ceremony | **works** (its own signatures carry no mesh) | **works** |
+| `node pull`, `send` to `node/<q>`, `node spawn`, `tasks get`/`history` on a node, a mail deposit, a mail poll, the binding exchange | **refused `-32007` "signature verification failed"** | **works** — judged in `[pairing] homeMesh`, so a grant living only in a NAMED mesh is still refused |
+
+**A cross-version pair therefore succeeds and is one-way.** The older node
+can command the newer one and the newer node reaches nothing on the older
+one; `node list` shows a healthy pair either way, which is why the rule is
+written down here rather than inferred from a refusal. The reverse also
+holds in the state: `state/nodes.json`'s per-mesh `grants` replace the
+pre-charter `allows`, and an older binary's `save_nodes` serializes the whole
+registry out of its own model — so its first write of that file ERASES every
+per-mesh grant and local narrowing, and only a refusal (not a warning) ever
+reaches an operator. Both hazards are one shape: a newer encoding the older
+binary cannot read.
+
+**There is no fallback, by design.** A compat arm for one release would have
+to fall back to the five-field form when a refusal comes back — and whoever
+can answer with that refusal (a relay, an on-path attacker, or the receiving
+peer itself) could then strip the mesh from the signed bytes and have the
+request judged in the receiving box's home mesh, which is exactly the
+re-aiming the sixth field exists to prevent. The remedy is upgrading every
+node. `CONTRACTS.md` §6 "Mixed versions" carries the same table with the
+operation list, §4's rollback-scope paragraph and §7's `grants` record carry
+the state half, and the encoding is pinned by
+`aoide-storage::wire_auth::tests::wire_encoding_skew_the_five_and_six_field_signatures_never_interchange`.
 
 ## Status
 

@@ -319,7 +319,11 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
     request / `node allow <name> spawn on --mesh <m>`), and the door-wide bearer
     never reaches the spawn arm. Signed-request failures carry their own
     codes — `-32007` (malformed or unverifiable signature, partial header
-    set), `-32008` (timestamp skew), `-32009` (nonce replay). Spawn unconfigured →
+    set), `-32008` (timestamp skew), `-32009` (nonce replay). **A signed
+    request from a `>= 0.0.26` node to a `< 0.0.26` door is always this
+    `-32007`**: the sixth (mesh) field of the canonical string has no arm in
+    the older verifier, which rebuilds five fields and compares bytes
+    ([[Node-Federation#Mixed versions — the wire is one-way]]). Spawn unconfigured →
     `-32004`; session not conductable → `-32004`; unknown contextId →
     `-32001`. A held-pending send returns a `submitted` Task immediately.
   - `aoide/graphSummary` — `{schemaVersion: "0", instance: {name, url,
@@ -534,7 +538,10 @@ outright at task #135 P3', hard cutover, no aliases.
   half; approving commits a `pubkey`/`verified` node record into
   `state/nodes.json` (`node_store::upsert_paired_node`, stamping
   `config.toml`'s `[pairing] defaultGrant` or the commit's own
-  `--allow`), dispatching by direction — inbound queue first, then
+  `--allow` into the ceremony's mesh, `grants[<mesh>]`, ON A FIRST
+  VERIFICATION ONLY — a re-pair re-grants nothing, and the commit's own
+  outcome says which it was: `grantStamped` beside `grantRequested`),
+  dispatching by direction — inbound queue first, then
   outbound — so the requester's own confirm is a SECOND `aoide pair`
   against the outbound queue, the one that polls. When the parked
   request carries the requester's `selfVia` claim, the inbound commit

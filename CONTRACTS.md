@@ -1204,6 +1204,27 @@ documented way to opt in, and the one thing a rollback has to know about.
 `cli/tests/node_connectivity.rs::no_default_path_writes_a_key_the_deployed_binary_refuses`
 drives those paths and asserts it.
 
+**What that paragraph covers, and what it does not.** It covers THIS FILE and
+one class of hazard: a `config.toml` key the older binary refuses to PARSE.
+Rolling back is not free in two other places, and no default path can make it
+so, because both are the same shape — a NEWER encoding the older binary reads
+differently, and neither has a compat write:
+
+- **The wire.** `>= 0.0.26` signs a sixth field (`X-Aoide-Mesh`) that
+  `< 0.0.26` has no arm for, so every signed command from the newer node to
+  the older one is refused `-32007` while the reverse still works — a pair
+  that looks healthy and is one-way. The rules, the operations and the reason
+  there is deliberately no fallback are §6's "Mixed versions".
+- **`state/nodes.json`.** The migration folds each record's `allows` into
+  `grants[<home>]` and REMOVES the legacy key, and an older binary's own
+  `save_nodes` serializes the whole registry from its own structs — which
+  know `allows` alone — so its first write drops every `grants` and
+  `narrowed` entry on disk. §7's `grants` record has the detail.
+
+Both follow from the same decision: the mesh is a signed field and a real
+scope, so the state that describes it is a new encoding, not a second copy.
+Upgrading every node is the remedy the fleet's own rollout takes.
+
 - `pairing.defaultGrant` (list of strings, default `["read"]`) — the
   capability set a node is granted when it FIRST becomes verified. The
   vocabulary IS §7's own closed node-capability set
@@ -6417,12 +6438,20 @@ unauthenticated** (`read_ok`/bearer gating never applies to any of them):
 the ceremony's whole point is establishing a credential where none exists
 yet, so gating it on one would be circular. A parked or revealed request
 grants nothing at all — only a fully APPROVED request commits a node
-record, and that record's own `verified: true` plus its `allows`
-(P-P3, stamped by `upsert_paired_node` from `[pairing] defaultGrant` or the
-commit's own `--allow`, the moment the node first becomes verified) is the entire grant this ceremony makes; the
+record, and that record's own `verified: true` plus its
+`grants[<the ceremony's mesh>]` (P-P3, stamped by `upsert_paired_node` from
+`[pairing] defaultGrant` or the commit's own `--allow`, the moment the node
+first becomes verified, and NEVER on a re-pairing of an already-verified
+record) is the entire grant this ceremony makes; the
 wire methods themselves flip no OTHER gate and change no spawn/bearer
-behavior beyond that one stamp — narrowing or widening `allows` afterward
-is `node allow`'s job (§3 above), never re-run by re-pairing. Unknown
+behavior beyond that one stamp — narrowing or widening the grant afterward
+is `node allow`'s job (§3 above), never re-run by re-pairing. **The commit's
+own outcome data names both halves**: `grantRequested` is the capability set
+that invocation asked for (the `--allow` as typed, else the resolved
+default), and `grantStamped` says whether it landed (`false` on a
+re-pairing, where the on-disk grant is deliberately untouched) — the field
+is `grantRequested` and not `grant` so no consumer, script or report can read
+a request as a live grant. Unknown
 methods still get the standard `-32601`;
 malformed params get `-32602` before anything is parked, persisted, or
 committed; a park-queue-full refusal is the distinct `-32000` (the park cap
@@ -7142,6 +7171,28 @@ that names no mesh (a pre-charter peer) is evaluated in `[pairing]
 homeMesh` **by that mesh's rules** — its governing charter first, its paired
 records only where no charter is shaped for it (review N1; the row below).
 
+**Mixed versions: the wire is one-way, and that is the design.** The sixth
+field makes an old request readable by a new door and — because a verifier
+compares bytes, not prefixes — a NEW request unreadable by an old one. Which
+operations cross which way is a rule of the wire, not of any command:
+
+| | `>= 0.0.26` → `< 0.0.26` | `< 0.0.26` → `>= 0.0.26` |
+| --- | --- | --- |
+| the pairing ceremony (`pairRequest`, `pairReveal`, `pairPoll`) | **works** — its own signatures carry no mesh (`wire_auth::canonical_string("PAIRPOLL", …, None)`, byte-identical on both sides) | **works** |
+| every signed command (`node pull`, `send` to `node/<q>`, `node spawn`, `tasks get`/`history` on a node, `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding`) | **refused `-32007` "signature verification failed"** — the sixth field is not in the bytes the older verifier rebuilds | **works**, judged in `[pairing] homeMesh`, so a grant that lives only in a NAMED mesh is still refused |
+
+So a pair across the versions succeeds and looks healthy in `node list` while
+being **one-way**: the older node reaches the newer one and the newer node
+reaches nothing on the older one. The refusal is the intended direction — no
+fallback, no double encoding, no version probe. Accepting both encodings for
+one release would need the SENDER to fall back on a refusal, and whoever can
+produce that refusal (a relay, an on-path attacker, or the receiving peer
+itself) could then have the mesh stripped from the signed bytes and the
+request judged in the receiving box's home mesh — precisely the re-aiming the
+sixth field exists to stop. **The remedy is upgrading every node**; the
+`aoide-storage` pin for it is
+`wire_auth::tests::wire_encoding_skew_the_five_and_six_field_signatures_never_interchange`.
+
 **`aoide/charterFetch` (P-CHARTER) — the LAN join's one read.** `params` is
 `{ "mesh": "<name>" }`; the result is
 `{ "mesh", "version", "operator": "<bare hex>", "charter": "<base64>", "sig":
@@ -7727,6 +7778,14 @@ fold removes it). The first `save_nodes` after that writes `grants` and no
 record and refuses every gated request. There is no compatibility write and
 no downgrade path: a fail-closed refusal is the intended direction, and a
 second on-disk copy of the same grants would be a drifting duplicate.
+**The older binary also WRITES that way**: `save_nodes` serializes the whole
+registry out of its own model (`NodeRegistry`/`Node`), and a `< 0.0.26` model
+has no `grants` or `narrowed` fields, so its first write of this file — a
+`node allow`, a pairing commit, a `node remove` — DELETES every per-mesh
+grant and every local narrowing, silently, no refusal anywhere. A rollback
+that intends to keep a grant must therefore keep the file as well, or accept
+that the fleet re-grants from the charter
+(`docs/architecture/HTTPS-MESH-API.md` "Trust per mesh").
 
 `resolve_node(nodes, addr, presented_token)` (`aoide_storage::node_store`,
 P-P3 decision 6) is the caller-identity ladder for the TWO unsigned rungs
