@@ -7,6 +7,9 @@ the packaging placeholders. **The core flake's exports
 change to what the core exports is the one case that also touches `lib/`
 and `tests/`.
 
+This page is the nix half — modules, options, the flake. Installing the
+`aoide`/`aoided` binaries themselves needs no nix and is `docs/INSTALL.md`.
+
 Verify at any point:
 
 ```
