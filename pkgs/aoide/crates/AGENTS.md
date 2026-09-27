@@ -58,6 +58,14 @@ caller writing into a closed pipe as soon as a loaded machine deschedules it
 between spawn and write, and the EPIPE surfaces as an ordinary transport
 failure — green on an idle desktop, red on a busy builder.
 
+The same "the fixture must not wait forever" discipline covers the socket
+fixtures: a test that binds a listener and waits for a delivery reads it
+through `aoide-test-support`'s bounded rig (`expect_delivery`/`accept_one`/
+`read_delivery`), never a hand-rolled `accept`/`read_to_end` — a payload the
+code under test withholds then FAILS that one test inside `DELIVERY_BUDGET`
+instead of parking it, and with it every test queued behind the crate's
+`env_lock`. The rig's own contract lives in that crate's `AGENTS.md`.
+
 ## Extension points, cross-crate
 
 - **A new domain crate**: add it to `pkgs/aoide/Cargo.toml`'s `[workspace]

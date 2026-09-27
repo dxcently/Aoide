@@ -410,6 +410,7 @@ mod tests {
     use crate::graph::model::{load_stage, sessions_path, write_stage, SessionsFile};
     use crate::graph::session_store::{do_session_phase, do_session_start, stamp_headless};
     use crate::graph::testutil::*;
+    use aoide_test_support::{accept_one, read_delivery};
     use std::io::{Read as _, Write as _};
     #[cfg(unix)]
     use std::os::unix::net::UnixListener;
@@ -493,10 +494,11 @@ mod tests {
     }
 
     fn read_all(listener: UnixListener) -> Vec<u8> {
-        let (mut conn, _) = listener.accept().unwrap();
-        let mut buf = Vec::new();
-        let _ = conn.read_to_end(&mut buf);
-        buf
+        // The bounded rig (`aoide_test_support`): a write this door/ring never
+        // makes must fail the test rather than park its `accept` — and, under
+        // `env_lock`, the whole suite queued behind it.
+        let mut conn = accept_one(&listener, "the fixture's socket receives its delivery");
+        read_delivery(&mut conn, "the fixture's socket receives its delivery")
     }
 
     #[test]
@@ -570,7 +572,7 @@ mod tests {
         let daemon_socket = root.join("fake-daemon.sock");
         let fake = UnixListener::bind(&daemon_socket).unwrap();
         let handle = std::thread::spawn(move || {
-            let (mut conn, _) = fake.accept().unwrap();
+            let mut conn = accept_one(&fake, "the ring dispatches to the fake daemon");
             let mut buf = [0u8; 4096];
             let n = conn.read(&mut buf).unwrap();
             let req: serde_json::Value = serde_json::from_slice(&buf[..n]).unwrap();

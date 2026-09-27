@@ -218,19 +218,20 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   makes that call too, so without this floor it would eventually touch the
   real `~/Aoide/state/auto-resume-boot-epoch` on this box.
 - **An `a2a` test fixture that EXPECTS a delivery waits for it through the
-  module's own `accept_one`/`expect_delivery` rig (`a2a.rs`'s `mod tests`),
-  never a hand-rolled blocking `accept`/`read_to_end` thread.** Those
-  fixtures bind a listener at the target's control socket and then drive a
-  `message/send` that is supposed to dial it; a delivery the door WITHHELD
-  (a refused arm, a grant the fixture no longer holds, a dial that landed
-  on another path) leaves that socket quiet for good, and since those
-  fixtures hold `env_lock` the parked thread takes every test queued behind
-  it down with it — the suite hangs instead of reporting one failure. The
-  rig bounds both halves (accept, and the read to the peer's close) at
-  `DELIVERY_BUDGET` and fails with the fixture's own expectation in the
-  message; a new delivery fixture asks it rather than copying a thread body.
-  A fixture that expects SILENCE keeps asserting on a non-blocking
-  `accept().is_err()`, which is already bounded and says the same thing.
+  shared rig — `aoide_test_support`'s `expect_delivery`/`accept_one`/
+  `read_delivery` — never a hand-rolled blocking `accept`/`read_to_end`
+  thread** (that crate's own `AGENTS.md` states the rig's contract, its
+  deadline and its host-neutrality; this bullet is only the reason it is
+  load-bearing HERE). These fixtures bind a listener at the target's control
+  socket and then drive a `message/send` that is supposed to dial it, and
+  they hold `env_lock` — so a delivery this door WITHHELD (a refused arm, a
+  grant the fixture no longer holds, a dial that landed on another path)
+  would park the acceptor thread and take every test queued behind it down
+  with it: a suite that hangs instead of reporting one failure. Write the
+  rig's `what` as the fixture's own expectation ("…is DELIVERED, not held
+  pending"). A fixture that expects SILENCE keeps asserting on a
+  non-blocking `accept().is_err()`, which is already bounded and says the
+  same thing.
 - **`daemon::run_boot_auto_resume` fires exactly ONCE per `run_loop` call,
   strictly BEFORE the tick loop — never move it inside the loop (P-D8).**
   It is a boot-time trigger, not a tick-cadence one: the guard

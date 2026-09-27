@@ -1,6 +1,7 @@
 //! Shared test scaffolding for every aoide crate's test modules: env-var
-//! save/restore, a scratch-dir helper, the process-wide env lock, and the
-//! fixture note payloads several command groups' tests need.
+//! save/restore, a scratch-dir helper, the process-wide env lock, the
+//! delivery-fixture rig, and the fixture note payloads several command
+//! groups' tests need.
 //!
 //! Extracted from the root package's `commands/mod.rs::test_support` +
 //! `lib.rs::env_lock` (Phase 9 restructure,
@@ -9,8 +10,14 @@
 //! only; nothing in a production build may edge on this crate.
 
 use aoide_protocol::{Door, Invocation};
+#[cfg(unix)]
+use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(windows)]
+use aoide_protocol::win_unix::{UnixListener, UnixStream};
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 /// Create-or-truncate an EMPTY file in the shape THIS host's feed reader
 /// demands: Unix's mode bits have no such reader, so a plain write is the whole
@@ -70,6 +77,99 @@ pub fn short_tmp(tag: &str) -> PathBuf {
     dir.push(format!("aoide-{hash:016x}-{}", std::process::id() % 100_000));
     std::fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+/// The deadline every delivery fixture in this workspace shares: long enough
+/// for the waits a legitimate delivery itself makes first — `wait_ready`'s 2s
+/// quiescence window for a hookless target plus `SUBMIT_KEYSTROKE_DELAY`'s
+/// 300ms write gap is the longest any of them reaches — and short enough that
+/// a delivery the door WITHHELD fails its test instead of parking it.
+///
+/// **Why a fixture needs this at all.** A delivery fixture binds a listener at
+/// the target's own socket and spawns a thread to read what arrives there; the
+/// code under test is supposed to dial it. When it does not (a refused arm, an
+/// authorisation the fixture no longer holds, a dial that landed elsewhere),
+/// an unbounded `accept`/`read_to_end` waits forever — and since these tests
+/// hold their crate's `env_lock`, the parked thread takes every test queued
+/// behind it down with it: a suite that hangs instead of reporting one
+/// failure. `accept_one`/`read_delivery`/`expect_delivery` are that wait,
+/// bounded, in ONE place.
+pub const DELIVERY_BUDGET: Duration = Duration::from_secs(10);
+
+/// Accept ONE connection by [`DELIVERY_BUDGET`], panicking rather than blocking
+/// forever when none arrives. `what` is the fixture's own expectation in its
+/// own words ("the parent's steer is DELIVERED, not held pending"), so the
+/// failure says WHICH arm broke rather than only that a socket stayed quiet.
+///
+/// The listener is armed non-blocking and polled, so the wait is a deadline and
+/// never a block; the accepted stream carries the same budget as its READ
+/// timeout, so the other half — a peer that connects and then goes silent — is
+/// bounded too. That read budget is the guarantee on either host: a non-blocking
+/// accepted socket would ignore `SO_RCVTIMEO`, so `win_unix::accept` clears the
+/// inherited flag best-effort and its `recv_into` honours the budget itself
+/// (the socket seam's own contract, `crates/protocol/src/win_unix.rs`).
+pub fn accept_one(listener: &UnixListener, what: &str) -> UnixStream {
+    listener.set_nonblocking(true).unwrap();
+    let deadline = Instant::now() + DELIVERY_BUDGET;
+    loop {
+        match listener.accept() {
+            Ok((conn, _)) => {
+                conn.set_read_timeout(Some(DELIVERY_BUDGET)).unwrap();
+                return conn;
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                if Instant::now() >= deadline {
+                    panic!("{what}\n  — nothing connected to the fixture's socket within {DELIVERY_BUDGET:?}");
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => panic!("{what}\n  — the fixture's listener failed: {e}"),
+        }
+    }
+}
+
+/// Everything a DELIVERED peer sends on one connection, up to its close —
+/// [`accept_one`]'s other half, and bounded the same way. A peer that connects,
+/// writes and then holds the connection open fails by name instead of reading
+/// forever.
+pub fn read_delivery(conn: &mut UnixStream, what: &str) -> Vec<u8> {
+    let deadline = Instant::now() + DELIVERY_BUDGET;
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            panic!(
+                "{what}\n  — the deliverer connected, sent {} byte(s), and held the connection \
+                 open for {DELIVERY_BUDGET:?} without closing",
+                buf.len()
+            );
+        }
+        conn.set_read_timeout(Some(left)).unwrap();
+        match conn.read(&mut chunk) {
+            Ok(0) => return buf,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => continue,
+            Err(e) => panic!("{what}\n  — reading the delivered payload failed: {e}"),
+        }
+    }
+}
+
+/// The whole rig, in the shape most fixtures want it: wait on its own thread
+/// (the code under test dials while the test body drives it) for the delivery,
+/// and hand back every byte. Bounded on both halves by [`accept_one`] /
+/// [`read_delivery`]; the caller asserts on the payload, so a withheld delivery
+/// is a failed assertion carrying `what` instead of a suite that never returns.
+pub fn expect_delivery(listener: UnixListener, what: &'static str) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut conn = accept_one(&listener, what);
+        read_delivery(&mut conn, what)
+    })
 }
 
 /// The built `aoide` binary beside the calling test's own executable — the
