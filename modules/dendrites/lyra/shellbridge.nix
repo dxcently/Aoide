@@ -169,7 +169,7 @@ lib.mkIf (config.aoide.enable && config.aoide.lyra.enable) {
       # default.nix). Read by dispatch_rice_mode_toggle's declarative-
       # direction re-exec (shellbridge.rs) so the bar's rice-mode toggle
       # re-pins to the shipped baseline instead of whatever song happens to
-      # be staged. Null when no song is named ("no song, no service" —
+      # be staged. Null when no song is named (a null song deploys nothing —
       # options.nix) — omit the var entirely rather than interpolate null;
       # shellbridge.rs already reads it as an Option (std::env::var(..).ok()),
       # so an absent var and a re-pin with nothing to re-pin to are the same

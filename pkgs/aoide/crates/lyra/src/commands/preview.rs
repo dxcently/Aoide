@@ -692,7 +692,7 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
         return Outcome::usage(
             cmd,
             format!(
-                "`widget` (`{widget_field}`) is outside run/qml/songs/ -- `preview declare` only declares a song's own widget body, never a facet file"
+                "`widget` (`{widget_field}`) is outside run/qml/songs/ -- `preview declare` only declares a song's own widget body, never a lane file"
             ),
         );
     }
@@ -3133,7 +3133,7 @@ mod tests {
             !checkout
                 .join("song/songbook/sonata/widgets/ShellBridge.qml")
                 .exists(),
-            "must never copy a facet file into the songbook"
+            "must never copy a lane file into the songbook"
         );
     }
 
