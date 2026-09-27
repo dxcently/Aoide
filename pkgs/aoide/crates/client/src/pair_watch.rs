@@ -1998,6 +1998,11 @@ mod tests {
     /// a kernel-timing race, not a path collision, so the fix is simply
     /// not contending: this lock serializes this module's own write+exec
     /// pairs against each other.
+    /// `#[cfg(unix)]` with its users: every caller is a `#!/bin/sh` shim test
+    /// (the write+exec TOCTOU pair this lock exists for is a POSIX one), so on
+    /// a host with no such fixture there is nothing to serialize and the item
+    /// is absent rather than dead.
+    #[cfg(unix)]
     fn shim_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         LOCK.lock().unwrap_or_else(|e| e.into_inner())
@@ -2076,6 +2081,11 @@ mod tests {
         assert!(matches!(result, DialogResult::SpawnError(_)), "expected SpawnError, got {result:?}");
     }
 
+    /// `#[cfg(unix)]` with its users: the dialog-entry tests that read an
+    /// approved code off a shim's stdout. The other tests call
+    /// `run_zenity_entry` directly and match the `DialogResult` variant, which
+    /// is the same assertion without the helper.
+    #[cfg(unix)]
     fn result_code(result: &DialogResult) -> Option<String> {
         match result {
             DialogResult::Approved(c) => Some(c.clone()),
