@@ -407,6 +407,32 @@ fn handle_charter_show(inv: &Invocation) -> Outcome {
     for mesh in &meshes {
         let Some(in_force) = charter::in_force_charter(mesh) else {
             if named.is_none() {
+                // **A charter-SHAPED mesh with no readable document is
+                // reported, not skipped** (re-review, the F2 table's last row):
+                // the mesh state exists (an operator key recorded by a `join`
+                // that has not accepted anything, or a document that no longer
+                // parses), the door refuses every request in it, and `mesh
+                // --json` lists it — so this surface must not go quiet about
+                // the very mesh an operator is trying to diagnose.
+                if !charter::charter_shaped(mesh) {
+                    continue;
+                }
+                rows.push(json!({
+                    "mesh": mesh,
+                    "inForce": false,
+                    "version": 0,
+                    "operatorKey": charter::load_trust(mesh).ok().flatten().unwrap_or_default().operator,
+                    "operator": charter::fingerprint_of_key(
+                        &charter::load_trust(mesh).ok().flatten().unwrap_or_default().operator,
+                    ),
+                    "trust": "see `aoide mesh`",
+                    "honoured": false,
+                    "highWater": 0,
+                    "relays": [],
+                    "nodes": [],
+                    "rekeyed": [],
+                    "note": "charter-shaped with NO readable charter document — no version is in force here, and every request in this mesh is refused until it is resolved",
+                }));
                 continue;
             }
             return Outcome::error(
@@ -466,6 +492,15 @@ fn handle_charter_show(inv: &Invocation) -> Outcome {
     let mut lines = Vec::new();
     for row in &rows {
         let mesh = row["mesh"].as_str().unwrap_or("");
+        if row.get("note").is_some() {
+            lines.push(format!(
+                "charter {} — NO charter document in force (operator {} ({}) recorded, none readable) — every request in this mesh is refused until it is resolved",
+                mesh,
+                row["operator"],
+                row["operatorKey"],
+            ));
+            continue;
+        }
         lines.push(format!(
             "charter {} v{} — operator {} ({}) — trust: {}, {} — high-water v{}",
             mesh,
