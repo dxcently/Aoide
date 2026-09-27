@@ -3,7 +3,8 @@
 Test content that isn't cargo's: whole-system and whole-artifact checks that
 need Nix — a build, or an evaluation of the whole configuration — to even
 exist. `lib/` holds build/eval machinery
-(`checks.nix`, `mkHost.nix`, `pkgs.nix`, `walk.nix`); this directory holds
+(`checks.nix`, `aoideos.nix`, `composition.nix`, `pkgs.nix`, `songbook.nix`);
+this directory holds
 what those checks actually test.
 
 - `vm-boot.nix` — headless NixOS boot test, wired as `checks.<system>.vm-boot`.

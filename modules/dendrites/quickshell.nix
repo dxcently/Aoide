@@ -22,7 +22,7 @@
 #   * bare — `config` stays null (the default): the package is installed and no
 #     service runs. No shell, no graphical-session anchor, nothing to fail.
 #
-# Reading discipline (house rule 5): the dress and identity scalars this lane
+# Reading discipline (house rule 5): the dress and the core scalars this lane
 # genuinely uses — `aoide.livery.wallpaper` (the shell's baked cover env, so a
 # wallpapered song survives a rebuild) and `aoide.root` (the runtime root the
 # QML reads its stage files from). Nothing else, and no `song/` path at all:

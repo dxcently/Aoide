@@ -13,8 +13,8 @@ package build from the same one-line input.
   overlay line of their own.
 - `options.nix` — THE core `aoide.*` option contract: `enable`, `root`,
   `checkout`, `auditLog`, `terminal`, `user`, `sessionTarget`. Every
-  AoideOS-side unit (`modules/nucleus/aoided.nix`, `secrets.nix`,
-  `shellbridge.nix`, `config.nix`) reads these options; this file only
+  AoideOS-side unit (`modules/nucleus/{aoided,secrets,config}.nix`,
+  `modules/dendrites/lyra/shellbridge.nix`) reads these options; this file only
   declares them.
 - `aoided.nix` — the `aoided` systemd user service itself: the tmpfiles
   rules for the runtime tree and the core session variables

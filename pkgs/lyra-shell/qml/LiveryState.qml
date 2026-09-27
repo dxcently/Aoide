@@ -21,7 +21,7 @@ QtObject {
     // ── livery file path ────────────────────────────────────────────────────
     // Stage path: $AOIDE_ROOT/song/stage/livery.json (runtime root, default
     // ~/.aoide — L-C2; the nix build never depends on this path —
-    // checks.no-song-read enforces that).
+    // checks.song-runtime-untracked enforces that).
     readonly property string liveryPath:
         (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/song/stage/livery.json"
 

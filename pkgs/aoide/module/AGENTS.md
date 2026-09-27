@@ -6,7 +6,7 @@
   `AGENTS.md`, "Two binaries") — no file here reaches into `modules/`
   or `song/`, and none may gain an input beyond nixpkgs.
 - **Explicit `imports`, no walker.** `default.nix` names every sibling
-  it pulls in by hand. `modules/`'s `lib/walk.nix` discovery is a
+  it pulls in by hand. The catalogue's one-line-per-dendrite naming is a
   different tree's convention; this one stays a plain, readable list —
   a consumer reads one file and knows what it imports.
 - **Every capability off by default.** An option declared here

@@ -73,8 +73,9 @@ fixtures; `pkgs/lyra-songbook` ships the built-in songs and their manifests.
 ## What it consumes
 
 Only the dress (`aoide.livery`), the structure (`aoide.arrangement`), the
-surface registry it declares into (`aoide.surfaces`), the identity scalars
-(`aoide.user`, `aoide.root`, `aoide.song`), the derived fact
+surface registry it declares into (`aoide.surfaces`), the core scalars
+(`aoide.enable`, `aoide.root`, `aoide.checkout`, `aoide.user`), the song
+selection (`aoide.song`), the derived fact
 `aoide.songbook.builtIn` — the songs this host builds in, which is what the
 deployed tree, the installed packages, the shipped templates and the seed are
 built from — and its own fact: root `AGENTS.md` house rule 5. Component-tier

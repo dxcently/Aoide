@@ -8,7 +8,8 @@
 # structure, the surfaces and identity — nothing else (root AGENTS.md house
 # rule 5). Here: `aoide.livery` (palette + component tiers), `aoide.surfaces`
 # (the registry it declares its own surfaces in), `aoide.arrangement`, the
-# identity scalars (`aoide.user`, `aoide.root`, `aoide.song`), the derived fact
+# core scalars (`aoide.enable`, `aoide.root`, `aoide.checkout`, `aoide.user`),
+# the song selection (`aoide.song`) and the derived fact
 # `aoide.songbook.builtIn` (the songs this host builds in — what this lane's
 # deployed manifest, widget copy, installed packages, shipped templates and seed
 # are built FROM) and its own fact.
@@ -92,8 +93,9 @@ let
       onlyBuiltIn = lib.filterAttrs (name: _: builtins.elem name builtIn);
 
       # ── Active song's committed livery — also a legitimate build-time read ─────
-      # `song/songbook/<name>/livery.json` is versioned score (checks.no-song-read
-      # only bans song/{stage,auditions,catalog,index}/, never song/songbook/), so
+      # `song/songbook/<name>/livery.json` is versioned score
+      # (checks.song-runtime-untracked only names song/{stage,auditions,declared}/,
+      # never song/songbook/), so
       # naming the ACTIVE song's livery file here is allowed for the same reason
       # `songbook` above is. Path concatenation (not string-interpolating the
       # whole `songbook` dir) so only this one file gets copied into the store.

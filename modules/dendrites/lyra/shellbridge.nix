@@ -320,7 +320,7 @@ lib.mkIf (config.aoide.enable && config.aoide.lyra.enable) {
   # These are the stable v0 stage paths (CONTRACTS.md §4), split by tree.
   # Lanes and the Quickshell widget must read exactly these paths; never
   # compute them independently. Note: these are RUNTIME paths — they are
-  # NEVER imported by any nix module (checks.no-song-read enforces this).
+  # NEVER imported by any nix module (checks.song-runtime-untracked enforces this).
   #
   # Documented here as comments (not as options) because they are live-side
   # constants, not build-time configuration:

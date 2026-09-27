@@ -30,7 +30,7 @@
   aoide.user = "khoa"; # ← your user
 
   # ── Darwin-incompatible baseline: blocked off here, host-side ─────────────
-  # hosts/common defaults these ON; each carries NixOS-only wiring or a
+  # The baseline aggregations default these ON; each carries NixOS-only wiring or a
   # package that doesn't belong on macOS, so the template opts out explicitly
   # (no class machinery — the host just says no):
   aoide.fonts.enable = false; # fonts.packages is a NixOS-only option
