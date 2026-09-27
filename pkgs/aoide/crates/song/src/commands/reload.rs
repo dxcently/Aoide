@@ -201,14 +201,25 @@ fn sync_draft_in_place(song: &str) -> Outcome {
 
     let hyprctl_status = crate::live::apply_live(&crate::live::geometry_keywords(&parsed));
 
-    let widget_sync = match crate::widgets::sync_song_widgets(song) {
+    // The §7.5 gate, once per reload: the same decision `rice stage` makes,
+    // for the same reason — `sync_draft_in_place` writes into `stage/` and
+    // `run/qml`, so it must refuse BEFORE either.
+    let songbook = match crate::widgets::plan_stage(song) {
+        Ok(songbook) => songbook,
+        Err(e) => {
+            return Outcome::error("reload", e.error)
+                .with_data(json!({ "reason": "stage-refused", "target": e.target }));
+        }
+    };
+
+    let widget_sync = match crate::widgets::sync_song_widgets(song, &songbook) {
         Ok(sync) => sync,
         Err(e) => {
             return Outcome::error("reload", format!("failed to sync widget bodies: {}", e.error))
                 .with_data(json!({ "reason": "widget-sync-failed", "target": e.target }));
         }
     };
-    let registry_sync = match crate::widgets::sync_song_registry(song) {
+    let registry_sync = match crate::widgets::sync_song_registry(song, &songbook) {
         Ok(sync) => sync,
         Err(e) => {
             return Outcome::error("reload", format!("failed to sync widget-type registry: {}", e.error))
@@ -255,6 +266,7 @@ mod tests {
         let root = unique_tmp("reload-declarative");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_reload(&reload_inv());
@@ -278,6 +290,7 @@ mod tests {
         let root = unique_tmp("reload-declarative-no-take");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         save_mode_marker(&ModeMarker {
             mode: RiceMode::Declarative,
@@ -306,6 +319,7 @@ mod tests {
         let root = unique_tmp("reload-staging-routing");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let songbook = shellbridge::songbook_dir("sonata");
@@ -348,6 +362,7 @@ mod tests {
         let root = unique_tmp("reload-staging-dedupe");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let songbook = shellbridge::songbook_dir("sonata");
@@ -416,6 +431,7 @@ mod tests {
         let root = unique_tmp("reload-draft-routing");
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let songbook = shellbridge::songbook_dir("sonata");

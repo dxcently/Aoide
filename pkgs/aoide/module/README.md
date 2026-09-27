@@ -13,19 +13,21 @@ package build from the same one-line input.
   overlay line of their own.
 - `options.nix` — THE core `aoide.*` option contract: `enable`, `root`,
   `checkout`, `auditLog`, `terminal`, `user`, `sessionTarget`. Every
-  AoideOS-side unit (`modules/nucleus/aoided.nix`, `secrets.nix`,
-  `shellbridge.nix`, `config.nix`) reads these options; this file only
+  AoideOS-side unit (`modules/nucleus/{aoided,secrets,config}.nix`,
+  `modules/dendrites/lyra/shellbridge.nix`) reads these options; this file only
   declares them.
 - `aoided.nix` — the `aoided` systemd user service itself: the tmpfiles
   rules for the runtime tree and the core session variables
   (`AOIDE_TERMINAL`, `AOIDE_ROOT`, `AOIDE_FLAKE_ROOT`), portable and
   nixpkgs-only. The unit's `wantedBy`/`after` anchor to
   `aoide.sessionTarget` — the seam a paint-dependent value enters
-  through, since this file may not read a facet option directly — and that
-  anchor decides only when the unit STARTS: there is no `partOf`, so a
-  desktop that dies takes the paint down and leaves the daemon, its audit
+  through, since this file may not read a lane's option directly. The lane
+  that brings a graphical session up sets that option (the lane that ships
+  the session's shell today), so this bundle never learns which lane it was —
+  and that anchor decides only when the unit STARTS: there is no `partOf`, so
+  a desktop that dies takes the paint down and leaves the daemon, its audit
   log, its gate and its doors running.
-  `modules/nucleus/aoided.nix` sets that option and carries the
+  `modules/nucleus/aoided.nix` carries the
   lyra-gated `AOIDE_SONG_TEMPLATES` variable plus every door
   (mcp/a2a/pair-watch), the discovery firewall carve, and the usage
   poller — all still AoideOS-side deployment.

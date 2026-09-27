@@ -12,10 +12,20 @@ See an existing song (`song/songbook/sonata/rice.nix`,
 the same values as a hand/agent-maintained JSON file — kept in sync with
 `rice.nix`, not derived from it.
 
+A song's `rice.nix` is handed two things by ARGUMENT and never by a path
+(`CONTRACTS.md` §5): `song` — the `lib/song.nix` API — and `borrow`, where
+`borrow "sonata"` is sonata's rolled-up `_widgets/` (the one cross-song idiom).
+So the signature is `{ lib, config, song, borrow, ... }:`, and a shelf's
+`_widgets/default.nix` is `{ lib, song, borrow, ... }:`; name only what the file
+uses and keep the `...`. A `../` path literal in any `.nix` under a song folder
+breaks every machine whose songbook is not this checkout — which is what
+`pkgs/lyra-songbook`, `aoideSeedSongbook` and the offline generator assume — and
+`checks.song-shape` scans for it.
+
 ## Per-song flavor widgets (`widgets/<slot>.qml`)
 
 **Which slots are live is not listed here.**
-`modules/facets/quickshell/qml/slots.md` is the catalog and the only place
+`pkgs/lyra-shell/qml/slots.md` is the catalog and the only place
 that tracks it — which names have a host anchor wired, which anchor kind
 each uses, and what extras each one is passed. A slot list copied into this
 file goes stale the moment an anchor is added or retired, which is exactly
@@ -39,7 +49,7 @@ come back here for the steps. To dress a slot:
 5. Nothing else is reachable: a widget sees `livery` + `bridge` (+ declared
    extras) only, never nix `config.*` (CONTRACTS.md §5 containment).
 
-**Build carry-over:** on the next `nixos-rebuild`, the quickshell facet's
+**Build carry-over:** on the next `nixos-rebuild`, the lyra lane's
 derivation copies the new file to `$out/qml/songs/<name>/<slot>.qml` and adds
 `<name>` → `[…, "<slot>"]` to the generated `songs/manifest.json` — every
 committed song's slot files are carried at once, not just the active one.
@@ -60,7 +70,7 @@ swap with no restart, exactly like its colours do.
 What an unauthored slot falls back to is per-slot, and the catalog's
 `fallback` column is where that lives. The general chain is: the active
 song's own file, else sonata's (the shipped baseline), else — `WidgetSlot`
-only — the anchor's facet-side `fallback` Component, else nothing rendered.
+only — the anchor's lane-side `fallback` Component, else nothing rendered.
 
 ## Migration — the livery rename
 

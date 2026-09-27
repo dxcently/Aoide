@@ -1,8 +1,7 @@
 # cadenza — coverage checklist
 
 Every surface a song can dress today, every bridged capability sonata
-answers on it, and cadenza's answer. Built from `modules/facets/quickshell/
-qml/slots.md` (the wired anchors), `shell.qml`, and a read of sonata's
+answers on it, and cadenza's answer. Built from `pkgs/lyra-shell/qml/slots.md` (the wired anchors), `shell.qml`, and a read of sonata's
 widget bodies for what each one reaches. Status: `design` → `preview` →
 `live` → `committed`.
 
@@ -10,7 +9,7 @@ widget bodies for what each one reaches. Status: `design` → `preview` →
 
 | slot | anchor · host | bridged capabilities to cover | cadenza answer | status |
 |---|---|---|---|---|
-| `bar` | WidgetSlot · shell.qml PanelWindow (`aoide-bar`), extras `shared` `powermenu` `dock` `stagingEngine` | Hyprland workspaces + active window; `shared` session counts; `powermenu.toggle()`, `dock.toggle()`; Pipewire sinks/sources + mute + default switch; Bluetooth adapter/devices; UPower battery; Networking; SystemTray (SNI); `bridge.toggleRiceMode` + `stage/mode.json`; clock; `stage/projects.json` + graph.json `workspaces[].project` + the `workspaceaction` line (bind/unbind a workspace) | the switchboard line (intent §3.1, §3.2); the RICE cell sends one toggle per switch (dim `…`, clicks swallowed until `livery.riceMode` changes or 10s); the binding is the jack insight pane's PROJECT row — chips, `[clear]`, an inline `[+ new]` name, each click one `workspaceaction` pinned to that jack. **Honest partial:** the facet's ShellBridge answers no `workspaceaction`, so the line goes fire-and-forget through `sendCommand` (success shows when graph.json rewrites; a refusal is silent, the amber pending mark clears after 5s); a bridge with `workspaceAction(fields, cb)` gets its `ok:false` shown as one dim line | design |
+| `bar` | WidgetSlot · shell.qml PanelWindow (`aoide-bar`), extras `shared` `powermenu` `dock` `stagingEngine` | Hyprland workspaces + active window; `shared` session counts; `powermenu.toggle()`, `dock.toggle()`; Pipewire sinks/sources + mute + default switch; Bluetooth adapter/devices; UPower battery; Networking; SystemTray (SNI); `bridge.toggleRiceMode` + `stage/mode.json`; clock; `stage/projects.json` + graph.json `workspaces[].project` + the `workspaceaction` line (bind/unbind a workspace) | the switchboard line (intent §3.1, §3.2); the RICE cell sends one toggle per switch (dim `…`, clicks swallowed until `livery.riceMode` changes or 10s); the binding is the jack insight pane's PROJECT row — chips, `[clear]`, an inline `[+ new]` name, each click one `workspaceaction` pinned to that jack. **Honest partial:** the shell's ShellBridge answers no `workspaceaction`, so the line goes fire-and-forget through `sendCommand` (success shows when graph.json rewrites; a refusal is silent, the amber pending mark clears after 5s); a bridge with `workspaceAction(fields, cb)` gets its `ok:false` shown as one dim line | design |
 | `calendar` | WidgetSlot · inside the bar | month grid | `cal` pane from the clock cell | design |
 | `dock` | SurfaceSlot · shell.qml (`aoide-dock`), extras `shared` `stagingEngine`; `toggle()` from the bar and `SUPER+G` | toggle contract; `openTab(tab)` from the bar cells | the tabbed board: OVERVIEW · project tabs · SYS · NOTIF (intent §3.3); closes by `[x]`, Escape, `SUPER+G`, the showing tab's bar cell, or a click off it (the `aoide-dock-scrim` catcher) | design |
 | `conductor` | WidgetSlot · sonata's dock | `stage/sessions.json` + `hooks.json` + `herald.json` summonses + `graph.json` `spawned` edges; `bridge.focusSession`, `sessionAction`, `traceSession`, `recheckSessions`, `heraldverdict` | not authored — the board's agent cards (`BoardCards`, intent §3.3 "The cards") on OVERVIEW (grouped by project) and each project tab: every published field sonata's card shows, subagents on tree limbs, the summons lane with `heraldverdict`, click → `focusSession`, the action line → `sessionAction`. Not drawn: the `traceSession` poll (the card reads the roster's `say`/`tool`) and the `recheckSessions` reap button | preview |
@@ -23,14 +22,14 @@ widget bodies for what each one reaches. Status: `design` → `preview` →
 | `powermenu` | SurfaceSlot · shell.qml (`aoide-powermenu`) | `{cmd:"power", action}` | prompt pane (intent §3.6) | design |
 | `launcher` | SurfaceSlot · shell.qml (`aoide-launcher`), extras `clipboard` `ledger` | apps, `AoideClipboard`, `GrimoireLedger` (`song/stage/grimoire.json`) | command pane (intent §3.5): fuzzy search over names + desktop ids, and a digits-only query that finds nothing names row n (Enter fires it) | design |
 
-## Carried but not anchored (facet still owns the surface)
+## Carried but not anchored (the shell still owns the surface)
 
 | slot | why no cadenza body now |
 |---|---|
-| `wallpaper` | shell.qml still hosts the facet's own wallpaper; the slot anchor lands with a later phase. Cadenza answers with a COVER, not a slot: the generated circuit board (`cover/pcb-<w>x<h>.png`, intent §3.9), staged with `lyra cover set`; the facet's wallpaper draws it. |
-| `wallpaper-picker` | no `SurfaceSlot` wired; the facet's `AoideWallpaperPicker` (SUPER+W) draws. Revisit when anchored. |
+| `wallpaper` | shell.qml still hosts the shell's own wallpaper; the slot anchor lands with a later phase. Cadenza answers with a COVER, not a slot: the generated circuit board (`cover/pcb-<w>x<h>.png`, intent §3.9), staged with `lyra cover set`; the shell's wallpaper draws it. |
+| `wallpaper-picker` | no `SurfaceSlot` wired; the shell's `AoideWallpaperPicker` (SUPER+W) draws. Revisit when anchored. |
 
-## Facet-owned, not dressable by a song today
+## Shell-owned, not dressable by a song today
 
 Lockscreen, OSD, greeter, the `lyra secrets ask` / `lyra pair ask|show`
 dialogs, the `*Preview` rigs. They read `livery.*`, so cadenza's key
@@ -45,7 +44,7 @@ recolours them; their shapes are out of the song's reach.
 | lamps | `activeAt` on `workspaces[]` / `ties[]` | S3 — **built** | core's `activeAt`; else derived: `hooks.json` `updatedAt` advancing |
 | working pulse | `hooks.json` phase `working` + session → jack (`workspaces[].sessions`) | S3 for the join | built on `hooks.json`; the jack join is derived (window → toplevel) until S3 |
 | send lamps | `graph.json` `sends: [{from, to, at}]` (the conductor's recent sends, newest last) | a core ask; no slice named in core-seams yet | nothing: absent `sends` runs no lamp (the switchboard fixture carries a ring) |
-| live cover (agents lit on the board) | a song-owned `wallpaper` slot anchor in the facet | not scheduled — a core ask | the static cover; no agent map |
+| live cover (agents lit on the board) | a song-owned `wallpaper` slot anchor in the shell | not scheduled — a core ask | the static cover; no agent map |
 | jack insight + SYS per-jack numbers | `state/usage/now.json` (`by: "workspace"`) | S5 tokens/cost, S6 CPU/mem, S7 history | jack pane: honest empty (§3.4); SYS per-jack: hidden (`hasJackUsage`) |
 | board feed + OVERVIEW mail | `aoide project board` via a shellbridge read op | S8–S10 | hidden (`hasBoardFeed`, `hasMailRead`); a project tab is its agents + terminals |
 | composer → agent | `{cmd:"boardpost", to:{session}}` | S11 | hidden (`hasBoardPost`) |

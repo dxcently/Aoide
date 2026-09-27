@@ -1,19 +1,19 @@
 # modules/nucleus/options.nix — THE OPTION CONTRACT.
 #
-# Every other module (dendrites, facets) builds against the options
-# declared here. This is versioned in CONTRACTS.md (livery schema v0). Facets
-# read ONLY `aoide.livery`, `aoide.arrangement` and `aoide.surfaces` — an
-# enumerated, closed whitelist (AGENTS.md house rule 5); no module reads another
-# module. The coupling discipline is enforced by lib/checks.nix, not by
-# politeness.
+# Every other module (dendrites) builds against the options
+# declared here. This is versioned in CONTRACTS.md (livery schema v0). A paint
+# lane reads `aoide.livery`, `aoide.arrangement` and `aoide.surfaces` from here,
+# plus the core scalars and the song selection declared beside them — the
+# enumerated, closed set root `AGENTS.md` house rule 5 states in full; no module
+# reads another module. That discipline is a documented convention, backed by
+# code review — `lib/checks.nix` has no check that inspects a lane's reads, as
+# rule 5 says.
 #
 # Discovered and applied unconditionally on every host (like dxflake's
 # nucleus — no mkIf guard). It declares options and eval-clean defaults only;
 # it wires no behaviour, so an empty config evaluates cleanly.
 {
   lib,
-  config,
-  inputs,
   ...
 }:
 let
@@ -31,7 +31,7 @@ let
 
   # ── Component override submodules ─────────────────────────────────────────
   # v0 component tier: bar.* / notif.* / window.*. Each field is optional and
-  # falls back to the palette when unset. Facets read these; nothing else does.
+  # falls back to the palette when unset. Paint dendrites read these; nothing else.
   mkComponent =
     fields:
     types.submodule {
@@ -63,45 +63,45 @@ let
   # ── Geometry submodule (v0 optional tier: gaps/border/rounding/blur) ──────
   # Additive-optional under the existing v0 schema (same nullOr-with-fallback
   # shape as the component tier above): every field is optional and falls
-  # back to the compositor facet's opinionated default when unset. A livery
+  # back to the compositor lane's opinionated default when unset. A livery
   # file with no `geometry` block behaves exactly as before — the compositor
-  # facet applies the fallback, not the option system.
+  # lane applies the fallback, not the option system.
   geometryType = types.submodule {
     options = {
       gapsOut = mkOption {
         type = types.nullOr types.int;
         default = null;
-        description = "Outer gap between windows and the screen edge (px). Falls back to the compositor facet's default (8) when null.";
+        description = "Outer gap between windows and the screen edge (px). Falls back to the compositor lane's default (8) when null.";
       };
       gapsIn = mkOption {
         type = types.nullOr types.int;
         default = null;
-        description = "Inner gap between adjacent windows (px). Falls back to the compositor facet's default (6) when null.";
+        description = "Inner gap between adjacent windows (px). Falls back to the compositor lane's default (6) when null.";
       };
       borderSize = mkOption {
         type = types.nullOr types.int;
         default = null;
-        description = "Window border thickness (px). Falls back to the compositor facet's default (2) when null.";
+        description = "Window border thickness (px). Falls back to the compositor lane's default (2) when null.";
       };
       rounding = mkOption {
         type = types.nullOr types.int;
         default = null;
-        description = "Window corner radius (px). Falls back to the compositor facet's default (0) when null.";
+        description = "Window corner radius (px). Falls back to the compositor lane's default (0) when null.";
       };
       blurEnabled = mkOption {
         type = types.nullOr types.bool;
         default = null;
-        description = "Whether compositor blur is enabled. Falls back to the compositor facet's default (true) when null.";
+        description = "Whether compositor blur is enabled. Falls back to the compositor lane's default (true) when null.";
       };
       blurSize = mkOption {
         type = types.nullOr types.int;
         default = null;
-        description = "Blur kernel size. Falls back to the compositor facet's default (8) when null.";
+        description = "Blur kernel size. Falls back to the compositor lane's default (8) when null.";
       };
       blurPasses = mkOption {
         type = types.nullOr types.int;
         default = null;
-        description = "Blur pass count. Falls back to the compositor facet's default (3) when null.";
+        description = "Blur pass count. Falls back to the compositor lane's default (3) when null.";
       };
     };
   };
@@ -219,7 +219,7 @@ let
   # ── Base16 scheme submodule (optional full-scheme tier) ───────────────────
   # A song MAY carry a complete base16 scheme following the base16 standard's
   # slot semantics (https://github.com/chriskempson/base16 — 00..07 the
-  # grayscale ramp, 08..0F the accent set). When present, the Stylix facet
+  # grayscale ramp, 08..0F the accent set). When present, the stylix lane
   # bakes it verbatim instead of synthesising a degenerate scheme from the
   # 4-anchor palette. All 16 slots are required once the tier is given — a
   # partial scheme would silently fall back per-slot and drift.
@@ -258,7 +258,7 @@ let
         type = types.str;
         example = "quickshell";
         description = ''
-          The single module that renders this surface. The Quickshell facet
+          The single module that renders this surface. The lyra lane
           populates this registry; Stylix reads it and disables its own
           derivation for owned surfaces. `checks.surface-ownership` asserts
           every declared surface names exactly one owner.
@@ -299,7 +299,7 @@ let
         description = ''
           The window/layer-shell namespace this widget registers under.
           null derives to "aoide-<slot>" — the consumer (the compositor
-          facet) computes this from the attribute key, since a plain option
+          lane) computes this from the attribute key, since a plain option
           default can't see its own key.
         '';
       };
@@ -338,7 +338,7 @@ let
           walk and the native hot-sync — `order` is the only way to get
           deterministic layout among multiple `dock` widgets. Consumers
           sort by `(order ?? 0, slot-name)` as tie-break. Meaningless for a
-          `kind = "surface"` entry (the compositor facet and the QML
+          `kind = "surface"` entry (the compositor lane and the QML
           runtime don't use it) — invalid combinations are rejected
           native-side (Phase 9), not by a nix-level constraint (nix option
           types can't easily express "field X only valid when kind==Y").
@@ -374,19 +374,24 @@ let
 
 in
 {
-  imports = [ inputs.aoide.nixosModules.default ];
-
+  # The core's own module (`pkgs/aoide/module`, `nixosModules.default` of the
+  # `aoide` input) is imported by the nucleus LANE that closes over this flake's
+  # inputs — `lib/aoideos.nix`'s `nucleusModule` — and not here: an `imports`
+  # list cannot read a module argument that `_module.args` supplies (the module
+  # list is what `config` is assembled from, so the read is a cycle), and this
+  # file must keep evaluating when a bare `evalModules` imports it without any
+  # lane around it (`lib/options.nix` reads the option declarations that way).
   options.aoide = {
     # ── Song selection — the replay seam ───────────────────────────────────
     # The song (rice) this host performs. A song is host-agnostic: ANY host in
     # the fleet replays any committed song by naming it here — one line, no
     # other edits. The shipped standard is song "sonata"; committed songs live
     # under song/songbook/<name>/ and self-gate on `aoide.song == "<name>"`
-    # (same self-registration discipline as dendrites — see CONTRACTS.md §5).
+    # (the same selection discipline as a dendrite — see CONTRACTS.md §5).
     #
-    # The VENUE (host) decides its instruments (facets/dendrites, hardware);
+    # The VENUE (host) decides its instruments (dendrites, hardware);
     # the SONG carries only the livery (palette + component tiers). A song must
-    # never set host options or enable facets/dendrites.
+    # never set host options or enable dendrites.
     song = mkOption {
       type = types.nullOr types.str;
       default = null;
@@ -395,20 +400,50 @@ in
         The song (rice) this host performs. Set to a committed song name
         (a folder under song/songbook/<name>/) to replay it on this host;
         the livery fan-out swaps with zero other edits. Null (the default)
-        means no song is named: "no song, no service" — a paint facet reads
-        this null and deploys nothing (no QML tree, no shell service) rather
-        than an empty surface, and every song's own rice.nix stays inert
+        means no song is named: a paint lane reads this null and deploys
+        nothing — no QML tree, no seeded stage, no rice restart — rather than
+        an empty surface, and every song's own rice.nix stays inert
         (its self-gate `config.aoide.song == "<name>"` is never true against
-        null). A host wanting the desktop names its song explicitly, e.g.
+        null). Naming a song is what puts a shell tree under the runtime root;
+        a host that brings its own config directory still runs a shell on it
+        (`aoide.quickshell.config`), song or no song. A host wanting the
+        desktop names its song explicitly, e.g.
         `aoide.song = "sonata";` for the shipped standard.
       '';
     };
 
-    # ── Livery seam (v0 schema) — the ONLY thing facets read ───────────────
+    # The songs this host BUILDS IN — the host record's `song.declared ∪
+    # song.available`, derived and set by the constructor's hook
+    # (`lib/aoideos.nix`, over `lib/songbook.nix`'s `builtIn`). A FACT about the
+    # selection, exactly as `aoide.song` is, and never hand-set: the lane that
+    # builds a song's widgets, installs its packages and seeds its folder reads
+    # it instead of asking the host record, which it cannot see.
+    #
+    # It is declared here, in the unconditional core, because the hook sets it
+    # on EVERY host — including one that selected no paint lane at all, where
+    # nothing reads it and it stays the empty default. A lane that reads it is
+    # reading a fact about the host, not another module (root AGENTS.md house
+    # rule 5 names it in the closed list for that reason).
+    songbook.builtIn = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      example = [ "sonata" ];
+      description = ''
+        The songs built into this system: the `rice.nix` files imported, the
+        widgets copied into the deployed shell tree, the packages installed and
+        the folders the machine songbook is seeded with. Derived from the host
+        record's song selection — and CLOSED UNDER BORROWS (CONTRACTS.md §5): a
+        song whose records borrow another song's slots builds the lender in too,
+        because the borrower's slots resolve to `songs/<owner>/<file>` on disk.
+        A host record never sets it.
+      '';
+    };
+
+    # ── Livery seam (v0 schema) — the ONLY thing paint lanes read ─────────
     livery = mkOption {
       description = ''
         The v0 livery schema — the single seam between the frozen nix layer
-        and the live desktop. Facets consume this and nothing else. Livery IS
+        and the live desktop. Paint dendrites consume this and nothing else.
         Aoide's design-token layer: the tokens themselves, named for the one
         set of house colours every surface wears in unison. Values and engine
         are one thing: the tokens are livery, resolved/validated/emitted by
@@ -428,7 +463,7 @@ in
             default = null;
             description = ''
               Optional full base16 scheme (all 16 slots, base16-standard
-              semantics). When set, the Stylix facet bakes this scheme for
+              semantics). When set, the stylix lane bakes this scheme for
               terminals/editors/GTK instead of synthesising one from the
               4-anchor palette. The palette tier still drives the live
               (stage/livery.json) side; keep the two in the same key.
@@ -454,7 +489,7 @@ in
             default = { };
             description = ''
               Geometry tier (v0 optional overrides): gaps/border/rounding/blur.
-              Every field is nullOr and falls back to the compositor facet's
+              Every field is nullOr and falls back to the compositor lane's
               opinionated default when unset — additive-optional, same status
               as the base16 tier. Hyprland-only in this pass; no QML consumer.
             '';
@@ -465,8 +500,8 @@ in
             description = ''
               The cover-art note: the wallpaper image this song carries, as a
               literal nix path (copied to the store — never a song/ runtime
-              read). Facets bake it as the Stylix base-context image. null means
-              "no cover" — the stylix facet falls back to its deterministic
+              read). Paint dendrites bake it as the stylix base-context image. null
+              "no cover" — the stylix lane falls back to its deterministic
               solid-colour derivation (from palette.bg), so the baked path stays
               buildable with no binary asset.
             '';
@@ -489,13 +524,13 @@ in
     # ── Arrangement seam (v1) — structure, livery's sibling ────────────────
     arrangement = mkOption {
       description = ''
-        The v1 arrangement schema — one of the three namespaces a facet may
+        The v1 arrangement schema — one of the three namespaces a paint lane may
         read. Where `aoide.livery` carries the song's DRESS (palette · base16
         · component tiers · geometry · cover), arrangement carries its
         STRUCTURE: which widget/surface TYPES the song brings into existence
         (`widgets`) and which painted surfaces it expects to stay mapped
         (`surfaces`). Dress and structure are different questions, so they
-        are different option trees; the facet read-whitelist stays an
+        are different option trees; the paint read-whitelist stays an
         enumerated, closed set — livery, arrangement, and the `aoide.surfaces`
         ownership registry (AGENTS.md house rule 5) — never an open `aoide.*`.
       '';
@@ -525,7 +560,7 @@ in
               file — `rice mode draft` symlinks it — so splitting a second file
               off would have to duplicate that routing and keep two files
               atomically consistent across the flip. The option-tree split is a
-              NIX NAMESPACE decision about what facets may read; it is not a
+              NIX NAMESPACE decision about what paint lanes may read; it is not a
               file split. Precedent: livery.json already carries a top-level
               `song` key with no `aoide.livery.song` option (CONTRACTS.md §4).
             '';
@@ -557,7 +592,7 @@ in
               This declares an EXPECTATION and instantiates nothing. It is a
               different question from `arrangement.widgets` above, which
               declares and INSTANTIATES per-song flavor widget types: the
-              facet-owned surfaces named here are hardcoded in the shell and
+              lane-owned surfaces named here are hardcoded in the shell and
               are never widget registrations, so declaring one here must
               never be read as asking for a second copy of it.
 
@@ -578,9 +613,78 @@ in
       default = { };
       example = literalExpression ''{ bar.owner = "quickshell"; notifications.owner = "quickshell"; }'';
       description = ''
-        Render-surface ownership registry. The Quickshell facet declares the
+        Render-surface ownership registry. The lyra lane declares the
         surfaces it owns; Stylix reads this and disables derivation for them.
         `checks.surface-ownership` fails eval if a surface has no owner.
+      '';
+    };
+
+    # ── Enable facts — the cross-lane seam ─────────────────────────────────
+    # What a paint lane brings into existence, declared ONCE. No module reads
+    # another module (root AGENTS.md house rule 5), so a cross-lane question —
+    # "does this host paint", "is there a shell here" — is never answered by
+    # reading the lane's own option. The lane that owns the thing sets its own
+    # fact `mkDefault true` when it is on (the compositor sets its own, and so
+    # does the greeter); core plumbing and other lanes read the fact.
+    # Each defaults to `false`: a host with no paint lane is headless.
+    # `aoide.lyra.enable` below — declared beside the package it installs — is
+    # the fifth fact in this family, same rule.
+    quickshell = {
+      enable = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          A Quickshell shell surface exists on this host. Set `mkDefault true`
+          by the lane that runs one (`dendrites/quickshell.nix` — the package
+          and the `aoide-quickshell` service). This is the FACT, not that
+          lane's own option: a host whose shell is painted by something else
+          leaves it false while still having a graphical session.
+        '';
+      };
+
+      config = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          The directory the shell runs: a store path or a host-owned config
+          directory, as a string. `null` (the default) is the bare case — the
+          quickshell package is installed and no shell service runs. Set by
+          the lane that supplies a config, read by the lane that installs the
+          package, so neither has to know the other by name. A lane with no
+          config to give leaves this null: nothing is wired.
+        '';
+      };
+    };
+
+    stylix.enable = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        A Stylix baked-theme fan-out exists on this host — the theme is
+        derived at build time and painted by nix. Set `mkDefault true` by the
+        lane that bakes it; a host that themes itself entirely at runtime
+        leaves it false.
+      '';
+    };
+
+    compositor.enable = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        A Wayland compositor is started by a lane on this host. Set
+        `mkDefault true` by the lane that starts it — a consumer that needs a
+        session but not a specific compositor reads this rather than naming
+        that lane.
+      '';
+    };
+
+    greeter.enable = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        A display-manager greeter comes up on this host's tty. Set
+        `mkDefault true` by the lane that brings it up. A host with no greeter
+        boots to the tty it lands on.
       '';
     };
 
@@ -720,11 +824,12 @@ in
           (the same six-boxes-plus-dash surface `lyra secrets ask` renders),
           `zenity --entry` otherwise. Off by default, same house policy as
           the MCP façade/A2A door/usage poller/secrets broker: the unit is
-          desktop-facet-gated exactly like `aoide-secrets-watch`
-          (`aoide.a2a.enable && aoide.facets.quickshell.enable`), but this
+          graphical-session-gated exactly like `aoide-secrets-watch`
+          (`aoide.a2a.enable && aoide.sessionTarget ==
+          "graphical-session.target"`), but this
           flag is the deliberate opt-in ON TOP of that gate — a host with
-          a2a and the quickshell facet both on does NOT get the popup
-          unless it also sets this. It lives in the `a2a` family because it
+          a2a on and a graphical session does NOT get the popup unless it
+          also sets this. It lives in the `a2a` family because it
           is meaningless without the door (`aoide.a2a.enable` is part of
           its gate). See `modules/nucleus/aoided.nix` for the unit and
           CONTRACTS.md §6's "Pairing events feed" subsection for the
@@ -797,19 +902,19 @@ in
     lyra = {
       enable = mkOption {
         type = types.bool;
-        default = config.aoide.facets.quickshell.enable;
-        defaultText = literalExpression "config.aoide.facets.quickshell.enable";
+        default = false;
         description = ''
           Install the `lyra` paint/rice binary — `pkgs.aoide.rice`, the
           separate output P-A8 split off the combined aoide/aoided/lyra
-          derivation so a headless closure never has to carry it. Defaults
-          to whether the quickshell facet is enabled (lyra exists to paint a
-          shell, so a graphical host wants it and a headless one doesn't by
-          default), but is independently overridable: an explicit flag,
-          not only the facet inference, for a future aoide config that wants
-          lyra without quickshell (or vice versa). Every unit that execs
-          `lyra` (shellbridge, the dunst herald feed) gates on this flag too,
-          so flipping it off never leaves a unit pointed at a missing binary.
+          derivation so a headless closure never has to carry it. The fifth
+          of options.nix's enable facts: set `mkDefault true` by the lane
+          that paints, which is the one that knows its shell needs the
+          binary. Independently overridable — an explicit flag, not only the
+          lane's inference, for a host that wants lyra without a shell (an
+          operator's own `lyra rice compose`) or a shell without lyra. Every
+          unit that execs `lyra` (shellbridge, the dunst herald feed) gates
+          on this flag too, so flipping it off never leaves a unit pointed
+          at a missing binary.
         '';
       };
     };

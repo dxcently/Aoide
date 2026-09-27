@@ -11,7 +11,7 @@
 // Song-local helper component (slots.md "Helper files"): uppercase-first
 // filename, resolved by TYPE NAME through the per-song qmldir the
 // derivation emits for any song carrying an uppercase-first widgets/ file
-// (modules/facets/quickshell/default.nix) -- no import statement needed by
+// (modules/dendrites/lyra/default.nix) -- no import statement needed by
 // a caller sitting in the same songs/fugue/ directory. Used by both
 // bar.qml and herald.qml.
 import QtQuick

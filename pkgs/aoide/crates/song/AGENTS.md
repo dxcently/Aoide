@@ -3,25 +3,48 @@
 ## Invariants
 
 - **This crate is lyra-only and stays nix-independent itself.** `widgets.rs`
-  is the one `nix eval` call in the whole workspace — it's here because
+  is the one place the workspace spawns `nix-instantiate` — it's here because
   `song` is `lyra`'s domain, but nothing else in this crate may shell out to
   Nix; the ricing engine must apply a song on generic Linux too (root
   `AGENTS.md`, "Nix-independence").
-- **`widgets::eval_songbook`'s templates fallback (L-C3, task #107) is
-  triggered structurally, never by catching a `nix eval` failure.** It
-  checks `flake_root().join("flake.nix").is_file()` FIRST and routes to
-  `eval_songbook_from_templates` before ever building a `nix` command —
-  don't "simplify" this into a try-nix-then-fall-back-on-error shape; that
-  would spawn a doomed `nix` process on every repo-less-host call (slow, and
-  a wrong error message when `nix` itself isn't on `PATH`) for no benefit.
-- **`eval_songbook_from_templates` only ever resolves a NO-`_widgets/`-shelf
-  song — it must refuse, not guess, when `name` has one.** Borrowed/composed
-  widget ownership can only be resolved by `composeSong` in the nix
-  evaluator (`widgets.rs`'s own module doc); `rice compose` never writes a
-  shelf, so this is a real but narrow gap, not an oversight. Don't extend
-  `scan_own_entry` to attempt shelf resolution — that would silently
-  reproduce ownership nix alone can correctly compute.
-- **`eval_songbook_from_templates` is a THREE-layer merge, not
+- **`widgets::plan_stage` is the gate, and it runs BEFORE the first write.**
+  `rice stage`/`rice mode` call it ahead of the livery write and hand its
+  answer to both syncs; a refusal stages NOTHING. Don't move it back inside
+  `sync_song_widgets`/`sync_song_registry`, and don't add a write path that
+  precedes it — the two refusal texts are the contract
+  (`refusal_no_nix`, `refusal_rebuild_needed`).
+- **Nothing in the runtime reads a checkout for the songbook.** The generator
+  is the SHIPPED file (`<templates>/../nix/manifest.nix`), its argument is the
+  MACHINE's songbook (`fs::songbook_root`), and the spawn's
+  `ErrorKind::NotFound` IS the no-nix answer — never a `which` probe, never a
+  `flake_root()` check, never a `#<flake output>` argv. `$AOIDE_FLAKE_ROOT`
+  survives for `rice declare`'s commit-in step only.
+- **§7.5's three cases, in order, and case 1 must stay nix-free.** Built in
+  with no DIFFERING machine copy (absent counts, and so does a match over what
+  the seed SHIPS — `MACHINE_RUNTIME_DIRS`, the machine's own `takes/`/`drafts/`
+  (NOT `elements/`, which is song-authored input) — are NOT differences in the
+  song, or a snapshot would disable
+  staging on a host with no nix and report a built-in song as not built in)
+  stages from the baked baseline; everything else is the generator; no nix makes
+  everything else a refusal.
+- **A staged song's LENDERS come with it.** `widget_owners` reads the owners its
+  manifest entry names and `sync_song_widgets` carries each lender's `widgets/`
+  into `run/qml/songs/<owner>/` — a borrowed slot resolves to
+  `songs/<owner>/<file>`, so carrying only the borrower leaves a dead slot with
+  no error anywhere. A lender with no `widgets/` in the songbook is an ERROR
+  naming it, never a skip.
+- **The gate runs in the CALLER, before the caller's first write.** Every
+  staging caller (`rice stage`, `rice mode stage`, `rice back` — whose first
+  write is its drift snapshot — `reload`) calls `plan_stage` before writing
+  anything, and an in-crate test pins the `back` case (§9(d) only covers
+  `stage`). Don't move the gate down into a sync.
+- **`baseline_songbook` only ever resolves a NO-`_widgets/`-shelf song's own
+  entry — it must skip the patch, not guess, when `name` has one.** Borrowed
+  ownership resolves only in `composeSong`, and for a built-in song the baked
+  baseline already carries that answer; patching it with a scan would DROP
+  every borrowed slot. Don't extend `scan_own_entry` to attempt shelf
+  resolution.
+- **`baseline_songbook` is a THREE-layer merge, not
   baseline-plus-current-song — don't collapse it back to two.** (1) the
   templates dir's baked `manifest.json`/`registry.json`, authoritative for
   every shipped, read-only song; (2) `overlay_surviving_entries` copies the
@@ -68,22 +91,22 @@
   `crate::live`/`crate::widgets` primitives directly, never
   `handle_rice_stage`.
 - **`song/declared/livery.json` (the declared twin, CONTRACTS.md §4) is
-  READ-ONLY for this crate — only the nix facet writes it.** The quickshell
-  facet's activation seed (`modules/facets/quickshell/default.nix`,
-  `home.activation.aoideSeedStage`) publishes it: the declared song's
-  committed notes with the venue's `aoide.livery.override` applied, `"song"`
-  injected, keys sorted. `commands::rice::notes_source` reads it for
-  `handle_rice_stage`, and `commands::rice::declared_song` exposes its
+  READ-ONLY for this crate — only the nix side writes it.** The lyra
+  lane's activation seed (`home.activation.aoideSeedStage`) publishes it: the
+  declared song's committed notes with the venue's `aoide.livery.override`
+  applied, `"song"` injected, keys sorted.
+  `commands::rice::notes_source` reads it for `handle_rice_stage`, and
+  `commands::rice::declared_song` exposes its
   `"song"` field (`rice mode declarative`'s no-`<name>` resolve uses it,
   ahead of `current_staged_song`). **The declared-song test is `"song"`
   EQUALITY against the name being staged — never a mode, never a mtime,
   never "the twin exists so use it".** The twin describes exactly one song;
   staging any other must derive from that song's own committed notes. A host
-  that never activated the facet has no twin at all, and every reader falls
+  that never activated the lane has no twin at all, and every reader falls
   back to the committed songbook — absent is the ordinary no-venue-override
   case, never an error. Never write this path from Rust: `rice stage` is a
   runtime writer of the STAGE, and a second Rust writer of the declared twin
-  would race the facet's seed and could never compute the override tier the
+  would race the lane's seed and could never compute the override tier the
   nix evaluator owns.
 - **`commands::rice::seed_songbook_from_templates` (task #41) is called
   from the STAGING ENTRY POINTS, never from inside `handle_rice_stage`
@@ -151,7 +174,7 @@
   makes the judgement unit-testable and is why an absent or malformed
   published file must read as "no expectation declared", never as an
   unhealthy desktop. **An EMPTY published declaration is the same case,
-  folded by `asserted_expectation`, not by the parser**: the facet publishes
+  folded by `asserted_expectation`, not by the parser**: the lane publishes
   the file on every host, so `{"surfaces": {}}` is what every non-declaring
   song ships, and it must reach `shell_has_zero_layers` — routing it to
   `surfaces_fall_short` gives a check with nothing to fail, which reads a

@@ -27,10 +27,10 @@ binaries + git on PATH, flakes enabled; the previous [[dxflake]] generation
 stays in the systemd-boot menu as the rollback. Every subsystem below is
 marked on one of three rungs:
 
-- **Implemented** — real code paths: the flake/walker/checks layer, the option
-  contract, the livery plumbing, the CLI trunk + MCP façade, the daemon and
-  bridge skeletons, the three facets, song replay, the launcher, the gadget
-  dock.
+- **Implemented** — real code paths: the flake/constructor/checks layer, the
+  option contract, the livery plumbing, the CLI trunk + MCP façade, the daemon
+  and bridge skeletons, the paint dendrites, song replay, the launcher, the
+  gadget dock.
 - **Stubbed** — the mutating CLI commands (`rice declare/transpose`,
   `content *`, `make`, `update`) parse, audit, and exit 64 with a
   structured not-implemented payload; only the live action is deferred.
@@ -50,7 +50,7 @@ The repo tracks a git remote (`origin`). File-level detail lives in
         nix eval · immutable · git             live desktop · ephemeral · running
    ┌──────────────────────────────┐        ┌──────────────────────────────────┐
    │  nucleus  dendrites           │        │  Quickshell   Hyprland            │
-   │  facets                       │        │  shellbridge  terminals           │
+   │  aggregations overrides       │        │  shellbridge  terminals           │
    │  hosts    song/songbook       │        │  notifications  widgets           │
    └──────────────┬───────────────┘        └───────────────┬──────────────────┘
                   │                                         │
@@ -108,7 +108,7 @@ routed through the desktop, not through `aoided`'s CLI trunk).
                                     two fan-outs         │
                        ┌─────────────────────────────────┴───────────────┐
                        ▼ (rehearsal / live)                (recording / baked) ▼
-        livery emit {stage · hyprctl · osc}      rice.nix → facets + [[Stylix]]
+        livery emit {stage · hyprctl · osc}      rice.nix → dendrites + [[Stylix]]
           │              │            │                               │
           ▼              ▼            ▼                               ▼
   song/stage/livery.json hyprctl    terminal OSC        hyprland.conf · QML colors ·
@@ -137,7 +137,7 @@ the implemented/stubbed ladder.
 | [[aoided]]           | CLI+MCP operations; desktop events             | audit log (`$AOIDE_ROOT/log`); default-deny event bus   | implemented (skeleton)                     |
 | [[Self-Ricing]]      | prompt/wallpaper; `songbook/`; shipped standard | `song/songbook/<song>/`; songbook append; stage    | mostly real (`transpose` exit 64) |
 | [[Content-Pipeline]] | folders + manifests; Mneme API                 | in-place index; quarantine on lint fail             | stubbed (all commands exit 64)                |
-| [[livery]]         | `aoide.livery` (palette + component tiers)   | `song/stage/livery.json`; baked facets + Stylix   | implemented (v0)                           |
+| [[livery]]         | `aoide.livery` (palette + component tiers)   | `song/stage/livery.json`; baked dendrites + Stylix   | implemented (v0)                           |
 | [[shellbridge]]      | unix-socket commands; Hyprland IPC             | atomic JSON in `state/stage/` (conducting) + `song/stage/` (rice); `hyprctl` dispatch    | implemented (accept loop live: `focuswindow`) |
 | [[Quickshell]]       | `state/stage/*.json` (sessions/hooks/graph/herald) + `song/stage/*.json` (livery/mode)  | widget socket commands; rendered surfaces            | implemented (9 real surfaces)              |
 | [[Hyprland]]         | baked config + `hyprctl` keywords              | IPC event/state socket                              | implemented (greetd stubbed)               |
@@ -148,7 +148,7 @@ the implemented/stubbed ladder.
 Why preview and adopted state can never diverge: both derive from the same
 `aoide.livery` values. The livery schema v0 (palette `bg/fg/accent/urgent` + component
 tiers `bar`/`notif`/`window`, each field `null` → palette, with the fallback
-applied **in the facets**) rides the external W3C design-tokens container
+applied **in the paint dendrites**) rides the external W3C design-tokens container
 format; [[livery]] (native Rust in `crates/song/src/livery/`; commands `lint` /
 `resolve` / `emit {stage,hyprctl,osc,file}`) is the engine. See [[livery]].
 
@@ -157,7 +157,7 @@ format; [[livery]] (native Rust in `crates/song/src/livery/`; commands `lint` /
                            │  single source of truth
              ┌─────────────┴──────────────┐
              ▼ REHEARSAL (live, uncommitted) ▼ RECORDING (adopted, committed)
-   livery emit                    rice.nix ──► facets + Stylix
+   livery emit                    rice.nix ──► dendrites + Stylix
    ├─ stage: song/stage/livery.json          │   (values baked at nix build)
    │         (atomic write; fully resolved)  ▼
    ├─ hyprctl: keyword dispatch         every nix-manageable target
@@ -171,14 +171,14 @@ Rehearsal is the sketch (hot-reloads, no rebuild); recording is the truth
 (durable, requires the gated rebuild). GTK/Qt surfaces need an app restart and
 are declare-only.
 
-The baked side is carried by the three facets, all real:
+The baked side is carried by three paint dendrites, all real:
 
 - **quickshell** — declares nine surfaces with `owner = "quickshell"` (bar,
   notifications, launcher, osd, lockscreen, greeter, wallpaper, agentWidgets,
   sessionGraph); QML rsyncs from the store into
   `$AOIDE_ROOT/run/qml/` (default `~/.aoide/run/qml/`) via home-manager
   activation (source stays
-  `modules/facets/quickshell/qml/`; no `qml/` at the repo root);
+  `pkgs/lyra-shell/qml/`; no `qml/` at the repo root);
   `LiveryState.qml` watches the stage file for the live fan-out. Eight of
   the nine carry a live QML body: `AoideBar.qml` is the bar (its own popouts
   also carry the calendar and now-playing gadgets); `AoideLauncher.qml` is
@@ -200,8 +200,8 @@ The baked side is carried by the three facets, all real:
   with colliding targets stood down on **both** the NixOS and home-manager
   layers for every Quickshell-owned surface.
 
-The `surface-ownership` and `no-song-read` checks that police this seam are
-real flake checks.
+The `surface-ownership` and `song-runtime-untracked` checks that police this seam
+are real flake checks.
 
 ## The rice loop — where the agent writes
 
@@ -242,28 +242,33 @@ default) — see [[Self-Ricing#Staging vs Declarative Mode]].
               ← the "self" in self-ricing
 ```
 
-`song/` is the agent's only writable domain.
+`song/songbook/` is a rice agent's writable domain; nothing else is.
 
 Song replay is implemented: `aoide.song` (nucleus option, `nullOr str`,
-default `null` — naming no song performs no song) selects the song a host
-performs; `lib/mkHost.nix` walks
-`song/songbook/` exactly as it walks `modules/`, so a committed song
+default `null` — naming no song performs no song) is the song a host
+performs, and a host SELECTS its songs (`song.declared` is what it performs,
+`song.available` what it builds in to stage without a rebuild);
+`lib/songbook.nix` finds `song/songbook/<song>/` by one typed scan and
+`lib/aoideos.nix` builds exactly the selected songs in, so a committed song
 self-registers and self-gates on `config.aoide.song == "<name>"` — the same
 discipline as a dendrite. The shipped standard is song `"sonata"` at
 `song/songbook/sonata/` — upstream-owned and evolving, exactly like any
-other upstream-owned tree (nucleus, facets): upstream MAY still update or
+other upstream-owned tree (nucleus, dendrites): upstream MAY still update or
 iterate on it. Every OTHER song — anything composed via `rice compose`
 under a different name — is clone-owned; upstream never touches it, an
 absolute guarantee unchanged by `sonata` being both shipped and actively
 iterated. The song carries livery only; the host is the
-venue — its specifics and which instruments (facets, dendrites) are enabled.
+venue — its specifics and which instruments (dendrites) are enabled.
 Replay = same song, new venue (one line in `hosts/<host>/default.nix`);
-transpose = new key, same venue. The `song-shape` check asserts every walked
-songbook file is a `rice.nix`; song shape v0 is `CONTRACTS.md §5`. Full
+transpose = new key, same venue. The `song-shape` check asserts the songbook's
+shape: no stray `.nix` outside a song's `rice.nix`/`_widgets/`, no `../`
+path literal in a song's `.nix` text, and every song carrying both `rice.nix`
+and `livery.json`; song shape v0 is `CONTRACTS.md §5`. Full
 replay treatment: [[Song-Vocabulary#Replay — any song, any host]].
 
-Inherited structure (nucleus, facets) changes by upstream merge only; new
-dendrite branches are additive. Mutation policy is encoded as radial distance
+Changes outside `song/` land only on a lane the User ordered, its scope named;
+a new dendrite branch is additive — one file plus its one catalogue line.
+Mutation policy is encoded as radial distance
 from the nucleus — see [[Snowflake-Anatomy]] and [[Governance]].
 
 ## The content pipeline — how knowledge enters
@@ -368,11 +373,11 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   committed `elements/*/element.json` into `run/elements/`), `shellbridge`,
   the 2-command `quickshell` group (`reload` — the Quickshell IPC hot-reload
   trigger, rebuilding the whole scene from `shell.qml` in-process to pick up
-  dynamically-loaded widget/facet QML the file watcher can't track — and
+  dynamically-loaded widget/shell QML the file watcher can't track — and
   `healthcheck`, the placeholder-screen lockup watchdog), `herald push`,
   `onboard` (the nix half of installation: generates `./aoide.nix` — or
   `--out <path>` — listing every
-  `aoide.*` module option, 142 today, derived live from the modules via the
+  `aoide.*` module option, 161 today, derived live from the modules via the
   flake's `aoideOptions` output, defaults commented out with one-line
   descriptions, plus the env-knob appendix as comments, and prints the
   `imports = [ ./aoide.nix ];` line for the user's own flake — it never edits
@@ -404,9 +409,9 @@ Live state lands in two stage trees under the runtime root (`$AOIDE_ROOT`,
 default `~/.aoide`), split by owner: `song/stage/*.json`
 (livery, mode, cover — rice/paint staging) and `state/stage/*.json`
 (sessions, hooks, projects, graph, herald, pending — the [[Session-Graph]]
-DAG layer's own conducting files). Beside them, the quickshell facet's
+DAG layer's own conducting files). Beside them, the lyra lane's
 activation seed publishes `song/declared/livery.json`, the venue's read-only
-statement of the declared song (CONTRACTS §4). `lib/mkHost.nix`
+statement of the declared song (CONTRACTS §4). `lib/aoideos.nix`'s constructor
 injects `pkgs.aoide` by overlay from the **same**
 `callPackage` paths as the flake's `packages` output, so the units and the
 flake always build the same binaries, never a drifted copy.
@@ -436,28 +441,36 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 ```
 ~/Aoide/
 ├── flake.nix        inputs: nixpkgs · home-manager · stylix · quickshell · hyprland
-│                    outputs: nixosConfigurations.yomi-strix · packages.aoide
-│                    · checks · devShells · formatter
-├── lib/             walk.nix (dendritic walker) · mkHost.nix (host assembly + pkgs
-│                    overlay) · checks.nix (surface-ownership · no-song-read · song-shape)
+│                    outputs: nixosConfigurations.<host> · hosts · inventory ·
+│                    packages · nixosModules · overlays · lib · aoideOptions ·
+│                    checks · devShells · formatter
+├── lib/             aoideos.nix (the constructor) · composition.nix (selection) ·
+│                    pkgs.nix / songbook.nix (discovery) · options.nix (aoideOptions) ·
+│                    checks.nix (surface-ownership · song-runtime-untracked · song-shape …)
 ├── tests/           non-cargo tests: vm-boot.nix (headless QEMU boot check) ·
 │                    portability.nix (static-artifact check) · distrobox.md (manual)
-├── modules/         the snowflake — walker-discovered layers
-│   ├── nucleus/     options.nix (THE contract) · aoided · shellbridge · melete-adapter
+├── modules/         the snowflake — the catalogue names what is selectable
+│   ├── nucleus/     options.nix (THE paint contract) · aoided · secrets · melete-adapter
 │   │                · packages.nix (aoide + git on PATH) · nix.nix (flakes on)
-│   ├── dendrites/   27 opt-in features (bash, nh, git, kitty, neovim, starship,
-│   │                mcfly, btop, yazi, fastfetch, devtools, cli, fonts, hyprland,
-│   │                obsidian, melete, mneme, firefox, screenshot, vision, audio,
-│   │                claude-code, clipboard, dunst, kimi-code, networkmanager,
-│   │                pi-coding-agent) ← additive
-│   └── facets/      quickshell · compositor · stylix          ← render surfaces (lyra-only)
-├── hosts/           common/ + yomi-strix/ (flags + the aoide.song selector; a real
-│                    hardware profile, switched live and running as the daily desktop)
-├── pkgs/            aoide/ (Rust workspace, 13 crates over two binaries —
-│                    aoide/aoided core + lyra paint, see [[Package-Layout]])
-├── song/            songbook/sonata/ (shipped standard) — rice.nix · livery.json ·
-│                    palette/ · sounds/ · icons/ · widgets/ · design/ (per song);
-│                    covers/ — shared wallpaper library, referenced by rice.nix
+│   ├── dendrites/   the opt-in lanes, one catalogue entry each (bash, nh, git, kitty,
+│   │                neovim, starship, mcfly, btop, yazi, fastfetch, devtools, cli,
+│   │                fonts, hyprland, obsidian, melete, mneme, firefox, screenshot,
+│   │                vision, audio, claude-code, clipboard, dunst, kimi-code,
+│   │                networkmanager, pi-coding-agent — plus the paint lanes
+│   │                quickshell · compositor · stylix · greeter · lyra) ← additive
+│   ├── aggregations/  named groups a host takes in one line (base · desktop · agents · aoideos)
+│   └── overrides/   capability-scoped fixes (no records yet)
+├── hosts/           one record per machine (yomi-strix is the real one; `_`-prefixed
+│                    dirs are the templates to copy) — flags, aggregations, the
+│                    aoide.song selector, and a real
+│                    hardware profile, switched live and running as the daily desktop
+├── pkgs/            aoide/ (Rust workspace, two binaries — aoide/aoided core +
+│                    lyra paint), lyra-shell/ (the QML skeleton), lyra-songbook/
+│                    (the shipped templates), see [[Package-Layout]]
+├── song/            songbook/<song>/ (per song: rice.nix · livery.json ·
+│                    palette/ · sounds/ · icons/ · widgets/ · design/) ·
+│                    covers/ — shared wallpaper library ·
+│                    songbook/learnings.md · songbook/update-playbook.md
 ├── docs/BUILD.md    module-authoring conventions
 ├── CONTRACTS.md     §0 design philosophy + the versioned contracts §1–8 (note
 │                    schema · dendrite shape · schema output · stage files ·
@@ -471,17 +484,18 @@ The map above is the dev git checkout (`~/Aoide`, reached via
 option): `song/stage/`, `song/declared/`, `state/` (+ `state/stage/`),
 `run/qml/`, the composed
 host `song/songbook/`, and the audit `log/`, created at runtime by
-systemd-tmpfiles, the quickshell facet's home-manager activation, and the
+systemd-tmpfiles, the quickshell lane's home-manager activation, and the
 binaries themselves; on first run the binaries migrate pre-existing
 `~/Aoide/{song/stage,state,log}` into the root, each piece gated on its own
 override being unset. `song/songbook/**` in the checkout is
 versioned score, legitimately walked at eval.
 
-`hosts/` knows dendrites; dendrites never know hosts. Facets read only
-`aoide.livery` and `aoide.arrangement` (and declare `aoide.surfaces`); no
+`hosts/` knows dendrites; dendrites never know hosts. Paint lanes read only
+`aoide.livery`, `aoide.arrangement` and `aoide.surfaces` plus the core scalars
+and the song selection root `AGENTS.md` house rule 5 enumerates; no
 module reads another module.
 The coupling discipline is contractual — the flake's checks (`surface-ownership`,
-`no-song-read`, `song-shape`, plus building both packages, plus the `vm-boot`
+`song-runtime-untracked`, `song-shape`, plus building both packages, plus the `vm-boot`
 headless boot of the assembled stack) fail eval on violation.
 
 ## Related

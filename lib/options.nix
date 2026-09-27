@@ -2,11 +2,12 @@
 # lane, docs/architecture/ONBOARD.md "The vars-file generator"). Feeds `lyra
 # onboard`'s `aoide.nix` generator: `nix eval --json <checkout>#aoideOptions`
 # returns every VISIBLE, non-internal `aoide.*` option declared across
-# modules/{nucleus,facets,dendrites}, narrowed to exactly what the generator
-# needs to render one commented line — name, description, and the default
-# already rendered as nix SOURCE TEXT (nixpkgs' own doc renderer does the
-# quoting/escaping; the generator pastes it verbatim, never re-serializes a
-# value itself). DERIVED from the option declarations via `lib.evalModules`
+# modules/nucleus and the dendrite bodies the registry catalogues,
+# narrowed to exactly what the generator needs to render one commented line —
+# name, description, and the default already rendered as nix SOURCE TEXT
+# (nixpkgs' own doc renderer does the quoting/escaping; the generator pastes
+# it verbatim, never re-serializes a value itself). DERIVED from the option
+# declarations via `lib.evalModules`
 # + `lib.optionAttrSetToDocList` — no hand-list. The emitted JSON deliberately
 # carries only {name, description, default} — no `type` field, since nothing
 # downstream consumes one; a future consumer adds it then, not speculatively.
@@ -14,11 +15,12 @@
 # Ladder rung (a) HELD (docs/architecture/ONBOARD.md "The vars-file
 # generator" / P-I3 brief): a bare `lib.evalModules` over the module tree
 # evaluates cleanly with no fight from `pkgs`/`config`-referencing
-# option constructions (`aoide.lyra.enable`'s `config.aoide.facets.
-# quickshell.enable` default, `aoide.auditLog`'s `"/home/${config.aoide.
-# user}/…"` default, three `melete`/`mneme` dendrite path defaults — nine
-# entries total, verified by grepping the raw doc-list output for `config\.`/
-# `pkgs\.`/`/nix/store` before committing to this rung). The heavier
+# option constructions (ten `default` fields reference `config` — the core
+# half's `aoide.root`/`checkout`/`auditLog`, with `"/home/${config.aoide.
+# user}/…"` and `${config.aoide.root}` paths, plus the `melete`/`mneme`
+# dendrite path defaults — and none references `pkgs` or a store path;
+# verified by grepping the raw doc-list output for `config\.`/`pkgs\.`/
+# `/nix/store` before committing to this rung). The heavier
 # `nixosSystem` fallback (rung (b)) was never needed. `pkgs` is the one thing
 # a real `nixosSystem` supplies as a module arg automatically that a bare
 # `evalModules` does not — supplied here via `specialArgs`, the flake's own
@@ -36,16 +38,43 @@
 {
   lib,
   pkgs,
-  inputs,
+  aoideInputs,
 }:
 let
+  registry = import ../modules;
+
+  # A dendrite file is a lane record (CONTRACTS.md §2): the option
+  # declarations and the guard live on `body`, and the lane is the module the
+  # constructor imports for a host that selected it. Only `body` is read here —
+  # a lane that nothing selected must not be evaluated to render a doc line.
+  #
+  # A capability with alternatives is a provider registry instead
+  # (`{ providers.<p> = <path>; }`, e.g. `compositor`), and each provider is a
+  # lane record of its own; the doc list needs every alternative's options, so
+  # every provider body is read. Same rule as
+  # `modules/dendrites/default.nix`'s whole-tree derivation.
+  bodyOf =
+    path:
+    let
+      entry = import path;
+    in
+    if entry ? body then [ entry.body ] else map (p: (import p).body) (lib.attrValues entry.providers);
+
+  bodies = lib.concatMap bodyOf (lib.attrValues registry.catalogue);
+
   evaled = lib.evalModules {
-    modules = [
-      ../modules
+    modules = bodies ++ [
+      ../modules/nucleus
+      # The core's own module, straight from this flake's input — the same
+      # value `lib/aoideos.nix`'s nucleus lane imports into a host. It comes
+      # from HERE rather than through `../modules/nucleus` because the
+      # `aoide.*` option contract is part of the doc list this file renders,
+      # and a bare `evalModules` has no lane to close over the inputs for it.
+      aoideInputs.aoide.nixosModules.default
       { config._module.check = false; }
     ];
     specialArgs = {
-      inherit inputs pkgs;
+      inherit aoideInputs pkgs;
       inherit (pkgs) system;
       username = "khoa";
       host = "aoide-options-eval";

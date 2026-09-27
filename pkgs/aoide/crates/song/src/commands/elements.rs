@@ -2,7 +2,7 @@
 //! into `run/elements/` (docs/architecture/ELEMENTS.md, L-E1). The
 //! shell-reachable bridge `crate::elements::seed_song` backs: today it's run
 //! by hand or by the User's own tooling; `rice stage` (L-E2) and the
-//! elements facet's activation hook (L-E3) are later phases that call the
+//! elements lane's activation hook (L-E3) are later phases that call the
 //! very same [`crate::elements::seed_song`], not a fork of it.
 
 use aoide_protocol::Invocation;

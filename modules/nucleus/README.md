@@ -1,32 +1,52 @@
 # modules/nucleus
 
 Core plumbing, discovered and applied unconditionally on every host — no
-`mkIf` guard, no per-host opt-in (unlike `dendrites`/`facets`). Every other
+`mkIf` guard, no per-host opt-in (unlike `dendrites`). Every other
 module builds against what nucleus declares.
 
 ## Named seams (what it exposes)
 
 - `options.nix` — the paint half of the option contract, plus the core door
   toggles whose units still live here: `aoide.livery`,
-  `aoide.arrangement`, `aoide.surfaces` — the enumerated, closed set facets
+  `aoide.arrangement`, `aoide.surfaces` — the enumerated, closed set a paint
   are allowed to read (root `AGENTS.md` house rule 5). Versioned in
-  CONTRACTS.md (livery schema v0). Also carries the non-facet-read option
+  CONTRACTS.md (livery schema v0). Also carries the non-paint-read option
   namespaces (`aoide.mcp`, `aoide.a2a`, `aoide.usage`, `aoide.lyra`,
   `aoide.secrets`, `aoide.pairing` — deployment/door toggles, not part of
-  the facet whitelist). The CORE half (`enable`, `root`, `checkout`,
-  `auditLog`, `terminal`, `user`) arrives by import: one `imports = [
-  inputs.aoide.nixosModules.default ]` line pulls it in from
-  `pkgs/aoide/module/options.nix` — the core flake's own option contract,
-  nixpkgs-only and portable to any consumer. `aoide.config` is the one
+  the paint whitelist). And it declares the ENABLE FACTS — the seam between
+  this layer and the paint lanes (CONTRACTS.md §0): `aoide.quickshell.enable`
+  (a shell surface exists here), `aoide.lyra.enable` (the paint/rice binary
+  is installed), `aoide.stylix.enable`, `aoide.compositor.enable`,
+  `aoide.greeter.enable`, each defaulting `false`, plus
+  `aoide.quickshell.config : nullOr str` — the directory a shell runs
+  (`null` is the bare case: package installed, no shell service). The lane
+  that owns a fact sets it `mkDefault true`; every reader — a nucleus file or
+  another lane — reads the FACT and never the owning lane's own option. The
+  CORE half (`enable`, `root`, `checkout`, `auditLog`, `terminal`, `user`,
+  `sessionTarget`) arrives by import from `pkgs/aoide/module/options.nix` — the
+  core flake's own option contract, nixpkgs-only and portable to any consumer.
+  The import is written by the LANE that closes over Aoide's own inputs
+  (`lib/aoideos.nix`'s `nucleusModule`, exported as `nixosModules.nucleus`), not
+  by a file here: a file in this directory cannot see the flake's inputs, and an
+  `imports` list cannot read a value that `_module.args` supplies. `aoide.config` is the one
   namespace declared elsewhere, in `config.nix` beside the rendering it
   exists for: its `settings` type comes from `pkgs.formats.toml`, so the
   option and the generator are one unit.
+- `assertions.nix` — the platform's invariant surface: the twin of the
+  constructor's gate pass (`lib/composition.nix`), for the failures only an
+  evaluated module graph can see. It reads the identity scalar `aoide.song`
+  and the lane facts and declares nothing, so it adds no option, no unit and
+  no package. Today: a song named with no `lyra` lane to paint it fails the
+  host's own evaluation with the taught fix.
 - `aoided.nix` — now carries only the AoideOS deltas for the `aoided` unit
   (`pkgs/aoide/module/aoided.nix` owns the unit itself, its tmpfiles
-  rules, and the core session variables): `aoide.sessionTarget` set to
-  `graphical-session.target` when the quickshell facet is on, and the
-  lyra-gated `AOIDE_SONG_TEMPLATES` session variable. Below that, still
-  here: every door (mcp, a2a, pair-watch) the daemon's event stream
+  rules, and the core session variables): the lyra-gated
+  `AOIDE_SONG_TEMPLATES` session variable, and nothing else paint-shaped.
+  `aoide.sessionTarget` is no longer set here but by the lane that brings a
+  graphical session up (the `quickshell` lane, which names the session when it
+  has a shell config to run), so this file reads no
+  lane's option either. Below that, still here: every door (mcp, a2a,
+  pair-watch) the daemon's event stream
   serves, the discovery-advertisement firewall carve, and the usage
   poller — core *binaries* in a still-AoideOS *deployment*, migrating
   them is a later slice's work, not this one's. Also opens the LAN
@@ -40,11 +60,11 @@ module builds against what nucleus declares.
   #132), running `aoide pair watch --popup` — gated on
   `aoide.a2a.enable && aoide.a2a.pairingPopup` (the last DEFAULT FALSE, so
   no host gets the popup without asking for it). NOT gated on
-  `aoide.facets.quickshell.enable`, unlike its sibling below: this unit
-  needs a graphical session and a dialog binary, and the facet is Aoide's
-  own SHELL — a host painted by something else (osaka, core Aoide beside
-  dxflake's Hyprland) has the session, takes the zenity path, and would
-  otherwise be locked out for an unrelated reason. `quickshell` on the
+  `aoide.quickshell.enable` (the shell fact), unlike its sibling below: this
+  unit needs a graphical session and a dialog binary, and that fact says only
+  that Aoide paints a shell here — a host painted by something else (osaka,
+  core Aoide beside dxflake's Hyprland) has the session, takes the zenity
+  path, and would otherwise be locked out for an unrelated reason. `quickshell` on the
   unit's `path` follows `aoide.lyra.enable`, the same flag that decides
   whether `lyra` is there to spawn it at all. Otherwise the same unit shape
   `secrets.nix`'s own
@@ -56,16 +76,9 @@ module builds against what nucleus declares.
   prefers `lyra secrets ask`.
 - `melete-adapter.nix` — the concrete thin-adapter exemplar on the `aoided`
   event stream.
-- `shellbridge.nix` — the bidirectional bridge service: atomic JSON state
-  out to `state/stage/*.json` (CONDUCTING files — sessions.json, hooks.json;
-  CONTRACTS.md §4), unix-socket commands in, Hyprland IPC consumed here
-  only. Its shared `$XDG_RUNTIME_DIR/aoide` directory survives bridge stops
-  and restarts (`RuntimeDirectoryPreserve=yes`): independently running
-  conductors own the session sockets inside it. It also carries the polkit
-  grant its power actions need: a systemd
-  user unit has no logind session, so `allow_active` never applies to the
-  `login1` actions and the powermenu's `systemctl reboot` would otherwise be
-  refused for want of interactive auth.
+- The shellbridge seam is not here: it belongs to the lane that paints a shell
+  (`modules/dendrites/lyra/README.md`, "Named seams — the bridge"), which is
+  also the lane that gates on a session existing.
 - `secrets.nix` (P-V4 of Workstream SECRETS, renamed from "vault" at P-V4b)
   — the secrets broker's deployment: its own system user `aoide-secrets` +
   groups `aoide-secrets`/`aoide-secrets-access`, and a SYSTEM
@@ -76,8 +89,9 @@ module builds against what nucleus declares.
   see `pkgs/aoide/crates/secrets/README.md`'s "Deployment" section for the
   non-nix install path this module mirrors. Also declares a graphical-session
   USER unit, `aoide-secrets-watch.service`, running `aoide secrets watch
-  --popup` — gated additionally on `aoide.facets.quickshell.enable` (the same
-  condition the broker's own `zenity` package pull already uses), since the
+  --popup` — gated additionally on the host having a graphical session
+  (`aoide.sessionTarget == "graphical-session.target"`, the same condition
+  the broker's own `zenity` package pull already uses), since the
   popup is a desktop surface belonging to the logged-in operator, never the
   secrets-uid broker.
 - `config.nix` (task #135 P-C) — nix as ONE authoring front-end for the
@@ -102,10 +116,17 @@ module builds against what nucleus declares.
 
 ## What it consumes
 
-Stock NixOS/Home-Manager options only; nothing from `dendrites`/`facets`.
+Stock NixOS/Home-Manager options only; nothing from `dendrites`. The
+enable facts it reads are its own, declared in `options.nix` — a lane sets
+them, which is the only way a lane's existence reaches nucleus.
 
 ## How it composes
 
-Every dendrite and facet reads `aoide.livery`/`aoide.arrangement`/
-`aoide.surfaces` from here and nothing else of nucleus's internals. Nucleus
-never reads a dendrite or facet back.
+Every dendrite reads its own options and stock ones; a paint dendrite reads
+`aoide.livery`/`aoide.arrangement`/`aoide.surfaces` from here and nothing else of
+nucleus's internals; nucleus
+reads back only options a lane SETS — an enable fact it declared itself
+(`aoide.quickshell.enable`, `aoide.lyra.enable`, …) or the core seam
+`aoide.sessionTarget` (`pkgs/aoide/module/options.nix`). In both directions
+the subject is an option declared outside the lane: nucleus never reads a
+lane's own option, and no lane reads another lane.

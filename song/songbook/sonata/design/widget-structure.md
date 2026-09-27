@@ -5,7 +5,7 @@
 How a `widgets/*.qml` file gets from disk to screen, what it is handed, what
 its host draws for it, and the contracts it cannot break. Verified against the
 five live files (`bar`, `calendar`, `launcher`, `notifications`, `powermenu`)
-and the facet chrome they hang off, as they stand today.
+and the lane chrome they hang off, as they stand today.
 
 Companions: `making-a-widget.md` (what makes a widget belong),
 `greek-grammar.md` (the drawing vocabulary), `hazards.md` (live failures).
@@ -14,7 +14,7 @@ Companions: `making-a-widget.md` (what makes a widget belong),
 
 ## 1. From file to screen
 
-The full mechanism is `modules/facets/quickshell/qml/slots.md` and
+The full mechanism is `pkgs/lyra-shell/qml/slots.md` and
 `CONTRACTS.md §5`; this only orients an author.
 
 ```
@@ -71,7 +71,7 @@ In practice, inside a `widgets/*.qml`:
 - **A new API lands as a bridge FIRST and the QML picks it up second.** Never
   the reverse; never only in QML.
 
-This is also the facet/song line: `modules/facets/quickshell/` keeps agnostic
+This is also the lane/song line: `pkgs/lyra-shell/qml/` keeps agnostic
 bridges and APIs, the song keeps everything that paints.
 
 ---
@@ -107,7 +107,7 @@ structurally incapable of reaching nix options through this surface —
 
 ### What `livery.*` actually exposes
 
-From `modules/facets/quickshell/qml/LiveryState.qml`:
+From `pkgs/lyra-shell/qml/LiveryState.qml`:
 
 - **colour roles** — `paletteBg/Fg/Accent/Urgent/Hot`, `wireCyan`, `holoBlue`,
   `violet`, `glitchPink`, `base09`, `base0F`; `accentSpread` and
@@ -149,12 +149,12 @@ function withA(cstr, a) {
   `GlobalShortcut`.
 
 A `PanelWindow`-rooted widget's namespace is **not a free choice**:
-`aoide-powermenu` and `aoide-launcher` are what the compositor facet's
+`aoide-powermenu` and `aoide-launcher` are what the compositor lane's
 layerrules match on for glass, so the string travels with the slot as part of
 its contract (catalogued in `slots.md`).
 
 The `bar` slot is the odd one: a `WidgetSlot`-hosted whole-content slot whose
-`PanelWindow` stays in the facet. The song owns its own footprint —
+`PanelWindow` stays in the shell. The song owns its own footprint —
 `shell.qml` binds the window's `implicitHeight` AND `exclusiveZone` to
 `barSlot.implicitHeight` — and the widget binds `width: parent ? parent.width
 : implicitWidth`, because under `Component.createObject(root, props)` its
@@ -230,8 +230,8 @@ above is the anomaly worth flagging in review.
 ## 6. Geometry constants
 
 - **`radius: 0` on every panel, card, cell, page and popout body.** Matches
-  the compositor facet's own window rounding, which defaults to 0
-  (`modules/facets/compositor/default.nix`, plus an explicit
+  the compositor lane's own window rounding, which defaults to 0
+  (`modules/dendrites/compositor/hyprland/default.nix`, plus an explicit
   `windowrule = rounding 0, match:class kitty`). Two deliberate
   exceptions exist, both in `bar.qml`: the workspace state marks are true
   circles (`radius: width / 2`, with equal width and height so both axes round
@@ -454,7 +454,7 @@ the contract:
 ## 11. The glass is compositor-side
 
 The frosted depth that makes a popout read as a framed stele is NOT drawable
-in QML (`modules/facets/compositor/default.nix`):
+in QML (`modules/dendrites/compositor/hyprland/default.nix`):
 
 - `layerrule = blur on` + `ignore_alpha 0.05` per namespace (`aoide-dock`,
   `aoide-launcher`, `aoide-powermenu`).
@@ -469,5 +469,5 @@ in QML (`modules/facets/compositor/default.nix`):
 
 A widget earns the frosted read by which host anchor and namespace it hangs
 under, not by anything it paints. Changing how glassy a popout feels is a
-facet edit (out of a song widget's scope) or a hosting choice — never a blur
+lane edit (out of a song widget's scope) or a hosting choice — never a blur
 effect in QML.

@@ -4,7 +4,7 @@
 //! `rice stage` (and widget-body sync, `widgets.rs`) already write bytes
 //! onto disk that Quickshell's own file watcher can pick up for STATICALLY
 //! `import`ed QML — but every song widget loads dynamically via
-//! `Qt.createComponent`, and facet-owned QML (`shell.qml`,
+//! `Qt.createComponent`, and lane-owned QML (`shell.qml`,
 //! `ShellBridge.qml`, `StagingEngine.qml`, `WidgetSlot.qml`,
 //! `SurfaceSlot.qml`) isn't watched at all. `Quickshell.reload(hard: bool)`
 //! (`AoideIpc.qml`, exposed via `Quickshell.Io.IpcHandler`) tears down and
@@ -16,7 +16,9 @@
 //! `quickshell ipc call <target> <function>` does NOT auto-discover a
 //! running instance by itself (confirmed live: it looks for a "default"
 //! config directory and fails otherwise) — the instance here was launched
-//! with `-p <run_qml_dir>/shell.qml` (`modules/facets/quickshell/default.nix`),
+//! with `-p <run_qml_dir>/shell.qml` (the `quickshell` lane's service,
+//! `modules/dendrites/quickshell.nix`; lyra — the lane that deploys the tree —
+//! names that directory as `aoide.quickshell.config`),
 //! so the same `-p` has to prefix the `ipc call` invocation to target it.
 //!
 //! ── Why success is judged on OUTPUT, not the exit code (khoa, 2026-08-15) ──

@@ -1,5 +1,5 @@
 # fugue's `bar` slot — the always-visible top-edge lattice, hosted by
-# shell.qml's PanelWindow. `kind` is absent → null: `bar` is a facet-anchored
+# shell.qml's PanelWindow. `kind` is absent → null: `bar` is a shell-anchored
 # slot (`WidgetSlot { slot: "bar" }`, slots.md's own wired-slot table), never
 # a declared `arrangement.widgets` entry.
 #
@@ -10,7 +10,7 @@
 # `.toggle()` on it (bar.qml:228) — shell.qml:139 injects
 # `powermenuSlot.item`, the live item of the real `SurfaceSlot { slot:
 # "powermenu" }` anchor. By the rule this shelf's sibling songs use (a real
-# wired anchor is a genuine sibling-slot address, an injected facet
+# wired anchor is a genuine sibling-slot address, an injected shell
 # component is not), `powermenu` WOULD be a `dependsOn` entry — except
 # `lib/song.nix`'s `composeSong` closure checks a dependency against
 # `present = builtins.attrNames widgets`, i.e. the KEYS OF THIS SAME
@@ -32,14 +32,14 @@
 # express. Widening that contract is a `lib/song.nix` design change, out of
 # scope for a prerequisite commit. Left empty here rather than invented
 # around; the runtime dependency is real and stays true — it is
-# `powermenuSlot.item`'s facet-level fallback that already makes it safe,
+# `powermenuSlot.item`'s shell-level fallback that already makes it safe,
 # same as it does today before this shelf existed.
 #
 # It ALSO declares `required property var dock` and calls `.toggle()` on it
-# (bar.qml:213) — but shell.qml:140 injects `dock: aoidePanel`, the facet's
+# (bar.qml:213) — but shell.qml:140 injects `dock: aoidePanel`, the shell's
 # own `AoidePanel` component, not a `SurfaceSlot { slot: "dock" }` anchor
 # (there is none — sonata's own `dock.nix` concedes the same thing). Calling
-# `.toggle()` on an injected facet object is not addressing a sibling slot
+# `.toggle()` on an injected shell object is not addressing a sibling slot
 # either way, so `dock` would not belong here regardless of the closure
 # issue above — do not copy it in for symmetry with sonata's `bar.nix`,
 # which lists it in error (see that file's audit note in the commit that

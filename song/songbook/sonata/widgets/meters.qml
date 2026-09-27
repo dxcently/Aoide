@@ -2,10 +2,10 @@
 // dock's gadget column (WidgetSlot host — root is an Item that sizes itself
 // off its content, same as every other slot in this directory).
 //
-// Ported from the facet's MetersGadget.qml (per-song widget-slot expansion,
-// CONTRACTS.md §5) — ownership moved from the facet to sonata's score. Live:
+// Ported from the shell's MetersGadget.qml (per-song widget-slot expansion,
+// CONTRACTS.md §5) — ownership moved from the shell to sonata's score. Live:
 // sonata's own `widgets/dock.qml` embeds `WidgetSlot { slot: "meters" }` in
-// its gadget column (slots.md's wired table). The facet's MetersGadget.qml
+// its gadget column (slots.md's wired table). The shell's MetersGadget.qml
 // stays in the tree but is no longer instantiated by anything.
 //
 // A live view of the machine's two vital pressures — CPU and RAM — read straight

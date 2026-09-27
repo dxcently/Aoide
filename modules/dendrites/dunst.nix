@@ -1,6 +1,6 @@
 # modules/dendrites/dunst.nix — the dunst notification daemon.
 #
-# Dendrite shape v0 (CONTRACTS.md §2):
+# Dendrite shape v1 (CONTRACTS.md §2):
 #   - one enable toggle: aoide.dunst.enable (off by default)
 #   - carries its own dependencies: the dunst package (dunstctl rides along for
 #     history and the pause levels), libnotify for the stock `notify-send`
@@ -68,99 +68,113 @@
 # (pkgs.aoide.rice — a SEPARATE, droppable output as of P-A8's multi-output
 # split); that push is this whole module's reason to exist, so a config that
 # leaves dunst on but turns lyra off would otherwise script an exec against a
-# binary no longer in the closure. Unlike shellbridge (gated on the
-# quickshell facet), dunst carries no facet dependency of its own — it is
-# gated here directly on the lyra flag instead.
-{
-  config,
-  lib,
-  pkgs,
-  ...
-}:
+# binary no longer in the closure. Unlike shellbridge (gated on the shell
+# and lyra enable facts), dunst carries no shell dependency of its own — it
+# is gated here directly on the lyra flag instead.
 
-{
-  options.aoide.dunst.enable = lib.mkEnableOption "dunst notification daemon (the herald's delivery backend)";
+let
+  body =
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
 
-  config = lib.mkIf (config.aoide.dunst.enable && config.aoide.lyra.enable) {
-    # libnotify rides along for `notify-send`: the stock client the freedesktop
-    # world (and aoide's own shellbridge mode-toggle path) reaches for. dunstify
-    # alone left it missing on the box.
-    environment.systemPackages = [
-      pkgs.dunst
-      pkgs.libnotify
-    ];
+    {
+      options.aoide.dunst.enable = lib.mkEnableOption "dunst notification daemon (the herald's delivery backend)";
 
-    # HM's module owns the whole daemon lifecycle: dunstrc generation from
-    # `settings`, a Type=dbus unit holding BusName=org.freedesktop.Notifications
-    # bound to the graphical session, D-Bus activation file, and a dunstrc
-    # reload trigger. Hand-rolling that (clipboard.nix style) would buy nothing.
-    home-manager.users.${config.aoide.user}.services.dunst = {
-      enable = true;
-      settings = {
-        global = {
-          # Nothing here is a dress — dunst never draws. These are the daemon
-          # behaviours the herald reads through, and nothing else.
+      config = lib.mkIf (config.aoide.dunst.enable && config.aoide.lyra.enable) {
+        # libnotify rides along for `notify-send`: the stock client the freedesktop
+        # world (and aoide's own shellbridge mode-toggle path) reaches for. dunstify
+        # alone left it missing on the box.
+        environment.systemPackages = [
+          pkgs.dunst
+          pkgs.libnotify
+        ];
 
-          # Sender text is DATA. Never parsed as markup, on either side of the
-          # seam: dunst hands it to the script verbatim, and the QML herald
-          # renders it as plain text. Untrusted text is never re-interpreted.
-          markup = "no";
+        # HM's module owns the whole daemon lifecycle: dunstrc generation from
+        # `settings`, a Type=dbus unit holding BusName=org.freedesktop.Notifications
+        # bound to the graphical session, D-Bus activation file, and a dunstrc
+        # reload trigger. Hand-rolling that (clipboard.nix style) would buy nothing.
+        home-manager.users.${config.aoide.user}.services.dunst = {
+          enable = true;
+          settings = {
+            global = {
+              # Nothing here is a dress — dunst never draws. These are the daemon
+              # behaviours the herald reads through, and nothing else.
 
-          # Duplicate stacking is the daemon's job and stays on; the herald
-          # ledger reads one entry per stack.
-          stack_duplicates = true;
-          hide_duplicate_count = false;
+              # Sender text is DATA. Never parsed as markup, on either side of the
+              # seam: dunst hands it to the script verbatim, and the QML herald
+              # renders it as plain text. Untrusted text is never re-interpreted.
+              markup = "no";
 
-          # The window the dock ledger keeps. The stage file is the live view;
-          # this is dunst's own record behind it (`dunstctl history`).
-          history_length = 20;
+              # Duplicate stacking is the daemon's job and stays on; the herald
+              # ledger reads one entry per stack.
+              stack_duplicates = true;
+              hide_duplicate_count = false;
 
-          # ── quiet hours ──────────────────────────────────────────────────
-          # `dunstctl set-paused true` (level 100) is total silence. Level 60 is
-          # the useful middle: ordinary toasts hold, critical (70) and the
-          # permission summons (90) still come through. Pause is enforced by the
-          # daemon BEFORE the script runs, which is precisely why quiet hours
-          # still work with the face moved to QML.
-          default_pause_level = 0;
+              # The window the dock ledger keeps. The stage file is the live view;
+              # this is dunst's own record behind it (`dunstctl history`).
+              history_length = 20;
 
-          # The feed rule's catch-all matcher is a real regex, not a glob.
-          enable_posix_regex = true;
-        };
+              # ── quiet hours ──────────────────────────────────────────────────
+              # `dunstctl set-paused true` (level 100) is total silence. Level 60 is
+              # the useful middle: ordinary toasts hold, critical (70) and the
+              # permission summons (90) still come through. Pause is enforced by the
+              # daemon BEFORE the script runs, which is precisely why quiet hours
+              # still work with the face moved to QML.
+              default_pause_level = 0;
 
-        # ── the feed ───────────────────────────────────────────────────────
-        # One catch-all rule: draw nothing, hand everything to aoide. `summary`
-        # is the matcher because every notification has one; `.*` matches all of
-        # them (posix regex is on above). `always_run_script` guarantees the
-        # script still runs for a notification dunst would otherwise consider
-        # suppressed.
-        #
-        # The script is `aoide herald push`, which reads the DUNST_* environment
-        # and writes the record over $AOIDE_BRIDGE_SOCKET. It is a real command and
-        # not a shell wrapper on purpose: notification bodies are arbitrary
-        # sender text, and hand-rolled shell JSON escaping is a bug farm.
-        #
-        # `script` takes ONE executable, not a command line — dunst appends its
-        # own five positional arguments (appname summary body icon urgency), so
-        # the command's arguments cannot be written here. Hence the wrapper. Its
-        # store path is absolute on purpose: dunst resolves a bare name through
-        # PATH, and the HM user unit's PATH is not ours to rely on. The command
-        # reads the DUNST_* environment, so the positional arguments dunst adds
-        # are ignored.
-        herald-feed = {
-          summary = ".*";
-          skip_display = true;
-          always_run_script = true;
-          # `herald` left core's registry at P-A5 of the binary-split
-          # workstream — it now lives only in `lyra` (crates/lyra/src/
-          # registry.rs). Both binaries ship from the same `pkgs.aoide`
-          # derivation (P-A7), but as of P-A8 `lyra` lives in that
-          # derivation's separate `rice` output (`pkgs.aoide.rice`) — named
-          # explicitly here, same reasoning as shellbridge.nix's ExecStart.
-          script = "${pkgs.writeShellScript "aoide-herald-push" ''
-            exec ${pkgs.aoide.rice}/bin/lyra herald push
-          ''}";
+              # The feed rule's catch-all matcher is a real regex, not a glob.
+              enable_posix_regex = true;
+            };
+
+            # ── the feed ───────────────────────────────────────────────────────
+            # One catch-all rule: draw nothing, hand everything to aoide. `summary`
+            # is the matcher because every notification has one; `.*` matches all of
+            # them (posix regex is on above). `always_run_script` guarantees the
+            # script still runs for a notification dunst would otherwise consider
+            # suppressed.
+            #
+            # The script is `aoide herald push`, which reads the DUNST_* environment
+            # and writes the record over $AOIDE_BRIDGE_SOCKET. It is a real command and
+            # not a shell wrapper on purpose: notification bodies are arbitrary
+            # sender text, and hand-rolled shell JSON escaping is a bug farm.
+            #
+            # `script` takes ONE executable, not a command line — dunst appends its
+            # own five positional arguments (appname summary body icon urgency), so
+            # the command's arguments cannot be written here. Hence the wrapper. Its
+            # store path is absolute on purpose: dunst resolves a bare name through
+            # PATH, and the HM user unit's PATH is not ours to rely on. The command
+            # reads the DUNST_* environment, so the positional arguments dunst adds
+            # are ignored.
+            herald-feed = {
+              summary = ".*";
+              skip_display = true;
+              always_run_script = true;
+              # `herald` left core's registry at P-A5 of the binary-split
+              # workstream — it now lives only in `lyra` (crates/lyra/src/
+              # registry.rs). Both binaries ship from the same `pkgs.aoide`
+              # derivation (P-A7), but as of P-A8 `lyra` lives in that
+              # derivation's separate `rice` output (`pkgs.aoide.rice`) — named
+              # explicitly here, same reasoning as shellbridge.nix's ExecStart.
+              script = "${pkgs.writeShellScript "aoide-herald-push" ''
+                exec ${pkgs.aoide.rice}/bin/lyra herald push
+              ''}";
+            };
+          };
         };
       };
     };
-  };
+in
+{
+  inherit body;
+
+  nixos =
+    { lib, ... }:
+    {
+      imports = [ body ];
+      config.aoide.dunst.enable = lib.mkDefault true;
+    };
 }

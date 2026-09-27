@@ -129,7 +129,7 @@ inert key.
 
 The same composition shape applies to AoideOS when it migrates. Public Lyra
 runtime QML/bridges belong to its package; consumer-owned widget source belongs
-with the songbook. A consumer does not recreate AoideOS's private facets tree.
+with the songbook. A consumer does not recreate AoideOS's private module tree.
 Large lane implementations may be extracted to `home.nix`, `nixos.nix`, or
 `darwin.nix` within their dendrite. Empty lane files are unnecessary.
 
@@ -186,6 +186,21 @@ Selection options cannot depend on the resulting NixOS/HM configuration: that
 would reintroduce a circular import decision. Platform settings are deferred
 modules until selection is complete. Constructors are small explicit functions
 using Nix module APIs; they are not a second module language or custom loader.
+
+The constructor is `lib/composition.nix`, a function of `{ lib }`, exported by
+the flake as `lib.composition` — a consumer assembles hosts through it by name
+instead of reaching into this tree for a file. It knows no vocabulary of its
+own: a host record's fields ride in through two hooks, both identity by default.
+`selectionModules` are extra modules for the selection passes, which is how a
+field the constructor has never heard of — a song selection is the first — is
+declared once and read by the gate step. `extraModulesFor` is a function of the
+resolved selection returning platform modules, which is how a gate-pass answer
+becomes an import without a gate-pass body import. That selection is the whole
+resolved one, catalogue values included, so the hook can reach a body nothing
+selected — which is why a caller passes selected paths only, never the
+catalogue. With both left at their defaults the module list is exactly the one
+the constructor assembles without them, and `tests/selection` covers each hook
+beside the selection cases it must not disturb.
 
 The evaluation boundary, stated exactly. `modules/aggregations/default.nix`
 names directories without importing them. An aggregation body is imported if and
@@ -594,7 +609,7 @@ songbook, not inside a rice: an image is not a look, and any rice may wear any
 cover. The repository's `song/` mirrors the runtime `~/.aoide/song/` in the
 committed half, and two of its runtime subdirectories exist only there,
 gitignored: `song/stage/`, where lyra renders what programs watch and
-hot-reload, and `song/declared/`, the quickshell facet's activation seed of
+hot-reload, and `song/declared/`, the lyra lane's activation seed of
 the declared song's notes with the venue override applied, which the runtime
 writers re-derive the declared song from (CONTRACTS.md §4). The wallpaper
 manager is independent of individual rices. Each user has independent state.
@@ -606,7 +621,16 @@ installing every upstream song.
 Several compatible bundles may be installed for immediate staging. Returning
 to declared restores the declared bundle without deleting draft source.
 Declaring promotes authored source to a songbook entry, not generated runtime
-files. Host selection of that default is a separate source change.
+files. Host selection of that default is NOT a separate source change any more:
+a host names the songs it builds in on its own record (`song.declared` /
+`song.available`), the constructor imports exactly those `rice.nix` files, and
+`declared ∪ available` — the built-in set, published as
+`aoide.songbook.builtIn` — decides the widgets copied into the deployed tree,
+the packages installed, the folders `pkgs/lyra-songbook` ships for that host,
+and the `builtin.json` the runtime compares a staged song's needs against.
+`~/.aoide/song/songbook` belongs to the MACHINE: it is seeded from that baseline
+only where a folder is absent — no comparison, no merge, never an overwrite
+(root `AGENTS.md` rule 10) — and the machine's copy wins for staging.
 
 Bound QML colors may hotload. Hyprland configuration switching uses an explicit
 reload backend and managed configuration scope; host-owned settings are not
@@ -645,7 +669,8 @@ implementation proof, not just this Nix layout.
 
 Recorded on dxflake. All four hosts — chiyo, osaka, sakaki and yomi-strix —
 evaluate to byte-identical system derivations before and after the migration.
-`tests/selection/run.sh` passes 39 of 39, including cases proving that an
+`tests/selection/run.sh` passes 49 of 49 — 41 cases ported from dxflake's
+suite plus 8 for the constructor's hooks — including cases proving that an
 aggregation body which throws on import stays unread when nothing selects it,
 that an unselected provider file stays unread, and that an unmatched override
 record whose overlay and module both throw is never called — with the

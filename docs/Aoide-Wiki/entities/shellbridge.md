@@ -81,7 +81,7 @@ Both the socket handler's `focus_window` and the window→session event
 listener shell out to `hyprctl`. A systemd user unit's default PATH is
 minimal (coreutils/findutils/grep/sed/systemd) and excludes the compositor,
 so a unit-level `path = [ pkgs.hyprland ]` on both the `shellbridge` and
-`aoide-graph-reap` services (`modules/nucleus/shellbridge.nix`) puts
+`aoide-graph-reap` services (`modules/dendrites/lyra/shellbridge.nix`) puts
 `hyprctl` on PATH explicitly. It is a *unit* option, a sibling of
 `serviceConfig`, not a `serviceConfig` key — nesting it there emits an inert
 raw `path=` line and PATH stays broken. Without it, every widget click

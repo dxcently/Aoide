@@ -1,169 +1,114 @@
 # hosts/yomi-strix/default.nix — the reference host.
 #
-# Flags + venue specifics, plus a GUARDED hardware import. A host never
-# imports module files directly; it flips `aoide.*` flags, states its own
-# hardware picks (the venue decides its instruments), and pulls ./hardware.nix.
-# First iteration: real profile ported from dxflake (the template), trimmed to
-# what boots this box and runs the desktop.
-{ lib, pkgs, ... }:
+# A host record: what this machine SELECTS (aggregations, lone capabilities,
+# people), then this machine's own platform settings in `nixos`, deferred until
+# selection is complete. It names no module file — nothing outside
+# `modules/default.nix` does.
+#
+# Nothing here is registered anywhere: `flake.nix` discovers `hosts/` one level
+# deep, so adding a machine is a new directory and never an edit to a list.
 {
-  imports = [
-    ../common
-  ]
-  # Guarded: import ./hardware.nix only if the file exists, so the flake
-  # still evaluates on a machine without a committed hardware scan.
-  ++ lib.optional (builtins.pathExists ./hardware.nix) ./hardware.nix;
+  # ── Aggregations ───────────────────────────────────────────────────────────
+  # base is the floor; desktop is the session's platform; agents is the coding
+  # agents a workstation runs; aoideos is the desktop itself, songs included.
+  aggregation.base.enable = true;
+  aggregation.desktop.enable = true;
+  aggregation.agents.enable = true;
+  aggregation.aoideos.enable = true;
 
-  networking.hostName = "yomi-strix";
-  networking.networkmanager.enable = true;
+  # ── Lone capabilities ──────────────────────────────────────────────────────
+  # What no aggregation speaks for. `qbittorrent` is here because no group
+  # claims it; `obsidian` in the same way; `inference` is a server a host either
+  # hosts or does not.
+  dendrites.obsidian.enable = true;
+  dendrites.qbittorrent.enable = true;
+  dendrites.inference.enable = true;
 
-  # Venue clock — the box sat on UTC with no zone set. Pin US Eastern to match
-  # the dxflake reference rig; timesyncd (default-on) keeps it NTP-synced.
-  time.timeZone = "America/New_York";
+  # ── Songs ──────────────────────────────────────────────────────────────────
+  # `declared` is the song this host PERFORMS — it becomes the fact
+  # `aoide.song`, which every `rice.nix` self-gates on. `available` is what it
+  # builds in to STAGE without a rebuild but does not perform.
+  #
+  # yomi performs cadenza and nothing else: the phosphor key, a green-CRT termui
+  # console — the song this machine has performed since the switch that made it
+  # the reference rig. The other committed rices are reached from the machine's
+  # own songbook (`aoide rice stage <n>`), which this host's songbook already
+  # holds — that is the point of the split.
+  song.declared = "cadenza";
+  song.available = [ ];
 
-  # ── Venue specifics (dxflake-templated, essentials only) ──────────────────
-  # Strix Halo (Ryzen AI Max) is new silicon — ride the latest kernel for the
-  # freshest amdgpu. gttsize/ttm let the iGPU borrow a large slice of the
-  # unified 32 GB pool (24 GiB GPU-mappable, ~8 GiB left for CPU/OS).
-  boot.kernelPackages = pkgs.linuxPackages_latest;
-  boot.kernelParams = [
-    "amdgpu.gttsize=24576" # MiB (24 GiB) of system RAM the GPU may map
-    "ttm.pages_limit=6291456" # 24 GiB in 4 KiB pages, matches gttsize
-  ];
-
-  # RDNA 3.5 iGPU: kernel driver + userspace graphics for the Hyprland facet.
-  services.xserver.videoDrivers = [ "amdgpu" ];
-  hardware.graphics = {
-    enable = true;
-    enable32Bit = true;
+  # ── People ─────────────────────────────────────────────────────────────────
+  # The definition is shared between machines and attached, never copied.
+  users.khoa = {
+    definition = ../../users/khoa.nix;
+    homeManager.enable = true;
   };
 
-  # 32 GB is modest while the iGPU eats RAM — compressed in-RAM swap cushion.
-  zramSwap.enable = true;
+  # ── This machine ───────────────────────────────────────────────────────────
+  # An ordinary NixOS module: hardware, the platform, and the `aoide.*` knobs
+  # that genuinely vary per machine. Nothing here can influence selection.
+  nixos =
+    { lib, pkgs, ... }:
+    {
+      # Guarded: import ./hardware.nix only when a scan is committed, so the
+      # flake still evaluates on a machine that has not run
+      # `nixos-generate-config` yet.
+      imports = lib.optional (builtins.pathExists ./hardware.nix) ./hardware.nix;
 
-  # Aoide flags for this box. Facets/dendrites (Wave 1) read these; this line
-  # is the entire host-side wiring for the desktop.
-  aoide.enable = true;
-  aoide.user = "khoa";
+      # The platform is the record's own statement: the constructor assembles
+      # the module list and lets the modules name the platform, rather than
+      # handing `nixosSystem` a `system` argument.
+      nixpkgs.hostPlatform = "x86_64-linux";
 
-  # The song this host performs. Replay any committed song on ANY host with one
-  # line — e.g. `aoide.song = "moonlight";` swaps the whole livery fan-out with
-  # zero other edits (song/songbook/<name>/). REQUIRED, not decorative:
-  # `aoide.song` defaults to null, and a host that names no song deploys no
-  # QML and runs no shell service — the paint facets only activate once a
-  # song is named. `sonata` is the shipped standard, the guaranteed-present
-  # baseline this host opts into by name. "cadenza": the phosphor key, a
-  # green-CRT termui console.
-  aoide.song = "cadenza";
+      networking.hostName = "yomi-strix";
+      networking.networkmanager.enable = true;
 
-  # Wave-1 facets — the whole desktop, one line each.
-  aoide.facets.quickshell.enable = true;
-  aoide.facets.compositor.enable = true;
-  aoide.facets.stylix.enable = true;
+      time.timeZone = "America/New_York";
 
-  # Host-invariant Hyprland behaviour (keybinds, input, layout, window rules).
-  # Paired with the compositor facet above: that one owns the look, this one
-  # owns everything a re-rice must not touch.
-  aoide.hyprland.enable = true;
+      boot.kernelPackages = pkgs.linuxPackages_latest;
+      boot.kernelParams = [
+        "amdgpu.gttsize=24576" # MiB (24 GiB) of system RAM the GPU may map
+        "ttm.pages_limit=6291456" # 24 GiB in 4 KiB pages, matches gttsize
+      ];
 
-  # The Samsung C24F390 hangs in PORTRAIT. Its EDID still reports the panel's
-  # native landscape geometry (520x290mm), so the rotation has to be declared:
-  # transform 3 is counter-clockwise, giving an effective 1080x1920. Flip the
-  # 3 to a 1 for clockwise — that single token is the whole change, and either
-  # direction can be tried live first with
-  #   hyprctl keyword monitor HDMI-A-1,1920x1080@60,0x0,1,transform,1
-  aoide.hyprland.monitors = [ "HDMI-A-1,1920x1080@60,0x0,1,transform,3" ];
+      services.xserver.videoDrivers = [ "amdgpu" ];
+      # `enable` is the `desktop` aggregation's (mkDefault true); the 32-bit
+      # userspace is this machine's own answer, so it is stated here.
+      hardware.graphics.enable32Bit = true;
 
-  # Scrolling columns suit the tall geometry; every other output keeps the
-  # global dwindle default, so this survives plugging a landscape monitor
-  # back in.
-  aoide.hyprland.scrollingMonitor = "HDMI-A-1";
+      zramSwap.enable = true;
 
-  # Screen capture — two callers, two dendrites (see each module header):
-  # hyprshot+satty for the human (SUPER+S), grim/slurp for agents ("vision").
-  aoide.screenshot.enable = true;
-  aoide.vision.enable = true;
+      # ── Aoide ──────────────────────────────────────────────────────────────
+      # `aoide.enable` and `aoide.mcp.enable` are the `base` aggregation's, and
+      # `aoide.song` is DERIVED from the record's `song.declared` by the
+      # constructor's hook — none of the three is a line here.
+      aoide.user = "khoa";
 
-  # Text clipboard history provider (cliphist + wl-clipboard) with QML picker.
-  aoide.clipboard.enable = true;
+      aoide.hyprland.monitors = [ "HDMI-A-1,1920x1080@60,0x0,1,transform,3" ];
+      aoide.hyprland.scrollingMonitor = "HDMI-A-1";
 
-  # Notification daemon — dunst owns org.freedesktop.Notifications but draws
-  # nothing; it feeds `aoide herald push`, and the Quickshell herald draws the
-  # popup and the dock ledger.
-  aoide.dunst.enable = true;
+      aoide.usage.enable = true;
 
-  # Audio backend (PipeWire + WirePlumber) — real volume control for the bar.
-  aoide.audio.enable = true;
+      aoide.a2a.enable = true;
+      aoide.a2a.discoveryAdvertise = true;
+      aoide.a2a.pairingPopup = true;
 
-  # claude.ai usage ledger — the dock's Usage stele reads state/usage.json,
-  # and this flag is the only thing that keeps it fed; without the poller the
-  # gadget draws whatever the last hand-run left and marks itself stale. The
-  # live half spends this account's own OAuth token, which is why the option
-  # ships off and a host opts in by name.
-  aoide.usage.enable = true;
+      aoide.secrets.enable = true;
+      aoide.secrets.members = [ "khoa" ];
 
-  # NetworkManager applet (nm-connection-editor + nm-applet; NM itself is the
-  # venue's own `networking.networkmanager.enable` above).
-  aoide.networkmanager.enable = true;
-
-  # A2A door resident (was hand-started in every earlier live test) — this box
-  # and sakaki are mutual peers for the live who/send mesh checks.
-  aoide.a2a.enable = true;
-
-  # Inbound ssh, keys-only — the doors are loopback-bound by policy, so an
-  # ssh tunnel is the ONLY transport a peer can ride to reach this box's
-  # far-door; without sshd here, sakaki's tunnel leg (its yomi-strix peer
-  # record dials 127.0.0.1:18711) can never come up. Password auth stays off:
-  # the enrolled peer keys below are the entire guest list.
-  services.openssh = {
-    enable = true;
-    settings = {
-      PermitRootLogin = "no";
-      PasswordAuthentication = false;
-      KbdInteractiveAuthentication = false;
+      # ── SSH ────────────────────────────────────────────────────────────────
+      services.openssh = {
+        enable = true;
+        settings = {
+          PermitRootLogin = "no";
+          PasswordAuthentication = false;
+          KbdInteractiveAuthentication = false;
+        };
+      };
+      # Keys on the account `users/khoa.nix` creates.
+      users.users.khoa.openssh.authorizedKeys.keys = [
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEyoERlxyi80OB0h+nw1NKO7Ki5gBfUCv8ufo5D8b8Kk sakaki-to-yomi-strix"
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICSHb3e535b2U/hWEmIsFC2j99SmEayq3HS/IH1c61Aw osaka-to-yomi-strix"
+      ];
     };
-  };
-  users.users.khoa.openssh.authorizedKeys.keys = [
-    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEyoERlxyi80OB0h+nw1NKO7Ki5gBfUCv8ufo5D8b8Kk sakaki-to-yomi-strix"
-    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICSHb3e535b2U/hWEmIsFC2j99SmEayq3HS/IH1c61Aw osaka-to-yomi-strix"
-  ];
-
-  # LAN discovery: this box both announces itself and runs `peer discover`.
-  # Advertising is what opens UDP 8711 (aoided.nix wires the firewall off this
-  # flag), and the port has to be open to HEAR beacons as well as send them —
-  # a NixOS default-deny firewall drops even this host's own multicast
-  # loopback copy when it arrives on a real interface (task #98). Discovery
-  # grants nothing on its own: pairing remains the only thing that writes a
-  # peer record.
-  aoide.a2a.discoveryAdvertise = true;
-
-  # The pairing popup (task #135). An inbound request otherwise waits in
-  # `aoide pair`'s own terminal for someone to go looking; with this on,
-  # `aoide-pair-watch` runs beside the session and raises the typed-code
-  # dialog the moment a request parks. Opt-in on top of the desktop-facet
-  # gate by design (`aoided.nix`: a2a + quickshell are not enough), and this
-  # is the deployment flip that turns it on for this box — the User's call,
-  # made 2026-09-02. It grants nothing: the dialog still demands the code
-  # read off the requester's own screen, and a rejection is one click.
-  aoide.a2a.pairingPopup = true;
-
-  # Secrets broker (workstream #58, P-V4 deployment): own uid, socket-only
-  # door. The operator joins the access group; enrollment happens only when
-  # the User says connect.
-  aoide.secrets.enable = true;
-  aoide.secrets.members = [ "khoa" ];
-
-  # Shipped dendrites (off unless wanted; aoide.mcp.enable stays false — house policy).
-  aoide.obsidian.enable = true;
-  aoide.qbittorrent.enable = true;
-  aoide.firefox.enable = true;
-  aoide.claude-code.enable = true;
-  aoide.kimi-code.enable = true;
-  aoide.pi-coding-agent.enable = true;
-  aoide.openai.enable = true;
-  aoide.eidolon.enable = true; # replaces pi for daily interactive use — see its dendrite header
-
-  # Local model-serving tooling (Ollama + llama.cpp), CPU/RAM only for now —
-  # see the dendrite header for the GPU-backend fork and the dxflake precedent.
-  aoide.inference.enable = true;
 }

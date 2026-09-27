@@ -1,9 +1,9 @@
 // wallpaper-picker.qml — sonata's "wallpaper-picker" slot: the wallpaper
 // switcher (surface: "wallpaper").
 //
-// Ported from the facet's AoideWallpaperPicker.qml (per-song widget-slot
-// expansion, CONTRACTS.md §5) — ownership moves from the facet to sonata's
-// score; the facet original stays in place until a later phase (Phase 6)
+// Ported from the shell's AoideWallpaperPicker.qml (per-song widget-slot
+// expansion, CONTRACTS.md §5) — ownership moves from the shell to sonata's
+// score; the shell original stays in place until a later phase (Phase 6)
 // retires it, so this file and AoideWallpaperPicker.qml are momentarily
 // twins. This slot is hosted by `SurfaceSlot`, not `WidgetSlot` — the root
 // below is a `PanelWindow`, not an `Item`, so it owns its own layer,
@@ -12,7 +12,7 @@
 // itself lands with Phase 6, not here.
 //
 // ── Why GlobalShortcut stays OUT of this file ───────────────────────────────
-// The facet's AoideWallpaperPicker.qml registers its own `aoide:wallpaper`
+// The shell's AoideWallpaperPicker.qml registers its own `aoide:wallpaper`
 // Hyprland global shortcut in-process — the launcher's in-process inbound
 // idiom (ShellBridge is OUTBOUND-only, no inbound CLI command to toggle a
 // surface). That keybind stays a FACET contract on purpose, same rationale
@@ -39,7 +39,7 @@
 // `lyra` now (bare name resolves via PATH: modules/nucleus/packages.nix puts
 // lyra's own droppable output, pkgs.aoide.rice, on systemPackages whenever
 // aoide.lyra.enable is on — P-A8 — which defaults to true here since this
-// widget only exists under the quickshell facet).
+// widget only exists under the quickshell shell).
 // wallpaper.qml
 // FileView-watches that file and hot-swaps the live wallpaper. No new socket,
 // no QML file write.
@@ -82,7 +82,7 @@ PanelWindow {
     visible: root.shown
     WlrLayershell.layer: WlrLayer.Overlay
     // NOT "aoide-wallpaper" — that string belongs to the Background surface
-    // the desktop cover is painted on (shell.qml), and the facet original
+    // the desktop cover is painted on (shell.qml), and the shell original
     // this file was ported from shared it. Two surfaces under one namespace
     // are indistinguishable to the compositor's layerrules, so glassing this
     // summon pane the way aoide-launcher/aoide-powermenu are glassed would

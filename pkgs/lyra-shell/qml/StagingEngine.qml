@@ -1,0 +1,143 @@
+// StagingEngine.qml — the staging engine: resolves the active song's livery
+// tokens to per-slot QML.
+//
+// The lyra lane's build (modules/dendrites/lyra/default.nix) carries
+// every committed song's authored widget slots into $out/qml/songs/<name>/
+// <slot>.qml, plus a generated songs/manifest.json — an OWNER MAP recording
+// which song's manifest entry provides each slot, and which song's directory
+// the body actually lives under — e.g. `{ "sonata": { "calendar": { "owner":
+// "sonata", "file": "calendar.qml" } } }`. A record's `owner` usually equals
+// its own song key, but need not: quodlibet borrows fugue's `bar` and
+// `herald`, so `quodlibet.bar.owner == "fugue"`. Because provenance is
+// recorded per-record, resolving a borrow is a direct lookup rather than a
+// fallback-chain walk — and a borrowed body still receives the BORROWING
+// song's livery, since palette arrives as an injected prop (below) and is
+// never read from disk by the widget. This singleton
+// reads that manifest (hot-reloaded, so a rebuild's new manifest is picked up
+// without restarting Quickshell) and answers the two questions a WidgetSlot
+// needs: does <song> dress <slot> (`has`), and where is its QML (`source`).
+//
+// Fixed injected-prop contract (CONTRACTS.md §5 containment): a loaded song
+// widget receives ONLY `livery` (LiveryState) and `bridge` (ShellBridge) —
+// plus whatever slot-specific extras the anchor declares (e.g. notifications'
+// `notification`) — never nix `config.*`. A song widget is store-copied
+// score, structurally incapable of reaching host/lane options through this
+// surface.
+//
+// ── Declared widget-type registry (Phase 4) ─────────────────────────────────
+// A second, independent data source: the same build (Phase 2) and
+// `rice stage`/`preview` hot-sync (Phase 3) also carry each song's
+// `aoide.arrangement.widgets` declarations into a sibling
+// songs/registry.json, shaped `{ "<song>": { "<slot>": {…declaration…} } }`
+// — which slots a song registers as widget-TYPE declarations (kind/
+// namespace/layer/shortcut/blur), a rarer, smaller set than manifest.json's
+// "which slot bodies exist". `declaredWidgets(song)` below answers "what did
+// <song> register" the way `has`/`source` answer "does <song> dress <slot>"
+// — a parallel accessor, not a replacement; `resolveSong`/body-loading are
+// unchanged.
+
+import QtQuick
+import Quickshell
+import Quickshell.Io
+
+QtObject {
+    id: root
+
+    readonly property string manifestPath:
+        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/run/qml/songs/manifest.json"
+
+    // The baseline-fallback floor (CONTRACTS.md §5): when the ACTIVE song
+    // doesn't dress a slot, resolution falls back to this song before
+    // falling back further to the anchor's own lane-side `fallback`
+    // Component. Sonata is the shipped, guaranteed-present standard song —
+    // a fixed constant here, independent of `aoide.song`'s own default
+    // (`modules/nucleus/options.nix`, null) — so it's the correct floor to
+    // catch every other song's gaps.
+    readonly property string baselineSong: "sonata"
+
+    // { "<song>": { "<slot>": { "owner": …, "file": … } }, … } — empty until
+    // the first successful parse.
+    property var manifest: ({})
+
+    // Declared as a property (not a default-child) because QtObject has no
+    // default property — the LiveryState.liveryFile idiom.
+    property FileView manifestFile: FileView {
+        id: manifestFile
+        path: root.manifestPath
+        watchChanges: true
+        onFileChanged: manifestFile.reload()
+        onTextChanged: {
+            try {
+                root.manifest = JSON.parse(manifestFile.text())
+            } catch (e) {
+                console.warn("[aoide/stagingengine] Failed to parse songs/manifest.json:", e)
+            }
+        }
+        Component.onCompleted: manifestFile.reload()
+    }
+
+    readonly property string registryPath:
+        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/run/qml/songs/registry.json"
+
+    // { "<song>": { "<slot>": {…declaration…} }, … } — empty until the first
+    // successful parse.
+    property var registry: ({})
+
+    // Same named-property idiom as manifestFile above (QtObject has no
+    // default property) — an independent FileView watching the sibling
+    // registry.json, same directory/reload/parse shape as manifestFile.
+    property FileView registryFile: FileView {
+        id: registryFile
+        path: root.registryPath
+        watchChanges: true
+        onFileChanged: registryFile.reload()
+        onTextChanged: {
+            try {
+                root.registry = JSON.parse(registryFile.text())
+            } catch (e) {
+                console.warn("[aoide/stagingengine] Failed to parse songs/registry.json:", e)
+            }
+        }
+        Component.onCompleted: registryFile.reload()
+    }
+
+    // <song>'s declared widget-type registrations — `{}` when the song has
+    // none, or the file hasn't loaded yet. Never throws: an unknown song or
+    // a not-yet-parsed registry both cleanly answer `{}`, same
+    // bounds-checked posture as `has` below.
+    function declaredWidgets(song) {
+        if (!song || !root.registry || !root.registry[song]) return {}
+        return root.registry[song]
+    }
+
+    // Does <song>'s manifest entry provide <slot>? Bounds-checked: an
+    // unknown song or a song with no entry for <slot> both cleanly answer
+    // false. The manifest is an OWNER MAP (`{ "<song>": { "<slot>": {
+    // "owner": …, "file": … } } }`), so this is a direct object lookup, not
+    // the list scan (`indexOf`) the pre-W3b shape needed.
+    function has(song, slot) {
+        return !!(song && root.manifest && root.manifest[song] && root.manifest[song][slot])
+    }
+
+    // Resolved URL for <song>'s <slot> widget — only meaningful when has()
+    // is true; callers gate on that first. Reads the slot's OWNER out of
+    // <song>'s manifest entry — usually <song> itself, but a borrow names a
+    // different song (quodlibet's `bar` is owned by fugue) — to find
+    // which song's copied songs/<owner>/ directory the body physically
+    // lives under, and the entry's `file` for the body's basename there.
+    function source(song, slot) {
+        var entry = root.manifest[song][slot]
+        return Qt.resolvedUrl("songs/" + entry.owner + "/" + entry.file)
+    }
+
+    // ── Baseline-fallback resolution (CONTRACTS.md §5) ──────────────────────
+    // Resolve <slot> to the song that actually authors it: <song> itself if
+    // it dresses the slot, else the baseline (sonata) if IT dresses the
+    // slot, else "" (no song provides it — the caller falls back further to
+    // its own lane-side `fallback` Component, or renders nothing).
+    function resolveSong(song, slot) {
+        if (root.has(song, slot)) return song
+        if (root.has(root.baselineSong, slot)) return root.baselineSong
+        return ""
+    }
+}

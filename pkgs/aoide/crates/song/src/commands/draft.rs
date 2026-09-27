@@ -464,6 +464,7 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_song(&stage, "sonata");
         std::fs::write(stage.join("cover.json"), r#"{"path":"x.png"}"#).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
@@ -495,6 +496,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("draft-save-nostage");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
@@ -511,6 +513,7 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         // VALID_NOTES parses fine but carries no "song" field.
         std::fs::write(stage.join("livery.json"), VALID_NOTES).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
@@ -527,6 +530,7 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_song(&stage, "sonata");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
@@ -553,6 +557,7 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_song(&stage, "sonata");
         std::fs::write(stage.join("cover.json"), r#"{"path":"x.png"}"#).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
@@ -575,6 +580,7 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_song(&stage, "sonata");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["amber-dusk"]));
@@ -604,6 +610,7 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_song(&stage, "sonata");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
 
@@ -645,6 +652,7 @@ mod tests {
         let routed_notes = r##"{"schemaVersion":"0","song":"sonata","palette":{"bg":"#routed"}}"##;
         std::fs::write(existing_dir.join("livery.json"), routed_notes).unwrap();
         std::os::unix::fs::symlink(&existing_dir.join("livery.json"), stage.join("livery.json")).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_draft_save(&inv(&["rice", "draft", "save"], &["amber-dusk"]));
@@ -664,6 +672,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("draft-list-absent");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_draft_list(&inv(&["rice", "draft", "list"], &[]));
@@ -680,6 +689,7 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::create_dir_all(root.join("songbook").join("sonata")).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_draft_list(&inv(&["rice", "draft", "list"], &["sonata"]));
@@ -696,6 +706,7 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_song(&stage, "sonata");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["amber-dusk"]));
@@ -730,6 +741,7 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_song(&stage, "sonata");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
 
@@ -760,6 +772,7 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_song(&stage, "sonata");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
@@ -780,6 +793,7 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_song(&stage, "sonata");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         // `draft_dir(song, name)` joins `name` straight into a path — a
@@ -798,6 +812,7 @@ mod tests {
         let stage = unique_tmp("draft-drop-missing");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_song(&stage, "sonata");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_draft_drop(&inv(&["rice", "draft", "drop"], &["nope"]));
@@ -812,6 +827,7 @@ mod tests {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let stage = unique_tmp("draft-drop-nosong");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         let out = handle_draft_drop(&inv(&["rice", "draft", "drop"], &["neon-night"]));
@@ -828,6 +844,7 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_song(&stage, "sonata");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["neon-night"]));
@@ -863,6 +880,7 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         stage_with_song(&stage, "sonata");
+        crate::commands::test_support::ensure_default_songbook_fixture();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         handle_draft_save(&inv(&["rice", "draft", "save"], &["amber-dusk"]));

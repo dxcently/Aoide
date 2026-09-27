@@ -542,8 +542,9 @@ the full count-site checklist (git show 9c2d05c).
   typed entry, not theater. `run_ask_dialog` now runs on BOTH directions;
   `run_confirm_dialog` and the plain-confirm outbound shape are gone.
   Deployed behind a NEW flag, `aoide.a2a.pairingPopup` (default false) —
-  the unit's desktop-facet gate is unchanged, this flag is the deliberate
-  opt-in on top of it, modules' own "flags default off" house rule.
+  the unit's desktop gate is unchanged, this flag is the deliberate
+  opt-in on top of it (the gate is `aoide.a2a.enable && aoide.a2a.pairingPopup`),
+  modules' own "flags default off" house rule.
 - **Task #135 P3' — the one-command collapse (M, "the command set can just
   be `aoide pair`").** `node.pair`, `node.pair.approve`, `node.pair.
   reject`, `node.pair.watch`, and `node.pending` DIE outright — hard

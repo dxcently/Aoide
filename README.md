@@ -21,36 +21,37 @@ This README explains what Aoide/AoideOS *is* — architecture, features, the Mel
 
 ## 1. Architecture
 
-The repo is a **snowflake**: everything lives under `modules/`, and each layer (`nucleus/`, `dendrites/`, `facets/`) names its own files in one `default.nix` (`modules/default.nix` + `lib/mkHost.nix` assemble the tree). No import list above the directory that holds the file — drop a `.nix` file in the right directory and add its one line to that directory's `default.nix`. A `/_`-prefixed path (`_wip.nix`, `_scratch/`) is simply never listed there.
+The repo is a **snowflake**: a capability enters by one file plus one line — a dendrite by its line in `modules/default.nix`'s catalogue, an aggregation or an override by its directory's own scan, a core module by its line in `modules/nucleus/default.nix`. `lib/aoideos.nix`'s constructor builds a host from its record and `lib/composition.nix` resolves selection before any module graph exists, importing only what was kept. Drop a `.nix` file in the right directory, add its one line, done. A `/_`-prefixed path (`_wip.nix`, `_scratch/`) is never catalogued and never listed, so it is shelved without being deleted.
 
 ```
 ~/Aoide/
 ├── modules/
-│   ├── nucleus/    core: aoided daemon, shellbridge, CLI packaging, options, policy
-│   ├── dendrites/  opt-in features — one tree, shipped + personal branches
-│   └── facets/     render surfaces (read ONLY aoide.livery): quickshell · compositor · stylix
-├── hosts/
-│   ├── common/     cross-machine baseline (which dendrites default ON)
-│   └── <host>/     machine-specific picks (hardware, enabled facets, song)
-├── pkgs/           the aoide CLI + daemon (Rust, its own flake, consumed as a path input)
-├── lib/            mkHost + checks + the walker (song/songbook, pkgs discovery)
-├── song/           the performed half (rices, songbook, runtime stage/)
-└── flake.nix       inputs + outputs (never edited to add a module)
+│   ├── nucleus/       core: aoided daemon, secrets, the option contract, policy
+│   ├── dendrites/     opt-in lanes — one tree, shipped + personal branches,
+│   │                  the paint lanes among them (lyra, quickshell, compositor,
+│   │                  stylix, greeter)
+│   ├── aggregations/  named groups a host takes in one line (base, desktop, …)
+│   └── overrides/     capability-scoped fixes
+├── hosts/             one record per machine (`_`-prefixed = template to copy)
+├── pkgs/              aoide (Rust, its own flake, consumed as a path input),
+│                      lyra-shell (the QML skeleton), lyra-songbook (templates)
+├── lib/               aoideos.nix (constructor) + composition + checks + discovery
+├── song/              the performed half (songbook, covers)
+└── flake.nix          inputs + outputs (never edited to add a module)
 ```
 
-Three layers, radial distance from the nucleus governing who may change what — see [Snowflake Anatomy](docs/Aoide-Wiki/concepts/Snowflake-Anatomy.md) for the full mutation policy:
+A catalogue at the centre and radial distance from it governing who may change what — see [Snowflake Anatomy](docs/Aoide-Wiki/concepts/Snowflake-Anatomy.md) for the full mutation policy:
 
 | Layer | Owner | What it holds |
 |---|---|---|
-| `modules/nucleus/` | upstream | The daemon, CLI packaging, the option contract, policy. |
-| `modules/dendrites/` | shipped + you | Opt-in features, one flat tree; new personal dendrites are additive files. |
-| `modules/facets/` | upstream | Render surfaces — Quickshell, the compositor, Stylix — reading only `aoide.livery`. |
-| `song/` | you (agent-written) | The performed half: committed songs, palettes, and the gitignored runtime `stage/`. |
+| `modules/nucleus/` | upstream | The daemon, secrets, the option contract, policy. |
+| `modules/dendrites/` | shipped + you | Opt-in lanes, one flat tree; new personal lanes are additive files — the paint lanes (lyra, quickshell, compositor, stylix, greeter) read only the namespaces root `AGENTS.md` house rule 5 enumerates. |
+| `song/songbook/<song>/` | you (agent-written) | The performed half: a committed song — rice.nix, livery.json, palettes, widgets, design notes. Everything outside `song/` changes only on a lane the User ordered. |
 
 Deeper reads:
 
 - [Full Architecture](docs/Aoide-Wiki/concepts/Full-Architecture.md) — the whole-body map: every subsystem, its inputs/outputs, where the frozen and performed halves meet at the livery seam.
-- [Codebase](docs/Aoide-Wiki/concepts/Codebase.md) — how the built repo actually works: the flake, the walker + overlay, the option contract, the systemd/service map, socket + stage-file contracts, real vs stubbed.
+- [Codebase](docs/Aoide-Wiki/concepts/Codebase.md) — how the built repo actually works: the flake, the catalogue + constructor + overlay, the option contract, the systemd/service map, socket + stage-file contracts, real vs stubbed.
 - [Desktop Architecture](docs/Aoide-Wiki/concepts/desktop/Desktop-Architecture.md) — how `aoided`, `shellbridge`, Quickshell, and the compositor compose into one agent-ready desktop body.
 - [Package Layout](docs/Aoide-Wiki/concepts/Package-Layout.md) — the `pkgs/aoide` Rust crate split (protocol, storage, conduct, song, cli, …) and its phased migration.
 - [Song Anatomy](docs/Aoide-Wiki/concepts/song/Song-Anatomy.md) / [Song Vocabulary](docs/Aoide-Wiki/concepts/song/Song-Vocabulary.md) — the performed half's own tree and naming map.
@@ -112,7 +113,7 @@ Two installs, one boundary between them (the two-binary split, [Package Layout](
 
 ### AoideOS — clone and run (Nix flakes)
 
-AoideOS is a framework you **clone and run**, not a package you install — the upstream repo ships the shape-making machinery (engine, contracts, walker, facets) but never the shapes themselves. Your clone is your instance, and shared git history means upstream improvements arrive as an ordinary merge. A remote fork is optional — for backup, fleet sync, or contributing back.
+AoideOS is a framework you **clone and run**, not a package you install — the upstream repo ships the shape-making machinery (engine, contracts, catalogue, paint lanes) but never the shapes themselves. Your clone is your instance, and shared git history means upstream improvements arrive as an ordinary merge. A remote fork is optional — for backup, fleet sync, or contributing back.
 
 **Prerequisites:** a NixOS box with flakes enabled (`nix.settings.experimental-features = [ "nix-command" "flakes" ];` in your existing config, or `experimental-features = nix-command flakes` in `/etc/nix/nix.conf`).
 
@@ -121,13 +122,13 @@ AoideOS is a framework you **clone and run**, not a package you install — the 
 git clone <upstream-url> ~/Aoide
 cd ~/Aoide
 
-# 2. Add a host: one line in flake.nix's nixosConfigurations, e.g.
-#      nixosConfigurations.<host> = mkHost "<host>";
-#    then create hosts/<host>/default.nix importing hosts/common —
-#    start from a shelved skeleton (hosts/_desktop, _laptop, or _server;
-#    _mac is the forward-looking darwin one, pending the mkHost class
-#    seam) or copy hosts/yomi-strix/, the living reference. A committed
-#    hardware.nix is imported guardedly if present.
+# 2. Add a host: a new directory under hosts/ — the flake DISCOVERS it and
+#    never names a machine. Start from a shelved skeleton (hosts/_desktop,
+#    _laptop, _server; _mac is the forward-looking darwin one, pending the
+#    darwin seam) or copy hosts/yomi-strix/, the living reference. The
+#    record selects aggregations, lone dendrites and its song
+#    (`song.declared`), then carries the machine's own platform settings.
+#    A committed hardware.nix is imported guardedly if present.
 
 # 3. Build + switch
 sudo nixos-rebuild switch --flake .#<host>
@@ -157,4 +158,4 @@ Two axes move independently, and neither has a background updater — house poli
 | [`docs/Aoide-Wiki/concepts/desktop/Controls.md`](docs/Aoide-Wiki/concepts/desktop/Controls.md) | Every keybind and shell alias: the `ad*` rebuild family, compositor keybinds, bar interactions, shell QoL aliases. |
 | [`AGENTS.md`](AGENTS.md) | The agent-facing onboarding doc — house rules and pointers, for any agent driving this repo; `docs/agent/` is its checkout-side router. |
 | [`CONTRACTS.md`](CONTRACTS.md) | Versioned interfaces: the note schema, dendrite shape, `schema --json`, stage-file formats. |
-| [`docs/BUILD.md`](docs/BUILD.md) | Module-authoring: how to write a dendrite or facet. |
+| [`docs/BUILD.md`](docs/BUILD.md) | Module-authoring: how to write a dendrite. |

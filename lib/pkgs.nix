@@ -1,12 +1,12 @@
 # lib/pkgs.nix — the packages walker.
 #
-# Sibling to lib/walk.nix: where walk.nix hands every `.nix` under a dir to the
-# module system, this hands every package dir under `../pkgs` to `callPackage`,
+# Sibling to the directory walks: where a walk used to hand every `.nix` under a
+# dir to the module system, this hands every package dir under `../pkgs` to `callPackage`,
 # so a package placed under `pkgs/<name>/` self-registers with no hand-list to
 # maintain (flake `packages` output, host + vm overlays, and a `pkg-<name>`
 # check all read this one source).
 #
-# Discovery rule (same shelving convention as walk.nix): read `../pkgs`, keep
+# Discovery rule (the same `_`-shelving convention every discovery here uses): read `../pkgs`, keep
 # entries that are DIRECTORIES whose name does NOT start with `_` (the shelving
 # opt-out: prefix a package dir with `_` — e.g. `_wip/` — to hide it from
 # discovery without deleting it) and that contain a `default.nix`. Each kept
@@ -22,7 +22,7 @@
 #
 # Naming rule: a package name must NOT shadow an existing nixpkgs attribute.
 # Because these packages are also injected via a nixpkgs overlay
-# (lib/mkHost.nix, tests/vm-boot.nix), a name that collides with a stock attribute
+# (lib/aoideos.nix, tests/vm-boot.nix), a name that collides with a stock attribute
 # would silently mask it. The `overlay` collision guard `throw`s a legible
 # error when a discovered name already exists in `prev` (the overlay is the
 # only path with the previous attrset in scope; the flake `packages` output has
@@ -36,23 +36,42 @@
 # catch. Add a name here ONLY with that intent; the default for a new package is
 # to pick a non-colliding name.
 #
-# Special-args escape hatch: `callPackage` auto-fills standard nixpkgs args. A
-# package needing a non-standard arg (e.g. another flake package, or an input)
-# overrides it with an explicit `//` after the call — edit THIS file's mapper
-# for that one name, e.g. in `discover`:
+# Intentional overrides — `intentionalOverrides`: a second overlay in
+# `nixpkgs.overlays` MAY deliberately replace what this walker supplies —
+# Aoide's lyra lane replaces `lyra-songbook` with the songs a host builds in.
+# Listing a name here is what lets the walker STEP ASIDE for it; an overlay
+# that replaces a walker name WITHOUT listing it is a loud evaluation error
+# naming the package and this rule, because a silent replacement is how one
+# overlay's package set quietly becomes another's without anyone deciding it.
+# Add a name here ONLY with that intent, never to silence the error.
 #
-#   discover = pkgs: (lib.genAttrs packageNames …) // {
-#     foo = pkgs.callPackage (pkgsDir + "/foo") { extraArg = pkgs.aoide; };
-#   };
+# Special-args escape hatch: `callPackage` auto-fills standard nixpkgs args. A
+# package needing an arg `callPackage` cannot reach (a value the FLAKE computes,
+# like `lyra-songbook`'s `aoideOptions`) declares it by name, and the caller
+# hands it in as `extra.<package>` at construction — one place per build
+# context, next to the `pkgs` that context calls through, never a special case
+# inside the mapper below:
+#
+#   discovered = (import ./lib/pkgs.nix {
+#     inherit lib;
+#     extra = { foo = { extraArg = <flake value>; }; };
+#   }).discover pkgs;
 #
 # Keeping the override here (not in flake.nix) preserves the single source: the
-# flake output and both overlays still read the same set.
+# flake output and both overlays still read the same set, and a package whose
+# extras a context forgets fails loudly (a required argument `callPackage`
+# never got), never silently.
 #
 # Usage:
 #   discovered = (import ./lib/pkgs.nix { inherit lib; }).discover pkgs;
 #   # overlay form (collision guard active):
 #   nixpkgs.overlays = [ (import ./lib/pkgs.nix { inherit lib; }).overlay ];
-{ lib }:
+{
+  lib,
+  # Extra `callPackage` arguments, by package name. A name with no entry gets
+  # none — every package that needs nothing from the flake needs no mention.
+  extra ? { },
+}:
 let
   pkgsDir = ../pkgs;
 
@@ -60,6 +79,14 @@ let
   intentionalShadows = [
     "melete" # Aoide's AI harness vs nixpkgs' `melete` headline font — unrelated.
     "eidolon" # Aoide's coding harness vs nixpkgs' `eidolon` — a dead alias, throws "removed as unmaintained upstream".
+  ];
+
+  # Names another overlay in the same `nixpkgs.overlays` list is allowed to
+  # replace (see header). The walker supplies a default per discovered package,
+  # so stepping aside is the ONLY way a lane's replacement can stand — and it
+  # happens only for a name listed here.
+  intentionalOverrides = [
+    "lyra-songbook" # the lyra lane replaces the whole songbook with the songs THIS host builds in.
   ];
 
   # Directory entries under ../pkgs that are packages: type == "directory",
@@ -80,8 +107,11 @@ let
 
   # Map every discovered name to its callPackage. `pkgs` is the package set that
   # supplies callPackage (nixpkgs legacyPackages in the flake output, `final`
-  # in the overlay).
-  discover = pkgs: lib.genAttrs packageNames (name: pkgs.callPackage (pkgsDir + "/${name}") { });
+  # in the overlay); `extra` (this file's own argument) supplies the arguments
+  # callPackage cannot fill by itself.
+  discover =
+    pkgs:
+    lib.genAttrs packageNames (name: pkgs.callPackage (pkgsDir + "/${name}") (extra.${name} or { }));
 
   # Entries under pkgsDir that are none of the three admitted shapes above
   # (shelved `_`-dir, callPackage target, self-flaked): a half-created
@@ -112,13 +142,46 @@ in
   # Overlay form for nixpkgs.overlays: injects every discovered package and
   # guards each name against ACCIDENTALLY masking a stock nixpkgs attribute
   # (intentional shadows are exempted — see header).
+  # The overlay, as a function of the UNOVERLAID set it is laid on.
+  #
+  # `stock` is the collision guard's question: a `pkgs/<name>` must not mask a
+  # nixpkgs attribute, so it asks the STOCK set — not the running composition,
+  # which also holds names ANOTHER overlay in the same list provided.
+  #
+  # And a name another overlay already provides is that overlay's answer — but
+  # only for a name listed in `intentionalOverrides`: the walker supplies a
+  # DEFAULT per discovered package, so it steps aside rather than overwriting
+  # one, and a replacement nobody listed is an evaluation error naming the
+  # package and the rule. That is what keeps a lane's replacement work — the
+  # lyra lane replaces `lyra-songbook` with the songs a host builds in, and two
+  # overlays writing one attribute is otherwise a race whose winner depends on
+  # the order `nixpkgs.overlays` happened to compose, not on either of them.
   overlay =
+    { stock }:
     final: prev:
     lib.genAttrs packageNames (
       name:
-      if prev ? ${name} && !(builtins.elem name intentionalShadows) then
+      if stock ? ${name} && !(builtins.elem name intentionalShadows) then
         throw "pkgs/${name} collides with a nixpkgs attribute — rename it (or add it to intentionalShadows in lib/pkgs.nix if the shadow is deliberate)"
+      else if prev ? ${name} && !(stock ? ${name}) then
+        if builtins.elem name intentionalOverrides then
+          # LOAD-BEARING, not tidiness. This yield is what makes a lane's
+          # replacement of a base package safe in either overlay application
+          # order: whichever of the two definitions is applied first supplies the
+          # name, and the other steps aside instead of overwriting it. Two
+          # overlays writing one attribute in one order is otherwise a race whose
+          # winner depends on how `nixpkgs.overlays` happened to compose — and
+          # `prev` inside a lane's own overlay is NOT guaranteed to carry the
+          # base's attributes (see lib/composition.nix's `overlays` argument),
+          # which is why a lane cannot simply `.override` what this supplies.
+          #
+          # The yield is not automatic: only a name in `intentionalOverrides`
+          # gets it (see the header). Anything else replacing a walker name is
+          # refused here, by name.
+          prev.${name}
+        else
+          throw "pkgs/${name}: another overlay in nixpkgs.overlays already provides '${name}', which this walker also supplies — the walker yields only to a name listed in intentionalOverrides (lib/pkgs.nix). List it there if replacing the walker's build is deliberate, or give the other overlay a name this walker does not supply."
       else
-        final.callPackage (pkgsDir + "/${name}") { }
+        final.callPackage (pkgsDir + "/${name}") (extra.${name} or { })
     );
 }

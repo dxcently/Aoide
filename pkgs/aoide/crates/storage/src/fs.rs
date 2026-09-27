@@ -633,6 +633,23 @@ pub fn flake_root() -> std::path::PathBuf {
     aoide_protocol::aoide_home().join("Aoide")
 }
 
+/// The lyra shell SOURCE, as a path relative to [`flake_root`]: the QML tree,
+/// the resolved icons and the preview fixture sets a checkout carries — the
+/// same directory `pkgs/lyra-shell` builds its `share/lyra/{qml,icons,
+/// preview}` from, so the path a checkout is READ from and the path the
+/// package is BUILT from cannot drift apart.
+///
+/// Named ONCE, here. Every site that CONSTRUCTS the shell path joins the const
+/// onto [`flake_root`] (`aoide-lyra`'s `commands::preview` stages the tree into
+/// an isolated preview root; `aoide-song`'s `compose` interpolates the const
+/// into the scaffold doc that points a new song's author at `qml/slots.md`) —
+/// prose and doc comments, and that scaffold text, may name the literal
+/// `"pkgs/lyra-shell"`, which nothing resolves. A second checkout-relative
+/// tree earns its own const beside this one rather than a literal at the call
+/// site — the rename this exists to survive is exactly the one that leaves a
+/// string behind in a crate nobody thought to grep.
+pub const LYRA_SHELL_SRC: &str = "pkgs/lyra-shell";
+
 /// Pure tier logic for [`song_templates_dir`] — the same two-tier shape
 /// `aoide_protocol::bin`'s sibling-binary resolver uses (env override, then
 /// a sibling of `current_exe()`'s directory gated on its OWN existence
@@ -703,6 +720,25 @@ pub fn song_templates_dir() -> Option<std::path::PathBuf> {
     resolve_song_templates_dir(env_value.as_deref(), exe_dir.as_deref(), sibling_is_dir)
 }
 
+/// `$AOIDE_SONG_TEMPLATES`'s parent — the shipped `share/lyra` dir. Beside
+/// the templates sit the two build-time payloads a repo-less machine reads to
+/// do its own work without a checkout: `nix/manifest.nix` (§9's offline
+/// songbook generator, evaluated by `aoide-song::widgets`) and
+/// `aoide-options.json` (`lyra onboard`'s option set). Named ONCE here, for
+/// the same reason [`LYRA_SHELL_SRC`] is: two crates derive it from
+/// [`song_templates_dir`], and a second derivation of the same parent is a
+/// rename waiting to leave one of them behind.
+///
+/// `None` exactly when [`song_templates_dir`] is `None` — there is no
+/// templates dir to sit beside.
+pub fn lyra_share_dir() -> Option<std::path::PathBuf> {
+    song_templates_dir().and_then(|templates| {
+        templates
+            .parent()
+            .map(std::path::Path::to_path_buf)
+    })
+}
+
 /// The committed-song directory: `<song>/songbook/<name>/`.
 ///
 /// Shares [`song_dir`]'s `AOIDE_STAGE_DIR`-relative resolution, so a test that
@@ -710,6 +746,14 @@ pub fn song_templates_dir() -> Option<std::path::PathBuf> {
 /// it (no separate `$AOIDE_SONGBOOK_DIR` needed — one seam, not two).
 pub fn songbook_dir(name: &str) -> std::path::PathBuf {
     song_dir().join("songbook").join(name)
+}
+
+/// The machine's songbook ROOT: `<song>/songbook/`, the directory a song is
+/// looked up BY NAME in ([`songbook_dir`]) and the argument the offline
+/// generator is pointed at (§9). A sibling of [`songbook_dir`] rather than a
+/// second path spelled at the call site, for the same one-seam reason.
+pub fn songbook_root() -> std::path::PathBuf {
+    song_dir().join("songbook")
 }
 
 /// The committed-song notes file: `<song>/songbook/<name>/livery.json`.
@@ -722,9 +766,8 @@ pub fn songbook_notes(name: &str) -> std::path::PathBuf {
 ///
 /// Same content as the active song's committed `livery.json` with the venue's
 /// `aoide.livery.override` applied (a plain file, never a symlink), published
-/// by the quickshell facet's activation seed
-/// (`modules/facets/quickshell/default.nix`) — the file's own `"song"` field
-/// says WHICH song that was. Absent on a host that never activated the facet
+/// by the lyra lane's activation seed — the file's own `"song"` field
+/// says WHICH song that was. Absent on a host that never activated the lane
 /// (or before its first activation); readers then fall back to the committed
 /// songbook for that song. Shares [`song_dir`]'s `AOIDE_STAGE_DIR`-relative
 /// resolution like every other song-tree path.

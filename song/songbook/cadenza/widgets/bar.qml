@@ -7,7 +7,7 @@
 //   ─────────────────────────────────────────────────────────────────────────── the trunk
 //   (<name> = the kit icon kit.glyph.<name>, intent §2 Glyphs; TRAY, the clock and ⏻ stay bare)
 //
-// WidgetSlot-hosted, root Item. The facet's PanelWindow reads `implicitHeight`
+// WidgetSlot-hosted, root Item. The shell's PanelWindow reads `implicitHeight`
 // (28) back for its height and exclusiveZone; width follows the host.
 // Extras, all optional so the canvas (powermenu: null, dock: null) and a bare
 // load never error: `shared`, `powermenu`, `dock`, `stagingEngine`.
@@ -119,7 +119,7 @@ import Quickshell.Services.Pipewire
 import Quickshell.Services.UPower
 import Quickshell.Services.SystemTray
 import Quickshell.Networking
-// the facet's WidgetSlot, for the embedded calendar (sonata's bar does the same)
+// the shell's WidgetSlot, for the embedded calendar (sonata's bar does the same)
 import "../.."
 import "Kit.js" as Kit
 
@@ -1256,7 +1256,7 @@ Item {
     function modeColor(m) { return m === "staging" ? root.kit.title : (m === "draft" ? root.kit.path : root.kit.dim) }
     // The RICE toggle in flight. A click sends the toggle once and the cell
     // reads a dim `…` at once; every further click is ignored until
-    // livery.riceMode (the facet's watch of song/stage/mode.json `mode`)
+    // livery.riceMode (the shell's watch of song/stage/mode.json `mode`)
     // actually changes, or 10s pass with it unchanged — then the cell is
     // itself again and says nothing more. A switch reloads the whole shell,
     // so the mark only has to hold until then; its job is to swallow the
@@ -1296,7 +1296,7 @@ Item {
     // The line one click sends. `bridge.workspaceAction(fields, cb)` answers
     // with core's one reply line {ok, message, action, workspace, project?,
     // data?} (or {ok:false, reason}); `ok:false` becomes one dim line in the
-    // pane. A bridge without it (the facet's ShellBridge today) takes the
+    // pane. A bridge without it (the shell's ShellBridge today) takes the
     // same line fire-and-forget through `sendCommand`: no reply, so no error
     // line — success shows when graph.json rewrites, and silence clears the
     // pending mark after 5s with nothing said.

@@ -73,12 +73,14 @@ shipped score templates at `<templates>/<from>/livery.json`, where
 templates is `$AOIDE_SONG_TEMPLATES` (absolute) else
 `<exe_dir>/../share/lyra/songbook` when that directory exists.
 `pkgs/lyra-songbook` bakes the committed `song/songbook/` tree plus
-prebaked `manifest.json`/`registry.json` into that share dir, so a
-repo-less host (no flake checkout on disk at all) still composes from
-`sonata` and regenerates the widget registry/manifest without ever invoking
-nix — baked baseline, surviving host-songbook entries overlaid, the staged
-song's own scan patched in last. A song with a `_widgets/` shelf still
-needs a real checkout.
+prebaked `manifest.json`/`registry.json`/`builtin.json` into that share dir,
+and beside it the OFFLINE generator (`nix/manifest.nix` + copies of
+`lib/songbook.nix`/`lib/song.nix` + the locked nixpkgs `lib/`) and
+`aoide-options.json`. So a repo-less host composes from `sonata` with no
+nix at all, and regenerates the widget registry/manifest over its OWN
+songbook with a plain `nix-instantiate --eval` on that shipped file — no
+flake, no network, no checkout. A song with a `_widgets/` shelf needs that
+generator, not a checkout: `composeSong` runs inside it.
 
 The same templates dir also seeds the runtime songbook itself: the first
 `lyra rice stage <name>` / `lyra rice mode stage <name>` for a song that is
@@ -113,8 +115,11 @@ still captures widget bodies alongside livery+cover on every mint, in every
 mode; it is the take store, not the draft mechanism, that remembers them.
 
 Outside the git checkout entirely — the runtime root owns
-`song/songbook/*/drafts/`, same as `song/stage/` — and banned from
-nix-eval reads (`lib/checks.nix`'s `noSongRead`): a draft is durable
+`song/songbook/*/drafts/`, same as `song/stage/` — and runtime state by
+construction: the `song-runtime-untracked` check
+(`lib/checks.nix`) fails if a `song/` runtime dir is ever committed, and a
+`rice declare` copy of a draft lands under a gitignored
+`song/songbook/*/drafts/`. A draft is durable
 scratch, never committed or declared truth. That distinction from the
 checkout's committed `song/songbook/<name>/` files is the entire point.
 
@@ -216,14 +221,18 @@ and `stage/cover.json` anywhere in the codebase (unaffected by which of
 brings live comes from the runtime root: the notes, the cover, the widget
 bodies, and the song's slot-owner map and widget-type registry
 (`run/qml/songs/manifest.json`/`registry.json`). None of it is evaluated
-from the git checkout, so a song that exists only in the runtime songbook
-stages and hot-loads without a commit, a merge or a rebuild. The
+from the git checkout: the manifest/registry sources are the shipped
+templates' baked files (for a song this system built in) and this machine's
+own songbook, evaluated by the SHIPPED generator over
+`$AOIDE_ROOT/song/songbook`. So a song that exists only in the runtime
+songbook stages and hot-loads without a commit, a merge or a rebuild. The
 declarative path may seed staging (the activation seed, the baked
 templates), never gate it. The staged song is always the LAST one staged:
 `stage/mode.json` remembers it as `stagingSong`, and every way back into
 staging (the bar's RICE toggle, a bare `rice mode stage`, a reboot)
-restores that song, never the declared one. Register §33 tracks the one
-path that still evaluates the checkout for the owner map.
+restores that song, never the declared one. The checkout is reached by
+exactly one staging-adjacent step, `rice declare`'s commit-in, and by
+nothing else.
 
 `rice stage` doesn't only hot-load the palette/notes tier any more —
 it also syncs the song's widget QML **bodies**
@@ -255,7 +264,7 @@ name, or with none: it re-pins `stage/livery.json` to the resolved song's
 declared notes FIRST (with no name, the DECLARED song — the song
 `song/declared/livery.json` names, the venue's activation-published twin of
 the committed notes with any `aoide.livery.override` already applied; only a
-host that never activated the facet falls back to the current stage's own
+host that never activated the lane falls back to the current stage's own
 song, the auto-resolve `rice mode stage` uses) and only writes the lock
 marker after that write succeeds, so the re-pin can never trip the lock it
 is about to set. This means a bare `rice mode declarative` **discards
@@ -300,7 +309,7 @@ A song may set `aoide.livery.geometry` — gaps, border size, rounding, and
 blur, every field optional — alongside its palette and window tiers; see
 [[livery#The geometry tier]] for the field list and the fallback/live-apply
 mechanism. A song that sets no geometry performs with the compositor
-facet's own defaults, unchanged.
+lane's own defaults, unchanged.
 
 ## The Shipped Baseline Is Guarded, Not Frozen
 
@@ -309,7 +318,7 @@ facet's own defaults, unchanged.
 naming no song performs no song: a host opts into the desktop by naming the
 song explicitly. A missing baseline is a loud nix eval failure, never a
 silent no-op. `sonata` is upstream-owned and
-evolving: like any other upstream-owned tree (nucleus, facets), upstream
+evolving: like any other upstream-owned tree (nucleus, dendrites), upstream
 MAY update or iterate on it.
 
 Every OTHER song — anything composed via `rice compose` under a name other
@@ -352,7 +361,7 @@ aoide.song = "sonata";
 
 **Replay** is performing a declared song at a different host: the song
 carries only livery (palette + component tiers), the host supplies its own
-specifics (hardware, monitors) and enabled instruments (facets, dendrites).
+specifics (hardware, monitors) and enabled instruments (dendrites).
 A host lacking an instrument does not sound that part.
 
 **Transpose** vs **replay**: transpose is same venue, new key (new

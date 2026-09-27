@@ -6,12 +6,12 @@
 {
   imports = [
     ./aoided.nix
+    ./assertions.nix
     ./config.nix
     ./melete-adapter.nix
     ./nix.nix
     ./options.nix
     ./packages.nix
     ./secrets.nix
-    ./shellbridge.nix
   ];
 }

@@ -1,12 +1,12 @@
 // wallpaper.qml — sonata's "wallpaper" slot: the background layer.
 //
-// Ported from the facet's AoideWallpaper.qml (per-song widget-slot expansion,
-// CONTRACTS.md §5) — ownership moves from the facet to sonata's score; the
-// facet original stays in place until a later phase (Phase 6) retires it, so
+// Ported from the shell's AoideWallpaper.qml (per-song widget-slot expansion,
+// CONTRACTS.md §5) — ownership moves from the shell to sonata's score; the
+// shell original stays in place until a later phase (Phase 6) retires it, so
 // this file and AoideWallpaper.qml are momentarily twins. This slot is hosted
 // by `WidgetSlot`, not `SurfaceSlot` — the root below is an `Item`, not a
 // `PanelWindow`; one instance lives inside the existing wallpaper PanelWindow
-// per screen (the facet's own Variants delegate keeps owning the layer,
+// per screen (the shell's own Variants delegate keeps owning the layer,
 // namespace and click-through mask — that's whole-content-slot chrome, same
 // as the bar's PanelWindow). That WidgetSlot host wiring itself lands with
 // Phase 6, not here.
@@ -45,7 +45,7 @@ Item {
     height: parent ? parent.height : implicitHeight
 
     // ── Cover path ─────────────────────────────────────────────────────────
-    // The BAKED song wallpaper — the quickshell facet exports its immutable
+    // The BAKED song wallpaper — the quickshell shell exports its immutable
     // store path as AOIDE_WALLPAPER, so the song's wallpaper is RELIABLY set on
     // every rebuild/boot (this was the "background gone after rebuild" bug: the
     // live stage/cover.json is runtime state nothing re-seeds from the song).

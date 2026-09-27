@@ -2,6 +2,8 @@
 # Performed-half live state:
 song/stage/
 song/auditions/
+# Declared-half live state (published by the quickshell activation seed):
+song/declared/
 # Per-song scratch drafts (song/songbook/<song>/drafts/) — nested under the
 # song they vary, never committed/declared truth (that's the whole point).
 song/songbook/*/drafts/

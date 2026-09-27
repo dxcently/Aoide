@@ -1,7 +1,7 @@
 //! Live watchdog for the quickshell placeholder-screen lockup.
 //!
-//! `aoide-quickshell.service`'s `Restart=on-failure` (`modules/facets/
-//! quickshell/default.nix`) is useless against one specific failure mode:
+//! `aoide-quickshell.service`'s `Restart=on-failure` (the quickshell
+//! lane) is useless against one specific failure mode:
 //! after a transient output blip on the real monitor, Qt's wayland QPA
 //! backend sometimes falls onto an internal placeholder screen and never
 //! reattaches even once the real output returns — the process stays
@@ -56,12 +56,12 @@
 //! `aoide-bar` would restart a healthy desktop every fifteen minutes
 //! forever. So it is DECLARED by the active song
 //! (`aoide.arrangement.surfaces`) and published to
-//! `run/qml/songs/surfaces.json` by the quickshell facet's build
+//! `run/qml/songs/surfaces.json` by the lyra lane's build
 //! (CONTRACTS.md §5). When that file is present this checks the declared
 //! namespaces against what is actually mapped, per monitor where the
 //! declaration says per-monitor; when it is absent, unreadable, or names no
 //! surface at all, nothing is declared and the old total count decides,
-//! unchanged. The empty case matters: the facet publishes the file on every
+//! unchanged. The empty case matters: the lane publishes the file on every
 //! host, so a song that declares nothing ships `{"surfaces": {}}`, and that
 //! must be the old check — not a check with nothing to assert, which would
 //! read a blank desktop as healthy on exactly the hosts that never opted in.
@@ -272,7 +272,7 @@ pub(crate) fn parse_expectation(v: &Value) -> Option<BTreeMap<String, bool>> {
 /// no surface, so the old total count decides, exactly as before the
 /// declaration existed (CONTRACTS.md §5, `aoide.arrangement.surfaces`).
 ///
-/// The empty case is not hypothetical. The quickshell facet publishes the
+/// The empty case is not hypothetical. The lyra lane publishes the
 /// file unconditionally, so every host whose song declares nothing carries a
 /// published `{"surfaces": {}}`. Handing that to [`surfaces_fall_short`] would
 /// be a check with nothing to fail — a blank desktop read as healthy — on
@@ -580,7 +580,7 @@ fn hyprctl_json(subcommand: &str) -> Value {
 /// spelling `$AOIDE_ROOT` or `~/.aoide` here — the runtime root is one
 /// relocatable seam, and a second spelling would be the one that drifts.
 ///
-/// EVERY failure mode is `None`: absent (a host whose facet predates this
+/// EVERY failure mode is `None`: absent (a host whose lane predates this
 /// file, or one that never deployed it), unreadable, or not valid JSON. `None`
 /// means "no expectation declared", which sends [`run_healthcheck`] down the
 /// total-count fallback — the same behaviour this watchdog had before the
@@ -802,9 +802,9 @@ mod tests {
 
     // ── The declared-expectation predicate ────────────────────────────────
     //
-    // The published shape, verbatim from the quickshell facet's own output
-    // (`modules/facets/quickshell/default.nix`'s `surfacesJsonFile`,
-    // CONTRACTS.md §5): one object, NOT keyed by song, whose keys are the
+    // The published shape, verbatim from the lyra lane's own output
+    // (`surfacesJsonFile`, CONTRACTS.md §5): one object, NOT keyed by song,
+    // whose keys are the
     // already-RESOLVED layer-shell namespaces. That resolution is why nothing
     // here derives `aoide-<slot>` itself.
     fn sonata_expectation() -> Value {
@@ -857,7 +857,7 @@ mod tests {
 
     // ── asserted_expectation: what the check actually asserts ─────────────
     //
-    // The facet publishes the file on EVERY host, so a song that declares
+    // The lane publishes the file on EVERY host, so a song that declares
     // nothing ships `{"surfaces": {}}` — the shape every non-declaring song
     // carries. That must be the old count, not a check with nothing to fail:
     // a blank desktop on such a host is exactly the incident the watchdog

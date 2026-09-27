@@ -22,32 +22,60 @@ nix eval .#nixosConfigurations.yomi-strix.config.system.build.toplevel.drvPath
 
 ## The module aggregates (how discovery works)
 
-Every layer under `modules/` carries a `default.nix` naming its own files,
-one line per file, in `LC_ALL=C` order; `modules/default.nix` imports the
-three layers and nothing else. There is no import list above the directory
-that holds the file. To add a module, drop a file in the right layer and add
-its one line to that layer's `default.nix`:
+`modules/default.nix` is the catalogue: plain data, never a module, naming
+every dendrite once by the name a host selects it with. `modules/dendrites/
+default.nix` derives its imports from those names (and contributes every
+alternative a provider registry names); `modules/nucleus/default.nix` names its
+own files, one line per file, in `LC_ALL=C` order. To add a capability, drop a
+file in the right layer and add its one line — the catalogue for a dendrite, that
+layer's own `default.nix` for a nucleus module:
 
 - `modules/nucleus/` — core, applies unconditionally (no `mkIf`).
 - `modules/dendrites/` — opt-in features, guarded on a flag.
-- `modules/facets/` — render surfaces, read `aoide.livery` only.
+- a paint lane is a dendrite like any other (`compositor`, `greeter`, `stylix`,
+  `lyra`) — see **Authoring a paint lane** below.
 
-**Shelving opt-out:** a `_`-prefixed file or directory is never listed in a
-`default.nix`. Prefix a work-in-progress file (`_wip.nix`) or dir
-(`_scratch/`) with `_` to shelve it; `modules/dendrites/_example.nix` is the
+**Shelving opt-out:** a `_`-prefixed file or directory is never catalogued and
+never listed in a `default.nix`. Prefix a work-in-progress file (`_wip.nix`) or
+dir (`_scratch/`) with `_` to shelve it; `modules/dendrites/_example.nix` is the
 checked-in template.
+
+### Aggregations and overrides
+
+Two siblings of the catalogue are read one level deep beside it, names and paths
+only, by their own directories' discovery files:
+
+- `modules/aggregations/` — memberships. `modules/aggregations/default.nix`
+  discovers every child directory holding a `default.nix`; a body is inert data
+  (`system.members`, `system.providers`, `system.nixos`). The constructor imports
+  only the bodies a host or one of its users selected, so an unselected group is
+  never read. See `modules/aggregations/README.md`.
+- `modules/overrides/` — capability-scoped fixes.
+  `modules/overrides/default.nix` discovers every `*.nix` file beside it. Every
+  host READS every record (matching means reading what it targets); what an
+  unmatched one never costs is its work. See `modules/overrides/README.md`.
+
+### Hosts are discovered too
+
+`flake.nix` reads `hosts/` one level deep — every immediate child holding a
+`default.nix`, minus the `_`-prefixed shelved ones — and builds
+`nixosConfigurations.<name>` and `inventory.<name>` from that same list. Adding a
+machine is a new directory; no file is edited to add one. A host record's shape is
+`hosts/README.md`; the constructor that assembles it is `lib/aoideos.nix`, over
+`lib/composition.nix`. `nix eval --json .#inventory.<host>` is the review surface
+for what a host selected.
 
 ---
 
 ## The option contract (what you read)
 
 Declared in `modules/nucleus/options.nix`, evaluated per host. Read these; write
-none of them except your own dendrite/facet flags.
+none of them except your own dendrite flags (a paint lane sets its own fact).
 
 | Option                         | Type                         | Notes |
 | ------------------------------ | ---------------------------- | ----- |
 | `aoide.enable`                 | bool                         | framework master switch |
-| `aoide.song`                   | nullOr str (default `null`)  | the song this host performs; names a `song/songbook/<name>/`. Null — no song named — means a paint facet deploys nothing: no song, no service |
+| `aoide.song`                   | nullOr str (default `null`)  | the song this host performs; names a `song/songbook/<name>/`. Null — no song named — means a paint lane deploys nothing: no QML tree, no seeded stage, no rice restart |
 | `aoide.user`                   | str (default `"khoa"`)       | owner of the `~/Aoide` clone |
 | `aoide.root`                   | str (default `"~/.aoide"`)   | the RUNTIME root — `song/stage/`, `song/declared/`, `state/`, `run/qml/`, composed `songbook/`; exported as `AOIDE_ROOT`. Core code default, nix-independent (L-C2, task #107) |
 | `aoide.checkout`               | str (default `"~/Aoide"`)    | the dev git checkout — `rice declare`'s commit-in target, `soundcheck`'s scan root, the songbook `nix eval` registry regen; exported as `AOIDE_FLAKE_ROOT` |
@@ -61,13 +89,20 @@ none of them except your own dendrite/facet flags.
 
 `AOIDE_SONG_TEMPLATES` (L-C3, task #107) is not its own `aoide.*` option — it
 is wired directly, as `${pkgs.lyra-songbook}/share/lyra/songbook`, but NOT
-onto the same broad unit list `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT` ride: only
-`aoide-song` reads it and only `lyra` links `aoide-song`, so it rides
-`modules/nucleus/shellbridge.nix`'s main `shellbridge` service (execs
-`lyra`) and `modules/nucleus/aoided.nix`'s `environment.sessionVariables`
-gated on `aoide.lyra.enable`, never the core-only units that exec plain
-`aoide` (a headless core carries no `pkgs.lyra-songbook` closure). That
-package (`pkgs/lyra-songbook/default.nix`) bakes the committed
+onto the same broad unit list `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT` ride: only the
+staging paths read it and only `lyra` links them, so it rides the units that
+exec or spawn `lyra` —
+`modules/dendrites/lyra/shellbridge.nix`'s main `shellbridge` service,
+`modules/dendrites/quickshell.nix`'s `aoide-quickshell` unit (the QML it
+starts execs `lyra`) — and `modules/nucleus/aoided.nix`'s
+`environment.sessionVariables` plus its own unit `Environment`, all gated on
+`aoide.lyra.enable`, never the core-only units that exec plain
+`aoide` (a headless core carries no `pkgs.lyra-songbook` closure). Each unit
+spells it in its OWN `Environment=` as well as inheriting the login copy:
+a session variable is a LOGIN fact, so a unit that started before a switch
+would otherwise keep the previous build's songbook until the operator relogs.
+That
+package (`pkgs/lyra-songbook/default.nix`) bakes the built-in
 `song/songbook/` tree plus `manifest.json`/`registry.json` (via
 `lib/songbook.nix`) at build time, so a repo-less host's `rice compose --from
 <song>` and its registry/manifest regeneration both have something to fall
@@ -100,35 +135,54 @@ hosts.
 
 ---
 
-## Authoring a facet (Wave 1 — render surfaces)
+## Authoring a paint lane
 
-A facet renders appearance. It reads **only** `aoide.livery`, and if it owns a
-surface it declares that in `aoide.surfaces`. Apply component fallbacks yourself.
+A paint lane renders appearance: it reads the dress (`aoide.livery`), the
+structure (`aoide.arrangement`), the surface registry (`aoide.surfaces`), the
+core scalars and the song selection — root `AGENTS.md` house rule 5, and nothing
+else. If it owns a surface it declares that in `aoide.surfaces`. Apply component
+fallbacks yourself.
 
 ```nix
-# modules/facets/quickshell/default.nix
-{ config, lib, ... }:
+# modules/dendrites/lyra/default.nix — a paint lane is a lane record: `body`
+# declares and guards, `nixos` imports `body` and sets the fact.
 let
-  t = config.aoide.livery;
-  # component-tier fallback: null → palette (see CONTRACTS.md §1)
-  barBg = if t.bar.bg != null then t.bar.bg else t.palette.bg;
+  body =
+    { config, lib, ... }:
+    let
+      t = config.aoide.livery;
+      # component-tier fallback: null → palette (see CONTRACTS.md §1)
+      barBg = if t.bar.bg != null then t.bar.bg else t.palette.bg;
+    in
+    {
+      config = lib.mkIf config.aoide.lyra.enable {
+        # Declare surface ownership — the stylix lane reads this and stands
+        # down for `bar`.
+        aoide.surfaces.bar.owner = "quickshell";
+        # … render the bar using barBg / t.palette.* …
+      };
+    };
 in
 {
-  config = lib.mkIf config.aoide.enable {
-    # Declare surface ownership — Stylix reads this and stands down for `bar`.
-    aoide.surfaces.bar.owner = "quickshell";
-    # … render the bar using barBg / t.palette.* …
-  };
+  inherit body;
+
+  nixos =
+    { lib, ... }:
+    {
+      imports = [ body ];
+      config.aoide.lyra.enable = lib.mkDefault true;
+    };
 }
 ```
 
 The `checks.surface-ownership` assertion fails eval if a declared surface has no
-owner; the Stylix facet must read `config.aoide.surfaces` and disable its own
+owner; the stylix lane must read `config.aoide.surfaces` and disable its own
 derivation for any surface already owned (overlap resolution,
 `concepts/Notes`).
 
-**Never read `song/` runtime paths at build time.** `checks.no-song-read` fails
-eval if a module under a `song/` runtime dir is discovered. `stage/` is live
+**Never read `song/` runtime paths at build time.** The `song-runtime-untracked`
+check fails if a `song/` runtime dir (`stage/`, `auditions/`, `declared/`) is
+committed into the source tree at all. `stage/` is live
 state, never load-bearing for the nix build.
 
 ---
@@ -137,12 +191,14 @@ state, never load-bearing for the nix build.
 
 A **song** is a committed, host-agnostic rice. Any host in the fleet performs it
 by naming it — the score adapts to that host's specifics and its enabled
-facet/dendrite set. **The venue (host) decides its instruments; the song
+dendrite set. **The venue (host) decides its instruments; the song
 carries only the notes.**
 
-Drop a folder under `song/songbook/<name>/` — `lib/mkHost.nix` walks it in
-like a dendrite, so there is no import list to edit. The song's `rice.nix`
-self-gates on `aoide.song`:
+Drop a folder under `song/songbook/<name>/` and select it in a host record
+(`song.declared`, or `song.available` to keep it built in to stage): one typed
+scan finds `song/songbook/<name>/rice.nix` and the constructor wires the selected
+songs in, so there is no import
+list to edit. The song's `rice.nix` self-gates on `aoide.song`:
 
 ```nix
 # song/songbook/moonlight/rice.nix
@@ -157,7 +213,7 @@ self-gates on `aoide.song`:
 
 Replay it on any host with **one line** in `hosts/<host>/default.nix`:
 `aoide.song = "moonlight";`. `aoide.song` defaults to null — naming no song
-performs no song: a host with the quickshell facet enabled but no song named
+performs no song: a host with the lyra lane enabled but no song named
 gets no deployed QML and no shell service, not an empty surface (options.nix).
 Every committed song's `rice.nix` self-gates on an equality check against
 `aoide.song`, so a null host leaves every song's `config` inert. Name a song
@@ -166,11 +222,13 @@ standard (`song/songbook/sonata/rice.nix`).
 
 **Host-agnostic rules (CONTRACTS.md §5):** a song sets ONLY `aoide.livery` (and,
 later, cover/chime refs inside `song/`). It NEVER sets host options (monitors,
-hardware, services) and NEVER enables facets/dendrites — those are the venue's.
+hardware, services) and NEVER enables paint lanes or dendrites — those are the
 Note values are literal nix; a song never reads `song/` runtime paths. The
-`song/songbook/**` tree is versioned score (not a runtime dir), so walking it
-does not violate `checks.no-song-read`. `checks.song-shape` asserts each walked
-songbook path is a `rice.nix`.
+`song/songbook/**` tree is versioned score (not a runtime dir), so reading it
+does not violate `checks.song-runtime-untracked`. `checks.song-shape` asserts
+three things about it: no stray `.nix` outside a song's `rice.nix`/`_widgets/`,
+no `../` path literal in a song's `.nix` text, and every song carrying both
+`rice.nix` and `livery.json`.
 
 ---
 
@@ -234,9 +292,9 @@ Provide:
   nix store, exposed as `packages.<system>.aoide-static`, never as
   `packages.default`.
 
-### Wave-1 facet/module agents (C, D)
+### Wave-1 module agents (C, D)
 
-- Add files only under `modules/facets/` and `modules/dendrites/`.
+- Add files only under `modules/dendrites/` — a paint lane included.
 - Flip flags in `hosts/yomi-strix/default.nix` (one line each).
 - Never edit `flake.nix` or `lib/`. If you need a new flake input, that is a
   Wave-0 change — request it; do not add it yourself.
@@ -273,8 +331,8 @@ session records) are contract §4.
 
 ## Non-cargo tests (`tests/`)
 
-`lib/` holds build/eval machinery (`checks.nix`, `mkHost.nix`, `pkgs.nix`,
-`walk.nix`); `tests/` holds what those checks actually test — the headless VM
+`lib/` holds build/eval machinery (`checks.nix`, `aoideos.nix`, `composition.nix`,
+`pkgs.nix`, `songbook.nix`); `tests/` holds what those checks actually test — the headless VM
 boot (`vm-boot.nix`) and the static-artifact portability assertions
 (`portability.nix`), plus the manual container suite (`distrobox.md`).
 See `tests/README.md` for why Rust's own tests do NOT live here.
@@ -284,9 +342,12 @@ See `tests/README.md` for why Rust's own tests do NOT live here.
 `lib/checks.nix` rides as flake `checks`:
 
 - `surface-ownership` — every `aoide.surfaces.<name>` names a non-empty owner.
-- `no-song-read` — no discovered module lives under a `song/` **runtime** dir
-  (`song/songbook/**` is versioned score, legitimately walked).
-- `song-shape` — every walked `song/songbook/**` path is a `rice.nix`
+- `song-runtime-untracked` — no `song/` **runtime** dir (`stage/`, `auditions/`,
+  `declared/`) exists in the source tree at all (`song/songbook/**` is versioned
+  score, legitimately read at eval).
+- `song-shape` — the songbook's shape: no stray `.nix` outside a song's
+  `rice.nix`/`_widgets/`, no `../` path literal in a song's `.nix` text, every
+  song carrying `rice.nix` and `livery.json`
   (host-agnostic song discipline; CONTRACTS.md §5).
 - `phantom-commands` — every backticked `aoide …`/`lyra …` spelling in
   `AGENTS.md`, `docs/agent/*.md`, `docs/INSTALL.md` and the wiki

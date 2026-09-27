@@ -49,7 +49,7 @@
   written before this field existed — a deployed `lyra` on PATH may predate
   `preview set` entirely, which is exactly why a canvas launched by an
   older or different binary must not trust PATH for its own rail.
-- **`commands::preview`'s root seeds four OTHER facet-read stage files a
+- **`commands::preview`'s root seeds four OTHER lane-read stage files a
   song's own widgets/livery never touch, so nothing starts with a parse
   warning on a missing file:** `song/stage/mode.json`
   (`LiveryState.qml`'s convention) is REWRITTEN on every build and on
@@ -66,12 +66,12 @@
   repeat with nothing new is a true no-op, and it NEVER runs `git`, touches
   the live stage, `~/.aoide`, or `run/qml` — commit and rebuild stay the
   user's own gate (house rule 2). A `widget` field outside `run/qml/songs/`
-  (a facet symlink) is refused with a usage error, never silently declared
+  (a lane symlink) is refused with a usage error, never silently declared
   — and the `starts_with("songs/")` check alone is a STRING match, not a
   boundary: a `..` component is rejected outright, and the canonicalized
   source is additionally required to land inside a real songbook
   `widgets/` dir, since a `..`-laden field can otherwise satisfy the
-  prefix check while resolving straight out to a facet file. `--slot` is
+  prefix check while resolving straight out to a lane file. `--slot` is
   validated against the
   same shape as a song name (`valid_song_name`) before it is ever joined
   into a path — an unvalidated slot is exactly the same class of escape.
@@ -82,14 +82,19 @@
   `stage_qml_copies`/`stage_song_copies`; `remove_stale` replaces a link
   left by an older root). The checkout is edited in the checkout; the
   root's copies are refreshed by the canvas from `preview.json`'s `stage`
-  map before every reload and by a `--no-launch` rebuild. Nothing in
+  map before every reload and by a `--no-launch` rebuild — one entry per
+  watched file that HAS a copy: a songbook widget mapped under
+  `songs/<s>/<rest>`, a shell qml file mapped flat to its own
+  `run/qml/<f>`; a watched file with no copy (a nested path under the
+  shell's qml dir, a foreign path) gets none, since the canvas rewrites
+  each `dst` from its `src`. Nothing in
   `commands::preview_tools` writes under `run/qml/`, and no code path may
   reintroduce a link there: a live incident during this crate's own P6
-  phase wrote through such a link and truncated `modules/facets/
-  quickshell/qml/WidgetPreview.qml` (no git copy — recovered only because
+  phase wrote through such a link and truncated `pkgs/lyra-shell/
+  qml/WidgetPreview.qml` (no git copy — recovered only because
   a reviewer's `Read` transcript held the file byte-for-byte);
   `a_write_through_run_qml_never_reaches_the_checkout` is the regression
-  test. The facet's `icons/` tree is copied the same way (`stage_qml_copies`),
+  test. The shell's `icons/` tree is copied the same way (`stage_qml_copies`),
   so the canvas toolbar's `Qt.resolvedUrl("icons/...")` never leaves the
   root. `resolve_widget_abs` resolves a `widget` field to the CHECKOUT
   file, never through the root, and `preview declare`'s containment check
@@ -201,14 +206,15 @@
   files it actually wrote before trusting a Rust API's own naming
   intuition.
 - **May be nix-dependent — the one binary allowed to.** `song::widgets`'s
-  `nix eval` and `commands::onboard`'s `nix eval`/`nix-instantiate` shell-outs
-  live reachable from here; that dependency must never migrate toward
+  `nix-instantiate` over the SHIPPED generator is the only shell-out left
+  reachable from here (`commands::onboard` reads a shipped JSON instead); that
+  dependency must never migrate toward
   `aoide-cli` or any core crate (root `AGENTS.md`, "core is
   nix-independent").
 - **`onboard`'s option derivation is DERIVED, never a hand-list.** Every
   `aoide.*` option `aoide.nix` documents comes from `flake.nix`'s
   `aoideOptions` output (`lib/options.nix`, `lib.evalModules` +
-  `lib.optionAttrSetToDocList`) — a new dendrite/facet option needs no edit
+  `lib.optionAttrSetToDocList`) — a new dendrite option needs no edit
   here or in `lib/options.nix`, it just appears on the next `lyra onboard`
   run. The env-knob appendix (`ENV_KNOBS` in `commands/onboard.rs`) is the
   ONE allowed hand-list, because env vars aren't module options and so
@@ -337,7 +343,7 @@
   a boundary no shared Rust type can enforce (root `AGENTS.md`'s core/paint
   split), so a drift here is silent until a dialog answers wrong.
 - `commands::preview_tools`'s own module doc, plus the QML canvas's own
-  doc (P7, `modules/facets/quickshell/qml/WidgetPreview.qml`), when the
+  doc (P7, `pkgs/lyra-shell/qml/WidgetPreview.qml`), when the
   `qs ipc call` argv shape, the element path grammar, or the
   `IpcHandler { target: "preview" }` function signatures change — same
   no-shared-type boundary as the dialog contract above, Rust on one side

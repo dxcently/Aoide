@@ -17,9 +17,9 @@
 //! succeed (`render_files` / `write_files`'s own split).
 //!
 //! `commands::elements` (`element seed <song>`) is the shell-reachable
-//! bridge this module backs; `rice stage` (L-E2) and the elements facet's
+//! bridge this module backs; `rice stage` (L-E2) and the elements lane's
 //! activation hook (L-E3) are later phases calling the same [`seed_song`]/
-//! [`seed_tree`] primitives — nothing here is facet- or stage-specific.
+//! [`seed_tree`] primitives — nothing here is lane- or stage-specific.
 
 use crate::livery::resolve::Resolved;
 use serde::Deserialize;
@@ -167,7 +167,7 @@ fn validate_relative_path(p: &str, field: &str) -> Result<(), ElementsError> {
 }
 
 /// Substitute the literal `{run}` token in `run.exec` with the absolute
-/// `run/elements/<element>` path. Done at generation time (the facet
+/// `run/elements/<element>` path. Done at generation time (the lane
 /// generating a unit/exec-once line, L-E3) — the finished string is what
 /// ships, never re-expanded at runtime.
 pub fn substitute_run_token(exec: &str, run_dir: &Path) -> String {

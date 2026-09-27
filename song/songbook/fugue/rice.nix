@@ -10,10 +10,14 @@
 #
 # HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.livery.
 # All livery values are literal nix expressions (no song/ runtime reads).
-{ lib, config, ... }:
+{
+  lib,
+  config,
+  song,
+  borrow,
+  ...
+}:
 let
-  song = import ../../../lib/song.nix { inherit lib; };
-
   # `_widgets/` is the widget-record shelf (lib/song.nix's header) — one
   # plain function per slot (`bar`, `herald`), rolled up and bound to owner
   # "fugue" by `_widgets/default.nix`. `composeSong` validates both records
@@ -22,7 +26,11 @@ let
   # Adding this shelf is what lets another song's composition borrow fugue's
   # `bar`/`herald` bodies: `mkWidget` binds `owner` from its caller, so an
   # `owner = "fugue"` record can only be minted from a fugue-owned roll-up.
-  widgets = import ./_widgets { inherit lib; };
+  # Its OWN shelf, through the name-keyed door any other song would use:
+  # `borrow` is the one place a shelf is opened (CONTRACTS.md §5), so the sheet
+  # a song hands `composeSong` is the sheet `lib/songbook.nix` rolled up, with
+  # the injected arguments already in it.
+  widgets = borrow "fugue";
 in
 {
   config = lib.mkIf (config.aoide.song == "fugue") {
@@ -78,7 +86,7 @@ in
     };
 
     # ── Cover-art note ────────────────────────────────────────────────────────
-    # null → the stylix facet bakes a deterministic graphite solid from
+    # null → the stylix lane bakes a deterministic graphite solid from
     # palette.bg, same mechanism sonata uses.
     aoide.livery.wallpaper = null;
   };

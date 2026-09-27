@@ -13,9 +13,10 @@ multiplexer in the stack — no tmux/screen-style terminal multiplexer is
 part of the design. (A narrower PTY layer does exist for agent control —
 `aoide conduct`, one PTY per conducted session, purpose-built for
 `send` injection, not a general terminal multiplexer — see
-[[shellbridge]], [[Agent-Hooking]].) Its facet (`modules/facets/compositor/`)
+[[shellbridge]], [[Agent-Hooking]].) Its lane
+(`modules/dendrites/compositor/hyprland/`)
 renders live appearance via `hyprctl`, reading only `aoide.livery` and
-`aoide.arrangement` like every other facet (house rule 5).
+`aoide.arrangement` like every other paint lane (house rule 5).
 
 shellbridge consumes the Hyprland IPC socket to track windows and dispatch focus commands. The session-jump flow (`hyprctl dispatch focuswindow address:…`) depends on this IPC path.
 

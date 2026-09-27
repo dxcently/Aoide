@@ -21,8 +21,8 @@
 # option-system recursion. Both fan-outs (the baked Stylix scheme and the
 # song/stage/livery.json seed) apply the identical rule through this one
 # file, so they cannot disagree. `resolve` keeps ONE signature across both
-# phases — Phase 1's three consumers (stylix, compositor facets) change zero
-# lines.
+# phases — Phase 1's consumers (the stylix and compositor paint lanes) change
+# zero lines.
 #
 # Usage: (import ./lib/livery.nix { inherit lib; }).resolve config.aoide.livery
 { lib }:

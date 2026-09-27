@@ -1,47 +1,37 @@
-# hosts/_laptop/default.nix — TEMPLATE: laptop skeleton.
-#
-# Shelved (the `_` prefix): not registered in flake.nix. Same shape as
-# _desktop, plus the portable-venue bits (power, lid, battery — the bar's
-# battery gauge reads these). To adopt:
-#   1. cp -r hosts/_laptop hosts/<your-hostname>
-#   2. flake.nix: `nixosConfigurations.<your-hostname> = mkHost "<your-hostname>";`
-#   3. set hostName/aoide.user/timeZone; commit a hardware.nix if you have one
-#   4. nixos-rebuild switch --flake .#<your-hostname>
-{ lib, pkgs, ... }:
+# hosts/_laptop/default.nix — TEMPLATE: laptop, the desktop plus power
+# management. Shelved: see _desktop. To adopt, copy to `hosts/<name>/` and set
+# hostName/timeZone.
 {
-  imports = [
-    ../common
-  ]
-  ++ lib.optional (builtins.pathExists ./hardware.nix) ./hardware.nix;
+  aggregation.base.enable = true;
+  aggregation.desktop.enable = true;
+  aggregation.aoideos.enable = true;
 
-  networking.hostName = "laptop"; # ← your hostname
-  networking.networkmanager.enable = true;
+  dendrites.claude-code.enable = true;
 
-  time.timeZone = "UTC"; # ← your zone
+  song.declared = "sonata";
+  song.available = [ ];
 
-  hardware.graphics.enable = true;
+  users.khoa = {
+    definition = ../../users/khoa.nix;
+    homeManager.enable = true;
+  };
 
-  # Portable venue: stock NixOS power management (not an aoide flag). Battery
-  # level surfaces in the bar automatically once the desktop is up.
-  powerManagement.enable = true;
+  nixos =
+    { lib, ... }:
+    {
+      imports = lib.optional (builtins.pathExists ./hardware.nix) ./hardware.nix;
 
-  aoide.enable = true;
-  aoide.user = "khoa"; # ← your user
-  aoide.song = "sonata";
+      nixpkgs.hostPlatform = "x86_64-linux";
 
-  # The whole desktop, one line each:
-  aoide.facets.quickshell.enable = true;
-  aoide.facets.compositor.enable = true;
-  aoide.facets.stylix.enable = true;
-  aoide.hyprland.enable = true;
+      networking.hostName = "laptop"; # ← your hostname
+      networking.networkmanager.enable = true;
 
-  aoide.screenshot.enable = true;
-  aoide.vision.enable = true;
-  aoide.clipboard.enable = true;
-  aoide.audio.enable = true;
-  aoide.networkmanager.enable = true;
+      time.timeZone = "UTC"; # ← your zone
 
-  # Opt-in dendrites:
-  aoide.firefox.enable = true;
-  aoide.claude-code.enable = true;
+      # The one thing this shape adds to the desktop: an on-battery machine has
+      # to manage its own power.
+      powerManagement.enable = true;
+
+      aoide.user = "khoa"; # ← your user
+    };
 }

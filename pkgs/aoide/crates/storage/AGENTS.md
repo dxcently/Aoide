@@ -230,6 +230,18 @@
   aoided}.rs`, `crates/lyra/src/bin/lyra.rs`) — a test may call it directly
   too (it is a plain idempotent function, no `Once`/env-isolation dance
   needed, unlike `migrate_conducting_stage`'s own test suite).
+- **A checkout-relative source path is named ONCE, here — `fs::LYRA_SHELL_SRC`
+  (`"pkgs/lyra-shell"`) is the pattern, not an exception.** The lyra shell's
+  QML/icons/preview tree is read by `aoide-lyra`'s `commands::preview` (which
+  stages it into an isolated preview root) and named in the scaffold doc
+  `aoide-song`'s `commands::rice` writes. Every site that CONSTRUCTS the path
+  joins the const onto `flake_root`; a prose or doc-comment spelling of the
+  literal (the const's own value, the CLI's `--fixture` help, `compose`'s
+  scaffold text) resolves nothing and is not a second source. A second such
+  tree earns its own const beside this one: the rename this survives is
+  exactly the one that leaves a string behind in a crate nobody thought to
+  grep, and the package built from the same directory (`pkgs/lyra-shell`) is
+  the other half that has to keep agreeing with it.
 - **`fs::song_templates_dir` returns `Option`, never a default (L-C3,
   lyra-carrier lane, task #107) — don't "helpfully" fall back to a
   hardcoded path when both tiers miss.** Unlike `root`/`flake_root` (always

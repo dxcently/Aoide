@@ -1,7 +1,7 @@
 // dock.qml — sonata's "dock" slot: the center-left DOCK (surface: "dock").
 //
-// The facet's former AoidePanel.qml is retired; this file is the dock —
-// ownership moved from the facet to sonata's score (per-song widget-slot
+// The shell's former AoidePanel.qml is retired; this file is the dock —
+// ownership moved from the shell to sonata's score (per-song widget-slot
 // expansion, CONTRACTS.md §5). Hosted by `SurfaceSlot`, not `WidgetSlot` —
 // the root below is a `PanelWindow`, not an `Item`, so it owns its own
 // layer, namespace and keyboard focus, the same contract powermenu.qml and
@@ -55,7 +55,7 @@
 // a visible affordance that there is more below the fold. The fore-edge takes the
 // wheel too, so the peeking page-block doubles as a scroll rail.
 // Conductor/Terminals/Usage/Meters/Power are now WidgetSlot anchors (the
-// widget-slot expansion, CONTRACTS.md §5) rather than direct facet-gadget
+// widget-slot expansion, CONTRACTS.md §5) rather than direct shell-gadget
 // instantiations — each resolves this same song's own widgets/<slot>.qml (or
 // sonata's own baseline) through the shared song-slot mechanism the
 // herald-center anchor already used. WidgetSlot forwards `livery` + `bridge`
@@ -71,12 +71,12 @@ import Quickshell
 import Quickshell.Wayland
 import Quickshell.Hyprland
 import Quickshell.Io
-// Reaches the facet's shared components — WidgetSlot (every gadget anchor
+// Reaches the shell's shared components — WidgetSlot (every gadget anchor
 // below), SongGadgets (the declared dock-kind widget host) and ScrollRail
 // (the draggable scrollbar) — none of which is dock-specific content, so
-// they stay in the facet rather than moving here. Deployed-tree relative
+// they stay in the shell rather than moving here. Deployed-tree relative
 // path: this file lands at $out/qml/songs/sonata/dock.qml, so two levels up
-// ($out/qml/songs/ → $out/qml/) is the facet's own qml/ root (the same
+// ($out/qml/songs/ → $out/qml/) is the shell's own qml/ root (the same
 // bar.qml/conductor.qml idiom documented in their own headers) — this only
 // resolves in the DEPLOYED layout, not from the source tree.
 import "../.."
@@ -549,7 +549,7 @@ PanelWindow {
                         // Every gadget takes root.gadgetW so the column is flush —
                         // one shared left edge, no 340-vs-360 stagger. Each is a
                         // WidgetSlot anchor (see the header note above) rather than
-                        // a direct facet-gadget instantiation; WidgetSlot forwards
+                        // a direct shell-gadget instantiation; WidgetSlot forwards
                         // livery + bridge to whatever it loads unconditionally, so
                         // only the slot-specific `shared` extra needs spelling out
                         // below.

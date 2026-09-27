@@ -9,12 +9,12 @@
 # Returns a RESOLVED `slot -> record` attrset (every widget function already
 # applied) — the shape `lib/song.nix`'s `composeSong` expects as input.
 #
-# `_widgets/` is underscore-prefixed on purpose: `lib/walk.nix` drops any path
-# containing `/_`, so this shelf never reaches the module system and
+# `_widgets/` is underscore-prefixed on purpose: the songbook's typed walk
+# (`lib/songbook.nix`'s `strayNixFiles`) prunes it by name, so this shelf never
+# reaches the module system and
 # `checks.song-shape` never sees it. It is score, not a module.
-{ lib }:
+{ lib, song, ... }:
 let
-  song = import ../../../../lib/song.nix { inherit lib; };
   owner = "sonata";
 
   slotFiles = lib.filterAttrs (n: t: t == "regular" && lib.hasSuffix ".nix" n && n != "default.nix") (

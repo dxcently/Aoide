@@ -321,8 +321,8 @@ fn handle_rice_stage_entry(inv: &Invocation) -> Outcome {
 /// not JSON, not an object, carries no string `"song"`, or carries one that
 /// fails [`crate::compose::valid_song_name`].
 ///
-/// Only the nix facet's activation seed writes that file
-/// (`modules/facets/quickshell/default.nix`); this crate only ever reads it.
+/// Only the nix side's activation seed writes that file; this crate only
+/// ever reads it.
 /// The name-shape guard mirrors [`super::mode::current_staged_song`]'s own
 /// read-side guard — the result is joined into a songbook path by callers, so
 /// a hand-poisoned field must resolve to nothing rather than to something
@@ -339,7 +339,7 @@ pub(crate) fn declared_song() -> Option<String> {
 /// own `"song"` field, else the committed
 /// [`shellbridge::songbook_notes(name)`].
 ///
-/// The twin is the facet's activation seed: the DECLARED song's committed
+/// The twin is the lane's activation seed: the DECLARED song's committed
 /// notes with the venue's `aoide.livery.override` already applied. Reading it
 /// here is what makes a runtime re-stage reproduce the venue instead of
 /// reverting the desktop to the song's own colours. The `"song"` equality test
@@ -371,7 +371,7 @@ fn notes_source(name: &str) -> PathBuf {
 ///
 /// This is the honest form of the hand-copy agents had been doing: drive the
 /// songbook notes into the stage so the shell has a palette to render — the
-/// DECLARED twin ([`notes_source`], CONTRACTS.md §4) when the facet has
+/// DECLARED twin ([`notes_source`], CONTRACTS.md §4) when the lane has
 /// published one for this song, else the song's own committed notes.
 ///
 /// `pub(crate)`, not private: `rice mode`'s `stage`/`declarative` handlers
@@ -462,6 +462,19 @@ pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
         _ => raw.clone(),
     };
 
+    // §7.5's gate, BEFORE anything is written: a refusal (not built in with no
+    // `nix`, or a machine-songbook song needing packages this system lacks)
+    // must leave stage/ and run/qml byte-unchanged — and the livery write
+    // below is already a change to stage/. The approved songbook is handed to
+    // both syncs, so one `rice stage` evaluates the songbook once.
+    let songbook = match crate::widgets::plan_stage(&name) {
+        Ok(songbook) => songbook,
+        Err(e) => {
+            return Outcome::error("rice.stage", e.error)
+                .with_data(json!({ "reason": "stage-refused", "target": e.target }));
+        }
+    };
+
     let stage = shellbridge::stage_dir();
     let notes_dst = stage.join("livery.json");
     if let Err(e) = shellbridge::atomic_write(&notes_dst, &staged) {
@@ -509,7 +522,7 @@ pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
     // file too, no rebuild. Fatal on failure, mirroring the cover-write
     // IO-failure path above: a torn widget copy/manifest write is worse
     // than refusing the whole call.
-    let widget_sync = match crate::widgets::sync_song_widgets(&name) {
+    let widget_sync = match crate::widgets::sync_song_widgets(&name, &songbook) {
         Ok(sync) => sync,
         Err(e) => {
             return Outcome::error(
@@ -529,7 +542,7 @@ pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
     // then reads THIS song's entry back out of the fresh result. Same call
     // site, same trigger (unconditional on `rice stage`/`preview`), same
     // fatal-on-IO posture as the widget-body sync just above.
-    let registry_sync = match crate::widgets::sync_song_registry(&name) {
+    let registry_sync = match crate::widgets::sync_song_registry(&name, &songbook) {
         Ok(sync) => sync,
         Err(e) => {
             return Outcome::error(
@@ -843,7 +856,7 @@ fn handle_rice_compose(inv: &Invocation) -> Outcome {
         "name": name,
         "from": from,
         "nextSteps": [
-            format!("truth: set aoide.song = \"{name}\" in the host's default.nix and rebuild"),
+            format!("truth: set song.declared = \"{name}\" in hosts/<host> and rebuild"),
             format!("sketch: `aoide rice stage {name}` to hot-load it live, no rebuild"),
         ],
     }))
@@ -1014,7 +1027,7 @@ mod tests {
 
     /// The declared twin (CONTRACTS.md §4) is the venue's copy of the
     /// declared song's notes — committed notes with `aoide.livery.override`
-    /// applied, published by the quickshell facet's activation seed. Staging
+    /// applied, published by the lyra lane's activation seed. Staging
     /// the DECLARED song must derive from THAT, not from the raw committed
     /// file, or the first runtime re-stage after activation reverts the
     /// venue recolour.
@@ -1030,7 +1043,7 @@ mod tests {
         std::fs::create_dir_all(&song).unwrap();
         std::fs::create_dir_all(&declared).unwrap();
         std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
-        // The twin is the same shape the facet's jq seed writes: committed
+        // The twin is the same shape the lane's jq seed writes: committed
         // notes, `"song"` injected, keys sorted, palette recoloured by the
         // venue override.
         std::fs::write(
@@ -1451,7 +1464,14 @@ mod tests {
         let stage = aoide_root.join("song").join("stage");
         let run_qml = aoide_root.join("run").join("qml");
         std::fs::create_dir_all(&stage).unwrap();
+        ensure_default_songbook_fixture();
         (root, stage, run_qml)
+    }
+
+    /// [`widget_sync_tmp`]'s seam default — see
+    /// [`crate::commands::test_support::ensure_default_songbook_fixture`].
+    fn ensure_default_songbook_fixture() {
+        crate::commands::test_support::ensure_default_songbook_fixture();
     }
 
     /// Writes a `{ manifest, registry }` payload to a fixture file under
@@ -1819,9 +1839,11 @@ mod tests {
             "AOIDE_STAGE_DIR",
             "AOIDE_FLAKE_ROOT",
             "AOIDE_SONG_TEMPLATES",
+            "PATH",
             crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR,
         ]);
         std::env::remove_var(crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR);
+        let _armed = crate::commands::test_support::require_the_real_songbook_path();
         let (root, stage, run_qml) = widget_sync_tmp("stage-templates-fallback");
 
         // `moonlight`'s own committed songbook dir — a widgets/ slot plus a
@@ -1854,10 +1876,14 @@ mod tests {
         std::fs::write(templates.join("registry.json"), r#"{"fugue":{}}"#).unwrap();
 
         std::fs::create_dir_all(&run_qml).unwrap();
+        let payload = root.join("nix-instantiate-payload.json");
+        crate::commands::test_support::nix_instantiate_recorder(&root, "{}");
+        crate::commands::test_support::prepend_path(&root.join("fake-bin"));
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        std::env::set_var("AOIDE_FLAKE_ROOT", &flake_root);
+        std::env::set_var("AOIDE_FLAKE_ROOT", root.join("no-flake"));
         std::env::set_var("AOIDE_SONG_TEMPLATES", &templates);
 
+        refresh_payload(&payload);
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
 
@@ -1891,29 +1917,32 @@ mod tests {
     }
 
     #[test]
-    fn stage_refuses_a_shelf_song_via_templates_without_a_real_checkout() {
-        // A `_widgets/` shelf needs `composeSong` in the nix evaluator to
-        // resolve borrowed ownership (module doc, "only `composeSong`...
-        // resolves ownership") — the templates fallback cannot do that, so
-        // it must refuse with a taught error rather than guess. `rice
-        // compose` never writes a shelf, so this only bites a hand-authored
-        // one on a repo-less host.
+    fn stage_refuses_a_machine_song_on_a_host_with_no_nix() {
+        // §7.5 case 3's first form: the song is not built into this system
+        // (`builtin.json` ships none), lives only in the machine's own
+        // songbook, and this host has no `nix-instantiate` to regenerate the
+        // manifest with. NOTHING may be staged — refusing is the point, not a
+        // partial stage.
+        //
+        // (The `_widgets/` shelf this fixture carries is deliberate: a shelf is
+        // exactly what the old repo-less path could not resolve, and what the
+        // shipped generator CAN — `composeSong` runs inside the generator. It
+        // is here so this test also pins that the refusal is about `nix`, not
+        // about shelves.)
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&[
             "AOIDE_STAGE_DIR",
-            "AOIDE_FLAKE_ROOT",
             "AOIDE_SONG_TEMPLATES",
+            "PATH",
             crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR,
         ]);
         std::env::remove_var(crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR);
-        let (root, stage, run_qml) = widget_sync_tmp("stage-templates-shelf-refused");
+        let _armed = crate::commands::test_support::require_the_real_songbook_path();
+        let (root, stage, run_qml) = widget_sync_tmp("stage-no-nix-refused");
 
         let song = root.join("aoide").join("song").join("songbook").join("sonata");
         std::fs::create_dir_all(song.join("_widgets")).unwrap();
         std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
-
-        let flake_root = root.join("no-flake");
-        std::fs::create_dir_all(&flake_root).unwrap();
 
         let templates = root.join("templates");
         std::fs::create_dir_all(&templates).unwrap();
@@ -1921,63 +1950,79 @@ mod tests {
         std::fs::write(templates.join("registry.json"), r#"{}"#).unwrap();
 
         std::fs::create_dir_all(&run_qml).unwrap();
+        // A PATH with nothing on it: there is no `nix-instantiate` to find.
+        let empty = root.join("empty-bin");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::env::set_var("PATH", &empty);
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        std::env::set_var("AOIDE_FLAKE_ROOT", &flake_root);
         std::env::set_var("AOIDE_SONG_TEMPLATES", &templates);
 
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["sonata"]));
         assert_eq!(out.status, Status::Error, "{:?}", out.data);
         assert!(
-            out.message.contains("_widgets") && out.message.contains("nix"),
-            "the taught error explains a shelf needs a real nix checkout: {}",
             out.message
+                .contains("sonata is not built into this system and this host has no nix"),
+            "the taught refusal names both halves: {}",
+            out.message
+        );
+        assert!(
+            out.message.contains("add it to song.available and rebuild"),
+            "the taught refusal names the way out: {}",
+            out.message
+        );
+        assert!(
+            !stage.join("livery.json").exists(),
+            "nothing is staged on a refusal: {}",
+            stage.display()
         );
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn stage_teaches_both_checked_locations_when_neither_flake_nor_templates_exist() {
-        // A host with neither a real flake checkout nor a templates dir
-        // gets a taught error, not a panic (L-C3's own requirement).
+    fn stage_refuses_when_no_shipped_templates_dir_exists() {
+        // A host with no shipped templates dir at all (`$AOIDE_SONG_TEMPLATES`
+        // unset, nothing beside the binary) has nowhere to read a built-in
+        // song's baked manifest/registry from and no generator to resolve a
+        // machine song with: a taught error naming both places looked in, not a
+        // panic.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&[
             "AOIDE_STAGE_DIR",
-            "AOIDE_FLAKE_ROOT",
             "AOIDE_SONG_TEMPLATES",
             crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR,
         ]);
         std::env::remove_var(crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR);
         std::env::remove_var("AOIDE_SONG_TEMPLATES");
+        let _armed = crate::commands::test_support::require_the_real_songbook_path();
         let (root, stage, run_qml) = widget_sync_tmp("stage-templates-neither");
 
         let song = root.join("aoide").join("song").join("songbook").join("moonlight");
         std::fs::create_dir_all(&song).unwrap();
         std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
 
-        let flake_root = root.join("no-flake");
-        std::fs::create_dir_all(&flake_root).unwrap();
-
         std::fs::create_dir_all(&run_qml).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        std::env::set_var("AOIDE_FLAKE_ROOT", &flake_root);
 
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
         assert_eq!(out.status, Status::Error, "{:?}", out.data);
         assert!(
-            out.message.contains("flake") && out.message.contains("templates"),
-            "taught error naming both locations, not a panic: {}",
+            out.message.contains("AOIDE_SONG_TEMPLATES")
+                && out.message.contains("share/lyra/songbook"),
+            "taught error naming both places checked, not a panic: {}",
             out.message
         );
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Shared setup for the two survival/prune tests below: a templates dir
-    /// with `sonata` (the compose `--from` default) but a deliberately EMPTY
-    /// baked manifest.json/registry.json (`{}`) — the whole point of both
-    /// tests is what happens to a song that is NOT in the frozen baseline at
-    /// all, so `sonata` itself never needs to appear in either file. Returns
-    /// `(root, stage, run_qml)`; callers still set `AOIDE_STAGE_DIR`/
-    /// `AOIDE_FLAKE_ROOT`/`AOIDE_SONG_TEMPLATES` themselves and own
+    /// Shared setup for the case-2 tests below: a templates dir with `sonata`
+    /// (the compose `--from` default) but a deliberately EMPTY baked
+    /// manifest.json/registry.json (`{}`), plus a FAKE `nix-instantiate` on
+    /// `PATH` (the §9 generator stand-in — the real one lives in a store path
+    /// this test binary never has). Returns `(root, stage, run_qml,
+    /// payload_path)`; the payload file is what the fake prints, so a caller
+    /// refreshes it with `generator_payload(&songbook_root())` right before a
+    /// stage. Callers still set `AOIDE_STAGE_DIR`/`AOIDE_FLAKE_ROOT`/
+    /// `AOIDE_SONG_TEMPLATES`/`PATH` themselves and own
     /// `remove_dir_all(&root)`.
     fn templates_fallback_tmp(tag: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
         let (root, stage, run_qml) = widget_sync_tmp(tag);
@@ -1994,18 +2039,32 @@ mod tests {
         std::fs::write(root.join("templates").join("manifest.json"), r#"{}"#).unwrap();
         std::fs::write(root.join("templates").join("registry.json"), r#"{}"#).unwrap();
 
-        let flake_root = root.join("no-flake");
-        std::fs::create_dir_all(&flake_root).unwrap();
+        let payload = root.join("nix-instantiate-payload.json");
+        crate::commands::test_support::nix_instantiate_recorder(&root, "{}");
+        crate::commands::test_support::prepend_path(&root.join("fake-bin"));
 
-        (root, stage, run_qml, flake_root)
+        (root, stage, run_qml, payload)
+    }
+
+    /// Refreshes the fake generator's payload to what a correct generator would
+    /// answer for the machine songbook AS IT IS NOW — call it immediately before
+    /// a stage whose songbook state just changed.
+    fn refresh_payload(payload: &std::path::Path) {
+        let songbook = shellbridge::songbook_root();
+        let json = if songbook.is_dir() {
+            crate::commands::test_support::generator_payload(&songbook)
+        } else {
+            r#"{"manifest":{},"registry":{},"packages":{}}"#.to_string()
+        };
+        std::fs::write(payload, json).unwrap();
     }
 
     /// Composes `name` from the shared `sonata` template, adds a single
     /// widget slot (`<name>.qml`, `.widgets` entry `{"kind":"dock","order":
-    /// 0}`), then stages it — the same two-call sequence a real repo-less
-    /// host's operator drives. Panics on any non-Ok `Outcome` (helper, not
-    /// the test itself).
-    fn compose_and_stage(name: &str) {
+    /// 0}`), refreshes the fake generator's payload to cover it, then stages it
+    /// — the same sequence a real machine-songbook host's operator drives.
+    /// Panics on any non-Ok `Outcome` (helper, not the test itself).
+    fn compose_and_stage(payload: &std::path::Path, name: &str) {
         let compose_out = handle_rice_compose(&inv(&["rice", "compose"], &[name]));
         assert_eq!(compose_out.status, Status::Ok, "compose {name}: {:?}", compose_out.data);
 
@@ -2023,36 +2082,36 @@ mod tests {
         )
         .unwrap();
 
+        refresh_payload(payload);
         let stage_out = handle_rice_stage(&inv(&["rice", "stage"], &[name]));
         assert_eq!(stage_out.status, Status::Ok, "stage {name}: {:?}", stage_out.data);
     }
 
     #[test]
     fn stage_from_templates_preserves_a_sibling_composed_songs_entry_across_regens() {
-        // The MUST-FIX regression this test exists for: composing+staging a
-        // SECOND song on a repo-less host must not drop the FIRST song's
-        // manifest/registry entry — neither is in the frozen baked baseline
-        // (both are runtime-composed), so a bare baseline-plus-current-song
-        // write would silently lose whichever song isn't the one just
-        // staged. `eval_songbook_from_templates`'s overlay layer is the fix:
-        // it copies the EXISTING on-disk entries for any song that still has
-        // a songbook directory before patching in the currently-staged
-        // song's own fresh entry.
+        // The MUST-FIX regression this test exists for: staging a SECOND song
+        // must not drop the FIRST song's manifest/registry entry. Neither is in
+        // the baked baseline, and the generated answer only covers the songs
+        // the machine's songbook holds — so the merge in `plan_stage` (shipped
+        // baseline, then this system's own generated answer on top) is what
+        // keeps every still-live song's entry.
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&[
             "AOIDE_STAGE_DIR",
             "AOIDE_FLAKE_ROOT",
             "AOIDE_SONG_TEMPLATES",
+            "PATH",
             crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR,
         ]);
         std::env::remove_var(crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR);
-        let (root, stage, run_qml, flake_root) = templates_fallback_tmp("templates-survival");
+        let _armed = crate::commands::test_support::require_the_real_songbook_path();
+        let (root, stage, run_qml, payload) = templates_fallback_tmp("templates-survival");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        std::env::set_var("AOIDE_FLAKE_ROOT", &flake_root);
+        std::env::set_var("AOIDE_FLAKE_ROOT", root.join("no-flake"));
         std::env::set_var("AOIDE_SONG_TEMPLATES", root.join("templates"));
 
-        compose_and_stage("alpha");
-        compose_and_stage("beta");
+        compose_and_stage(&payload, "alpha");
+        compose_and_stage(&payload, "beta");
 
         let manifest: Value = serde_json::from_str(
             &std::fs::read_to_string(run_qml.join("songs").join("manifest.json")).unwrap(),
@@ -2102,15 +2161,24 @@ mod tests {
             crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR,
         ]);
         std::env::remove_var(crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR);
-        let (root, stage, run_qml, flake_root) = templates_fallback_tmp("templates-baked-survives");
+        let _armed = crate::commands::test_support::require_the_real_songbook_path();
+        let (root, stage, run_qml, _payload) = templates_fallback_tmp("templates-baked-survives");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        std::env::set_var("AOIDE_FLAKE_ROOT", &flake_root);
+        std::env::set_var("AOIDE_FLAKE_ROOT", root.join("no-flake"));
         std::env::set_var("AOIDE_SONG_TEMPLATES", root.join("templates"));
 
         let baked_manifest = json!({ "sonata": { "bar": { "owner": "sonata", "file": "bar.qml" } } });
         let baked_registry = json!({ "sonata": { "bar": { "kind": "bar", "order": 0 } } });
         std::fs::write(root.join("templates").join("manifest.json"), baked_manifest.to_string()).unwrap();
         std::fs::write(root.join("templates").join("registry.json"), baked_registry.to_string()).unwrap();
+        // The host BUILT sonata in — the only way case 1 (stage the shipped
+        // baseline with no nix at all) is reachable, and the reason this test
+        // needs no generator stand-in.
+        std::fs::write(
+            root.join("templates").join("builtin.json"),
+            r#"{"declared":null,"songs":["sonata"],"packages":[]}"#,
+        )
+        .unwrap();
 
         let declared = shellbridge::declared_notes();
         std::fs::create_dir_all(declared.parent().unwrap()).unwrap();
@@ -2150,23 +2218,26 @@ mod tests {
             "AOIDE_STAGE_DIR",
             "AOIDE_FLAKE_ROOT",
             "AOIDE_SONG_TEMPLATES",
+            "PATH",
             crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR,
         ]);
         std::env::remove_var(crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR);
-        let (root, stage, run_qml, flake_root) = templates_fallback_tmp("templates-prune");
+        let _armed = crate::commands::test_support::require_the_real_songbook_path();
+        let (root, stage, run_qml, payload) = templates_fallback_tmp("templates-prune");
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        std::env::set_var("AOIDE_FLAKE_ROOT", &flake_root);
+        std::env::set_var("AOIDE_FLAKE_ROOT", root.join("no-flake"));
         std::env::set_var("AOIDE_SONG_TEMPLATES", root.join("templates"));
 
-        compose_and_stage("alpha");
-        compose_and_stage("beta");
+        compose_and_stage(&payload, "alpha");
+        compose_and_stage(&payload, "beta");
 
         // alpha's songbook dir is gone — simulating a deleted/never-declared
         // composed song.
         std::fs::remove_dir_all(shellbridge::songbook_dir("alpha")).unwrap();
 
         // Re-stage beta: nothing about beta itself changed, but the regen
-        // this triggers must re-check every overlay candidate's existence.
+        // this triggers regenerates from a songbook alpha is no longer in.
+        refresh_payload(&payload);
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["beta"]));
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
 
@@ -2198,6 +2269,320 @@ mod tests {
             "beta's own entry is unaffected: {registry:?}"
         );
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn stage_evaluates_the_shipped_generator_with_the_machine_songbook_and_no_flake() {
+        // §9(a): the generator is a plain FILE eval of the SHIPPED
+        // `nix/manifest.nix` (found through the templates dir this binary
+        // resolves), its songbook argument is the MACHINE's own root, and its
+        // argv carries no flake ref and no checkout path — that is what makes
+        // the runtime offline and its result a function of the machine.
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_FLAKE_ROOT",
+            "AOIDE_SONG_TEMPLATES",
+            "PATH",
+            crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR,
+        ]);
+        std::env::remove_var(crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR);
+        let _armed = crate::commands::test_support::require_the_real_songbook_path();
+        let (root, stage, run_qml, payload) = templates_fallback_tmp("stage-generator-argv");
+        std::fs::create_dir_all(&run_qml).unwrap();
+
+        // A checkout path the flake path USED to be read from, pointed at by
+        // the env var the flake path used to read: if any argv names it, the
+        // runtime is not offline.
+        let checkout = root.join("a-checkout");
+        std::fs::create_dir_all(&checkout).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
+        std::env::set_var("AOIDE_SONG_TEMPLATES", root.join("templates"));
+
+        let song = shellbridge::songbook_dir("moonlight");
+        std::fs::create_dir_all(song.join("widgets")).unwrap();
+        std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(song.join("widgets").join("bar.qml"), "// bar\n").unwrap();
+        refresh_payload(&payload);
+
+        let out = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+
+        let argv = std::fs::read_to_string(root.join("nix-instantiate-argv.txt")).unwrap();
+        assert!(
+            argv.contains("--eval --strict --json --expr"),
+            "a strict JSON file eval, not a flake eval: {argv}"
+        );
+        let manifest_nix = root
+            .join("templates")
+            .join("..")
+            .join("nix")
+            .join("manifest.nix");
+        assert!(
+            argv.contains(&manifest_nix.to_string_lossy().to_string()),
+            "the generator comes from the shipped templates dir: {argv}"
+        );
+        assert!(
+            argv.contains(&shellbridge::songbook_root().to_string_lossy().to_string()),
+            "the songbook argument is the MACHINE's own root: {argv}"
+        );
+        assert!(
+            !argv.contains(&checkout.to_string_lossy().to_string()),
+            "no argv names the checkout ($AOIDE_FLAKE_ROOT): {argv}"
+        );
+        assert!(
+            !argv.contains('#'),
+            "no argv is a flake ref: {argv}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn stage_of_a_built_in_song_never_invokes_the_generator() {
+        // §9(a)'s other half: case 1 needs no nix, and this proves it by
+        // leaving a recording `nix-instantiate` on PATH and asserting the
+        // record is empty.
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_SONG_TEMPLATES",
+            "PATH",
+            crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR,
+        ]);
+        std::env::remove_var(crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR);
+        let _armed = crate::commands::test_support::require_the_real_songbook_path();
+        let (root, stage, run_qml, _payload) = templates_fallback_tmp("stage-built-in-no-nix");
+        std::fs::create_dir_all(&run_qml).unwrap();
+        let templates = root.join("templates");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_SONG_TEMPLATES", &templates);
+
+        std::fs::write(
+            templates.join("manifest.json"),
+            json!({ "sonata": { "bar": { "owner": "sonata", "file": "bar.qml" } } }).to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            templates.join("registry.json"),
+            json!({ "sonata": { "bar": { "kind": "bar", "order": 0 } } }).to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            templates.join("builtin.json"),
+            r#"{"declared":null,"songs":["sonata"],"packages":[]}"#,
+        )
+        .unwrap();
+
+        // The declared twin, written AFTER the stage dir is pinned — the song
+        // has no songbook copy at all, which is case 1's other half.
+        let declared = shellbridge::declared_notes();
+        std::fs::create_dir_all(declared.parent().unwrap()).unwrap();
+        std::fs::write(
+            &declared,
+            r##"{"palette":{"accent":"#ebbcba","bg":"#191724","fg":"#e0def4","urgent":"#eb6f92"},"schemaVersion":"0","song":"sonata"}"##,
+        )
+        .unwrap();
+
+        let out = handle_rice_stage(&inv(&["rice", "stage"], &["sonata"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert!(
+            !root.join("nix-instantiate-argv.txt").exists(),
+            "a built-in song with no differing machine copy stages with no nix at all"
+        );
+
+        let manifest: Value = serde_json::from_str(
+            &std::fs::read_to_string(run_qml.join("songs").join("manifest.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            manifest["sonata"],
+            json!({ "bar": { "owner": "sonata", "file": "bar.qml" } }),
+            "the baked baseline is what a built-in song stages from: {manifest:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn stage_refuses_and_leaves_stage_and_run_qml_byte_unchanged_when_packages_are_missing() {
+        // §9(d): a machine-songbook song whose `packages` are absent from
+        // `builtin.json.packages` is refused, and NOTHING is staged — not the
+        // livery, not a widget body, not the manifest.
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_SONG_TEMPLATES",
+            "PATH",
+            crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR,
+        ]);
+        std::env::remove_var(crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR);
+        let _armed = crate::commands::test_support::require_the_real_songbook_path();
+        let (root, stage, run_qml, payload) = templates_fallback_tmp("stage-rebuild-needed");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_SONG_TEMPLATES", root.join("templates"));
+
+        // This system built in sonata and installed NOTHING for it; the
+        // machine's own copy of moonlight needs a package that is not here.
+        std::fs::write(
+            root.join("templates").join("builtin.json"),
+            r#"{"declared":"sonata","songs":["sonata"],"packages":[]}"#,
+        )
+        .unwrap();
+        let song = shellbridge::songbook_dir("moonlight");
+        std::fs::create_dir_all(song.join("widgets")).unwrap();
+        std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(song.join("widgets").join("bar.qml"), "// bar\n").unwrap();
+        std::fs::write(
+            &payload,
+            json!({
+                "manifest": { "moonlight": { "bar": { "owner": "moonlight", "file": "bar.qml" } } },
+                "registry": { "moonlight": {} },
+                "packages": { "moonlight": ["not-installed-pkg"] },
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        std::fs::create_dir_all(run_qml.join("songs")).unwrap();
+        std::fs::write(run_qml.join("songs").join("manifest.json"), "{}\n").unwrap();
+        std::fs::write(run_qml.join("songs").join("registry.json"), "{}\n").unwrap();
+
+        let before = crate::commands::test_support::tree_snapshot(&[&stage, &run_qml]);
+        let out = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
+        assert_eq!(out.status, Status::Error, "{:?}", out.data);
+        assert!(
+            out.message.contains(
+                "rebuild needed: moonlight needs not-installed-pkg (not in this system)"
+            ),
+            "the taught refusal names the song and the missing packages: {}",
+            out.message
+        );
+        assert!(
+            out.message
+                .contains("add \"moonlight\" to song.available"),
+            "…and the way out: {}",
+            out.message
+        );
+        assert_eq!(
+            crate::commands::test_support::tree_snapshot(&[&stage, &run_qml]),
+            before,
+            "a refusal stages nothing: stage/ and run/qml are byte-unchanged"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_snapshot_in_a_seeded_built_in_song_still_stages_with_no_nix() {
+        // H2: the machine's own runtime dirs are NOT a difference in the SONG.
+        // `rice take`, `rice back` (its drift snapshot), `rice draft save` and
+        // `rice element seed` all write INSIDE the machine's copy of a built-in
+        // song — and comparing those names against the shipped folder made the
+        // song "differing", which on a host with no nix reads as `is not built
+        // into this system` (false on its face) and disables stage/reload/back
+        // for that song. One snapshot must not do that.
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_SONG_TEMPLATES",
+            "PATH",
+            crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR,
+        ]);
+        std::env::remove_var(crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR);
+        let _armed = crate::commands::test_support::require_the_real_songbook_path();
+        let (root, stage, run_qml, _payload) = templates_fallback_tmp("stage-seeded-with-runtime-dirs");
+        std::fs::create_dir_all(&run_qml).unwrap();
+        let templates = root.join("templates");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_SONG_TEMPLATES", &templates);
+        std::fs::write(
+            templates.join("builtin.json"),
+            r#"{"declared":"sonata","songs":["sonata"],"packages":[]}"#,
+        )
+        .unwrap();
+
+        // The SEED's folder and the machine's copy, content-identical on both
+        // sides (a mode difference — store 0444 vs `cp -r` 0644 — is not one).
+        let shipped = templates.join("sonata");
+        let machine = shellbridge::songbook_dir("sonata");
+        for dir in [&shipped, &machine] {
+            std::fs::create_dir_all(dir.join("widgets")).unwrap();
+            std::fs::write(dir.join("livery.json"), VALID_NOTES).unwrap();
+            std::fs::write(dir.join("widgets").join("bar.qml"), "// bar\n").unwrap();
+        }
+        // …plus the machine's OWN runtime dirs, which the seed never ships.
+        std::fs::create_dir_all(machine.join("takes")).unwrap();
+        std::fs::write(machine.join("takes").join("0001.json"), "{}\n").unwrap();
+        std::fs::write(machine.join("takes").join("head.json"), "1\n").unwrap();
+        std::fs::create_dir_all(machine.join("drafts").join("neon-night")).unwrap();
+        std::fs::write(machine.join("drafts").join("neon-night").join("livery.json"), "{}\n")
+            .unwrap();
+
+        let out = handle_rice_stage(&inv(&["rice", "stage"], &["sonata"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert!(
+            !root.join("nix-instantiate-argv.txt").exists(),
+            "a seeded built-in song with a take and a draft is still case 1 — no nix at all"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn staging_a_borrower_carries_its_lenders_widget_bodies_too() {
+        // M4: a borrowed slot's BODY lives in the lender's `widgets/`, and
+        // `StagingEngine.qml` resolves a slot to `songs/<owner>/<file>` — so
+        // staging a borrower without its lender's bodies leaves a dead slot
+        // with no error anywhere. The owners come from the entry `plan_stage`
+        // resolved, which for a machine-authored composition is the
+        // generator's own answer (that is where `composeSong` resolves
+        // borrowed ownership).
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_SONG_TEMPLATES",
+            "PATH",
+            crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR,
+        ]);
+        std::env::remove_var(crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR);
+        let _armed = crate::commands::test_support::require_the_real_songbook_path();
+        let (root, stage, run_qml, payload) = templates_fallback_tmp("stage-borrower-carries-lender");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_SONG_TEMPLATES", root.join("templates"));
+
+        // A machine-authored borrower whose slot is owned by `lender`, and the
+        // lender's own bodies in the songbook beside it.
+        let borrower = shellbridge::songbook_dir("borrower");
+        std::fs::create_dir_all(borrower.join("_widgets")).unwrap();
+        std::fs::write(borrower.join("livery.json"), VALID_NOTES).unwrap();
+        let lender = shellbridge::songbook_dir("lender");
+        std::fs::create_dir_all(lender.join("widgets")).unwrap();
+        std::fs::write(lender.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(lender.join("widgets").join("bar.qml"), "// lender bar\n").unwrap();
+        std::fs::write(
+            &payload,
+            json!({
+                "manifest": { "borrower": { "bar": { "owner": "lender", "file": "bar.qml" } } },
+                "registry": { "borrower": {} },
+                "packages": { "borrower": [] },
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let out = handle_rice_stage(&inv(&["rice", "stage"], &["borrower"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert_eq!(
+            std::fs::read_to_string(run_qml.join("songs").join("lender").join("bar.qml")).unwrap(),
+            "// lender bar\n",
+            "the lender's body is carried, so `songs/<owner>/<file>` resolves"
+        );
+        assert!(
+            out.changed
+                .iter()
+                .any(|c| c.ends_with("run/qml/songs/lender/bar.qml")),
+            "…and is reported: {:?}",
+            out.changed
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

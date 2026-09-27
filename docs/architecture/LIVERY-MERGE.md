@@ -5,6 +5,12 @@
 > engine name to find every affected file — the rename surface is enumerated
 > in §2.2.
 >
+> **Paths in this document are the tree as the plan found it.** Its step list
+> records what each step edited, so a path below names where a file was at that
+> time, not where it is now — the tree has moved on (`modules/facets/**` became
+> paint lanes under `modules/dendrites/`, the QML skeleton lives in
+> `pkgs/lyra-shell/`).
+>
 > **Status: ALL PHASES LANDED — Phase 4 committed and switched
 > (2026-08-13).**
 > The name is confirmed: **livery** (§7.1). Phase 1 (native engine +
@@ -204,6 +210,9 @@ the deep-pantheon crate scheme; offered as the in-voice runner-up.
 > name-independent.**
 
 ### 2.2 Full rename surface (grep census — every consumer)
+
+Paths below are as of the plan (see the header): they name what each step found
+and edited, not the tree's present layout.
 
 **Code — Rust (`pkgs/aoide/crates/`)**
 - `song/src/notes.rs` — drop the binary-locate env var/PATH lookup + `run_lint` shell-out (becomes native call).
@@ -547,7 +556,7 @@ Check, per step:
 | **Correctness** | Named acceptance commands actually run and pass on the reviewer's checkout — not just claimed. Goldens are byte-identical where the step says byte-identical, semantic-equal where it says semantic. |
 | **Contract fidelity** | `aoide schema --json` diff is *exactly* the intended entries for this step and nothing incidental (Phase 1.5/3). `stage/livery.json` shape matches CONTRACTS §4 (schemaVersion + palette + bar/notif/window fully resolved, no `null`). No schema *version* bump (shape is unchanged; the rename is a namespace edit — §6). |
 | **Scope discipline** | Only the step's listed files changed (`git diff --stat` matches). No `git add -A`; explicit pathspecs. No file another agent owns was touched. |
-| **House rules** | Facets read only `aoide.livery` (no cross-module read); no `song/` runtime path read at eval (`checks.no-song-read` still green); `checks.song-shape` still green (songbook entries are `rice.nix` + `livery.json`, no stray `.nix`); no AI co-author trailer. |
+| **House rules** | Paint lanes read only the namespaces root `AGENTS.md` house rule 5 enumerates (no cross-module read); no `song/` runtime dir committed at eval (`checks.song-runtime-untracked` still green); `checks.song-shape` still green (songbook entries are `rice.nix` + `livery.json`, no stray `.nix`); no AI co-author trailer. |
 | **Live safety** (Phases 3–4) | The dual-read/dual-write invariant of §2.3 is intact at the step boundary: at no committed state can a running old reader or a fresh new reader fail to find a valid stage file. Phase 4 only lands after explicit live-stable sign-off. |
 | **Port faithfulness** (Phase 1) | The native validator's error strings and the emit outputs match the Node engine on the shared fixtures. The alias resolver handles the `{group.key}` fixture and rejects a cycle. |
 | **Tests present** | New logic carries `#[test]`s / goldens; a step that ports a Node `test/run.js` case has the Rust equivalent. `cargo test --workspace` is green, not just the crate's own. |

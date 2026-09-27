@@ -58,7 +58,7 @@ job ends up hard-coding colours in six different files that drift apart.
   editors, browser, boot) automatically. On the Quickshell side, the same
   same livery values fan out through `stage/livery.json` — one runtime read,
   every QML surface. **No other file hard-codes a colour available from
-  livery.** A dendrite or facet that wants a colour reads
+  livery.** A dendrite that wants a colour reads
   `aoide.livery.*`; it never writes its own hex.
 
 The point of the split: creation is where taste and vision-checking live
@@ -88,7 +88,7 @@ loop). Two things to look at, side by side, on the live desktop:
    wallpaper is allowed to show through, not the hex value — a surface can
    read "too dark" and still be exactly the right colour, so the fix for a
    muddy surface is opacity/glass, not a whiter hex. hyprglass glasses the
-   **windows** too — `manage_window_blur = 1` in the compositor facet extends
+   **windows** too — `manage_window_blur = 1` in the compositor lane extends
    the Liquid-Glass refraction/fresnel from the quickshell layer surfaces onto
    the translucent terminal, so terminal and shell wear one glass (the shader
    only paints visible translucent content, so opaque windows are untouched).
@@ -114,7 +114,7 @@ loop). Two things to look at, side by side, on the live desktop:
 This is a **vision check**, not a lint rule: it means actually looking at the
 running desktop (screenshot or live) after a rice change, not just trusting
 that `nix flake check` passed. `adcheck` catches structural violations (a
-facet reading another module, a surface with two owners); it cannot catch
+lane reading another module, a surface with two owners); it cannot catch
 "the terminal reads dark while the bar reads light."
 
 ## Related

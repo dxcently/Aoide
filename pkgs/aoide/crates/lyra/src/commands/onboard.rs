@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["onboard"],
-        summary: "Generate `aoide.nix`: every `aoide.*` module option, derived fresh from modules/{nucleus,facets,dendrites}, commented out at its current default -- then print the `imports` line to teach it in. Never edits the user's flake.",
+        summary: "Generate `aoide.nix`: every `aoide.*` module option, derived fresh from modules/{nucleus,dendrites}, commented out at its current default -- then print the `imports` line to teach it in. Never edits the user's flake.",
         args: [],
         flags: [
             flag!("out", "string", "Where to emit the generated module (default: ./aoide.nix)."),
@@ -56,15 +56,7 @@ fn handle_onboard(inv: &Invocation) -> Outcome {
         );
     }
 
-    let Some(checkout) = checkout_root() else {
-        return Outcome::error(
-            cmd,
-            "lyra onboard must run from inside an Aoide checkout (no flake.nix + pkgs/aoide found walking up from the cwd) -- run it from inside the clone `aoide onboard` delegates from",
-        )
-        .with_data(json!({ "reason": "no-checkout" }));
-    };
-
-    let options = match eval_aoide_options(&checkout) {
+    let options = match read_aoide_options() {
         Ok(o) => o,
         Err(e) => return Outcome::error(cmd, format!("deriving the aoide.* option set: {e}")),
     };
@@ -100,18 +92,19 @@ fn handle_onboard(inv: &Invocation) -> Outcome {
 /// The invoking checkout's root: walk up from `cwd` looking for a directory
 /// carrying both `flake.nix` and `pkgs/aoide` — the two markers that
 /// distinguish a real Aoide checkout from an arbitrary directory. See the
-/// module doc for why this is lyra's own equivalent of core's
-/// `hooks::skill_source()` walk-up rather than a shared function.
-fn checkout_root() -> Option<PathBuf> {
-    let mut dir = std::env::current_dir().ok()?;
-    loop {
-        if dir.join("flake.nix").is_file() && dir.join("pkgs/aoide").is_dir() {
-            return Some(dir);
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
+/// The `aoide.*` option doc set, read from the SHIPPED
+/// `share/lyra/aoide-options.json` — `pkgs/lyra-songbook` builds it from
+/// `lib/options.nix` at nix-build time, and it sits beside the song templates
+/// [`aoide_storage::fs::lyra_share_dir`] resolves. The FILE is the eval, so
+/// `lyra onboard` needs neither a checkout nor `nix` on PATH: it works from any
+/// cwd, on a machine that has never seen the Aoide source.
+fn read_aoide_options() -> Result<Vec<OptionEntry>, String> {
+    let share = aoide_storage::fs::lyra_share_dir()
+        .ok_or_else(|| "no shipped lyra data dir: $AOIDE_SONG_TEMPLATES names none (or is not absolute) and no `share/lyra/songbook` sits beside this binary".to_string())?;
+    let path = share.join("aoide-options.json");
+    let bytes = std::fs::read(&path)
+        .map_err(|e| format!("cannot read the shipped option set at {} ({e})", path.display()))?;
+    parse_options(&bytes)
 }
 
 /// One derived `aoide.*` option, narrowed to exactly what the formatter
@@ -128,32 +121,10 @@ struct OptionEntry {
     default: Option<String>,
 }
 
-/// One `nix eval --json --no-eval-cache <checkout>#aoideOptions` shell-out.
-/// `checkout` is a real directory (from [`checkout_root`]), never a relative
-/// fragment, so the flake ref never depends on the process's own cwd staying
-/// put. On any failure (`nix` missing, eval error, unparseable output)
-/// returns `Err` with nix's own message where available.
-fn eval_aoide_options(checkout: &Path) -> Result<Vec<OptionEntry>, String> {
-    let flake_ref = format!("{}#aoideOptions", checkout.display());
-
-    let output = std::process::Command::new("nix")
-        .args(["eval", "--json", "--no-eval-cache", &flake_ref])
-        .output()
-        .map_err(|e| format!("failed to run `nix eval` (is `nix` on PATH? lyra depends on nix for this command only): {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("nix eval failed deriving the aoide.* option set:\n{}", stderr.trim()));
-    }
-
-    parse_options(&output.stdout)
-}
-
-/// Parse [`eval_aoide_options`]'s payload — a flat JSON array of `{name,
+/// Parse [`read_aoide_options`]'s payload — a flat JSON array of `{name,
 /// description, default?}` objects, `lib/options.nix`'s exact output shape.
 /// Sorted by `name` on the way out so the generated file's ordering is
-/// deterministic regardless of whatever order nix's own doc-list walk
-/// happened to produce.
+/// deterministic regardless of the order the eval emitted.
 fn parse_options(bytes: &[u8]) -> Result<Vec<OptionEntry>, String> {
     let parsed: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|e| format!("aoide options eval output isn't valid JSON: {e}"))?;
@@ -321,9 +292,9 @@ const ENV_KNOBS: &[(&str, &str)] = &[
 /// The pure formatter: `options` in, the whole `aoide.nix` text out. A real
 /// nix module, `{ config, lib, pkgs, ... }: { … }` — the function head is
 /// required, not decorative: several derived defaults are literal nix
-/// SOURCE TEXT that references `config` (`aoide.auditLog`'s `"/home/${config
-/// .aoide.user}/…"`, `aoide.lyra.enable`'s `config.aoide.facets.quickshell.
-/// enable`, three melete/mneme path defaults) — pasting that text into a
+/// SOURCE TEXT that references `config` (`aoide.root`/`aoide.checkout`'s
+/// `"/home/${config.aoide.user}/…"`, `aoide.auditLog`'s `config.aoide.root`
+/// chain, the melete/mneme path defaults) — pasting that text into a
 /// bare attrset with no `config` in scope would fail to evaluate the moment
 /// a user uncomments one of those lines. Every option renders as ONE dotted
 /// attrpath assignment (`aoide.a2a.port = 8710;`) — nix accepts a dotted
@@ -367,61 +338,58 @@ fn render_aoide_nix(options: &[OptionEntry]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aoide_test_support::{env_lock, unique_tmp};
+    use aoide_test_support::{env_lock, unique_tmp, EnvSaver};
 
-    // ── checkout_root: the from-a-checkout walk-up ───────────────────────
+    // ── read_aoide_options: the shipped option set, no nix, no checkout ──
 
     #[test]
-    fn checkout_root_finds_the_repo_root_by_walking_up_to_flake_and_pkgs_aoide() {
+    fn read_aoide_options_reads_the_shipped_file_beside_the_song_templates() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let root = unique_tmp("lyra-onboard-checkout-found");
-        std::fs::write(root.join("flake.nix"), "").unwrap();
-        std::fs::create_dir_all(root.join("pkgs/aoide")).unwrap();
-        let nested = root.join("song/songbook/sonata");
-        std::fs::create_dir_all(&nested).unwrap();
+        let _s = EnvSaver::capture(&["AOIDE_SONG_TEMPLATES", "PATH"]);
+        let root = unique_tmp("lyra-onboard-shipped-options");
+        let share = root.join("share").join("lyra");
+        std::fs::create_dir_all(share.join("songbook")).unwrap();
+        std::fs::write(
+            share.join("aoide-options.json"),
+            r#"[{"name":"aoide.livery.base16.base00","description":"base00"},
+                {"name":"aoide.a2a.port","description":"The A2A HTTP port.","default":"8710"}]"#,
+        )
+        .unwrap();
+        // No `nix` on PATH at all: the shipped file IS the eval, and this
+        // proves the command cannot be reaching for one.
+        let empty = root.join("empty-bin");
+        std::fs::create_dir_all(&empty).unwrap();
+        std::env::set_var("PATH", &empty);
+        std::env::set_var("AOIDE_SONG_TEMPLATES", share.join("songbook"));
 
-        let saved_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&nested).unwrap();
-        let found = checkout_root();
-        std::env::set_current_dir(&saved_cwd).unwrap();
-
+        let options = read_aoide_options().expect("the shipped option set reads with no nix");
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0].name, "aoide.a2a.port", "sorted by name");
+        assert_eq!(options[0].default.as_deref(), Some("8710"));
         assert_eq!(
-            found.map(|p| std::fs::canonicalize(p).unwrap()),
-            Some(std::fs::canonicalize(&root).unwrap())
+            options[1].default, None,
+            "a doc entry with no static default stays None"
+        );
+
+        let rendered = render_aoide_nix(&options);
+        assert!(rendered.contains("  # aoide.a2a.port = 8710;\n"), "{rendered}");
+        assert!(
+            rendered
+                .contains("  # aoide.livery.base16.base00 = <no static default -- see description>;\n"),
+            "{rendered}"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn checkout_root_is_none_outside_a_checkout() {
+    fn read_aoide_options_teaches_when_no_shipped_data_dir_resolves() {
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let root = unique_tmp("lyra-onboard-checkout-missing");
-        std::fs::create_dir_all(&root).unwrap();
+        let _s = EnvSaver::capture(&["AOIDE_SONG_TEMPLATES"]);
+        std::env::remove_var("AOIDE_SONG_TEMPLATES");
 
-        let saved_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&root).unwrap();
-        let found = checkout_root();
-        std::env::set_current_dir(&saved_cwd).unwrap();
-
-        assert!(found.is_none(), "found a checkout root where there is none: {found:?}");
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn checkout_root_requires_both_markers_not_just_one() {
-        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let root = unique_tmp("lyra-onboard-checkout-partial");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(root.join("flake.nix"), "").unwrap();
-        // No pkgs/aoide -- must not count as a checkout.
-
-        let saved_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&root).unwrap();
-        let found = checkout_root();
-        std::env::set_current_dir(&saved_cwd).unwrap();
-
-        assert!(found.is_none(), "one marker without the other must not resolve: {found:?}");
-        let _ = std::fs::remove_dir_all(&root);
+        let err = read_aoide_options().expect_err("no shipped dir, no options");
+        assert!(err.contains("AOIDE_SONG_TEMPLATES"), "{err}");
+        assert!(err.contains("share/lyra/songbook"), "{err}");
     }
 
     // ── parse_options: the eval payload shape ────────────────────────────
@@ -666,21 +634,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // ── Real-nix integration -- #[ignore]'d: needs `nix`/network, per
-    // crates/song/src/widgets.rs's identical `eval_songbook` precedent. Run
-    // by hand via the discipline's own `nix develop -c cargo test` (which
-    // has `nix` on PATH); the package's sandboxed checkPhase has neither. ──
-
-    #[test]
-    #[ignore = "shells to a real `nix eval`; the package's sandboxed checkPhase has no `nix` on PATH / no network (crates/song/src/widgets.rs's identical precedent)"]
-    fn aoide_options_flake_output_evaluates_and_covers_known_options() {
-        let checkout = checkout_root().expect("run this ignored test from inside the checkout (e.g. `cargo test` from pkgs/aoide)");
-        let options = eval_aoide_options(&checkout).expect("nix eval of #aoideOptions failed");
-        assert!(options.len() > 100, "expected >100 aoide.* options, got {}", options.len());
-        assert!(options.iter().any(|o| o.name == "aoide.a2a.port"));
-        assert!(options.iter().any(|o| o.name == "aoide.lyra.enable"));
-        assert!(options.iter().any(|o| o.name == "aoide.livery.base16.base00" && o.default.is_none()));
-    }
+    // ── The generated file against a REAL module eval -- #[ignore]'d: needs
+    // `nix`/network, per crates/song/src/widgets.rs's identical precedent. Run
+    // by hand via the discipline's own `nix develop -c cargo test` (which has
+    // `nix` on PATH); the package's sandboxed checkPhase has neither. Point
+    // $AOIDE_SONG_TEMPLATES at a built `lyra-songbook`'s `share/lyra/songbook`
+    // (or run from a checkout where the exe-sibling resolves) so
+    // `read_aoide_options` finds the shipped set. ──
 
     /// ONBOARD.md's own P-I3 gate: "generated file evaluates (`nix eval` a
     /// host importing it)" — stronger than `nix-instantiate --parse`
@@ -695,11 +655,28 @@ mod tests {
     /// brief's own "do not `nix build` the full package" caution extends to
     /// not pulling in hardware/graphics/home-manager weight this check has
     /// no need for).
+    ///
+    /// The checkout this probe imports is named by CWD-INDEPENDENT compile-time
+    /// knowledge (this crate's own manifest dir), never by a runtime walk-up:
+    /// `lyra onboard` itself needs no checkout any more, so the only place a
+    /// checkout may be named is a TEST that exercises the module system.
     #[test]
-    #[ignore = "shells to a real `nix eval`; same sandbox constraint as the eval test above"]
+    #[ignore = "shells to a real `nix eval`; same sandbox constraint as the eval tests above"]
     fn generated_file_imports_cleanly_into_a_real_module_eval() {
-        let checkout = checkout_root().expect("run this ignored test from inside the checkout (e.g. `cargo test` from pkgs/aoide)");
-        let options = eval_aoide_options(&checkout).expect("nix eval of #aoideOptions failed");
+        // The shipped option set comes from `$AOIDE_SONG_TEMPLATES`'s parent
+        // (or the exe sibling). Read it under the lock and RESTORE it, so a
+        // hand-run of this probe cannot leak an env rewrite into the rest of
+        // the suite — the same discipline every other env-touching test here
+        // holds. Run it by hand with `AOIDE_SONG_TEMPLATES` pointed at a built
+        // `lyra-songbook`'s `share/lyra/songbook`.
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_SONG_TEMPLATES", "AOIDE_FLAKE_ROOT"]);
+        let checkout = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(4)
+            .expect("crates/lyra -> crates -> aoide -> pkgs -> the checkout")
+            .to_path_buf();
+        let options = read_aoide_options().expect("the shipped option set must resolve");
 
         let root = unique_tmp("lyra-onboard-real-import");
         std::fs::create_dir_all(&root).unwrap();
@@ -716,8 +693,14 @@ mod tests {
               flake = builtins.getFlake {checkout_lit};
               lib = flake.inputs.nixpkgs.lib;
               pkgs = import flake.inputs.nixpkgs {{ system = "x86_64-linux"; }};
-              walk = import ({checkout_lit} + "/lib/walk.nix") {{ inherit lib; }};
-              discovered = walk ({checkout_lit} + "/modules");
+              # The whole tree, as a consumer takes it: the two aggregates. The
+              # old `lib/walk.nix` handed every `.nix` under `modules/` to the
+              # evaluator; the aggregates are what name that set now, and they
+              # are what a whole-tree consumer imports.
+              discovered = [
+                ({checkout_lit} + "/modules/dendrites")
+                ({checkout_lit} + "/modules/nucleus")
+              ];
               evaled = lib.evalModules {{
                 modules = discovered ++ [ {{ config._module.check = false; }} {path_lit} ];
                 specialArgs = {{

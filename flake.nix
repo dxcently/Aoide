@@ -27,7 +27,7 @@
 
     # nvf (Neovim-Flake) — the neovim dendrite's config framework (dxflake
     # form, verbatim). Inputs can only live here; the dendrite reaches it via
-    # specialArgs (lib/mkHost.nix threads `inputs` into home-manager too).
+    # specialArgs (lib/aoideos.nix threads `inputs` into home-manager too).
     nvf = {
       url = "github:notashelf/nvf";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -55,30 +55,64 @@
       forAllSystems = f: nixpkgs.lib.genAttrs systems f;
       inherit (nixpkgs) lib;
 
-      # Per-host assembly (walker + host + home-manager + stylix).
-      mkHost = import ./lib/mkHost.nix {
+      # Per-host assembly (selection constructor + host record + home-manager).
+      aoideos = import ./lib/aoideos.nix {
         inherit inputs lib;
         system = "x86_64-linux";
         username = "khoa";
       };
 
-      # The walker, for checks that reason over the module tree.
-      walk = import ./lib/walk.nix { inherit lib; };
+      # The machines this flake builds. `hostNames` lives in lib/aoideos.nix —
+      # the ONE site that reads `hosts/` — so what this file builds and what
+      # `mkHost` takes as `knownHosts` cannot disagree. `_desktop`/`_laptop`/
+      # `_server` are the templates to copy; `_mac` needs the darwin seam first.
+      inherit (aoideos) hostNames;
+
+      # One per discovered host; lazy per attribute, so an output that names one
+      # host never forces the others.
+      hosts = lib.genAttrs hostNames aoideos.mkHost;
+
+      # The songbook's own discovery — the same file a host's song selection is
+      # validated against, so the `song-shape` check and the selection can never
+      # disagree about what a song is.
+      songbookLib = import ./lib/songbook.nix { inherit lib; };
 
       # The packages walker — auto-discovers pkgs/<name>/default.nix. One source
       # feeds the `packages` output, the auto-generated `pkg-<name>` checks, and
-      # the host + vm overlays (lib/mkHost.nix, tests/vm-boot.nix).
-      pkgsWalk = import ./lib/pkgs.nix { inherit lib; };
+      # the host + vm overlays (lib/aoideos.nix, tests/vm-boot.nix).
+      #
+      # `extra` is the walker's special-args escape hatch (lib/pkgs.nix's
+      # header): `lyra-songbook` ships the `aoide.*` option doc list, which
+      # `callPackage` cannot fill — it is derived from this flake's `inputs` —
+      # so it is named here, once, in the context that has them.
+      pkgsWalk = import ./lib/pkgs.nix {
+        inherit lib;
+        extra = {
+          lyra-songbook = {
+            aoideOptions = self.aoideOptions;
+          };
+        };
+      };
+
+      # The catalogue, read once: `lib.catalogue` and `nixosModules` are two
+      # views of this one record (`modules/default.nix` is plain data).
+      registry = import ./modules;
     in
     {
       # ── NixOS configurations ───────────────────────────────────────────────
-      # One line per host. Shelved skeletons live at hosts/_{desktop,laptop,
-      # server,mac} — copy one to hosts/<name>/, register it here, done (the
-      # `_mac` one is forward-looking: it needs the darwin class seam in
-      # lib/mkHost.nix first). yomi-strix remains the living reference host.
-      nixosConfigurations = {
-        yomi-strix = mkHost "yomi-strix";
-      };
+      # One per DISCOVERED host (see `hostNames` above) — this file never names
+      # a machine. Both outputs are derived from the same `hosts`, so what
+      # `nixosConfigurations.<name>` builds and what `inventory.<name>` says it
+      # resolved can never disagree.
+      nixosConfigurations = lib.mapAttrs (_: h: h.system) hosts;
+
+      # What each host actually resolved: its aggregations, every dendrite it
+      # selected with the provider answering it and the file that answered, its
+      # users, and which override records matched. Derived from selection in
+      # `lib/composition.nix`, never maintained by hand — this is the review
+      # surface for "no accidental all-dendrite loading":
+      # `nix eval --json .#inventory.yomi-strix`.
+      inventory = lib.mapAttrs (_: h: h.inventory) hosts;
 
       # ── Packages ───────────────────────────────────────────────────────────
       # Auto-discovered by lib/pkgs.nix: every `pkgs/<name>/default.nix` (not
@@ -109,7 +143,7 @@
       );
 
       # ── Songbook manifest/registry (C4/W3) ──────────────────────────────────
-      # The SAME generator `modules/facets/quickshell/default.nix`'s
+      # The SAME generator `modules/dendrites/lyra/default.nix`'s
       # `quickshellConfig` derivation uses at build time
       # (`lib/songbook.nix`), exposed as a lean flake output so
       # `pkgs/aoide/crates/song/src/widgets.rs` can shell out to `nix eval
@@ -132,8 +166,8 @@
         };
 
       # ── aoide.* option derivation (P-I3, onboarding lane) ───────────────────
-      # Every `aoide.*` option declared across modules/{nucleus,facets,
-      # dendrites}, narrowed to {name, description, default} for `lyra
+      # Every `aoide.*` option declared across modules/{nucleus,dendrites},
+      # narrowed to {name, description, default} for `lyra
       # onboard`'s `aoide.nix` generator (docs/architecture/ONBOARD.md "The
       # vars-file generator"; lib/options.nix does the evalModules walk).
       # Deliberately NOT per-system like `packages`/`checks` below —
@@ -143,14 +177,73 @@
       # flake ref (`nix eval --json <checkout>#aoideOptions`) with no system
       # attrpath to get right.
       aoideOptions = import ./lib/options.nix {
-        inherit lib inputs;
+        inherit lib;
+        aoideInputs = inputs;
         pkgs = nixpkgs.legacyPackages.x86_64-linux;
       };
 
+      # ── Library ────────────────────────────────────────────────────────────
+      # The one public seam for assembling a host's module list. A consumer
+      # that wants the constructor imports it from here by name instead of
+      # reaching into `lib/composition.nix` through the source tree.
+      #
+      # The selection constructor (docs/architecture/NIX-COMPOSITION.md
+      # "Selection before platform evaluation"): selection resolves in an
+      # ordinary `evalModules` pass that knows nothing about NixOS, and the
+      # platform import list is assembled from the result. The exported thing is
+      # the FILE, still a function of `{ lib }`: a consumer applies it with the
+      # `lib` its own host evaluation uses, so the selection pass runs on the
+      # consumer's lib and not on this flake's, and dxflake migrates onto it
+      # rather than onto a copy of its own. `tests/selection` imports the file
+      # by path — the file is what the suites exercise, not this output.
+      #
+      # Each entry is its file's own function, still UNAPPLIED (so a consumer
+      # applies it with its own `lib`), except `catalogue`, which is data: the
+      # same `name = <path>` record `nixosModules.<name>` spells one name at a
+      # time, for a consumer that wants all of them at once. `lib/options.nix`
+      # is NOT here: it reads this tree's modules, which a consumer neither has
+      # nor should name.
+      lib = {
+        composition = import ./lib/composition.nix;
+        livery = import ./lib/livery.nix;
+        songbook = import ./lib/songbook.nix;
+        catalogue = registry.catalogue;
+      };
+
+      # ── The export surface a consumer builds against ───────────────────────
+      # Everything here is for a flake that consumes AoideOS as a stranger
+      # (PACKAGE-LAYOUT's "AoideOS's export surface"): it names no path inside
+      # this tree, and the flake inputs Aoide's own lanes need are closed over
+      # by `nixosModules.nucleus` instead of being threaded through the
+      # consumer's `specialArgs`.
+      #
+      # `nixosModules` is the catalogue plus `nucleus`: one entry per catalogue
+      # name, each the PATH this flake's own registry holds for that capability
+      # (`import`ing it yields the lane record `{ body; nixos; }` the
+      # constructor's `registry.catalogue` takes — the same value, spelled one
+      # name at a time), and `nucleus` the ONE module that sets
+      # `_module.args.aoideInputs`, which is also what `mkHost` passes. A
+      # consumer's catalogue is that attrset minus `nucleus`.
+      nixosModules = {
+        nucleus = aoideos.nucleusModule;
+      }
+      // registry.catalogue;
+
+      # The base package overlay: every `pkgs/<name>` this tree discovers plus
+      # `aoide`, the self-flaked core — the same set the `packages` output names
+      # (R8: `lyra` is deliberately NOT here, nixpkgs owns that name; the rice
+      # binary is the `aoide` derivation's `rice` output).
+      overlays.default =
+        final: prev:
+        (pkgsWalk.overlay { stock = nixpkgs.legacyPackages.${prev.stdenv.hostPlatform.system}; }) final prev
+        // {
+          aoide = inputs.aoide.packages.${prev.stdenv.hostPlatform.system}.default;
+        };
+
       # ── Checks ─────────────────────────────────────────────────────────────
       # The contractual coupling discipline (lib/checks.nix). They pass
-      # trivially now (no facets declare surface owners yet) and become real as
-      # Wave-1 facets populate `aoide.surfaces`. Also builds EVERY package as
+      # trivially now (no lane declares surface owners yet) and become real as
+      # the paint lanes populate `aoide.surfaces`. Also builds EVERY package as
       # `pkg-<name>` — one per DISCOVERED package (lib/pkgs.nix; whatever
       # currently lives under pkgs/ — no fixed list here to go stale) plus
       # `pkg-aoide` explicit from the `aoide` input, since the core is
@@ -181,10 +274,18 @@
         pkgChecks
         // {
           surface-ownership = checks.surfaceOwnership (hostCfg.aoide.surfaces or { });
-          no-song-read = checks.noSongRead (walk ./modules);
-          # Committed songs self-register from song/songbook (walked into each
-          # host by lib/mkHost.nix); song-shape asserts each is a rice.nix only.
-          song-shape = checks.songShape (walk ./song/songbook);
+          # A song's runtime dirs are gitignored state; this fails if one was
+          # committed anyway (it replaced `no-song-read`, which scanned module
+          # paths for those names and could not fire).
+          song-runtime-untracked = checks.songRuntimeUntracked self;
+          # Every discovered song carries rice.nix + livery.json and holds no
+          # other `.nix` (`lib/songbook.nix`'s strayNixFiles, builtins.readDir —
+          # the walker is gone). What a host builds in is the host's selection,
+          # not this check's business.
+          song-shape = checks.songShape {
+            inherit (songbookLib) songNames strayNixFiles escapingNixFiles;
+            songbook = ./song/songbook;
+          };
           # The two livery fan-outs (baked Stylix, stage seed) agree under an
           # `aoide.livery.override` — proved against a fixed fixture inside
           # lib/checks.nix, not this host's own config (see lib/livery.nix
@@ -211,6 +312,28 @@
           # and never shells out to nix — AGENTS.md's nix-independence claim
           # made a real gate (see lib/checks.nix's Check 7).
           nix-independence = checks.nixIndependence self;
+          # §9(b): the SHIPPED generator, evaluated exactly as the runtime
+          # evaluates it, reproduces `#songbookManifest` over the committed
+          # songbook — offline, no flake, no checkout.
+          generator-offline = checks.generatorOffline {
+            lyraSongbook = (pkgsWalk.discover pkgs).lyra-songbook;
+            songbook = ./song/songbook;
+            expected = builtins.toJSON {
+              manifest = songbookLib.manifestAttrs;
+              registry = songbookLib.registryAttrs;
+            };
+          };
+          # §9(e): and it answers the same over a COPY of that songbook outside
+          # the repo — §7.4's "a song is a self-contained folder" and "no
+          # repo-absolute paths", which is what a machine's own songbook needs.
+          generator-relocatable = checks.generatorRelocatable {
+            lyraSongbook = (pkgsWalk.discover pkgs).lyra-songbook;
+            songbook = ./song/songbook;
+            expected = builtins.toJSON {
+              manifest = songbookLib.manifestAttrs;
+              registry = songbookLib.registryAttrs;
+            };
+          };
           # VM boot test — boots the Aoide desktop config headless and asserts
           # the stack comes up (multi-user.target, aoide on PATH,
           # greeter enabled, aoided + shellbridge user services active, graph

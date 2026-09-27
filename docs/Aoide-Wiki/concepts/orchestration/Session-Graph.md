@@ -135,7 +135,7 @@ instead — a beamed tree of agent/sub-agent sessions, not a literal node/edge
 diagram (field contract: [[Widget-Bridge-Contract]]).
 
 The `aoide.surfaces.sessionGraph` owner-registry entry
-(`modules/facets/quickshell/default.nix`) is still declared, but no QML file
+(`modules/dendrites/lyra/default.nix`) is still declared, but no QML file
 backs it — the standalone overlay (`AoideSessionGraph.qml` + `GraphRow.qml`)
 and the shared `GraphModel.qml` it and the dock's DAG gadget instantiated
 are absent from the QML tree (open thread: whether the registry entry

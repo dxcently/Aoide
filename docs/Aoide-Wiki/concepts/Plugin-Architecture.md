@@ -15,11 +15,12 @@ by being added to a list.
 
 ## The rule, and where the repo already runs it
 
-- **Discovery by existing, not by import list.** `lib/walk.nix` finds
-  `modules/dendrites/*`, `modules/facets/*`, `pkgs/*`, and
-  `song/songbook/*/rice.nix` by walking the tree ([[Codebase#The walker and
-  host assembly (`lib/`)]], [[Snowflake-Anatomy]]); a new folder is the whole
-  registration, no import list to hand-edit.
+- **Discovery by existing, not by import list.** `modules/default.nix`'s
+  catalogue names each dendrite once — a new file plus its one line is the
+  whole registration, no import list to hand-edit — while `modules/aggregations/`,
+  `modules/overrides/`, `pkgs/*` and `song/songbook/*/rice.nix` are found by
+  their directories' own shallow scans ([[Codebase#The catalogue, the
+  constructor (`lib/`)]], [[Snowflake-Anatomy]]).
 - **Self-gating, not switched from outside.** Each discovered module gates
   itself on its own `enable`/`aoide.song`, rather than a parent module
   turning it on.
@@ -27,8 +28,10 @@ by being added to a list.
   `StagingEngine.resolveSong(song, slot)` — by slot *name*, falling back to
   sonata — so no host surface ever imports a concrete widget
   ([[Widget-Maker#The staging engine — a song overrides desktop chrome]]).
-- **A closed, named service set.** Facets read `aoide.livery` and
-  `aoide.arrangement` and nothing else — a closed pair of named services,
+- **A closed, named service set.** Paint lanes read `aoide.livery`,
+  `aoide.arrangement` and `aoide.surfaces`, plus the core scalars and the song
+  selection root `AGENTS.md` house rule 5 enumerates, and nothing else — a closed
+  set of named services,
   never another module's internals.
 
 ## Spatial and temporal composability
@@ -64,7 +67,7 @@ picks the option that can be deleted.
 ## The corollary for Quickshell: render surfaces only
 
 **Quickshell paints; it never *is* the capability.** Every QML file in
-`modules/facets/quickshell/` and `song/songbook/*/widgets/` is a render
+`pkgs/lyra-shell/qml/` and `song/songbook/*/widgets/` is a render
 surface that picks up an agnostic bridge or API by name. State, policy, IPC,
 and system access live behind a bridge — a CLI command, a stage file
 (`CONTRACTS.md` §4), an IPC socket — reachable **with only a shell, no
@@ -86,8 +89,8 @@ ricing agents that read that file directly.
 
 ## Related
 
-- [[Codebase]] — the walker and host-assembly mechanics this rule names
-- [[Snowflake-Anatomy]] — the dendrite/facet discovery model
+- [[Codebase]] — the catalogue and host-assembly mechanics this rule names
+- [[Snowflake-Anatomy]] — the dendrite/catalogue discovery model
 - [[Widget-Maker]] — the staging engine and the render-surface corollary in
   practice
 - [[Widget-Bridge-Contract]] — the widget-side rules the corollary produces

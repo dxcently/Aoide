@@ -16,9 +16,9 @@
 #
 # Neither tarball carries a LICENSE file (only `info.json`'s
 # `license{title,spdx,url}`), so the two upstream texts are vendored
-# separately at `modules/facets/quickshell/icons/LICENSE-{iconoir,ph}` (the
-# facet directory that actually ships selected icons — §C2) and copied into
-# this derivation's `$out` from there, rather than fetched a second time.
+# separately in the shell source that actually ships selected icons
+# (`pkgs/lyra-shell/icons/LICENSE-{iconoir,ph}`) and copied into this
+# derivation's `$out` from there, rather than fetched a second time.
 #
 # `lib/pkgs.nix`'s walker auto-discovers any `pkgs/<name>/default.nix` with no
 # sibling `flake.nix` (confirmed against the `pkgs/eidolon`/`pkgs/kimi-code`
@@ -38,8 +38,8 @@ let
     url = "https://registry.npmjs.org/@iconify-json/ph/-/ph-1.2.2.tgz";
     hash = "sha256-46WCoEfZgp/H6IQsZg2AZeWY0baLtYy2jnWh8eWmFMw=";
   };
-  licenseIconoir = ../../modules/facets/quickshell/icons/LICENSE-iconoir;
-  licensePh = ../../modules/facets/quickshell/icons/LICENSE-ph;
+  licenseIconoir = ../lyra-shell/icons/LICENSE-iconoir;
+  licensePh = ../lyra-shell/icons/LICENSE-ph;
 in
 stdenvNoCC.mkDerivation {
   pname = "iconify-data";

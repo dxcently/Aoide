@@ -1,5 +1,5 @@
 # sonata's `powermenu` slot — hosted by shell.qml's `SurfaceSlot { slot:
-# "powermenu" }` (slots.md's wired table). `kind` absent → null: facet-
+# "powermenu" }` (slots.md's wired table). `kind` absent → null: shell-
 # anchored, never a declared registry entry.
 #
 # No `packages`: the actual reboot/shutdown action goes through

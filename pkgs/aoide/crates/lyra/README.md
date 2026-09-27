@@ -20,14 +20,16 @@ are core `aoide` identity, root `AGENTS.md`).
   coupled `onboard` (below).
 - `commands::onboard` — `lyra onboard` (P-I3, docs/architecture/ONBOARD.md):
   the nix half of the onboarding flow, reached only via `aoide onboard`'s
-  delegate spawn once `rice_bin()` resolves. Shells `nix eval --json
-  <checkout>#aoideOptions` (flake.nix/lib/options.nix — every `aoide.*`
-  option declared across `modules/{nucleus,facets,dendrites}`, derived, not
-  hand-listed) and renders `aoide.nix`: a nix module the user imports, every
-  option commented out at its default. Reruns over a previously-generated
-  file warn, back up to `<out>.bak`, and regenerate; a hand-written file at
-  the target path is refused, never overwritten. Never touches the user's
-  flake.
+  delegate spawn once `rice_bin()` resolves. Reads the SHIPPED
+  `share/lyra/aoide-options.json` (`fs::lyra_share_dir()`, which
+  `pkgs/lyra-songbook` builds from `lib/options.nix` — every `aoide.*` option
+  declared across `modules/{nucleus,dendrites}`, derived, not hand-listed) and
+  renders `aoide.nix`: a nix module the user imports, every option commented
+  out at its default. No `nix` and no checkout are needed: the file is the
+  eval, so it works from any cwd. Reruns over a
+  previously-generated file warn, back up to `<out>.bak`, and regenerate; a
+  hand-written file at the target path is refused, never overwritten. Never
+  touches the user's flake.
 - `run_lyra` — drives `aoide_protocol::door::run` with lyra's own registry/
   dispatcher and its own smaller `special` hook (`mcp serve --stdio`,
   `guide`/`schema`/`livery`/`secrets ask`/`pair ask`/`pair show` raw
@@ -133,7 +135,7 @@ are core `aoide` identity, root `AGENTS.md`).
   `state/stage/{sessions,projects,hooks,herald}.json` seeded from a named
   fixture set or a directory (falling back to empty-but-valid defaults
   while no fixture set has landed yet), and its own `run/qml/` — COPIES,
-  never symlinks into the checkout: one copy per facet `*.qml`, the facet's
+  never symlinks into the checkout: one copy per shell `*.qml`, the shell's
   resolved `icons/` tree (the canvas toolbar's Iconoir glyphs, `lyra icon
   resolve` output already in the checkout), one copied
   tree per non-`_`-prefixed song's `widgets/` dir (`stage_qml_copies`/
@@ -153,7 +155,7 @@ are core `aoide` identity, root `AGENTS.md`).
   the live dir from inside its own canvas) as a usage error. A running
   canvas (`preview.pid` live) blocks only a second LAUNCH on its root;
   `--no-launch` re-stages the copies and merges into the control file
-  while it stays up. Every OTHER facet-read stage file
+  while it stays up. Every OTHER lane-read stage file
   the isolated root needs merely to exist gets written too:
   `song/stage/mode.json` (`LiveryState.qml`'s own convention — `mode`,
   `song`, `stagingSong`, `since`) is REWRITTEN on every build and on
@@ -187,7 +189,7 @@ are core `aoide` identity, root `AGENTS.md`).
   elsewhere — the set the P2 canvas hot-reloads against). The child's env
   is rewritten (`AOIDE_ROOT`/`AOIDE_STATE_DIR`/`AOIDE_STAGE_DIR` repointed
   at the isolated root, `AOIDE_DAEMON_SOCKET` at a path that never exists
-  so no facet QML can reach the real `aoided` even bypassing a stub
+  so no lane QML can reach the real `aoided` even bypassing a stub
   bridge, and every widget-slot env override — `QS_STAGE`,
   `CONDUCTOR_WIDGET`, etc. — stripped) and `PR_SET_PDEATHSIG`-armed
   exactly like `commands::dialog_qml::spawn_quickshell`'s own discipline,
@@ -209,7 +211,7 @@ are core `aoide` identity, root `AGENTS.md`).
   canvas's own counterpart of `rice declare` (`commands/stubs.rs`,
   `Self-Ricing.md`'s stage-vs-commit split): it copies the previewed
   widget body (refusing a `widget` outside `run/qml/songs/` — never a
-  facet symlink) and, unless `liverySource` is exactly the preview's own
+  lane symlink) and, unless `liverySource` is exactly the preview's own
   song (its palette is already checkout truth), the resolved palette
   tiers (`palette`/`base16`/`bar`/`notif`/`window` only — every other
   authored key in the checkout's `livery.json` survives untouched, and
@@ -396,6 +398,6 @@ docs/architecture/ELEMENTS.md) renders a song's committed
 `elements/*/element.json` (non-QML rice targets — waybar, dunst, anything
 with a config file) into `run/elements/`. Never depends on
 `aoide-client`/`aoide-conductor` — no A2A client, no TUI; those stay
-core-only. May depend on Nix (`song::widgets`'s `nix eval`, and now
-`commands::onboard`'s own `nix eval`/`nix-instantiate` shell-outs) — the
+core-only. May depend on Nix (`song::widgets`'s `nix-instantiate` over the
+shipped generator) — the
 one binary allowed to (root `AGENTS.md`, "core is nix-independent").

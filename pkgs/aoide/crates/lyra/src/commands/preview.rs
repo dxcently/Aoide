@@ -9,7 +9,7 @@
 //! genuinely separate `quickshell -p <root>/run/qml/WidgetPreview.qml`
 //! against it, with `AOIDE_ROOT`/`AOIDE_STATE_DIR`/`AOIDE_STAGE_DIR`/
 //! `AOIDE_DAEMON_SOCKET` all repointed at that root on the CHILD's env
-//! only — `AOIDE_DAEMON_SOCKET` at a path that never exists, so no facet
+//! only — `AOIDE_DAEMON_SOCKET` at a path that never exists, so no lane
 //! QML can reach the real `aoided` even if a stub bridge were bypassed.
 //! `lyra preview set` edits that root's `preview.json` control document
 //! (widget, viewport, anchor, zoom, fixture, livery — the schema below)
@@ -35,6 +35,7 @@
 use crate::dispatch::Invocation;
 use crate::output::Outcome;
 use crate::registry::{arg, cmd, flag, Registry};
+use aoide_storage::fs::LYRA_SHELL_SRC;
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -46,7 +47,7 @@ pub fn register(r: &mut Registry) {
         args: [arg!("widget", "string", false, "Initial widget to preview: a bare slot name, `<song>/<slot>`, or an absolute songbook widgets/ path.")],
         flags: [
             flag!("song", "string", "Song whose default livery/widgets seed the preview (default \"sonata\")."),
-            flag!("fixture", "string", "Fixture set name under modules/facets/quickshell/preview/fixtures/, or a directory path (default \"many\")."),
+            flag!("fixture", "string", "Fixture set name under pkgs/lyra-shell/preview/fixtures/, or a directory path (default \"many\")."),
             flag!(
                 "livery",
                 "string",
@@ -123,7 +124,7 @@ const VIEWPORT_PRESETS: &[(&str, u32, u32)] = &[
     ("portrait", 1080, 1920),
 ];
 
-/// Env vars a facet's QML might already carry (a live `lyra` session's own
+/// Env vars a lane's QML might already carry (a live `lyra` session's own
 /// widget-slot overrides) that must never leak into the isolated canvas —
 /// the preview always renders the canvas's OWN `preview.json` choices, not
 /// whatever the shell happened to export.
@@ -677,13 +678,13 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
     let mut changed: Vec<String> = Vec::new();
 
     // ── widget body ─────────────────────────────────────
-    // Never declare a facet file or an out-of-songbook path -- only a
+    // Never declare a lane file or an out-of-songbook path -- only a
     // widget under `run/qml/songs/` (mirrors a real songbook's own
     // `<song>/widgets/`) is something `preview declare` has any business
     // copying back into the checkout. The prefix check alone is a STRING
     // match and nothing more: a `..`-laden field
-    // (`songs/demo/../../../../modules/facets/quickshell/qml/ShellBridge`)
-    // satisfies it while resolving to a facet file entirely outside any
+    // (`songs/demo/../../../../pkgs/lyra-shell/qml/ShellBridge`)
+    // satisfies it while resolving to a lane file entirely outside any
     // songbook -- so a `..` component is refused outright, and (the
     // structural check underneath the string one) the field's resolved
     // CHECKOUT file is required to land inside the real checkout songbook.
@@ -691,7 +692,7 @@ fn handle_preview_declare(inv: &Invocation) -> Outcome {
         return Outcome::usage(
             cmd,
             format!(
-                "`widget` (`{widget_field}`) is outside run/qml/songs/ -- `preview declare` only declares a song's own widget body, never a facet file"
+                "`widget` (`{widget_field}`) is outside run/qml/songs/ -- `preview declare` only declares a song's own widget body, never a lane file"
             ),
         );
     }
@@ -1168,7 +1169,7 @@ fn normalize_hex(s: &str) -> String {
 /// Synthesize a v0 livery container from a bare base16 scheme. The palette
 /// mapping — `bg=base00, fg=base05, accent=base0D, urgent=base08,
 /// hot=base0B` — is CONTRACTS.md §1's base16 column read in reverse, the
-/// mirror of `modules/facets/stylix/default.nix`'s `synthesisedScheme`
+/// mirror of `modules/dendrites/stylix.nix`'s `synthesisedScheme`
 /// (lines 77-105), which derives base16 FROM the palette in the opposite
 /// direction. `hot=base0B` is this reverse seam's own choice: stylix's
 /// forward mapping never emits a `hot` slot at all (`hot` is optional and
@@ -1268,9 +1269,9 @@ fn stage_livery(
         .map_err(|e| LiveryStageError::Error(format!("writing {}: {e}", dst.display())))
 }
 
-// ─────────────────────────── other facet stage files ───────────────────────────
+// ─────────────────────────── other lane stage files ───────────────────────────
 
-/// `ROOT/song/stage/mode.json` -- the facet QML's own rice-mode read
+/// `ROOT/song/stage/mode.json` -- the lane QML's own rice-mode read
 /// (`LiveryState.qml`, lines 216/267, and its callers all expect this file
 /// to exist). Rewritten UNCONDITIONALLY on every `lyra preview` build and
 /// on `preview set --song`: the canvas's mode is always "staging" of the
@@ -1293,7 +1294,7 @@ fn write_mode_json(root: &Path, song: &str) -> Result<(), String> {
         .map_err(|e| format!("writing {}: {e}", path.display()))
 }
 
-/// Every OTHER facet-read stage file a preview root needs merely to EXIST
+/// Every OTHER lane-read stage file a preview root needs merely to EXIST
 /// so its QML doesn't start with a parse warning on a missing file:
 /// `song/stage/cover.json` (`LiveryState.qml`/`AoideWallpaper.qml:32`),
 /// `song/stage/grimoire.json` (`GrimoireLedger`), and `state/usage.json`.
@@ -1309,7 +1310,7 @@ fn seed_static_stage_files(root: &Path) -> Result<(), String> {
     // workspace writes (`jq .schemaVersion` against the live
     // `grimoire.json`/`usage.json` both print `"0"`, matching
     // `SCHEMA_VERSION`'s own type here) -- a bare number would be a type
-    // mismatch against what these facets actually read on a real host.
+    // mismatch against what these paint lanes actually read on a real host.
     // `launches` is an OBJECT keyed by app id on both the live file and
     // `GrimoireLedger.qml:113`, never an array.
     seed_if_absent(
@@ -1354,9 +1355,7 @@ enum FixtureSource {
 
 fn fixtures_registry_dir(checkout: &Path) -> PathBuf {
     checkout
-        .join("modules")
-        .join("facets")
-        .join("quickshell")
+        .join(LYRA_SHELL_SRC)
         .join("preview")
         .join("fixtures")
 }
@@ -1482,9 +1481,9 @@ fn copy_tree_fresh(src_dir: &Path, dst_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// One copy per `*.qml` in `CHECKOUT/modules/facets/quickshell/qml/`,
-/// landing at `ROOT/run/qml/<file>.qml`, plus the facet's resolved icon
-/// assets (`CHECKOUT/modules/facets/quickshell/icons/` -> `ROOT/run/qml/
+/// One copy per `*.qml` in `CHECKOUT/pkgs/lyra-shell/qml/`,
+/// landing at `ROOT/run/qml/<file>.qml`, plus the shell's resolved icon
+/// assets (`CHECKOUT/pkgs/lyra-shell/icons/` -> `ROOT/run/qml/
 /// icons/`, the canvas toolbar's `Qt.resolvedUrl("icons/...")` source) —
 /// refreshed on every build, so a rebuild always reflects the checkout's
 /// CURRENT files. Icons are `lyra icon resolve` output already in the
@@ -1492,12 +1491,12 @@ fn copy_tree_fresh(src_dir: &Path, dst_dir: &Path) -> Result<(), String> {
 fn stage_qml_copies(checkout: &Path, run_qml_dir: &Path) -> Result<(), String> {
     std::fs::create_dir_all(run_qml_dir)
         .map_err(|e| format!("creating {}: {e}", run_qml_dir.display()))?;
-    let facet = checkout.join("modules").join("facets").join("quickshell");
-    let icons = facet.join("icons");
+    let shell = checkout.join(LYRA_SHELL_SRC);
+    let icons = shell.join("icons");
     if icons.is_dir() {
         copy_tree_fresh(&icons, &run_qml_dir.join("icons"))?;
     }
-    let src_dir = facet.join("qml");
+    let src_dir = shell.join("qml");
     let Ok(entries) = std::fs::read_dir(&src_dir) else {
         return Ok(());
     };
@@ -1542,28 +1541,42 @@ fn stage_song_copies(checkout: &Path, run_qml_songs: &Path) -> Result<(), String
 }
 
 /// `src -> dst` for every `watch` entry that has a copy under `ROOT/run/
-/// qml/` (a songbook widget file: `CHECKOUT/song/songbook/<s>/widgets/<rest>`
-/// -> `ROOT/run/qml/songs/<s>/<rest>`). The canvas rewrites each `dst` from
-/// its `src` before a reload; a watched file with no copy (a foreign path
-/// the canvas loads verbatim) has no entry.
+/// qml/`: a songbook widget file (`CHECKOUT/song/songbook/<s>/widgets/<rest>`
+/// -> `ROOT/run/qml/songs/<s>/<rest>`) or a shell file
+/// (`CHECKOUT/<LYRA_SHELL_SRC>/qml/<f>` -> `ROOT/run/qml/<f>`, the flat
+/// one-copy-per-`*.qml` [`stage_qml_copies`] writes — a watch entry nested
+/// deeper than the shell's qml dir has no copy and so no entry). The canvas
+/// rewrites each `dst` from its `src` before a reload; a watched file with no
+/// copy (a foreign path the canvas loads verbatim) has no entry.
 fn compute_stage_map(checkout: &Path, root: &Path, watch: &[String]) -> Map<String, Value> {
     let songbook = checkout.join("song").join("songbook");
+    let shell_qml = checkout.join(LYRA_SHELL_SRC).join("qml");
+    let run_qml = root.join("run").join("qml");
+    let comps_of = |rel: &Path| -> Vec<String> {
+        rel.components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect()
+    };
     let mut out = Map::new();
     for src in watch {
-        let Ok(rel) = Path::new(src).strip_prefix(&songbook) else {
+        let p = Path::new(src);
+        if let Ok(rel) = p.strip_prefix(&songbook) {
+            let comps = comps_of(rel);
+            if comps.len() >= 3 && comps[1] == "widgets" {
+                let dst = run_qml
+                    .join("songs")
+                    .join(&comps[0])
+                    .join(comps[2..].join("/"));
+                out.insert(src.clone(), json!(dst.to_string_lossy()));
+            }
+            continue;
+        }
+        let Ok(rel) = p.strip_prefix(&shell_qml) else {
             continue;
         };
-        let comps: Vec<String> = rel
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy().into_owned())
-            .collect();
-        if comps.len() >= 3 && comps[1] == "widgets" {
-            let dst = root
-                .join("run")
-                .join("qml")
-                .join("songs")
-                .join(&comps[0])
-                .join(comps[2..].join("/"));
+        let comps = comps_of(rel);
+        if comps.len() == 1 && rel.extension().and_then(|e| e.to_str()) == Some("qml") {
+            let dst = run_qml.join(&comps[0]);
             out.insert(src.clone(), json!(dst.to_string_lossy()));
         }
     }
@@ -1644,7 +1657,7 @@ fn map_widget(widget: &str, song: &str, checkout: &Path) -> String {
 /// absolute already (an out-of-songbook path `map_widget` passed through
 /// verbatim) is canonicalized directly; `songs/<s>/<rest>` maps to
 /// `CHECKOUT/song/songbook/<s>/widgets/<rest>`; any other relative
-/// spelling is a facet file, `CHECKOUT/modules/facets/quickshell/qml/
+/// spelling is a shell file, `CHECKOUT/pkgs/lyra-shell/qml/
 /// <rest>`. A `..` component is refused (`None`), as is a missing file --
 /// best-effort metadata for [`compute_watch_list`], never worth failing
 /// the whole build/merge over.
@@ -1665,9 +1678,7 @@ pub(crate) fn resolve_widget_abs(checkout: &Path, widget_field: &str) -> Option<
             .join(file)
     } else {
         checkout
-            .join("modules")
-            .join("facets")
-            .join("quickshell")
+            .join(LYRA_SHELL_SRC)
             .join("qml")
             .join(widget_field)
     };
@@ -1678,7 +1689,7 @@ pub(crate) fn resolve_widget_abs(checkout: &Path, widget_field: &str) -> Option<
 /// declare`): every `*.qml` under the CURRENT song's own
 /// `checkout/song/songbook/<song>/widgets/` (sorted), plus the previewed
 /// widget's own resolved file when it lives somewhere else -- a foreign
-/// song's widget, or a facet path passed in verbatim. Pure over an
+/// song's widget, or a lane path passed in verbatim. Pure over an
 /// already-resolved absolute widget path so it needs no env, no preview
 /// root, and no live filesystem beyond the two directories it's handed.
 fn compute_watch_list(checkout: &Path, song: &str, widget_abs: Option<&Path>) -> Vec<String> {
@@ -2022,18 +2033,18 @@ mod tests {
     }
     use std::collections::BTreeMap;
 
-    /// A fake CHECKOUT: `flake.nix`, a couple of facet qml files, two songs
+    /// A fake CHECKOUT: `flake.nix`, a couple of lane qml files, two songs
     /// (one with a `_`-prefixed shelved sibling that must be skipped).
     fn fake_checkout(dir: &Path) {
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(dir.join("flake.nix"), "{ }\n").unwrap();
 
-        let qml = dir.join("modules/facets/quickshell/qml");
+        let qml = dir.join(LYRA_SHELL_SRC).join("qml");
         std::fs::create_dir_all(&qml).unwrap();
         std::fs::write(qml.join("ShellBridge.qml"), "// bridge\n").unwrap();
         std::fs::write(qml.join("LiveryState.qml"), "// livery\n").unwrap();
         std::fs::write(qml.join("not-qml.txt"), "ignore me\n").unwrap();
-        let icons = dir.join("modules/facets/quickshell/icons/iconoir");
+        let icons = dir.join(LYRA_SHELL_SRC).join("icons").join("iconoir");
         std::fs::create_dir_all(&icons).unwrap();
         std::fs::write(icons.join("drag-hand-gesture.svg"), "<svg/>\n").unwrap();
 
@@ -2124,7 +2135,7 @@ mod tests {
             .is_symlink());
         assert_eq!(std::fs::read_to_string(&bridge).unwrap(), "// bridge\n");
         assert!(!run_qml_dir.join("not-qml.txt").exists());
-        // icon assets: the facet's resolved tree, copied beside the QML.
+        // icon assets: the lane's resolved tree, copied beside the QML.
         let icon = run_qml_dir.join("icons/iconoir/drag-hand-gesture.svg");
         assert!(!std::fs::symlink_metadata(&icon)
             .unwrap()
@@ -2166,7 +2177,7 @@ mod tests {
         .unwrap();
         assert_eq!(hooks, json!({}));
 
-        // the four other facet-read stage files exist -- LiveryState.qml
+        // the four other lane-read stage files exist -- LiveryState.qml
         // (mode.json/cover.json), AoideWallpaper.qml (cover.json),
         // GrimoireLedger (grimoire.json), and state/usage.json -- so none
         // of those components starts with a parse warning.
@@ -2662,7 +2673,7 @@ mod tests {
             ("root", root.to_str().unwrap()),
             (
                 "widget",
-                "demo/../../../../modules/facets/quickshell/qml/ShellBridge",
+                "demo/../../../../pkgs/lyra-shell/qml/ShellBridge",
             ),
         ]));
         assert_eq!(outcome.status, aoide_protocol::output::Status::Usage);
@@ -3093,9 +3104,9 @@ mod tests {
         // `..`-laden persisted `widget` field satisfies it while
         // canonicalizing, through a REAL `run/qml/songs/<song>` directory
         // symlink (what an older, symlinking root left behind), straight out
-        // to a facet file entirely outside any songbook. Reproduces the
-        // coordinator's own review shape (`demo/../../../../modules/facets/
-        // quickshell/qml/ShellBridge`; "sonata" stands in for "demo" here).
+        // to a lane file entirely outside any songbook. Reproduces the
+        // coordinator's own review shape (`demo/../../../../pkgs/lyra-shell/
+        // qml/ShellBridge`; "sonata" stands in for "demo" here).
         let base = scratch("declare_traversal_via_symlink");
         let checkout = base.join("checkout");
         fake_checkout(&checkout);
@@ -3111,7 +3122,7 @@ mod tests {
 
         write_seed_control(
             &root,
-            json!({"widget": "songs/sonata/../../../../modules/facets/quickshell/qml/ShellBridge.qml", "song": "sonata"}),
+            json!({"widget": format!("songs/sonata/../../../../{LYRA_SHELL_SRC}/qml/ShellBridge.qml"), "song": "sonata"}),
         );
 
         let outcome = with_flake_root(&checkout, || {
@@ -3122,7 +3133,7 @@ mod tests {
             !checkout
                 .join("song/songbook/sonata/widgets/ShellBridge.qml")
                 .exists(),
-            "must never copy a facet file into the songbook"
+            "must never copy a lane file into the songbook"
         );
     }
 
@@ -3172,7 +3183,7 @@ mod tests {
         // replaced by a copy, never written through.
         std::fs::create_dir_all(run_qml_dir.join("songs")).unwrap();
         std::os::unix::fs::symlink(
-            checkout.join("modules/facets/quickshell/qml/ShellBridge.qml"),
+            checkout.join(LYRA_SHELL_SRC).join("qml").join("ShellBridge.qml"),
             run_qml_dir.join("ShellBridge.qml"),
         )
         .unwrap();
@@ -3188,7 +3199,7 @@ mod tests {
         for (copy, original) in [
             (
                 run_qml_dir.join("ShellBridge.qml"),
-                checkout.join("modules/facets/quickshell/qml/ShellBridge.qml"),
+                checkout.join(LYRA_SHELL_SRC).join("qml").join("ShellBridge.qml"),
             ),
             (
                 run_qml_dir.join("songs/sonata/conductor.qml"),
@@ -3219,13 +3230,13 @@ mod tests {
     }
 
     #[test]
-    fn compute_stage_map_pairs_each_songbook_watch_entry_with_its_run_qml_copy() {
+    fn compute_stage_map_pairs_each_watch_entry_with_its_run_qml_copy() {
         let checkout = Path::new("/c");
         let root = Path::new("/r");
         let watch = vec![
             "/c/song/songbook/sonata/widgets/conductor.qml".to_string(),
             "/c/song/songbook/etude/widgets/parts/Knob.qml".to_string(),
-            "/c/modules/facets/quickshell/qml/ShellBridge.qml".to_string(),
+            format!("/c/{LYRA_SHELL_SRC}/qml/ShellBridge.qml"),
             "/elsewhere/foreign.qml".to_string(),
         ];
         let map = compute_stage_map(checkout, root, &watch);
@@ -3234,8 +3245,45 @@ mod tests {
             json!({
                 "/c/song/songbook/sonata/widgets/conductor.qml": "/r/run/qml/songs/sonata/conductor.qml",
                 "/c/song/songbook/etude/widgets/parts/Knob.qml": "/r/run/qml/songs/etude/parts/Knob.qml",
+                "/c/pkgs/lyra-shell/qml/ShellBridge.qml": "/r/run/qml/ShellBridge.qml",
             })
         );
+    }
+
+    /// The shell arm's `src` set is the shell's qml dir's OWN direct children
+    /// — nothing else may enter, and the songbook arm keeps claiming every
+    /// songbook path (a songbook path that contains the shell prefix still
+    /// belongs to the songbook arm; `stage_song_copies` mirrors it under
+    /// `songs/`, which is where its own `import "../.."` expects to be).
+    #[test]
+    fn compute_stage_map_songbook_arm_is_unaffected_by_the_shell_arm() {
+        let checkout = Path::new("/c");
+        let root = Path::new("/r");
+        let songbook_widget = "/c/song/songbook/sonata/widgets/conductor.qml";
+        let songbook_lookalike =
+            format!("/c/song/songbook/sonata/widgets/{LYRA_SHELL_SRC}/qml/ShellBridge.qml");
+        let nested_shell = format!("/c/{LYRA_SHELL_SRC}/qml/songs/etude/widgets/Knob.qml");
+        let not_qml = format!("/c/{LYRA_SHELL_SRC}/qml/slots.md");
+        let watch = vec![
+            songbook_widget.to_string(),
+            songbook_lookalike.clone(),
+            nested_shell.clone(),
+            not_qml.clone(),
+        ];
+        let map = compute_stage_map(checkout, root, &watch);
+        assert_eq!(map.len(), 2);
+        assert_eq!(
+            map.get(songbook_widget),
+            Some(&json!("/r/run/qml/songs/sonata/conductor.qml"))
+        );
+        assert_eq!(
+            map.get(&songbook_lookalike),
+            Some(&json!(
+                "/r/run/qml/songs/sonata/pkgs/lyra-shell/qml/ShellBridge.qml"
+            ))
+        );
+        assert!(!map.contains_key(&nested_shell));
+        assert!(!map.contains_key(&not_qml));
     }
 
     #[test]
@@ -3250,12 +3298,12 @@ mod tests {
         );
         assert_eq!(
             resolve_widget_abs(&checkout, "ShellBridge.qml"),
-            Some(real.join("modules/facets/quickshell/qml/ShellBridge.qml"))
+            Some(real.join(LYRA_SHELL_SRC).join("qml").join("ShellBridge.qml"))
         );
         assert_eq!(
             resolve_widget_abs(
                 &checkout,
-                "songs/sonata/../../../modules/facets/quickshell/qml/ShellBridge.qml"
+                &format!("songs/sonata/../../../{LYRA_SHELL_SRC}/qml/ShellBridge.qml")
             ),
             None
         );

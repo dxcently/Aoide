@@ -1,22 +1,99 @@
 # modules/dendrites
 
-Optional, additive host capabilities — every dendrite self-gates on its own
-`aoide.<name>.enable` and is named once, in `default.nix`, by the directory
-that holds it. Today's set spans desktop apps (firefox, obsidian, qbittorrent,
-kitty), CLI tooling (git, yazi, starship, mcfly, nh), agent and desktop AI
-tooling (claude-code, eidolon, kimi-code, pi-coding-agent, OpenAI Codex + ChatGPT),
-local model-serving tooling (inference: Ollama + llama.cpp), and system
-services (dunst, networkmanager, audio).
+Optional, additive host capabilities. A dendrite is one file (or a directory
+with `default.nix`), named once in `modules/default.nix`'s catalogue, and it
+self-gates on its own `aoide.<name>.enable`. Today's set spans desktop apps
+(firefox, obsidian, qbittorrent, kitty), CLI tooling (git, yazi, starship,
+mcfly, nh), agent and desktop AI tooling (claude-code, eidolon, kimi-code,
+pi-coding-agent, OpenAI Codex + ChatGPT), local model-serving tooling
+(inference: Ollama + llama.cpp), system services (dunst, networkmanager,
+audio), and **the paint lanes** — what makes a machine paint at all:
+`compositor` (with its `hyprland` provider), `greeter`, `stylix`, `quickshell`
+(the shell runtime: the package and the one `aoide-quickshell` service) and
+`lyra` (the Quickshell surface, its shellbridge, and the song-gated deploy
+half). A paint lane reads only what root `AGENTS.md` house rule 5 lists; its
+`body` is guarded on a FACT that nucleus declares rather than on an option it
+declares itself, so a consumer can ask "is there a shell here?" without reading
+the lane that made one.
+
+## The shape (CONTRACTS.md §2, v1)
+
+Each file evaluates to a lane record — `body` (the module itself) plus the
+lanes it answers for:
+
+```
+modules/dendrites/kitty.nix
+├── body   : { config, lib, ... }: { options.aoide.kitty.enable = …; config = mkIf …; }
+└── nixos  : { imports = [ body ]; config.aoide.kitty.enable = mkDefault true; }
+```
+
+Why both: a host that takes the whole tree merges every `body` (through
+`modules/dendrites/default.nix`), and a host the constructor assembles
+(`lib/composition.nix`) imports only the `nixos` lane of what it selected.
+The two are MUTUALLY EXCLUSIVE in one module list — both import the same
+`body`, so `aoide.<name>.enable` would be declared twice and nixpkgs throws
+`already declared` rather than merging. Take the aggregate and select
+nothing, or select through the catalogue and leave the aggregate out;
+`mkNixosModules` refuses the pair by name.
+Every dendrite's lane is `nixos`, because each writes its Home Manager
+configuration from the NixOS side. A dendrite carries its OWN dependencies in
+the lane that needs them: the `stylix` lane imports the Stylix NixOS module,
+so no other file has to know the lane exists.
+
+## The shell lane (`quickshell.nix`) and the seam with `lyra`
+
+The shell runtime is two files, split by what each one knows:
+
+```
+quickshell.nix    the PACKAGE, and the one `aoide-quickshell` user service.
+                  Knows no song, deploys nothing: it starts a shell on the
+                  directory `aoide.quickshell.config` names and stops there.
+lyra/             the SURFACE. Builds the QML tree from `pkgs/lyra-shell` plus
+                  the built-in songs' `widgets/`, deploys it, seeds the stage,
+                  restarts the rice, watches it (healthcheck), owns shellbridge
+                  and the `aoide.surfaces` registry.
+```
+
+They never name each other. `lyra` sets the fact `aoide.quickshell.config` to
+its deployed runtime root (`$AOIDE_ROOT/run/qml`); the shell lane reads that
+fact, owns `aoide.quickshell.enable` and starts the service. Each side is
+removable without a trace on the other, and the shell keeps running the day a
+different lane (or a host) supplies the directory instead.
+
+**The two allowed shapes of Quickshell without lyra** — no song, no QML tree,
+no rice binary:
+
+| Shape | How | What runs |
+|---|---|---|
+| own config | the host sets `aoide.quickshell.config` to its own config directory (a store path or a host path) | the package, plus `aoide-quickshell` on that directory, plus the graphical-session anchor `aoided` needs |
+| bare | nothing sets it (`null`, the default) | the package only: no service, no session claim |
+
+The service is gated on the config, never on `aoide.song` — a shell that paints
+a host's own config has no song and starts exactly the same way. What is
+song-gated is `lyra`'s half: deploy, seed, restart.
 
 ## Named seams (what it exposes)
 
 - One file per capability, each declaring `aoide.<name>.enable` (default
-  `false`) and carrying its own package/service dependencies.
+  `false`) and carrying its own package/service dependencies. A paint lane
+  instead guards on the fact of the same name, declared once in
+  `modules/nucleus/options.nix`.
+- A capability with ALTERNATIVES is a provider registry: a directory whose
+  `default.nix` is `{ providers.<p> = <path>; }`, each provider a lane record
+  of its own (see `compositor/README.md`). The catalogue names the directory.
+- `default.nix` — this directory's whole-tree aggregate. It names no dendrite:
+  its imports are DERIVED from the catalogue
+  (`builtins.attrValues (import ../default.nix).catalogue`) in attribute-name
+  order — the `LC_ALL=C` order the catalogue is written in — so a dendrite added
+  or shelved by its catalogue line needs no edit here. A provider registry
+  contributes EVERY alternative's `body`: taking the whole tree means taking
+  every alternative, and the constructor is the one place exactly one is
+  chosen.
 - `_example.nix` — the checked-in template: shelved by its `_` prefix
-  (never listed in `default.nix`), documents the v0 dendrite shape and the
-  enable-with-one-line-in-`hosts/`convention.
+  (uncatalogued, so nothing imports it), showing the v1 lane record and the
+  enable-with-one-line convention.
 - A dendrite that draws (e.g. `dunst.nix`'s notification popups) hands off
-  to a facet-owned surface via a bridge (a CLI command, a stage file) rather
+  to a render surface via a bridge (a CLI command, a stage file) rather
   than drawing itself — `dunst.nix` pipes through `aoide herald push` into
   `state/stage/herald.json`, which the Quickshell herald widget reads.
 
@@ -31,11 +108,18 @@ no GPU override. Neither package needs `allowUnfree` (both MIT).
 
 `config.aoide.*` options it declares itself, plus stock NixOS/Home-Manager
 options. A dendrite reads no other module's internals — not even another
-dendrite's.
+dendrite's. A paint dendrite reads the dress (`aoide.livery`), the structure
+(`aoide.arrangement`), the surface registry (`aoide.surfaces`), the identity
+scalars and its own fact; nothing else (root `AGENTS.md` house rule 5).
 
 ## How it composes
 
-`hosts/<host>/default.nix` opts a host into a dendrite with one line
-(`aoide.<name>.enable = true`). Dendrites know nothing about hosts; hosts
-know dendrites. A tool graduates from a shared file (e.g. `devtools.nix`)
-into its own dendrite the moment a host needs to toggle it independently.
+A host selects a dendrite by name — one line in `hosts/<host>/default.nix`
+(`aoide.<name>.enable = true`) in the full tree, or the same name in an
+aggregation's `members` once the constructor assembles the host. Dendrites
+know nothing about hosts; hosts know dendrites. A tool graduates from a shared
+file (e.g. `devtools.nix`) into its own dendrite the moment a host needs to
+toggle it independently. The paint lanes with more than one file carry their own
+directories and charters (`compositor/README.md`, `lyra/README.md`); the
+one-file lanes — `greeter.nix`, `stylix.nix`, `quickshell.nix` — are charted
+here, above.

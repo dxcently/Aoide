@@ -1,5 +1,5 @@
 # fugue's `herald` slot — the notification popup, hosted by shell.qml's
-# `SurfaceSlot { slot: "herald" }`. `kind` absent → null: facet-anchored,
+# `SurfaceSlot { slot: "herald" }`. `kind` absent → null: shell-anchored,
 # never a declared `arrangement.widgets` entry.
 #
 # `dependsOn`: absent. herald.qml declares `required property var livery` and

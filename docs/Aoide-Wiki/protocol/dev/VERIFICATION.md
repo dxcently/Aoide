@@ -26,7 +26,7 @@ sudo <toplevel>/bin/switch-to-configuration switch
 hyprctl reload                                     # compositor rules
 systemctl --user restart aoide-quickshell.service  # bar / dock / gadgets
 lyra rice stage <song>                             # livery hot-reload
-qs -p modules/facets/quickshell/qml/shell.qml      # QML parse check
+qs -p pkgs/lyra-shell/qml/shell.qml               # QML parse check
 
 # show — capture through lyra, never bare grim
 lyra screen shot                                   # full layout + JSON sidecar

@@ -10,7 +10,7 @@ tags: [aoide, livery, theming, base16]
 `livery` is Aoide's **design-token layer**: one name for both the values and
 the act of stamping them. The same word names the native engine that
 validates, resolves, and emits the tokens. A song authors `aoide.livery.*`;
-facets read `aoide.livery` and nothing else; the runtime seam is
+the paint lanes read `aoide.livery` and nothing else; the runtime seam is
 `stage/livery.json`. Naming rationale lives in [[Lexicon]].
 
 The livery merge (LIVERY-MERGE.md) ported the standalone Node engine into
@@ -25,7 +25,7 @@ livery is where the frozen nix layer and the live desktop meet: values
 frozen into the crystal, sounded at runtime. The container stays W3C
 design-tokens format; livery is Aoide's name for what fills it.
 
-Every facet consumes livery and nothing else. No module reads another
+Every paint lane consumes livery and nothing else. No module reads another
 module. The coupling discipline is contractual, not polite.
 
 ## Two fan-outs, one source
@@ -44,8 +44,8 @@ live side.
 Because both fan-outs derive from the same livery values, staged state and
 adopted state cannot diverge. This is the "zero drift" guarantee. Beyond
 `rice stage`/`cover set` writing `stage/livery.json` live (while `rice mode
-staging` allows it — see [[Self-Ricing#Staging vs Declarative Mode]]), the quickshell
-facet's `home.activation.aoideSeedStage` reasserts it from the active song's
+staging` allows it — see [[Self-Ricing#Staging vs Declarative Mode]]), the lyra
+lane's `home.activation.aoideSeedStage` reasserts it from the active song's
 committed `song/songbook/<song>/livery.json` on every activation (see
 [[Codebase#Runtime contracts (socket + stage files)]]), through
 `lib/livery.nix`'s `stagePatch` — the same `aoide.livery.override` venue
@@ -81,7 +81,7 @@ The palette tier is closed.
 compositor's shape values: `gapsOut`, `gapsIn`, `borderSize`, `rounding`,
 `blurEnabled`, `blurSize`, `blurPasses` — every field `nullOr`, so a song
 that sets none of them yields the same `hyprland.conf` as one that omits the
-block entirely. The compositor facet (`modules/facets/compositor/default.nix`)
+block entirely. The compositor lane (`modules/dendrites/compositor/hyprland/default.nix`)
 reads the tier directly and falls back field-by-field to its own opinionated
 defaults (`8`/`6`/`2`/`0`/`true`/`8`/`3`) for anything unset. This tier sits
 outside the engine's own schema — it is never validated by `livery lint`,
@@ -119,7 +119,7 @@ no new crate, no Node toolchain. What moved, in place:
   the generalization proof; `gtk`/`gsettings` host-mutating apply stays
   deferred to the `management` seam.
 
-The resolver is the same fallback the nix facets apply independently for the
+The resolver is the same fallback the nix paint lanes apply independently for the
 baked side ([[Stylix]], compositor) — identical rules, so both fan-outs agree
 and staged and adopted state cannot diverge. Pure emit vs. host apply stays
 split: the emitters only produce bytes; `live::apply_live` /
@@ -187,7 +187,7 @@ shape is unchanged; the update playbook records the namespace/file rename.
 
 ## Stylix overlap resolution
 
-The [[Quickshell]] facet declares the surfaces it owns; [[Stylix]] disables
+The [[Quickshell]] lane declares the surfaces it owns; [[Stylix]] disables
 derivation for those surfaces from that declaration. The flake's `checks`
 assert that no surface has two owners. They fail eval if any module reads
 `song/` runtime paths at build time — `stage/` can never become load-bearing

@@ -16,21 +16,30 @@ recorded here because every contract in this file is downstream of it.
 
 **Everything is a plugin.** A capability enters Aoide by *existing* at a
 conventional path, declaring what it needs by *name*, and being removable
-without a trace. Nothing enters by being named from outside its own
-directory.
+without a trace: delete the file and its one catalogue line, and nothing else
+in the tree knows it was there. That line — in `modules/default.nix`'s
+catalogue — is the only place a module file is named.
 
-The repo already runs this way and did before it had a name for it: every
-module directory carries a `default.nix` naming its own files, so **adding a
-capability is a new file and one line in the directory that holds it**
-(`modules/dendrites/`, `modules/facets/`, `modules/nucleus/`); `lib/walk.nix`
-still discovers `pkgs/*` and `song/songbook/*/rice.nix` the same way (§2,
-§5). Each of those modules
+The repo already runs this way and did before it had a name for it. A dendrite
+is one file (or one directory) plus **one catalogue line** — the whole-tree
+aggregate derives its imports from that catalogue, so no second list follows it.
+`lib/pkgs.nix` discovers `pkgs/*`, and `lib/songbook.nix`'s `discover` finds
+`song/songbook/<song>/` — each a directory's one typed scan (§2, §5) — the same
+way. `lib/walk.nix` is gone: a host imports what it selected, and the check that
+catches a stray `.nix` in a song folder reads the directory itself. `modules/nucleus/default.nix`
+names its own files in directory order: it is the unconditional core, so a layer
+nothing selects has no name to be reached by, and its one line per file is what
+puts them in the tree. Each of those modules
 self-gates on its own `enable`/`aoide.song` rather than being switched on from
 outside. A widget resolves through `StagingEngine.resolveSong(song, slot)` — by
 slot *name*, falling back to sonata — so no surface ever imports a concrete
-widget (§5). Facets read only the closed namespace whitelist house rule 5
-enumerates (`AGENTS.md` owns the list): named services, never another
-module's internals.
+widget (§5). Paint dendrites read only the closed namespace whitelist house
+rule 5 enumerates (`AGENTS.md` owns the list): named services, never another
+module's internals. The catalogue is also what the selection constructor reads:
+`lib/composition.nix` (exported as `lib.composition`) resolves a host's
+selection in a pass that runs before any module graph exists and imports only
+what that pass kept — a provider registry resolves to the alternative the host
+named, and a file nothing selected is never read.
 
 Two names for the halves, taken from **Cordis** — *A Programming Paradigm for
 Spatiotemporal Composability* (Shi, Zhang & Cui; preprint 2026-08-13,
@@ -51,15 +60,47 @@ This is Nix's own thesis (declarative, additive, atomically reversible) applied
 above the nix layer, and it is why the three doors — CLI, MCP, and A2A — are
 one implementation with three façades rather than three features.
 
-**What it forbids, concretely:** a registry an author must edit to be seen; a
+**What it forbids, concretely:** a second place a module file is named; a
 module reaching into another module; a capability that only exists inside one
 consumer; an effect with no inverse. When a design choice is open, take the one
 that can be deleted.
 
+### Enable facts — how a lane reaches nucleus
+
+A lane cannot be read (first rule above), so the one question every layer has to
+ask — *is there a shell / a session on this host?* — is answered by a FACT that
+nucleus declares once, in `modules/nucleus/options.nix`. Each `enable` fact
+defaults `false`; `aoide.quickshell.config` defaults `null`:
+
+| Fact | What it means | Set by |
+|---|---|---|
+| `aoide.quickshell.enable` | a Quickshell shell surface exists here | the lane that runs one (`dendrites/quickshell.nix` — the package and the `aoide-quickshell` service) |
+| `aoide.quickshell.config` (`nullOr str`, `null`) | the directory a shell runs; `null` is the bare case — package installed, no shell service | whoever supplies one: a lane, or the host |
+| `aoide.lyra.enable` | the paint/rice binary is installed (`pkgs.aoide.rice`) | the lane that paints (`dendrites/lyra`) |
+| `aoide.stylix.enable` | the theme is baked at build time, painted by nix | the stylix lane (`dendrites/stylix.nix`) |
+| `aoide.compositor.enable` | a Wayland compositor is started here | the compositor lane (`dendrites/compositor`) |
+| `aoide.greeter.enable` | a display-manager greeter comes up on this host's tty | the greeter lane (`dendrites/greeter.nix`) |
+
+The lane that owns a fact sets it `mkDefault true` while it is on, so a host
+that flips it back off still wins. Every reader then reads the FACT — never the
+owning lane's own option, and never through one lane to reach another. That is
+the one place house rule 5 must hold in both directions at once: nucleus
+plumbing (`modules/nucleus/secrets.nix`) and sibling lanes alike need to know
+whether a session exists, and neither may name the lane that made one. A lane
+reading a fact is reading nucleus's own declaration rather than another
+module's internals; which of these names a *paint dendrite* may read is whatever
+`AGENTS.md` rule 5's list currently enumerates.
+
+`aoide.sessionTarget` is the same seam answering a different question — *which
+target does `aoided` anchor to?* It is declared in the core half
+(`pkgs/aoide/module/options.nix`), defaults to `default.target`, and a painting
+lane sets it to `graphical-session.target`; the unit that reads it never learns
+which lane did.
+
 ### The corollary for Quickshell: render surfaces only
 
 **Quickshell paints; it never *is* the capability.** Every QML file in
-`modules/facets/quickshell/` and `song/songbook/*/widgets/` is a render surface
+`modules/dendrites/lyra/` and `song/songbook/*/widgets/` is a render surface
 that picks up an agnostic bridge or API by name. State, policy, IPC and system
 access live behind a bridge (a CLI command, a stage file in §4, an IPC socket) that
 is reachable **with only a shell**.
@@ -74,15 +115,15 @@ the reverse, and never only in QML. A surface may read, arrange, animate and
 draw; it may not own the only copy of a fact, shell out to do work a command should
 do, or decide policy.
 
-#### The paint test — facet QML vs song QML
+#### The paint test — lane QML vs song QML
 
 The terminal test above decides **bridge vs QML**. This second test decides
-where a file that already passed it lives: the facet keeps agnostic bridges and
-APIs, the song keeps everything that paints (§5). **The facet is not a component
+where a file that already passed it lives: the lane keeps agnostic bridges and
+APIs, the song keeps everything that paints (§5). **A lane is not a component
 library** — a shared visual component's home is the song's `widgets/` dir under
-an uppercase name, not `modules/facets/quickshell/qml/`.
+an uppercase name, not `pkgs/lyra-shell/qml/`.
 
-> A file stays in `modules/facets/quickshell/qml/` **iff all three are YES**:
+> A file stays in `pkgs/lyra-shell/qml/` **iff all three are YES**:
 >
 > 1. **Song-blind.** Does the file name zero aesthetic decisions? Reading
 >    `livery.paletteFg` is fine — that is picking up an API. *Deciding* that a
@@ -100,25 +141,25 @@ an uppercase name, not `modules/facets/quickshell/qml/`.
 >
 > **Tie-breaker**, when an agent honestly cannot call question 2: *would a
 > reviewer file this file's diff under "design change"?* If yes, it is song. A
-> facet file's diff is always a mechanism change.
+> lane file's diff is always a mechanism change.
 >
 > **What the test is not.** It is not "does it paint" — `WidgetSlot` is an
-> `Item` and `SurfaceSlot` hosts a `PanelWindow`, and both are facet. It is not
+> `Item` and `SurfaceSlot` hosts a `PanelWindow`, and both are lane. It is not
 > "is it a `QtObject`" — `MoodFaces` and `MorphState` are `QtObject`s and both
 > are song. It is not line count — `AudioColonnade` is 1940 lines of song and
-> `AoideIpc` is 24 lines of facet. It is not "is it shared" — shared across
-> *widgets* is not shared across *songs*, and only the second earns a facet home.
+> `AoideIpc` is 24 lines of lane. It is not "is it shared" — shared across
+> *widgets* is not shared across *songs*, and only the second earns a lane home.
 >
-> **The corollary for a new API**: a new capability lands as a facet bridge that
+> **The corollary for a new API**: a new capability lands as a lane bridge that
 > answers **with data**, never with a component to instantiate, and the song
-> picks it up by name. Concretely: a facet bridge exposes `paletteAccent`; it
+> picks it up by name. Concretely: a lane bridge exposes `paletteAccent`; it
 > does not expose `ctxBar()`. If the natural shape of the new thing is "a
 > component every widget instantiates", it is not an API — it is a song helper,
 > and it goes in `widgets/` with an uppercase name.
 
 Question 3 is the load-bearing one, and it is where every genuine argument in
 this tree lives. The same text sits in
-`modules/facets/quickshell/qml/slots.md` — one wording, two homes, because a
+`pkgs/lyra-shell/qml/slots.md` — one wording, two homes, because a
 ricing agent reading about where to put a helper is exactly the agent who needs
 the rule.
 
@@ -169,7 +210,7 @@ validator; the option type is a permissive gate only.
 
 Additive-optional (same status as the base16 tier): every field is `nullOr`,
 defaulting to `null`. A notes file with no `geometry` block behaves exactly
-as before — the compositor facet applies the fallback, not the option
+as before — the compositor lane applies the fallback, not the option
 system. Rides `song/stage/livery.json` for live application: `lyra rice
 stage` live-applies this tier (plus `window.border`/`borderInactive`) via
 best-effort, guarded `hyprctl keyword` calls — see §4's staged-geometry
@@ -194,10 +235,10 @@ unaffected by this tier.
 
 | Key         | Type            | Default | Falls back to                          |
 | ----------- | --------------- | ------- | -------------------------------------- |
-| `wallpaper` | `nullOr path`   | `null`  | facet's deterministic solid-colour PNG |
+| `wallpaper` | `nullOr path`   | `null`  | the stylix lane's deterministic solid-colour PNG |
 
 A literal nix path (copied to the store — never a `song/` runtime read). The
-stylix facet bakes it as the base-context image; `null` bakes the solid-colour
+the stylix lane bakes it as the base-context image; `null` bakes the solid-colour
 fallback derived from `palette.bg`.
 
 ### Override tier (v0 additive — venue recolour, `override.*`)
@@ -245,38 +286,79 @@ and `livery.json` from v0 to v1 when the design-system workstream lands v1.
 
 ---
 
-## 2. Dendrite shape — **v0**
+## 2. Dendrite shape — **v1**
 
-A dendrite is a module named in `modules/dendrites/default.nix` that guards
-its `config` on a per-feature or role flag. Discovery imports the file; gating
-decides activation (dxflake pattern, verbatim).
+A dendrite is one file (or a directory with `default.nix`) at
+`modules/dendrites/<name>`, named once in `modules/default.nix`'s catalogue.
+**v1 is the lane record**: the file evaluates to a plain attribute set naming the
+module that declares the capability (`body`) and the lanes it answers for
+(`nixos`, `homeManager`, `darwin`). v1 carries no migration note — this repo is
+the shape's only consumer, and dxflake pins its own revision rather than
+following this one.
 
 ```nix
 # modules/dendrites/<name>.nix
-{ config, lib, ... }:
+let
+  body =
+    { config, lib, ... }:
+    {
+      options.aoide.<name>.enable = lib.mkEnableOption "<name>";
+      config = lib.mkIf config.aoide.<name>.enable {
+        # a dendrite carries its own dependencies (narrowest scope wins)
+      };
+    };
+in
 {
-  options.aoide.<name>.enable = lib.mkEnableOption "<name>";
-  config = lib.mkIf config.aoide.<name>.enable {
-    # a dendrite carries its own dependencies (narrowest scope wins)
-  };
+  inherit body;
+
+  nixos =
+    { lib, ... }:
+    {
+      imports = [ body ];
+      config.aoide.<name>.enable = lib.mkDefault true;
+    };
 }
 ```
 
+`body` is the module: it declares the options and guards the config. The
+`nixos` lane imports `body` and sets the flag `mkDefault true`, so selecting
+the dendrite for the system is what turns the capability on. The constructor
+(`lib/composition.nix`) imports the lane of what a host selected and nothing
+else; `modules/dendrites/default.nix` imports every `body`, which is how a
+host taking the whole tree still sees each `aoide.<name>.*` option.
+
+Those two are **mutually exclusive in one module list**. An aggregate `body` and
+a selected lane's `body` are the same declarations arriving twice, which nixpkgs
+throws on (`already declared`) rather than merging; `mkNixosModules` refuses the
+pair by name before the platform pass runs. Take the whole tree and select
+nothing, or select through the catalogue and leave the aggregate out.
+
 Rules:
 
-- **Guard on `aoide.<name>.enable`** (per-feature) or an aggregation/role flag.
+- **Guard on `aoide.<name>.enable`** (per-feature) or an aggregation/role flag,
+  in `body`.
+- **A capability with alternatives is a provider registry** — a directory
+  whose file is `{ providers.<p> = <path>; }` — and its catalogue entry is the
+  directory, not a provider file.
 - **A dendrite never reads another module** — only `config.aoide.*` options it
   declares itself, plus stock NixOS options.
-- **Growth is additive**: new dendrites are new files; upstream merges stay
-  conflict-free by construction.
+- **Growth is additive**: a new dendrite is a new file plus one catalogue line,
+  and that line is the only place the file is named — the whole-tree aggregate
+  derives its imports from it. Upstream merges stay conflict-free by
+  construction.
 - **Shelving opt-out**: prefix a filename with `_` (`_wip.nix`) — a
-  `_`-prefixed file is not listed in `default.nix` and so is not a module,
-  shelved without being deleted. Any path containing `/_` is skipped.
+  `_`-prefixed file is not catalogued and so is not a module, shelved without
+  being deleted. Any path containing `/_` is skipped.
 - Subfolders under `modules/dendrites/` are grouping only; a file inside one
-  still needs its own line in `modules/dendrites/default.nix` to be a module.
+  still needs its own catalogue line to be selectable.
 
-Facets (`modules/facets/`) are the same shape but MAY read `aoide.livery` and
-MAY declare `aoide.surfaces.<name>.owner` — they read no other module.
+A paint dendrite is a lane record like any other, and its `nixos` half is what
+sets its fact `mkDefault true`. Its guard is the FACT `modules/nucleus`
+declares (`aoide.<name>.enable`), not an option it declares itself: the
+cross-lane seam exists so that a consumer can ask "is there a shell here?"
+without reading the lane that made one. What it may read is exactly what root
+`AGENTS.md` house rule 5 enumerates — by reference, never restated here, so the
+two cannot drift.
 
 ### Repo shape (the root is closed)
 
@@ -286,7 +368,7 @@ its designated place** — never a new root entry:
 - covers (wallpapers) → `song/songbook/<song>/assets/`
 - chimes (sounds) → `song/songbook/<song>/sounds/`
 - per-song assets → `song/songbook/<song>/`
-- module assets → next to their module, as a directory dendrite/facet
+- module assets → next to their module, as a directory dendrite or provider dir
 
 Content paths are looked up in the Song Map (`concepts/Song-Vocabulary` in the
 wiki). Creating a new **closed** root entry is a **contract change**, not a
@@ -302,21 +384,28 @@ glob, not a literal entry:
 ```
 AGENTS.md        closed-file
 .claude          closed-dir
+CLAUDE.md        closed-file
 CONTRACTS.md     closed-file
 docs             closed-dir
+evals            closed-dir
 flake.lock       closed-file
 flake.nix        closed-file
 .git             closed-dir
 .gitignore       closed-file
 hosts            closed-dir
 lib              closed-dir
+LICENSE          closed-file
 modules          closed-dir
 pkgs             closed-dir
 README.md        closed-file
 song             closed-dir
 statix.toml      closed-file
+templates        closed-dir
+tests            closed-dir
+users            closed-dir
 .pi              runtime-dir
 .pi-subagents    runtime-dir
+evidence         runtime-dir
 log              runtime-file
 run              runtime-dir
 state            runtime-dir
@@ -324,10 +413,12 @@ result*          clutter-symlink
 ```
 
 `runtime-*` entries: `.pi/` and `.pi-subagents/` (pi / subagent session
-runtime), `log` (content-pipeline + audit runtime, newline-delimited JSON —
-a **file**, not a directory), `state/` (account/usage runtime, e.g.
-`state/usage.json`), and `run/` (the deployed Quickshell tree rsynced from
-the store by home-manager, `modules/facets/quickshell/default.nix`). All are
+runtime), `evidence/` (Lyra preview and screenshot captures, regenerated by the
+suites that take them — runtime-only, absent from disk today), `log`
+(content-pipeline + audit runtime, newline-
+delimited JSON — a **file**, not a directory), `state/` (account/usage runtime,
+e.g. `state/usage.json`), and `run/` (the deployed Quickshell tree rsynced from
+the store by home-manager, `modules/dendrites/lyra/default.nix`). All are
 disposable and never committed. `.gitignore` also reserves `catalog/` and
 `index/` for the same content-pipeline runtime; neither exists on disk today.
 
@@ -349,14 +440,15 @@ untracked both).
 ### Package shape (`pkgs/` is walked too)
 
 `pkgs/` self-registers by the same walk `song/songbook/` still uses
-(`modules/` self-registers through its own `default.nix` aggregates
-instead). Drop
+(`modules/` self-registers through the catalogue instead — one line per
+dendrite, which the whole-tree aggregate derives over — and
+`modules/nucleus/` through its own `default.nix`). Drop
 `pkgs/<name>/default.nix` — a `callPackage`-able derivation taking standard
 nixpkgs args — and `lib/pkgs.nix` (the packages walker) discovers it into **all
 four** consumers from one source:
 
 - the flake `packages.<system>.<name>` output,
-- the host overlay (`lib/mkHost.nix` → `pkgs.<name>` inside every module),
+- the host overlay (`lib/aoideos.nix`'s constructor, over `lib/pkgs.nix` → `pkgs.<name>` inside every module),
 - the vm overlay (`tests/vm-boot.nix` — literally the same import), and
 - a `pkg-<name>` flake check that builds it.
 
@@ -868,7 +960,7 @@ first when a node is still there to receive it.
 
 Two live-side (rehearsal) state trees, both gitignored runtime, never
 committed, never load-bearing for the nix build (enforced by
-`checks.no-song-read`), split by who owns them (command-defrag lane,
+`checks.song-runtime-untracked`), split by who owns them (command-defrag lane,
 2026-08-27 — root `AGENTS.md`'s "Aoide (core) vs AoideOS/Lyra" boundary
 applied to the stage tree itself):
 
@@ -920,10 +1012,15 @@ actually existing — `aoide_protocol::bin`'s sibling-binary resolver shape,
 applied to a directory). On a NixOS host the env tier always wins, but only
 where it can be READ: `AOIDE_SONG_TEMPLATES` is paint data (only
 `aoide-song` reads it, only `lyra` links `aoide-song`), so it is wired ONLY
-onto units whose process execs `lyra` — `modules/nucleus/shellbridge.nix`'s
-main `shellbridge` service — plus `modules/nucleus/aoided.nix`'s
+onto units whose process execs or spawns `lyra` —
+`modules/dendrites/lyra/shellbridge.nix`'s
+main `shellbridge` service and `modules/dendrites/quickshell.nix`'s
+`aoide-quickshell` unit (the QML it starts execs `lyra`) — plus
+`modules/nucleus/aoided.nix`'s
 `environment.sessionVariables` (an operator's own interactive `lyra rice
-compose`), itself gated on `aoide.lyra.enable` so a host that never installs
+compose`) and that unit's own `Environment=` (so a restart after a switch
+picks up the new songbook instead of the login session's copy), itself gated on
+`aoide.lyra.enable` so a host that never installs
 `lyra` never carries the var into its shells either. It does NOT ride the
 core-only units (`aoided` itself, `aoide-mcp`/`aoide-a2a`/`aoide-usage`/
 `aoide-pair-watch`, `aoide-graph-reap`, `aoide-secrets-watch`, the melete
@@ -932,7 +1029,7 @@ adapter) the way `$AOIDE_ROOT`/`$AOIDE_FLAKE_ROOT` do — those exec plain
 would drag paint data onto a headless core for nothing. `pkgs/lyra-songbook`
 bakes a verbatim copy of the committed `song/songbook/` tree plus
 `manifest.json`/`registry.json` (via `lib/songbook.nix`, the SAME generator
-the checkout-host `nix eval` path and the quickshell facet's own build-time
+the checkout-host `nix eval` path and the lyra lane's own build-time
 carry both call) at nix build time. The sibling-of-binary tier exists for a
 future non-nix tarball install instead. Neither tier resolving is a taught
 error naming both locations, never a panic; a song with a `_widgets/` shelf
@@ -1253,7 +1350,7 @@ Upgrading every node is the remedy the fleet's own rollout takes.
   passes judgment on. Empty (the default) disables the lane outright. **On a
   nix host, this MUST name the fast checks only** (the example above:
   `fmt`/`nix-lint`, joined by `lib/checks.nix`'s own `discovery`/
-  `song-shape`/`no-song-read`/`surface-ownership` — the check lane's
+  `song-shape`/`song-runtime-untracked`/`surface-ownership` — the check lane's
   fast-lane budget), never bare `nix flake check` — the lane runs
   SYNCHRONOUSLY inside the hook, so an unscoped invocation also evaluates the
   slow attributes (vm-boot, `pkg-*`, portability), which routinely run for
@@ -1337,7 +1434,7 @@ mirror + fallback were dropped in Phase 4 of the livery merge —
 Beyond `lyra rice stage <name>`/`cover set`/other emitters writing this
 live, it is also **seeded from the active song's committed notes, with the
 venue's `aoide.livery.override` applied, on every activation**
-(`home.activation.aoideSeedStage`, `modules/facets/quickshell/default.nix`,
+(`home.activation.aoideSeedStage`, `modules/dendrites/lyra/default.nix`,
 via `lib/livery.nix`'s `stagePatch`) — so a host that boots without ever
 running `rice stage` still has a correct, recoloured live stage twin from
 boot. The same jq run publishes the declared twin below, which is what the
@@ -1392,7 +1489,7 @@ venue's `aoide.livery.override` applied (`lib/livery.nix`'s `stagePatch`, §1's
 override tier), its top-level `song` field set to that song's name, keys
 sorted (`jq -S`, matching `serde_json::Value`'s BTreeMap ordering). Written by
 the SAME activation seed that writes `song/stage/livery.json` above
-(`home.activation.aoideSeedStage`, `modules/facets/quickshell/default.nix`) —
+(`home.activation.aoideSeedStage`, `modules/dendrites/lyra/default.nix`) —
 one `jq` run, two destinations, so the two files can never disagree.
 
 Why it exists: `stage/livery.json` is the LIVE stage, rewritten by runtime
@@ -1400,7 +1497,7 @@ writers, so it cannot itself say what the venue declared. This file is the
 venue's read-only statement of that, and the runtime writers reach for it when
 they need to re-derive the DECLARED song's notes rather than the committed
 ones. A plain file, never a symlink (nothing routes it — the draft routing
-above applies to `stage/livery.json` alone). **Absent** means the facet has
+above applies to `stage/livery.json` alone). **Absent** means the lane has
 never activated on this host; readers then fall back to the committed
 `song/songbook/<name>/livery.json` unchanged, which is the ordinary
 behaviour on a host with no venue override anyway.
@@ -1482,10 +1579,10 @@ song/songbook/sonata/drafts/neon-night/
 
 No metadata file: the draft name is the directory name, the base song is
 the directory it's nested under, and saved-at is `livery.json`'s mtime.
-Gitignored (`song/songbook/*/drafts/`, same category as `song/stage/`) and
-banned from nix-eval reads (`lib/checks.nix`'s `noSongRead` — matched by
-regex, `.*/song/songbook/[^/]+/drafts/.*`, since the runtime dir nests at a
-variable depth a flat infix can't name) — a draft is durable scratch,
+Gitignored (`song/songbook/*/drafts/`, same category as `song/stage/`):
+pure flake eval reads only TRACKED files, so a `rice declare` copy landing in
+the checkout never reaches evaluation, and a `.nix` committed there would be a
+stray the `song-shape` check names. A draft is durable scratch,
 **never committed or declared truth**; that distinction from
 `song/songbook/<name>/`'s own committed files is the entire point.
 
@@ -1513,7 +1610,7 @@ the routing and falling back to `staging` — switch modes first
 ### `state/stage/sessions.json` / `hooks.json` — **v0**
 
 The shellbridge roster + live hook phases (full field tables in
-`modules/nucleus/shellbridge.nix`). Session records: `{ sessionId, agent,
+`modules/dendrites/lyra/shellbridge.nix`). Session records: `{ sessionId, agent,
 windowAddress, cwd, state, startedAt }`; hook records: `{ sessionId, phase,
 updatedAt }`.
 
@@ -4789,29 +4886,41 @@ about "broker-owned" is permanent, only "not yet a cross-crate contract".
 
 A **song** (rice) is a committed, **host-agnostic** score. The design thesis:
 a song is host-agnostic; ANY host in the fleet performs it by naming it, and
-the performance adapts to that host's specifics and its enabled facet/dendrite
+the performance adapts to that host's specifics and its enabled dendrite
 set. The **venue (host) decides its instruments; the song carries only the
 notes.**
 
-### Selection — `aoide.song`
+### Selection — the host record
 
-`aoide.song` (nullOr str, default `null`, declared in
-`modules/nucleus/options.nix`) names the song this host performs. A host
-replays any committed song with **one line**:
+A host names its songs on its own RECORD, in two fields
+(`lib/songbook.nix`'s `selectionModule`, read in the constructor's gate pass —
+before any module graph exists, so a bad name fails before anything is built):
 
 ```nix
 # hosts/<host>/default.nix
-aoide.song = "moonlight";
+song.declared = "sonata";   # the song this host performs
+song.available = [ ];       # built in, stageable live, not performed
 ```
 
-Naming no song performs no song: `aoide.song` defaults to null, and every
-committed song's `rice.nix` self-gates on `config.aoide.song == "<name>"`,
-which is never true against null — so a host that names nothing gets no
-song's config, and the paint facets (which read the active song to bake and
+`declared` becomes the platform fact `aoide.song`; `declared ∪ available` is
+the built-in set, published as `aoide.songbook.builtIn`. **Built in** means five
+things: the song's `rice.nix` is imported, its `widgets/` are copied into the
+deployed shell tree, the package names its widget records declare
+(`composeSong`) are installed, its folder ships in `pkgs/lyra-songbook` (this
+host's copy holds only its built-ins), and it is recorded in
+`share/lyra/songbook/builtin.json` as `{ declared, songs, packages }`.
+
+Naming no song performs no song: `aoide.song` is null, and every committed
+song's `rice.nix` self-gates on `config.aoide.song == "<name>"`, which is never
+true against null — so a host that names nothing imports no song and gets no
+song's config, and the paint lanes (which read the active song to bake and
 deploy) activate only when a song IS named: no QML tree, no shell service
-otherwise, not an empty surface. A host wanting the desktop names its song
-explicitly; `sonata` is the shipped standard (`song/songbook/sonata/rice.nix`),
-the guaranteed-present baseline every fleet member can opt into by name.
+otherwise, not an empty surface. A song selected with no `lyra` lane is refused
+by name — `song.declared = "<n>" needs the lyra dendrite: select
+aggregations.aoideos (or dendrites.lyra) on this host` — because a song is QML
+painted by lyra, and every `rice.nix` self-gates on a name nothing else reads.
+`sonata` is the shipped standard, the guaranteed-present baseline every fleet
+member can opt into by name.
 **Renamed (2026-08-14):** the shipped standard song was `default`;
 `song/songbook/default/` is now retired outright (its Pantheon design
 grammar relocated to
@@ -4821,12 +4930,33 @@ git-recoverable history, not deleted knowledge). No shape change, no version
 bump: every "shipped baseline" reference in this section simply names
 `sonata` now. Full dated entry: `docs/Aoide-Wiki/ingest/log.md`.
 
+### The songbook belongs to the machine
+
+`~/.aoide/song/songbook` is the MACHINE's own: its built-in songs plus whatever
+it made itself. It is never a link to, or a copy synced from, the repo — and a
+rebuild never rewrites what it holds. The lyra lane's activation step
+`aoideSeedSongbook` copies each built-in song folder in **only when that folder
+does not exist**: no comparison, no merge, never an overwrite. `sonata/takes/`,
+`sonata/drafts/` and hand-edited `design/` notes on a machine that already has
+them survive every switch (root `AGENTS.md` rule 10 — staging never waits on
+the declared build, and is always the last song staged).
+
+When a song is both built in and present in the machine songbook, the MACHINE
+copy wins for staging: it is the one the user can edit without a rebuild. To
+return to the shipped copy, the user moves the machine's folder aside by hand —
+nothing does it for them.
+
 ### Self-registration (dendrite discipline)
 
-Committed songs live under `song/songbook/<name>/rice.nix`. `lib/mkHost.nix`
-walks `song/songbook` (via `lib/walk.nix`) into every
-host, so **adding a song is a new folder — never an edit to an import list**.
-The empty songbook (just `.gitkeep`) walks to `[]` and is tolerated.
+Committed songs live under `song/songbook/<name>/rice.nix`. `lib/songbook.nix`
+`discover`s them — one typed scan, an immediate child directory, `_`-prefixed
+entries shelved — and the constructor imports the `rice.nix` of the songs a host
+BUILT IN (its record's `declared ∪ available`), so **adding a song is a new
+folder — never an edit to an import list**, and an unselected song's file is
+never read at all (a landmine song proves it in `tests/selection`). A
+discovered folder with no `rice.nix` is still discovered — the manifest is right
+to see a song being written — but it can never be selected: naming it throws
+`song <n> has no rice.nix`.
 
 Each song's `rice.nix` **self-gates**, exactly like a dendrite:
 
@@ -4847,7 +4977,7 @@ Each song's `rice.nix` **self-gates**, exactly like a dendrite:
   **`aoide.arrangement`** (declared widget/surface types) and — later —
   cover/chime references inside `song/`.
 - A song **NEVER** sets host options (monitors, hardware, services) and
-  **NEVER** enables facets or dendrites. Those are the venue's decision.
+  **NEVER** enables paint lanes or dendrites. Those are the venue's decision.
 - All note values are **literal nix** — a song never reads `song/` runtime
   paths (`stage/` · `auditions/`), same as the standard.
 - Shelving/subfolders follow the walker rules (a `/_` path is skipped).
@@ -4859,21 +4989,74 @@ Each song's `rice.nix` **self-gates**, exactly like a dendrite:
   "only defines `aoide.livery`" invariant, `TODO(song-shape v1)` in
   `lib/checks.nix`).
 
+### The shelf, and the two injected arguments
+
+A song is a SELF-CONTAINED folder: its `.nix` files name nothing outside
+`song/songbook/<song>/`. The two things a song genuinely needs from elsewhere
+arrive as ARGUMENTS, injected at the two sites that evaluate a song:
+
+- **`<song>/rice.nix`** is imported by the module system (the constructor's
+  hook), so it receives them as module args: `_module.args.song` and
+  `_module.args.borrow`.
+- **`<song>/_widgets/default.nix`** is imported by `lib/songbook.nix`'s
+  `borrow`, so it receives them as ordinary function arguments. That function is
+  also the ONE place a shelf is opened, which is why the generator, the
+  `packages` a lane installs and the lane's `builtin.json` all see the same
+  roll-up.
+
+- **`song`** is the `lib/song.nix` API (`composeSong`, `mkWidget`, …) — the thing
+  a `rice.nix` used to reach for with `../../../lib/song.nix`.
+- **`borrow`** is `name → that song's _widgets/, rolled up with the same two
+  arguments`. It is the one cross-song idiom (`lib/song.nix`'s header): a
+  composition that dresses a slot with another song's body borrows it BY NAME —
+  `borrow "sonata" // { inherit (borrow "fugue") bar herald; }`. An unknown name,
+  or a song with no `_widgets/` shelf, throws a message naming the discovered set.
+- **`songbook`** is the directory those songs were discovered in, injected the
+  same way (`_module.args.songbook`, set by the same hook that sets `song` and
+  `borrow`). It exists so the lane that PAINTS a host's built-in songs — which
+  copies their folders, resolves their `packages` and builds the shipped
+  templates — never names a repository path: a consumer's songs live in the
+  consumer's tree (`lib/songbook.nix` takes the directory, `pkgs/lyra-songbook`
+  takes it as an argument). A `rice.nix` itself never reads it.
+- **A borrow JOINS the built-in set.** The songs a host builds in are closed
+  under the owners its records name: a host that declares quodlibet alone builds
+  in `fugue` and `sonata` as well, because quodlibet's records borrow slots from
+  both. That is not a convenience — a record names its body by `owner`, the
+  deployed tree resolves `songs/<owner>/<file>`, and a lender that is not on disk
+  makes the borrower's slot render nothing. So the widget copy, the shipped
+  templates, the packages installed, the machine songbook seed and
+  `builtin.json` all carry the lenders, and a lender becomes stageable on that
+  host. There is no separate field for it: the closure is what
+  `song.declared ∪ song.available` would have said if the host had written the
+  lenders out by hand.
+- **A `.nix` under a song folder carries no `../` path literal.** The rule is  about the TEXT, and that is what `checks.song-shape` scans
+  (`escapingNixFiles`): the escape SHAPE the injected arguments replaced, caught
+  whether or not it would resolve — including one written inside a comment, which
+  is the price of a scan that does not have to evaluate a song to judge it.
+- **Signatures.** A `rice.nix` declares `{ lib, config, song, borrow, ... }:`;
+  a shelf's `default.nix` declares `{ lib, song, borrow, ... }:`. Both keep
+  `...`: a file that wants only one of the two names it (`{ borrow, ... }:`),
+  and a third argument later does not break every song at once.
+
 ### The songbook is versioned score, not runtime
 
-`checks.no-song-read` (§4) bans reading `song/` **runtime** dirs at eval
-(`stage/` · `auditions/` · `catalog/` · `index/`). It
+`checks.song-runtime-untracked` (§4) fails if a `song/` **runtime** dir
+(`stage/` · `auditions/` · `declared/`) exists in the source tree at eval. It
 deliberately does **not** list `song/songbook/`: committed songs there are
-versioned score, legitimately walked at eval. Walking the songbook never trips
+versioned score, legitimately read at eval. Reading the songbook never trips
 the check.
 
 ### Enforcement
 
-`checks.song-shape` structurally asserts every walked songbook path is a
-`rice.nix` (a song's module entry) — catching a stray `.nix` that could set
-arbitrary host options. The **full** "only defines `aoide.livery`" invariant is
-a documented convention here (isolated per-module option-diffing is
-disproportionate for v0; see the `TODO(song-shape v1)` in `lib/checks.nix`).
+`checks.song-shape` structurally asserts three things about every discovered
+song: it carries its `rice.nix` and its `livery.json`; it holds no `.nix` outside
+`rice.nix` and its `_widgets/` shelf (`strayNixFiles`, which would join the
+module merge silently and could set arbitrary host options); and no `.nix` in it
+has text carrying a `../` path literal (`escapingNixFiles` — a scan of the text,
+not a resolution, per "The shelf, and the two injected arguments" above). The
+**full** "only defines `aoide.livery`" invariant is a documented convention here
+(isolated per-module option-diffing is disproportionate for v0; see the
+`TODO(song-shape v1)` in `lib/checks.nix`).
 
 **Migration to v1:** the update playbook migrates `song/songbook/*/rice.nix`
 and `livery.json` from v0 to v1 with the livery schema (§1).
@@ -4890,11 +5073,11 @@ set of "flavor" surfaces — committed files, not nix options:
   renders until a host surface actually embeds a `WidgetSlot` anchor for
   that slot name. The **wired-slot catalog** — which slots a real anchor
   resolves today, which host embeds each, and each slot's extras/fallback —
-  lives in `modules/facets/quickshell/qml/slots.md`, documented there only
+  lives in `pkgs/lyra-shell/qml/slots.md`, documented there only
   once an anchor is actually wired (same "what IS built" discipline as this
   section).
-- **Build:** the quickshell facet's derivation
-  (`modules/facets/quickshell/default.nix`) walks every committed song's
+- **Build:** the lyra lane's derivation
+  (`modules/dendrites/lyra/default.nix`) walks every committed song's
   `widgets/*.qml` files to `$out/qml/songs/<name>/<slot>.qml`, plus a
   generated `$out/qml/songs/manifest.json` recording which songs authored
   which slots — ALL songs' bodies land on disk at once (home-manager
@@ -4930,7 +5113,7 @@ set of "flavor" surfaces — committed files, not nix options:
   — **never** nix `config.*`. This does not loosen the song-shape rule above:
   a song's `rice.nix` still sets **ONLY** `aoide.livery` — widgets are
   committed QML files carried by the build, not nix options, and a widget is
-  structurally incapable of reaching host/facet options through this surface.
+  structurally incapable of reaching host/lane options through this surface.
 - **Playbook:** `song/songbook/update-playbook.md`.
 
 **Additive (2026-08-14) — baseline-fallback resolution:**
@@ -4938,7 +5121,7 @@ set of "flavor" surfaces — committed files, not nix options:
 just the one song: the active song's own file if it authored the slot, else
 **sonata**'s (the shipped standard song — the baseline every song can fall
 back to, a fixed constant independent of `aoide.song`'s own default, which
-is null), else `""` (the anchor's own facet-side
+is null), else `""` (the anchor's own lane-side
 `fallback` Component, when it has one, or nothing). `WidgetSlot.resolvedSource`
 keys off the RESOLVED song, not a bool, so a live song-switch between two
 songs that both provide a slot re-triggers correctly instead of silently
@@ -4954,7 +5137,7 @@ props)` mechanism `WidgetSlot` uses, exposing the live instance as `.item`
 for the host to call directly (e.g. the bar's clef calling
 `.item.toggle()`). A slot's catalog entry in `slots.md` documents which
 anchor kind hosts it — a slot that roots a `PanelWindow` also documents its
-WlrLayershell namespace there, since the compositor facet's glass
+WlrLayershell namespace there, since the compositor lane's glass
 layerrules match on it; that contract travels with the slot.
 
 **Additive (2026-08-14) — helper files:** a widget needing its own helper
@@ -4977,7 +5160,7 @@ already wired a `WidgetSlot`/`SurfaceSlot` for. `aoide.arrangement.widgets`
 (`modules/nucleus/options.nix`, house rule 5's other half of the closed
 `aoide.livery` + `aoide.arrangement` pair) is a second, independent
 mechanism: it lets a song **register a brand-new slot** via nix, apart from
-the fixed catalog above, instead of only dressing a name the facet already
+the fixed catalog above, instead of only dressing a name the lane already
 anchored. `arrangement` carries the song's STRUCTURE (which widget/surface
 TYPES it brings into existence) where `livery` carries its DRESS — different
 questions, hence a separate option tree, but still the same two-namespace
@@ -5026,22 +5209,22 @@ the one stage/draft-routed twin file (`rice mode draft` symlinks it), so
 splitting a second file off would have to duplicate that same routing and
 keep two files atomically consistent across every flip — a cost the option
 tree split doesn't need to pay, since that split is a NIX NAMESPACE decision
-about what facets may read, not a file-layout decision.
+about what paint lanes may read, not a file-layout decision.
 
 **`registry.json`:** a build-time artifact parallel to `manifest.json` but
 serving a different purpose — NOT merged into it. `manifest.json` answers
 "which slot **bodies** exist" (any `.qml` file a song drops under
 `widgets/`); `registry.json` answers "which slots did a song **register as
 a widget-TYPE declaration**" (a rarer, smaller set — most songs declare
-none). The quickshell facet's build
-(`modules/facets/quickshell/default.nix`) walks every committed song's
+none). The lyra lane's build
+(`modules/dendrites/lyra/default.nix`) walks every committed song's
 `livery.json` `.widgets // {}` into `$out/qml/songs/registry.json`, shaped
 `{ "<song>": { "<slot>": {…declaration…} } }` — every committed song gets an
 entry, `{}` when absent, never an error, never a skipped song. `rice
 stage` hot-syncs one song's entry live, no rebuild
 (`sync_song_registry`, `pkgs/aoide/crates/song/src/widgets.rs`), mirroring
 `sync_song_widgets`'s existing `manifest.json` hot-sync. The compositor
-facet (`modules/facets/compositor/default.nix`) reads `aoide.arrangement.widgets`
+look (`modules/dendrites/compositor/hyprland/default.nix`) reads `aoide.arrangement.widgets`
 (the nix option, active song only) to generate one layerrule pair per
 `kind = "surface"` entry — filtered to `surface` first, since a `dock` entry
 has no layer surface of its own and must never generate a namespace/glass
@@ -5083,12 +5266,12 @@ committed song declares a `kind = "dock"` entry yet.
 `aoide.arrangement.surfaces` (`modules/nucleus/options.nix`, the same
 `arrangement` namespace as `widgets` above — deliberately NOT a fourth
 top-level `aoide.*` name, and not `aoide.surfaces`, which is the separate
-facet ownership registry Stylix reads) declares which painted surfaces a
+lane ownership registry Stylix reads) declares which painted surfaces a
 song **expects to be mapped**. It is `attrsOf` one-flag entries, keyed by
 slot name, `perMonitor` (bool, default `false`): `true` = one mapped layer
 surface per enabled output, `false` = exactly one, wherever it lands. A
 declaration is an **expectation** and instantiates nothing — the surfaces it
-names are facet-owned windows (`shell.qml`'s bar/wallpaper `Variants`
+names are lane-owned windows (`shell.qml`'s bar/wallpaper `Variants`
 delegates, `SurfaceSlot { slot: "dock" }`), never `arrangement.widgets`
 entries, which would stand up a second copy of each.
 
@@ -5100,8 +5283,8 @@ owner is not this shell at all (a host where waybar owns the bar) is
 likewise declared by nobody, which is the point: the expectation is the
 song's statement, not a hardcoded list.
 
-**The generated artifact:** the quickshell facet's build
-(`modules/facets/quickshell/default.nix`) emits
+**The generated artifact:** the lyra lane's build
+(`modules/dendrites/lyra/default.nix`) emits
 `$out/qml/songs/surfaces.json`, deployed with the rest of the tree to
 `run/qml/songs/surfaces.json`. It is deliberately NOT keyed by song, unlike
 `manifest.json`/`registry.json` beside it: those describe the whole
@@ -5149,7 +5332,7 @@ widgets above already get. The design authority is
 `docs/architecture/ELEMENTS.md` (task #121); this subsection pins the
 descriptor's on-disk contract and `run/elements/`'s runtime shape.
 `crates/song/src/elements.rs` is the one parser/render pipeline every
-consumer (`element seed`, and later `rice stage`/the elements facet) calls
+consumer (`element seed`, and later `rice stage`/the elements lane) calls
 through — never a second implementation.
 
 **The descriptor:** one `song/songbook/<song>/elements/<element>/element.json`
@@ -5189,14 +5372,14 @@ on refusal:
   unknown or malformed placeholder is a structured error, never a silent
   no-op.
 - `surfaces` — optional list of surface names the element claims; folded
-  into `aoide.surfaces` with `owner = "<element>"` once the elements facet
+  into `aoide.surfaces` with `owner = "<element>"` once the elements lane
   (L-E3) lands. Not consumed by the cargo pipeline itself.
 - `run.exec` — the full command line; the literal token `{run}` is
   substituted with the absolute `run/elements/<element>` path at
   generation time (`elements::substitute_run_token`) — never re-expanded
   at runtime.
 - `run.via` — exactly `"unit"` or `"exec-once"`; anything else refuses.
-- `reload` / `restart` — optional command overrides for the facet's
+- `reload` / `restart` — optional command overrides for the lane's
   restart derivation (L-E2/L-E3); not read by the cargo render pipeline.
 
 **Render pipeline:** for each element, every declared file is rendered
@@ -5219,7 +5402,7 @@ The ONLY place a running element reads its config from; nothing under
 **Landed vs. designed (L-E1 only):** the descriptor parser, the render
 pipeline, `run_elements_dir()`, and `element seed` are implemented and
 tested. `rice stage` does not yet render elements as part of the stage
-loop, and no nix facet yet reads `elements/` at eval or generates a
+loop, and no nix lane yet reads `elements/` at eval or generates a
 systemd unit / exec-once line / `aoide.surfaces` claim — those are L-E2
 and L-E3, later phases in the same lane, not yet built.
 
@@ -6918,12 +7101,10 @@ cadence and is NEVER treated as a dismissal. `--popup` is refused up front
 when NEITHER `lyra` nor `zenity` resolves; `--popup`+`--json` together is
 a usage error. Deployed as the graphical-session USER unit
 `aoide-pair-watch.service` (`modules/nucleus/aoided.nix`), gated on
-`aoide.a2a.enable && aoide.facets.quickshell.enable &&
-aoide.a2a.pairingPopup` — the last of those DEFAULT FALSE (modules' own
-"flags default off" house rule): the unit exists and is desktop-facet-
-gated the same way `aoide-secrets-watch` is, but the popup itself is
-opt-in on top of that, never assumed just because a2a and the quickshell
-facet are both on.
+`aoide.a2a.enable && aoide.a2a.pairingPopup` — the last of those DEFAULT FALSE
+(modules' own "flags default off" house rule): the unit exists whenever a2a is
+on, but the popup itself is opt-in on top of that, never assumed just because
+a2a is on.
 
 This subsection is **additive**: a new events-feed record shape and a
 new CLI command, no change to the wire methods above, no version bump.

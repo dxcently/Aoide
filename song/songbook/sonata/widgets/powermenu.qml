@@ -1,9 +1,9 @@
 // powermenu.qml — sonata's "powermenu" slot (was AoideExodos.qml, moved out
-// of the facet as of the widget-slot expansion, CONTRACTS.md §5). Hosted by
+// of the shell as of the widget-slot expansion, CONTRACTS.md §5). Hosted by
 // `SurfaceSlot`, not `WidgetSlot` — this root is a `PanelWindow`, not an
 // `Item`, so it owns its own layer, namespace, keyboard focus, and
 // GlobalShortcut; that contract travels with the slot (see
-// modules/facets/quickshell/qml/slots.md). Moved as one inseparable unit —
+// pkgs/lyra-shell/qml/slots.md). Moved as one inseparable unit —
 // the deal animation, the layer-shell setup, the GlobalShortcut all still
 // belong together in this one file.
 //
@@ -38,7 +38,7 @@
 //
 // ── The glass (the Grimoire recipe, verbatim) ──────────────────────────────
 // Full-screen transparent Overlay layer surface, namespace "aoide-powermenu".
-// The compositor facet (modules/facets/compositor/default.nix) gives that
+// The compositor lane (modules/dendrites/compositor/hyprland/default.nix) gives that
 // namespace `layerrule blur` + `ignore_alpha 0.05` + hyprglass Liquid Glass,
 // so the desktop behind is visible, blurred, and gently refracted through the
 // ink scrim and the translucent steles — the frosted-depth read.

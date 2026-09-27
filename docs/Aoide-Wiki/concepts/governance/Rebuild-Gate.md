@@ -29,7 +29,7 @@ This is the only mode until the capability is deliberately turned on.
 
 ## The `aoide.rebuild` capability
 
-**Status:** specified; `modules/nucleus/options.nix` declares no `aoide.rebuild` surface today, and the compositor facet marks the polkit prompt explicit future work.
+**Status:** specified; `modules/nucleus/options.nix` declares no `aoide.rebuild` surface today, and the compositor lane marks the polkit prompt explicit future work.
 
 The design grants the agent a passwordless but narrowly-scoped path to the gated commands:
 

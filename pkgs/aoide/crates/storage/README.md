@@ -67,7 +67,11 @@ by decision — no embedded database yet
   `$AOIDE_ROOT` (absolute-path-wins), default `<home>/.aoide`, nix-free
   (L-C2, lyra-carrier lane, task #107) — EXCEPT `fs::flake_root`, which
   stays pinned to the dev git checkout (`$AOIDE_FLAKE_ROOT`, default
-  `<home>/Aoide`) since that is not a runtime tree. `fs` resolves TWO stage
+  `<home>/Aoide`) since that is not a runtime tree. Beside it sits
+  `fs::LYRA_SHELL_SRC` — the ONE checkout-relative source path named from
+  outside this crate (the lyra shell's `qml`/`icons`/`preview` tree, and the
+  same directory `pkgs/lyra-shell` is built from, so what a checkout is read
+  from and what the package ships cannot drift apart). `fs` resolves TWO stage
   roots off that one root, not one (command-defrag lane S1, 2026-08-27,
   CONTRACTS.md §4): `stage_dir` — unchanged, `$AOIDE_ROOT/song/stage/`,
   rice/paint (`livery.json`/`mode.json`, lyra's tree) — and
@@ -128,8 +132,12 @@ by decision — no embedded database yet
   (L-C3, same lane) is a THIRD, sibling path seam alongside `root`/
   `flake_root`: the shipped SCORE TEMPLATES dir a repo-less host's `rice
   compose --from <song>` and `aoide-song::widgets`'s registry/manifest
-  regeneration both fall back to when `songbook_dir`/`flake_root` have
-  nothing. Two tiers — `$AOIDE_SONG_TEMPLATES` (absolute-wins, same
+  regeneration both fall back to when `songbook_dir` has
+  nothing. `fs::lyra_share_dir` is its PARENT — the shipped `share/lyra`
+  dir, where the offline generator (`nix/manifest.nix`) and
+  `aoide-options.json` (`lyra onboard`) sit — and `fs::songbook_root` is the
+  machine's `<song>/songbook/`, the argument that generator is pointed at.
+  Two tiers — `$AOIDE_SONG_TEMPLATES` (absolute-wins, same
   discipline as every override above), else a sibling of `current_exe()`'s
   directory (`<exe_dir>/../share/lyra/songbook`, gated on that directory
   actually existing) — the same shape `aoide_protocol::bin`'s sibling-binary

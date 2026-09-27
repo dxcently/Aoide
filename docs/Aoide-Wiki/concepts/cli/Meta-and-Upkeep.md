@@ -147,7 +147,7 @@ lyra onboard [--out <path>] [--yes] [--json]
 - **Reads:** the checkout root, found by walking up from the cwd for a
   directory holding both `flake.nix` and `pkgs/aoide`; outside a checkout the
   run fails exit 1, `reason: "no-checkout"`. The option set is derived live
-  with `nix eval <checkout>#aoideOptions` (142 options today), never from a
+  with `nix eval <checkout>#aoideOptions` (161 options today), never from a
   hand-list.
 - **Writes:** `./aoide.nix` (`--out <path>` overrides) — a nix module the
   user imports, listing every `aoide.*` module option commented out at its
@@ -232,7 +232,7 @@ lyra quickshell reload [--json]
 - **Notes:** not gated; best-effort — `not-running` (service absent: no IPC
   attempted) and `failed` are reported facts, never command failures; exit
   stays 0. This is the reload lane for dynamically-loaded widget QML
-  (`Qt.createComponent`) and facet-owned QML that Quickshell's own file
+  (`Qt.createComponent`) and lane-owned QML that Quickshell's own file
   watcher never tracks ([[Quickshell]]). Named `quickshell`, not `shell`,
   because a top-level `shell` command collided with the `--agent shell`
   flag value (see the module doc in

@@ -36,7 +36,8 @@ make it stick. The rebuild itself is the **user-gated** step — see
 ## Desktop keybinds
 
 Keybinds are host-invariant behaviour, so they live in
-`modules/dendrites/hyprland.nix`, not the compositor facet (which owns only
+`modules/dendrites/compositor/hyprland/behaviour.nix`, not the compositor's
+look (which owns only
 livery-derived appearance — gaps, borders, layerrules). `SUPER` is the
 modifier.
 
@@ -68,8 +69,8 @@ modifier.
 
 ### Bar cell interactions
 
-`song/songbook/sonata/widgets/bar.qml` (the bar moved out of the facet into
-the song; see [[Song-Anatomy]]):
+`song/songbook/sonata/widgets/bar.qml` (the bar is the song's body, resolved by
+slot name; see [[Song-Anatomy]]):
 
 | Cell | Interaction |
 |---|---|

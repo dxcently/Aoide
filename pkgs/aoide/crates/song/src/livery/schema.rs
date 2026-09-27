@@ -8,7 +8,7 @@
 //! `$value` (and optionally `$type`). References use the `{group.name}` alias
 //! syntax that Style Dictionary resolves. The palette tier is base16-closed; the
 //! component tier is bar.* / notif.* / window.*, each field `nullOr hex` where
-//! null means "fall back to the palette" (the FACET applies the fallback; the
+//! null means "fall back to the palette" (the nix side applies the fallback; the
 //! stage emitter resolves it fully — see resolve.rs).
 //!
 //! Port faithfulness: every error string is byte-identical to the Node
@@ -49,7 +49,7 @@ pub const PALETTE_KEYS: [&str; 4] = ["bg", "fg", "accent", "urgent"];
 /// Optional palette keys — present or absent, but when present must be a hex
 /// colour (never null). `hot` is the one-neon trace/highlight colour (the
 /// reference stills' optic-nerve green): notes WITHOUT it stay valid, and a
-/// facet falls the surface back to `accent` when it is absent. Keeping it
+/// lane falls the surface back to `accent` when it is absent. Keeping it
 /// optional preserves the v0 contract for every existing note file.
 pub const PALETTE_OPTIONAL_KEYS: [&str; 1] = ["hot"];
 
@@ -57,7 +57,7 @@ pub const PALETTE_OPTIONAL_KEYS: [&str; 1] = ["hot"];
 /// the full sixteen-slot terminal scheme (the "pantheon bw" ramp + accent set).
 /// All-or-nothing and CLOSED, exactly like the palette: when the block is present
 /// every slot base00..base0F must be given (each a hex, never null), and any key
-/// outside the sixteen is rejected. Notes WITHOUT it stay valid — a facet falls
+/// outside the sixteen is rejected. Notes WITHOUT it stay valid — a lane falls
 /// the wireframe accents back to `accent` when the block is absent, so the v0
 /// contract is preserved for every existing note file (same posture as `hot`).
 pub const BASE16_KEYS: [&str; 16] = [
@@ -301,7 +301,7 @@ pub fn validate(container: &Value) -> Validation {
     // Widgets tier — optional top-level key, an object keyed by slot name
     // (CONTRACTS.md §5; `aoide.arrangement.widgets`, options.nix). Absent
     // means "no declared widget types", treated as `{}` — same posture the
-    // build-time walk already uses (`modules/facets/quickshell/default.nix`'s
+    // build-time walk already uses (the lyra lane's
     // `.widgets // {}`). These fields are plain configuration, not W3C
     // design-token notes (no `{group.key}` refs, no `$value` wrapping), so
     // they are matched directly against `Value`, unlike the colour tiers

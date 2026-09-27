@@ -4,7 +4,7 @@
 # `song/songbook/<song>/_widgets/<slot>.nix`. A sibling `default.nix` roll-up
 # binds the owner and the slot name to each function; the song's `rice.nix`
 # composes the result. This file is the song-blind mechanism both halves call —
-# the nix analogue of `modules/facets/quickshell/qml/WidgetSlot.qml`, which
+# the nix analogue of `pkgs/lyra-shell/qml/WidgetSlot.qml`, which
 # hosts a widget without knowing which song wrote it.
 #
 # Two exports:
@@ -16,13 +16,13 @@
 # WHY A PLAIN FUNCTION AND NOT A MODULE FRAGMENT. A fragment is only reachable
 # through the merged config, and a song's `rice.nix` self-gates on
 # `aoide.song == "<name>"`. The quickshell derivation walks EVERY song in the
-# songbook (see modules/facets/quickshell/default.nix's songs loop and its note
+# songbook (see modules/dendrites/lyra/default.nix's songs loop and its note
 # on why the registry cannot come from `config`), so a fragment-based record
 # would be invisible for every song the host is not currently performing —
 # nine songs out of ten, silently. A plain function is importable by the
 # derivation regardless of which song is active.
 #
-# `_widgets/` is deliberately underscore-prefixed: `lib/walk.nix` drops any
+# `_widgets/` is deliberately underscore-prefixed: `lib/songbook.nix`'s scan drops any
 # path containing `/_`, so the shelf never joins the module merge and
 # `checks.song-shape` — which filters walk's output — never sees it. The shelf
 # is score, not a module.
@@ -149,7 +149,7 @@ let
       }
       {
         # null is a fourth, deliberate value the option type does not carry: an
-        # anchored-catalog slot, hosted by the facet's shell, registering
+        # anchored-catalog slot, hosted by the lane's shell, registering
         # nothing. `options.nix`'s submodule defaults `kind` to "surface"; a
         # record's ABSENT kind means the opposite, so `composeSong` filters
         # nulls out before mapping and never leans on the option default.
@@ -200,8 +200,8 @@ let
       {
         # NOT named `instruments`. In this tree an instrument is what the VENUE
         # sounds — `docs/Aoide-Wiki/concepts/song/Song-Vocabulary.md:57` defines
-        # a venue's instruments as "which facets and dendrites are enabled", and
-        # :49 lists widgets themselves among the quickshell facet's instruments.
+        # a venue's instruments as "which dendrites are enabled", and
+        # :49 lists widgets themselves among the lyra lane's instruments.
         # A song-side field by that name would also read as the song choosing
         # them, which `CONTRACTS.md:807` forbids outright. This field is the
         # narrower, song-owned thing: the packages providing the executables a

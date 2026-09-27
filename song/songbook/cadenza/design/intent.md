@@ -10,7 +10,7 @@ lit by lamps.
 **References:** `refs/ref-termui.png` (the pane grammar: box rules, green
 titles, braille/dot charts, sparklines, a gauge) and `refs/ref-crt.jpg` (the
 light: green phosphor on near-black, a faint bloom, nothing else).
-**Polarity:** dark. Needs a livery field the facet does not read yet (§5).
+**Polarity:** dark. Needs a livery field the lane does not read yet (§5).
 **Cover:** a static circuit board on the CRT black (§3.9): dim copper-green
 tracks, pads and vias, generated from the palette. Staged live with
 `lyra cover set`; the wallpaper note stays `null` until the cover is
@@ -333,7 +333,7 @@ One 28px line in the tmux/termui idiom, left to right:
   amber mark clears then or after 5s. When the bridge answers the line
   (`bridge.workspaceAction`), an `ok: false` reply becomes one dim line with
   core's own `message` (else `reason`), plain text. **Honest partial:** the
-  facet's bridge answers no `workspaceaction` today, so the line goes
+  lane's bridge answers no `workspaceaction` today, so the line goes
   fire-and-forget (`bridge.sendCommand`); success still shows through
   `graph.json`, and a refusal says nothing: the amber mark just clears
   after 5s.
@@ -492,7 +492,7 @@ list is real (Hyprland + `sessions.json`), the numbers read `no usage data
 ### 3.5 Launcher (`launcher`, `aoide-launcher`)
 A centred command pane: `> ` prompt, fuzzy list with `[n]` indices, modes as
 tabs in the rule (`apps │ clip │ ledger`) — clipboard and the grimoire ledger
-stay the facet data seams they are.
+stay the lane data seams they are.
 - **Search first, then the number.** A query is searched in every mode,
   digits included: apps and ledger match an app's name AND its desktop id
   (so `2048` finds 2048), clip matches the preview text. Only when a query
@@ -531,7 +531,7 @@ The wallpaper is a still image of a circuit board under the tube.
 - Live: `lyra cover set <abs path>` (a hot swap). Declaring it into
   `aoide.livery.wallpaper` for the rebuild is the User's to admit.
 - **The live board (waits on a core wallpaper slot).** The agent map
-  belongs on the cover, not the bar. Once the facet anchors a song-owned
+  belongs on the cover, not the bar. Once the lane anchors a song-owned
   `wallpaper` slot, cadenza's `wallpaper.qml` draws `CoverPcb` live with a
   fresh seed at every shell start, and each live agent takes one pad near
   the edge: its ring lit in its state colour, a spawned child's pad joined
@@ -557,7 +557,7 @@ reads a fixture path.
   only set `aoide.livery` (house rule 5). Proposed: an
   `aoide.livery.polarity` field (nucleus option, CONTRACTS §1, livery
   schema/lint), read by the stylix dendrite that phase 5 S5 creates in
-  place of the facet. cadenza then declares `"dark"`.
+  place of the lane. cadenza then declares `"dark"`.
 - **Glass (needs a core change).** The compositor module loads hyprglass,
   its config block and the `blur on` layer rules unconditionally;
   `geometry.blurEnabled = false` only stops Hyprland's blur. Proposed, the
@@ -566,7 +566,7 @@ reads a fixture path.
   or a `glass` field). dxflake's own
   `dendrites/compositor/hyprland/hyprglass.nix` also loads it whenever the
   quickshell module is on, so it needs the same gate.
-- **Bar height** 28px vs sonata's 36; the facet reads it back, so it is the
+- **Bar height** 28px vs sonata's 36; the lane reads it back, so it is the
   song's call.
 - **Unbuilt seams** — every "bridge not wired" above names its slice.
 

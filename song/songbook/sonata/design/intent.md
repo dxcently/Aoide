@@ -1,6 +1,6 @@
 # sonata — Design Intent
 
-**Song:** sonata (committed rice; the selected key on yomi-strix)
+**Song:** sonata (committed rice; the shipped standard — the key every unauthored slot falls back to. yomi-strix performs `cadenza`.)
 **Palette:** a Greek marble key — pale warm-marble ground, plum-charcoal ink,
 deep Attic-gold chrome accent, terracotta urgent, a true laurel leaf-green
 one-hot blaze; aegean blue steps back to a preview/information role
@@ -10,9 +10,9 @@ state-glyph contract shared verbatim with `theme.rs`, and the role→hue palette
 below. A deliberate divergence from the Pantheon wireframe grammar the retired
 `default` song once drew (kept as historical reference at
 `docs/Aoide-Wiki/references/pantheon/pantheon-grammar.md`)
-**Cover:** none — the wallpaper note is `null`, so the stylix facet bakes a
+**Cover:** none — the wallpaper note is `null`, so the stylix lane bakes a
 deterministic **bright-marble field** from `palette.bg` (`#f2ebde`) — the
-same null-wallpaper-to-solid mechanism the stylix facet applies to any song
+same null-wallpaper-to-solid mechanism the stylix lane applies to any song
 with no cover note. Colours fit the theme, not a
 photo; the wallpaper switcher handles photos live (see the Iteration Log)
 
@@ -38,18 +38,19 @@ shared per-widget blueprint anywhere.
 
 ## Why this song exists
 
-sonata is the light key currently performed on yomi-strix. Any host in the
+sonata is the songbook's shipped standard — the light key, and the fallback
+every unauthored slot resolves to. Any host in the
 fleet performs it with one line — `aoide.song = "sonata";` — and the whole
 `aoide.livery` fan-out swaps with zero other edits.
 
 ## Host-agnostic by construction
 
-This song sets ONLY `aoide.livery`. It names no host, enables no facet or
+This song sets ONLY `aoide.livery`. It names no host, enables no lane or
 dendrite, touches no hardware or service, and does not key `stylix.polarity`
-(the stylix facet pins polarity light — a song cannot flip it). The venue
+(the stylix lane pins polarity light — a song cannot flip it). The venue
 (host) decides its instruments; sonata carries only the notes. That is exactly
 what lets one score be performed on any host with its own specifics and its own
-enabled facet/dendrite set (CONTRACTS.md §5).
+enabled lane/dendrite set (CONTRACTS.md §5).
 
 ## The key — the Greek register, region by region
 
@@ -63,7 +64,7 @@ opacity, not colour": kitty renders at `background_opacity` 0.86 and the bar
 sheet at ~0.30 opacity **over** this ground — `base00` stays in the pale
 marble-glass family, a warm sunlit stone.
 
-The polarity is **light** (the stylix facet pins it): `base00` is the lightest
+The polarity is **light** (the stylix lane pins it): `base00` is the lightest
 value and `base05`–`base07` are the dark inks.
 
 | Region of the Greek register | Slot(s) | Colour |
@@ -135,8 +136,9 @@ bare running text.
 
 ## Current surface elements (as performed)
 
-How the key reads on yomi-strix — sonata's instantiation of its house grammar
-(`design/greek-grammar.md`). The glass alphas are facet/dendrite constants, not
+How the key reads — sonata's instantiation of its house grammar
+(`design/greek-grammar.md`) — recorded against the rig it was drawn on. The
+glass alphas are lane/dendrite constants, not
 livery notes; they are tuned against THIS key and recorded here as its design
 memory. The colour values below are the re-keyed Greek notes; the drawn shapes
 are each songbook widget's (`bar`/`calendar`/`launcher`/`notifications`/
@@ -288,13 +290,13 @@ not yet ended) names that terminal, "Kill terminal <name>"; anything else reads
   olive `#6b8b33` (only 41° off the new gold; leaf-green is 71° off). **Aegean
   `base0D` keeps its value and `holoBlue` role but its JOB narrows to
   preview/information** (workspace preview ring, links) — no longer active-state
-  chrome. **Cover retired: `wallpaper` → null**, so the stylix facet bakes a
+  chrome. **Cover retired: `wallpaper` → null**, so the stylix lane bakes a
   deterministic bright-marble solid from `palette.bg` `#f2ebde` (the default
   song's mechanism); the `covers/yuki-sonata.png` reference is dropped (khoa:
   colours fit the theme, not a photo; the wallpaper switcher handles photos
   live). Facet-tuning memory recorded above: bar sheet glass 0.45 → 0.30, bar
-  popouts → 0.72, unfocused kitty 0.90 → 0.80 (these live in the compositor/
-  quickshell facets — other workers' domain — noted here only as design memory,
+  popouts → 0.72, unfocused kitty 0.90 → 0.80 (these live in the compositor and
+  quickshell lanes — another lane's domain — noted here only as design memory,
   not edited by this song).
 - 2026-07-30: **bar opaque + window borders swapped** (khoa: theme consistency
   pass). `AoideBar.qml`'s manuscript-strip sheet is no longer glass: fill is now
@@ -308,8 +310,8 @@ not yet ended) names that terminal, "Kill terminal <name>"; anything else reads
   **teal** `#3f867e` (was marble-shade `#e8dfcc`) — the focused window now
   matches the bar's gold chrome, the unfocused window recedes to a cool teal
   instead of near-vanishing into the marble ground. Edited in both
-  `livery.json` and `rice.nix` (kept in sync). The compositor facet
-  (`modules/facets/compositor/default.nix:42-44,72-73`) already derives
+  `livery.json` and `rice.nix` (kept in sync). The compositor lane
+  (`modules/dendrites/compositor/hyprland/default.nix`) already derives
   `col.active_border`/`col.inactive_border` from `aoide.livery.window.border`/
   `.borderInactive` (falling back to `palette.accent`/`palette.bg` when a song
   leaves them null) — no compositor-side change was needed, the pipeline just

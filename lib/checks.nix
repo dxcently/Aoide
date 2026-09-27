@@ -5,18 +5,22 @@
 # discovery specifically):
 #
 #   1. surface-ownership — no render surface may have two owners. The
-#      Quickshell facet declares `aoide.surfaces.<name>.owner`; Stylix reads
+#      lyra lane declares `aoide.surfaces.<name>.owner`; the stylix lane reads
 #      the same registry and disables derivation for owned surfaces. Two
 #      modules claiming the same surface is a build-time error.
 #
-#   2. no-song-read — no module may make the nix build depend on a `song/`
-#      runtime path (`stage/`, `auditions/`, …). `stage/` can
-#      never become load-bearing for the frozen half. Enforced structurally:
-#      an evaluated nixos config never imports/reads those paths, so we assert
-#      over the module tree's source strings.
+#   2. song-runtime-untracked — a song's RUNTIME dirs (`song/stage/`,
+#      `song/auditions/`, `song/declared/`) must not exist in the source tree at
+#      all. This replaces `no-song-read`, which scanned module PATHS for those
+#      names and was vacuously true — a module never reads through its own path.
+#      What actually keeps runtime state out of evaluation is that pure flake
+#      eval reads only TRACKED files and `.gitignore` covers those three; this
+#      check is what fails if one is ever committed or left behind.
 #
-#   3. song-shape — a committed song under song/songbook/<name>/ is exactly
-#      one rice.nix, never a stray extra module riding along.
+#   3. song-shape — a committed song under song/songbook/<name>/ carries its
+#      `rice.nix` and its `livery.json`, and no `.nix` anywhere else: an extra
+#      module in a song folder would join the merge silently and could set
+#      arbitrary host options.
 #
 #   4. fmt — `nixfmt --check` over every `.nix` file in the flake's own
 #      COMMITTED source (flake.nix's declared `formatter`, run by nothing
@@ -64,7 +68,7 @@
 #       `stagePatch` is the identity with no override set.
 #
 # 1–3 and 5 are written so they PASS TRIVIALLY where nothing populates the
-# registry they inspect yet (1) and become real as Wave-1 facets/packages
+# registry they inspect yet (1) and become real as Wave-1 lanes/packages
 # land. Each resolves to a trivial derivation: it either builds (assertion
 # held) or the eval fails with a readable message (assertion broken). 10 is
 # the same eval-time-assert shape against a fixed fixture instead of a
@@ -88,7 +92,7 @@ let
   # ── Check 1: surface ownership ────────────────────────────────────────────
   # Consumes the evaluated `aoide.surfaces` registry. Duplicate detection is a
   # no-op today because attrsets cannot hold duplicate keys; the real teeth
-  # arrive when a facet asserts, in its own module, that it is the sole owner
+  # arrive when a lane asserts, in its own module, that it is the sole owner
   # of a surface (Wave-1 wires the mkMerge/last-wins guard). Here we assert the
   # registry is well-formed: every declared surface names a non-empty owner.
   surfaceOwnership =
@@ -101,46 +105,33 @@ let
       badOwner == [ ]
     ) "surfaces with no owner: ${builtins.toString badOwner}";
 
-  # ── Check 2: no song/ RUNTIME read at build time ───────────────────────────
-  # Asserts that no walked module path lives under a `song/` RUNTIME dir. The
-  # ban is scoped to ephemeral runtime state (stage/ · auditions/ · catalog/ ·
-  # index/) — `stage/` can never become load-bearing for the frozen half. It
-  # deliberately does NOT list `song/songbook/` wholesale: committed songs
-  # there are VERSIONED SCORE, legitimately walked at eval by lib/mkHost.nix
-  # (each song's rice.nix self-gates on `aoide.song`). Walking the songbook
-  # therefore never trips this check on its own — EXCEPT the `drafts/`
-  # subfolder nested inside each song (`song/songbook/<name>/drafts/`,
-  # `rice draft save`'s scratch tree): that one runtime dir sits INSIDE an
-  # otherwise-legitimate songbook path, so a flat infix can't name it (the
-  # song name varies) — matched by regex instead, scoped tightly to just the
-  # `drafts/` subfolder, never the songbook entry itself.
-  noSongRead =
-    modulePaths:
+  # ── Check 2: song RUNTIME state stays out of the source tree ───────────────
+  # `song/stage/`, `song/auditions/` and `song/declared/` are live state —
+  # what was last staged, what was auditioned, what was declared — and `.gitignore`
+  # covers all three. Pure flake eval reads only TRACKED files, so an untracked
+  # runtime dir cannot reach a build; this check is what catches one that was
+  # committed anyway, or left behind in a store copy that was taken from a dirty
+  # tree. (The old `no-song-read` scanned module PATHS for those names and could
+  # never fire: a module never reads through its own path.)
+  songRuntimeUntracked =
+    src:
     let
-      runtimeInfixes = [
-        "/song/stage/"
-        "/song/auditions/"
-        "/song/catalog/"
-        "/song/index/"
+      runtimeDirs = [
+        "stage"
+        "auditions"
+        "declared"
       ];
-      isSongDraft = s: builtins.match ".*/song/songbook/[^/]+/drafts/.*" s != null;
-      offenders = builtins.filter (
-        p:
-        let
-          s = toString p;
-        in
-        builtins.any (needle: lib.hasInfix needle s) runtimeInfixes || isSongDraft s
-      ) modulePaths;
+      present = builtins.filter (d: builtins.pathExists (src + "/song/${d}")) runtimeDirs;
     in
-    assertCheck "no-song-read" (
-      offenders == [ ]
-    ) "modules read song/ runtime paths at build time: ${builtins.toString offenders}";
+    assertCheck "song-runtime-untracked" (
+      present == [ ]
+    ) "song/ holds gitignored runtime state in the source tree: ${builtins.toString present}";
 
   # ── Check 3: song shape (host-agnostic discipline) ─────────────────────────
   # A committed song under song/songbook/<name>/ carries ONLY notes: its
   # rice.nix sets aoide.notes (palette + component tiers) and — later —
   # cover/chime references inside song/. It must NEVER set host options
-  # (monitors, hardware, services) or enable facets/dendrites: the VENUE (host)
+  # (monitors, hardware, services) or enable dendrites: the VENUE (host)
   # decides its instruments, the SONG carries only the notes (CONTRACTS.md §5).
   #
   # A cheap STRUCTURAL slice of that discipline is enforced here: every walked
@@ -151,23 +142,37 @@ let
   # TODO(song-shape v1): the full "only defines aoide.notes" invariant needs
   # per-module isolated eval + option-definition diffing — disproportionate for
   # v0. Until then the invariant is a DOCUMENTED CONVENTION (CONTRACTS.md §5 /
-  # docs/BUILD.md), backed by this structural rice.nix-only gate and code review.
+  # docs/BUILD.md), backed by this structural gate and code review.
   # Joins that convention: a song must never set `aoide.livery.override.*`
   # (CONTRACTS.md §5) — the override tier is HOST-set only.
+  #
+  # The walk is `lib/songbook.nix`'s `strayNixFiles` (builtins.readDir, `_widgets/`
+  # pruned by name), not a filesystem walker: the check has to keep working now
+  # that the walker is gone, and it has to agree with the discovery a host
+  # selection is validated against.
   songShape =
-    songbookPaths:
+    {
+      songbook,
+      songNames,
+      strayNixFiles,
+      escapingNixFiles,
+    }:
     let
-      strays = builtins.filter (
-        p:
-        let
-          s = toString p;
-        in
-        !lib.hasSuffix "/rice.nix" s
-      ) songbookPaths;
+      incomplete = builtins.filter (
+        name:
+        !(builtins.pathExists (songbook + "/${name}/rice.nix"))
+        || !(builtins.pathExists (songbook + "/${name}/livery.json"))
+      ) songNames;
     in
-    assertCheck "song-shape" (
-      strays == [ ]
-    ) "songbook holds non-rice.nix modules (a song is rice.nix only): ${builtins.toString strays}";
+    assertCheck "song-shape" (strayNixFiles == [ ] && incomplete == [ ] && escapingNixFiles == [ ])
+      "songbook shape is wrong — ${
+        if strayNixFiles != [ ] then
+          "stray .nix outside rice.nix/_widgets/: ${builtins.toString strayNixFiles}"
+        else if escapingNixFiles != [ ] then
+          "a song's `.nix` TEXT carries a `../` path literal (CONTRACTS.md §5): ${builtins.toString escapingNixFiles}"
+        else
+          "no rice.nix or no livery.json in: ${builtins.toString incomplete}"
+      }";
 
   # ── Check 4: nixfmt --check over the committed source ──────────────────────
   # `src` is the flake's own store copy (flake.nix passes `self`), which nix
@@ -634,12 +639,113 @@ let
     in
     assertCheck "livery-fanout" (stagedPalette == resolvedPalette && identity)
       "stagePatch and resolve disagree on the override recolour, or stagePatch is not the identity with no override set";
+  # ── Checks 11 and 12: the shipped songbook generator is offline ───────────
+  # §9's claim, as a build: `share/lyra/nix/manifest.nix` (shipped by
+  # `pkgs/lyra-songbook`) is the runtime's generator, and a plain
+  # `nix-instantiate --eval --strict --json --expr` on it — the exact argv
+  # `aoide-song::widgets` runs, with `NIX_PATH=` empty, no flake, no network, no
+  # checkout — must answer what the flake's own `songbookManifest` answers.
+  #
+  # Check 11 (`generator-offline`): over the repo's committed songbook.
+  # Check 12 (`generator-relocatable`): over a COPY of it in `$TMPDIR`, outside
+  # the repo — §7.4's constraints 1 and 5 (a song folder is self-contained and
+  # holds no repo-absolute path), which is what lets a machine evaluate its OWN
+  # songbook.
+  #
+  # `expected` is `builtins.toJSON { inherit (songbookLib) manifestAttrs
+  # registryAttrs; }` — the same value the `songbookManifest` flake output
+  # exposes, so the comparison is against the flake, never a hand-kept golden.
+  generatorCommands =
+    { lyraSongbook, songbookArg }:
+    ''
+      export XDG_CACHE_HOME="$TMPDIR/cache" HOME="$TMPDIR"
+      nix-instantiate --eval --strict --json --expr \
+        "import ${lyraSongbook}/share/lyra/nix/manifest.nix { songbook = \"${songbookArg}\"; }" \
+        | jq -c 'del(.packages)'
+    '';
+
+  generatorOffline =
+    {
+      lyraSongbook,
+      songbook,
+      expected,
+    }:
+    pkgs.runCommand "aoide-check-generator-offline"
+      {
+        nativeBuildInputs = [
+          pkgs.nix
+          pkgs.jq
+          pkgs.diffutils
+        ];
+        expectedJson = pkgs.writeText "aoide-songbook-manifest.json" expected;
+      }
+      ''
+        got=$(${
+          generatorCommands {
+            inherit lyraSongbook;
+            songbookArg = "${songbook}";
+          }
+        })
+        want=$(cat "$expectedJson")
+        if [ "$got" != "$want" ]; then
+          echo "the shipped generator's answer over ${songbook} is not #songbookManifest:" >&2
+          diff <(printf '%s' "$want" | jq -S .) <(printf '%s' "$got" | jq -S .) >&2 || true
+          exit 1
+        fi
+        printf 'aoide check generator-offline: ok\n' > "$out"
+      '';
+
+  generatorRelocatable =
+    {
+      lyraSongbook,
+      songbook,
+      expected,
+    }:
+    pkgs.runCommand "aoide-check-generator-relocatable"
+      {
+        nativeBuildInputs = [
+          pkgs.nix
+          pkgs.jq
+          pkgs.diffutils
+        ];
+        songbookCopy = builtins.path {
+          path = songbook;
+          name = "aoide-songbook-copy";
+        };
+        expectedJson = pkgs.writeText "aoide-songbook-manifest.json" expected;
+      }
+      ''
+        export XDG_CACHE_HOME="$TMPDIR/cache" HOME="$TMPDIR"
+        # A copy that shares no directory with any checkout — the shape a
+        # machine's own `$AOIDE_ROOT/song/songbook` has.
+        mkdir -p "$TMPDIR/relocated"
+        cp -r "$songbookCopy"/. "$TMPDIR/relocated"/
+        in_repo=$(${
+          generatorCommands {
+            inherit lyraSongbook;
+            songbookArg = "${songbook}";
+          }
+        })
+        relocated=$(${
+          generatorCommands {
+            inherit lyraSongbook;
+            songbookArg = "$TMPDIR/relocated";
+          }
+        })
+        want=$(cat "$expectedJson")
+        if [ "$in_repo" != "$want" ] || [ "$relocated" != "$want" ]; then
+          echo "the shipped generator answers differently for a relocated songbook:" >&2
+          diff <(printf '%s' "$want" | jq -S .) <(printf '%s' "$relocated" | jq -S .) >&2 || true
+          exit 1
+        fi
+        printf 'aoide check generator-relocatable: ok\n' > "$out"
+      '';
 in
 {
   inherit
     assertCheck
     surfaceOwnership
-    noSongRead
+    songRuntimeUntracked
     songShape
     fmt
     discovery
@@ -648,5 +754,7 @@ in
     portability
     nixLint
     liveryFanout
+    generatorOffline
+    generatorRelocatable
     ;
 }

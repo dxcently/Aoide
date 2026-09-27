@@ -1,60 +1,47 @@
-# hosts/_desktop/default.nix — TEMPLATE: desktop workstation skeleton.
+# hosts/_desktop/default.nix — TEMPLATE: desktop workstation.
 #
-# Shelved (the `_` prefix): not registered in flake.nix, so nothing builds or
-# evals it. yomi-strix stays the living reference; this is the generic starting
-# shape. To adopt:
+# Shelved (the `_` prefix): `flake.nix` discovers `hosts/` minus the `_`-prefixed
+# entries, so nothing builds or evaluates this file. yomi-strix stays the living
+# reference; this is the generic starting shape. To adopt:
 #   1. cp -r hosts/_desktop hosts/<your-hostname>
-#   2. flake.nix: `nixosConfigurations.<your-hostname> = mkHost "<your-hostname>";`
-#   3. set hostName/aoide.user/timeZone below; drop a committed hardware.nix
-#      next to this file (the guarded import tolerates its absence)
-#   4. nixos-rebuild switch --flake .#<your-hostname>
-{ lib, pkgs, ... }:
+#   2. set hostName below; drop a committed hardware.nix beside this file
+#      (the guarded import tolerates its absence)
+#   3. nixos-rebuild switch --flake .#<your-hostname>
+#
+# No list anywhere needs the new name — hosts are discovered.
 {
-  imports = [
-    ../common
-  ]
-  # Guarded: import ./hardware.nix only if the file exists, so the flake
-  # still evaluates on a machine without a committed hardware scan.
-  ++ lib.optional (builtins.pathExists ./hardware.nix) ./hardware.nix;
+  aggregation.base.enable = true;
+  aggregation.desktop.enable = true;
+  aggregation.aoideos.enable = true;
 
-  networking.hostName = "desktop"; # ← your hostname
-  networking.networkmanager.enable = true;
+  # Agents are a workstation's business, not the desktop's; a host that runs one
+  # names it here.
+  dendrites.claude-code.enable = true;
 
-  time.timeZone = "UTC"; # ← your zone
+  # The song this host performs, and what it additionally builds in. `sonata` is
+  # the shipped standard, the guaranteed-present baseline. Any committed rice is
+  # reachable from the machine's own songbook without a rebuild
+  # (`aoide rice stage <n>`) — `declared` is only what is painted at boot.
+  song.declared = "sonata";
+  song.available = [ ];
 
-  # Venue graphics — pick your driver and any venue kernel params here.
-  # (yomi-strix shows the amdgpu + latest-kernel version of this block.)
-  hardware.graphics.enable = true;
+  users.khoa = {
+    definition = ../../users/khoa.nix;
+    homeManager.enable = true;
+  };
 
-  # Aoide flags. hosts/common already defaults the framework + baseline
-  # dendrites ON; a host only flips what differs.
-  aoide.enable = true;
-  aoide.user = "khoa"; # ← your user
+  nixos =
+    { lib, ... }:
+    {
+      imports = lib.optional (builtins.pathExists ./hardware.nix) ./hardware.nix;
 
-  # The song this host performs. REQUIRED, not decorative: `aoide.song`
-  # defaults to null, and a host that names no song deploys no QML and runs
-  # no shell service — the paint facets only activate once a song is named.
-  # `sonata` is the shipped standard, the guaranteed-present baseline this
-  # host opts into by name. Replay any committed song/songbook/<name>/ with
-  # this one line.
-  aoide.song = "sonata";
+      nixpkgs.hostPlatform = "x86_64-linux";
 
-  # The whole desktop, one line each (facets render; hyprland owns the
-  # rice-invariant behaviour — keybinds, input, window rules):
-  aoide.facets.quickshell.enable = true;
-  aoide.facets.compositor.enable = true;
-  aoide.facets.stylix.enable = true;
-  aoide.hyprland.enable = true;
+      networking.hostName = "desktop"; # ← your hostname
+      networking.networkmanager.enable = true;
 
-  # Desktop conveniences:
-  aoide.screenshot.enable = true; # hyprshot+satty for the human
-  aoide.vision.enable = true; # grim/slurp for agents
-  aoide.clipboard.enable = true; # cliphist history + QML picker
-  aoide.audio.enable = true; # PipeWire + WirePlumber
-  aoide.networkmanager.enable = true; # nm-connection-editor + nm-applet
+      time.timeZone = "UTC"; # ← your zone
 
-  # Opt-in dendrites (browse modules/dendrites/; aoide.mcp.enable stays false
-  # — house policy):
-  aoide.firefox.enable = true;
-  aoide.claude-code.enable = true;
+      aoide.user = "khoa"; # ← your user
+    };
 }

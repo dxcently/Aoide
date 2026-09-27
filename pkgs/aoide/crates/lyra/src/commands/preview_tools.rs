@@ -6,8 +6,8 @@
 //! item tree joined against its own QML source (so a node comes back with
 //! not just geometry but `id`/`file:line`), and keep a small scaffolding
 //! notes list an agent can read as a work list. Every capability here is
-//! reachable from a shell — the canvas (P7, `modules/facets/quickshell/
-//! qml/WidgetPreview.qml`'s `IpcHandler { target: "preview" }`) only PAINTS
+//! reachable from a shell — the canvas (P7, `pkgs/lyra-shell/qml/
+//! WidgetPreview.qml`'s `IpcHandler { target: "preview" }`) only PAINTS
 //! the same data, per root `AGENTS.md` house rule 7's "delete every
 //! `.qml` — is this still reachable from a terminal?" test.
 //!
@@ -3234,25 +3234,46 @@ exit 0
     /// The real fixture behind the `join_level`/`parse_static_qml` fixes
     /// above: a live run against `song/songbook/sonata/widgets/
     /// SessionMenu.qml` found every child below a `"file"` match reading
-    /// "none" (1054 none vs 34 resolved). Skips (never fails) when this
-    /// checkout doesn't have the song present.
-    fn read_session_menu_qml() -> Option<String> {
+    /// "none" (1054 none vs 34 resolved).
+    ///
+    /// HERMETIC and LOUD. `$AOIDE_FLAKE_ROOT` is pinned to THIS checkout
+    /// (found from this crate's own manifest dir — never from the operator's
+    /// environment, and never `~/.aoide/Aoide`, which is how these numbers
+    /// went stale unnoticed), and an unreadable file PANICS: a skip would let
+    /// the fixture rot into a no-op the day the song moves.
+    fn read_session_menu_qml() -> String {
         let path =
             aoide_storage::fs::flake_root().join("song/songbook/sonata/widgets/SessionMenu.qml");
-        match std::fs::read_to_string(&path) {
-            Ok(text) => Some(text),
-            Err(e) => {
-                eprintln!("skipping: {} unreadable ({e})", path.display());
-                None
-            }
-        }
+        std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "the committed SessionMenu.qml fixture is unreadable at {} ({e}) — this test reads \
+                 THIS checkout's song (pinned via $AOIDE_FLAKE_ROOT), and an unreadable file is a \
+                 failure, not a skip",
+                path.display()
+            )
+        })
+    }
+
+    /// `$AOIDE_FLAKE_ROOT` pinned at this checkout for the whole test, restored
+    /// on drop — held as a binding (`let _pin = pin_checkout();`) by every test
+    /// that reads a committed song.
+    struct PinnedCheckout(#[allow(dead_code)] aoide_test_support::EnvSaver);
+
+    fn pin_checkout() -> PinnedCheckout {
+        let saver = aoide_test_support::EnvSaver::capture(&["AOIDE_FLAKE_ROOT"]);
+        let checkout = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(4)
+            .expect("crates/lyra -> crates -> aoide -> pkgs -> the checkout");
+        std::env::set_var("AOIDE_FLAKE_ROOT", checkout);
+        PinnedCheckout(saver)
     }
 
     #[test]
     fn session_menu_qml_top_level_children_match_the_real_checkout() {
-        let Some(text) = read_session_menu_qml() else {
-            return;
-        };
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _pin = pin_checkout();
+        let text = read_session_menu_qml();
         let (roots, _) = parse_static_qml(&text);
         assert_eq!(
             roots.len(),
@@ -3268,16 +3289,23 @@ exit 0
             .collect();
         assert_eq!(
             got,
-            vec![("TextEdit", 67), ("FolderDialog", 134), ("FileView", 165), ("FileView", 179), ("MouseArea", 186), ("Rectangle", 187)],
-            "the inline `component Action: Rectangle {{ ... }}` at line 275 (and its own nested Text/MouseArea) must never appear here -- it's a type declaration, not a child instance"
+            vec![
+                ("TextEdit", 138),
+                ("FolderDialog", 205),
+                ("FileView", 236),
+                ("FileView", 250),
+                ("MouseArea", 257),
+                ("Rectangle", 258)
+            ],
+            "the inline `component Action: Rectangle {{ ... }}` (and its own nested Text/MouseArea) must never appear here -- it's a type declaration, not a child instance"
         );
     }
 
     #[test]
     fn file_matched_node_children_resolve_positionally_against_the_real_session_menu_children() {
-        let Some(text) = read_session_menu_qml() else {
-            return;
-        };
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _pin = pin_checkout();
+        let text = read_session_menu_qml();
         let path =
             aoide_storage::fs::flake_root().join("song/songbook/sonata/widgets/SessionMenu.qml");
         let mut components = ComponentMap::new();
@@ -3348,17 +3376,17 @@ exit 0
         assert_eq!(menu.children[0].match_kind, "positional");
         assert_eq!(
             menu.children[0].source.as_deref(),
-            Some(format!("{}:67", path.display())).as_deref()
+            Some(format!("{}:138", path.display())).as_deref()
         );
         assert_eq!(menu.children[1].match_kind, "positional");
         assert_eq!(
             menu.children[1].source.as_deref(),
-            Some(format!("{}:186", path.display())).as_deref()
+            Some(format!("{}:257", path.display())).as_deref()
         );
         assert_eq!(menu.children[2].match_kind, "positional");
         assert_eq!(
             menu.children[2].source.as_deref(),
-            Some(format!("{}:187", path.display())).as_deref()
+            Some(format!("{}:258", path.display())).as_deref()
         );
     }
 
@@ -3366,28 +3394,32 @@ exit 0
     /// declared INLINE inside `conductor.qml` (`component SessionCard:
     /// FocusScope { ... }`, no file of its own), so before part A it could
     /// never get a `"file"` match at all -- everything below it stayed
-    /// "none" regardless of the SessionMenu fix. Skips (never fails) when
-    /// this checkout doesn't have the song present.
-    /// The checkout is located from the crate's own manifest dir, never
-    /// `$AOIDE_FLAKE_ROOT`, which sibling tests repoint under a lock this
-    /// helper does not take.
-    fn read_conductor_qml() -> Option<(PathBuf, String)> {
+    /// "none" regardless of the SessionMenu fix.
+    ///
+    /// Located from this crate's own manifest dir, never `$AOIDE_FLAKE_ROOT`
+    /// (which sibling tests repoint under a lock this helper does not take),
+    /// and LOUD: an unreadable fixture PANICS. It used to `eprintln!` and
+    /// return `None`, so the three tests below silently became no-ops in any
+    /// tree without the outer repo's `song/` — which is exactly how their
+    /// expectations went stale. In the nix sandbox this whole group is
+    /// skipped BY NAME in `pkgs/aoide/default.nix`'s `checkFlags`, because
+    /// that source tree has no `song/` by design.
+    fn read_conductor_qml() -> (PathBuf, String) {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../../../song/songbook/sonata/widgets/conductor.qml");
-        match std::fs::read_to_string(&path) {
-            Ok(text) => Some((path, text)),
-            Err(e) => {
-                eprintln!("skipping: {} unreadable ({e})", path.display());
-                None
-            }
-        }
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            panic!(
+                "the committed conductor.qml fixture is unreadable at {} ({e}) — this test reads \
+                 the OUTER repo's song, and an unreadable file is a failure, not a skip",
+                path.display()
+            )
+        });
+        (path, text)
     }
 
     #[test]
     fn conductor_qml_registers_its_inline_session_card_component() {
-        let Some((_, text)) = read_conductor_qml() else {
-            return;
-        };
+        let (_, text) = read_conductor_qml();
         let (_, inline) = parse_static_qml(&text);
         let card = inline
             .iter()
@@ -3404,9 +3436,7 @@ exit 0
     #[test]
     fn file_matched_inline_component_children_resolve_positionally_against_conductors_real_session_card(
     ) {
-        let Some((path, text)) = read_conductor_qml() else {
-            return;
-        };
+        let (path, text) = read_conductor_qml();
         let (_, inline) = parse_static_qml(&text);
         let card_node = inline
             .into_iter()
@@ -3492,9 +3522,7 @@ exit 0
     /// fails) when this checkout doesn't have the song present.
     #[test]
     fn conductor_qmls_repeater_delegate_is_a_real_child_never_the_repeaters_own_id() {
-        let Some((_, text)) = read_conductor_qml() else {
-            return;
-        };
+        let (_, text) = read_conductor_qml();
         let (roots, _) = parse_static_qml(&text);
         // The MOVEMENTS loop: the first `delegate: Column {` and the
         // `Repeater {` opening just above it -- located by content, since

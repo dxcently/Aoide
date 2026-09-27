@@ -8,6 +8,7 @@
 //! (reading `--from`'s notes, writing the scaffolded files) and calls
 //! through to this module for the actual rendering.
 
+use aoide_storage::fs::LYRA_SHELL_SRC;
 use serde_json::Value;
 
 /// A valid `rice compose` song name: `^[a-z0-9][a-z0-9-]*$`. This one check
@@ -162,7 +163,7 @@ pub fn render_intent_md(name: &str, from: &str) -> String {
          ## How to fill this rice\n\
          \n\
          - Slot catalog (which slots a host wires today, what each expects): \
-           `modules/facets/quickshell/qml/slots.md`\n\
+           `{LYRA_SHELL_SRC}/qml/slots.md`\n\
          - Per-song widget contract: `CONTRACTS.md` §5, \"Per-song flavor widgets\"\n\
          - Songbook playbook: `song/songbook/update-playbook.md`\n\
          - Drop a `widgets/<slot>.qml` here to dress a slot — any file under `widgets/` \

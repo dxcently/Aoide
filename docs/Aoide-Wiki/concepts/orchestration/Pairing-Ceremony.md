@@ -229,8 +229,13 @@ optional target:
   always sufficient, and the popup is a second door over the same
   primitive. A graphical session runs it as the `aoide-pair-watch.service`
   user unit (`modules/nucleus/aoided.nix`), gated on `aoide.a2a.enable &&
-  aoide.facets.quickshell.enable && aoide.a2a.pairingPopup` — the last of
-  those OFF by default; a host with a2a and the quickshell facet on does
+  aoide.a2a.pairingPopup` — the last of
+  those OFF by default. Deliberately NOT gated on the shell fact
+  (`aoide.quickshell.enable`), which says only that Aoide paints a shell here:
+  a host painted by something else has the session and takes the zenity path.
+  What follows `aoide.lyra.enable` is the unit's `quickshell` entry on `path`
+  (and `AOIDE_RICE_BIN`), since a host without lyra has no use for either. A
+  host with a2a on does
   not get the popup unless it also opts in.
 - **`--allow read,spawn`** stamps the grant this commit makes — first
   verification only, a re-pair never re-grants — overriding
