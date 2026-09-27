@@ -766,8 +766,12 @@ aoide mesh [--json]
   `"charter"`/`"paired"`, and each `CharterRow` is
   `{"mesh", "declared", "version", "operator", "operatorKey", "trust",
   "trusted", "highWater", "rekeyed": [{"node", "from", "to", "version",
-  "at"}], "inert": [...], "nodes"}` where `operator` is the `SHA256:`
-  fingerprint and `operatorKey` the bare hex.
+  "at"}], "inert": [...], "autogated": [...], "nodes"}` where `operator` is
+  the `SHA256:` fingerprint and `operatorKey` the bare hex. `autogated`
+  names this box's records whose unsigned address/token rail answers by THIS
+  charter — populated on the HOME mesh's row only (`[pairing] homeMesh`: the
+  rail carries no signed mesh, so no other mesh judges it) and empty
+  elsewhere.
 - **Notes:** unlike `node list`'s roster above, this reads only what a
   human explicitly named in `[mesh.<name>]` — an unregistered or
   undeclared node never appears as a row, only in `undeclared`. Drift is

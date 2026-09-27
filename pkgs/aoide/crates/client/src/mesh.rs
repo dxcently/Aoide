@@ -276,7 +276,26 @@ pub struct CharterRow {
     /// this mesh: the record's `grants` entry is not what the door reads (the
     /// charter's line is), so the row reports it rather than letting an
     /// operator believe the record's own grant is live.
+    ///
+    /// **A record here is inert as a GRANT, not as a whole.** If it also
+    /// carries `autogate`, the door's unsigned address/token rail still
+    /// resolves it — and that rail names no mesh, so the door judges the record
+    /// by its HOME mesh's rules. Where this row IS the home mesh, `autogated`
+    /// below names exactly those records, which is what stops this list from
+    /// implying an `autogate` record has nothing left that answers here.
     pub inert: Vec<String>,
+    /// **This box's records whose UNSIGNED autogate rail answers by THIS
+    /// charter** — every registered record with `autogate` set, reported only
+    /// on the row for the home mesh (`[pairing] homeMesh`), because that is the
+    /// mesh the door judges such a record by (`aoide-server::a2a::
+    /// rail_admits` reads `effective_mesh(None)`: the rail carries no signed
+    /// mesh to name another). On any other mesh's row the rail answers by
+    /// home's rules, not by these, so naming them there would be the same class
+    /// of lie the `inert` list was fixed for. A record in both lists is a
+    /// record whose own grant is inert AND whose rail this charter judges: its
+    /// key on the line with `message` ⇒ delivers, otherwise the send is held
+    /// PENDING (never refused).
+    pub autogated: Vec<String>,
     /// How many nodes the charter lists.
     pub nodes: usize,
 }
@@ -375,6 +394,7 @@ pub fn report(meshes: &BTreeMap<String, Mesh>, nodes: &[Node], local_name: &str)
 pub fn charter_rows(declared: &BTreeSet<String>, nodes: &[Node]) -> Vec<CharterRow> {
     let mut names: BTreeSet<String> = declared.iter().cloned().collect();
     names.extend(aoide_storage::charter::meshes_with_state());
+    let home = aoide_storage::config::home_mesh();
     let mut out = Vec::new();
     for mesh in names {
         // F2: the row is on CHARTER-SHAPED, so a mesh whose operator key is
@@ -419,6 +439,11 @@ pub fn charter_rows(declared: &BTreeSet<String>, nodes: &[Node]) -> Vec<CharterR
                 .filter(|n| n.verified && !n.grant(&mesh).is_empty())
                 .map(|n| n.name.clone())
                 .collect(),
+            autogated: if mesh == home {
+                nodes.iter().filter(|n| n.autogate).map(|n| n.name.clone()).collect()
+            } else {
+                Vec::new()
+            },
             nodes: in_force.as_ref().map(|c| c.nodes.len()).unwrap_or(0),
         });
     }
@@ -520,6 +545,14 @@ fn render_charter(charter: &CharterRow) -> String {
         line.push_str(&format!(
             "\n  inert here (paired, but the charter's line is what this door reads): {}",
             charter.inert.join(", ")
+        ));
+    }
+    if !charter.autogated.is_empty() {
+        line.push_str(&format!(
+            "\n  autogate rail here (unsigned send auto-delivers by address/token): {} — \
+             this charter is what judges it (home mesh): the record verified and its key on \
+             the line with `message` ⇒ delivered, otherwise held PENDING",
+            charter.autogated.join(", ")
         ));
     }
     line
@@ -1211,7 +1244,15 @@ mod tests {
             let mut peer = node("peerbox", true, Some("ssh://k@h"));
             peer.pubkey = Some("aa".repeat(32));
             peer.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+            peer.autogate = true;
             aoide_storage::node_store::save_nodes(&[peer]).unwrap();
+
+            // A SECOND charter mesh, not this box's home: its row exists (F2
+            // reports a shaped mesh) but must not claim the rail, because the
+            // rail carries no signed mesh and is judged by home alone.
+            std::fs::create_dir_all(aoide_storage::charter::mesh_state_dir("away")).unwrap();
+            std::fs::write(aoide_storage::charter::in_force_path("away"), "mesh = \"away\"\nversion = 1\n")
+                .unwrap();
 
             // Declared, so the section's own `source` is exercised too.
             std::fs::write(
@@ -1224,8 +1265,13 @@ mod tests {
             let nodes = aoide_storage::node_store::load_nodes();
             let report = report(&loaded.config.mesh, &nodes, "this-box");
 
-            assert_eq!(report.charters.len(), 1, "one charter in force: {:?}", report.charters);
-            let row = &report.charters[0];
+            assert_eq!(
+                report.charters.len(),
+                2,
+                "the home charter and the away fixture's own, each a row: {:?}",
+                report.charters
+            );
+            let row = report.charters.iter().find(|c| c.mesh == "home").expect("the home row");
             assert_eq!(row.mesh, "home");
             assert_eq!(row.version, 1);
             assert!(row.declared, "the mesh is also declared in config.toml");
@@ -1235,6 +1281,25 @@ mod tests {
             assert_eq!(row.high_water, 1, "the version just applied is the mark");
             assert!(row.rekeyed.is_empty(), "nothing was re-keyed by v1");
             assert_eq!(row.inert, vec!["peerbox".to_string()], "the record's own grant is not the answer here");
+            assert_eq!(
+                row.autogated,
+                vec!["peerbox".to_string()],
+                "but the record is inert as a GRANT, not as a whole: its `autogate` rail still answers, and home is the mesh that judges it"
+            );
+            let text = render_charter(row);
+            assert!(
+                text.contains("autogate rail here") && text.contains("held PENDING"),
+                "the surface says the rail exists and what this charter does with it: {text}"
+            );
+
+            // The rail is judged by HOME and nobody else: the away mesh's own
+            // row must not claim a say over it.
+            let away = report.charters.iter().find(|c| c.mesh == "away").expect("the shaped mesh is reported too");
+            assert!(
+                away.autogated.is_empty(),
+                "a charter that is not this box's home judges no rail: {away:?}"
+            );
+            assert!(!render_charter(away).contains("autogate rail here"), "and says nothing about one");
 
             assert_eq!(
                 report.sections[0].source,

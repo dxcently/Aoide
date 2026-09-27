@@ -305,7 +305,7 @@ Remote reach composes what already exists:
   `:724` `do_inject`, `:790` `spawn_inject_prompt`). Bearer auth is the
   landing-in-parallel bearer lane on the existing token surface
   (`a2a.rs:348` `token_authorized`, `node_store.rs:196` `token_bytes_eq`,
-  `:216` `is_autogated_node_token`); this workstream consumes it, never
+  `:216` `autogated_node_token`); this workstream consumes it, never
   reimplements it.
 
 ### The hub option

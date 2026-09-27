@@ -587,7 +587,15 @@
     row is also where a paired record in a charter mesh is REPORTED inert
     (`CharterRow::inert`) — the record's own grant entry is not what the door
     reads there, and an operator must not have to infer that from the door's
-    code.
+    code. **An `autogate` record is inert as a grant and not as a whole**: the
+    door's unsigned address/token rail still resolves it, judged by the
+    record's HOME mesh (`aoide-server::a2a::rail_admits`), so
+    `CharterRow::autogated` names those records on the HOME mesh's row (and
+    nowhere else — a rail carries no signed mesh, so another mesh's charter
+    has no say over it) and `render_charter` prints them with what this charter
+    decides: line with `message` ⇒ delivered, otherwise held PENDING. Don't
+    drop that line back to a bare `inert` list: it was the surface calling such
+    a record untrusted when its rail was still live.
   - **`Node` gains no field for this.** A mesh's shape lives entirely in
     `config.toml`'s `[mesh.*]`; the live registry (`node_store::Node`) is
     read, never written, by this comparison, and never grows a

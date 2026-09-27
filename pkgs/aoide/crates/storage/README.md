@@ -313,8 +313,8 @@ by decision — no embedded database yet
   caller-identity ladder the A2A door keys off, returning WHICH `NodeRung`
   matched alongside the `Node`: a presented bearer against a node's own
   `token_file` first (`NodeRung::Token`), an origin address against that
-  node's `url` second (`NodeRung::Addr`) — unlike `is_autogated_node_token`/
-  `is_autogated_node_addr` above, it looks at EVERY registered node, not
+  node's `url` second (`NodeRung::Addr`) — unlike `autogated_node_token`/
+  `autogated_node_addr` above, it looks at EVERY registered node, not
   only `autogate`-marked ones, since resolving WHICH node is calling is a
   different question from "should this node skip the pending queue."
   `NodeRung` carries a THIRD variant, `Signature` (P-P4) — the strongest
@@ -330,7 +330,19 @@ by decision — no embedded database yet
   proof, and a bare token match is replayable and identical across every
   request the real node or an impersonator ever sends; both remain fine
   for attribution/origin-stamping and the ordinary autogate question, just
-  never for Spawn. Ambiguity resolves deterministically: `node add` refuses only a
+  never for Spawn. The autogate rail's own two matches are the OTHER half of
+  the ladder, and they are deliberately not `resolve_node`:
+  `autogated_node_addr`/`autogated_node_token` return the RECORD a source
+  address or a presented bearer resolves to among the `autogate`-marked
+  subset (registry order, first match wins — the door folds ip then token,
+  and only `resolve_node` tries the token rung first). `aoide-server`'s #50
+  guard exemption asks the same question as `.is_some()` on that result, so
+  there is no separate `is_autogated_node_*` predicate to drift against.
+  **A match is not a delivery:** the rail carries no signed mesh, so the door
+  judges the matched record by its HOME mesh
+  (`aoide-server::a2a::rail_admits` — the charter's line for its key where a
+  charter governs home, nothing where home is charter-shaped or `config.toml`
+  will not load, the record's own flag where home is a pair mesh). Ambiguity resolves deterministically: `node add` refuses only a
   duplicate NAME (CONTRACTS.md §7), so two nodes can share a URL host or
   hold byte-identical `token_file` contents, and `resolve_node` then
   answers with whichever matches FIRST in registry (array) order — not

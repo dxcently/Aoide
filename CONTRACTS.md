@@ -5739,7 +5739,10 @@ conductable session with zero approval. Fixed in `a2a.rs::do_inject` /
 - A **remote** origin auto-delivers ONLY when it matches a node explicitly
   marked `"autogate": true` in `state/nodes.json` (§7 below) — the
   cross-device analogue of `send`'s local "sender is the target's own
-  parent" autogate rule. An unmarked/unknown remote sender is held
+  parent" autogate rule. The flag is what opens the rail, not the whole
+  trust: the matched record is judged by its HOME mesh's rules, so where a
+  charter governs that mesh its key must be on the charter's line (P-CHARTER,
+  the rail table below). An unmarked/unknown remote sender is held
   **pending**, reusing `send`'s EXISTING `pending.json` queue
   machinery verbatim (`conduct::graph::send::session_send`'s own gate — no
   second pending-queue implementation). The synchronous JSON-RPC response
@@ -5826,7 +5829,7 @@ that command being non-empty. Fixed in `a2a.rs`:
   per-node secret from the server-wide `tokenFile` above — it resurrects the
   `autogate` flag's original intent (§7) by letting a token, not an
   IP, say WHICH registered node is calling. `aoide_storage::node_store::
-  is_autogated_node_token` folds this the same way `is_autogated_node_addr`
+  autogated_node_token` folds this the same way `autogated_node_addr`
   already did; Inject's `autogate_match` is now the OR of both checks, so an
   operator who never sets a node's `tokenFile` sees the original
   address-only match, unchanged. This is a per-node credential, not one
@@ -5907,7 +5910,7 @@ shape alone (`-32001 task not found` vs a `submitted`/injected Task — an
 `do_inject`, which could still **write `pending.json`** with zero credential
 presented at all. A hard `-32005` here, mirroring Spawn, would be the WRONG
 fix: enrolled nodes authenticate this call via their OWN per-node token
-(`Node.tokenFile` / `is_autogated_node_token`, 2026-08-19 amendment above),
+(`Node.tokenFile` / `autogated_node_token`, 2026-08-19 amendment above),
 never the server-wide one, and aoide's own outbound clients send no bearer
 by default (`commands.rs`/`wire.rs` — a per-node `Node.bearerSecret`, set via
 `node add --bearer-secret <name>` and resolved fresh through the secrets
@@ -5973,8 +5976,8 @@ message_send`:
 - `resolve_node(nodes, addr, presented_token)` (`aoide_storage::node_store`)
   is the caller-identity ladder — a presented bearer matched against ANY
   registered node's own `tokenFile` first, the connection's origin address
-  matched against a node's `url` second — unlike `is_autogated_node_token`/
-  `is_autogated_node_addr` above, it checks EVERY registered node, not only
+  matched against a node's `url` second — unlike `autogated_node_token`/
+  `autogated_node_addr` above, it checks EVERY registered node, not only
   ones marked `autogate`, since "which node is this" is a different
   question from "should this node skip the pending queue." It returns
   WHICH rung matched alongside the node (`NodeRung::Token` /
@@ -7211,6 +7214,76 @@ nothing local widens a charter grant. In a pair mesh neither applies and
 refuses on the first request after the new version is received, whatever
 paired record the key also has.
 
+**The UNSIGNED autogate rail answers to the same charter** (the A3 review's
+finding 4). `message/send`'s Inject arm carries three auto-delivery rails, and
+the two unsigned ones — a source ADDRESS resolving to an `autogate` record's
+`url`, or a presented bearer matching that record's own `tokenFile`
+(§6's 2026-08-18 amendment) — sit behind no request signature at all, so they
+name no mesh. They are judged by the record the rail MATCHED, by its HOME
+mesh, resolved with `effective_mesh(None)` exactly as a request that names no
+mesh is:
+
+| the record the rail matched | home mesh | auto-delivers |
+|---|---|---|
+| any record | `config.toml` will not LOAD, so home cannot be read | **nothing** — held PENDING |
+| `autogate`, `verified`, key on the line with `message` | a charter GOVERNS it | yes — the line, minus this box's own `node allow … message off --mesh <home>` |
+| any record | charter-SHAPED, operator key undecidable | **nothing** — held PENDING |
+| any record | a PAIR mesh (nothing shaped for it) | yes — the record's own `autogate` flag, the whole rule, exactly as before |
+
+**Home is READ here, never guessed** (review F6). `config::home_mesh` answers
+the built-in default when `config.toml` is unreadable, so a box whose real
+`[pairing] homeMesh` is a charter mesh would otherwise be judged by the DEFAULT
+mesh's (pair) rules and deliver on the record's flag again — the rule stepped
+around by one unreadable file. The rail therefore resolves home with
+`config::home_mesh_fallible` and pends on `Err`: no answer, no delivery. A
+MISSING config is not an error (`config::load` answers the defaults, and
+`present: false`), so the fence is about a config that exists and will not read.
+A NAMED request is the other half of this ruling and is unchanged:
+`grant_in_mesh` resolves its mesh through `effective_mesh`/`home_mesh`, the
+door-wide grant question, where the same swallow is deliberate and NOT fixed
+here — the two are separate resolutions of the same name, and neither is the
+other's fallback.
+
+**The address rung is an ADDRESS match, with an address match's limits**
+(review F5; unchanged by this ruling, and inherent to the rung).
+`autogated_node_addr` returns the FIRST registry-order record whose `url` host
+resolves to the peer, so with two records on one host the send delivers on
+whichever comes first — listed first ⇒ delivered, unlisted first ⇒ PENDING —
+and only one of those two directions is fail-closed. `node_url_matches_addr`
+asks the live resolver for a hostname `url`, so the admitted address set is
+whatever DNS answers at that moment; anyone who is at, NAT'd behind, proxied
+with, or landing on a listed record's address is auto-delivered as that
+record, whatever key is really sending. It fails CLOSED in the shapes that do
+not parse: an IPv4-mapped/unmapped mismatch is a non-match, and an IPv6-literal
+`url` (`[::1]`, bare `2001:db8::1`) never matches at all. Accepted by design —
+[`NodeRung::Addr`] is "spoofable by anyone who can reach the door from that
+address" (§7), and before this ruling every one of those cases DELIVERED; this
+narrowing is what makes the first of them pend.
+
+`a2a::rail_admits` is that table and `a2a::rail_admits_here` the disk read
+that feeds it (one governing/shaped resolution per matched record); the charter
+arm is `grant_from`, so "the line minus local narrowing" has ONE
+implementation and the rail cannot drift from the grant lookup.
+**`verified` is asked only of a record that claims a charter LINE**, never of a
+keyless record the rail matched by address: `aoide node add --autogate` writes
+`verified: false` (a card fetch is reachability, never identity), so requiring
+it in a pair mesh would delete the rail rather than harden it. The third rail —
+the signature rung (`NodeRung::Signature` on an `autogate` record, finding 5) —
+already reads the grant in the request's SIGNED mesh, and is unchanged. Loopback
+delivery is unchanged too: `should_deliver_now(Loopback, _)` consults neither
+rail.
+
+**A rail that does not deliver PENDS; it is not refused.** The match and the
+delivery are two booleans in the Inject arm, deliberately: `autogate_match` is
+what exempts a caller from the #50 uniform-response guard (a registered record
+presenting its own address or token is not an unauthenticated stranger whose
+`contextId` answer must be uniform), and only `deliver_match` feeds
+`should_deliver_now`. Folding the charter's judgement into the match would
+answer a charter-unlisted caller with the guard's synthetic `submitted` Task —
+neither delivered nor queued, and invisible to the operator — instead of the
+approval queue, whose entry still carries the `node:<name>` attribution its
+`from` field would have had.
+
 ### `aoide/binding` (P-SEAL, `docs/architecture/HTTPS-MESH-API.md`)
 
 `params` may carry the caller's own signed age binding; the result always
@@ -7644,8 +7717,8 @@ P-P3 decision 6) is the caller-identity ladder for the TWO unsigned rungs
 — a presented bearer matched against ANY registered node's own `tokenFile`
 first (`NodeRung::Token` on a hit), the connection's origin address matched
 against a node's `url` second (`NodeRung::Addr` on a hit); it returns which
-rung matched alongside the `Node`. Unlike `is_autogated_node_token`/
-`is_autogated_node_addr` (§6's 2026-08-19 amendment), it checks every
+rung matched alongside the `Node`. Unlike `autogated_node_token`/
+`autogated_node_addr` (§6's 2026-08-19 amendment), it checks every
 registered node, not only ones marked `autogate` — "which node is this" is
 a different question from "should this node skip the pending queue." The
 three rungs `NodeRung` now carries are NOT interchangeable strength:
