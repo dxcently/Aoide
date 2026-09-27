@@ -287,7 +287,9 @@ Inject delivery still classifies the caller's address first
 pending-approval queue `send` uses, auto-delivering only on an autogate
 match — the OR of the address check, the per-node `tokenFile` check, and
 the signature-rung `autogate` flag on the resolved node's own record
-(`autogate_match` = `ip_autogate || token_autogate || sig_autogate`). An
+(`autogate_match` = `ip_autogate || token_autogate || sig_autogate`) — the
+flag opening that rail, and `message` in the mesh the request SIGNED for
+being what it delivers on ([[A2A-Door]], P-CHARTER). An
 `Unknown` origin never auto-delivers. A verified signature outranks
 loopback for this question: an ssh `-L` forward delivers a tunneled
 node's packets from its own end's sshd, so `origin_for_inject` strips

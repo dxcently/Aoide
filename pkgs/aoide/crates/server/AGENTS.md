@@ -510,7 +510,9 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   local caller's loopback trust is exactly as before this phase. The
   like-for-like half: `autogate_match` folds in a THIRD signal,
   `sig_autogate` — `resolved_node` matched via `NodeRung::Signature` whose
-  own `Node.autogate` is `true` — alongside the existing
+  own `Node.autogate` is `true` AND whose caller holds `message` in the mesh
+  its request SIGNED for (`node.autogate && may_message(&caller_grant(..))`,
+  review finding 5) — alongside the existing
   `ip_autogate`/`token_autogate`, computed AFTER `resolved_node` now (moved
   down from before it) so this fold can read it; an operator who already
   marked a node auto-deliver keeps that behavior once it starts signing,
@@ -540,9 +542,15 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `config::home_mesh_fallible`, PENDS on `Err` — a `config.toml` that will not
   load must not silently resolve to the built-in default mesh, which is how a
   charter-governed box would otherwise be judged by a pair mesh's rules (review
-  F6). `grant_in_mesh` keeps `effective_mesh`/`home_mesh`'s tolerant resolution:
-  that is the named request's own door-wide question, deliberately not this
-  rail's. **`verified` is asked ONLY of a
+  F6). `grant_in_mesh` reads the SAME failable resolution: `effective_mesh`
+  returns `Err` for an unnamed request with an unreadable config, and the
+  grant is `Grant::none()` — a guessed default mesh's paired records never
+  answer, which is the stale-`grants[home]` door N1/F2 closed for a charter
+  home, reachable by breaking one file (`mesh_or_refusal` turns that same
+  `Err` into the refusal's own words, naming the file and the parse error).
+  A NAMED mesh is untouched — the name is the answer — and callers that never
+  consult a grant (an unsigned loopback inject, an ordinary `tasks/get`) read
+  no config at all. **`verified` is asked ONLY of a
   record claiming a charter LINE**, never of a keyless record the rail matched
   by address: `aoide node add --autogate` writes `verified: false` (a card
   fetch is reachability, never identity), so requiring it in a pair mesh would

@@ -450,7 +450,14 @@ the inbound half of the two-door contract (the outbound half is
   undecidable delivers nothing; a `config.toml` that will not LOAD delivers
   nothing either (review F6 — `home_mesh()` answers the built-in default there,
   which would judge the send by the wrong mesh); a pair-mesh home keeps
-  the record's own `autogate` flag as the whole rule. The match and the
+  the record's own `autogate` flag as the whole rule. **The grant lookup
+  answers an unreadable config the same way**: `effective_mesh` is fallible, an
+  unnamed request's grant is `Grant::none()` when the config will not load, and
+  `spawn`/`mailDeposit`/`mailPoll`/`binding` refuse with `-32010` naming the
+  file (`mesh_or_refusal`) rather than naming a guessed mesh. A request that
+  NAMED its mesh never reads the config, and a caller that consults no grant
+  (an unsigned loopback inject, an ordinary `tasks/get`) is untouched. The
+  match and the
   delivery are deliberately two booleans — `autogate_match` still exempts the
   caller from the #50 uniform guard, `deliver_match` is what
   `should_deliver_now` reads — so a record the charter does not answer for is
