@@ -481,21 +481,35 @@ fn handle_charter_show(inv: &Invocation) -> Outcome {
                 if !charter::charter_shaped(mesh) {
                     continue;
                 }
+                // A row shaped like its siblings (confirm finding 5): a typed
+                // `inForce` discriminator rather than a prose `note` the
+                // renderer keys on, `trust` inside the SAME enumeration the
+                // others use, and the `paths` block every other row carries.
+                let trust = charter::load_trust(mesh).ok().flatten().unwrap_or_default();
+                let declared_key = charter::config_operator(mesh).ok().flatten();
+                let state_key = Some(trust.operator.clone()).filter(|k| !k.is_empty());
                 rows.push(json!({
                     "mesh": mesh,
                     "inForce": false,
                     "version": 0,
-                    "operatorKey": charter::load_trust(mesh).ok().flatten().unwrap_or_default().operator,
-                    "operator": charter::fingerprint_of_key(
-                        &charter::load_trust(mesh).ok().flatten().unwrap_or_default().operator,
-                    ),
-                    "trust": "see `aoide mesh`",
+                    "operatorKey": trust.operator,
+                    "operator": charter::fingerprint_of_key(&trust.operator),
+                    "trust": match (&declared_key, &state_key) {
+                        (Some(_), Some(_)) => "both",
+                        (Some(_), None) => "config",
+                        (None, Some(_)) => "state",
+                        (None, None) => "none",
+                    },
                     "honoured": false,
                     "highWater": 0,
                     "relays": [],
                     "nodes": [],
                     "rekeyed": [],
-                    "note": "charter-shaped with NO readable charter document — no version is in force here, and every request in this mesh is refused until it is resolved",
+                    "paths": {
+                        "charter": charter::in_force_path(mesh).to_string_lossy(),
+                        "trust": charter::trust_path(mesh).to_string_lossy(),
+                        "source": charter::source_path(mesh).to_string_lossy(),
+                    },
                 }));
                 continue;
             }
@@ -556,7 +570,7 @@ fn handle_charter_show(inv: &Invocation) -> Outcome {
     let mut lines = Vec::new();
     for row in &rows {
         let mesh = row["mesh"].as_str().unwrap_or("");
-        if row.get("note").is_some() {
+        if row["inForce"].as_bool() == Some(false) {
             lines.push(format!(
                 "charter {} — NO charter document in force (operator {} ({}) recorded, none readable) — every request in this mesh is refused until it is resolved",
                 mesh,
@@ -957,6 +971,37 @@ mod tests {
             let missing = handle_charter_show(&inv(&["away"]));
             assert_eq!(missing.status, aoide_protocol::output::Status::Error, "{missing:?}");
             assert_eq!(missing.data.as_ref().unwrap()["reason"], "no-charter");
+        });
+    }
+
+    /// **A charter-SHAPED mesh with no readable document is reported, and its
+    /// row is shaped like its siblings** (confirm finding 5): the 1197c88 row
+    /// shipped untested, with a prose `note` the renderer keyed on and a fifth
+    /// value in `trust` — so any future row carrying a `note` would silently
+    /// take that branch. The discriminator is now the typed `inForce: false`,
+    /// `trust` is the same enumeration the other rows use, and the row carries
+    /// the `paths` block every other one does.
+    #[test]
+    fn a_shaped_mesh_with_no_document_is_reported_as_its_own_row() {
+        with_root("show-shaped-no-doc", |_dir| {
+            // A trust record and NO charter document: the `join`-before-accept
+            // shape (and what a corrupt document leaves behind).
+            aoide_storage::charter::trust_operator("home", &format!("ed25519:{}", "cd".repeat(32))).unwrap();
+            assert!(charter::charter_shaped("home"));
+            assert!(charter::in_force_charter("home").is_none(), "no document");
+
+            let out = handle_charter_show(&inv(&[]));
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+            let row = &out.data.as_ref().unwrap()["meshes"][0];
+            assert_eq!(row["mesh"], "home");
+            assert_eq!(row["inForce"], false);
+            assert_eq!(row["version"], 0);
+            assert_eq!(row["trust"], "state", "the same enumeration the other rows use, not a prose pointer");
+            assert_eq!(row["honoured"], false);
+            assert!(row.get("note").is_none(), "no prose discriminator: {row}");
+            assert!(row["paths"]["trust"].is_string(), "and the paths block every sibling carries: {row}");
+            assert!(out.message.contains("NO charter document in force"), "{}", out.message);
+            assert!(out.message.contains("refused"), "and says what it means: {}", out.message);
         });
     }
 
