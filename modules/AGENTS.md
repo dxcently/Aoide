@@ -1,10 +1,11 @@
-# AGENTS.md — invariants across `modules/{dendrites,nucleus}/` and the registry
+# AGENTS.md — invariants across `modules/{nucleus,dendrites,aggregations,overrides}/`
 
 Cross-module rules only. A directory's own `AGENTS.md` holds what's local to
-it; this file holds what would otherwise be repeated in all three. Points up
-to the root `AGENTS.md` for house rule 5 (the closed paint-read whitelist),
-house rule 1 (only `song/` is agent-writable — `modules/` changes by
-upstream merge or new-dendrite-addition only) and house rule 7 (everything is
+it; this file holds what would otherwise be repeated in each of the four. Points
+up to the root `AGENTS.md` for house rule 5 (the closed paint-read whitelist),
+house rule 1 (a rice agent writes only `song/songbook/<song>/`; `modules/`
+changes only on a lane the User ordered, whose scope is named, or additively as
+a new dendrite plus its catalogue line) and house rule 7 (everything is
 a plugin).
 
 ## The catalogue names; one aggregate derives
@@ -13,7 +14,8 @@ a plugin).
 `catalogue` holds one `name = path;` line per dendrite, and that name is how a
 host, a user and an aggregation reach it. It is the ONE place a dendrite file is
 named. `aggregations` and `overrides` are the records read one level deep beside
-it — empty until `modules/aggregations/` and `modules/overrides/` land. A
+it — by their own directories' discovery files, names and paths only, never a
+body at catalogue time. A
 dendrite is added as a new file plus ONE line — the catalogue line — and removed
 by deleting both, with no other file in the tree aware it existed:
 `modules/dendrites/default.nix` derives its imports from the catalogue

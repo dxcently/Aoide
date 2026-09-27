@@ -49,10 +49,11 @@ and the staging/declarative/draft modes:
 
 ## House rules (hard constraints)
 
-1. **`song/` is your only writable domain.** You commit to
-   `song/songbook/<song>/` and nothing else. Inherited structure
-   (`modules/nucleus`) changes by upstream merge only; new
-   `modules/dendrites/` branches are additive.
+1. **A rice agent writes `song/` and nothing else.** You commit to
+   `song/songbook/<song>/` and to no other path. Everything outside `song/` —
+   `modules/`, `pkgs/`, `lib/`, `hosts/`, `users/`, `tests/`, `docs/` — changes
+   only on a lane the User ordered, with that lane's scope named. A new
+   `modules/dendrites/` lane is additive: one file plus its one catalogue line.
 2. **The rebuild is user-gated.** You *propose*; the user *admits*; git
    *records*. No background rebuilds, no self-updaters — house policy.
 3. **Read before you write.** Read `song/songbook/` and the relevant song's
@@ -67,17 +68,19 @@ and the staging/declarative/draft modes:
    `aoide.arrangement` (the structure: which widget/surface TYPES a song
    brings into existence), `aoide.surfaces` (the render-surface ownership
    registry: a dendrite declares the surfaces it owns; `stylix` reads it to
-   skip derivation for them), the identity scalars `aoide.user`,
-   `aoide.root`, `aoide.song`, and the derived `aoide.songbook.builtIn` (what
-     this host BUILT IN, derived
-     from its own song selection), and its own `aoide.<name>.*`. The list is
-   enumerated and closed, never "any `aoide.*`"; a new namespace needs the
-   same explicit amendment each of these got. No module reads another
-   module: cross-dendrite facts (`aoide.{quickshell,lyra,stylix,compositor,
-   greeter}.enable`, `aoide.quickshell.config`, `aoide.sessionTarget`) are
-   declared once in `modules/nucleus` and set by the lane that owns them.
-   This is a documented convention backed by code review; the selection
-   tests prove unselected dendrites and songs are never read, and no
+   skip derivation for them), the core scalars every lane stands on
+   (`aoide.enable`, `aoide.root`, `aoide.checkout`, `aoide.user`), the song
+   selection (`aoide.song`, and the derived `aoide.songbook.builtIn` — what
+   this host BUILT IN, from its own song selection), and its own
+   `aoide.<name>.*`. The list is enumerated and closed, never "any `aoide.*`";
+   a new namespace needs the same explicit amendment each of these got. No
+   module reads another module: cross-dendrite facts (`aoide.{quickshell,lyra,
+   stylix,compositor,greeter}.enable`, `aoide.quickshell.config`) are declared
+   once in `modules/nucleus` and set by the lane that owns them;
+   `aoide.sessionTarget` is the same seam declared in the core module
+   (`pkgs/aoide/module/options.nix`) and set by the lane that paints a
+   session. This is a documented convention backed by code review; the
+   selection tests prove unselected dendrites and songs are never read, and no
    automated coupling check exists yet.
 6. **Every operation flows through `aoided`:** one policy surface, one gate,
    one audit log (`$AOIDE_ROOT/log`, default `~/.aoide/log`). Both doors

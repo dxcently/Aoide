@@ -1,9 +1,11 @@
 # modules
 
 The AoideOS module tree: everything a host needs beyond the core flake's own
-`nixosModules.default`. Two layers, in the order the module system merges
-them — `dendrites/` (opt-in), `nucleus/` (unconditional core) — each with its
-own charter, in its own `README.md`, plus
+`nixosModules.default`. Four directories — `nucleus/` (unconditional core),
+`dendrites/` (opt-in lanes), and the two records read beside them,
+`aggregations/` (named groups of catalogue entries) and `overrides/`
+(capability-scoped fixes, applied to the hosts that selected the capability) —
+each with its own charter, in its own `README.md`, plus
 the catalogue that names what can be selected.
 
 ## Named seams (what it exposes)
@@ -12,8 +14,8 @@ the catalogue that names what can be selected.
   `catalogue` names every dendrite once, by the name a host selects it with,
   and points at the file (or directory) that answers it. It is the ONE place a
   dendrite file is named. `aggregations` and `overrides` are the sibling
-  discovery records, read one level deep beside it and empty until
-  `modules/aggregations/` and `modules/overrides/` land. `lib/composition.nix`
+  discovery records, read one level deep beside it — names and paths only, no
+  body imported at catalogue time. `lib/composition.nix`
   reads this record before any module graph exists and imports only what
   selection kept.
 - `dendrites/default.nix`, `nucleus/default.nix` —
@@ -22,8 +24,9 @@ the catalogue that names what can be selected.
   (`builtins.attrValues (import ../default.nix).catalogue`, and a provider
   registry entry contributes every alternative). `nucleus/default.nix` names only
   the files inside its own directory — it is the unconditional core, so it has no
-  catalogue name to be found by. `lib/mkHost.nix` and `tests/vm-boot.nix` import
-  the two aggregates directly;
+  catalogue name to be found by. `lib/composition.nix` imports the two
+  aggregates for a host that took the whole tree, and `tests/vm-boot.nix`
+  imports them directly as a consumer would;
   nothing imports the catalogue as a module.
 - A dendrite file is a lane record (`{ body; nixos; }`, CONTRACTS.md §2):
   `body` is the module this tree merges (its `aoide.<name>.*` options and its

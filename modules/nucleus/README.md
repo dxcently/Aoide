@@ -76,18 +76,9 @@ module builds against what nucleus declares.
   prefers `lyra secrets ask`.
 - `melete-adapter.nix` — the concrete thin-adapter exemplar on the `aoided`
   event stream.
-- `shellbridge.nix` — the bidirectional bridge service: atomic JSON state
-  out to `state/stage/*.json` (CONDUCTING files — sessions.json, hooks.json;
-  CONTRACTS.md §4), unix-socket commands in, Hyprland IPC consumed here
-  only. Its shared `$XDG_RUNTIME_DIR/aoide` directory survives bridge stops
-  and restarts (`RuntimeDirectoryPreserve=yes`): independently running
-  conductors own the session sockets inside it. It also carries the polkit
-  grant its power actions need: a systemd
-  user unit has no logind session, so `allow_active` never applies to the
-  `login1` actions and the powermenu's `systemctl reboot` would otherwise be
-  refused for want of interactive auth. Gated on the shell and lyra enable
-  facts — a painted shell exists here, nothing broader — so a headless box
-  never drags the Qt/Wayland stack in for units that could not fire.
+- The shellbridge seam is not here: it belongs to the lane that paints a shell
+  (`modules/dendrites/lyra/README.md`, "Named seams — the bridge"), which is
+  also the lane that gates on a session existing.
 - `secrets.nix` (P-V4 of Workstream SECRETS, renamed from "vault" at P-V4b)
   — the secrets broker's deployment: its own system user `aoide-secrets` +
   groups `aoide-secrets`/`aoide-secrets-access`, and a SYSTEM
