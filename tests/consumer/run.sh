@@ -37,25 +37,44 @@ printf '%-52s %s\n' "CHECK" "RESULT"
 printf '%s\n' "--------------------------------------------------------------------"
 
 # ── 1. No reach-in ──────────────────────────────────────────────────────────
-# `<anything> + "/` on the aoide input is the shape being banned; `aoide.lib.…`
-# and `aoide.nixosModules.…` are the shape being required. Both greps run over
+# Three shapes are banned, and each is caught by its own control below:
+#   - `<aoide> + "/…"`            a path built onto the aoide input, through any
+#                                 attribute chain (`aoide.outPath`, `aoide.inputs.
+#                                 aoide`, a let-bound alias of any of them);
+#   - `aoide.inputs.<x>`          Aoide's own inputs threaded by hand;
+#   - `getFlake(…)`               the ref re-imported so a path can be read off
+#                                 it, the shape that dodges both greps above.
+# `aoide.lib.…` and `aoide.nixosModules.…` are the shape being REQUIRED, and
+# neither mentions a path or a ref. Both greps run over
 # every file in this directory, so a new fixture file cannot opt out.
-reachin=$(grep -rnE 'aoide *\+ *"/|aoide\.inputs\.' --include='*.nix' . || true)
+reachin=$(grep -rnE 'aoide(\.[A-Za-z]+)* *\+ *"/|aoide\.inputs\.|getFlake' --include='*.nix' . || true)
 if [ -z "$reachin" ]; then
-  printf '%-52s PASS\n' "no path into Aoide, no input threading"; pass=$((pass+1))
+  printf '%-52s PASS\n' "no path into Aoide, no input threading, no getFlake"; pass=$((pass+1))
 else
-  printf '%-52s FAIL\n' "no path into Aoide, no input threading"
+  printf '%-52s FAIL\n' "no path into Aoide, no input threading, no getFlake"
   printf '%s\n' "$reachin" | sed 's/^/    | /'
   fail=$((fail+1))
 fi
 
-# The positive control for that grep: it must be able to fire. A pattern that
-# matches nothing anywhere is not evidence.
-if grep -qE 'aoide *\+ *"/' <(printf 'x = aoide + "/modules/default.nix";\n'); then
-  printf '%-52s PASS\n' "the reach-in grep can match"; pass=$((pass+1))
-else
-  printf '%-52s FAIL\n' "the reach-in grep can match"; fail=$((fail+1))
-fi
+# The positive controls for that grep: it must be able to fire on EACH spelling
+# it bans. A pattern that matches nothing anywhere is not evidence.
+control() { # label  sample-line
+  if grep -qE 'aoide(\.[A-Za-z]+)* *\+ *"/|aoide\.inputs\.|getFlake' <(printf '%s\n' "$2"); then
+    printf '%-52s PASS\n' "$1"; pass=$((pass+1))
+  else
+    printf '%-52s FAIL\n' "$1"; fail=$((fail+1))
+  fi
+}
+control "the reach-in grep can match: bare input" \
+  'x = aoide + "/modules/default.nix";'
+control "the reach-in grep can match: .outPath" \
+  'x = aoide.outPath + "/modules/default.nix";'
+control "the reach-in grep can match: a chained attr" \
+  'x = aoide.inputs.aoide.outPath + "/song/songbook";'
+control "the reach-in grep can match: input threading" \
+  'x = aoide.inputs.nixpkgs.legacyPackages.${system};'
+control "the reach-in grep can match: getFlake" \
+  'x = (builtins.getFlake "path:/home/khoa/Aoide").outPath + "/modules";'
 
 # ── 2. The consumer's host ──────────────────────────────────────────────────
 tmp=$(mktemp -d) || exit 1
