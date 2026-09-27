@@ -1,11 +1,11 @@
 // bar.qml — cadenza's "bar" slot: the switchboard line (intent §3.1, §3.2).
 //
-//   [⏻] [1] [2]aoide [3]aoide [5] [7]melete [9]mneme   title…   <agents> 6/10 <cpu> 23% $ 4.20 <notif> 3 │ <vol> 62% <bt> <net> │ TRAY 2 <rice> stg │ 14:02:31 │ ●○●┐ patch
-//                                                                                                                                         ●─●  panel
-//   (<name> = the kit icon kit.glyph.<name>, intent §2 Glyphs; $, TRAY, the clock and ⏻ stay bare)
-//         ○──●─○──────○        ○                    (pads, a bus, a junction)
-//            ┆╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┆                    (a spawned wire on lane 0)
+//   [⏻] (1) (2)aoide (3)aoide (5) (7)melete (10)mneme   title…   <agents> 6/10 <notif> 3 │ <vol> 62% <bt> <net> <bat> 88% │ TRAY 2 <rice> stg │ 14:02:31
+//          │     │         │                               (pads; a tied pad grows a lead)
+//          ●─────┴─────────┘                               (a bus on lane 0, a junction)
+//          ┆╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┆                      (a spawned wire on lane 1)
 //   ─────────────────────────────────────────────────────────────────────────── the trunk
+//   (<name> = the kit icon kit.glyph.<name>, intent §2 Glyphs; TRAY, the clock and ⏻ stay bare)
 //
 // WidgetSlot-hosted, root Item. The facet's PanelWindow reads `implicitHeight`
 // (28) back for its height and exclusiveZone; width follows the host.
@@ -16,33 +16,49 @@
 //   Hyprland          workspaces (jack number, occupied, focused, urgent), active title
 //   state/stage/sessions.json + hooks.json   per-jack sessions, AGT, urgent jacks
 //   state/stage/graph.json  `workspaces[].project` (jack labels), `ties` (tie
-//                           lines), `activeAt` (lamps) — core-seams §E. Absent
-//                           today, so the bar DERIVES them (the "DERIVED TIES"
+//                           lines), `activeAt` (lamps) — core-seams §E, built
+//                           in core; on a graph.json WITHOUT the block (no
+//                           compositor in play, an older core) the bar
+//                           DERIVES them (the "DERIVED TIES"
 //                           block, coverage.md's bend) from graph.json
 //                           `edges` + sessions.json `windowAddress` + Hyprland
 //                           toplevels, lamps from hooks.json `updatedAt`
-//   BarPatch.qml            the patch panel after the clock (intent §3.2a):
-//                           live agents, spawned wires, activity lamps
 //   state/usage/now.json    `by:"workspace"` rows → the jack insight pane —
 //                           core-seams §C; absent today → "no usage data"
 //   state/stage/herald.json the NOTIF cell count
-//   livery.usagePath        `$` (state/usage.json local.today.costUsd)
+//   state/stage/projects.json  the registered names → the jack pane's PROJECT chips
 //   livery.riceMode         the RICE cell
-//   /proc/stat, /proc/meminfo, /proc/net/route   CPU, mem total, NET kind
+//   /proc/meminfo, /proc/net/route   mem total (insight gauge), NET kind
 //                           (kernel files, sonata meters/bar precedent)
 //   Pipewire · Bluetooth · Networking · UPower · SystemTray  (sonata's services)
+// CPU and spend are not on the bar: they live on the board's SYS tab.
 //
 // ── What it does ───────────────────────────────────────────────────────────
 //   [⏻] → powermenu.toggle()          jack click → workspace.activate()
-//   AGT / CPU / $ / NOTIF / the patch panel → dock.openTab("overview"|"sys"|"sys"|"notif"|"overview"),
-//        falling back to dock.toggle() when the dock has no openTab
-//   RICE → bridge.toggleRiceMode()     session row → bridge.focusSession(id)
-//   VOL/BT/NET/BAT/TRAY/clock → their own pane (one open at a time, click
-//        the cell again to close); jack hover → the jack insight pane;
-//        patch panel hover → its AGENTS pane.
+//   AGT / NOTIF → dock.openTab("overview"|"notif"), falling back to
+//        dock.toggle() when the dock has no openTab
+//   RICE → bridge.toggleRiceMode() ONCE, then a dim `…` and no more clicks
+//        until livery.riceMode changes (or 10s)
+//   session row → bridge.focusSession(id)
+//   SOUND+BT/NET/BAT/TRAY/clock → their own pane (one open at a time, click
+//        the cell again to close; wheel on the sound cell steps the volume);
+//        jack hover → the jack insight pane.
+//   PROJECT chips (the jack insight pane) → ONE `workspaceaction` line to
+//        shellbridge, pinned to THAT pane's jack (never the focused one):
+//        bind `{action:"set", project, workspace}`, create a name-only project
+//        and bind (`new: true`), unbind `{action:"clear", workspace}`. Through
+//        `bridge.workspaceAction(fields, cb)` when the bridge has it (its one
+//        reply line; `ok:false` → one dim line in the pane), else fire-and-
+//        forget `bridge.sendCommand` (no reply to show). Either way a pending
+//        mark rides the chip until graph.json shows the binding, or 5s pass.
+//        The lit chip is always graph.json's `workspaces[].project`.
+//   Special workspaces (negative ids: -98 scratch, -99) draw no pad, from
+//   either arm, and a tie with a negative end is dropped; their sessions
+//   still count in the agents/notif cells.
 //   Service writes are sonata's: sink/source volume + mute + default,
-//   adapter power + device connect, wifi on/off + connect/disconnect/forget,
-//   tray activate/menu, `pavucontrol`, and `aoide spawn --windowed -- btop`.
+//   adapter power (`enabled`) + device connect()/disconnect(), wifi on/off +
+//   connect/disconnect/forget, tray activate/menu, `pavucontrol`, and
+//   `aoide spawn --windowed -- btop`.
 //
 // ── Panes ──────────────────────────────────────────────────────────────────
 // Every pane is the kit's Pane (by URL), hosted in ONE PopupWindow (an
@@ -50,27 +66,50 @@
 // only) draws the same pane component inside this item instead, under the
 // bar, because the canvas grabs an item, not a popup window.
 //
-// ── Ties and lamps (paint of core's `ties` + `activeAt`) — a schematic ─────
-// Drawn in the band between the socket rules and the trunk, every wire 2px
-// in `ink` (phosphor fg), never dim, so a tie reads at 1:1. Allocation is in
-// jack-INDEX space, so geometry never feeds back into it:
-//   pads      a tied jack gets a hollow 6px ring under its socket; no tie, no pad
-//   bus       a `project` tie set is ONE solid wire on the pad row through all
-//             its pads — when its span crosses no foreign pad and it shares no
-//             jack with another pad-row bus; otherwise it takes a lane
-//   lanes     ≤2 below the pad row (by end, best fit, closed intervals); a
-//             `spawned` tie drops from its pad, runs DASHED along its lane and
-//             rises into the other pad; what does not fit is a `+n` (cyan) on
-//             its left jack
-//   junctions a filled dot wherever a wire meets a wire: a lane wire leaving a
-//             pad that already carries a bus leaves the BUS beside the ring,
-//             dotted there; a lane bus's inner drops meet its run in a dotted T.
-//             A crossing without a dot is not a connection.
-// One Canvas draws it and repaints only when the schematic or the palette moves.
-// Lamp: a 12px amber dash (6px on a drop), 600ms linear, along the wire's own
-// path (drop, lane, rise) or up from the trunk into a jack's socket, only when
-// `activeAt` ADVANCES between two reads; one in flight per wire, later
-// advances coalesce into it.
+// ── Jacks, ties and lamps (paint of core's `ties` + `activeAt`) — a schematic
+// Every jack is a PAD: a round 1px outline hugging its number — a circle the
+// pad row's 14px across for one digit, a pill of the same height for two
+// (the digits' cells + half a pad height; the song's one rounded shape), centred in a slot
+// of (digits + 1) cells — drawn for every jack — ink when
+// occupied, dim when empty, filled `title` with a `ground` number when
+// active, red when a session on it is awaiting. The project label follows
+// the pad, blue. Ties hang in the band between the pads and the trunk,
+// every wire 2px in `ink` (phosphor fg), never dim, so a tie reads at 1:1.
+// Allocation is in jack-INDEX space, so geometry never feeds back into it:
+//   leads     a tied pad grows ONE lead from the middle of its bottom edge,
+//             down to the deepest lane that attaches to it; no tie, no lead
+//   lanes     2 below the pads, closed intervals (two wires on one lane never
+//             share a jack). A `project` tie set is ONE bus joining its leads,
+//             lane 0 first; a `spawned` tie drops down its lead, runs DASHED
+//             along its lane (lane 1 first) and rises into the other lead.
+//             What fits neither lane is a `+n` (cyan) on its left jack
+//   junctions a filled dot wherever a wire meets a wire: where a wire leaves
+//             a lead that runs on below it, and where a bus's inner lead meets
+//             its run in a T. A lead crossing a foreign wire has no dot — a
+//             crossing without a dot is not a connection.
+// One Canvas draws leads, wires and dots and repaints only when the
+// schematic or the palette moves. Lamp: a 12px amber dash (6px on a lead),
+// 600ms linear, along the wire's own path (lead, lane, lead) or up from the
+// trunk into a jack's pad, only when `activeAt` ADVANCES between two reads;
+// one in flight per wire, later advances coalesce into it.
+//
+// ── The working pulse and the send lamps ──────────────────────────────────
+// Pulse: a pad breathes (ring toward `bright`, a faint `title` fill; the
+// active pad's fill toward `bright`) for as long as ANY session on its jack
+// has `hooks.json` phase "working", and stops the moment none does. One
+// shared 2s breath drives every working pad, so a roster write that rebuilds
+// the jack delegates never restarts it, and nothing runs when no pad works.
+// An urgent pad keeps its red ring; amber stays the lamp's.
+// Session → jack is `sessionJack`: core's `workspaces[].sessions` when
+// graph.json carries them, the derivation (window → toplevel) until then;
+// a session with no window lights nothing.
+// Sends: graph.json `sends: [{from, to, at}]` (core's conductor ring, newest
+// last; unbuilt today → nothing). An entry NEW between two reads (never on
+// the first read that carries a ring) runs a lamp from the sender's jack
+// to the receiver's — along a standing tie joining the two when one is laid, else along a
+// TRANSIENT dim wire (a free lane over the span, else down to the trunk)
+// drawn for the lamp's run only and removed with it; no tie is invented.
+// Same jack, or one end without a jack → that jack's own lamp.
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -113,19 +152,21 @@ Item {
         }
     }
 
-    // ── geometry: one text row, the schematic band, the trunk ────────────────
-    // rows (px): glyphs 0..12 (lifted 2px) · socket rule 13 · pad 14..19 with
-    // the bus on 16..17 · lane 0 on 21..22 · lane 1 on 24..25 · a clear row · trunk 27
+    // ── geometry: the pad row, the schematic band, the trunk ─────────────────
+    // rows (px): round pad 0..13 (14 across) (text lifted 2px, digits centred inside) ·
+    // lead from 14 · lane 0 on 17..18 · clear 19..21 · lane 1 on 22..23 ·
+    // clear 24..26 · trunk 27. A junction dot is 6px on its wire's centre
+    // (lane 0: 15..20, lane 1: 20..25), so a dot never reaches the pad, the
+    // trunk, or a foreign wire on the other lane.
     readonly property int barH: 28
     readonly property int textY: -2            // every text on the line, lifted to free the band
-    readonly property int socketY: 13          // a jack's socket rule
-    readonly property int padTop: 14           // the pad ring: 6px, rows 14..19
-    readonly property int padS: 6
-    readonly property int busY: padTop + 2     // a bus on the pad row: rows 16..17
+    readonly property int padTop: 0            // the pad outline: rows 0..13
+    readonly property int padH: 14
+    readonly property int leadTop: padTop + padH   // a lead starts under the pad's bottom edge
     readonly property int wireW: 2             // every wire is 2px
     readonly property int trunkY: barH - 1
     readonly property int lanes: 2
-    function laneY(l) { return 21 + 3 * l }    // 21..22, 24..25
+    function laneY(l) { return 17 + 5 * l }    // 17..18, 22..23
 
     implicitHeight: barH
     implicitWidth: kit.cells(138)
@@ -141,7 +182,6 @@ Item {
     property var hookPhase: ({})
     property var graphDoc: null
     property var nowDoc: null
-    property var usageDoc: null
     property var heraldRows: []
 
     function parseJson(fv) {
@@ -183,8 +223,9 @@ Item {
     }
     // Activity = a session's `hooks.json` `updatedAt` ADVANCING between two
     // reads (never on the first read, never for a session first seen). It
-    // lights the patch panel always, and the switchboard while it derives its
-    // ties (core's `activeAt` takes the switchboard over when S3 lands).
+    // lights the switchboard only while the bar derives its ties (core's
+    // `activeAt` takes over when S3 lands, and this detector goes with the
+    // derivation bend).
     property var _hookAt: ({})
     property bool _hookInit: false
     function detectActivity(at) {
@@ -194,11 +235,8 @@ Item {
                 if (prev[k] !== undefined && at[k] > prev[k]) fire.push(k)
         root._hookAt = at
         root._hookInit = true
-        if (fire.length === 0) return
-        Qt.callLater(function () {
-            root.derivedActivity(fire)
-            if (patchLoader.item) patchLoader.item.activity(fire)
-        })
+        if (fire.length === 0 || root.coreTies) return
+        Qt.callLater(function () { root.derivedActivity(fire) })
     }
     FileView {
         id: heraldFile
@@ -211,6 +249,25 @@ Item {
             if (d) root.heraldRows = Array.isArray(d.notifications) ? d.notifications : []
         }
         onLoadFailed: root.heraldRows = []
+    }
+    // projects.json: the registered names, in the file's order — the jack
+    // pane's PROJECT chips (the binding itself is graph.json's, never this)
+    property var projectNames: []
+    FileView {
+        id: projectsFile
+        path: root.aoideRoot + "/state/stage/projects.json"
+        watchChanges: true
+        printErrors: false
+        onFileChanged: reload()
+        onTextChanged: {
+            var d = root.parseJson(projectsFile)
+            if (!d) return
+            var a = Array.isArray(d.projects) ? d.projects : [], out = []
+            for (var i = 0; i < a.length; i++)
+                if (a[i] && typeof a[i].name === "string" && a[i].name.length > 0) out.push(a[i].name)
+            root.projectNames = out
+        }
+        onLoadFailed: root.projectNames = []
     }
     // graph.json: the ties block rides only when core writes it (core-seams §E)
     property bool graphOk: false
@@ -226,8 +283,10 @@ Item {
             root.graphOk = true
             root.graphDoc = d
             root.detectLamps(d)
+            root.detectSends(d)
+            root.settleWsPending()
         }
-        onLoadFailed: { root.graphOk = false; root.graphDoc = null }
+        onLoadFailed: { root.graphOk = false; root.graphDoc = null; root._sendInit = false }
     }
     // state/usage/now.json — the S5/S6 store (core-seams §C); absent today
     property bool nowOk: false
@@ -245,28 +304,12 @@ Item {
         }
         onLoadFailed: { root.nowOk = false; root.nowDoc = null }
     }
-    property bool usageOk: false
-    FileView {
-        id: usageFile
-        path: root.livery.usagePath
-        watchChanges: true
-        printErrors: false
-        onFileChanged: reload()
-        onTextChanged: {
-            var d = root.parseJson(usageFile)
-            if (!d) return
-            root.usageOk = true
-            root.usageDoc = d
-        }
-        onLoadFailed: { root.usageOk = false; root.usageDoc = null }
-    }
     // A file that did not exist at load has no watch to wake it; look again.
     Timer {
         interval: 5000; repeat: true; running: true
         onTriggered: {
             if (!root.graphOk) graphFile.reload()
             if (!root.nowOk) nowFile.reload()
-            if (!root.usageOk) usageFile.reload()
         }
     }
 
@@ -317,27 +360,31 @@ Item {
     // ════════════════════════════════════════════════════════════════════════
     // THE SWITCHBOARD — jacks, routes, geometry
     // ════════════════════════════════════════════════════════════════════════
-    // core's fields when graph.json carries them; the derivation below until then
+    // core's fields when graph.json carries them; the derivation below until then.
+    // A SPECIAL workspace (a negative id: -98 scratch, -99) is never a jack,
+    // from either arm, and a tie with a negative end is dropped from the
+    // drawing; `wsReal` is the one test every join below uses.
+    function wsReal(w) { return typeof w === "number" && w > 0 }
     readonly property var graphWs: {
         var m = {}
         var a = root.coreTies
             ? (Array.isArray(root.graphDoc.workspaces) ? root.graphDoc.workspaces : [])
             : root.derived.workspaces
         for (var i = 0; i < a.length; i++)
-            if (a[i] && typeof a[i].workspace === "number") m[a[i].workspace] = a[i]
+            if (a[i] && root.wsReal(a[i].workspace)) m[a[i].workspace] = a[i]
         return m
     }
-    readonly property var graphTies: root.coreTies
+    readonly property var graphTies: (root.coreTies
         ? (Array.isArray(root.graphDoc.ties) ? root.graphDoc.ties : [])
-        : root.derived.ties
+        : root.derived.ties).filter(function (e) { return e && root.wsReal(e.from) && root.wsReal(e.to) })
 
     // ════════════════════════════════════════════════════════════════════════
     // DERIVED TIES — the bend (design/coverage.md, "The derivation bend";
     // intent §3.2 "Where ties come from"). DELETE THIS BLOCK WHEN S3 LANDS:
     // `coreTies` becomes always-true, and `derived`, `toplevelWs`, `normAddr`
     // and `derivedActivity` go with it (the two `root.coreTies ? … : derived`
-    // switches above collapse to their core arm, and detectActivity's
-    // `derivedActivity` call goes).
+    // switches above collapse to their core arm, detectActivity's
+    // `derivedActivity` call goes, and so does `sessionJack`'s derived arm).
     //
     // Until core publishes graph.json `workspaces`/`ties`/`activeAt`, the bar
     // joins three published facts itself — paint over published data, never
@@ -459,6 +506,33 @@ Item {
     }
     // ═══ end of the derivation bend ═════════════════════════════════════════
 
+    // session id → jack: core's `workspaces[].sessions` when graph.json
+    // carries them; the derivation's window → toplevel join until then
+    // (that arm goes with the bend). A session with no window has no jack.
+    function sessionOf(ref) {
+        var v = "" + (ref || "")
+        return v.indexOf("session:") === 0 ? v.slice(8) : v
+    }
+    readonly property var sessionJack: {
+        if (!root.coreTies) return root.derived.sessionWs
+        var m = {}
+        var a = Array.isArray(root.graphDoc.workspaces) ? root.graphDoc.workspaces : []
+        for (var i = 0; i < a.length; i++) {
+            var w = a[i]
+            if (!w || typeof w.workspace !== "number" || !(w.workspace > 0)) continue
+            var ss = Array.isArray(w.sessions) ? w.sessions : []
+            for (var j = 0; j < ss.length; j++) m[root.sessionOf(ss[j])] = w.workspace
+        }
+        return m
+    }
+    // the jacks with a session whose hooks.json phase is "working" right now
+    readonly property var workingJacks: {
+        var m = {}, P = root.hookPhase, J = root.sessionJack
+        for (var id in P)
+            if (P[id] === "working" && J[id] > 0) m[J[id]] = true
+        return m
+    }
+
     readonly property var hyprWs: {
         var m = {}
         var vs = (Hyprland.workspaces && Hyprland.workspaces.values) ? Hyprland.workspaces.values : []
@@ -502,6 +576,9 @@ Item {
                 urgent: urgent || !!(w && w.urgent),
                 occupied: tops > 0 || sess.length > 0 || !!(g && g.live > 0),
                 project: (g && typeof g.project === "string") ? g.project : "",
+                // the BINDING: core's `project` only — the derivation's label
+                // is a guess from anchors, never a binding a chip may light
+                bound: (root.coreTies && g && typeof g.project === "string") ? g.project : "",
                 live: g ? (g.live || 0) : sess.length,
                 sessions: sess
             })
@@ -541,64 +618,67 @@ Item {
             routes.push(rr)
         }
         routes.sort(function (p, q) { return p.a !== q.a ? p.a - q.a : p.b - q.b })
-        // every jack some tie touches (a bus on the pad row may not pass one it
-        // does not join, or it would read as joining it)
-        var tied = {}
-        for (var r0 = 0; r0 < routes.length; r0++)
-            for (var mm = 0; mm < routes[r0].members.length; mm++) tied[routes[r0].members[mm]] = true
-        // 1. project buses onto the pad row: its span holds no foreign pad, and
-        //    it shares no jack with another pad-row bus (two buses meeting end to
-        //    end on one row would read as one bus)
-        var padRow = []
-        for (var r1 = 0; r1 < routes.length; r1++) {
-            var P = routes[r1]
-            P.onPads = false
-            if (P.kind !== "project") continue
-            var ok = true
-            for (var x = P.a + 1; x < P.b && ok; x++)
-                if (tied[x] && P.members.indexOf(x) < 0) ok = false
-            for (var q = 0; q < padRow.length && ok; q++)
-                if (!(padRow[q].b < P.a || padRow[q].a > P.b)) ok = false
-            if (ok) { P.onPads = true; padRow.push(P) }
+        // onto ≤2 lanes below the pads, closed intervals (two wires on one lane
+        // never share a jack, or they would read as one wire through its lead).
+        // Project buses first, lane 0 first; then spawned wires, lane 1 first.
+        // Within a kind, by END (the greedy that draws the most wires). What
+        // fits neither lane is a `+n` on its left jack.
+        var occ = []
+        for (var l0 = 0; l0 < root.lanes; l0++) occ.push([])
+        function free(l, R) {
+            for (var q = 0; q < occ[l].length; q++)
+                if (!(occ[l][q].b < R.a || occ[l][q].a > R.b)) return false
+            return true
         }
-        // 2. everything else onto ≤2 lanes below: by END, each into the free
-        //    lane that ended latest (closed intervals) — the greedy that draws
-        //    the most wires; what does not fit is a `+n` on its left jack
-        var laneEnd = []
-        for (var l0 = 0; l0 < root.lanes; l0++) laneEnd.push(-1)
         var badges = {}
-        var rest = routes.filter(function (z) { return !z.onPads })
-        rest.sort(function (p, q) { return p.b !== q.b ? p.b - q.b : q.a - p.a })
-        for (var r2 = 0; r2 < rest.length; r2++) {
-            var R = rest[r2], best = -1
-            for (var l = 0; l < root.lanes; l++)
-                if (laneEnd[l] < R.a && (best < 0 || laneEnd[l] > laneEnd[best])) best = l
-            if (best >= 0) { R.lane = best; laneEnd[best] = R.b }
-            if (R.lane < 0) {
-                var jid = J[R.a].id
-                badges[jid] = (badges[jid] || 0) + 1
+        var byEnd = function (p, q) { return p.b !== q.b ? p.b - q.b : q.a - p.a }
+        var passes = [
+            { kind: "project", pref: [0, 1] },
+            { kind: "spawned", pref: [1, 0] }
+        ]
+        for (var ps = 0; ps < passes.length; ps++) {
+            var list = routes.filter(function (z) { return z.kind === passes[ps].kind })
+            list.sort(byEnd)
+            for (var r2 = 0; r2 < list.length; r2++) {
+                var R = list[r2]
+                for (var pi = 0; pi < passes[ps].pref.length && R.lane < 0; pi++) {
+                    var l = passes[ps].pref[pi]
+                    if (l < root.lanes && free(l, R)) { R.lane = l; occ[l].push(R) }
+                }
+                if (R.lane < 0) {
+                    var jid = J[R.a].id
+                    badges[jid] = (badges[jid] || 0) + 1
+                }
             }
         }
         return { routes: routes, badges: badges }
     }
 
-    // jack geometry, in whole cells: socket "[n]", project label, "+n" badge
+    // jack geometry: the pad's slot (one cell per digit + half a cell each side),
+    // then the project label and the "+n" badge on the cell grid after it
     readonly property var jackModel: {
         var J = root.jacks, B = root.routing.badges
         var out = [], xc = 0
         for (var i = 0; i < J.length; i++) {
             var j = J[i]
-            var sock = "[" + j.id + "]"
+            var num = "" + j.id
             var badge = B[j.id] ? "+" + B[j.id] : ""
-            var n = sock.length + j.project.length + badge.length
+            var padC = num.length + 1
+            var n = padC + j.project.length + badge.length
+            var x = root.kit.cells(xc), slotW = root.kit.cells(padC)
+            // round: a padH circle for one digit; for more, a pill of the same
+            // height, the digits' cells plus half a pad height, centred in its slot
+            var padW = num.length < 2 ? root.padH : root.kit.cells(num.length) + root.padH / 2
+            var padX = Math.floor((slotW - padW) / 2)
             out.push({
                 id: j.id, ws: j.ws, focused: j.focused, urgent: j.urgent,
-                occupied: j.occupied, project: j.project, live: j.live,
-                sessions: j.sessions, sock: sock, badge: badge,
-                x: root.kit.cells(xc),
+                occupied: j.occupied, project: j.project, bound: j.bound, live: j.live,
+                sessions: j.sessions, num: num, badge: badge,
+                x: x,
                 w: root.kit.cells(n),
-                sockW: root.kit.cells(sock.length),
-                cx: Math.round(root.kit.cells(xc) + root.kit.cells(sock.length) / 2)
+                slotW: slotW, padX: padX, padW: padW,
+                // the lead's left px column: under the pad's bottom point
+                lx: x + padX + Math.floor(padW / 2) - 1
             })
             xc += n + 1
         }
@@ -612,90 +692,99 @@ Item {
             if (root.jackModel[i].id === id) return i
         return -1
     }
-    function jackColor(j) {
+    // the pad's outline: red when a session on it waits on you, else title
+    // when active (the pad is filled), ink when occupied, dim when empty
+    function padColor(j) {
         if (j.urgent) return root.kit.urgent
         if (j.focused) return root.kit.title
         if (j.occupied) return root.kit.ink
         return root.kit.dim
     }
+    // the number: ground on the active pad's fill, else the outline's colour
+    function numColor(j) {
+        if (j.focused) return root.kit.ground
+        return root.padColor(j)
+    }
+
+    // ── the working pulse: ONE breath, 0 → 1 → 0 over 2s, shared by every
+    // working pad; it runs only while a drawn pad works (CPU 0 at rest) and
+    // survives the jack delegates being rebuilt on every roster write
+    readonly property bool pulsing: {
+        var M = root.jackModel, W = root.workingJacks
+        for (var i = 0; i < M.length; i++) if (W[M[i].id]) return true
+        return false
+    }
+    // Stepped, not a 60fps animation: 25 steps of 80ms (12.5 fps) on a
+    // cosine. A pad's brightness moves a few percent a step, which reads as
+    // a breath, and the bar redraws 12.5 times a second instead of every
+    // vsync while an agent works — most of the day.
+    readonly property int breathSteps: 25
+    property int _breathAt: 0
+    property real breath: 0
+    Timer {
+        interval: 80; repeat: true
+        running: root.pulsing
+        onTriggered: {
+            root._breathAt = (root._breathAt + 1) % root.breathSteps
+            root.breath = 0.5 - 0.5 * Math.cos(2 * Math.PI * root._breathAt / root.breathSteps)
+        }
+        onRunningChanged: if (!running) { root._breathAt = 0; root.breath = 0 }
+    }
+    // a working pad's ring: its tone toward `bright` (an urgent ring stays red)
+    function pulseRing(j, g) {
+        var c = root.padColor(j)
+        return (g > 0 && !j.urgent) ? Qt.tint(c, root.kit.withA(root.kit.bright, 0.85 * g)) : c
+    }
+    // its fill: the active pad's `title` toward `bright`; else a faint `title`
+    function pulseFill(j, g, previewed) {
+        if (j.focused) return g > 0 ? Qt.tint(root.kit.title, root.kit.withA(root.kit.bright, 0.7 * g)) : root.kit.title
+        if (previewed) return root.kit.select
+        return g > 0 ? root.kit.withA(root.kit.title, 0.3 * g) : "transparent"
+    }
     // ── the schematic, in board pixels (integers; a wire is its top-left px) ──
-    //   pads[]  {cx}                          hollow ring, padS wide, under the socket
-    //   runs[]  {x, y, w, h, dashed}          wire rectangles (2px thick)
+    //   runs[]  {x, y, w, h, dashed}          leads and lane wires (2px thick)
     //   dots[]  {x, y}                        filled junction dot, centred on (x, y)
     //   paths{} key → [{x, y}, …]             the polyline a lamp runs (wire px)
     readonly property var schematic: {
         var M = root.jackModel, rs = root.routing.routes
-        var W = root.wireW, pr = root.padS / 2           // pad spans cx-3 .. cx+2
-        var pads = {}, runs = [], dots = [], paths = {}
-        var busSide = {}                                 // idx → {l, r}: a pad-row bus leaves it that way
-        var taken = {}                                   // "idx:side" → departures already hung off that bus side
-        function padOf(i) { pads[i] = { cx: M[i].cx } }
-        // 1. pad-row buses: pad to pad through every member
+        var W = root.wireW
+        var runs = [], dots = [], paths = {}
+        // a roster change can re-run this between `routing` and `jackModel`
+        // catching up; draw nothing for that one pass rather than index past M
+        for (var g = 0; g < rs.length; g++)
+            if (rs[g].b >= M.length) return { runs: runs, dots: dots, paths: paths }
+        // 1. which lanes attach to each jack's lead; the lead runs down to the deepest
+        var depth = {}                                   // idx → deepest lane
+        var ends = function (L) { return L.kind === "spawned" ? [L.from, L.to] : L.members }
         for (var r = 0; r < rs.length; r++) {
             var R = rs[r]
-            if (!R.onPads) continue
-            var pts = []
-            for (var k = 0; k < R.members.length; k++) {
-                var m = R.members[k]
-                padOf(m)
-                if (!busSide[m]) busSide[m] = { l: false, r: false }
-                if (k > 0) busSide[m].l = true
-                if (k < R.members.length - 1) busSide[m].r = true
-                if (k > 0) {
-                    var x0 = M[R.members[k - 1]].cx + pr, x1 = M[m].cx - pr
-                    runs.push({ x: x0, y: root.busY, w: Math.max(0, x1 - x0), h: W, dashed: false })
-                }
-                pts.push({ x: M[m].cx - 1, y: root.busY })
-            }
-            paths[R.key] = pts
+            if (R.lane < 0) continue
+            var E = ends(R)
+            for (var e = 0; e < E.length; e++)
+                depth[E[e]] = Math.max(depth[E[e]] === undefined ? -1 : depth[E[e]], R.lane)
         }
-        // 2. lane wires: down from each end, along the lane, up into the other
+        for (var k in depth) {
+            var i = parseInt(k)
+            runs.push({ x: M[i].lx, y: root.leadTop, w: W, h: root.laneY(depth[k]) + W - root.leadTop, dashed: false })
+        }
+        // 2. lane wires: lead to lead along the lane; a dot where the wire leaves
+        //    a lead that runs on below it, and where an inner lead meets the run
         for (var r2 = 0; r2 < rs.length; r2++) {
             var L = rs[r2]
-            if (L.onPads || L.lane < 0) continue
+            if (L.lane < 0) continue
             var ly = root.laneY(L.lane)
-            var dashed = L.kind === "spawned"
-            var ends = L.kind === "spawned" ? [L.from, L.to] : L.members
-            var lo = L.a, hi = L.b
-            var drops = {}
-            for (var e = 0; e < ends.length; e++) {
-                var i = ends[e]
-                padOf(i)
-                var cx = M[i].cx, dx, top
-                var toward = (i === hi) ? -1 : 1        // which way this end's lane run goes
-                var bs = busSide[i]
-                if (bs && (bs.l || bs.r)) {
-                    // the pad already carries a bus: hang off the bus beside the
-                    // ring, with a junction dot where the wire leaves it
-                    var side = (toward > 0 ? bs.r : bs.l) ? toward : -toward
-                    var tk = i + ":" + side
-                    var n = taken[tk] || 0
-                    taken[tk] = n + 1
-                    dx = cx + side * (pr + 5 + 7 * n) - (side < 0 ? 2 : 0)   // mirrors about the ring
-                    top = root.busY
-                    dots.push({ x: dx + 1, y: root.busY + 1 })
-                } else {
-                    // a bare pad: drop straight out of its bottom (lane 0 left of
-                    // centre, lane 1 right of it, so two lanes never share a drop)
-                    dx = cx - 2 + 2 * L.lane
-                    top = root.padTop + root.padS
-                }
-                runs.push({ x: dx, y: top, w: W, h: ly - top, dashed: false })
-                drops[i] = { x: dx, top: top }
-            }
-            var xs = ends.map(function (q) { return drops[q].x })
+            var ee = ends(L)
+            var xs = ee.map(function (q) { return M[q].lx })
             var xa = Math.min.apply(null, xs), xb = Math.max.apply(null, xs)
-            runs.push({ x: xa, y: ly, w: xb - xa + W, h: W, dashed: dashed })
-            // a lane bus joining 3+ jacks: its inner drops meet the run in a T
-            for (var e2 = 0; e2 < ends.length; e2++) {
-                var d = drops[ends[e2]]
-                if (d.x > xa && d.x < xb) dots.push({ x: d.x + 1, y: ly + 1 })
+            runs.push({ x: xa, y: ly, w: xb - xa + W, h: W, dashed: L.kind === "spawned" })
+            for (var e2 = 0; e2 < ee.length; e2++) {
+                var d = M[ee[e2]].lx
+                if ((d > xa && d < xb) || depth[ee[e2]] > L.lane) dots.push({ x: d + 1, y: ly + 1 })
             }
-            var f = drops[L.kind === "spawned" ? L.from : lo], t = drops[L.kind === "spawned" ? L.to : hi]
-            paths[L.key] = [{ x: f.x, y: f.top }, { x: f.x, y: ly }, { x: t.x, y: ly }, { x: t.x, y: t.top }]
+            var f = M[L.kind === "spawned" ? L.from : L.a].lx, t = M[L.kind === "spawned" ? L.to : L.b].lx
+            paths[L.key] = [{ x: f, y: root.leadTop }, { x: f, y: ly }, { x: t, y: ly }, { x: t, y: root.leadTop }]
         }
-        var padList = Object.keys(pads).map(function (q) { return pads[q] })
-        return { pads: padList, runs: runs, dots: dots, paths: paths }
+        return { runs: runs, dots: dots, paths: paths }
     }
 
     // ── lamps ────────────────────────────────────────────────────────────────
@@ -707,11 +796,12 @@ Item {
         var next = {}
         var ws = Array.isArray(doc.workspaces) ? doc.workspaces : []
         for (var i = 0; i < ws.length; i++)
-            if (ws[i] && ws[i].activeAt) next["w:" + ws[i].workspace] = root._t(ws[i].activeAt)
+            if (ws[i] && ws[i].activeAt && root.wsReal(ws[i].workspace))
+                next["w:" + ws[i].workspace] = root._t(ws[i].activeAt)
         var ties = Array.isArray(doc.ties) ? doc.ties : []
         for (var j = 0; j < ties.length; j++) {
             var e = ties[j]
-            if (!e || !e.activeAt) continue
+            if (!e || !e.activeAt || !root.wsReal(e.from) || !root.wsReal(e.to)) continue
             var key = e.kind === "spawned" ? "s:" + e.from + ">" + e.to : "p:" + (e.project || "?")
             next[key] = Math.max(next[key] || 0, root._t(e.activeAt))
         }
@@ -727,23 +817,92 @@ Item {
             for (var f = 0; f < fire.length; f++) root.fireLamp(fire[f])
         })
     }
+    // ── send lamps: graph.json `sends` (core's conductor ring, newest last).
+    // A key (from|to|at) not in the previous read's ring is a new send; the
+    // first read that CARRIES `sends` only records — after a load, after the
+    // file went away, or when a ring first appears mid-session — so a ring
+    // that appears never fires its backlog. Absent `sends` runs nothing.
+    property var _sendSeen: ({})
+    property bool _sendInit: false
+    function detectSends(doc) {
+        if (!Array.isArray(doc.sends)) { root._sendSeen = ({}); root._sendInit = false; return }
+        var S = doc.sends
+        var next = {}, fresh = []
+        for (var i = 0; i < S.length; i++) {
+            var e = S[i]
+            if (!e || !e.from || !e.to) continue
+            var k = e.from + "|" + e.to + "|" + (e.at || "")
+            if (root._sendInit && !root._sendSeen[k] && !next[k]) fresh.push({ from: e.from, to: e.to })
+            next[k] = true
+        }
+        root._sendSeen = next
+        root._sendInit = true
+        if (fresh.length > 0) Qt.callLater(function () {
+            for (var f = 0; f < fresh.length; f++) root.fireSend(fresh[f].from, fresh[f].to)
+        })
+    }
+    // is lane `l` clear of every laid route over jack indices lo..hi?
+    function laneFree(l, lo, hi) {
+        var rs = root.routing.routes
+        for (var r = 0; r < rs.length; r++)
+            if (rs[r].lane === l && !(rs[r].b < lo || rs[r].a > hi)) return false
+        return true
+    }
+    function fireSend(from, to) {
+        var a = root.sessionJack[root.sessionOf(from)], b = root.sessionJack[root.sessionOf(to)]
+        var ia = a > 0 ? root.jackIndex(a) : -1, ib = b > 0 ? root.jackIndex(b) : -1
+        if (ia < 0 && ib < 0) return
+        if (ia < 0 || ib < 0 || ia === ib) { root.fireLamp("w:" + (ia >= 0 ? a : b)); return }
+        var M = root.jackModel, W = root.wireW
+        var fx = M[ia].lx, tx = M[ib].lx
+        var path = function (y) {
+            return [{ x: fx, y: root.leadTop }, { x: fx, y: y }, { x: tx, y: y }, { x: tx, y: root.leadTop }]
+        }
+        // a standing tie that joins both jacks carries the lamp on its own lane
+        var rs = root.routing.routes
+        for (var r = 0; r < rs.length; r++) {
+            var R = rs[r]
+            if (R.lane < 0) continue
+            var E = R.kind === "spawned" ? [R.from, R.to] : R.members
+            if (E.indexOf(ia) >= 0 && E.indexOf(ib) >= 0) {
+                root.fireLamp("x:" + a + ">" + b, false, path(root.laneY(R.lane)))
+                return
+            }
+        }
+        // none: a transient wire for this run only — a lane free over the
+        // span, else down to the trunk — removed when the lamp is done
+        var lo = Math.min(ia, ib), hi = Math.max(ia, ib), y = root.trunkY - 1
+        for (var l = 0; l < root.lanes; l++)
+            if (root.laneFree(l, lo, hi)) { y = root.laneY(l); break }
+        var wire = [
+            { x: fx, y: root.leadTop, w: W, h: y + W - root.leadTop },
+            { x: tx, y: root.leadTop, w: W, h: y + W - root.leadTop },
+            { x: Math.min(fx, tx), y: y, w: Math.abs(tx - fx) + W, h: W }
+        ]
+        root.fireLamp("x:" + a + ">" + b, false, path(y), wire)
+    }
+
     // `upward`: run the wire backwards, child jack → parent jack (a derived
-    // activity is the child reporting in; core's `activeAt` runs from → to)
-    function fireLamp(key, upward) {
+    // activity is the child reporting in; core's `activeAt` runs from → to).
+    // `path`/`wire` (sends only): the polyline to run, and the transient wire
+    // drawn under it for this run only.
+    function fireLamp(key, upward, path, wire) {
         if (root._lamps[key]) return                    // coalesce into the one in flight
         var pts = null
-        if (key.indexOf("w:") === 0) {
-            // a jack's own lamp: up from the trunk into its socket, left of the pad
+        if (path) {
+            pts = path
+        } else if (key.indexOf("w:") === 0) {
+            // a jack's own lamp: up from the trunk into the middle of its pad
             var i = root.jackIndex(parseInt(key.slice(2)))
             if (i < 0) return
-            var jx = Math.round(root.jackModel[i].x) + 2
-            pts = [{ x: jx, y: root.trunkY - 1 }, { x: jx, y: root.socketY }]
+            var jx = root.jackModel[i].lx
+            pts = [{ x: jx, y: root.trunkY - 1 }, { x: jx, y: root.leadTop }]
         } else {
             pts = root.schematic.paths[key] || null     // a badge carries no wire to run
             if (!pts) return
             if (upward) pts = pts.slice().reverse()
         }
-        var o = lampComp.createObject(board, { key: key, pts: pts, dur: root.lampMs })
+        var o = lampComp.createObject(board, { key: key, pts: pts, wire: wire || [], dur: root.lampMs })
         if (o) root._lamps[key] = o
     }
     function lampDone(key, o) {
@@ -751,76 +910,78 @@ Item {
         o.destroy()
     }
     // the lamp: one Rectangle, one NumberAnimation on `t`, 0 → 1 along the wire's
-    // polyline (drop, lane, rise); 12px long on a run, 6px on a drop, 2px thick
+    // polyline (lead, lane, lead); 12px long on a run, 6px on a lead, 2px thick.
+    // A send with no standing tie brings its transient wire (dim, 2px), which
+    // lives exactly as long as the lamp.
     Component {
         id: lampComp
-        Rectangle {
-            id: lamp
-            property string key: ""
-            property var pts: []
-            property int dur: 600
-            property real t: 0
-            readonly property var segs: {
-                var out = [], total = 0
-                for (var i = 1; i < pts.length; i++) {
-                    var len = Math.abs(pts[i].x - pts[i - 1].x) + Math.abs(pts[i].y - pts[i - 1].y)
-                    out.push({ a: pts[i - 1], b: pts[i], s: total, len: len })
-                    total += len
+        Item {
+            id: lampRun
+            property alias key: lamp.key
+            property alias pts: lamp.pts
+            property alias dur: lamp.dur
+            property var wire: []
+            Repeater {
+                model: lampRun.wire
+                delegate: Rectangle {
+                    required property var modelData
+                    x: modelData.x; y: modelData.y
+                    width: modelData.w; height: modelData.h
+                    color: root.kit.dim
                 }
-                return { list: out, total: total }
             }
-            readonly property var at: {
-                var S = segs.list, d = t * segs.total
-                for (var i = 0; i < S.length; i++) {
-                    var g = S[i]
-                    if (d <= g.s + g.len || i === S.length - 1) {
-                        var u = g.len > 0 ? Math.min(1, Math.max(0, (d - g.s) / g.len)) : 0
-                        return { x: g.a.x + (g.b.x - g.a.x) * u, y: g.a.y + (g.b.y - g.a.y) * u,
-                                 horiz: g.a.y === g.b.y,
-                                 x0: Math.min(g.a.x, g.b.x), x1: Math.max(g.a.x, g.b.x),
-                                 y0: Math.min(g.a.y, g.b.y), y1: Math.max(g.a.y, g.b.y) }
+            Rectangle {
+                id: lamp
+                property string key: ""
+                property var pts: []
+                property int dur: 600
+                property real t: 0
+                readonly property var segs: {
+                    var out = [], total = 0
+                    for (var i = 1; i < pts.length; i++) {
+                        var len = Math.abs(pts[i].x - pts[i - 1].x) + Math.abs(pts[i].y - pts[i - 1].y)
+                        out.push({ a: pts[i - 1], b: pts[i], s: total, len: len })
+                        total += len
                     }
+                    return { list: out, total: total }
                 }
-                return { x: 0, y: 0, horiz: true, x0: 0, x1: 0, y0: 0, y1: 0 }
+                readonly property var at: {
+                    var S = segs.list, d = t * segs.total
+                    for (var i = 0; i < S.length; i++) {
+                        var g = S[i]
+                        if (d <= g.s + g.len || i === S.length - 1) {
+                            var u = g.len > 0 ? Math.min(1, Math.max(0, (d - g.s) / g.len)) : 0
+                            return { x: g.a.x + (g.b.x - g.a.x) * u, y: g.a.y + (g.b.y - g.a.y) * u,
+                                     horiz: g.a.y === g.b.y,
+                                     x0: Math.min(g.a.x, g.b.x), x1: Math.max(g.a.x, g.b.x),
+                                     y0: Math.min(g.a.y, g.b.y), y1: Math.max(g.a.y, g.b.y) }
+                        }
+                    }
+                    return { x: 0, y: 0, horiz: true, x0: 0, x1: 0, y0: 0, y1: 0 }
+                }
+                width: at.horiz ? 12 : root.wireW
+                height: at.horiz ? root.wireW : 6
+                // centred on the head, held inside the segment so it never overhangs a wire end
+                x: Math.round(at.horiz ? Math.max(at.x0, Math.min(at.x - 5, at.x1 + root.wireW - width)) : at.x)
+                y: Math.round(at.horiz ? at.y : Math.max(at.y0, Math.min(at.y - 3, at.y1 + root.wireW - height)))
+                color: root.kit.hot
+                NumberAnimation on t {
+                    id: run
+                    running: false
+                    from: 0; to: 1; duration: lamp.dur; easing.type: Easing.Linear
+                    onFinished: root.lampDone(lamp.key, lampRun)
+                }
+                Component.onCompleted: run.start()
             }
-            width: at.horiz ? 12 : root.wireW
-            height: at.horiz ? root.wireW : 6
-            // centred on the head, held inside the segment so it never overhangs a wire end
-            x: Math.round(at.horiz ? Math.max(at.x0, Math.min(at.x - 5, at.x1 + root.wireW - width)) : at.x)
-            y: Math.round(at.horiz ? at.y : Math.max(at.y0, Math.min(at.y - 3, at.y1 + root.wireW - height)))
-            color: root.kit.hot
-            NumberAnimation on t {
-                id: run
-                running: false
-                from: 0; to: 1; duration: lamp.dur; easing.type: Easing.Linear
-                onFinished: root.lampDone(lamp.key, lamp)
-            }
-            Component.onCompleted: run.start()
         }
     }
 
     // ════════════════════════════════════════════════════════════════════════
     // DATA — machine (kernel files) and services
     // ════════════════════════════════════════════════════════════════════════
-    property real cpuPct: -1
-    property var _cpuPrev: null
+    // mem total: the jack insight pane's mem gauge scale
     property real memTotal: 0
-    FileView { id: statFile; path: "/proc/stat"; blockLoading: true; printErrors: false }
     FileView { id: memFile; path: "/proc/meminfo"; blockLoading: true; printErrors: false }
-    function sampleCpu() {
-        statFile.reload()
-        var line = ("" + statFile.text()).split("\n")[0] || ""
-        var p = line.trim().split(/\s+/).slice(1).map(Number)
-        if (p.length < 4) return
-        var idle = p[3] + (p[4] || 0), total = 0
-        for (var i = 0; i < p.length; i++) total += p[i] || 0
-        if (root._cpuPrev) {
-            var dt = total - root._cpuPrev.total
-            if (dt > 0) root.cpuPct = Math.max(0, Math.min(100, 100 * (1 - (idle - root._cpuPrev.idle) / dt)))
-        }
-        root._cpuPrev = { idle: idle, total: total }
-    }
-    Timer { interval: 2000; repeat: true; running: true; onTriggered: root.sampleCpu() }
 
     // ── clock ───────────────────────────────────────────────────────────────
     property var now: new Date()
@@ -904,17 +1065,26 @@ Item {
         root.btDev = found
         root.btEpoch++
     }
+    // the KNOWN devices (paired/bonded, or connected) — a merely seen device is
+    // not listed: pairing is blueman's job, this pane is a switch, not a manager.
+    // `state` (Quickshell.Bluetooth BluetoothDeviceState) names the transition
+    // while a connect/disconnect is in flight.
+    function btGloss(d) {
+        if (d.state === BluetoothDeviceState.Connecting) return "connecting…"
+        if (d.state === BluetoothDeviceState.Disconnecting) return "disconnecting…"
+        return d.connected ? "connected" : "paired"
+    }
     readonly property var btRoster: {
         var epoch = root.btEpoch
         var out = []
         var vals = (Bluetooth.devices && Bluetooth.devices.values) ? Bluetooth.devices.values : []
         for (var i = 0; i < vals.length; i++) {
             var d = vals[i]
-            if (!d) continue
+            if (!d || !(d.connected || d.paired || d.bonded)) continue
             out.push({ key: "" + d.address, name: "" + (d.deviceName || d.name || d.address),
-                       gloss: d.connected ? "connected" : (d.paired ? "paired" : "seen"),
-                       current: d.connected === true })
+                       gloss: root.btGloss(d), current: d.connected === true })
         }
+        out.sort(function (a, b) { return a.current !== b.current ? (a.current ? -1 : 1) : a.name.localeCompare(b.name) })
         return out
     }
     function pickBt(key) {
@@ -942,7 +1112,11 @@ Item {
             required property var modelData
             width: 0; height: 0; visible: false
             readonly property bool conn: modelData ? modelData.connected : false
+            readonly property int st: modelData ? modelData.state : 0
+            readonly property bool pr: modelData ? modelData.paired : false
             onConnChanged: root.rescanBt()
+            onStChanged: root.rescanBt()
+            onPrChanged: root.rescanBt()
         }
     }
 
@@ -1059,12 +1233,11 @@ Item {
         memFile.reload()
         var m = /MemTotal:\s+(\d+)/.exec("" + memFile.text())
         if (m) root.memTotal = parseInt(m[1]) * 1024
-        root.sampleCpu()
         routeFile.reload()
         root.rescanBt()
         root.rescanNet()
         root.recountTray()
-        for (var f of [sessionsFile, hooksFile, heraldFile, graphFile, nowFile, usageFile]) f.reload()
+        for (var f of [sessionsFile, hooksFile, heraldFile, projectsFile, graphFile, nowFile]) f.reload()
     }
 
     // ── formatting ──────────────────────────────────────────────────────────
@@ -1079,13 +1252,25 @@ Item {
         if (b >= 1073741824) return (b / 1073741824).toFixed(1) + "G"
         return Math.round(b / 1048576) + "M"
     }
-    readonly property var todayCost: {
-        var u = root.usageDoc
-        var v = (u && u.local && u.local.today) ? u.local.today.costUsd : null
-        return (typeof v === "number") ? v : null
-    }
     function modeWord(m) { return m === "staging" ? "stg" : (m === "draft" ? "drft" : "decl") }
     function modeColor(m) { return m === "staging" ? root.kit.title : (m === "draft" ? root.kit.path : root.kit.dim) }
+    // The RICE toggle in flight. A click sends the toggle once and the cell
+    // reads a dim `…` at once; every further click is ignored until
+    // livery.riceMode (the facet's watch of song/stage/mode.json `mode`)
+    // actually changes, or 10s pass with it unchanged — then the cell is
+    // itself again and says nothing more. A switch reloads the whole shell,
+    // so the mark only has to hold until then; its job is to swallow the
+    // double click that sent two toggles.
+    property bool ricePending: false
+    readonly property string riceModeNow: root.livery.riceMode || "declarative"
+    onRiceModeNowChanged: { root.ricePending = false; ricePendingTimer.stop() }
+    function toggleRice() {
+        if (root.ricePending) return
+        root.ricePending = true
+        ricePendingTimer.restart()
+        if (root.bridge && root.bridge.toggleRiceMode) root.bridge.toggleRiceMode()
+    }
+    Timer { id: ricePendingTimer; interval: 10000; onTriggered: root.ricePending = false }
 
     // ── actions ─────────────────────────────────────────────────────────────
     function openBoard(tab) {
@@ -1094,6 +1279,105 @@ Item {
     }
     function launchBtop() {
         Quickshell.execDetached(["aoide", "spawn", "--windowed", "--agent", "btop", "--", "btop"])
+    }
+
+    // ── the workspace binding: the jack pane's PROJECT row ──────────────────
+    // ONE shellbridge line per click, always carrying the pane's own jack id
+    // (`workspace`), so it binds the pad the pane belongs to, never the
+    // focused one. The bar holds no binding of its own: the lit chip is
+    // graph.json's `workspaces[].project`, and `wsPending` is only a brief
+    // mark on the clicked chip until graph.json shows the result (or 5s pass).
+    property var wsPending: null        // {ws, action, project} — the click in flight
+    property string wsError: ""         // an ok:false reply's own words (PlainText)
+    property int wsErrorWs: -1          // …for this jack only
+    property bool wsNaming: false       // the `[+ new]` name field is open
+    property int wsNamingWs: -1         // …pinned to this jack when it opened
+    property string wsNameText: ""      // what is typed (mirrored for the hint)
+    // The line one click sends. `bridge.workspaceAction(fields, cb)` answers
+    // with core's one reply line {ok, message, action, workspace, project?,
+    // data?} (or {ok:false, reason}); `ok:false` becomes one dim line in the
+    // pane. A bridge without it (the facet's ShellBridge today) takes the
+    // same line fire-and-forget through `sendCommand`: no reply, so no error
+    // line — success shows when graph.json rewrites, and silence clears the
+    // pending mark after 5s with nothing said.
+    function wsSend(fields) {
+        var ws = fields.workspace
+        root.wsError = ""
+        root.wsErrorWs = -1
+        root.wsPending = { ws: ws, action: fields.action, project: fields.project || "" }
+        wsPendingTimer.restart()
+        var b = root.bridge
+        if (b && typeof b.workspaceAction === "function") {
+            b.workspaceAction(fields, function (reply) {
+                var r = reply || {}
+                if (r.ok !== false) return               // the chip moves with graph.json
+                if (root.wsPending && root.wsPending.ws === ws) {
+                    root.wsPending = null
+                    wsPendingTimer.stop()
+                }
+                root.wsError = ("" + (r.message || r.reason || "refused")).replace(/\s+/g, " ")
+                root.wsErrorWs = ws
+            })
+        } else if (b && typeof b.sendCommand === "function") {
+            var line = { cmd: "workspaceaction" }
+            for (var k in fields) line[k] = fields[k]
+            b.sendCommand(line)
+        } else {
+            root.wsPending = null
+            wsPendingTimer.stop()
+        }
+    }
+    function bindJack(ws, project, isNew) {
+        if (!root.wsReal(ws) || !project) return
+        var f = { action: "set", workspace: ws, project: "" + project }
+        if (isNew) f["new"] = true
+        root.wsSend(f)
+    }
+    function unbindJack(ws) {
+        if (root.wsReal(ws)) root.wsSend({ action: "clear", workspace: ws })
+    }
+    // graph.json rewrote: the pending mark goes once the binding shows
+    function settleWsPending() {
+        var p = root.wsPending
+        if (!p) return
+        var g = root.coreTies ? root.graphWs[p.ws] : null
+        var bound = (g && typeof g.project === "string") ? g.project : ""
+        if ((p.action === "set" && bound === p.project) || (p.action === "clear" && bound === "")) {
+            root.wsPending = null
+            wsPendingTimer.stop()
+        }
+    }
+    Timer { id: wsPendingTimer; interval: 5000; onTriggered: root.wsPending = null }
+    // a new project's name, checked before it is sent: the wire refuses a
+    // name that is blank, starts with `-`, or carries a control character
+    // WITHOUT a reply, so the field says so first; whitespace and >40 are
+    // this pane's own limits (one argv word, one chip)
+    function wsNameProblem(t) {
+        // each answer fits the field's 12-cell hint
+        if (t.length === 0) return "type a name"
+        if (t.length > 40) return "≤ 40 chars"
+        if (/[\u0000-\u001f\u007f]/.test(t)) return "no controls"
+        if (/\s/.test(t)) return "no spaces"
+        if (t.charAt(0) === "-") return "no leading -"
+        return ""
+    }
+    function openNaming() {
+        if (!root.insightJack) return
+        root.wsNamingWs = root.insightId
+        root.wsNameText = ""
+        root.wsNaming = true
+    }
+    function cancelNaming() {
+        root.wsNaming = false
+        root.wsNamingWs = -1
+        root.wsNameText = ""
+    }
+    function submitNaming(t) {
+        var name = "" + t
+        if (!root.wsNaming || root.wsNameProblem(name) !== "") return
+        var ws = root.wsNamingWs
+        root.cancelNaming()
+        root.bindJack(ws, name, true)
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -1129,6 +1413,7 @@ Item {
         root.openPane = ""
         root.paneCell = null
         root.paneHovered = false
+        root.cancelNaming()
     }
     function jackEnter(id) {
         root.jackHovered = true
@@ -1136,6 +1421,7 @@ Item {
         var i = root.jackIndex(id)
         if (i < 0) return
         if (root.openPane === "jack" && root.insightId === id) return
+        if (root.openPane === "jack" && root.wsNaming) return          // the name field holds its jack
         if (root.openPane !== "" && root.openPane !== "jack") return   // a latched pane wins
         root.insightId = id
         jackAnchor.x = root.jackModel[i].x
@@ -1143,44 +1429,39 @@ Item {
         root.showPane("jack", jackAnchor, false)
     }
     function jackLeave() { root.jackHovered = false; hoverGrace.restart() }
-    // the patch panel's hover pane: same grace as a jack's, a latched pane wins
-    property bool patchHovered: false
-    function patchHover(on) {
-        root.patchHovered = on
-        if (!on) { hoverGrace.restart(); return }
-        hoverGrace.stop()
-        if (root.openPane === "patch") return
-        if (root.openPane !== "" && root.openPane !== "jack") return
-        root.showPane("patch", patchLoader, true)
-    }
     Timer {
         id: hoverGrace
         interval: 220
         onTriggered: {
-            if (root.paneHovered) return
+            if (root.paneHovered || root.wsNaming) return   // a name being typed holds the pane
             if (root.openPane === "jack" && !root.jackHovered) root.closePane()
-            else if (root.openPane === "patch" && !root.patchHovered) root.closePane()
         }
     }
 
     // BarPreview hooks: open a named pane / a jack's insight pane without a pointer
     function previewPane(name) {
-        var c = ({ vol: volCell, bt: btCell, net: netCell, bat: batCell, tray: trayCell, clock: clockCell,
-                   patch: patchLoader })[name]
+        var c = ({ sound: soundCell, net: netCell, bat: batCell, tray: trayCell, clock: clockCell })[name]
         if (c) root.showPane(name, c, true)
     }
     function previewJack(id) { root.jackEnter(id); root.jackHovered = false }
+    // …and the PROJECT row's states: the name field with `t` typed, a click
+    // (`{action, project?, new?}` on the open jack — through whatever bridge
+    // the harness handed in, the canvas stub or its reply stub)
+    function previewNaming(t) { root.openNaming(); root.wsNameText = "" + t }
+    function previewWsClick(c) {
+        if (!c || !root.insightJack) return
+        if (c.action === "clear") root.unbindJack(root.insightId)
+        else root.bindJack(root.insightId, c.project, c["new"] === true)
+    }
 
     function paneComponent(name) {
         switch (name) {
-        case "vol": return volPane
-        case "bt": return btPane
+        case "sound": return soundPane
         case "net": return netPane
         case "bat": return batPane
         case "tray": return trayPane
         case "clock": return clockPane
         case "jack": return jackPane
-        case "patch": return patchLoader.item ? patchLoader.item.paneComponent : null
         }
         return null
     }
@@ -1207,6 +1488,15 @@ Item {
                 }
             }
         }
+    }
+    // Keyboard reaches an xdg_popup only under a compositor focus grab — the
+    // bar's layer surface never takes keys (sonata's bar PSK line is the
+    // mechanism reference). Grab exactly while the `[+ new]` name field is
+    // open; a click anywhere outside clears the grab, which cancels the field.
+    HyprlandFocusGrab {
+        windows: [ popup ]
+        active: root.wsNaming && popup.visible
+        onCleared: root.cancelNaming()
     }
     // preview only: the same pane drawn under the bar, inside this item
     Loader {
@@ -1235,12 +1525,18 @@ Item {
         property string glyph: ""
         property string value: ""
         property color valueColor: kit.ink
+        // a second glyph after the value, in its own state colour (the sound
+        // cell's bluetooth mark: `󰕾 62% 󰂯`); it keeps that colour on hover
+        property string tail: ""
+        property color tailColor: kit.dim
         readonly property string head: glyph.length > 0 ? glyph : label
         property bool lit: false
         signal activated()
         signal wheeled(int delta)
         readonly property int gap: (head.length > 0 && value.length > 0) ? 1 : 0
-        implicitWidth: kit.cells(kit.cellLen(head) + gap + kit.cellLen(value))
+        readonly property int tailAt: kit.cellLen(head) + gap + kit.cellLen(value) + 1
+        implicitWidth: kit.cells(tail.length > 0 ? tailAt + kit.cellLen(tail)
+                                                 : kit.cellLen(head) + gap + kit.cellLen(value))
         width: implicitWidth
         height: parent ? parent.height : 0
         Text {
@@ -1256,6 +1552,16 @@ Item {
             x: cell.kit.cells(cell.kit.cellLen(cell.head) + cell.gap)
             text: cell.value
             color: cell.valueColor
+            font: cell.kit.font
+            textFormat: Text.PlainText
+            style: Text.Outline
+            styleColor: cell.kit.withA(color, 0.18)
+        }
+        Text {
+            visible: cell.tail.length > 0
+            x: cell.kit.cells(cell.tailAt)
+            text: cell.tail
+            color: cell.tailColor
             font: cell.kit.font
             textFormat: Text.PlainText
             style: Text.Outline
@@ -1325,7 +1631,8 @@ Item {
         width: Math.min(root.boardW, Math.max(0, right.x - x - root.kit.cells(2)))
         clip: root.boardW > width
 
-        // tie lines: one Canvas, repainted only when the routes or the palette move
+        // leads, tie lines and junctions: one Canvas, repainted only when the
+        // routes or the palette move (the pads are the jacks' own Rectangles)
         Canvas {
             id: ties
             width: Math.max(1, root.boardW)
@@ -1350,17 +1657,6 @@ Item {
                         for (var y = w.y; y < w.y + w.h; y += 5) ctx.fillRect(w.x, y, w.w, Math.min(3, w.y + w.h - y))
                     }
                 }
-                // pads: a hollow 6px ring (corners cut), its inside cleared so a
-                // wire never shows through it
-                var t = root.padTop, n = root.padS
-                for (var p = 0; p < S.pads.length; p++) {
-                    var l = S.pads[p].cx - n / 2
-                    ctx.clearRect(l, t, n, n)
-                    ctx.fillRect(l + 1, t, n - 2, 1)
-                    ctx.fillRect(l + 1, t + n - 1, n - 2, 1)
-                    ctx.fillRect(l, t + 1, 1, n - 2)
-                    ctx.fillRect(l + n - 1, t + 1, 1, n - 2)
-                }
                 // junctions: a filled 6px dot (corners cut) where a wire meets a wire
                 for (var d = 0; d < S.dots.length; d++) {
                     var c = S.dots[d]
@@ -1376,32 +1672,42 @@ Item {
             delegate: Item {
                 id: jack
                 required property var modelData
-                readonly property color tone: root.jackColor(modelData)
+                readonly property color tone: root.padColor(modelData)
                 readonly property bool previewed: !!root.shared && root.shared.hoveredWorkspace === modelData.id
+                // the shared breath, on this pad only while a session on it works
+                readonly property real glow: root.workingJacks[modelData.id] ? root.breath : 0
                 x: modelData.x
                 width: modelData.w
                 height: root.barH
 
-                // the board's terminal-row hover names this jack
+                // the pad: a round 1px outline (a circle, a pill for two
+                // digits) — the song's one rounded shape (intent §3.2) —
+                // filled `title` when active; the board's row hover fills it
+                // `select`; a working pad breathes (pulseRing/pulseFill)
                 Rectangle {
-                    visible: jack.previewed
-                    y: root.textY
-                    width: jack.modelData.sockW; height: root.kit.cellH
-                    color: root.kit.select
+                    x: jack.modelData.padX
+                    y: root.padTop
+                    width: jack.modelData.padW; height: root.padH
+                    radius: root.padH / 2
+                    color: root.pulseFill(jack.modelData, jack.glow, jack.previewed)
+                    border.width: 1
+                    border.color: root.pulseRing(jack.modelData, jack.glow)
+                    antialiasing: true
                 }
                 Text {
                     y: root.textY
-                    text: jack.modelData.sock
-                    color: jack.tone
-                    font.family: root.kit.font.family
-                    font.pixelSize: root.kit.font.pixelSize
-                    font.bold: jack.modelData.focused
+                    x: jack.modelData.padX
+                    width: jack.modelData.padW
+                    horizontalAlignment: Text.AlignHCenter
+                    text: jack.modelData.num
+                    color: root.numColor(jack.modelData)
+                    font: root.kit.font
                     textFormat: Text.PlainText
-                    style: Text.Outline
+                    style: jack.modelData.focused ? Text.Normal : Text.Outline
                     styleColor: root.kit.withA(color, 0.18)
                 }
                 Text {
-                    x: jack.modelData.sockW; y: root.textY
+                    x: jack.modelData.slotW; y: root.textY
                     visible: jack.modelData.project.length > 0
                     text: jack.modelData.project
                     color: root.kit.path
@@ -1409,19 +1715,12 @@ Item {
                     textFormat: Text.PlainText
                 }
                 Text {
-                    x: root.kit.cells(jack.modelData.sock.length + jack.modelData.project.length); y: root.textY
+                    x: jack.modelData.slotW + root.kit.cells(jack.modelData.project.length); y: root.textY
                     visible: jack.modelData.badge.length > 0
                     text: jack.modelData.badge
                     color: root.kit.number
                     font: root.kit.font
                     textFormat: Text.PlainText
-                }
-                // the socket rule: an occupied jack is a solid rule, an empty one none
-                Rectangle {
-                    visible: jack.modelData.occupied || jack.modelData.focused
-                    x: 1; y: root.socketY
-                    width: jack.modelData.sockW - 2; height: 1
-                    color: jack.tone
                 }
                 MouseArea {
                     anchors.fill: parent
@@ -1438,13 +1737,66 @@ Item {
     }
 
     // ── the active window's title, dim, truncated ───────────────────────────
+    // An agent's terminal title leads with the harness's own spinner glyph
+    // (✳ ◑ ⠂ …), which animates in the title itself. The bar strips it and
+    // paints its own lamp in a reserved cell: the window's session state from
+    // hooks.json (sessions.json `windowAddress` → the active toplevel), a hard
+    // blink in and out while working, steady otherwise, the cell empty for a
+    // window with no session. The blink Timer runs only while it is shown.
+    readonly property string activeAddr:
+        Hyprland.activeToplevel && Hyprland.activeToplevel.address
+            ? root.normAddr(Hyprland.activeToplevel.address) : ""
+    readonly property string activeState: {
+        if (!root.activeAddr) return ""
+        var a = root.sessionRows
+        for (var i = 0; i < a.length; i++) {
+            var s = a[i]
+            if (!s || root.normAddr(s.windowAddress) !== root.activeAddr) continue
+            var ph = root.hookPhase["" + (s.sessionId || s.id || "")]
+            return root.normState(ph ? ph : s.state)
+        }
+        return ""
+    }
+    function stripSpinner(t) {
+        // one or two leading symbol glyphs, then a space: the harness spinner
+        // (a glyph is a code point that is no letter/digit in any case and
+        // no path or bracket start; astral glyphs are two UTF-16 units)
+        var cps = Array.from(t)
+        var n = 0
+        while (n < 2 && n < cps.length) {
+            var c = cps[n]
+            if (/\s/.test(c) || /[0-9~\/.\[(]/.test(c) || c.toUpperCase() !== c.toLowerCase()) break
+            n++
+        }
+        if (n === 0 || n >= cps.length || !/\s/.test(cps[n])) return t
+        return cps.slice(n + 1).join("").replace(/^\s+/, "")
+    }
+    property bool titleBlinkOn: true
+    Timer {
+        interval: 500; repeat: true
+        running: root.activeState === "working" && titleText.visible
+        onRunningChanged: root.titleBlinkOn = true
+        onTriggered: root.titleBlinkOn = !root.titleBlinkOn
+    }
+    Text {
+        id: titleLamp
+        y: root.textY
+        x: board.x + board.width + root.kit.cells(2)
+        visible: titleText.visible && root.activeState !== ""
+        opacity: root.activeState === "working" && !root.titleBlinkOn ? 0 : 1
+        text: root.kit.lampGlyph(root.activeState)
+        color: root.kit.lampColor(root.activeState)
+        font: root.kit.font
+        textFormat: Text.PlainText
+    }
     Text {
         id: titleText
         y: root.textY
-        x: board.x + board.width + root.kit.cells(2)
+        x: board.x + board.width + root.kit.cells(2) + (root.activeState !== "" ? root.kit.cells(2) : 0)
         width: Math.max(0, right.x - root.kit.cells(2) - x)
-        visible: width >= root.kit.cells(6)
-        text: (Hyprland.activeToplevel && Hyprland.activeToplevel.title) ? "" + Hyprland.activeToplevel.title : ""
+        visible: right.x - root.kit.cells(2) - board.x - board.width - root.kit.cells(2) >= root.kit.cells(8)
+        text: (Hyprland.activeToplevel && Hyprland.activeToplevel.title)
+            ? root.stripSpinner("" + Hyprland.activeToplevel.title) : ""
         color: root.kit.dim
         font: root.kit.font
         textFormat: Text.PlainText
@@ -1456,7 +1808,7 @@ Item {
     Row {
         id: right
         y: root.textY
-        anchors.right: patchLoader.left
+        anchors.right: parent.right
         anchors.rightMargin: root.kit.cellW
         height: root.barH
         spacing: root.kit.cellW
@@ -1470,20 +1822,6 @@ Item {
         }
         Cell {
             kit: root.kit
-            glyph: root.kit.glyph.cpu
-            value: root.cpuPct < 0 ? "—" : Math.round(root.cpuPct) + "%"
-            valueColor: root.cpuPct < 0 ? root.kit.dim : (root.cpuPct >= 80 ? root.kit.warn : root.kit.number)
-            onActivated: root.openBoard("sys")
-        }
-        Cell {
-            kit: root.kit
-            label: "$"
-            value: root.todayCost === null ? "—" : root.todayCost.toFixed(2)
-            valueColor: root.todayCost === null ? root.kit.dim : root.kit.number
-            onActivated: root.openBoard("sys")
-        }
-        Cell {
-            kit: root.kit
             glyph: root.kit.glyph.notif
             value: "" + root.heraldStats.count
             valueColor: root.heraldStats.summons ? root.kit.urgent
@@ -1491,25 +1829,19 @@ Item {
             onActivated: root.openBoard("notif")
         }
         Sep { kit: root.kit }
+        // sound + bluetooth: ONE cell, one pane (intent §3.1) — `󰕾 62% 󰂯`;
+        // the 󰂯 is dim off (󰂲), ink on, title with a device connected
         Cell {
-            id: volCell
+            id: soundCell
             kit: root.kit
             glyph: root.volMuted ? root.kit.glyph.volMuted : root.kit.glyph.vol
             value: !root.sinkAudio ? "—" : root.volPct + "%"
             valueColor: (!root.sinkAudio || root.volMuted) ? root.kit.dim : root.kit.number
-            lit: root.openPane === "vol"
-            onActivated: root.togglePane("vol", volCell, true)
+            tail: root.btOn ? root.kit.glyph.bt : root.kit.glyph.btOff
+            tailColor: !root.btOn ? root.kit.dim : (root.btDev ? root.kit.title : root.kit.ink)
+            lit: root.openPane === "sound"
+            onActivated: root.togglePane("sound", soundCell, true)
             onWheeled: function (d) { root.nudgeVol(root.sinkAudio, d > 0 ? 5 : -5) }
-        }
-        Cell {
-            id: btCell
-            kit: root.kit
-            // glyph only (intent §3.1): lit ink with a device on, dim otherwise;
-            // the device name lives in the pane
-            glyph: root.btOn ? root.kit.glyph.bt : root.kit.glyph.btOff
-            valueColor: root.btDev ? root.kit.ink : root.kit.dim
-            lit: root.openPane === "bt"
-            onActivated: root.togglePane("bt", btCell, true)
         }
         Cell {
             id: netCell
@@ -1544,9 +1876,12 @@ Item {
         Cell {
             kit: root.kit
             glyph: root.kit.glyph.rice
-            value: root.modeWord(root.livery.riceMode)
-            valueColor: root.modeColor(root.livery.riceMode)
-            onActivated: root.bridge.toggleRiceMode()
+            // pending: `…` padded to the word it replaces, so the clock never moves
+            value: root.ricePending
+                   ? "…" + root.kit.rep(" ", root.modeWord(root.livery.riceMode).length - 1)
+                   : root.modeWord(root.livery.riceMode)
+            valueColor: root.ricePending ? root.kit.dim : root.modeColor(root.livery.riceMode)
+            onActivated: root.toggleRice()
         }
         Sep { kit: root.kit }
         Cell {
@@ -1556,27 +1891,6 @@ Item {
             valueColor: root.openPane === "clock" ? root.kit.title : root.kit.ink
             onActivated: root.togglePane("clock", clockCell, true)
         }
-        Sep { kit: root.kit }
-    }
-
-    // ── the patch panel (intent §3.2a): BarPatch.qml, by URL; placed here only
-    Loader {
-        id: patchLoader
-        anchors.right: parent.right
-        anchors.rightMargin: root.kit.cellW
-        width: item ? item.width : root.kit.cells(16)
-        height: root.barH
-        Component.onCompleted: setSource(root.kit.helper("BarPatch"), {
-            kit: Qt.binding(() => root.kit),
-            sessions: Qt.binding(() => root.sessions),
-            graphDoc: Qt.binding(() => root.graphDoc),
-            lampMs: Qt.binding(() => root.lampMs)
-        })
-    }
-    Connections {
-        target: patchLoader.item
-        function onActivated() { root.openBoard("overview") }
-        function onHoveredChanged() { root.patchHover(patchLoader.item.hovered) }
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -1727,30 +2041,66 @@ Item {
         elide: Text.ElideRight
     }
 
-    // ── VOL ─────────────────────────────────────────────────────────────────
-    readonly property int volCols: 40
-    readonly property int volRows: !root.sinkAudio && !root.srcAudio ? 1
+    // ── SOUND + BLUETOOTH — one pane, two sections (intent §3.1) ────────────
+    //   SOUND      out/in gauges (label click mutes, click sets, wheel steps),
+    //              the output and input device lists (click picks the default),
+    //              the mixer row
+    //   BLUETOOTH  `[b] power [on]` (click toggles the adapter's `enabled`),
+    //              then the known devices `󰂯 name  connected|paired` (click
+    //              connects or disconnects). No adapter, or powered off: the
+    //              section is one dim line (off: that line is the power toggle).
+    readonly property int soundCols: 40
+    readonly property bool audioAny: !!root.sinkAudio || !!root.srcAudio
+    readonly property int soundRows: !root.audioAny ? 1
         : 2 + 1 + Math.max(1, sinkRoster.length) + 1 + Math.max(1, sourceRoster.length) + 1
+    readonly property int btRows: 1 + (!root.btAdapter || !root.btOn ? 1 : 1 + Math.max(1, btRoster.length))
     Component {
-        id: volPane
+        id: soundPane
         Use {
             kit: root.kit; helper: "Pane"
             props: ({
-                title: "volume", focused: true, animateOnCreate: true, cols: root.volCols,
+                title: "sound", focused: true, animateOnCreate: true, cols: root.soundCols,
                 stat: Qt.binding(() => root.sinkAudio ? (root.volMuted ? "mute" : root.volPct + "%") : ""),
-                rows: Qt.binding(() => root.volRows), content: volBody })
+                rows: Qt.binding(() => root.soundRows + root.btRows), content: soundBody })
+        }
+    }
+    // a section head inside a pane: `─ BLUETOOTH ─────`, the word in title
+    component Section: Item {
+        id: sec
+        required property var kit
+        property int cols: 30
+        property string label: ""
+        width: kit.cells(cols)
+        height: kit.cellH
+        Text {
+            text: "─ "
+            color: sec.kit.dim
+            font: sec.kit.font; textFormat: Text.PlainText
+        }
+        Text {
+            x: sec.kit.cells(2)
+            text: sec.label.toUpperCase()
+            color: sec.kit.title
+            font: sec.kit.titleFont; textFormat: Text.PlainText
+        }
+        Text {
+            x: sec.kit.cells(3 + sec.label.length)
+            text: Kit.rep("─", Math.max(0, sec.cols - sec.label.length - 3))
+            color: sec.kit.dim
+            font: sec.kit.font; textFormat: Text.PlainText
         }
     }
     Component {
-        id: volBody
+        id: soundBody
         Column {
-            Note { kit: root.kit; cols: root.volCols; visible: !root.sinkAudio && !root.srcAudio
+            // ── SOUND ──
+            Note { kit: root.kit; cols: root.soundCols; visible: !root.audioAny
                    text: "no audio device — pipewire not ready" }
             GaugeLine {
-                visible: !!root.sinkAudio
-                kit: root.kit; cols: root.volCols; interactive: true
+                visible: root.audioAny
+                kit: root.kit; cols: root.soundCols; interactive: !!root.sinkAudio
                 label: "out"; frac: root.volPct / 100
-                valueText: root.volMuted ? "mute" : root.volPct + "%"
+                valueText: !root.sinkAudio ? "—" : (root.volMuted ? "mute" : root.volPct + "%")
                 fillColor: root.volMuted ? root.kit.dim : root.kit.ink
                 valueColor: root.volMuted ? root.kit.dim : root.kit.number
                 onLabelClicked: root.toggleMute(root.sinkAudio)
@@ -1758,8 +2108,8 @@ Item {
                 onWheeled: function (d) { root.nudgeVol(root.sinkAudio, d > 0 ? 5 : -5) }
             }
             GaugeLine {
-                visible: !!root.sinkAudio || !!root.srcAudio
-                kit: root.kit; cols: root.volCols; interactive: !!root.srcAudio
+                visible: root.audioAny
+                kit: root.kit; cols: root.soundCols; interactive: !!root.srcAudio
                 label: "in"; frac: root.micPct / 100
                 valueText: !root.srcAudio ? "—" : (root.micMuted ? "mute" : root.micPct + "%")
                 fillColor: root.micMuted ? root.kit.dim : root.kit.ink
@@ -1768,15 +2118,15 @@ Item {
                 onSetFrac: function (f) { root.setVol(root.srcAudio, f) }
                 onWheeled: function (d) { root.nudgeVol(root.srcAudio, d > 0 ? 5 : -5) }
             }
-            Rule { kit: root.kit; cols: root.volCols; label: "out"; visible: !!root.sinkAudio || !!root.srcAudio }
-            Note { kit: root.kit; cols: root.volCols; visible: (!!root.sinkAudio || !!root.srcAudio) && root.sinkRoster.length === 0
+            Rule { kit: root.kit; cols: root.soundCols; label: "out"; visible: root.audioAny }
+            Note { kit: root.kit; cols: root.soundCols; visible: root.audioAny && root.sinkRoster.length === 0
                    text: "no output device" }
             Repeater {
-                model: root.sinkRoster
+                model: root.audioAny ? root.sinkRoster : []
                 delegate: ListRow {
                     required property var modelData
                     required property int index
-                    kit: root.kit; cols: root.volCols
+                    kit: root.kit; cols: root.soundCols
                     idx: "" + (index + 1)
                     lamp: modelData.current ? "●" : "○"
                     lampColor: modelData.current ? root.kit.title : root.kit.dim
@@ -1786,15 +2136,15 @@ Item {
                     onActivated: root.pickSink(modelData.key)
                 }
             }
-            Rule { kit: root.kit; cols: root.volCols; label: "in"; visible: !!root.sinkAudio || !!root.srcAudio }
-            Note { kit: root.kit; cols: root.volCols; visible: (!!root.sinkAudio || !!root.srcAudio) && root.sourceRoster.length === 0
+            Rule { kit: root.kit; cols: root.soundCols; label: "in"; visible: root.audioAny }
+            Note { kit: root.kit; cols: root.soundCols; visible: root.audioAny && root.sourceRoster.length === 0
                    text: "no input device" }
             Repeater {
-                model: root.sourceRoster
+                model: root.audioAny ? root.sourceRoster : []
                 delegate: ListRow {
                     required property var modelData
                     required property int index
-                    kit: root.kit; cols: root.volCols
+                    kit: root.kit; cols: root.soundCols
                     idx: "" + (index + 1)
                     lamp: modelData.current ? "●" : "○"
                     lampColor: modelData.current ? root.kit.title : root.kit.dim
@@ -1805,53 +2155,38 @@ Item {
                 }
             }
             ListRow {
-                visible: !!root.sinkAudio || !!root.srcAudio
-                kit: root.kit; cols: root.volCols
+                visible: root.audioAny
+                kit: root.kit; cols: root.soundCols
                 idx: "m"; name: "mixer"; gloss: "pavucontrol"
                 onActivated: root.openMixer()
             }
-        }
-    }
-
-    // ── BT ──────────────────────────────────────────────────────────────────
-    readonly property int btCols: 36
-    readonly property int btRows: !root.btAdapter ? 1 : 1 + 1 + Math.max(1, btRoster.length)
-    Component {
-        id: btPane
-        Use {
-            kit: root.kit; helper: "Pane"
-            props: ({
-                title: "bluetooth", focused: true, animateOnCreate: true, cols: root.btCols,
-                stat: Qt.binding(() => !root.btAdapter ? "" : (root.btOn ? "on" : "off")),
-                statColor: Qt.binding(() => root.btOn ? root.kit.title : root.kit.dim),
-                rows: Qt.binding(() => root.btRows), content: btBody })
-        }
-    }
-    Component {
-        id: btBody
-        Column {
-            Note { kit: root.kit; cols: root.btCols; visible: !root.btAdapter; text: "no adapter" }
+            // ── BLUETOOTH ──
+            Section { kit: root.kit; cols: root.soundCols; label: "bluetooth" }
+            Note { kit: root.kit; cols: root.soundCols; visible: !root.btAdapter
+                   text: "no bluetooth adapter" }
             ListRow {
                 visible: !!root.btAdapter
-                kit: root.kit; cols: root.btCols
-                idx: "p"; name: "power"; gloss: root.btOn ? "on" : "off"
+                kit: root.kit; cols: root.soundCols
+                idx: "b"
+                name: root.btOn ? "power" : "bluetooth is off"
+                nameColor: root.btOn ? root.kit.ink : root.kit.dim
+                gloss: root.btOn ? "[on]" : "[off]"
                 glossColor: root.btOn ? root.kit.title : root.kit.dim
                 onActivated: root.toggleBtPower()
             }
-            Rule { kit: root.kit; cols: root.btCols; label: "devices"; visible: !!root.btAdapter }
-            Note { kit: root.kit; cols: root.btCols; visible: !!root.btAdapter && root.btRoster.length === 0
-                   text: root.btOn ? "no paired device" : "adapter off" }
+            Note { kit: root.kit; cols: root.soundCols; visible: root.btOn && root.btRoster.length === 0
+                   text: "no paired device" }
             Repeater {
-                model: root.btAdapter ? root.btRoster : []
+                model: root.btOn ? root.btRoster : []
                 delegate: ListRow {
                     required property var modelData
-                    required property int index
-                    kit: root.kit; cols: root.btCols
-                    idx: "" + (index + 1)
-                    lamp: modelData.current ? "●" : "○"
-                    lampColor: modelData.current ? root.kit.title : root.kit.dim
+                    kit: root.kit; cols: root.soundCols
+                    lamp: root.kit.glyph.bt
+                    lampColor: modelData.current ? root.kit.title : root.kit.ink
                     name: modelData.name
+                    nameColor: modelData.current ? root.kit.bright : root.kit.ink
                     gloss: modelData.gloss
+                    glossColor: modelData.current ? root.kit.title : root.kit.dim
                     onActivated: root.pickBt(modelData.key)
                 }
             }
@@ -2073,8 +2408,39 @@ Item {
         var t = (r && r.total) ? r.total.tokens : null
         return t ? (t["in"] || 0) + (t.out || 0) : null
     }
+    // the PROJECT row's chips, packed onto lines of the pane's width (one
+    // cell between chips): every registered project in projects.json order
+    // (the bound one too, even before projects.json names it), then
+    // `[clear]` while the jack is bound, then `[+ new]`
+    readonly property var wsChipLines: {
+        var j = root.insightJack
+        if (!j) return []
+        var names = root.projectNames.slice()
+        if (j.bound && names.indexOf(j.bound) < 0) names.push(j.bound)
+        var items = []
+        for (var i = 0; i < names.length; i++) items.push({ kind: "proj", name: names[i] })
+        if (j.bound) items.push({ kind: "clear", name: "clear" })
+        items.push({ kind: "new", name: "+ new" })
+        var W = root.jackCols, lines = [], cur = [], used = 0
+        for (var k = 0; k < items.length; k++) {
+            var it = items[k]
+            var label = it.name
+            if (root.kit.cellLen(label) + 2 > W) label = label.slice(0, W - 3) + "…"
+            it.text = "[" + label + "]"
+            it.len = root.kit.cellLen(it.text)
+            if (cur.length > 0 && used + 1 + it.len > W) { lines.push(cur); cur = []; used = 0 }
+            it.col = used + (cur.length > 0 ? 1 : 0)
+            used = it.col + it.len
+            cur.push(it)
+        }
+        if (cur.length > 0) lines.push(cur)
+        return lines
+    }
+    readonly property bool wsNamingHere: root.wsNaming && root.wsNamingWs === root.insightId
+    readonly property bool wsErrorHere: root.wsError.length > 0 && root.wsErrorWs === root.insightId
+    readonly property int wsRows: 1 + wsChipLines.length + (wsNamingHere ? 1 : 0) + (wsErrorHere ? 1 : 0)
     readonly property int jackRows: (insightRow ? 4 : 1) + 1
-        + Math.max(1, insightJack ? insightJack.sessions.length : 0) + 1 + 1
+        + Math.max(1, insightJack ? insightJack.sessions.length : 0) + wsRows + 1 + 1
     Component {
         id: jackPane
         Use {
@@ -2164,6 +2530,108 @@ Item {
                     onActivated: root.bridge.focusSession(modelData.id)
                 }
             }
+            // ── PROJECT: bind this jack (the pane's own id rides every click)
+            //   [aoide] [melete] [mneme] [clear] [+ new]
+            // the bound chip is lit (a `title` band, `ground` text — the
+            // active pad's own fill); a click in flight marks its chip amber
+            // until graph.json shows it; `[clear]` only while bound
+            Rule { kit: root.kit; cols: root.jackCols; label: "project" }
+            Repeater {
+                model: root.wsChipLines
+                delegate: Item {
+                    id: chipLine
+                    required property var modelData
+                    width: root.kit.cells(root.jackCols); height: root.kit.cellH
+                    Repeater {
+                        model: chipLine.modelData
+                        delegate: Item {
+                            id: chip
+                            required property var modelData
+                            readonly property var j: root.insightJack
+                            readonly property var p: root.wsPending
+                            readonly property bool lit: modelData.kind === "proj" && !!j && modelData.name === j.bound
+                                || (modelData.kind === "new" && root.wsNamingHere)
+                            readonly property bool pending: !!p && !!j && p.ws === j.id && (
+                                (modelData.kind === "proj" && p.action === "set" && p.project === modelData.name)
+                                || (modelData.kind === "clear" && p.action === "clear")
+                                || (modelData.kind === "new" && p.action === "set"
+                                    && root.projectNames.indexOf(p.project) < 0))
+                            x: root.kit.cells(modelData.col)
+                            width: root.kit.cells(modelData.len); height: root.kit.cellH
+                            Rectangle {
+                                anchors.fill: parent
+                                color: chip.lit ? root.kit.title : root.kit.select
+                                visible: chip.lit || chipMa.containsMouse
+                            }
+                            Text {
+                                text: chip.modelData.text
+                                color: chip.pending ? root.kit.hot
+                                     : chip.lit ? root.kit.ground
+                                     : chipMa.containsMouse ? root.kit.match
+                                     : chip.modelData.kind === "proj" ? root.kit.path : root.kit.ink
+                                font: root.kit.font; textFormat: Text.PlainText
+                            }
+                            MouseArea {
+                                id: chipMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: chip.lit ? Qt.ArrowCursor : Qt.PointingHandCursor
+                                onClicked: {
+                                    var j = chip.j
+                                    if (!j) return
+                                    var k = chip.modelData.kind
+                                    if (k === "proj" && !chip.lit) { root.cancelNaming(); root.bindJack(j.id, chip.modelData.name, false) }
+                                    else if (k === "clear") { root.cancelNaming(); root.unbindJack(j.id) }
+                                    else if (k === "new") { if (root.wsNamingHere) root.cancelNaming(); else root.openNaming() }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // the `[+ new]` name field: Enter binds (creating the name), Escape
+            // cancels; the hint says why a name would be refused
+            Item {
+                id: nameLine
+                visible: root.wsNamingHere
+                width: root.kit.cells(root.jackCols); height: root.kit.cellH
+                readonly property string problem: root.wsNameProblem(root.wsNameText)
+                Text { text: "name:"; color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText }
+                TextInput {
+                    id: nameInput
+                    x: root.kit.cells(6)
+                    width: root.kit.cells(root.jackCols - 6 - 12)
+                    height: root.kit.cellH
+                    clip: true
+                    font: root.kit.font
+                    color: root.kit.bright
+                    selectionColor: root.kit.select
+                    selectedTextColor: root.kit.match
+                    maximumLength: 64
+                    cursorDelegate: Rectangle { width: 2; color: root.kit.hot; visible: nameInput.activeFocus }
+                    onTextChanged: if (root.wsNameText !== text) root.wsNameText = text
+                    onAccepted: root.submitNaming(text)
+                    Keys.onEscapePressed: root.cancelNaming()
+                    Connections {
+                        target: root
+                        function onWsNameTextChanged() { if (nameInput.text !== root.wsNameText) nameInput.text = root.wsNameText }
+                    }
+                    onVisibleChanged: if (visible) { text = root.wsNameText; forceActiveFocus() }
+                    Component.onCompleted: if (visible) { text = root.wsNameText; forceActiveFocus() }
+                }
+                Text {
+                    anchors.right: parent.right
+                    width: root.kit.cells(12)
+                    horizontalAlignment: Text.AlignRight
+                    elide: Text.ElideLeft
+                    text: root.wsNameText.length > 0 && nameLine.problem !== "" ? nameLine.problem : "⏎ bind  esc"
+                    color: root.kit.dim
+                    font: root.kit.font; textFormat: Text.PlainText
+                }
+            }
+            // core's refusal, verbatim and dim (a `workspaceAction` reply only)
+            Note { kit: root.kit; cols: root.jackCols; visible: root.wsErrorHere
+                   text: "✕ " + root.wsError }
             Rule { kit: root.kit; cols: root.jackCols }
             ListRow {
                 kit: root.kit; cols: root.jackCols

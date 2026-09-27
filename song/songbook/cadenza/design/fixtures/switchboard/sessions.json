@@ -16,7 +16,8 @@
       "windowAddress": "0x3000000a0000",
       "conductable": true,
       "tool": "Bash: cargo test -p aoide-conduct -- graph::ties",
-      "say": null
+      "say": null,
+      "workspaceProject": "aoide"
     },
     {
       "sessionId": "f3000000-0000-4000-8000-000000000002",
@@ -83,7 +84,8 @@
       "pid": 999105,
       "windowAddress": "0x3000000a0004",
       "conductable": true,
-      "say": null
+      "say": null,
+      "workspaceProject": "melete"
     },
     {
       "sessionId": "f3000000-0000-4000-8000-000000000006",
@@ -100,7 +102,8 @@
       "windowAddress": "0x3000000a0005",
       "conductable": true,
       "tool": "Bash: cargo test -p aoide-conduct -- graph::ties",
-      "say": null
+      "say": null,
+      "workspaceProject": "melete"
     },
     {
       "sessionId": "f3000000-0000-4000-8000-000000000007",
@@ -133,7 +136,8 @@
       "windowAddress": "0x3000000a0007",
       "conductable": true,
       "tool": null,
-      "say": null
+      "say": null,
+      "workspaceProject": "aoide"
     },
     {
       "sessionId": "f3000000-0000-4000-8000-000000000009",
@@ -186,7 +190,8 @@
       "conductable": true,
       "parentSessionId": "f3000000-0000-4000-8000-000000000001",
       "tool": "Bash: cargo test -p aoide-conduct -- graph::ties",
-      "say": null
+      "say": null,
+      "workspaceProject": "melete"
     },
     {
       "sessionId": "f3000000-0000-4000-8000-000000000012",
@@ -202,6 +207,23 @@
       "pid": 999112,
       "windowAddress": "0x3000000a0011",
       "conductable": true,
+      "say": null
+    },
+    {
+      "sessionId": "f3000000-0000-4000-8000-000000000013",
+      "agent": "claude",
+      "kind": "agent",
+      "state": "idle",
+      "title": "scratch: vault notes",
+      "model": "claude-opus-5-5",
+      "petname": "grey-heron",
+      "cwd": "/home/user/mneme",
+      "workspace": -98,
+      "startedAt": "2026-09-26T13:24:00Z",
+      "pid": 999113,
+      "windowAddress": "0x3000000a0012",
+      "conductable": true,
+      "tool": null,
       "say": null
     }
   ]

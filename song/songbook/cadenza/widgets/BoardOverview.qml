@@ -1,20 +1,24 @@
-// BoardOverview.qml — the board's first tab (intent §3.3): four panes on one
-// screen, AGENTS · PROJECTS · TERMINALS · MAIL.
+// BoardOverview.qml — the board's first tab (intent §3.3): its panes on one
+// screen, AGENTS · TERMINALS · PROJECTS, and MAIL once `board.hasMailRead`
+// (the mail read is not published yet; until then the pane is not drawn).
 //
-//   ┌─ AGENTS ───────────────────────────────────── 3/5 ┐
-//   │ ● rook-lantern   aoide     working    4m  phase 5… │
-//   │   [↵] focus  [p] project  [u] undying  [x] kill     │   (the selected row)
-//   │ └ ● shiny-kite   aoide     working    1m  subage… │
-//   └───────────────────────────────────────────────────┘
+//   ┌─ AGENTS ─────────────────────────────────────────────────── 3/5 ┐
+//   │ aoide ──────────────────────────── 3 agt · 2 working · 312k tok │
+//   │ ● phase 5 slice S8 — the board read op                 [2]  #01 │
+//   │   …                                   (a 9-line agent card)     │
+//   │ ├─ ● subagent: read the mail store              up 12m   #01.1 │
+//   │ unanchored ────────────────────────────────────────────────────  │
+//   ┌─ TERMINALS ──────────────────────────────────────────────── 4 ┐
+//   │ ● phase 5 slice S8 — the board read op   working  [2]    1h02m │
+//   │   ~/Aoide                                    rook-lantern · aoide│
+//
+// The agent and terminal cards are BoardCards (sonata's conductor and
+// terminals data, cadenza's paint); this file stacks the panes and scrolls.
 //
 // A HELPER (uppercase — never a slot), loaded by URL from BoardBody with
-// `kit` and `board` (the body root: model, actions, clock).
-//
-// Actions on the selected agent go through the bridge only, in exactly the
-// shapes sonata's SessionMenu sends: focusSession; sessionAction "project"
-// {project}, "undying" {state:on|off}, "kill" {} (kill confirms y/N inline,
-// and is refused for subagents/app rows the way SessionMenu refuses them).
-// Keys: j/k or ↑/↓ select · ↵/f focus · p project · u undying · x kill.
+// `kit` and `board` (the body root: model, cards, actions, clock).
+// Keys go to the agent cards: j/k or ↑/↓ select · ↵/f focus · p project ·
+// u undying · x kill (BoardCards owns the selection and the action line).
 import QtQuick
 
 Item {
@@ -34,72 +38,47 @@ Item {
         }
     }
 
-    readonly property var agents: board.model.agents
-    readonly property var terminals: board.model.terminals
     readonly property var projects: board.model.projects
 
-    // ── selection + the inline action line ────────────────────────────────
-    property string selId: ""
-    property string mode: ""            // "" | "project" | "kill"
-    property string msg: ""
-    property bool msgFailed: false
-    property bool busy: false
-    readonly property int selIndex: {
-        for (var i = 0; i < agents.length; i++) if (agents[i].s.sessionId === selId) return i
-        return -1
+    // the two card lists, handed back by their Loaders once built
+    property var agentCards: null
+    property var ttyCards: null
+    readonly property int agentCount: {
+        var n = 0, gs = board.cards.groups
+        for (var i = 0; i < gs.length; i++) n += gs[i].agents
+        return n
     }
-    readonly property var selRow: selIndex >= 0 ? agents[selIndex] : null
-    function select(i) {
-        if (agents.length === 0) return
-        i = Math.max(0, Math.min(agents.length - 1, i))
-        if (agents[i].s.sessionId !== selId) { selId = agents[i].s.sessionId; mode = ""; msg = "" }
-    }
-    function killable(s) {
-        return !!s && s.kind !== "app" && board.kindOf(s) !== "subagent"
-            && ("" + (s.sessionId || "")).indexOf("sub:") !== 0 && board.isLive(s)
-    }
-    function isUndying(s) { return !!s && board.undyingIds.indexOf(s.sessionId) >= 0 }
-    function run(action, fields) {
-        var s = selRow ? selRow.s : null
-        if (!s || busy) return
-        if (!board.bridge || !board.bridge.sessionAction) { msgFailed = true; msg = "session actions unavailable"; return }
-        busy = true; msgFailed = false; msg = "waiting for aoide…"; mode = ""
-        board.bridge.sessionAction(s.sessionId, action, fields, function (r) {
-            root.busy = false
-            root.msgFailed = !(r && r.ok)
-            root.msg = (r && r.message) ? ("" + r.message) : (root.msgFailed ? "action failed" : "done")
-        })
-    }
-    function cancel() {
-        if (mode !== "") { mode = ""; return true }
-        return false
-    }
-    function handleKey(e) {
-        var s = selRow ? selRow.s : null
-        if (mode === "kill") {
-            if (e.key === Qt.Key_Y) { run("kill", {}); return true }
-            mode = ""; msg = "kill cancelled"; msgFailed = false; return true
-        }
-        if (mode === "project") {
-            var n = e.key - Qt.Key_0
-            if (n === 0) { run("project", { project: "" }); return true }
-            if (n >= 1 && n <= 9 && n <= projects.length) { run("project", { project: projects[n - 1].name }); return true }
-            mode = ""; return true
-        }
-        switch (e.key) {
-        case Qt.Key_J: case Qt.Key_Down: select(selIndex + 1); return true
-        case Qt.Key_K: case Qt.Key_Up:   select(selIndex < 0 ? 0 : selIndex - 1); return true
-        case Qt.Key_Return: case Qt.Key_Enter: case Qt.Key_F:
-            if (selRow) board.focus(selRow); return true
-        case Qt.Key_P: if (s) { mode = "project"; msg = "" } return true
-        case Qt.Key_U: if (s) run("undying", { state: isUndying(s) ? "off" : "on" }); return true
-        case Qt.Key_X: if (killable(s)) { mode = "kill"; msg = "" } return true
-        }
-        return false
+    readonly property int workingCount: {
+        var n = 0, gs = board.cards.groups
+        for (var i = 0; i < gs.length; i++) n += gs[i].working
+        return n
     }
 
-    // ── layout: the four panes stacked, the whole column scrolls ──────────
+    function cancel() { return root.agentCards ? root.agentCards.cancel() : false }
+    function handleKey(e) {
+        if (!root.agentCards || !root.agentCards.handleKey(e)) return false
+        Qt.callLater(root.revealSelected)
+        return true
+    }
+    // keep the selected card in view when j/k walks off the screen
+    function revealSelected() {
+        var c = root.agentCards
+        if (!c || c.selIndex < 0) return
+        var lines = 0
+        for (var i = 0; i < c.entries.length; i++) {
+            var e = c.entries[i]
+            if (e.type === "card" && e.row.s.sessionId === c.selId) break
+            lines += e.lines
+        }
+        var p = c.mapToItem(col, 0, root.kit.lines(lines))
+        if (p.y < flick.contentY) flick.contentY = p.y
+        else if (p.y + root.kit.lines(4) > flick.contentY + flick.height)
+            flick.contentY = Math.min(Math.max(0, col.implicitHeight - flick.height), p.y + root.kit.lines(4) - flick.height)
+    }
+
+    // ── layout: the panes stacked, the whole column scrolls ───────────────
     Flickable {
+        id: flick
         anchors.fill: parent
         contentHeight: col.implicitHeight
         boundsBehavior: Flickable.StopAtBounds
@@ -112,9 +91,17 @@ Item {
                 width: col.width
                 kit: root.kit; helper: "Pane"
                 props: ({ title: "agents", glow: "bloom",
-                          stat: Qt.binding(() => root.board.model.working + "/" + root.agents.length),
-                          rows: Qt.binding(() => Math.max(1, root.agents.length + (root.selRow ? 1 : 0))),
+                          stat: Qt.binding(() => root.workingCount + "/" + root.agentCount),
+                          rows: Qt.binding(() => root.agentCards ? root.agentCards.lineCount : 1),
                           content: agentsBody })
+            }
+            Use {
+                width: col.width
+                kit: root.kit; helper: "Pane"
+                props: ({ title: "terminals", glow: "bloom",
+                          stat: Qt.binding(() => "" + root.board.cards.ttys.length),
+                          rows: Qt.binding(() => root.ttyCards ? root.ttyCards.lineCount : 1),
+                          content: terminalsBody })
             }
             Use {
                 width: col.width
@@ -124,177 +111,38 @@ Item {
                           rows: Qt.binding(() => Math.max(1, root.projects.length)),
                           content: projectsBody })
             }
+            // MAIL: hidden until the mail read is published (board.hasMailRead)
             Use {
                 width: col.width
-                kit: root.kit; helper: "Pane"
-                props: ({ title: "terminals", glow: "bloom",
-                          stat: Qt.binding(() => "" + root.terminals.length),
-                          rows: Qt.binding(() => Math.max(1, root.terminals.length)),
-                          content: terminalsBody })
-            }
-            Use {
-                width: col.width
+                visible: root.board.hasMailRead
                 kit: root.kit; helper: "Pane"
                 props: ({ title: "mail", glow: "bloom",
-                          stat: Qt.binding(() => root.board.boardWired ? "" + root.board.mailThreads.length : ""),
+                          stat: Qt.binding(() => "" + root.board.mailThreads.length),
                           rows: Qt.binding(() => Math.max(1, Math.min(8, root.board.mailThreads.length))),
                           content: mailBody })
             }
         }
     }
 
-    // ══ AGENTS ════════════════════════════════════════════════════════════
+    // ══ AGENTS · TERMINALS — the cards (BoardCards, by URL) ═══════════════
     Component {
         id: agentsBody
-        Column {
+        Use {
             width: parent ? parent.width : 0
-            readonly property int w: root.kit.fit(width)
-            Text {
-                visible: root.agents.length === 0
-                text: "no live agents"
-                color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
-            }
-            Repeater {
-                model: root.agents
-                Column {
-                    id: arow
-                    required property var modelData
-                    required property int index
-                    readonly property var s: modelData.s
-                    readonly property bool sel: s.sessionId === root.selId
-                    readonly property bool hot: s.sessionId === root.board.hotId
-                    readonly property int w: parent ? parent.w : 0
-                    // name 14 · project 9 · state 9 · age 4 · title (rest)
-                    readonly property int titleCells: Math.max(0, w - 2 - 15 - 10 - 10 - 5 - 1)
-                    width: parent ? parent.width : 0
-
-                    Item {
-                        width: arow.width; height: root.kit.cellH
-                        Rectangle { anchors.fill: parent; visible: arow.sel; color: root.kit.select }
-                        Row {
-                            Text {
-                                visible: arow.modelData.depth > 0
-                                text: "└ "
-                                color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
-                            }
-                            Text {
-                                text: root.kit.lampGlyph(arow.s.state) + " "
-                                color: arow.hot ? root.kit.hot : root.kit.lampColor(arow.s.state)
-                                font: root.kit.font; textFormat: Text.PlainText
-                                style: Text.Outline; styleColor: root.kit.withA(color, 0.18)
-                            }
-                            Text {
-                                text: root.kit.padR(arow.s.petname || arow.s.agent || "agent", arow.modelData.depth ? 12 : 14) + " "
-                                color: arow.sel ? root.kit.match : root.kit.ink
-                                font: root.kit.font; textFormat: Text.PlainText
-                                style: Text.Outline; styleColor: root.kit.withA(color, 0.18)
-                            }
-                            Text {
-                                text: root.kit.padR(arow.modelData.project || "—", 9) + " "
-                                color: arow.modelData.project ? root.kit.path : root.kit.dim
-                                font: root.kit.font; textFormat: Text.PlainText
-                            }
-                            Text {
-                                text: root.kit.padR(arow.s.state || "", 9) + " "
-                                color: arow.s.state === "awaiting" ? root.kit.urgent : (arow.sel ? root.kit.match : root.kit.mid)
-                                font: root.kit.font; textFormat: Text.PlainText
-                            }
-                            Text {
-                                text: root.kit.padL(root.board.age(arow.modelData.since), 4) + " "
-                                color: root.kit.number; font: root.kit.font; textFormat: Text.PlainText
-                            }
-                            Text {
-                                text: " " + root.kit.padR(arow.s.title || arow.s.agent || "", arow.titleCells)
-                                color: arow.sel ? root.kit.match : root.kit.dim
-                                font: root.kit.font; textFormat: Text.PlainText
-                            }
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: { root.select(arow.index); root.board.forceActiveFocus() }
-                            onDoubleClicked: root.board.focus(arow.modelData)
-                        }
-                    }
-
-                    // the selected row's action line
-                    Item {
-                        visible: arow.sel
-                        width: arow.width; height: visible ? root.kit.cellH : 0
-                        Rectangle { anchors.fill: parent; color: root.kit.select }
-                        Row {
-                            x: root.kit.cells(2)
-                            visible: root.mode === "" && root.msg === ""
-                            Repeater {
-                                model: [
-                                    { k: "↵", t: "focus",   on: true,  a: "focus" },
-                                    { k: "p", t: "project", on: true,  a: "project" },
-                                    { k: "u", t: root.isUndying(arow.s) ? "undying ✓" : "undying", on: true, a: "undying" },
-                                    { k: "x", t: root.killable(arow.s) ? "kill" : "kill n/a", on: root.killable(arow.s), a: "kill" }
-                                ]
-                                Row {
-                                    id: act
-                                    required property var modelData
-                                    Text { text: "[" + act.modelData.k + "] "; color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText }
-                                    Text {
-                                        text: act.modelData.t + "  "
-                                        color: act.modelData.on ? root.kit.match : root.kit.dim
-                                        font: root.kit.font; textFormat: Text.PlainText
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            enabled: act.modelData.on
-                                            onClicked: {
-                                                var a = act.modelData.a
-                                                if (a === "focus") root.board.focus(arow.modelData)
-                                                else if (a === "project") root.mode = "project"
-                                                else if (a === "undying") root.run("undying", { state: root.isUndying(arow.s) ? "off" : "on" })
-                                                else if (a === "kill") root.mode = "kill"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        // project picker: [0] auto [1] aoide …
-                        Row {
-                            x: root.kit.cells(2)
-                            visible: root.mode === "project"
-                            Text { text: "project: "; color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText }
-                            Repeater {
-                                model: [{ n: 0, name: "" }].concat(root.projects.slice(0, 9).map(function (p, i) { return { n: i + 1, name: p.name } }))
-                                Row {
-                                    id: pick
-                                    required property var modelData
-                                    Text { text: "[" + pick.modelData.n + "] "; color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText }
-                                    Text {
-                                        text: (pick.modelData.name || "auto") + "  "
-                                        color: pick.modelData.name ? root.kit.path : root.kit.match
-                                        font: root.kit.font; textFormat: Text.PlainText
-                                        MouseArea { anchors.fill: parent; onClicked: root.run("project", { project: pick.modelData.name }) }
-                                    }
-                                }
-                            }
-                        }
-                        // kill confirm, y/N
-                        Text {
-                            x: root.kit.cells(2)
-                            visible: root.mode === "kill"
-                            text: "kill " + (arow.s.petname || arow.s.sessionId) + "?  [y/N]"
-                            color: root.kit.urgent; font: root.kit.font; textFormat: Text.PlainText
-                        }
-                        // the bridge's answer
-                        Text {
-                            x: root.kit.cells(2)
-                            width: parent.width - x
-                            visible: root.mode === "" && root.msg !== ""
-                            text: (root.msgFailed ? "✕ " : "→ ") + root.msg
-                            elide: Text.ElideRight
-                            color: root.msgFailed ? root.kit.urgent : root.kit.match
-                            font: root.kit.font; textFormat: Text.PlainText
-                            MouseArea { anchors.fill: parent; onClicked: root.msg = "" }
-                        }
-                    }
-                }
-            }
+            kit: root.kit; helper: "BoardCards"
+            props: ({ board: root.board, what: "agents", project: "" })
+            onLoaded: root.agentCards = item
+            Component.onDestruction: if (root.agentCards === item) root.agentCards = null
+        }
+    }
+    Component {
+        id: terminalsBody
+        Use {
+            width: parent ? parent.width : 0
+            kit: root.kit; helper: "BoardCards"
+            props: ({ board: root.board, what: "terms", project: "" })
+            onLoaded: root.ttyCards = item
+            Component.onDestruction: if (root.ttyCards === item) root.ttyCards = null
         }
     }
 
@@ -348,61 +196,6 @@ Item {
         }
     }
 
-    // ══ TERMINALS ═════════════════════════════════════════════════════════
-    Component {
-        id: terminalsBody
-        Column {
-            width: parent ? parent.width : 0
-            readonly property int w: root.kit.fit(width)
-            Text {
-                visible: root.terminals.length === 0
-                text: "no conducted terminals"
-                color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
-            }
-            Repeater {
-                model: root.terminals
-                Item {
-                    id: trow
-                    required property var modelData
-                    readonly property var s: modelData.s
-                    readonly property int w: parent ? parent.w : 0
-                    width: parent ? parent.width : 0; height: root.kit.cellH
-                    Row {
-                        Text {
-                            text: root.kit.lampGlyph(trow.s.state) + " "
-                            color: trow.s.sessionId === root.board.hotId ? root.kit.hot : root.kit.lampColor(trow.s.state)
-                            font: root.kit.font; textFormat: Text.PlainText
-                        }
-                        Text {
-                            text: root.kit.padR(trow.s.petname || trow.s.agent || "shell", 14) + " "
-                            color: root.kit.ink; font: root.kit.font; textFormat: Text.PlainText
-                            style: Text.Outline; styleColor: root.kit.withA(color, 0.18)
-                        }
-                        Text {
-                            text: root.kit.padR(trow.s.workspace !== null && trow.s.workspace !== undefined
-                                                ? "[" + trow.s.workspace + "]" : "[·]", 5) + " "
-                            color: root.kit.path; font: root.kit.font; textFormat: Text.PlainText
-                        }
-                        Text {
-                            text: root.kit.padR(trow.modelData.project || "—", 9) + " "
-                            color: trow.modelData.project ? root.kit.path : root.kit.dim
-                            font: root.kit.font; textFormat: Text.PlainText
-                        }
-                        Text {
-                            text: root.kit.padR(root.board.shortPath(trow.s.cwd), Math.max(0, trow.w - 2 - 15 - 6 - 10))
-                            color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
-                        }
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.board.focus(trow.modelData)
-                    }
-                }
-            }
-        }
-    }
-
     // ══ MAIL ══════════════════════════════════════════════════════════════
     Component {
         id: mailBody
@@ -410,17 +203,12 @@ Item {
             width: parent ? parent.width : 0
             readonly property int w: root.kit.fit(width)
             Text {
-                visible: !root.board.boardWired
-                text: "no mail view — bridge not wired"
-                color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
-            }
-            Text {
-                visible: root.board.boardWired && root.board.mailThreads.length === 0
+                visible: root.board.mailThreads.length === 0
                 text: "no active mail"
                 color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
             }
             Repeater {
-                model: root.board.boardWired ? root.board.mailThreads.slice(0, 8) : []
+                model: root.board.hasMailRead ? root.board.mailThreads.slice(0, 8) : []
                 Row {
                     id: mrow
                     required property var modelData

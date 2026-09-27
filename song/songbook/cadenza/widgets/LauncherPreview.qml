@@ -34,6 +34,7 @@ Item {
     readonly property var cells: [
         { name: "apps",       mode: "apps",   query: "",     clip: true,  led: true  },
         { name: "appsQuery",  mode: "apps",   query: "te",   clip: true,  led: true  },
+        { name: "appsPick",   mode: "apps",   query: "3",    clip: true,  led: true  },
         { name: "clip",       mode: "clip",   query: "",     clip: true,  led: true  },
         { name: "ledger",     mode: "ledger", query: "",     clip: true,  led: true  },
         { name: "noMatch",    mode: "apps",   query: "zqxv", clip: true,  led: true  },

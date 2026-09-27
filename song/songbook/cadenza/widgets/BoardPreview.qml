@@ -6,11 +6,21 @@
 //       <worktree>/song/songbook/cadenza/widgets/BoardPreview.qml --song cadenza \
 //       --fixture <worktree>/song/songbook/cadenza/design/fixtures/board
 //
-// It loads BoardBody by URL and sets the SAME properties the live adapter
-// will set once the seams land — `boardWired` + `boards` (the §D answer of
-// `aoide project board`, S8–S10) and `usageNow` (§C now.json, S5/S6). The
+// It loads BoardBody by URL, flips the per-seam switches the live board keeps
+// off (`hasBoardFeed`, `hasMailRead`, `hasBoardPost`, `hasJackUsage` — on
+// once the matching fixture file loads; the composer's switch rides the
+// feed's) and feeds the SAME properties the live source will — `boards` (the
+// §D answer of `aoide project board`, S8–S10) and `usageNow` (§C now.json,
+// S5/S6). The
 // stage files (sessions/projects/hooks/herald) come in through `--fixture`
 // as usual; BoardBody itself never reads a fixture path.
+//
+// The cards (agents, subagents, summonses, terminals) have their own set,
+// `design/fixtures/cards`: pass it as both `--fixture` and
+// `CADENZA_BOARD_FIXTURE` (it holds no board.json / now.json, so every seam
+// switch stays off, as live), and copy its `graph.json` (the `spawned`
+// edges one subagent hangs by) into `<preview root>/state/stage/` after the
+// root is built — `--fixture` places only the four stage files.
 //
 // The fixture directory: `$CADENZA_BOARD_FIXTURE`, else the checkout's
 // `song/songbook/cadenza/design/fixtures/board` under `$AOIDE_FLAKE_ROOT`.
@@ -77,7 +87,10 @@ Item {
             shared: Qt.binding(() => harness.shared),
             stagingEngine: Qt.binding(() => harness.stagingEngine),
             open: true,
-            boardWired: Qt.binding(() => harness.boardAnswer !== null),
+            hasBoardFeed: Qt.binding(() => harness.boardAnswer !== null),
+            hasMailRead: Qt.binding(() => harness.boardAnswer !== null),
+            hasBoardPost: Qt.binding(() => harness.boardAnswer !== null),
+            hasJackUsage: Qt.binding(() => harness.nowAnswer !== null),
             boards: Qt.binding(function () {
                 var b = {}
                 if (harness.boardAnswer && harness.boardAnswer.project)

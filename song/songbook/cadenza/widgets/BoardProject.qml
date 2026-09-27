@@ -1,24 +1,38 @@
-// BoardProject.qml — one registered project's tab on the board (intent §3.3):
-// the project's feed on the left, its agents and terminals in a narrow rail
-// on the right, the composer along the bottom.
+// BoardProject.qml — one registered project's tab on the board (intent §3.3).
+//
+// Today (no feed published): the project's agent cards (mains with their
+// subagents hung under them) and its terminal cards, full width — the same
+// BoardCards the OVERVIEW draws, filtered to this project, no group chrome.
+//
+//   ┌─ AGENTS ─────────────────────────────────────────────── 1/2 ┐
+//   │ ● phase 5 slice S8 — the board read op             [2]  #01 │
+//   │   claude / claude-opus-5-5                          working │
+//   │   …                                    (a 9-line agent card) │
+//   ┌─ TERMINALS ───────────────────────────────────────────── 1 ┐
+//   │ ● cargo test -p aoide-conduct       working  [2]      1h02m │
+//   │   ~/Aoide                                          brisk-tor │
+//
+// Once `board.hasBoardFeed`: the feed on the left, the same agents and
+// terminals in a narrow rail on the right, and — once `board.hasBoardPost` —
+// the composer along the bottom.
 //
 //   │ 14:02 rook-lanter ● turn settled              │ ● rook-lan │
 //   │ 14:02 minerva-owl ◐ Bash: cargo test          │ ◐ minerva- │
 //   │ 14:03 nimble-come ↳ settled end_turn · 12 ca… │ ─ tty ──── │
 //   │ 14:05 human       » re: phase 5 slice S8 — …  │ ○ brisk [2]│
 //   ├───────────────────────────────────────────────┴────────────┤
-//   │ to: aoide ▾ │ post: bridge not wired                        │
+//   │ to: aoide ▾ │ post: not wired                                │
 //
 // A HELPER (uppercase — never a slot), loaded by URL from BoardBody with
 // `kit`, `board` and `project`.
 //
 // The feed is `board.boards[project].items` — the §D answer the unbuilt
-// shellbridge read op will deliver (S8–S10). Until `board.boardWired` the
-// feed says `no feed — bridge not wired`. Every item's text is untrusted
+// shellbridge read op will deliver (S8–S10). Every item's text is untrusted
 // model/sender output: PlainText, one line, elided, never actionable, and
 // never copied into the composer (house rule 4). The composer is drawn
-// DISABLED — `boardpost` does not exist (S11/S12); its target cycles over the
-// project and its agents so the shape is visible, and nothing is sent.
+// DISABLED even when its switch is on — `boardpost` does not exist
+// (S11/S12); its target cycles over the project and its agents so the shape
+// is visible, and nothing is sent.
 import QtQuick
 
 Item {
@@ -27,6 +41,22 @@ Item {
     required property var kit
     required property var board
     property string project: ""
+
+    component Use: Loader {
+        required property var kit
+        required property string helper
+        property var props: ({})
+        Component.onCompleted: {
+            var p = { kit: Qt.binding(() => kit) }
+            for (var k in props) p[k] = props[k]
+            setSource(kit.helper(helper), p)
+        }
+    }
+
+    // the two switches this tab reads (BoardBody owns them)
+    readonly property bool feedOn: board.hasBoardFeed
+    readonly property bool postOn: board.hasBoardPost
+    readonly property int composerH: postOn ? kit.lines(2) : 0
 
     readonly property int railCells: 14
     readonly property int railW: kit.cells(railCells + 1)
@@ -45,10 +75,14 @@ Item {
                    .map(function (r) { return { label: r.s.petname || r.s.agent || "agent", id: r.s.sessionId } }))
     readonly property var target: targets[Math.min(targetIndex, targets.length - 1)]
 
+    // without the feed, keys drive the agent cards (select · focus · actions)
+    function cancel() { return (!root.feedOn && root.agentCards) ? root.agentCards.cancel() : false }
     function handleKey(e) {
-        if (e.key === Qt.Key_J || e.key === Qt.Key_Down) { feed.flick(0, -800); return true }
-        if (e.key === Qt.Key_K || e.key === Qt.Key_Up) { feed.flick(0, 800); return true }
-        if (e.key === Qt.Key_End || e.key === Qt.Key_G) { feed.positionViewAtEnd(); return true }
+        if (!root.feedOn && root.agentCards) return root.agentCards.handleKey(e)
+        var f = root.feedOn ? feed : roster
+        if (e.key === Qt.Key_J || e.key === Qt.Key_Down) { f.flick(0, -800); return true }
+        if (e.key === Qt.Key_K || e.key === Qt.Key_Up) { f.flick(0, 800); return true }
+        if (root.feedOn && (e.key === Qt.Key_End || e.key === Qt.Key_G)) { feed.positionViewAtEnd(); return true }
         return false
     }
 
@@ -101,16 +135,12 @@ Item {
     // ══ FEED ══════════════════════════════════════════════════════════════
     Item {
         id: feedArea
-        width: parent.width - root.railW
-        height: parent.height - root.kit.lines(2)
+        visible: root.feedOn
+        width: root.feedOn ? parent.width - root.railW : 0
+        height: parent.height - root.composerH
 
         Text {
-            visible: !root.board.boardWired
-            text: "no feed — bridge not wired"
-            color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
-        }
-        Text {
-            visible: root.board.boardWired && root.items.length === 0
+            visible: root.items.length === 0
             text: "no board items for " + root.project
             color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
         }
@@ -120,10 +150,9 @@ Item {
             // never cut in half under the tab rule
             width: parent.width
             height: Math.floor(parent.height / root.kit.cellH) * root.kit.cellH
-            visible: root.board.boardWired
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            model: root.board.boardWired ? root.items : []
+            model: root.feedOn ? root.items : []
             onCountChanged: Qt.callLater(feed.positionViewAtEnd)
             Component.onCompleted: Qt.callLater(feed.positionViewAtEnd)
             delegate: Row {
@@ -159,14 +188,16 @@ Item {
         }
     }
 
-    // ══ RAIL ══════════════════════════════════════════════════════════════
+    // ══ RAIL (beside the feed) ════════════════════════════════════════════
     Rectangle {                                   // the rail's rule
+        visible: root.feedOn
         x: feedArea.width + Math.round(root.kit.cellW / 2)
-        width: 1; height: feedArea.height + Math.round(root.kit.cellH / 2)
+        width: 1; height: feedArea.height + (root.postOn ? Math.round(root.kit.cellH / 2) : 0)
         color: root.kit.dim
     }
     Column {
         id: rail
+        visible: root.feedOn
         x: feedArea.width + root.kit.cells(1)
         width: root.kit.cells(root.railCells)
         height: feedArea.height
@@ -239,14 +270,81 @@ Item {
         }
     }
 
-    // ══ COMPOSER (disabled until boardpost lands) ═════════════════════════
+    // ══ ROSTER (no feed): the agent cards + the terminal cards, full width ═
+    // BoardCards with `project` set: this project's mains with their
+    // subagents hung under them, then its terminals (no group chrome).
+    property var agentCards: null
+    property var ttyCards: null
+    readonly property int cardAgents: {
+        var gs = board.cards.groups
+        for (var i = 0; i < gs.length; i++) if (gs[i].anchored && gs[i].name === root.project) return gs[i].agents
+        return 0
+    }
+    readonly property int cardWorking: {
+        var gs = board.cards.groups
+        for (var i = 0; i < gs.length; i++) if (gs[i].anchored && gs[i].name === root.project) return gs[i].working
+        return 0
+    }
+    Flickable {
+        id: roster
+        visible: !root.feedOn
+        width: parent.width
+        height: parent.height - root.composerH
+        contentHeight: rosterCol.implicitHeight
+        boundsBehavior: Flickable.StopAtBounds
+        clip: true
+        Column {
+            id: rosterCol
+            width: parent.width
+            Use {
+                width: rosterCol.width
+                kit: root.kit; helper: "Pane"
+                props: ({ title: "agents", glow: "bloom",
+                          stat: Qt.binding(() => root.cardWorking + "/" + root.cardAgents),
+                          rows: Qt.binding(() => root.agentCards ? root.agentCards.lineCount : 1),
+                          content: rosterAgents })
+            }
+            Use {
+                width: rosterCol.width
+                kit: root.kit; helper: "Pane"
+                props: ({ title: "terminals", glow: "bloom",
+                          stat: Qt.binding(() => "" + (root.ttyCards ? root.ttyCards.entries.length : 0)),
+                          rows: Qt.binding(() => root.ttyCards ? root.ttyCards.lineCount : 1),
+                          content: rosterTerms })
+            }
+        }
+    }
+    Component {
+        id: rosterAgents
+        Use {
+            width: parent ? parent.width : 0
+            kit: root.kit; helper: "BoardCards"
+            props: ({ board: root.board, what: "agents", project: root.project })
+            onLoaded: root.agentCards = item
+            Component.onDestruction: if (root.agentCards === item) root.agentCards = null
+        }
+    }
+    Component {
+        id: rosterTerms
+        Use {
+            width: parent ? parent.width : 0
+            kit: root.kit; helper: "BoardCards"
+            props: ({ board: root.board, what: "terms", project: root.project })
+            onLoaded: root.ttyCards = item
+            Component.onDestruction: if (root.ttyCards === item) root.ttyCards = null
+        }
+    }
+
+    // ══ COMPOSER (hasBoardPost; drawn disabled until boardpost lands) ═════
     Rectangle {
-        y: feedArea.height + Math.round(root.kit.cellH / 2)
+        visible: root.postOn
+        y: parent.height - root.composerH + Math.round(root.kit.cellH / 2)
         width: parent.width; height: 1
         color: root.kit.dim
     }
     Row {
-        y: feedArea.height + root.kit.cellH
+        visible: root.postOn
+        y: parent.height - root.composerH + root.kit.cellH
         Text { text: "to: "; color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText }
         Text {
             text: (root.target ? root.target.label : root.project) + " ▾"
@@ -261,7 +359,7 @@ Item {
         Text { text: " │ "; color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText }
         Text {
             // no input exists until boardpost does: nothing here can be typed into
-            text: "post: bridge not wired"
+            text: "post: not wired"
             color: root.kit.dim; font: root.kit.font; textFormat: Text.PlainText
         }
     }

@@ -67,3 +67,17 @@ in git; `git log --follow -- song/songbook/default/` finds it.
 - **An inner glow lit from the resting rule colour is invisible.** At
   0.10 alpha of `dim` on CRT black the edge rose by ~6/255. Light the glow
   from `title` and let alpha, not colour, carry rest vs focus.
+- **Staging reaps preview canvases.** `rice mode stage` kills stray
+  quickshell processes, so an open preview canvas goes with them. Don't
+  restage while anyone is shooting in a canvas.
+- **`run/qml/songs/<song>/` keeps deleted helpers.** The stage sync copies
+  and overwrites but never removes, so a helper deleted from the song stays
+  in the generated copy. It's harmless while nothing imports it; don't read
+  it as proof the file is still in use.
+- **Raw OSC writes race the program on the pty.** Pushing colours by
+  writing escapes to `/dev/pts/N` can interleave with the program's own
+  output and get eaten. Use the terminal's control socket (`kitty @`)
+  instead.
+- **Check before toggling a surface to screenshot it.** `aoide:dock` is a
+  toggle; firing it to "open" the board closed the one the user already had
+  open. Read the state (or ask) first.
