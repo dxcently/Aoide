@@ -52,7 +52,8 @@ gets the whole self-ricing, agent-conducting environment without adopting NixOS.
 for the steward especially):**
 
 - **No NixOS assumption below `cli`.** The workspace is a standalone flake with
-  no dependency on this repo's NixOS modules (nucleus/dendrites/facets). The
+  no dependency on this repo's NixOS modules (nucleus/dendrites/aggregations).
+  The
   NixOS integration is a *consumer* of the crates, never the other way round.
 - **`management` is host-abstracted.** The privileged hands speak to a host
   *backend*: a **NixOS backend** (nixos-rebuild / modules, as today) and a
@@ -480,14 +481,15 @@ The stability contract — what a consumer may rely on staying true:
   variables (`AOIDE_TERMINAL`, `AOIDE_ROOT`, `AOIDE_FLAKE_ROOT`) — one
   import carries all three. `sessionTarget` (default `default.target`)
   is the seam a paint-dependent anchor enters through: the unit's own
-  `wantedBy`/`after` read it, never a facet option directly, and the
+  `wantedBy`/`after` read it, never a lane's option directly, and the
   anchor decides only when the unit starts — no `partOf`, so a desktop
   that dies leaves the daemon and its doors running.
-  `modules/nucleus/options.nix` is this repo's own consumer: both
-  `lib/mkHost.nix` and `tests/vm-boot.nix` read the overlay through it
+  `modules/nucleus/options.nix` is this repo's own consumer: both the
+  constructor (`lib/aoideos.nix`) and `tests/vm-boot.nix` read the overlay
+  through it
   instead of each carrying their own copy of the injection lambda, and
-  `modules/nucleus/aoided.nix` sets `aoide.sessionTarget` to
-  `graphical-session.target` when the quickshell facet is on. Editing
+  `modules/dendrites/quickshell.nix` sets `aoide.sessionTarget` to
+  `graphical-session.target` when it has a shell config to run. Editing
   `module/` never rebuilds the binaries: `pkgs/aoide/default.nix`'s
   `src` filter drops the top-level `module/` directory, so the
   package's store path moves only on a crate-tree change.

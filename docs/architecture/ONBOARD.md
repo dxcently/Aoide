@@ -117,7 +117,7 @@ a CLI-door concern only.
 
 The derivation mechanism keeps nix knowledge in nix: the flake grows
 an options output (nixosOptionsDoc-style JSON over an `evalModules` of
-`modules/{nucleus,facets}`, filtered to the `aoide.*` namespace), and
+`modules/{nucleus,dendrites,aggregations}`, filtered to the `aoide.*` namespace), and
 `lyra onboard` shells to `nix` to realize it, then formats the JSON
 into the commented `aoide.nix`. A new option appears in the file
 because it exists in a module — no hand-list to drift. If

@@ -493,6 +493,6 @@ already waiting for them:
   wiki's own table of contents.
 - `docs/architecture/CORE-POSIX.md` — what of the core is portable, per
   capability, and what is a taught refusal.
-- To paint: `README.md` § 4, `docs/BUILD.md` (writing a dendrite or facet),
+- To paint: `README.md` § 4, `docs/BUILD.md` (writing a dendrite or a paint lane),
   [Clone and Run](Aoide-Wiki/concepts/governance/Clone-and-Run.md) (the
   distribution's clone-and-run model and self-update).

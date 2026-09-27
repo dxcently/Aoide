@@ -129,7 +129,7 @@ inert key.
 
 The same composition shape applies to AoideOS when it migrates. Public Lyra
 runtime QML/bridges belong to its package; consumer-owned widget source belongs
-with the songbook. A consumer does not recreate AoideOS's private facets tree.
+with the songbook. A consumer does not recreate AoideOS's private module tree.
 Large lane implementations may be extracted to `home.nix`, `nixos.nix`, or
 `darwin.nix` within their dendrite. Empty lane files are unnecessary.
 
@@ -609,7 +609,7 @@ songbook, not inside a rice: an image is not a look, and any rice may wear any
 cover. The repository's `song/` mirrors the runtime `~/.aoide/song/` in the
 committed half, and two of its runtime subdirectories exist only there,
 gitignored: `song/stage/`, where lyra renders what programs watch and
-hot-reload, and `song/declared/`, the quickshell facet's activation seed of
+hot-reload, and `song/declared/`, the lyra lane's activation seed of
 the declared song's notes with the venue override applied, which the runtime
 writers re-derive the declared song from (CONTRACTS.md §4). The wallpaper
 manager is independent of individual rices. Each user has independent state.
