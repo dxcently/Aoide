@@ -269,8 +269,9 @@ Register-ScheduledTask -TaskName AoideAoided -Force -User $env:USERNAME -RunLeve
 Register-ScheduledTask -TaskName AoideA2a -Force -User $env:USERNAME -RunLevel Limited `
   -Trigger $trigger -Settings $settings -Action (New-ScheduledTaskAction -Execute "$exe\aoide.exe" -Argument 'a2a serve')
 
-# 3. Start them now, without logging out.
-Start-ScheduledTask -TaskName AoideAoided, AoideA2a
+# 3. Start them now, without logging out. (`Start-ScheduledTask`'s -TaskName is
+#    a single string, unlike Get-ScheduledTask's: pipe the tasks to it.)
+Get-ScheduledTask -TaskName AoideAoided, AoideA2a | Start-ScheduledTask
 
 # 4. Check.
 Get-ScheduledTask AoideAoided, AoideA2a | Get-ScheduledTaskInfo |

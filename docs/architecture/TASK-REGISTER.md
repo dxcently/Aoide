@@ -2104,52 +2104,78 @@ project/parent inheritance across local/remote/app/subagents;
   serve --stdio` / `aoide a2a serve`), and `aoided`'s only child in that run
   was its own console host — so "native aoided runs resident" needs those
   processes run BESIDE it, never under it.
-- Residency on Windows: nothing exists in-tree. The tree's only mechanism is
-  Linux's — the systemd user unit `pkgs/aoide/module/aoided.nix`
-  (`Type=simple`, `Restart=on-failure`, anchored to the session target) with its
-  sibling door units in `modules/nucleus/aoided.nix`. Measured on that host: a
-  daemon started by `Start-Process` inside an ssh session was alive at 60 s and
-  gone at the next session, with empty stderr and no stop record — an
-  ssh-launched daemon is not a resident one there, and that host's own
-  logon/service mechanism is unmeasured.
+- Residency on Windows: an install path, exercised end to end. The tree ships
+  no Windows unit — the only declared mechanism is Linux's (the systemd user
+  unit `pkgs/aoide/module/aoided.nix`, `Type=simple`, `Restart=on-failure`,
+  anchored to the session target, with its sibling door units in
+  `modules/nucleus/aoided.nix`) — so the portable equivalent lives in
+  `docs/INSTALL.md` § 7.2: one per-user logon task per process (the daemon, the
+  door), the environment in persistent user variables, restart-on-failure
+  settings and NO execution time limit (the three-day default would stop a
+  resident daemon). Installed on ThinkChiyo as `AoideAoided` + `AoideA2a` from
+  `%USERPROFILE%\.cargo\bin` with the real root `%USERPROFILE%\.aoide`, named
+  `AOIDE_A2A_NODE_NAME=thinkchiyo-win` on `AOIDE_A2A_PORT=8720`: `Get-ScheduledTask
+  … | Start-ScheduledTask` brought both up with no logout, the door answered
+  `http://127.0.0.1:8720/.well-known/agent-card.json` with **200** (103 skills),
+  `aoide node list` named this host `thinkchiyo-win`, and a LATER ssh session
+  found both processes still running under their tasks. No command was added for
+  it: the capability is shell-reachable already, it is one file at the OS's own
+  conventional path with a one-command inverse, and a core verb writing into a
+  host's scheduler would be deployment logic inside the portable binary.
+  `aoide identity` minted this node's keypair (`state\identity`) — pairing needs
+  one, and that node had none.
+- Native<->WSL pairing on ONE box (the two nodes ThinkChiyo runs) is BLOCKED on
+  the WSL side's build, and the block is measured rather than assumed. The ruled
+  path needs no inbound dial — the ceremony is requester-dials
+  (`aoide/pairRequest`/`aoide/pairPoll` ride the REQUESTER's own forward dial,
+  and `aoide/pairRequest`'s observed origin is display data, never a decision),
+  Windows reaches the WSL door through WSL2's own localhost forwarding, and the
+  LAN guard's loopback refusal (`-32007` on `aoide/charterFetch`) is bypassed by
+  taking `mesh join --operator`/`charter accept <file>` instead. What stops it
+  is the version: the WSL node's daemon and CLI are `~/.local/bin`'s
+  **0.0.23** (Sep 25; `~/.cargo/bin` holds 0.0.25, and this tree is 0.0.26),
+  and a byte-level read of those artifacts gives `pairRequest`/`pairReveal`/
+  `pairPoll`/`selfVia` present — design A's poll ceremony IS there — but
+  `aoide/mailPoll` present only from 0.0.25 on and `aoide/charterFetch` and the
+  `mesh` grant field only in 0.0.26 (P-CHARTER). So the ruled mail flow (the WSL
+  side holds, Windows polls) cannot be served by that door, and a pair committed
+  by it would write a pre-charter grant the 0.0.26 side now judges delivery by.
+  The User's install was NOT replaced (ruled out in this lane), so the ceremony
+  waits on a ruling: upgrade the WSL node's `~/.local/bin` build keeping its name
+  and port (its yomi pairing rides the same name), or accept a pre-charter
+  asymmetric grant.
 - The managed task wrapper (`spawn --task`, `session watch`) claims no Windows
   support today. Its two named prerequisites — the conduct-owned PTY
   transcript its live view reads, and the stage lock its record writes and
   delivery cursor ride — are native on both hosts now; the wrapper's own
   commands are UNMEASURED there, so its earliest honest Windows point is a
   measurement, not a rewrite.
-- Native<->WSL pairing on ONE box (the two nodes ThinkChiyo will run) is
-  admissible today and needs NO inbound dial: the ceremony is requester-dials
-  (`aoide/pairRequest`/`aoide/pairPoll` ride the requester's own forward dial,
-  and a requester whose door is loopback-only completes pairing), and
-  `aoide/pairRequest`'s observed origin is display data, never a decision.
-  Which path is admissible, and what each side must be given:
-  `aoide pair <url>` — the discovery arm (`pair <hostname>`) is REFUSED on one
-  box by its own self-pair guard (a loopback source address, or an
-  advertisement whose name is this instance's own); the LAN guard refuses a
-  LOOPBACK peer for `aoide/charterFetch` (`-32007` — a relayed forward and an
-  ssh tunnel both arrive as loopback, which is exactly why that rule exists),
-  so a mesh join on one box takes `mesh join --operator <key>` or `charter
-  accept <file>`. Windows dialling the WSL door rides WSL's own localhost
-  forwarding (the VM's `127.0.0.1` listeners surface on Windows `127.0.0.1`;
-  measured for that VM's sshd and its python/qemu listeners). The WSL side
-  dialling the WINDOWS door needs a hop it does not have: inside that VM
-  `127.0.0.1` is the VM's own loopback and its `/etc/hosts` maps `ThinkChiyo`
-  to itself, so it must reach the Windows door by address through the tunnel
-  transport (`--via ssh://dxcen@<addr>` against Windows OpenSSH) — and
-  Windows' sshd authorizes ONE key today (`administrators_authorized_keys`,
-  `khoa@yomi-strix`), none of the WSL user's, so that hop is a key change
-  nobody has made. Two structural collisions remain for that pair, both
-  measurable without a ceremony: the two nodes compute the SAME node name (one
-  computer name, folded — the existing `AOIDE_A2A_NODE_NAME` override is the
-  escape), and default door port `8710` is contested on one loopback, exactly
-  as `127.0.0.1:22` already is (that VM's sshd holds Windows' loopback:22
-  through the relay while Windows' own sshd holds `0.0.0.0:22`).
-- Next, in order: (1) run the WSL node's `aoide a2a serve` and give the two
-  nodes distinct names and distinct door ports, then measure the pairing
-  ceremony between them on one box (the ceremony itself is the User's gate);
-  (2) a Windows residency mechanism — a per-user logon task or a service —
-  which does not exist yet; (3) the `boot_epoch` row's non-Linux arm; (4) the
+- The ruled one-box path, in full: Windows is the REQUESTER and the WSL door is
+  the approver, so the ceremony dials `http://127.0.0.1:8710/` through WSL2's
+  own localhost forwarding (measured: the VM's `127.0.0.1` listeners surface on
+  Windows `127.0.0.1`, for its sshd and its python/qemu listeners alike) and
+  nothing ever dials inward. The discovery arm (`pair <hostname>`) is REFUSED on
+  one box by its own self-pair guard (a loopback source address, or an
+  advertisement named this instance's own), so the explicit URL is the arm; the
+  LAN guard refuses a LOOPBACK peer for `aoide/charterFetch` (`-32007` — a
+  relayed forward and an ssh tunnel both arrive as loopback, which is why that
+  rule exists), so the mesh comes in by `mesh join --operator <key>` or
+  `charter accept <file>` instead. Two collisions the pair must be given
+  answers to, both already measured: the two nodes compute the SAME node name
+  (one computer name, folded — resolved by ruling: `AOIDE_A2A_NODE_NAME`, the
+  native side `thinkchiyo-win`) and door port `8710` is contested on one
+  loopback exactly as `127.0.0.1:22` already is (resolved the same way:
+  `AOIDE_A2A_PORT=8720` native, 8710 left to WSL). The WSL->Windows hop needs
+  nothing for the ruled direction: that node holds its letters and this one
+  polls, and a WSL-side dial INTO the Windows door would need an address and a
+  key Windows sshd does not authorize today (`administrators_authorized_keys`,
+  one key, `khoa@yomi-strix`).
+- Next, in order: (1) the User's ruling on the WSL node's build, then the
+  ceremony on one box (its own gate); (2) the WSL node's `aoide a2a serve` as a
+  sibling process (nothing runs it today — no listener on 8710 in that VM);
+  (3) a WSL->Windows hop, if it is ever wanted, is a key authorization on that
+  host's sshd (one key today, `khoa@yomi-strix`) — not ruled on, not needed for
+  the ruled direction; (4) the `boot_epoch` row's non-Linux arm; (5) the
   managed-task wrapper's native measurement.
 
 ## 29. HTTPS mesh with end-to-end encrypted letters

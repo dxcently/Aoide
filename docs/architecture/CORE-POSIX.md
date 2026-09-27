@@ -16,8 +16,13 @@
 > the conducted session driven end to end, and the A2A, mail and MCP-stdio
 > doors answering (the run is named under "Evidence and limits"). What remains
 > open is per row, and named there: `boot_epoch` is Linux-only, so the pre-boot
-> reap signal and the boot-epoch-guarded auto-resume never fire off it; no
-> residency mechanism for that host exists in the tree; one
+> reap signal and the boot-epoch-guarded auto-resume never fire off it;
+> residency there is an install path rather than a missing mechanism —
+> `docs/INSTALL.md` § 7.2's per-user logon task (exercised on that host: both
+> processes started without a logout, the door answering its AgentCard on
+> `127.0.0.1:8720`, and both still running from a later session) — while the
+> tree itself still ships no Windows unit, and a logon task's process ends with
+> its logon session; one
 > `graph_residency_p_d6` binary is contention-sensitive under full parallelism
 > (recorded under "Next layer"); and ONE `aoide-storage` test fails there
 > deterministically and PRE-EXISTING —
