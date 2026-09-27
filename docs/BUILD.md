@@ -89,13 +89,20 @@ none of them except your own dendrite flags (a paint lane sets its own fact).
 
 `AOIDE_SONG_TEMPLATES` (L-C3, task #107) is not its own `aoide.*` option — it
 is wired directly, as `${pkgs.lyra-songbook}/share/lyra/songbook`, but NOT
-onto the same broad unit list `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT` ride: only
-`aoide-song` reads it and only `lyra` links `aoide-song`, so it rides
-`modules/nucleus/shellbridge.nix`'s main `shellbridge` service (execs
-`lyra`) and `modules/nucleus/aoided.nix`'s `environment.sessionVariables`
-gated on `aoide.lyra.enable`, never the core-only units that exec plain
-`aoide` (a headless core carries no `pkgs.lyra-songbook` closure). That
-package (`pkgs/lyra-songbook/default.nix`) bakes the committed
+onto the same broad unit list `AOIDE_ROOT`/`AOIDE_FLAKE_ROOT` ride: only the
+staging paths read it and only `lyra` links them, so it rides the units that
+exec or spawn `lyra` —
+`modules/dendrites/lyra/shellbridge.nix`'s main `shellbridge` service,
+`modules/dendrites/quickshell.nix`'s `aoide-quickshell` unit (the QML it
+starts execs `lyra`) — and `modules/nucleus/aoided.nix`'s
+`environment.sessionVariables` plus its own unit `Environment`, all gated on
+`aoide.lyra.enable`, never the core-only units that exec plain
+`aoide` (a headless core carries no `pkgs.lyra-songbook` closure). Each unit
+spells it in its OWN `Environment=` as well as inheriting the login copy:
+a session variable is a LOGIN fact, so a unit that started before a switch
+would otherwise keep the previous build's songbook until the operator relogs.
+That
+package (`pkgs/lyra-songbook/default.nix`) bakes the built-in
 `song/songbook/` tree plus `manifest.json`/`registry.json` (via
 `lib/songbook.nix`) at build time, so a repo-less host's `rice compose --from
 <song>` and its registry/manifest regeneration both have something to fall
@@ -132,7 +139,7 @@ hosts.
 
 A paint lane renders appearance: it reads the dress (`aoide.livery`), the
 structure (`aoide.arrangement`), the surface registry (`aoide.surfaces`), the
-identity scalars and its own fact — root `AGENTS.md` house rule 5, and nothing
+core scalars and the song selection — root `AGENTS.md` house rule 5, and nothing
 else. If it owns a surface it declares that in `aoide.surfaces`. Apply component
 fallbacks yourself.
 
@@ -173,8 +180,9 @@ owner; the stylix lane must read `config.aoide.surfaces` and disable its own
 derivation for any surface already owned (overlap resolution,
 `concepts/Notes`).
 
-**Never read `song/` runtime paths at build time.** `checks.no-song-read` fails
-eval if a module under a `song/` runtime dir is discovered. `stage/` is live
+**Never read `song/` runtime paths at build time.** The `song-runtime-untracked`
+check fails if a `song/` runtime dir (`stage/`, `auditions/`, `declared/`) is
+committed into the source tree at all. `stage/` is live
 state, never load-bearing for the nix build.
 
 ---
@@ -186,8 +194,10 @@ by naming it — the score adapts to that host's specifics and its enabled
 dendrite set. **The venue (host) decides its instruments; the song
 carries only the notes.**
 
-Drop a folder under `song/songbook/<name>/` — the `songbook` lane walks it in
-(`lib/walk.nix`, until S8 makes the selection per host), so there is no import
+Drop a folder under `song/songbook/<name>/` and select it in a host record
+(`song.declared`, or `song.available` to keep it built in to stage): one typed
+scan finds `song/songbook/<name>/rice.nix` and the constructor wires the selected
+songs in, so there is no import
 list to edit. The song's `rice.nix` self-gates on `aoide.song`:
 
 ```nix
@@ -214,9 +224,11 @@ standard (`song/songbook/sonata/rice.nix`).
 later, cover/chime refs inside `song/`). It NEVER sets host options (monitors,
 hardware, services) and NEVER enables paint lanes or dendrites — those are the
 Note values are literal nix; a song never reads `song/` runtime paths. The
-`song/songbook/**` tree is versioned score (not a runtime dir), so walking it
-does not violate `checks.no-song-read`. `checks.song-shape` asserts each walked
-songbook path is a `rice.nix`.
+`song/songbook/**` tree is versioned score (not a runtime dir), so reading it
+does not violate `checks.song-runtime-untracked`. `checks.song-shape` asserts
+three things about it: no stray `.nix` outside a song's `rice.nix`/`_widgets/`,
+no `../` path literal in a song's `.nix` text, and every song carrying both
+`rice.nix` and `livery.json`.
 
 ---
 
@@ -320,7 +332,7 @@ session records) are contract §4.
 ## Non-cargo tests (`tests/`)
 
 `lib/` holds build/eval machinery (`checks.nix`, `aoideos.nix`, `composition.nix`,
-`pkgs.nix`, `walk.nix`); `tests/` holds what those checks actually test — the headless VM
+`pkgs.nix`, `songbook.nix`); `tests/` holds what those checks actually test — the headless VM
 boot (`vm-boot.nix`) and the static-artifact portability assertions
 (`portability.nix`), plus the manual container suite (`distrobox.md`).
 See `tests/README.md` for why Rust's own tests do NOT live here.
@@ -330,9 +342,12 @@ See `tests/README.md` for why Rust's own tests do NOT live here.
 `lib/checks.nix` rides as flake `checks`:
 
 - `surface-ownership` — every `aoide.surfaces.<name>` names a non-empty owner.
-- `no-song-read` — no discovered module lives under a `song/` **runtime** dir
-  (`song/songbook/**` is versioned score, legitimately walked).
-- `song-shape` — every walked `song/songbook/**` path is a `rice.nix`
+- `song-runtime-untracked` — no `song/` **runtime** dir (`stage/`, `auditions/`,
+  `declared/`) exists in the source tree at all (`song/songbook/**` is versioned
+  score, legitimately read at eval).
+- `song-shape` — the songbook's shape: no stray `.nix` outside a song's
+  `rice.nix`/`_widgets/`, no `../` path literal in a song's `.nix` text, every
+  song carrying `rice.nix` and `livery.json`
   (host-agnostic song discipline; CONTRACTS.md §5).
 - `phantom-commands` — every backticked `aoide …`/`lyra …` spelling in
   `AGENTS.md`, `docs/agent/*.md`, `docs/INSTALL.md` and the wiki

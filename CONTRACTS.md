@@ -448,7 +448,7 @@ nixpkgs args — and `lib/pkgs.nix` (the packages walker) discovers it into **al
 four** consumers from one source:
 
 - the flake `packages.<system>.<name>` output,
-- the host overlay (`lib/mkHost.nix` → `pkgs.<name>` inside every module),
+- the host overlay (`lib/aoideos.nix`'s constructor, over `lib/pkgs.nix` → `pkgs.<name>` inside every module),
 - the vm overlay (`tests/vm-boot.nix` — literally the same import), and
 - a `pkg-<name>` flake check that builds it.
 
@@ -960,7 +960,7 @@ first when a node is still there to receive it.
 
 Two live-side (rehearsal) state trees, both gitignored runtime, never
 committed, never load-bearing for the nix build (enforced by
-`checks.no-song-read`), split by who owns them (command-defrag lane,
+`checks.song-runtime-untracked`), split by who owns them (command-defrag lane,
 2026-08-27 — root `AGENTS.md`'s "Aoide (core) vs AoideOS/Lyra" boundary
 applied to the stage tree itself):
 
@@ -1012,10 +1012,15 @@ actually existing — `aoide_protocol::bin`'s sibling-binary resolver shape,
 applied to a directory). On a NixOS host the env tier always wins, but only
 where it can be READ: `AOIDE_SONG_TEMPLATES` is paint data (only
 `aoide-song` reads it, only `lyra` links `aoide-song`), so it is wired ONLY
-onto units whose process execs `lyra` — `modules/nucleus/shellbridge.nix`'s
-main `shellbridge` service — plus `modules/nucleus/aoided.nix`'s
+onto units whose process execs or spawns `lyra` —
+`modules/dendrites/lyra/shellbridge.nix`'s
+main `shellbridge` service and `modules/dendrites/quickshell.nix`'s
+`aoide-quickshell` unit (the QML it starts execs `lyra`) — plus
+`modules/nucleus/aoided.nix`'s
 `environment.sessionVariables` (an operator's own interactive `lyra rice
-compose`), itself gated on `aoide.lyra.enable` so a host that never installs
+compose`) and that unit's own `Environment=` (so a restart after a switch
+picks up the new songbook instead of the login session's copy), itself gated on
+`aoide.lyra.enable` so a host that never installs
 `lyra` never carries the var into its shells either. It does NOT ride the
 core-only units (`aoided` itself, `aoide-mcp`/`aoide-a2a`/`aoide-usage`/
 `aoide-pair-watch`, `aoide-graph-reap`, `aoide-secrets-watch`, the melete
@@ -1345,7 +1350,7 @@ Upgrading every node is the remedy the fleet's own rollout takes.
   passes judgment on. Empty (the default) disables the lane outright. **On a
   nix host, this MUST name the fast checks only** (the example above:
   `fmt`/`nix-lint`, joined by `lib/checks.nix`'s own `discovery`/
-  `song-shape`/`no-song-read`/`surface-ownership` — the check lane's
+  `song-shape`/`song-runtime-untracked`/`surface-ownership` — the check lane's
   fast-lane budget), never bare `nix flake check` — the lane runs
   SYNCHRONOUSLY inside the hook, so an unscoped invocation also evaluates the
   slow attributes (vm-boot, `pkg-*`, portability), which routinely run for
@@ -1574,10 +1579,10 @@ song/songbook/sonata/drafts/neon-night/
 
 No metadata file: the draft name is the directory name, the base song is
 the directory it's nested under, and saved-at is `livery.json`'s mtime.
-Gitignored (`song/songbook/*/drafts/`, same category as `song/stage/`) and
-banned from nix-eval reads (`lib/checks.nix`'s `noSongRead` — matched by
-regex, `.*/song/songbook/[^/]+/drafts/.*`, since the runtime dir nests at a
-variable depth a flat infix can't name) — a draft is durable scratch,
+Gitignored (`song/songbook/*/drafts/`, same category as `song/stage/`):
+pure flake eval reads only TRACKED files, so a `rice declare` copy landing in
+the checkout never reaches evaluation, and a `.nix` committed there would be a
+stray the `song-shape` check names. A draft is durable scratch,
 **never committed or declared truth**; that distinction from
 `song/songbook/<name>/`'s own committed files is the entire point.
 
@@ -1605,7 +1610,7 @@ the routing and falling back to `staging` — switch modes first
 ### `state/stage/sessions.json` / `hooks.json` — **v0**
 
 The shellbridge roster + live hook phases (full field tables in
-`modules/nucleus/shellbridge.nix`). Session records: `{ sessionId, agent,
+`modules/dendrites/lyra/shellbridge.nix`). Session records: `{ sessionId, agent,
 windowAddress, cwd, state, startedAt }`; hook records: `{ sessionId, phase,
 updatedAt }`.
 
@@ -5035,10 +5040,10 @@ arrive as ARGUMENTS, injected at the two sites that evaluate a song:
 
 ### The songbook is versioned score, not runtime
 
-`checks.no-song-read` (§4) bans reading `song/` **runtime** dirs at eval
-(`stage/` · `auditions/` · `catalog/` · `index/`). It
+`checks.song-runtime-untracked` (§4) fails if a `song/` **runtime** dir
+(`stage/` · `auditions/` · `declared/`) exists in the source tree at eval. It
 deliberately does **not** list `song/songbook/`: committed songs there are
-versioned score, legitimately walked at eval. Walking the songbook never trips
+versioned score, legitimately read at eval. Reading the songbook never trips
 the check.
 
 ### Enforcement
