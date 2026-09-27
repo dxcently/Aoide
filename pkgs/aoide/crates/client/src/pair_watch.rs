@@ -1480,6 +1480,7 @@ mod tests {
                 expires_at: aoide_storage::pairing::expires_at_from(now_epoch),
                 state: aoide_storage::pairing::OutboundState::AwaitingApproval,
                 via: None,
+                mesh: None,
                 tries: 0,
             })
             .unwrap();
@@ -1746,6 +1747,7 @@ mod tests {
                 expires_at: aoide_storage::pairing::expires_at_from(now_epoch),
                 state: aoide_storage::pairing::OutboundState::AwaitingApproval,
                 via: None,
+                mesh: None,
                 tries: 0,
             })
             .unwrap();
@@ -1804,6 +1806,7 @@ mod tests {
                 expires_at: aoide_storage::pairing::expires_at_from(now_epoch),
                 state: aoide_storage::pairing::OutboundState::AwaitingApproval,
                 via: None,
+                mesh: None,
                 tries: 0,
             })
             .unwrap();
@@ -1846,6 +1849,7 @@ mod tests {
                 expires_at: aoide_storage::pairing::expires_at_from(now_epoch),
                 state: aoide_storage::pairing::OutboundState::AwaitingApproval,
                 via: None,
+                mesh: None,
                 tries: 0,
             })
             .unwrap();
@@ -2350,6 +2354,7 @@ mod tests {
                 expires_at: aoide_storage::pairing::expires_at_from(now_epoch),
                 state: aoide_storage::pairing::OutboundState::AwaitingConfirm,
                 via: None,
+                mesh: None,
                 tries: 0,
             })
             .unwrap();
@@ -2398,6 +2403,7 @@ mod tests {
                 expires_at: aoide_storage::pairing::expires_at_from(now_epoch),
                 state: aoide_storage::pairing::OutboundState::AwaitingConfirm,
                 via: None,
+                mesh: None,
                 tries: 0,
             })
             .unwrap();
@@ -2436,6 +2442,7 @@ mod tests {
                 expires_at: aoide_storage::pairing::expires_at_from(now_epoch),
                 state: aoide_storage::pairing::OutboundState::AwaitingConfirm,
                 via: None,
+                mesh: None,
                 tries: 0,
             })
             .unwrap();

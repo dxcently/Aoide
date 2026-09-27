@@ -242,7 +242,7 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   The pairing ceremony's entire purpose is establishing a credential where
   none exists yet — gating either on an existing credential would be
   circular. What keeps this safe: a parked/revealed/approved request
-  grants NOTHING by itself (no `allows`, no spawn/bearer gate, P-P3's lane
+  grants NOTHING by itself (no grants, no spawn/bearer gate, P-P3's lane
   untouched), every REQUIRED field is validated BEFORE anything is parked
   or resolved (`valid_pubkey_hex`/`valid_nonce_hex`/`valid_commit_hex`/
   `valid_node_name`/`valid_node_url`) — `selfVia` (task #131) is the one
@@ -341,8 +341,8 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   ladder (a presented token against a node's own `token_file` first —
   `NodeRung::Token` — else the TCP origin against that node's `url` —
   `NodeRung::Addr`). `spawn_admitted` accepts ONLY a `NodeRung::Signature`
-  resolution, deferring the node-side check to `node_may_spawn(node)`
-  (`verified && allows.contains("spawn")`) only in that case — neither the
+  resolution, deferring the node-side check to `may_spawn(&grant)`
+  (`"spawn"` in the caller's grant for the mesh the request names) only in that case — neither the
   address rung nor the (now-insufficient) token rung reaches `do_spawn`
   any more. Both unsigned rungs still resolve a node identity fine for
   every OTHER purpose (Inject's `from` attribution, autogate) — they are
@@ -354,7 +354,8 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   for the code `-32006` still returns uniformly: a genuinely paired node
   resolved via the Token rung is told its aoide is too old to sign
   requests (upgrade the caller, don't re-pair); a Signature-resolved node
-  whose `allows` lacks `spawn` is told the exact `node allow` fix; every
+  whose grant in the request's mesh lacks `spawn` is told the exact
+  `node allow … spawn on --mesh <m>` fix; every
   other shape gets the original "pair first, then allow" message, now
   naming the signature requirement too. The door-wide bearer that gates
   every OTHER arm (read commands, the uniform-response guard, Inject's
@@ -365,7 +366,7 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   test in this file drives `do_spawn`'s real OS-level process spawn (an
   established precedent, `spawn_inject_prompts_success_branch_
   files_the_opening_turn_into_the_mailbase`'s own doc comment) — the gate
-  itself is proven via the pure `node_may_spawn`/`spawn_admitted`/
+  itself is proven via the pure `may_spawn`/`spawn_admitted`/
   `spawn_refusal` predicates, `verify_signed_request`'s own dedicated test
   section, and `message_send`'s REFUSAL branches only. **P-P5b's own
   `node_spawn_signed_and_allowed_is_admitted_up_to_the_do_spawn_boundary`
@@ -709,9 +710,9 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   request without the key stays byte-identical. The gate is three clauses at
   once: `read_ok` (the door-wide bearer rule every read arm carries —
   `token_authorized`), a caller resolved through the SIGNATURE rung, and that
-  record `verified` with `read` in its `allows` (`node_may_read`,
-  `node_may_spawn`'s twin one capability over). Resolution goes through
-  `resolved_caller`, which takes the rung from the PROOF rather than a second
+  record `verified` with `read` among its grants in the request's mesh
+  (`output_read_admitted`, `may_spawn`'s twin one capability over). Resolution goes through
+  `caller_grant`/`grant_in_mesh`, which take the rung from the PROOF rather than a second
   lookup: no `SignedCaller` (unsigned, bearer, address) is `None` whatever the
   registry holds. The remote-parent key match is deliberately NOT required to
   READ — reading is wider than writing, and `send`'s remote-parent delivery
@@ -764,16 +765,31 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   the refusal, the both-keys rule and the no-existence-oracle pin,
   `an_unsigned_history_read_is_refused` the unsigned shape, and
   `lines_after_reads_only_params_metadata_and_tolerates_any_value` the reader.
+- **A sealed deposit's reply word is `accepted`, and an applied charter's detail
+  rides in `data` (P-CHARTER).** MAIL.md §Wire's outcome vocabulary is closed to
+  `accepted`/`duplicate`/`refused`, and a sender's classifier reads any other
+  string as a REFUSAL — so a door answering a word it was never taught parks a
+  charter that had already landed, its own spool saying it was refused forever.
+  `deposit_sealed`'s charter arm therefore answers
+  `{"status": "accepted", "msgid": …, "charter": {"mesh", "version", "rekeyed"}}`:
+  the word the sender knows, the detail in `data`. `aoide-client`'s
+  `a_landed_charter_retires_the_senders_entry` reads this exact shape, and this
+  crate's `a_landed_charter_is_answered_accepted_with_its_detail_in_data` is the
+  half that fails if the word changes.
 - **`aoide/mailDeposit` (P-M2) is the SECOND capability-gated A2A arm,
   after Spawn, and the first not gated on `spawn` — `deposit_admitted`
   mirrors `spawn_admitted` one capability over, but signature-only from
   the start, with no Addr/Token fallback rung to migrate off of the way
-  Spawn once had.** `node_may_message` is `verified && allows.contains
-  ("message")`, checked only against `ctx.signed_caller`'s KEY-resolved
+  Spawn once had.** `may_message` is `"message"` in the caller's grant for
+  THE MESH THE REQUEST NAMES (`grant_in_mesh`), checked only against `ctx.signed_caller`'s KEY-resolved
   node (`resolved: Option<&Node>`, `None` whenever the request carried no
   verified signature at all). `deposit_refusal` returns `-32010` for
-  BOTH its shapes (paired-but-not-`message`-allowed, told the exact `node
-  allow … message on` fix; everything else, told to pair then allow) —
+  ALL THREE of its shapes, and the P-CHARTER one PREEMPTS the other two (paired-but-not-`message`-allowed, told the exact `node
+  allow … message on` fix; everything else, told to pair then allow; and the FIRST of the three —
+   the mesh being charter-shaped with an undecidable operator key — told that,
+   told the reason word, pointed at `aoide mesh charter show`, with the
+   `trusted_operator` DETAIL (which names both operator keys) going to this
+   host's audit line and never to an ungated caller) —
   **`-32010` is deliberate and must never regress to `-32006` (Spawn's own
   code) or `-32007` (already `verify_signed_request`'s own incomplete-
   headers/signature-mismatch refusal code, CONTRACTS.md §6) — a new
@@ -831,7 +847,7 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `a2a::tests::a_duplicate_of_a_filed_letter_respools_its_ack`.
 - **`aoide/mailPoll` (P-M3) is the SAME admission question asked one node
   narrower, and the hand-over side of mail rather than the deposit side.**
-  `poll_admitted` = `node_may_message` PLUS `params.node == the resolved
+  `poll_admitted` = `may_message` PLUS `params.node == the resolved
   caller's own name` — MAIL.md §Wire's "the caller's verified identity must
   BE `node`". A refusal reuses `-32010` (never a new code, never
   `-32006`/`-32007`) in three shapes. **The `down` clause is NOT here yet**:
@@ -879,8 +895,8 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   before its tick loop and called once per iteration — never a producer
   that spawns its OWN thread or sleeps internally (previous invariant).
 - **A new capability-gated A2A method (beyond Spawn/Message)** follows
-  `spawn_admitted`/`deposit_admitted`'s shape: a `node_may_<verb>`
-  predicate (`verified && allows.contains("<verb>")`) consulted only
+  `spawn_admitted`/`deposit_admitted`'s shape: a `may_<verb>`
+  predicate (a capability in the caller's grant for the request's mesh) consulted only
   against a `NodeRung::Signature` resolution, a dedicated `<verb>_refusal`
   returning ONE NEW reserved code (never `-32006`/`-32007`/`-32010`,
   already spoken for), and — if the method has no per-dispatch audit path

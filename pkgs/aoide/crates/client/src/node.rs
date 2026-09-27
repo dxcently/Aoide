@@ -108,10 +108,20 @@ pub fn build_pair_request_body(
     self_url: &str,
     self_via: Option<&str>,
     binding: Option<&aoide_storage::seal::Binding>,
+    mesh: Option<&str>,
 ) -> Value {
     let mut params = json!({ "pubkeyHex": pubkey_hex, "name": self_name, "commitHex": commit_hex, "url": self_url });
     if let Some(via) = self_via {
         params["selfVia"] = json!(via);
+    }
+    // P-CHARTER: the mesh this pairing's grant lands in on BOTH sides. The
+    // one field that makes a pair symmetric — each end used to resolve the
+    // mesh alone, so two operators naming different meshes landed a pair with
+    // the grant in a mesh the other end never reads. Omitted when unnamed, so
+    // an approver's commit resolves it locally exactly as before (and an old
+    // approver, which ignores the key, still pairs).
+    if let Some(mesh) = mesh {
+        params["mesh"] = json!(mesh);
     }
     // P-SEAL: this instance's own self-signed age binding, when it has one.
     // Omitted outright for a caller with none, so an old approver sees the
@@ -554,7 +564,7 @@ mod tests {
 
     #[test]
     fn build_pair_request_body_matches_the_jsonrpc_shape() {
-        let body = build_pair_request_body("pk", "box-b", "commit", "http://a/", None, None);
+        let body = build_pair_request_body("pk", "box-b", "commit", "http://a/", None, None, None);
         assert_eq!(body["method"], "aoide/pairRequest");
         assert_eq!(body["params"]["pubkeyHex"], "pk");
         assert_eq!(body["params"]["name"], "box-b");
@@ -562,12 +572,27 @@ mod tests {
         assert_eq!(body["params"]["url"], "http://a/");
         assert!(body["params"].get("nonceHex").is_none(), "the nonce itself never rides pairRequest");
         assert!(body["params"].get("selfVia").is_none(), "selfVia is omitted outright when the caller has no claim, never sent null");
+        assert!(body["params"].get("mesh").is_none(), "and so is mesh: an unnamed pairing resolves its mesh locally, as it always did");
     }
 
     #[test]
     fn build_pair_request_body_carries_self_via_when_given() {
-        let body = build_pair_request_body("pk", "box-b", "commit", "http://a/", Some("ssh://khoa@box-b"), None);
+        let body = build_pair_request_body("pk", "box-b", "commit", "http://a/", Some("ssh://khoa@box-b"), None, None);
         assert_eq!(body["params"]["selfVia"], "ssh://khoa@box-b");
+    }
+
+    /// **The mesh rides the request** (P-CHARTER): the one field that makes
+    /// both ends commit the same mesh, and the reason two operators naming
+    /// different meshes can no longer land an asymmetric pair.
+    #[test]
+    fn build_pair_request_body_carries_the_mesh_when_given() {
+        let body = build_pair_request_body("pk", "box-b", "commit", "http://a/", None, None, Some("away"));
+        assert_eq!(body["params"]["mesh"], "away");
+        let plain = build_pair_request_body("pk", "box-b", "commit", "http://a/", None, None, None);
+        assert!(
+            plain["params"].get("mesh").is_none(),
+            "and an unnamed pairing sends no key at all, so an old approver's shape is byte-identical"
+        );
     }
 
     #[test]
@@ -576,7 +601,7 @@ mod tests {
         // simulate its `Deserialize` over a body this (new) requester sent
         // with no claim, and confirm the shape round-trips with nothing
         // extra required.
-        let body = build_pair_request_body("pk", "box-b", "commit", "http://a/", None, None);
+        let body = build_pair_request_body("pk", "box-b", "commit", "http://a/", None, None, None);
         let params = body["params"].clone();
         assert!(params.get("selfVia").is_none());
         // And the reverse: an old requester's body (no selfVia key at all)

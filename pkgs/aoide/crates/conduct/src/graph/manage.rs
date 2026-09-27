@@ -1121,7 +1121,8 @@ mod tests {
             hub: false,
             pubkey: None,
             verified: false,
-            allows: Vec::new(),
+            grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-14T00:00:00Z".into(),
         }])
@@ -1412,7 +1413,8 @@ mod tests {
             hub: false,
             pubkey: None,
             verified: false,
-            allows: Vec::new(),
+            grants: aoide_storage::node_store::Grants::new(),
+            narrowed: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-01-01T00:00:00Z".into(),
         }

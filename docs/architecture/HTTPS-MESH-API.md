@@ -131,8 +131,11 @@ Rules:
   the User's home mesh (`[pairing] homeMesh`, default `home`). Its `allows` becomes
   its grant there, unchanged, so every trusted peer keeps exactly what it had. A
   request that names no mesh (a peer not yet upgraded) is evaluated in the home
-  mesh only, and only against a migrated paired record. It never matches a charter
-  mesh.
+  mesh **by that mesh's rules**: its governing charter first, and its migrated
+  paired record only where no charter is shaped for the mesh. So a peer whose
+  key the home charter does not list — or once listed and since removed — is
+  refused there, and the migration's "keeps exactly what it had" holds exactly
+  as long as home stays a pair mesh.
 - **Rooting a mesh that holds paired records.** When the User runs `aoide mesh
   charter init home`, the charter becomes the home mesh's trust. `init` lists the
   mesh's paired records: each of the User's own machines is added to the charter,
@@ -149,28 +152,35 @@ machines. It is shaped like agenix: public keys in one file, one signer.
 
 1. **Each machine generates its own keys** on first setup: the Ed25519 identity key
    and the age X25519 key (Keys, below). `aoide onboard` ends by printing the
-   machine's **node line**, which `aoide identity` also prints at any time:
+   machine's **node line**, which `aoide identity` also prints at any time (and
+   carries in its `--json` as `nodeLine`, beside the durable `nodeFingerprint`):
 
    ```text
-   thinkchiyo = { key = "ed25519:<hex>", age = "<binding>" }   # SHA256:<fingerprint>
+   thinkchiyo = { key = "ed25519:<hex>", age = '<binding>' }   # SHA256:<fingerprint>
    ```
 
-   The line carries the identity public key and the self-signed age binding. The
-   fingerprint is for the operator's eye, and it is `sha256` over the raw 32-byte
-   **identity** public key, lowercase hex — the key a charter line and a paired record
-   are keyed by, and the key the binding's own signature is checked against. It is not
-   the age key's fingerprint and it is not the short colon-separated label `aoide
-   identity` prints locally; Keys, below, separates the two. **Nothing computes or
-   prints this today** — `aoide identity` prints the short label above, and the durable
-   `SHA256:<hex>` node-line fingerprint is P-CHARTER's to build (Keys, below). Nothing
-   private is printed.
+   The line carries the identity public key and the self-signed age binding, and
+   it is pasteable as it stands: `age` is the binding's own JSON inside a TOML
+   **literal** string (single quotes), which is legal because no field of a
+   binding can contain a single quote. The fingerprint is for the operator's eye,
+   and it is `sha256` over the raw 32-byte **identity** public key, lowercase hex
+   — the key a charter line and a paired record are keyed by, and the key the
+   binding's own signature is checked against. It is not the age key's
+   fingerprint and it is not the short colon-separated label `aoide identity`
+   prints locally; Keys, below, separates the two. Nothing private is printed.
 2. **The operator roots the mesh once.** `aoide mesh charter init <mesh>` mints the
-   mesh's operator key on the operator's machine, writes an empty charter source,
-   and prints the **operator line**, `operator = "ed25519:<hex>"`, with its
-   fingerprint.
+   mesh's operator key at `state/operator/<mesh>.key` (raw 32-byte seed, `0600`,
+   never printed), records it as this machine's root for that mesh, writes an
+   empty charter source — never over an existing one — and prints the **operator
+   line**, `operator = "ed25519:<hex>"`, with its fingerprint. It refuses on a
+   machine that ALREADY trusts an operator for that mesh, in its config line or in
+   its state record: that machine is a node of the mesh, and `init` there would
+   mint a key no other node knows and repoint its trust at it.
 3. **The operator adds each machine**: paste its node line under `[nodes]`, add its
    `address` and, when it needs more than `message`, its `grant`, then run `aoide
-   mesh charter sign <mesh>`.
+   mesh charter sign <mesh>`. Signing applies the result on the operator's own
+   machine (it is a node of its own mesh) and spools the signed pair to every other
+   node on the charter.
 4. **Each machine trusts the operator key once**, by one of:
    - the operator line in its config, `[mesh.<name>] operator = "…"`, rendered by
      Nix or written by hand;
@@ -185,6 +195,20 @@ machines. It is shaped like agenix: public keys in one file, one signer.
    mesh charter accept <file>`. Later versions arrive as letters. From then on the
    machine trusts every charter node with the charter's grants.
 
+   **A later version is spooled for every node on the charter, but it only
+   travels to the ones this box can DIAL — a node it has a record for.** The
+   charter's own `address` is not a route in this phase: turning a line's
+   `address` into a dial target is the router's job, at P-M4 (Transports and
+   relays; MAIL.md §Transit). So a version signed after a machine joined by
+   `--operator` or by file — the two non-LAN paths, which create no pairwise
+   record — WAITS in the signer's spool until either that machine is paired
+   (giving it a record to dial) or P-M4 routes charter addresses. The receive
+   half is already in place: the door admits and applies such a letter from an
+   origin it holds no record for (Connections and trust, above). `aoide mesh
+   charter sign` reports each spooled node as `drained` or `NOT DIALED — no
+   node record here`, so the wait is visible at the moment it is created
+   rather than only in `mail outbox` afterwards.
+
 **The file.** TOML, edited by the operator; the example is under Transports and
 relays. Keys:
 
@@ -192,22 +216,29 @@ relays. Keys:
 - `version` — written by `sign`, strictly increasing.
 - `relays` — relay node names, in preference order.
 - `[nodes]` — one line per node:
-  - `key` — the identity public key;
-  - `age` — the node's self-signed age binding;
+  - `key` — the identity public key, `ed25519:<64 lowercase hex>`;
+  - `age` — the node's self-signed age binding, as the JSON inside a TOML literal
+    string (exactly what the node line prints); it must verify under the `key` on
+    its own line;
   - `address` — `ssh://…`, `https://…` or `poll`; default `poll`;
   - `grant` — capabilities; default `["message"]`.
-- Optional `[status]` (`hold`, `down`) and `[gates]`, with MAIL.md's meanings.
+- Optional `[status]` (`hold`, `down` per node) and `[gates]` (a mesh name to the
+  node that gates it), with MAIL.md's meanings; `sign` checks their shapes and that
+  they name nodes of the charter, and their semantics are the router's.
 
 The source lives at `$AOIDE_ROOT/charters/<mesh>.toml` by default; `--file` points
 anywhere, such as the operator's Nix repository, since it holds public keys only.
-For a charter mesh the charter IS the mesh declaration: config's `[mesh.<name>]`
-carries only `operator` and optional `pins`. `nodes`, `grant`, `relays`, `status`
-or `gates` beside `operator` is a load-time error, so there is one source.
+Its detached signature is always `<file>.sig` — the extension is appended, never
+replaced. For a charter mesh the charter IS the mesh declaration: config's
+`[mesh.<name>]` carries only `operator` and optional `pins`. `nodes`, `grant` or
+`sameOperator` beside `operator` is a load-time error, so there is one source.
 
 **Signing.** `aoide mesh charter sign <mesh>` validates (name grammar, capability
-vocabulary, every binding verifies under the key on its own line, no key on two
-lines), writes the next `version` into the file, and writes the detached signature
-`<mesh>.toml.sig`:
+vocabulary, addresses, relays that are nodes of the mesh, every binding verifies
+under the key on its own line), writes the next `version` into the file **in
+place** — comments, spacing and key order survive, because the bytes that come back
+are the bytes that get signed — and writes the detached signature
+`<mesh>.toml.sig` beside it:
 
 ```text
 charter_sig = operator Ed25519 over frame("aoide/charter", [mesh, version, sha256(file bytes)])
@@ -226,29 +257,97 @@ charters and board takeover records (MAIL.md §Boards, "Takeover") and nothing e
 it is never a node's identity key, even on the machine that is both.
 
 **Accepting.** Every node keeps the charter in force at
-`state/mesh/<mesh>/charter.toml` with its `.sig`, and the highest version seen per
-(mesh, operator key) at rest. A node accepting a charter:
+`state/mesh/<mesh>/charter.toml` with its `.sig` beside it, and its own record of
+what it trusts at `state/mesh/<mesh>/trust.json`: the operator key it trusts for
+that mesh, the highest version applied **per (mesh, operator key)**, and the nodes
+the last applied version re-keyed. A node accepting a charter, in this order:
 
-1. Verifies the signature under the operator key it trusts for that mesh, before
-   parsing anything. No trusted key for that mesh is `unknown-operator`.
-2. Requires the parsed `mesh` and `version` to equal the signed ones.
-3. Requires the digest in the `.sig` to equal `sha256` of the charter bytes, so a
+1. Checks the `.sig`'s own framing and the digest it carries against `sha256` of
+   the bytes received. This needs no parse and no trust, and it runs FIRST so a
    touched source is `charter-tampered` rather than misreported as a bad key.
-4. Refuses a version not above the high-water mark (`stale-charter`), so a replayed
-   older charter never returns.
-5. Refuses every charter for a mesh whose config operator line and state record
-   disagree (`operator-mismatch`) until the User resolves it.
+2. Parses the file — which is where every line is checked: name grammar, the
+   capability vocabulary, addresses, relays and `[status]`/`[gates]` that name
+   nodes of the charter, and each node's binding under the key on its own line. A
+   file that does not parse cannot be the artifact that was signed, so it is
+   `charter-tampered` too.
+3. Resolves the operator key it trusts for the mesh the file declares: the config
+   line against the state record. No trusted key for that mesh is
+   `unknown-operator`; the two disagreeing is `operator-mismatch` until a human
+   resolves it. A config that exists and cannot be honoured is `config-unreadable`,
+   and this node's own record failing to read is `local-io` — the two ways the
+   question "whose signature do I check?" can fail to have an answer.
+4. Verifies the signature under that key (see Signing). `mesh` and `version` are
+   the parsed ones — they are the only source there is, and the digest is what
+   binds the artifact to them — so a signature that does not verify under the key
+   this node trusts is `unknown-operator`: this node does not trust the key that
+   signed this.
+5. Refuses a version not above the high-water mark (`stale-charter`), so a
+   replayed older charter never returns. A re-root restarts the mark by
+   construction, because the mark is keyed by the operator key.
 
-A version that changes an existing node's identity `key` is applied, and `aoide mesh`
-reports the re-keyed node, because a new key on an old name is what a stolen
-operator key would sign.
+**Steps 3 through 5 and the writes below are one critical section**, under a lock
+per mesh (`state/mesh/<mesh>/.charter.lock`, a blocking `flock(LOCK_EX)`), because
+the mark is read in step 5 and written by step 3 of the next apply: two applies
+that both read the old mark can let the OLDER version win the write and silently
+un-apply a revocation, leaving the mark below a version that has been applied. Two
+different meshes never contend, and nothing else takes a charter lock.
+
+Only then is anything written, in this order:
+
+1. the `.sig` for the incoming version;
+2. `charter.toml` — the bytes that signature is over;
+3. `trust.json`, whose `versions` entry is the claim of application.
+
+The order is what makes a failure between the writes truthful. A failure there
+leaves either a `.sig` beside the PREVIOUS charter (the pair does not verify, and
+the next accept of the same version writes both again) or a new charter with a
+valid `.sig` and the mark not advanced (the next delivery re-applies it — the same
+bytes, the same charter in force, no new key material). It is refused with its own
+word, **`local-io`**: the four words above answer for the charter, and this one
+says the charter was fine and this node could not finish writing it.
+
+A version that changes an existing node's identity `key` is applied, and marked on
+this node — `trust.json`'s `rekeyed` and an audit line at the moment it lands,
+which is what an unattended `poll` has instead of a person reading the output —
+because a new key on an old name is what a stolen operator key would sign.
+
+**`aoide mesh` for a charter mesh is the trust-per-mesh slice's.** This document
+fixes what a charter is, what signs it and how a node applies it; the nodelist
+view that reads a charter's nodes, grants and version next to the live registry
+(`aoide mesh`'s rows for a mesh whose config declares an `operator`) belongs
+there, together with the grants-at-the-door check and `mesh join`.
 
 **Carriage.** A signed charter travels like mail: a `charter` letter, sealed to each
 node and origin-signed by the operator's machine, through the ordinary outbox,
 relays and poll. Its authority is the operator signature, never the carrier. A relay
-can drop or delay a charter; it can never alter or forge one. A node verifies the
-enclosed charter first and then the letter's origin against it, so a machine can
-accept its first charter by letter from an origin it did not yet know.
+can drop or delay a charter; it can never alter or forge one.
+
+The letter carries no envelope: its sealed payload is
+`frame("aoide/charter-payload", [file bytes, .sig bytes])` ("Encodings"), its
+`msgid` is `sha256` of the signature input, so one charter version has ONE identity
+across every seal of it, and the copy a node opens is sealed to the binding on that
+node's own line — which is how a charter reaches a machine this one has never
+exchanged a binding with.
+
+A node verifies the enclosed charter FIRST and then the letter's origin against it,
+so a machine can accept a charter from an origin it did not yet know. Concretely:
+the outer signature is checked against the key the container itself names (no
+registry is consulted), the enclosed charter is applied, and only then is the
+origin required to be a node the accepted charter lists, holding exactly the key the
+container names. The zone the letter claims is checked against the only authority
+that can answer it before any registry does — the charter that just landed — so a
+carrier that relabels the zone is refused `zone-violation`, and the charter it
+carried stays in force, because the charter's authority is the operator signature
+and never the letter's routing claim. Both sides of that comparison are SIGNED —
+the mesh the carrier's own envelope signed, against the mesh inside the operator's
+signature input — so a hop that rewrites the container's hop-mutable `mesh` neither
+admits nor refuses a charter by itself. A charter that fails any accept step is
+refused before any part of the container is trusted, and nothing is written.
+Nothing is filed as correspondence and nothing is acked — a charter is a mesh's
+trust, not a letter, and the letter's own envelope never leaves the sender's own
+outbox bookkeeping. A plaintext envelope claiming the `charter` kind is refused
+outright (`not-correspondence`): it carries no charter to apply, and filing it
+would put a letter in a mailbox whose only content is a claim about itself.
 
 **Grants.** A node's charter line is what every other node on the charter grants it,
 at its own door, in this mesh. Local narrowing (above) is the only per-host
@@ -259,26 +358,58 @@ new version on receipt: its door refuses the removed key in that mesh, its route
 stops routing to it, and every board of that mesh with a member on the removed
 node rotates to a new epoch (MAIL.md §Boards). A node that has not yet received the
 new charter still trusts the removed machine. The revocation reaches it through its
-relay like any letter. Charters carry no expiry, which is an open decision. A board
-whose owner node is removed is frozen until the operator takes it over.
+relay like any letter. A board whose owner node is removed is frozen until the
+operator takes it over.
+
+**A charter carries no validity window** (settled). Charters have no expiry and no
+not-before for the beta, so there is nothing in a charter that ages out on its own.
+The consequence is named rather than papered over: a relay that drops a newer
+charter delays a revocation for as long as it keeps dropping it, and the delay is
+unbounded — the revocation is never cancelled, but it does not arrive on a clock
+either. Adding a validity window later is a new charter format version; it is not
+a change to this one.
 
 **The operator key and re-rooting.** The operator key is one Ed25519 key per mesh,
 stored `0600` at `state/operator/<mesh>.key` on the operator's machine. It is
 never on a relay, never printed, never in the Nix store. Losing it does not stop the
 mesh: every node keeps the last charter it verified, so only changes stop (add,
-remove, grant, relay). `aoide mesh charter reroot <mesh>` mints a new operator key
-and signs the current charter source with it. The cost:
+remove, grant, relay). `aoide mesh charter reroot <mesh>` replaces the operator key
+(the old one is deleted, never archived) and signs the current charter source under
+the new key. The cost:
 
 - every machine must trust the new key the way it trusted the first: one config line
-  or one LAN join per machine;
+  or one LAN join per machine. That is each machine's own trust-entry step, and on a
+  host whose config is not hand-editable it is `aoide mesh join <mesh> --operator
+  <new key> --replace`, which records the key in state and CARRIES THE VERSION
+  HIGH-WATER ACROSS (the new key's first charter must still beat every version that
+  mesh has applied) — **never** an edit of `state/mesh/<mesh>/trust.json`, which is
+  where the version mark lives and where a hand edit would silently reset it.
+  `--replace` is what makes the change the operator's: without it a different key is
+  refused, by name, and the refusal points at the flag;
+- **on the operator's own machine, `reroot` refuses up front if its config declares
+  the mesh's operator key**, because that line pins the key the re-root is about to
+  replace: the line and the record would disagree and even the new charter would be
+  refused `operator-mismatch`. It refuses before minting, bumping or signing
+  anything, so no version advances with no node told. The same refusal covers a
+  machine whose config line and record already disagree;
 - nothing else changes: no node re-keys, nothing is re-paired, no board re-keys,
   and filed mail is untouched.
 
 Trust is replaced, not added. A node that trusts the new key refuses charters under
-the old one, and its high-water mark restarts under the new key. If the old key was
-**compromised** rather than lost, its holder can sign charters that every untouched
-machine accepts until it is re-rooted. The exposure window is the time it takes to
-touch every machine; a successor key committed in advance would shorten it (open).
+the old one, and its high-water mark restarts under the new key — the mark is keyed
+by the operator key, so the new key's first version applies from zero while the old
+key's mark stays where it was, for the record. If the old key was **compromised**
+rather than lost, its holder can sign charters that every untouched machine accepts
+until it is re-rooted. The exposure window is the time it takes to touch every
+machine.
+
+**No successor key is committed in advance** (settled). A charter lists no
+next-generation operator key, so a compromised operator key cannot be replaced
+without touching every machine: re-rooting stays one touch per machine, and the
+exposure window above is the price. The alternative — a successor already inside
+the signed charter — would shorten that window and is refused for the beta, because
+a key that can take the mesh over needs to be at least as well guarded as the root
+it succeeds, and a charter is a file operators copy around.
 
 **`sameOperator`.** The charter answers the parked question: one operator is one
 charter signer. Nodes on one charter need no pairing between them, so a converge has
@@ -650,6 +781,41 @@ rather than merely rejected: a mismatch between the two is refused **`charter-ta
 distinct from `unknown-operator` (a signature that does not verify under the key the
 node trusts) and from `stale-charter` (a version not above the high-water mark).
 
+**The digest is compared first**, before the signature and before the parse, because
+that comparison needs neither — and because the alternative misreports the most
+ordinary accident there is. A file with a trailing newline still parses, and its
+signature still has the *shape* of a signature; only the digest says what actually
+happened, which is `charter-tampered` and not "this node does not trust the key".
+
+**`mesh` and `version` have one source, and that is the file.** The verifier builds
+the signed input from the values it parsed — there is no second place they could come
+from, and the digest is what binds the artifact to them, so the parse cannot be
+tricked into naming a mesh or a version other than the ones that were signed. What
+the accept steps make real is therefore the mesh being one this node has a trusted
+operator key for (`unknown-operator`) and the version being above that
+`(mesh, operator key)`'s mark (`stale-charter`).
+
+**A `charter` letter's `msgid` is the digest of that same signature input**,
+`sha256(frame("aoide/charter", [mesh, version, sha256(file bytes)]))`. One charter
+version therefore has one `msgid` across every seal of it, whatever route a copy
+takes, and a re-sign names a new version and so a new `msgid`.
+
+**A worked `charter_sig` input.** `mesh = "home"`, `version = 12`, and the digest
+of an EMPTY file — `sha256("") = e3b0c442…7852b855`, which makes the example
+checkable with `sha256sum` and the frame rule alone:
+
+```text
+616f6964652f636861727465720000000004686f6d6500000008000000000000
+000c00000020e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495
+991b7852b855
+```
+
+70 bytes: the label `aoide/charter` (13 bytes) and its NUL, then three
+length-prefixed fields — `home` (4), the version as a `u64` big-endian (8), and the
+digest (32). The operator's signature is over exactly these bytes, and the
+`.sig` file is the 64 signature bytes and that same 32-byte digest in a
+`frame("aoide/charter-sig", …)`.
+
 **Suite identifiers.** Lowercase ASCII matching `[a-z0-9-]+`, no `/` and no `aoide/`
 prefix, so a suite name can never be read as a frame label. The registered set for `v
 = 1` is exactly one identifier:
@@ -777,7 +943,8 @@ security, and protection once an endpoint is compromised.
 | Anyone who finds a tunnel hostname | Can send arbitrary HTTPS | Access refuses the request at the edge. Behind Access, an unsigned or unknown-key request is refused before any handler runs. |
 | Unpermitted relay | Holds containers only | Cannot read, mutate, re-seal, re-sign, or forge a receipt. |
 | Authorized relay or hub (transit, `message`) | Verifies, spools, appends a chained hop signature, drops or delays | Routing authority is not edit authority. It cannot open, alter, forge, or cut and re-append the chain. |
-| Relay carrying a charter | Drops, delays or replays a charter letter | Cannot alter or forge a charter (operator signature). An older version is refused (`stale-charter`). A dropped revocation is delayed, never cancelled. |
+| Relay carrying a charter | Drops, delays or replays a charter letter | Cannot alter or forge a charter (operator signature). An older version is refused (`stale-charter`). A dropped revocation is delayed, never cancelled — and, because a charter carries no validity window (settled), that delay is unbounded: nothing in the charter expires on its own to force the question. |
+| Anyone who holds a charter file | Copies it anywhere | It holds public keys, addresses and grants and no secret at all. Altering one byte makes it `charter-tampered`; the file and its `.sig` are a pair or they are nothing. |
 | Node trusted in one mesh | Has a valid identity and its grants there | Gains nothing in another mesh. Reads only what is addressed to it. A mismatch between outer and inner claims, or between the outer and inner `ctx`, refuses. |
 | Node removed from a charter | Its keys, and everything it already received | Refused at every door holding the new version. Opens no post of an epoch after its boards rotate. Keeps what it already filed. |
 | Stolen operator key | Signs charters and board takeovers for that mesh | Every machine trusting that key accepts its charters until re-rooted. It can seize the mesh's boards: take them over, and re-key a member node's charter line to keys it holds so every later wrap reaches it. It opens no epoch wrapped before the re-key. Every takeover and every re-keyed line is marked on each member node and audited. The operator key is the mesh's root and is guarded as one. |
@@ -860,19 +1027,18 @@ Charters and config hold only public keys, so no secret-management layer (agenix
 is involved. The operator key (Charters) and board epoch identities (MAIL.md §Boards)
 are the only other private keys, with the same storage rules.
 
-**Two fingerprints, and only one of them is built.** The one this design's code
-uses is `age_fingerprint`: lowercase hex `sha256` over the age recipient's
+**Two fingerprints, and both are built.** The one the container's own code uses is
+`age_fingerprint`: lowercase hex `sha256` over the age recipient's
 **canonical bech32 string** — `Recipient`'s own `Display` output, lowercase and
 re-encoded from the key, so it is injective in the raw key. (The raw 32 bytes are
 not reachable through the `age` crate's API; see the Encodings table for why the
 string is the preimage.) That is the value a binding carries and the value storage
 keys by.
 
-The other is **P-CHARTER's, and not yet built**: a durable `SHA256:<hex>` node
-fingerprint over the raw 32-byte **identity** public key, printed on the node line
-so two operators have something to compare out of band. Nothing in this tree
-computes or prints it today — the node line in "Charters" describes the shape that
-seam will produce, not one that exists. When it lands it is a second, distinct
+The other is the durable **`SHA256:<hex>`** node fingerprint: lowercase hex `sha256`
+over the raw 32-byte **identity** public key. It is printed on the node line so two
+operators have something to compare out of band, `aoide identity` carries it as
+`nodeFingerprint` and prints it with the node line, and it is a second, distinct
 value from `age_fingerprint`, over a different key.
 
 The short colon-separated label `aoide identity` prints today
@@ -894,10 +1060,24 @@ convenience: it is never compared across machines and never a trust input.
   tunnel makes any peer look local, and the loopback door is itself reached through a
   hop. The guard, for pairing and for the LAN join: the dialed peer address (direct,
   or the SSH hop's host) lies in a subnet the host declares local, and the ceremony
-  never traverses a relay.
+  never traverses a relay. Implemented as a property of the ADDRESS alone
+  (`charter::is_local_network`): private or link-local, never loopback — a relayed
+  forward and an ssh tunnel both arrive as loopback, so admitting it would admit every
+  relay — with an IPv4-mapped IPv6 peer unwrapped to the v4 it maps to.
 - **In a charter mesh the charter is the only trust.** A paired record in that mesh for
   a key the charter lists is inert and reported. A key the charter does not list is not
-  trusted in that mesh, whatever a pairing says.
+  trusted in that mesh, whatever a pairing says — and a mesh a charter was accepted for
+  is charter-shaped even while its operator key is UNDECIDABLE, where it refuses every
+  request rather than falling back to the pre-charter paired records.
+- **A charter letter is its own authority.** It carries the operator's signature over
+  the charter, so `aoide/mailDeposit` admits a `charter`-purpose container on a
+  VERIFIED SIGNATURE and no `message` grant: gating it on the grant would make this
+  section's own bootstrap unreachable — a machine accepting its first charter by letter
+  from an origin it did not yet know — while the container is still only honoured if
+  the operator signed what it carries. For every LATER version the signer is a node the
+  charter in force names, and `verify_signed_request` resolves it from the charter's own
+  node list (identity only; the grant is still the line's), so a box with no
+  `nodes.json` record for the operator still receives revocation.
 - **Rendering the operator line.** Nix hosts render `[mesh.<name>] operator` from a
   future Aoide module option. Non-Nix hosts (native Windows, WSL) write the same line
   by hand or run `aoide mesh join`.
@@ -1229,8 +1409,10 @@ scheduler (`aoide mail poll`).
   - Local `node allow … off --mesh` narrows a charter grant; nothing local widens one.
   - A paired record in a charter mesh for a listed key is inert and reported.
 - **Migration:** every existing paired record lands in the home mesh with its grant
-  byte-identical; trusted peers keep working; a request naming no mesh matches only
-  a migrated home-mesh record.
+  byte-identical; trusted peers keep working **while home is a pair mesh**; a
+  request naming no mesh is judged by the home mesh's rules (its charter first
+  where one governs — a key the charter does not list is refused there, whatever
+  the migrated record says).
 - **Re-root:** after the new key is trusted, charters under the old key are refused and
   the high-water mark restarts; a node that has not been re-rooted keeps working on
   its last charter.
@@ -1283,10 +1465,6 @@ its `seq` or new owner.
 - **Forward secrecy:** age does not provide it, for letters or board epochs. Adopt MLS
   or a ratchet before P-SEAL if the User requires FS/PCS.
 - **Padding policy** for ciphertext length.
-- **Charter expiry:** whether a charter carries a validity window, so that a relay
-  dropping a revocation delays it by a bounded time rather than indefinitely.
-- **A successor key committed in the charter**, so a compromised operator key can be
-  replaced without touching every machine.
 - **Cross-mesh origin verification through a gate:** a destination in mesh B must hold
   the origin's key from mesh A, and mesh B's trust does not carry it. Where that key
   comes from is open; a gate never supplies it.

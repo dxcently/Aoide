@@ -122,7 +122,9 @@ Enter applies it and Escape closes the menu.
 
 Historical actions never focus a stale process. The menu retains the exact
 selected target through dispatch. Rename and Kill are not context actions. A
-node menu carries the `allows` set it opened with, so a toggle states the
+node menu carries the grant set it opened with (per mesh, P-CHARTER: the SOLE
+granted mesh's capabilities, or nothing when the node is trusted in several
+and a bare `node allow` would refuse), so a toggle states the
 change it showed, and a node this box holds no record of is never offered a
 grant or a removal the registry would refuse.
 
@@ -167,7 +169,7 @@ blocking `--wait`, and never a code on a new request.
 
 Mesh adds the registry's own trust rows (`node status --json`) and every
 declared mesh's divergence (`mesh --json`) beneath the roster probe: the node's
-verified flag, its `allows` set, its cache state, and drift reported in the
+verified flag, its per-mesh grant set, its cache state, and drift reported in the
 compare's own words. Drift is reported, never repaired here — `e` or a
 right-click offers the pairing ceremony for a divergent name, the three
 capability toggles for a node with a record, and removal behind an exact-name

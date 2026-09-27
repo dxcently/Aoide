@@ -362,6 +362,26 @@ never the inbound/serve half (that's `aoide-server`).
   a self-contained file, own handler, own tests, appended last into
   `commands::all()`).
 
+- `charter` (P-CHARTER) — `aoide mesh charter init|sign|accept|reroot`, the
+  operator's four commands: one operator's machines, rooted once and signed
+  by that operator's own key. Own module, own `register`, appended after
+  `mesh` into `commands::all()`, and — like every handler here — a thin edge:
+  the mechanism (`aoide_storage::charter`) parses, validates, signs, accepts,
+  keeps the high-water mark and spools, and these handlers render what it
+  returns.
+
+  What they do beyond rendering is the best-effort drain of what `sign`/
+  `reroot` spooled (`mail_wire::drain_node`, one node at a time, a failure
+  reported rather than fatal — the write already happened and `mail outbox`
+  is where a spooled entry's story lives) and one audit line per re-keyed
+  node, because `init`/`sign` on the operator's machine are the only place a
+  re-key is seen by a person at all.
+
+  **`aoide mesh`'s own report is unchanged by this**: `crate::mesh` still
+  reads the declaration against the registry, and a charter mesh's config
+  section (its `operator` line) is what the door and the charter reader
+  consume — never `drift`.
+
   **The read.** `aoide mesh` compares the declaration against the live node
   registry (`aoide_storage::node_store::load_nodes`) and reports where they
   diverge. The compare itself, `drift`, is pure — no I/O, no clock, no env
@@ -450,6 +470,15 @@ never the inbound/serve half (that's `aoide-server`).
   got a response does not poll; and because nothing attemptable means no
   dial at all, a `--hold`-only spool does not contact the node (`mail send
   --hold`'s own post-spool report therefore still reads `queued`).
+  **P-CHARTER adds the `poll` address to the same three places, from ONE
+  predicate** (`node_store::Node::never_dialled`, the record's address
+  being `poll`): `spool_entry` holds such an entry whatever its caller asked
+  for — the ack path's own literal `false` is covered by that line rather than
+  by an argument it must remember — `drain_node` returns before the link lock
+  and before the binding exchange (a dial held entries are filtered too late
+  for), and `pollable_nodes()` leaves such a node out, so a bare
+  `aoide mail poll` never dials a node that has no inbound transport to answer
+  on.
   `post_signed(node, method, params)` is the dial/bearer/sign/POST/parse
   half both methods share — `attempt_deposit` and `poll_node` are two
   readings of its `SignedCall`, never two copies of the wire machinery.
@@ -594,7 +623,8 @@ never the inbound/serve half (that's `aoide-server`).
   mailboxes), `state/mail-export/` by default, advancing no cursor and
   writing no note whose bytes already match (see the `mail_export` module
   bullet and MAIL.md "Export") —
-  `handle_node_allow` (`node allow <name> <cap> on|off`, P-P3, `docs/
+  `handle_node_allow` (`node allow <name> <cap> on|off [--mesh <m>]`, P-P3, per
+  mesh since P-CHARTER, `docs/
   architecture/PAIRING.md` decision 5) is a thin wire around
   `aoide_storage::node_store::set_node_allow` — idempotent, refuses an
   unknown node or an unknown capability with distinct taught errors, no
@@ -794,9 +824,16 @@ never the inbound/serve half (that's `aoide-server`).
   operator relays that code to the requester, who types it into their
   own still-pending prompt to finish the ceremony.
   **`run_pair_request(cmd, url, name, self_url, self_via, dial_via,
-  record_via)` (P-P6, `dial_via`/`record_via` added P-S4, `self_via` added
-  P-PV1/task #131) is `pair_via_url`'s own body, extracted so
-  `pair_via_hostname` reaches it too — reused, never copied.**
+  record_via, mesh)` (P-P6, `dial_via`/`record_via` added P-S4, `self_via` added
+  P-PV1/task #131, `mesh` added P-CHARTER) is `pair_via_url`'s own body,
+  extracted so `pair_via_hostname` reaches it too — reused, never copied.**
+  `mesh` is the mesh the ceremony names, and it is the one thing that makes a
+  pair SYMMETRIC: it rides `aoide/pairRequest` (`node::build_pair_request_body`
+  adds the key only when the operator named one), the approver parks it on the
+  inbound entry through its own writer (`pairing::set_inbound_mesh`), and both
+  legs' commits pass it to `pairing_mesh`, which takes it ABOVE every local
+  source — so the two ends write the same mesh by construction, instead of each
+  resolving it alone and landing a grant the other end could never read.
   `pair_via_url` still owns every bit of
   `<url>`/`--name`/`--self-url`/`--self-via`/`--via` parsing and the
   `valid_node_name` check (a CLI-typed name needs it); `pair_via_hostname`
