@@ -19,9 +19,12 @@ package build from the same one-line input.
 - `aoided.nix` — the `aoided` systemd user service itself: the tmpfiles
   rules for the runtime tree and the core session variables
   (`AOIDE_TERMINAL`, `AOIDE_ROOT`, `AOIDE_FLAKE_ROOT`), portable and
-  nixpkgs-only. The unit's `wantedBy`/`after`/`partOf` anchor to
+  nixpkgs-only. The unit's `wantedBy`/`after` anchor to
   `aoide.sessionTarget` — the seam a paint-dependent value enters
-  through, since this file may not read a facet option directly.
+  through, since this file may not read a facet option directly — and that
+  anchor decides only when the unit STARTS: there is no `partOf`, so a
+  desktop that dies takes the paint down and leaves the daemon, its audit
+  log, its gate and its doors running.
   `modules/nucleus/aoided.nix` sets that option and carries the
   lyra-gated `AOIDE_SONG_TEMPLATES` variable plus every door
   (mcp/a2a/pair-watch), the discovery firewall carve, and the usage

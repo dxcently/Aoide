@@ -161,10 +161,18 @@ journalctl --user -u aoided -f
 - `Type=simple` is correct because the loop never exits on its own;
   `Restart=on-failure` covers a crash or a bind failure without masking one as
   active.
-- On a painting box, mirror the nix unit: `WantedBy=graphical-session.target`
-  with matching `After=`/`PartOf=`. Off a graphical session, `default.target`
-  is the anchor — `PartOf=graphical-session.target` there would propagate an
-  immediate stop to a manually started daemon.
+- On a painting box, mirror only the nix unit's ANCHOR:
+  `WantedBy=graphical-session.target` with matching
+  `After=graphical-session.target`, and **no `PartOf=`**. The anchor decides
+  when the daemon starts, never when it stops: a desktop crash (or a logout
+  that stops the shell) must not take the audit log, the gate and the doors
+  down with it, and a stop systemd propagates is a deliberate one that
+  `Restart=` will not undo. What surviving costs is stated plainly — the
+  process that outlives a desktop crash keeps the dead session's
+  `WAYLAND_DISPLAY`/`HYPRLAND_INSTANCE_SIGNATURE`, so anything it launches
+  into the desktop can aim at a stale socket until the next
+  `systemctl --user restart aoided`. Off a graphical session,
+  `default.target` is the anchor and none of this applies.
 - If the daemon must outlive logout: `loginctl enable-linger "$USER"`.
 - On WSL this shape is reachable as-is — systemd is PID 1 there when
   `/etc/wsl.conf` sets `[boot] systemd=true`.
