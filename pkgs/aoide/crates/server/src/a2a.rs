@@ -2986,10 +2986,13 @@ fn spawn_refusal(resolved: Option<(&aoide_storage::node_store::Node, aoide_stora
         ),
         Some((_, NodeRung::Addr)) | Some((_, NodeRung::Token)) | None => (
             -32006,
-            "spawn refused: spawn requires the caller be identified via a verified, per-request \
-             SIGNED request from a paired node (an address match, or an unverified token match, \
-             never admits spawn) — pair first via `aoide pair`, then `node allow <name> spawn on`"
-                .to_string(),
+            format!(
+                "spawn refused: spawn requires the caller be identified via a verified, per-request \
+                 SIGNED request from a paired node (an address match, or an unverified token match, \
+                 never admits spawn) — pair first via `aoide pair`, then `node allow <name> spawn on \
+                 --mesh {mesh}` (the grant is read in the mesh the request names; on a node trusted in \
+                 several, `--mesh` is required)"
+            ),
         ),
     }
 }
@@ -7948,16 +7951,21 @@ mod tests {
         kp
     }
 
-    /// [`setup_signed_node`]'s sibling with a controllable `allows` set —
-    /// P-P5b's own admission/revocation round-trip tests need a genuinely
-    /// paired+verified node whose `allows` they choose, not the empty
-    /// default `setup_signed_node` stamps.
+    /// [`setup_signed_node`]'s sibling with a controllable grant set — the
+    /// admission/revocation round-trip tests need a genuinely paired+verified
+    /// node whose grants they choose, in the mesh they choose (P-CHARTER).
     fn setup_signed_node_with_allows(node_name: &str, allows: &[&str]) -> aoide_storage::identity::Keypair {
+        setup_signed_node_with_grants(node_name, "home", allows)
+    }
+
+    /// [`setup_signed_node_with_allows`] with the mesh spelled out — the
+    /// fixture a named-mesh test needs (review N5).
+    fn setup_signed_node_with_grants(node_name: &str, mesh: &str, allows: &[&str]) -> aoide_storage::identity::Keypair {
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
         let mut node = fixture_node(node_name, "http://node/", false);
         node.verified = true;
         node.pubkey = Some(kp.info().pubkey_hex);
-        node.grants = aoide_storage::node_store::grants_in("home", allows);
+        node.grants = aoide_storage::node_store::grants_in(mesh, allows);
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
         kp
     }
@@ -10811,6 +10819,31 @@ mod tests {
                 serde_json::from_str(&std::fs::read_to_string(&pending_path).unwrap()).unwrap();
             assert!(pending["pending"].as_array().map(Vec::is_empty).unwrap_or(true), "a delivered send never queues");
         }
+
+        // Review N5: the SAME autogate-marked node, naming a mesh it holds
+        // nothing in, does NOT get the without-pending delivery — it falls to
+        // the pending queue like any stranger, because per-mesh trust is
+        // decided in the mesh the request names.
+        let away_params = serde_json::json!({
+            "message": { "parts": [{ "kind": "text", "text": "named away" }], "contextId": id }
+        });
+        let away = message_send(
+            &away_params,
+            &audit_log,
+            "",
+            "",
+            ConnOrigin::Loopback,
+            "",
+            None,
+            Some(SignedCaller { name: "trusted-tunneled-node", key: &"ab".repeat(32), mesh: Some("away") }),
+        );
+        assert!(away.is_ok(), "a held send is still a well-formed answer: {away:?}");
+        let pending: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&pending_path).unwrap_or_else(|_| "{\"pending\":[]}".to_string())).unwrap();
+        assert!(
+            !pending["pending"].as_array().map(Vec::is_empty).unwrap_or(true),
+            "an autogate-marked caller holding nothing in the mesh it NAMES is held for approval: {pending}"
+        );
 
         let _ = std::fs::remove_dir_all(&root);
         match saved_stage {

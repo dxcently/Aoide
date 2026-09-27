@@ -1367,18 +1367,23 @@ impl std::fmt::Debug for ContainerOutcome {
 /// the hop branch is a caller that spools the container onward without
 /// calling it. P-SEAL's only transport is the direct lane, so the hop
 /// branch is exercised in tests rather than in the field.
-/// Do two mesh names mean the same mesh? An EMPTY name is "unnamed", which
-/// every reader resolves to the home mesh (`config::home_mesh`) — so a
-/// pre-charter container (`origin_mesh: ""`) and a request signed for the
-/// home mesh agree, and a named container and an unnamed request do NOT
-/// (the request is the one that has to say where it acts). Pure.
+/// Do two mesh names mean the same mesh? **An EMPTY name resolves to the home
+/// mesh on EITHER side** (`config::home_mesh`): a container minted before
+/// P-CHARTER carries `origin_mesh: ""` and an un-upgraded peer sends no
+/// `X-Aoide-Mesh`, and both mean "the home mesh", which is where the design
+/// says such a request is evaluated (HTTPS-MESH-API.md "Trust per mesh":
+/// "A request that names no mesh … is evaluated in the home mesh only"). So a
+/// `""` container against a request signed for the home mesh is ACCEPTED
+/// (review N1: without this every letter minted by main was undepositable
+/// forever, and the taught fix named something the sender could not change),
+/// and a `""` container against a request signed for `away` is refused, as a
+/// named container against `away` would be. Pure.
 fn mesh_matches(container_mesh: &str, request_mesh: &str) -> bool {
-    let named = |m: &str| !m.trim().is_empty();
-    match (named(container_mesh), named(request_mesh)) {
-        (false, false) => true,
-        (true, true) => container_mesh.eq_ignore_ascii_case(request_mesh),
-        _ => false,
-    }
+    let named = |m: &str| {
+        let t = m.trim();
+        if t.is_empty() { crate::config::home_mesh() } else { t.to_ascii_lowercase() }
+    };
+    named(container_mesh) == named(request_mesh)
 }
 
 /// `aoide/mailDeposit`'s sealed half (P-SEAL): verify the container and hand
@@ -2106,7 +2111,7 @@ mod container_tests {
     /// the request mesh that agrees with it is `"home"`. Tests that need a
     /// different request mesh call `super::deposit_container` directly.
     fn deposit_container(container: &Container) -> Result<ContainerOutcome, String> {
-        super::deposit_container(container, &container.origin_mesh)
+        super::deposit_container(container, "home")
     }
 
     fn env(dir: &std::path::Path) {
@@ -2240,6 +2245,62 @@ mod container_tests {
             "mesh-mismatch",
             "and only there: a request naming another mesh is refused, so the grant cannot be borrowed across meshes"
         );
+    }
+
+    /// **Review N1 + N6.** N1: a container minted BEFORE P-CHARTER carries
+    /// `originMesh: ""`, and the design says a request naming no mesh is
+    /// evaluated in the home mesh — so such a container must deposit against a
+    /// request signed for the home mesh (main minted every letter this way;
+    /// refusing them made the whole pre-charter outbox undepositable, with a
+    /// taught fix the sender could not act on). Against a request signed for
+    /// another mesh it is still refused. N6: `container.mesh` is NOT an
+    /// admission input, so a relay flipping it changes nothing.
+    #[test]
+    fn a_pre_charter_container_deposits_in_the_home_mesh_and_a_flipped_hop_mesh_is_inert() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let dir = aoide_test_support::unique_tmp("pre-charter-deposit");
+        std::fs::create_dir_all(&dir).unwrap();
+        env(&dir);
+
+        let me = crate::display::local_node_name();
+        let (kp, _) = identity::load_or_mint().unwrap();
+        let mut nodes = node_store::load_nodes();
+        node_store::upsert_paired_node(
+            &mut nodes,
+            &me,
+            "ssh://self",
+            &kp.info().pubkey_hex,
+            &now_iso_utc(),
+            &["message".to_string()],
+            "home",
+        );
+        node_store::save_nodes(&nodes).unwrap();
+        let binding = publish_binding().unwrap();
+
+        // Exactly what 724fe0f minted: an envelope and a container whose
+        // `originMesh` is `""` (no mesh was named anywhere yet).
+        let envelope = mail::mint_outbound_letter_in_mesh("alice", &me, "bob", "pre-charter letter", "").unwrap();
+        assert_eq!(envelope.header.origin_mesh, "");
+        let container = seal_envelope(&envelope, &binding, "", "", &me, &now_iso_utc()).unwrap();
+        assert_eq!(container.origin_mesh, "");
+
+        let opened = |c: &Container, mesh: &str| matches!(
+            super::deposit_container(c, mesh).unwrap(),
+            ContainerOutcome::Opened { .. } | ContainerOutcome::Duplicate { .. }
+        );
+        assert!(opened(&container, "home"), "a pre-charter container must deposit against a home-mesh request");
+        assert_eq!(
+            reason(&super::deposit_container(&container, "away").unwrap()),
+            "mesh-mismatch",
+            "…and only there: a request signed for another mesh refuses it"
+        );
+
+        // N6: flip the UNSIGNED hop field — the deposit is unaffected, because
+        // `container.mesh` is not an admission input.
+        let mut flipped = container.clone();
+        flipped.mesh = "somewhere-else".to_string();
+        assert!(opened(&flipped, "home"), "a relay flipping `container.mesh` cannot turn an accepted deposit into a refusal");
     }
 
     #[test]
@@ -2661,7 +2722,7 @@ mod review_fix_tests {
 
     /// Same shim: the fixtures here ride the home mesh too.
     fn deposit_container(container: &Container) -> Result<ContainerOutcome, String> {
-        super::deposit_container(container, &container.origin_mesh)
+        super::deposit_container(container, "home")
     }
 
     fn env(dir: &std::path::Path) {

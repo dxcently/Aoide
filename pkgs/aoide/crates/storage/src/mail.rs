@@ -862,12 +862,9 @@ fn mint_kind(
 /// sending command, which mints through
 /// [`mint_outbound_letter_in_mesh`] outright.
 pub fn mesh_for_node(node: &str) -> String {
-    let known = crate::node_store::load_nodes()
-        .into_iter()
-        .find(|p| p.name == node)
-        .map(|p| crate::node_store::granted_meshes(&p))
-        .unwrap_or_default();
-    crate::node_store::resolve_mesh(None, &known, &crate::config::home_mesh()).unwrap_or_default()
+    let record = crate::node_store::load_nodes().into_iter().find(|p| p.name == node);
+    let grants = record.as_ref().map(|p| p.grants.clone()).unwrap_or_default();
+    crate::node_store::resolve_mesh(None, &grants, &crate::config::home_mesh(), "message").unwrap_or_default()
 }
 
 /// Mint a letter for the mesh this box derives for its destination

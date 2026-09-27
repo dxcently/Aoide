@@ -831,6 +831,7 @@ fn handle_config_set(inv: &Invocation) -> Outcome {
                 crate::config::SetRefusal::Unloadable { .. } => "config-unloadable",
                 crate::config::SetRefusal::Io { .. } => "config-io-failed",
                 crate::config::SetRefusal::StrandsGrants { .. } => "config-strands-grants",
+                crate::config::SetRefusal::WidensUnnamed { .. } => "config-widens-unnamed",
             };
             Outcome::error(cmd, refusal.to_string())
                 .with_data(json!({ "reason": reason, "key": key }))

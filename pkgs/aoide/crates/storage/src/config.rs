@@ -750,6 +750,12 @@ pub enum SetRefusal {
     /// new mesh where those records hold nothing (finding 7 — the fleet goes
     /// dark with nothing to report it).
     StrandsGrants { current: String, wanted: String, records: Vec<String> },
+    /// A `pairing.homeMesh` change that would WIDEN the unnamed trust
+    /// surface: the mesh being moved TO already holds grants, and every
+    /// pre-charter request (one that names no mesh) is evaluated in the home
+    /// mesh — so those grants become reachable by requests that never named a
+    /// mesh at all (review N8).
+    WidensUnnamed { current: String, wanted: String, records: Vec<String> },
 }
 
 impl std::fmt::Display for SetRefusal {
@@ -786,6 +792,16 @@ impl std::fmt::Display for SetRefusal {
                  you want it to live first (`aoide node allow <node> <cap> on --mesh <mesh>`), or move them \
                  (`aoide node allow <node> <cap> on --mesh {wanted}` then `... off --mesh {current}`), then set \
                  this key",
+                records.len(),
+                records.join(", ")
+            ),
+            SetRefusal::WidensUnnamed { current, wanted, records } => write!(
+                f,
+                "refusing to move the home mesh from `{current}` to `{wanted}`: `{wanted}` already holds \
+                 grants for {} node record(s) ({}), and a request that names NO mesh is evaluated in the \
+                 home mesh — so every un-upgraded peer would newly reach them. Move those grants out of \
+                 `{wanted}` first (`aoide node allow <node> <cap> off --mesh {wanted}`), or pick a home \
+                 mesh that holds none",
                 records.len(),
                 records.join(", ")
             ),
@@ -853,13 +869,29 @@ pub fn set(key: &str, raw: &str) -> Result<SetOutcome, SetRefusal> {
         let wanted = value.first().cloned().unwrap_or_default();
         let current = before.pairing.home_mesh.clone();
         if wanted != current {
-            let stranded: Vec<String> = crate::node_store::load_nodes()
-                .into_iter()
+            let nodes = crate::node_store::load_nodes();
+            // Review N8: the guard runs BOTH ways. Leaving the current home
+            // mesh strands the grants parked in it (unnamed requests move to
+            // the new name and read nothing there)…
+            let stranded: Vec<String> = nodes
+                .iter()
                 .filter(|n| n.verified && !n.grant(&current).is_empty())
-                .map(|n| n.name)
+                .map(|n| n.name.clone())
                 .collect();
             if !stranded.is_empty() {
                 return Err(SetRefusal::StrandsGrants { current, wanted, records: stranded });
+            }
+            // …and ARRIVING at a mesh that already holds grants WIDENS what an
+            // unnamed request reaches: every pre-charter peer is evaluated in
+            // the home mesh, so those grants become reachable by requests that
+            // never named a mesh. Said out loud rather than allowed silently.
+            let widening: Vec<String> = nodes
+                .iter()
+                .filter(|n| n.verified && !n.grant(&wanted).is_empty())
+                .map(|n| n.name.clone())
+                .collect();
+            if !widening.is_empty() {
+                return Err(SetRefusal::WidensUnnamed { current, wanted, records: widening });
             }
         }
     }
@@ -1245,12 +1277,24 @@ mod tests {
             assert!(msg.contains("--mesh"), "and both fixes: {msg}");
             assert_eq!(load().unwrap().config.pairing.home_mesh, "home", "nothing was written");
 
-            // Re-granted where it is wanted, the move is allowed.
+            // Re-granted where it is wanted — and now the OTHER direction
+            // refuses: `fleet` holds the grant, and an unnamed request is
+            // evaluated in the home mesh, so this move would widen what every
+            // un-upgraded peer reaches (review N8).
             let mut nodes = crate::node_store::load_nodes();
             crate::node_store::set_node_allow(&mut nodes, me, "read", true, "fleet").unwrap();
             crate::node_store::set_node_allow(&mut nodes, me, "read", false, "home").unwrap();
             crate::node_store::save_nodes(&nodes).unwrap();
-            assert!(set("pairing.homeMesh", "fleet").is_ok(), "no grant is stranded any more");
+            let err = set("pairing.homeMesh", "fleet").unwrap_err();
+            let msg = err.to_string();
+            assert!(matches!(err, SetRefusal::WidensUnnamed { .. }), "{msg}");
+            assert!(msg.contains(me), "{msg}");
+
+            // With nothing granted anywhere, the move is allowed.
+            let mut nodes = crate::node_store::load_nodes();
+            crate::node_store::set_node_allow(&mut nodes, me, "read", false, "fleet").unwrap();
+            crate::node_store::save_nodes(&nodes).unwrap();
+            assert!(set("pairing.homeMesh", "fleet").is_ok(), "no grant is stranded and none is widened");
         });
     }
 

@@ -719,26 +719,29 @@ fn parse_via_flag(inv: &Invocation) -> Result<Option<aoide_storage::tunnel::Via>
 /// spawn admission would otherwise fail opaquely on the far end instead of
 /// here, where the real cause is known.
 /// Resolve the mesh one outbound signed request acts in — the shared rule
-/// [`sign_headers_for_node`] applies, named separately so every caller's
-/// error message is the same taught sentence
-/// ([`aoide_storage::node_store::resolve_mesh`]'s).
-pub fn request_mesh(node: &aoide_storage::node_store::Node, named: Option<&str>) -> Result<String, String> {
-    aoide_storage::node_store::resolve_mesh(
-        named,
-        &aoide_storage::node_store::granted_meshes(node),
-        &aoide_storage::config::home_mesh(),
-    )
+/// [`sign_headers_for_node`] applies (`node_store::resolve_mesh` over the
+/// record's grants and THE CAPABILITY THE CALL NEEDS: `message` for the mail
+/// methods, `read` for a frame/history/roster read, `spawn` for a spawn), so
+/// every caller's error message is the same taught sentence.
+pub fn request_mesh(node: &aoide_storage::node_store::Node, named: Option<&str>, cap: &str) -> Result<String, String> {
+    aoide_storage::node_store::resolve_mesh(named, &node.grants, &aoide_storage::config::home_mesh(), cap)
 }
 
 pub(crate) fn sign_headers_for_node(
     node: &aoide_storage::node_store::Node,
     body: &str,
     named_mesh: Option<&str>,
+    cap: &str,
 ) -> Result<Vec<(String, String)>, String> {
     if !node.verified {
         return Ok(Vec::new());
     }
-    let mesh = request_mesh(node, named_mesh)?;
+    // The mesh is resolved with THE CAPABILITY THE CALL NEEDS (review
+    // N2/N3/N4/N12): a mail call asks about `message`, a frame/history/roster
+    // read about `read`, a spawn about `spawn` — so a record trusted in two
+    // meshes stays reachable as long as the capability lives in one of them,
+    // and only a genuine tie refuses.
+    let mesh = request_mesh(node, named_mesh, cap)?;
     let (keypair, _) = aoide_storage::identity::load_or_mint()
         .map_err(|e| format!("loading this instance's identity to sign a request to node `{}`: {e}", node.name))?;
     let path = aoide_storage::node_store::url_path(&node.url);
@@ -1051,7 +1054,7 @@ fn handle_node_allow(inv: &Invocation) -> Outcome {
         .find(|p| p.name == name)
         .map(aoide_storage::node_store::granted_meshes)
         .unwrap_or_default();
-    let mesh = match aoide_storage::node_store::resolve_mesh(inv.flags.get("mesh").map(String::as_str), &known, &aoide_storage::config::home_mesh()) {
+    let mesh = match aoide_storage::node_store::resolve_mesh_any(inv.flags.get("mesh").map(String::as_str), &known, &aoide_storage::config::home_mesh()) {
         Ok(m) => m,
         Err(e) => return Outcome::error(cmd, format!("--mesh: {e}")).with_data(json!({ "reason": "mesh-ambiguous", "node": name })),
     };
@@ -1158,7 +1161,7 @@ fn pull_one_node(node: &aoide_storage::node_store::Node, named: Option<&str>) ->
 
     let attempt: Result<aoide_storage::node_store::NodeCacheEntry, String> = (|| {
         let bearer = resolve_node_bearer(node)?;
-        let extra_headers = sign_headers_for_node(node, &body_str, named)?;
+        let extra_headers = sign_headers_for_node(node, &body_str, named, "read")?;
         let (code, resp_body) = post_json_to_node(node, &body_str, bearer.as_deref(), &extra_headers, 15)?;
         if code != 200 {
             return Err(format!("HTTP {code}"));
@@ -1213,7 +1216,7 @@ pub fn pull_node_live(node: &aoide_storage::node_store::Node, timeout_secs: u64,
     let body = crate::node::build_graph_summary_request();
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let bearer = resolve_node_bearer(node)?;
-    let extra_headers = sign_headers_for_node(node, &body_str, named)?;
+    let extra_headers = sign_headers_for_node(node, &body_str, named, "read")?;
     let (code, resp_body) = post_json_to_node(node, &body_str, bearer.as_deref(), &extra_headers, timeout_secs)?;
     if code != 200 {
         return Err(format!("HTTP {code}"));
@@ -1260,7 +1263,7 @@ pub fn send_message_to_node(
     let body = crate::wire::build_message_send_body(text, &message_id, Some(context_id), from_session, None);
     let body_str = serde_json::to_string(&body).unwrap_or_default();
     let bearer = resolve_node_bearer(node)?;
-    let extra_headers = sign_headers_for_node(node, &body_str, named_mesh)?;
+    let extra_headers = sign_headers_for_node(node, &body_str, named_mesh, "message")?;
     let (code, resp) = post_json_to_node(node, &body_str, bearer.as_deref(), &extra_headers, 15)?;
     if code != 200 {
         return Err(format!("HTTP {code}"));
@@ -1319,7 +1322,7 @@ pub fn task_get_on_node(
     let body_str = serde_json::to_string(&wire).unwrap_or_default();
     let plain = |message: String| crate::node::FrameReadError { code: None, message };
     let bearer = resolve_node_bearer(node).map_err(plain)?;
-    let extra_headers = sign_headers_for_node(node, &body_str, named_mesh).map_err(plain)?;
+    let extra_headers = sign_headers_for_node(node, &body_str, named_mesh, "read").map_err(plain)?;
     let (code, resp) = post_json_to_node_with_tunnel_key(
         node,
         &body_str,
@@ -1374,7 +1377,7 @@ pub fn task_history_on_node(
     let body_str = serde_json::to_string(&wire).unwrap_or_default();
     let plain = |message: String| crate::node::FrameReadError { code: None, message };
     let bearer = resolve_node_bearer(node).map_err(plain)?;
-    let extra_headers = sign_headers_for_node(node, &body_str, named_mesh).map_err(plain)?;
+    let extra_headers = sign_headers_for_node(node, &body_str, named_mesh, "read").map_err(plain)?;
     let (code, resp) = post_json_to_node_with_tunnel_key(
         node,
         &body_str,
@@ -1510,7 +1513,7 @@ pub fn spawn_on_node_via(
     let bearer =
         resolve_node_bearer(node).map_err(|e| SpawnNodeError::new("bearer-resolve-failed", e))?;
     let extra_headers =
-        sign_headers_for_node(node, &body_str, named_mesh).map_err(|e| SpawnNodeError::new("signing-failed", e))?;
+        sign_headers_for_node(node, &body_str, named_mesh, "spawn").map_err(|e| SpawnNodeError::new("signing-failed", e))?;
     let (code, resp) = post_json_to_node_with_via_override(node, &body_str, bearer.as_deref(), &extra_headers, 15, via_override)
         .map_err(|e| SpawnNodeError::new("send-failed", e))?;
     if code != 200 {
@@ -2104,7 +2107,7 @@ fn pairing_mesh(name: &str, named: Option<&str>) -> Result<String, String> {
     if let Ok(loaded) = aoide_storage::config::load() {
         known.extend(loaded.config.mesh.keys().cloned());
     }
-    aoide_storage::node_store::resolve_mesh(named, &known, &aoide_storage::config::home_mesh())
+    aoide_storage::node_store::resolve_mesh_any(named, &known, &aoide_storage::config::home_mesh())
 }
 
 /// The capability set a pairing commit stamps on a FIRST verification (task
@@ -4907,7 +4910,7 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
     // letter minted unnamed could never be deposited to a peer trusted only
     // outside the home mesh.
     let record = aoide_storage::node_store::load_nodes().into_iter().find(|p| p.name == node);
-    let mesh = match record.as_ref().map(|p| request_mesh(p, inv.flags.get("mesh").map(String::as_str))) {
+    let mesh = match record.as_ref().map(|p| request_mesh(p, inv.flags.get("mesh").map(String::as_str), "message")) {
         Some(Ok(mesh)) => mesh,
         Some(Err(e)) => return Outcome::error(cmd, format!("--mesh: {e}")).with_data(json!({ "reason": "mesh-ambiguous", "node": node })),
         None => return Outcome::error(cmd, format!("no node named `{node}`")).with_data(json!({ "reason": "unknown-node", "name": node })),
@@ -5386,11 +5389,22 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
 
     let mut rows: Vec<Value> = Vec::new();
     let mut filed = 0usize;
+    let mut refused_total = 0usize;
     for node in &targets {
         match crate::mail_wire::poll_node(node, inv.flags.get("mesh").map(String::as_str)) {
-            Ok(n) => {
-                filed += n;
-                rows.push(json!({ "node": node, "status": "polled", "filed": n }));
+            Ok(outcome) => {
+                filed += outcome.filed;
+                refused_total += outcome.refused.len();
+                // Review N13: a refused container is REPORTED, not only
+                // audited — the row names its msgid and the taught word, so a
+                // mesh-mismatched hand-over is visible where the operator is
+                // looking.
+                rows.push(json!({
+                    "node": node,
+                    "status": "polled",
+                    "filed": outcome.filed,
+                    "refused": outcome.refused,
+                }));
             }
             Err(e) => rows.push(json!({ "node": node, "status": "unreachable", "filed": 0, "reason": e })),
         }
@@ -5400,8 +5414,9 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
         "no paired node holds `message` — nothing to poll".to_string()
     } else {
         format!(
-            "polled {} node(s): {filed} envelope(s) filed{}",
+            "polled {} node(s): {filed} envelope(s) filed{}{}",
             targets.len(),
+            if refused_total == 0 { String::new() } else { format!(", {refused_total} container(s) refused") },
             if unreachable == 0 { String::new() } else { format!(", {unreachable} unreachable") }
         )
     };
@@ -5842,7 +5857,7 @@ mod tests {
         with_node_state("sign-unverified", || {
             let node = fixture_node(None);
             assert!(!node.verified);
-            let headers = sign_headers_for_node(&node, "{}", None).unwrap();
+            let headers = sign_headers_for_node(&node, "{}", None, "read").unwrap();
             assert!(headers.is_empty(), "an unpaired/unverified node gets no signature headers: {headers:?}");
         });
     }
@@ -5854,7 +5869,7 @@ mod tests {
             let mut node = fixture_node(None);
             node.verified = true;
             let body = r#"{"jsonrpc":"2.0","method":"message/send"}"#;
-            let headers = sign_headers_for_node(&node, body, None).unwrap();
+            let headers = sign_headers_for_node(&node, body, None, "read").unwrap();
 
             let get = |name: &str| {
                 headers
@@ -5931,7 +5946,7 @@ mod tests {
             let mut node = fixture_node(None);
             node.name = "this-sides-nickname-for-the-approver".to_string();
             node.verified = true;
-            let headers = sign_headers_for_node(&node, "{}", None).unwrap();
+            let headers = sign_headers_for_node(&node, "{}", None, "read").unwrap();
             let sent = headers
                 .iter()
                 .find(|(k, _)| k == aoide_storage::wire_auth::HEADER_NODE)
@@ -6088,7 +6103,7 @@ mod tests {
             let body = crate::wire::build_message_send_body("do the thing", &gen_message_id(), None, None, None);
             assert!(body["params"]["message"].get("contextId").is_none(), "spawn-shaped body carries no contextId");
             let body_str = serde_json::to_string(&body).unwrap();
-            let headers = sign_headers_for_node(&node, &body_str, None).unwrap();
+            let headers = sign_headers_for_node(&node, &body_str, None, "read").unwrap();
             assert_eq!(headers.len(), 5, "all five X-Aoide-* headers present: {headers:?}");
             for name in [
                 aoide_storage::wire_auth::HEADER_NODE,
@@ -6780,12 +6795,12 @@ mod tests {
             // And directly: sign_headers_for_node itself only ever reads
             // node.url (never node.via, never a dial url) — an unverified
             // node's empty-headers shortcut is untouched by via either way.
-            assert_eq!(sign_headers_for_node(&node, "{}", None).unwrap(), Vec::<(String, String)>::new(), "unverified nodes are unaffected, via or not");
+            assert_eq!(sign_headers_for_node(&node, "{}", None, "read").unwrap(), Vec::<(String, String)>::new(), "unverified nodes are unaffected, via or not");
             node.verified = true;
-            let headers_with_via = sign_headers_for_node(&node, "{}", None).unwrap();
+            let headers_with_via = sign_headers_for_node(&node, "{}", None, "read").unwrap();
             let mut node_no_via = node.clone();
             node_no_via.via = None;
-            let headers_without_via = sign_headers_for_node(&node_no_via, "{}", None).unwrap();
+            let headers_without_via = sign_headers_for_node(&node_no_via, "{}", None, "read").unwrap();
             // Nonce/timestamp differ call to call (fresh each time) — but
             // the NODE identity header (never derived from via) must agree.
             let node_header_idx = aoide_storage::wire_auth::HEADER_NODE;

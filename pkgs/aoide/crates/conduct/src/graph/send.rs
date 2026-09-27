@@ -1281,10 +1281,10 @@ fn deliver_remote_with(
                 Err(e) => (None, format!("\nnot claiming parent: {e}")),
             };
             // P-CHARTER: the mesh this delivery acts in. `send`'s target is a
-            // NODE (`node/query`), so the record resolves it — its sole granted
-            // mesh, else the home mesh; a record trusted in more than one mesh
-            // refuses, naming them.
-            let named_mesh = aoide_client::commands::request_mesh(node, inv.flags.get("mesh").map(String::as_str));
+            // NODE (`node/query`), so the record resolves it — the `--mesh`
+            // typed, else the sole mesh holding `message`, else the home mesh;
+            // a genuine tie refuses, naming the meshes.
+            let named_mesh = aoide_client::commands::request_mesh(node, inv.flags.get("mesh").map(String::as_str), "message");
             let named_mesh = match named_mesh {
                 Ok(m) => Some(m),
                 Err(e) => return Outcome::error(cmd, format!("--mesh: {e}")).with_data(serde_json::json!({ "reason": "mesh-ambiguous" })),
