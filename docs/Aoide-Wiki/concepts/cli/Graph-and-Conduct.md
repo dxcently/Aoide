@@ -599,11 +599,24 @@ aoide send (--id <id> | --to <name>) [--submit] [--yes] [--from <sender>] -- <te
   UNPREFIXED text — UNLESS the text carries no letter at all (a bare keystroke
   answer like `1`), which leaves the title alone AND skips the provenance
   prefix (a `session permit` verdict digit must land byte-exact, not `from
-  orch-1: 1`). EVERY outcome appends one audit record (`class: "audit"`,
-  `command: "send"`, status `pending|delivered|error`, the unprefixed
-  text as `untrusted_data` — never the message — and the resolved sender, if
-  any, folded into the message) to the audit log (`$AOIDE_ROOT/log` by
-  default).
+  orch-1: 1`). EVERY outcome writes TWO audit records to the single audit
+  log (`$AOIDE_ROOT/log` by default), and the pair is the house-wide shape
+  rather than a send-only one. The handler writes its own OUTCOME record
+  first, through `audit_send` (`pkgs/aoide/crates/conduct/src/graph/
+  send.rs`): the one carrying the send-specific status vocabulary
+  (`pending|delivered|error`), the UNPREFIXED text as `untrusted_data` —
+  never the message, forwarded text being data — and the resolved sender,
+  if any, folded into its message. Then the dispatcher appends its own
+  per-command record once the handler returns (`cli/src/dispatch.rs`) —
+  the line EVERY dispatched command gets, send included (`class: "audit"`,
+  `command: "send"`, status `ok|error` off the outcome envelope, the
+  outcome's own message, `untrusted_data` omitted; [[Doors-and-Nodes]]:
+  "every one-shot command appends one NDJSON audit record through the
+  single dispatcher … the doors add their own records on top"). Neither
+  line is droppable: the dispatcher's is what keeps send auditable like
+  every other command under the one-log contract, while `audit_send`'s is
+  the only one that names the gate outcome (`yes|autogate|autogate-parent|
+  autogate-sibling`) the caller actually got.
 - **Output:** pending → exit 0, `data: {id, state: "pending", delivered:
   false, submit, gate}`; delivered → exit 0, `data: {id, state: "delivered",
   delivered: true, submit, title, gate}` with `gate` ∈ `yes | autogate |
