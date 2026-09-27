@@ -236,7 +236,7 @@ named (`grants[<mesh>]` — `config.toml`'s `[pairing] defaultGrant`,
 time the record becomes verified and never again (a re-pairing re-grants
 nothing), and the door's per-request gates read that record. In a charter
 mesh the charter's own line for the key is the grant instead
-([[HTTPS-MESH-API|trust per mesh]]).
+(`docs/architecture/HTTPS-MESH-API.md`, "Trust per mesh").
 
 `node_store::resolve_node` answers "who is this caller" on a ladder of
 rungs (`CONTRACTS.md` §6 "Legacy escapes"):
