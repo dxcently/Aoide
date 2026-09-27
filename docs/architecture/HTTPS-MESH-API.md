@@ -135,6 +135,17 @@ Rules:
   real `[pairing] homeMesh`). A record the charter does not answer for is held
   PENDING — never refused — and the queue entry names it (`node:<name>`).
   `aoide mesh` reports those records on the home mesh's charter row.
+- **An unreadable config grants nothing and refuses with the reason.** The same
+  resolution decides every unnamed request, so it fails closed at the grant too:
+  `aoide-server::a2a::effective_mesh` is failable, an unnamed request's grant is
+  empty while `config.toml` will not load, and `spawn` / `mailDeposit` /
+  `mailPoll` / `binding` refuse `-32010` naming the file and the parse error —
+  never a guessed mesh's rules, which is the stale-`grants[home]` door a broken
+  file would otherwise open. A request that NAMED its mesh is judged by that
+  name with or without a readable config (a charter-shaped named mesh already
+  failed closed through the undecidable-operator arm); a readable config with no
+  mesh named keeps the migration rule above; and a caller that consults no grant
+  at all — an unsigned loopback inject, an ordinary read — is untouched.
 - **Local narrowing only.** A node's own `aoide node allow <node> <cap> off --mesh
   <m>` narrows what its door grants in that mesh, and wins over the charter.
   Nothing local widens a charter grant.

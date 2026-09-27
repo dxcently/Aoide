@@ -175,7 +175,8 @@ to **rebuild time** instead.
   `verify_signed_request` already verified is remote by construction (an
   ssh `-L` forward terminates at loopback on this end), so
   `origin_for_inject` strips `Loopback`'s free pass from it — and then the
-  node's own `autogate` flag or a matched remote-parent claim decides
+  node's own `autogate` flag, with `message` in the mesh the request signed
+  for, or a matched remote-parent claim decides
   delivery, never the arrival address ([[Node-Transport]]).
   This is the one interactive per-request gate the wire otherwise lacks —
   added for [[Node-Federation|node federation]]'s non-loopback case, which
@@ -235,7 +236,9 @@ to **rebuild time** instead.
   `node_store::autogated_node_token` folds a presented token
   against every registered node's own token file, and Inject's autogate
   match is the OR of the address check, this token check, the
-  signature-rung `autogate` flag, and a matched remote-parent claim — the
+  signature-rung `autogate` flag (the flag opens that rail too; what it
+  delivers on is `message` in the mesh the request SIGNED for), and a
+  matched remote-parent claim — the
   node that spawned this very session steering its own child
   (CONTRACTS.md §6's remote-parent rule, [[Node-Transport]]) — a shared
   secret could never tell two nodes apart, so identifying which node called

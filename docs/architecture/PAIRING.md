@@ -364,10 +364,13 @@ nodes:
   request whose signature this door already verified is, by
   construction, never a local caller, so it is treated as remote for
   the auto-deliver-vs-pending question regardless of which address it
-  arrived from: `state/nodes.json`'s per-node `autogate` flag, or the
-  remote-parent rule below, decides whether a signed node's send still
-  auto-delivers — never the connection origin. An unsigned request's
-  loopback trust is unaffected —
+  arrived from: `state/nodes.json`'s per-node `autogate` flag AND the
+  caller's grant in the mesh its own request SIGNED for (P-CHARTER: the flag
+  opens the rail, and `message` on the charter's line — or on the paired
+  record, where no charter is shaped — is what the flag then delivers on;
+  CONTRACTS.md §6's rail table), or the remote-parent rule below, decides
+  whether a signed node's send still auto-delivers — never the connection
+  origin. An unsigned request's loopback trust is unaffected —
   this narrowing only ever removes a free pass a signature was never
   entitled to in the first place.
 - **A remote parent steers the child it spawned, and the tunnel is its
@@ -752,7 +755,9 @@ forward is a pipe, not a party to the protocol.
   trust — it is a remote node by construction, and `a2a.rs::origin_for_
   inject` strips loopback's free pass from it before the delivery decision
   runs (CONTRACTS.md §6). A signature-rung `autogate` flag restores
-  auto-delivery for a node the operator already marked that way, exactly
+  auto-delivery for a node the operator already marked that way — the flag
+  AND the caller's grant in the mesh its request SIGNED for (P-CHARTER: the
+  flag opens the rail, `message` is what it delivers on) — exactly
   the like-for-like an operator's existing grant expects, and a matched
   remote-parent claim does the same for the node that spawned this very
   session — the tunneled parent is the shape that rule exists to serve.

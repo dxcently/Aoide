@@ -167,20 +167,24 @@ pub fn default_home_mesh() -> String {
 
 /// This box's home mesh, tolerantly: `[pairing] homeMesh` when the config
 /// loads, else the built-in default. For readers that must DEGRADE rather
-/// than fail — the door deciding which mesh an unnamed request acts in (a
-/// refusal there would answer every request with an error, which is worse
-/// than the pre-charter behaviour) and the outbound signing path. It is
-/// NEVER the fallback the MIGRATION uses: a config that will not parse must
-/// not be guessed at while folding grants into a mesh
+/// than fail — a CLI display column, `node allow`'s own default mesh, the
+/// outbound signing path, a letter minted before any mesh was carried. **The
+/// A2A door is NOT one of them**: an unnamed request's mesh decides what it
+/// may do, so the door reads [`home_mesh_fallible`] and refuses (or grants
+/// nothing) on `Err` rather than judging a request by a mesh the operator
+/// never named. It is NEVER the fallback the MIGRATION uses either: a config
+/// that will not parse must not be guessed at while folding grants into a mesh
 /// ([`home_mesh_fallible`] is what `node_store::load_nodes` reads).
 pub fn home_mesh() -> String {
     home_mesh_fallible().unwrap_or_else(|_| default_home_mesh())
 }
 
 /// `[pairing] homeMesh` or the error that stopped the config loading — the
-/// strict half of [`home_mesh`], for the one caller that must NOT guess:
+/// strict half of [`home_mesh`], for every caller that must NOT guess:
 /// `node_store::load_nodes`, which folds pre-charter grants into whatever
-/// mesh this returns and cannot take them back out.
+/// mesh this returns and cannot take them back out, and the A2A door
+/// (`aoide-server::a2a::effective_mesh`), whose `Err` arm is a request that
+/// named no mesh with no readable answer to judge it by.
 pub fn home_mesh_fallible() -> Result<String, LoadError> {
     load().map(|l| l.config.pairing.home_mesh)
 }
