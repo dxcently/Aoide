@@ -442,7 +442,9 @@ The stability contract — what a consumer may rely on staying true:
   variables (`AOIDE_TERMINAL`, `AOIDE_ROOT`, `AOIDE_FLAKE_ROOT`) — one
   import carries all three. `sessionTarget` (default `default.target`)
   is the seam a paint-dependent anchor enters through: the unit's own
-  `wantedBy`/`after`/`partOf` read it, never a facet option directly.
+  `wantedBy`/`after` read it, never a facet option directly, and the
+  anchor decides only when the unit starts — no `partOf`, so a desktop
+  that dies leaves the daemon and its doors running.
   `modules/nucleus/options.nix` is this repo's own consumer: both
   `lib/mkHost.nix` and `tests/vm-boot.nix` read the overlay through it
   instead of each carrying their own copy of the injection lambda, and

@@ -6337,7 +6337,9 @@ remote node, so `a2a.rs::origin_for_inject` strips `ConnOrigin::Loopback`'s
 free pass from it before `should_deliver_now` ever runs, leaving the
 signature-rung `autogate` flag (folded into `autogate_match` alongside
 `ip_autogate`/`token_autogate`) as the only route back to auto-delivery for
-a signed node, exactly as an operator already granted it. In short: the
+a signed node — the flag opening that rail and the caller's grant in the mesh
+its request SIGNED for being what it then delivers on (P-CHARTER; §6's rail
+table) — exactly as an operator already granted it. In short: the
 read arms and attribution tolerate any of the four; Spawn accepts exactly
 one; and once a request is signed, its delivery timing is decided by
 autogate or by a PROVEN remote-parent match, never by which address it happened
@@ -7230,19 +7232,33 @@ mesh is:
 | any record | charter-SHAPED, operator key undecidable | **nothing** — held PENDING |
 | any record | a PAIR mesh (nothing shaped for it) | yes — the record's own `autogate` flag, the whole rule, exactly as before |
 
-**Home is READ here, never guessed** (review F6). `config::home_mesh` answers
-the built-in default when `config.toml` is unreadable, so a box whose real
-`[pairing] homeMesh` is a charter mesh would otherwise be judged by the DEFAULT
-mesh's (pair) rules and deliver on the record's flag again — the rule stepped
-around by one unreadable file. The rail therefore resolves home with
-`config::home_mesh_fallible` and pends on `Err`: no answer, no delivery. A
-MISSING config is not an error (`config::load` answers the defaults, and
-`present: false`), so the fence is about a config that exists and will not read.
-A NAMED request is the other half of this ruling and is unchanged:
-`grant_in_mesh` resolves its mesh through `effective_mesh`/`home_mesh`, the
-door-wide grant question, where the same swallow is deliberate and NOT fixed
-here — the two are separate resolutions of the same name, and neither is the
-other's fallback.
+**Home is READ, never guessed — at the rail AND at the grant lookup** (review
+F6, both halves). `config::home_mesh` answers the built-in default when
+`config.toml` is unreadable, so a box whose real `[pairing] homeMesh` is a
+charter mesh would otherwise be judged by the DEFAULT mesh's (pair) rules —
+the rule stepped around by one unreadable file, on the rail and on the grant
+alike. Both resolve home through `config::home_mesh_fallible`: the rail
+(`rail_admits_here`) PENDS on `Err` (no answer, no delivery), and
+`effective_mesh` returns the `Err` to `grant_in_mesh`, which answers
+`Grant::none()` — there is no mesh whose rules could grant. The arms that owe
+the caller a reason build it from that same `Err` (`mesh_or_refusal`), so a
+gated refusal names the FILE and the parse error instead of naming a mesh the
+operator never chose; `spawn`/`mailDeposit`/`mailPoll`/`binding` all answer
+`-32010` that way, the same family as the undecidable-operator arm.
+A MISSING config is not an error (`config::load` answers the defaults, and
+`present: false`), so the fence is about a config that exists and will not
+read.
+
+**Scoped to exactly that failure.** A request that NAMED its mesh is judged by
+that name's rules with or without a readable config — the name is the answer,
+and no config line decides a pair mesh's rules; a charter-shaped named mesh
+already failed closed through the undecidable-operator arm above (a
+`trusted_operator` read that hits the same unreadable config). Callers that
+never consult a grant are untouched: an unsigned loopback inject
+(`should_deliver_now(Loopback, _)` is unconditionally true) and an ordinary
+`tasks/get` read no mesh and no grant at all. A readable config with no mesh
+named keeps N1's behaviour exactly — home's rules, charter first, paired
+records only where none is shaped.
 
 **The address rung is an ADDRESS match, with an address match's limits**
 (review F5; unchanged by this ruling, and inherent to the rung).

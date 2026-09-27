@@ -1013,6 +1013,12 @@ impl Grant {
 /// `verify_signed_request` already requires an exact-name header to resolve
 /// them — answer in REGISTRY ORDER, the tie-break CONTRACTS.md §7 already
 /// documents for `resolve_node`'s ladder.
+///
+/// **A config that will not load grants NOTHING** (review F6, door-wide): the
+/// unnamed case's mesh is the CONFIG's to name ([`effective_mesh`]), and this
+/// function takes [`Grant::none`] rather than letting a guessed default mesh
+/// answer from its paired records. A NAMED mesh is unaffected — the name is
+/// the answer, and no config line decides a pair mesh's rules.
 fn grant_in_mesh(named: Option<&str>, caller_key: &str) -> Grant {
     let nodes = aoide_storage::node_store::load_nodes();
     // **One mesh, resolved once** (review N1): a request that named none is
@@ -1022,7 +1028,21 @@ fn grant_in_mesh(named: Option<&str>, caller_key: &str) -> Grant {
     // records, so a pre-charter peer whose key a charter had since REMOVED was
     // still admitted by its stale `grants[home]` — the pre-charter fallback F2
     // exists to remove, reachable by omitting one header.
-    let mesh = effective_mesh(named);
+    let mesh = match effective_mesh(named) {
+        Ok(mesh) => mesh,
+        // **An unreadable config grants nothing** (the door-wide half of review
+        // F6): `effective_mesh` will not guess a mesh for a request that named
+        // none, so there is no mesh whose rules could grant — and the pre-image
+        // behaviour (the built-in default, whose paired records then answer) is
+        // exactly the stale-`grants[home]` door N1/F2 closed for a CHARTER home,
+        // reachable by breaking one file. `Grant::none()` and not an error: a
+        // caller and an ungranted caller are indistinguishable from outside by
+        // construction (`Grant` carries no "why"), and the arms that OWE the
+        // operator a reason build it from the same `Err` in
+        // [`mesh_or_refusal`]. A NAMED mesh is untouched: its name is its own
+        // answer, and the config plays no part in a pair mesh's rules.
+        Err(_) => return Grant::none(),
+    };
     let governing = aoide_storage::charter::governing(&mesh);
     // F2: a mesh a charter was accepted for is a charter mesh even while its
     // operator key is undecidable, and a charter mesh never falls back to the
@@ -1161,9 +1181,11 @@ fn rail_admits(
 /// (pair) rules and deliver on the record's flag again. The rail therefore
 /// reads [`aoide_storage::config::home_mesh_fallible`] and PENDS on `Err`:
 /// an unreadable config has no answer to give, and the whole charter rule is
-/// exactly what a guessed mesh name would step around. (`grant_in_mesh` still
-/// resolves the same way a named request's mesh is resolved — that is the
-/// grant lookup's own, door-wide question, not this rail's.)
+/// exactly what a guessed mesh name would step around. (The GRANT lookup reads
+/// the same failable resolution now too — [`effective_mesh`] returns that
+/// `Err` and [`grant_in_mesh`] answers [`Grant::none`] — so the rail's `Err`
+/// arm and the grant's agree; a NAMED request still resolves from its own name
+/// without touching the config.)
 fn rail_admits_here(nodes: &[aoide_storage::node_store::Node], record: &aoide_storage::node_store::Node) -> bool {
     let Ok(mesh) = aoide_storage::config::home_mesh_fallible() else {
         return false;
@@ -1196,11 +1218,54 @@ fn rail_admits_here(nodes: &[aoide_storage::node_store::Node], record: &aoide_st
 /// was carried (`seal::seal_envelope`'s callers pass the envelope's own
 /// `origin_mesh`, still `""` at P-SEAL) says "unnamed", not "a mesh called
 /// nothing".
-fn effective_mesh(named: Option<&str>) -> String {
+///
+/// **`Err` is the unnamed case with an unreadable config** (the door-wide half
+/// of review F6). A request that NAMED a mesh is answered from its own name
+/// and never reads the config at all; a request that named none is answered by
+/// `[pairing] homeMesh` — and when `config.toml` cannot be read, what that
+/// mesh IS has no answer. [`aoide_storage::config::home_mesh`] would answer the
+/// BUILT-IN DEFAULT there, which is how a charter-governed box gets judged by a
+/// pair mesh's rules and how a revoked key comes back through a stale
+/// `grants[home]` — the one fallback this signature exists to remove. Callers
+/// that read a GRANT take [`Grant::none`] on `Err` ([`grant_in_mesh`]); callers
+/// that only need the mesh for a refusal's words name the unreadable config
+/// ([`mesh_or_refusal`]).
+fn effective_mesh(named: Option<&str>) -> Result<String, aoide_storage::config::LoadError> {
     match named.map(str::trim).filter(|m| !m.is_empty()) {
-        Some(m) => m.to_ascii_lowercase(),
-        None => aoide_storage::config::home_mesh(),
+        Some(m) => Ok(m.to_ascii_lowercase()),
+        None => aoide_storage::config::home_mesh_fallible(),
     }
+}
+
+/// **The refusal an unreadable config earns at a gated arm**, or the resolved
+/// mesh when the config reads — [`effective_mesh`]'s `Err` arm, audited and
+/// phrased in ONE place so every mesh-naming refusal answers an unreadable
+/// config the same way. The reason names the file and the parse error
+/// ([`aoide_storage::config::LoadError`]'s own Display does), because the
+/// operator's fix is in that file or in the request.
+///
+/// `-32010` is the family this belongs to: nothing is granted, exactly as
+/// `charter_refusal`'s undecidable-operator arm answers — the difference is
+/// only WHICH piece of host state could not be read.
+fn mesh_or_refusal(
+    what: &str,
+    named: Option<&str>,
+    label: &str,
+    audit_log: &Path,
+) -> Result<String, (i64, String)> {
+    effective_mesh(named).map_err(|err| {
+        let msg = format!(
+            "{what}: this request names no mesh, so it acts in this host's home mesh \
+             (`[pairing] homeMesh`) — and the config that names it cannot be read ({err}). NOTHING is \
+             granted until it loads: the built-in default is a GUESS at a mesh name, and a guess would \
+             judge this request by rules nobody named (in the shape that matters, a pair mesh's paired \
+             records instead of the charter that governs home). Fix `{}` and retry, or name the mesh \
+             in the request",
+            err.path().display()
+        );
+        let _ = audit(audit_log, Door::A2a, EventClass::Audit, label, "unauthorized", &msg);
+        (-32010, msg)
+    })
 }
 
 /// The caller's grant in the mesh its request acts in — the ONE place a call
@@ -2921,8 +2986,11 @@ fn message_send(
     );
     // P-CHARTER (the A3 review's finding 4): the two UNSIGNED rails ask the
     // mesh as well, read at the record's HOME mesh because that is the only
-    // mesh such a request has (`effective_mesh(None)` — it carries no signed
-    // mesh to name another). Two booleans, deliberately:
+    // mesh such a request has — it carries no signed mesh to name another, so
+    // home is `[pairing] homeMesh`, READ rather than guessed
+    // (`rail_admits_here` takes `home_mesh_fallible` and pends on `Err`; not
+    // `effective_mesh`, whose `Err` arm is a named request's own question).
+    // Two booleans, deliberately:
     //
     //   `autogate_match` = the rails MATCHED a record → the door admits the
     //     caller (the #50 uniform-response guard's exemption, unchanged);
@@ -3113,7 +3181,15 @@ fn message_send(
                 let node = resolved_node.expect("spawn_admitted only returns true when resolved_node is Some").0;
                 do_spawn(&agent_cmd, &prompt, audit_log, &node.name, spawn_cwd, remote_parent, task.as_deref())
             } else {
-                let (code, msg) = spawn_refusal(resolved_node, &effective_mesh(signed_caller.and_then(|c| c.mesh)));
+                let (code, msg) = match mesh_or_refusal(
+                    "spawn refused",
+                    signed_caller.and_then(|c| c.mesh),
+                    "a2a.message/send",
+                    audit_log,
+                ) {
+                    Ok(mesh) => spawn_refusal(resolved_node, &mesh),
+                    Err(refusal) => refusal,
+                };
                 let _ = audit(
                     audit_log,
                     Door::A2a,
@@ -3469,7 +3545,12 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
             Err(e) => return Err((-32602, format!("invalid params: envelope: {e}"))),
         };
 
-    let mesh = effective_mesh(ctx.signed_caller.and_then(|c| c.mesh));
+    let mesh = mesh_or_refusal(
+        "mail deposit refused",
+        ctx.signed_caller.and_then(|c| c.mesh),
+        "a2a.aoide/mailDeposit",
+        ctx.audit_log,
+    )?;
     let grant = caller_grant(ctx.signed_caller);
     if !deposit_admitted(&grant) {
         let (code, msg) = deposit_refusal(ctx.signed_caller, &mesh, ctx.audit_log);
@@ -3644,7 +3725,12 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
         return Err((-32602, "invalid params: node is required".to_string()));
     }
 
-    let mesh = effective_mesh(ctx.signed_caller.and_then(|c| c.mesh));
+    let mesh = mesh_or_refusal(
+        "mail poll refused",
+        ctx.signed_caller.and_then(|c| c.mesh),
+        "a2a.aoide/mailPoll",
+        ctx.audit_log,
+    )?;
     let grant = caller_grant(ctx.signed_caller);
     if !poll_admitted(ctx.signed_caller, &grant, &claimed) {
         let (code, msg) = poll_refusal(ctx.signed_caller, &mesh, &claimed, ctx.audit_log);
@@ -3759,7 +3845,12 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
     // spooling relay or a TLS edge could turn an accepted deposit into a
     // permanent refusal by flipping one unsigned byte — a cheap mail-delivery
     // DoS. The request's own mesh is what admission reads the grant in.
-    let request_mesh = effective_mesh(ctx.signed_caller.and_then(|c| c.mesh));
+    let request_mesh = mesh_or_refusal(
+        "mail deposit refused",
+        ctx.signed_caller.and_then(|c| c.mesh),
+        "a2a.aoide/mailDeposit",
+        ctx.audit_log,
+    )?;
 
     let grant = caller_grant(ctx.signed_caller);
     // **A charter letter's gate is not the grant** (P-CHARTER, review F3). Its
@@ -3955,7 +4046,12 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
 /// TO this node, so refusing it to a node that may already deposit mail
 /// would leave the two halves of the same exchange gated differently.
 fn node_binding(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
-    let mesh = effective_mesh(ctx.signed_caller.and_then(|c| c.mesh));
+    let mesh = mesh_or_refusal(
+        "binding refused",
+        ctx.signed_caller.and_then(|c| c.mesh),
+        "a2a.aoide/binding",
+        ctx.audit_log,
+    )?;
     let grant = caller_grant(ctx.signed_caller);
     if !deposit_admitted(&grant) {
         let (code, msg) = deposit_refusal(ctx.signed_caller, &mesh, ctx.audit_log);
@@ -16207,6 +16303,174 @@ mod tests {
     /// (a first cut spelled the name it searched for, which the search found
     /// in itself); the live answer to "which record is this caller" is
     /// `grant_in_mesh`, exercised by the gate tests above.
+
+    /// **A config that will not load grants nothing** (review F6, door-wide).
+    /// An unnamed request's mesh is the CONFIG's to name, so an unreadable
+    /// config leaves nothing to judge it by — and the pre-image fallback (the
+    /// built-in default, whose PAIRED RECORDS then answer) is the same
+    /// stale-`grants[home]` door N1/F2 closed for a charter home, reachable by
+    /// breaking one file. A NAMED mesh is untouched: the name is its own
+    /// answer, and no config line decides a pair mesh's rules.
+    #[test]
+    fn an_unreadable_config_grants_nothing_to_an_unnamed_request() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_root = std::env::var("AOIDE_ROOT").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_config = std::env::var("AOIDE_CONFIG").ok();
+        let root = aoide_test_support::short_tmp("a2a-cfg-failclosed");
+        std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::remove_var("AOIDE_CONFIG");
+
+        let config = root.join("config.toml");
+        std::fs::write(&config, "[pairing]\nhomeMesh = \"home\"\n").unwrap();
+
+        let mut node = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        node.verified = true;
+        node.pubkey = Some("aa11".to_string());
+        node.grants = std::collections::BTreeMap::from([
+            ("home".to_string(), vec!["message".to_string()]),
+            ("away".to_string(), vec!["read".to_string()]),
+        ]);
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        // 1. The config reads: N1's behaviour, unchanged — the unnamed request
+        //    resolves to `home`, and home's PAIRED RECORDS are what answer.
+        assert_eq!(effective_mesh(None).ok().as_deref(), Some("home"), "`[pairing] homeMesh`, read");
+        assert!(
+            grant_in_mesh(None, "aa11").holds("message"),
+            "while the config reads, home is a pair mesh and its record is the grant"
+        );
+        assert!(grant_in_mesh(Some("away"), "aa11").holds("read"));
+
+        // 2. The config stops loading. Home has no answer, and the built-in
+        //    default is a guess, not an answer.
+        std::fs::write(&config, "this is not a config at all ][\n").unwrap();
+        assert!(aoide_storage::config::load().is_err(), "the premise: the config no longer loads");
+        assert!(effective_mesh(None).is_err(), "`[pairing] homeMesh` cannot be read, so home cannot be resolved");
+        assert!(
+            grant_in_mesh(None, "aa11") == Grant::none(),
+            "an unnamed request is granted NOTHING while the config will not load — never a guessed mesh's paired records"
+        );
+
+        // 3. A request that NAMED its mesh is unaffected: the name is the
+        //    answer, and the config plays no part in a pair mesh's rules.
+        assert_eq!(effective_mesh(Some("away")).ok().as_deref(), Some("away"), "a named mesh never reads the config");
+        assert_eq!(effective_mesh(Some("  AWAY ")).ok().as_deref(), Some("away"), "trimmed and folded, as before");
+        assert!(
+            grant_in_mesh(Some("away"), "aa11").holds("read"),
+            "and a named mesh's own rules still answer: the fence is exactly the unnamed case"
+        );
+
+        match saved_root {
+            Some(v) => std::env::set_var("AOIDE_ROOT", v),
+            None => std::env::remove_var("AOIDE_ROOT"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+        match saved_config {
+            Some(v) => std::env::set_var("AOIDE_CONFIG", v),
+            None => std::env::remove_var("AOIDE_CONFIG"),
+        }
+    }
+
+    /// **The refusal NAMES the unreadable config.** The arms that owe the
+    /// operator a reason build it from the same `Err`, so the reason is the
+    /// real one — not "you hold nothing in mesh `home`", which is the reason a
+    /// GUESSED mesh would produce.
+    #[test]
+    fn an_unreadable_config_refuses_a_gated_arm_and_names_the_config() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_root = std::env::var("AOIDE_ROOT").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_config = std::env::var("AOIDE_CONFIG").ok();
+        let root = aoide_test_support::short_tmp("a2a-cfg-refusal");
+        std::env::set_var("AOIDE_ROOT", &root);
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::remove_var("AOIDE_CONFIG");
+
+        let config = root.join("config.toml");
+        std::fs::write(&config, "[pairing]\nhomeMesh = \"home\"\n").unwrap();
+
+        let mut node = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        node.verified = true;
+        node.pubkey = Some("aa11".to_string());
+        node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        assert!(
+            node_binding(&json!({}), &ctx).is_ok(),
+            "with a readable config this caller is admitted — the fixture is otherwise fine"
+        );
+
+        std::fs::write(&config, "this is not a config at all ][\n").unwrap();
+        let (code, msg) = node_binding(&json!({}), &ctx).expect_err("an unreadable config grants nothing");
+        assert_eq!(code, -32010, "the capability family's own code, like the undecidable-operator arm");
+        assert!(msg.contains("config.toml"), "the reason names the FILE: {msg}");
+        assert!(msg.contains("names no mesh"), "and the case it is about, so the operator knows the fix: {msg}");
+        assert!(
+            !msg.contains("does not include `message`"),
+            "never the guessed mesh's reason — that would be a lie about why: {msg}"
+        );
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("a2a.aoide/binding"), "audited under the arm's own label: {log}");
+
+        // The SAME request, naming its mesh, is judged by that mesh — the
+        // fence is the unnamed case and nothing else.
+        let mut named = mail_deposit_ctx(&audit_log, Some("box-b"));
+        named.signed_caller = Some(SignedCaller { name: "box-b", key: "aa11", mesh: Some("home") });
+        assert!(
+            node_binding(&json!({}), &named).is_ok(),
+            "a named mesh's own rules answer whatever the config says: the name IS the answer"
+        );
+
+        match saved_root {
+            Some(v) => std::env::set_var("AOIDE_ROOT", v),
+            None => std::env::remove_var("AOIDE_ROOT"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+        match saved_config {
+            Some(v) => std::env::set_var("AOIDE_CONFIG", v),
+            None => std::env::remove_var("AOIDE_CONFIG"),
+        }
+    }
+
+    /// **A local path that consults no grant is unchanged** by the fence: an
+    /// unsigned loopback inject never reads a rail, a grant or the config
+    /// (`should_deliver_now(ConnOrigin::Loopback, _)` is unconditionally true),
+    /// and an ordinary `tasks/get` is the bearer gate and the stage. Both stay
+    /// byte-identical with a config that will not load.
+    #[test]
+    fn an_unreadable_config_leaves_the_local_paths_unchanged() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let boxed = rail_box("aoide-a2a-cfg-local", "home", &format!("http://{RAIL_PEER_ADDR}:8710/"), true, None);
+        boxed.break_config();
+        assert!(aoide_storage::config::load().is_err(), "the premise: the config no longer loads");
+
+        let result = boxed.send("local-line", "", None, ConnOrigin::Loopback);
+        assert!(result.is_ok(), "{result:?}");
+        assert_eq!(
+            boxed.delivered().as_deref(),
+            Some("local-line\r"),
+            "an unsigned loopback inject delivers exactly as before — no grant, no mesh, no config read"
+        );
+        assert!(boxed.pending().is_empty(), "and nothing was queued");
+
+        let ctx = test_ctx(&boxed.audit_log, "");
+        let task = handle_jsonrpc(
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": RAIL_SESSION } }),
+            &ctx,
+        );
+        assert!(task.get("error").is_none(), "an ordinary read answers: {task}");
+        assert_eq!(task["result"]["id"], RAIL_SESSION, "with the session's own task: {task}");
+    }
 
     /// **The charter as the second source behind the one lookup** — every
     /// P-CHARTER "Trust per mesh" bullet this slice owns, at the door:

@@ -85,6 +85,13 @@ pub struct Node {
     /// record verified), and where home is charter-shaped with an undecidable
     /// operator key the send is held PENDING whatever this flag says. Only in
     /// a PAIR mesh is this flag the whole rule, exactly as it always was.
+    ///
+    /// **For a SIGNATURE-resolved caller the flag is likewise only the
+    /// opener**: the door also reads `message` in the mesh that request signed
+    /// for (`aoide-server::a2a`'s `sig_autogate` = this flag AND
+    /// `may_message(&caller_grant(..))`, P-CHARTER), so the same flag on the
+    /// same record delivers in a mesh the caller holds `message` in and pends
+    /// in one it does not.
     #[serde(default)]
     pub autogate: bool,
     /// Path to a file (on THIS instance) holding the shared secret this node
