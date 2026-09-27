@@ -1043,10 +1043,24 @@ convenience: it is never compared across machines and never a trust input.
   tunnel makes any peer look local, and the loopback door is itself reached through a
   hop. The guard, for pairing and for the LAN join: the dialed peer address (direct,
   or the SSH hop's host) lies in a subnet the host declares local, and the ceremony
-  never traverses a relay.
+  never traverses a relay. Implemented as a property of the ADDRESS alone
+  (`charter::is_local_network`): private or link-local, never loopback — a relayed
+  forward and an ssh tunnel both arrive as loopback, so admitting it would admit every
+  relay — with an IPv4-mapped IPv6 peer unwrapped to the v4 it maps to.
 - **In a charter mesh the charter is the only trust.** A paired record in that mesh for
   a key the charter lists is inert and reported. A key the charter does not list is not
-  trusted in that mesh, whatever a pairing says.
+  trusted in that mesh, whatever a pairing says — and a mesh a charter was accepted for
+  is charter-shaped even while its operator key is UNDECIDABLE, where it refuses every
+  request rather than falling back to the pre-charter paired records.
+- **A charter letter is its own authority.** It carries the operator's signature over
+  the charter, so `aoide/mailDeposit` admits a `charter`-purpose container on a
+  VERIFIED SIGNATURE and no `message` grant: gating it on the grant would make this
+  section's own bootstrap unreachable — a machine accepting its first charter by letter
+  from an origin it did not yet know — while the container is still only honoured if
+  the operator signed what it carries. For every LATER version the signer is a node the
+  charter in force names, and `verify_signed_request` resolves it from the charter's own
+  node list (identity only; the grant is still the line's), so a box with no
+  `nodes.json` record for the operator still receives revocation.
 - **Rendering the operator line.** Nix hosts render `[mesh.<name>] operator` from a
   future Aoide module option. Non-Nix hosts (native Windows, WSL) write the same line
   by hand or run `aoide mesh join`.

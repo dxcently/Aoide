@@ -3398,7 +3398,21 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
     let request_mesh = effective_mesh(ctx.signed_caller.and_then(|c| c.mesh));
 
     let grant = caller_grant(ctx.signed_caller);
-    if !deposit_admitted(&grant) {
+    // **A charter letter's gate is not the grant** (P-CHARTER, review F3). Its
+    // authority travels INSIDE it: `seal::deposit_container` verifies the
+    // operator signature over the enclosed charter before the carrier is
+    // judged on anything, and then requires the origin to be a node the
+    // ACCEPTED charter lists (`deposit_charter`'s own "no registry in the
+    // loop" check). Gating it on a `message` grant would make the design's own
+    // bootstrap unreachable — "a machine can accept its first charter by
+    // letter from an origin it did not yet know" — while changing nothing an
+    // attacker can do: the container is only honoured if the OPERATOR signed
+    // what it carries, and the caller still had to sign this request. So a
+    // charter-purpose container needs a VERIFIED SIGNATURE and no grant; every
+    // other purpose needs the grant exactly as before.
+    let charter_letter = container.purpose == aoide_storage::seal::PURPOSE_CHARTER
+        && ctx.signed_caller.is_some();
+    if !deposit_admitted(&grant) && !charter_letter {
         let (code, msg) = deposit_refusal(ctx.signed_caller, &request_mesh);
         let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "unauthorized", &msg);
         return Err((code, msg));
@@ -5103,7 +5117,51 @@ fn verify_signed_request(req: &HttpRequest, now_epoch: i64) -> SignedRequestOutc
     // ONE refusal for unknown key / unverified node / keyless record / bad
     // signature alike — never an existence oracle over the registry.
     let resolved = match candidates.as_slice() {
-        [] => return SignedRequestOutcome::Refused(-32007, "signature verification failed".to_string()),
+        [] => {
+            // **Third rung (P-CHARTER, review F3): a TRUSTED, IN-FORCE
+            // charter's own node list.** A charter mesh's node list IS its
+            // trust, and a machine that took the mesh by `mesh join` or
+            // `mesh charter accept` holds no `nodes.json` record for anyone —
+            // so without this rung a charter letter could never reach the
+            // machines the non-LAN paths create, and "later versions arrive as
+            // letters" was unreachable through the door.
+            //
+            // It is deliberately NARROW: only the mesh the request SIGNED
+            // (`req.signed_mesh`, never `container.mesh`), only a mesh this
+            // node can HONOUR (`charter::governing` — an unverified,
+            // superseded or undecidable charter resolves nobody), and the key
+            // must be one the charter's line carries. The grant that follows is
+            // still the charter LINE's (`grant_in_mesh`), so this rung decides
+            // IDENTITY only, exactly as the registry rung does.
+            let charter_signer = req
+                .signed_mesh
+                .as_deref()
+                .and_then(aoide_storage::charter::governing)
+                .and_then(|charter| {
+                    charter.nodes.iter().find(|(_, line)| {
+                        aoide_storage::wire_auth::verify_signature_hex(&line.key, canonical.as_bytes(), signature)
+                    })
+                    .map(|(name, line)| (name.clone(), line.key.clone()))
+                });
+            let Some((name, key)) = charter_signer else {
+                return SignedRequestOutcome::Refused(-32007, "signature verification failed".to_string());
+            };
+            let pubkey_hex = key.to_ascii_lowercase();
+            if nonce_is_replay(&pubkey_hex, nonce) {
+                return SignedRequestOutcome::Refused(
+                    -32009,
+                    format!(
+                        "nonce replay: charter node `{name}` reused a `{HEADER_NONCE}` value already seen within the current replay window"
+                    ),
+                );
+            }
+            return SignedRequestOutcome::Verified {
+                resolved: name,
+                key,
+                claimed: node_name.to_string(),
+                mesh: req.signed_mesh.clone(),
+            };
+        }
         [one] => *one,
         several => {
             let Some(exact) = several.iter().find(|p| p.name == node_name) else {
@@ -14043,9 +14101,11 @@ mod tests {
         let receiver_line = aoide_storage::charter::node_line().unwrap();
 
         // The operator's box: root the mesh, paste both lines under [nodes],
-        // sign v1.
+        // sign v1. Its identity keypair is kept — it is the key the charter's
+        // `opbox` line carries, and the carriage assertions below sign as it.
         charter_machine(&root, "operator", "opbox");
         let init = aoide_storage::charter::init("home").unwrap();
+        let (op_kp, _) = aoide_storage::identity::load_or_mint().unwrap();
         let op_line = aoide_storage::charter::node_line().unwrap();
         let src = format!(
             "mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{op_line}\n{receiver_line}\n"
@@ -14066,18 +14126,37 @@ mod tests {
         )
         .unwrap();
 
-        // The receiving node trusts ONLY the operator line — no pairing, no
-        // nodes.json entry for the origin — which is the bootstrap case the
-        // carriage rule exists for.
+        // The receiving node trusts ONLY the operator line — **no pairing, and
+        // no `nodes.json` record for the origin** (review F3: the first cut of
+        // this test said exactly that and then INSTALLED the record at
+        // `setup_signed_node_with_allows`, which made the test prove the
+        // registry rung instead of the charter rung). What admits the deposit
+        // now is the charter the receiver just accepted: the origin is a node
+        // ON it, and its key verifies the request's signature
+        // (`verify_signed_request`'s charter rung).
         charter_machine(&root, "receiver", "receiverbox");
         std::fs::write(
             root.join("receiver").join("config.toml"),
             format!("[mesh.home]\noperator = \"ed25519:{}\"\n", init.operator),
         )
         .unwrap();
-        setup_signed_node_with_allows("opbox", &["message"]);
+        assert!(
+            aoide_storage::node_store::load_nodes().is_empty(),
+            "the premise, asserted where the old test merely claimed it: the receiver knows no node"
+        );
+
+        // The request must name the mesh it acts in for the charter rung to
+        // apply — the mesh is inside the signature (`X-Aoide-Mesh`), and the
+        // rung reads it, never the container's hop-mutable field. The signer is
+        // a charter NODE's key, so the request is built from a keypair holding
+        // it rather than from this process's own identity.
+        let body = serde_json::to_vec(&json!({ "container": container })).unwrap();
+        let now = 1_800_000_000_i64;
+        let op_key = aoide_storage::charter::parse(&src).unwrap().nodes["opbox"].key.clone();
+        assert_eq!(op_key, op_kp.info().pubkey_hex, "the charter's line carries the operator machine's own identity key");
+
         let audit_log = root.join("log");
-        let ctx = mail_deposit_ctx(&audit_log, Some("opbox"));
+        let ctx = RequestCtx { signed_caller: Some(SignedCaller { name: "opbox", key: op_key.as_str(), mesh: Some("home") }), ..mail_deposit_ctx(&audit_log, None) };
 
         let reply = mail_deposit(&json!({ "container": container }), &ctx)
             .expect("an admitted charter deposit is answered, never refused");
@@ -14099,6 +14178,37 @@ mod tests {
             init.operator,
             "and recorded under the operator key the config line named"
         );
+
+        // **The rung that makes every LATER letter deliverable** (review F3).
+        // The charter is in force now, and this box still holds no record for
+        // `opbox`: a signed request naming `home` resolves through the
+        // charter's own node list — identity only, the grant still the line's
+        // (`grant_in_mesh`) — while a key the charter does not list resolves to
+        // nothing, and a mesh that charter does not govern resolves to nothing.
+        let req = signed_request_in_mesh(&op_kp, "opbox", "/", &body, now, &unique_nonce("carriage"), Some("home"));
+        match verify_signed_request(&req, now) {
+            SignedRequestOutcome::Verified { resolved, key, .. } => {
+                assert_eq!(resolved, "opbox", "the charter's line names the signer");
+                assert_eq!(key, op_key, "and its key is the one that verified — identity only, no grant");
+            }
+            other => panic!("a charter-listed signer resolves through the charter rung, got {other:?}"),
+        }
+        assert!(
+            aoide_storage::node_store::load_nodes().iter().all(|n| n.name != "opbox"),
+            "and it resolved with no registry record at all"
+        );
+        let stranger_kp = aoide_storage::identity::mint_ephemeral().unwrap();
+        let stranger_req =
+            signed_request_in_mesh(&stranger_kp, "opbox", "/", &body, now, &unique_nonce("carriage-stranger"), Some("home"));
+        assert!(matches!(
+            verify_signed_request(&stranger_req, now),
+            SignedRequestOutcome::Refused(_, _)
+        ), "a key the charter does not list resolves to nothing");
+        let away_req = signed_request_in_mesh(&op_kp, "opbox", "/", &body, now, &unique_nonce("carriage-away"), Some("away"));
+        assert!(matches!(
+            verify_signed_request(&away_req, now),
+            SignedRequestOutcome::Refused(_, _)
+        ), "and the rung never crosses meshes");
 
         let _ = std::fs::remove_dir_all(&root);
         for (key, value) in [

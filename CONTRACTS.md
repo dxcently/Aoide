@@ -7233,11 +7233,27 @@ rung to migrate off the way Spawn once had.** The caller must resolve via
 `verify_signed_request`'s KEY-RESOLVED `signed_caller` (the identical
 per-request signature scheme the Spawn arm's gate uses, security posture
 above) to a node that is both `verified` and carries `"message"` in
-`allows`. A refusal is `-32010` — a NEW code: never `-32006` (Spawn's own)
+`grants[<the request's mesh>]`. A refusal is `-32010` — a NEW code: never
+`-32006` (Spawn's own)
 and never `-32007` (`verify_signed_request`'s own incomplete-headers/
 signature-mismatch refusal) — in one of two shapes: paired but missing
 `message` (told the exact `node allow <name> message on` fix), or
 anything else at all (told to pair, then allow).
+
+**Two P-CHARTER qualifications, both narrow.** (1) `verify_signed_request` has a
+CHARTER rung below the registry: a request whose signature verifies under a key
+the TRUSTED, IN-FORCE charter for the mesh the request SIGNED (never
+`container.mesh`) names resolves to THAT LINE's node name — identity only, with
+the grant still read by `grant_in_mesh` from the line. It is what makes a later
+charter version deliverable to a machine that holds no `nodes.json` record for
+its operator. No unverified, superseded or undecidable charter resolves
+anybody. (2) A **`charter`-purpose container is admitted on a verified
+signature and NO grant at all**: its authority travels inside it (the operator
+signature `seal::deposit_container` verifies before judging the carrier, then
+the origin must be a node the accepted charter lists), so gating it on
+`message` would make the bootstrap — a machine taking its first charter by
+letter from an origin it did not yet know — impossible. Every other purpose
+needs the grant exactly as written above.
 
 Past admission, the envelope's own content is entirely
 `aoide_storage::mail::deposit`'s policy chain (spec item 4's order):
