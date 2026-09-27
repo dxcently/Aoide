@@ -4,7 +4,7 @@
 
 **AoideOS** is the OS harness for your harness — Hyprland compositor, Quickshell shell, an orchestrator daemon (`aoided`), a content pipeline, and a self-ricing engine — built on the shell-only Aoide core, that you **clone and run**, not install. Its naming thesis in one line: architecture is frozen music — the nix layer is the score, the running desktop is the performance, a rice is a song the system sings. The Aoide·Melete·Mneme naming is a three-Muses theme: Aoide is the *song* (this repo), [Melete](#melete--the-doer) is *practice* (the coding harness), [Mneme](#mneme--the-door) is *memory* (the knowledge vault) — the other two are independently-owned systems Aoide **integrates and launches**, never vendors.
 
-> Status — walking skeleton. The desktop, the flake, the `graph` group, the daemon, and the theming fan-out are **real and running live** (yomi-strix is switched onto this flake). A handful of commands (`rice declare`/`transpose`, the `content` group, `make`, `update`, `onboard`) are **structured stubs** that return exit `64` (`not-implemented`) with the right shape — the trunk is wired, the muscle is being grown. See [`aoide-cli`](docs/Aoide-Wiki/entities/aoide-cli.md) for exactly which.
+> Status — walking skeleton. The desktop, the flake, the `graph` group, the daemon, and the theming fan-out are **real and running live** (yomi-strix is switched onto this flake). A handful of commands (`rice declare`/`transpose`, the `content` group, `make`, `update`) are **structured stubs** that return exit `64` (`not-implemented`) with the right shape — the trunk is wired, the muscle is being grown. See [`aoide-cli`](docs/Aoide-Wiki/entities/aoide-cli.md) for exactly which.
 
 This README explains what Aoide/AoideOS *is* — architecture, features, the Melete/Mneme integration, and how to install it. For day-to-day driving (every keybind, alias, and CLI command) see the linked wiki pages in [§6](#6-further-documentation) — nothing here duplicates a reference table that already lives there.
 
@@ -13,7 +13,7 @@ This README explains what Aoide/AoideOS *is* — architecture, features, the Mel
 1. [Architecture](#1-architecture)
 2. [Features](#2-features)
 3. [Melete & Mneme](#3-melete--mneme)
-4. [Install (Nix flakes)](#4-install-nix-flakes)
+4. [Install](#4-install)
 5. [How Aoide updates](#5-how-aoide-updates)
 6. [Further documentation](#6-further-documentation)
 
@@ -103,9 +103,16 @@ An independently-owned vault API serving a folder of notes over MCP — read, wr
 
 ---
 
-## 4. Install (Nix flakes)
+## 4. Install
 
-Aoide is a framework you **clone and run**, not a package you install — the upstream repo ships the shape-making machinery (engine, contracts, walker, facets) but never the shapes themselves. Your clone is your instance, and shared git history means upstream improvements arrive as an ordinary merge. A remote fork is optional — for backup, fleet sync, or contributing back.
+Two installs, one boundary between them (the two-binary split, [Package Layout](docs/architecture/PACKAGE-LAYOUT.md)):
+
+- **Aoide (the core)** — `aoide` and `aoided`, sessions and conduct, the doors — needs no nix at all: `cargo install` from a checkout on any Linux, [docs/INSTALL.md](docs/INSTALL.md).
+- **AoideOS (this distribution)** — the same core plus `lyra`, the paint half — is a flake you clone and run, below.
+
+### AoideOS — clone and run (Nix flakes)
+
+AoideOS is a framework you **clone and run**, not a package you install — the upstream repo ships the shape-making machinery (engine, contracts, walker, facets) but never the shapes themselves. Your clone is your instance, and shared git history means upstream improvements arrive as an ordinary merge. A remote fork is optional — for backup, fleet sync, or contributing back.
 
 **Prerequisites:** a NixOS box with flakes enabled (`nix.settings.experimental-features = [ "nix-command" "flakes" ];` in your existing config, or `experimental-features = nix-command flakes` in `/etc/nix/nix.conf`).
 
@@ -126,7 +133,7 @@ cd ~/Aoide
 sudo nixos-rebuild switch --flake .#<host>
 ```
 
-From then on the flake ships its own rebuild aliases (`adbuild`/`adtest`/`adrebuild`/…) for the everyday loop — see [Controls](docs/Aoide-Wiki/concepts/desktop/Controls.md). `aoide onboard` is the specified one-shot version of steps 2–3 (generate the host, seed `song/`, print the agent guide) but is a stub today (exit `64`) — drive it by hand with the steps above meanwhile. Full onboarding narrative, done-state checks, and self-update: [Clone and Run](docs/Aoide-Wiki/concepts/governance/Clone-and-Run.md).
+From then on the flake ships its own rebuild aliases (`adbuild`/`adtest`/`adrebuild`/…) for the everyday loop — see [Controls](docs/Aoide-Wiki/concepts/desktop/Controls.md). `aoide onboard` does steps 2–3's setup in one shot (register the clone, seed `song/`, wire the harness hooks, delegate the nix half to `lyra onboard` when `lyra` resolves) and is idempotent; it needs the `aoide` binary on `PATH` first, which is [docs/INSTALL.md](docs/INSTALL.md) § 1–3. Full onboarding narrative, done-state checks, and self-update: [Clone and Run](docs/Aoide-Wiki/concepts/governance/Clone-and-Run.md).
 
 ---
 

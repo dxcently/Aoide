@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-09-03
+updated: 2026-09-27
 tags: [aoide, cli, mcp, a2a, node, daemon]
 ---
 
@@ -488,9 +488,10 @@ aoide node hub <name> [--clear]
 ### aoide pair
 
 ```
-aoide pair [<name|url|id>] [--name <n>] [--via ssh://[user@]host[:port]]
-            [--self-via ssh://[user@]host] [--secs N] [--wait SECS]
-            [--allow read,spawn] [--mesh <mesh>] [--yes] [--json]
+aoide pair [<name|url|id>] [--name <n>] [--code <code>]
+            [--via ssh://[user@]host[:port]] [--self-url <url>]
+            [--self-via ssh://[user@]host] [--mesh <mesh>]
+            [--secs N] [--wait SECS] [--allow read,spawn] [--yes] [--json]
 aoide pair reject <id|name>
 aoide pair watch [--popup] [--json]
 ```

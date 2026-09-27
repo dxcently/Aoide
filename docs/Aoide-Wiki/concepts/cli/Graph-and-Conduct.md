@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-28
+updated: 2026-09-27
 tags: [aoide, cli, session, graph, conductor]
 ---
 
@@ -12,7 +12,7 @@ top-level `send`/`spawn`/`resurrect` verbs, and the top-level `conduct`
 command are the [[Session-Graph]]'s command surface: session registration and
 the project/session DAG, injection into conducted terminals
 ([[Conductor-Channel]]), window jumps ([[Terminal-Commander]]), the
-dead-session reaper, and the `inbox` commands that read back what `send`
+dead-session reaper, and the `mail` commands that read back what `send`
 delivered. The `graph` prefix itself owns only the read/analysis lens now —
 the bare render and `graph link`; everything that acts (`send`/`spawn`/
 `resurrect`) or manages session/project lifecycle (`session *`/`project *`)
@@ -29,10 +29,14 @@ bare `session`, and `resurrect` below. Handlers live in
 `pkgs/aoide/crates/conduct/src/graph/{commands,session_store,send,pending,spawn,resurrect,undying,session_pick,permit,window,conduct,doc,model,common}.rs`
 and `pkgs/aoide/crates/conduct/src/reap.rs`; registrations in
 `pkgs/aoide/crates/conduct/src/commands/graph.rs` (the registered `path:`
-renamed in place — handler names and file layout are unchanged). `inbox
-list|read|clear` is the one exception: it lives in
-`pkgs/aoide/crates/storage/src/{inbox, commands}.rs` — inbox is state, and
-storage already owns the store.
+renamed in place — handler names and file layout are unchanged). The `mail`
+group is the one exception, and it spans three crates by design: its handlers
+are `register_mail` in `pkgs/aoide/crates/client/src/commands.rs` (P-M2), except
+`mail ring` (`aoide_conduct::commands::graph::register_mail_ring`) and
+`mail serve` (the server's mail adapter, H1); the store itself — `base.jsonl`,
+the envelope, the lock — stays in `pkgs/aoide/crates/storage/src/mail.rs`,
+because `storage` sits below `client` in the DAG and mail now dials another
+node to deliver.
 
 Path resolution (`pkgs/aoide/crates/storage/src/fs.rs`): the conducting stage
 dir is `$AOIDE_STAGE_DIR` when absolute, else `$AOIDE_ROOT/state/stage/` — so
@@ -825,51 +829,36 @@ aoide session reap [--announce] [--json]
   reap control runs it `--announce` via the shellbridge. A false reap of a
   merely-quiet live session self-heals at its next hook event.
 
-### aoide inbox list
+### the receive half — `aoide mail`
+
+What `send` delivered is read back through the `mail` group; there is no
+separate group for it. A message that actually landed is filed as one
+**receipt** in the addressed mailbase (`state/mail/base.jsonl`), addressed from
+the sender to the session name it landed in — by every path that lands bytes in
+a live session: `send`'s local-delivery success path (a direct `--id`, a
+`--to <local target>`, and `pending approve`'s re-drive), the A2A door's
+spawn-first-turn path, and `mail ring`'s own ring. Reading it is a cursor
+advance, not a removal:
 
 ```
-aoide inbox list [--all] [--json]
+aoide mail                                           # names with unread mail, this reader
+aoide mail read [--for <name>] [--all-names] [--reread] [--json]
+aoide mail poll                                      # ask every paired node for its spool
 ```
 
-- **Reads:** `state/inbox.json` (absent → empty, never an error) — the
-  durable, per-host, NOT song-scoped record of every message that actually
-  landed in a local session (`pkgs/aoide/crates/storage/src/inbox.rs`,
-  registered in that same crate's `commands.rs`, not `conduct`). Filed at
-  exactly two sites: `send`'s local-delivery success path (covers a
-  direct `--id`, a `--to <local target>`, and `pending approve`'s re-drive)
-  and the A2A door's spawn-first-turn path — the receive half of a message
-  that landed, however it got there.
-- **Output:** unread entries only by default, every entry with `--all`; `id`
-  is the entry's position in the full stored array (unlike `pending list`,
-  marking an entry read does not remove it, so positions stay stable across
-  repeated calls — the one thing that CAN still shift a position is the
-  200-entry cap dropping the oldest on a new arrival mid-session).
+- **Reads:** `state/mail/base.jsonl` (absent → empty, never an error), plus the
+  reader's own cursor; `--reread` reprints already-read entries for the names
+  selected, while the cursor only ever moves forward.
+- **Writes:** the cursor, on `mail read`/`mail mark`. `mail rm` prunes base
+  entries older than the given age — the only pruning there is.
 - **Notes:** not gated.
 
-### aoide inbox read
-
-```
-aoide inbox read <n> [--json]
-```
-
-- **Reads/writes:** `state/inbox.json`; marks the entry at position `n`
-  (as shown by `inbox list`) read, under the same stage lock every
-  read-modify-write in this tree uses. A bad or out-of-range `n` fails
-  cleanly.
-- **Notes:** not gated. Idempotent — re-marking an already-read entry is a
-  clean no-op, not an error.
-
-### aoide inbox clear
-
-```
-aoide inbox clear [--json]
-```
-
-- **Writes:** empties `state/inbox.json`; reports how many entries were
-  dropped (`0` on an already-empty inbox — a clean no-op, not an error).
-- **Notes:** not gated, unconditional — no `--yes`, matching `session prune`'s
-  precedent: the command name is the whole blast radius, nothing selective to
-  confirm.
+The store is `aoide_storage::mail` — envelope/entry types, the canonical header,
+signing, the lock, the migration, the origin-signature check, deposit — and the
+command handlers live in `aoide_client::commands::register_mail`, moved there at
+P-M2 because delivery now dials another node and `storage` sits below `client` in
+the DAG. The letter, the mailbox, the board and the outbox are
+`docs/architecture/MAIL.md`'s subject; this page only names the door.
 
 ### aoide conduct
 
