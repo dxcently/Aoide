@@ -52,9 +52,9 @@
   # `aoide.song` defaults to null, and a host that names no song deploys no
   # QML and runs no shell service — the paint facets only activate once a
   # song is named. `sonata` is the shipped standard, the guaranteed-present
-  # baseline this host opts into by name. "sonata": the light glass key drawn
-  # from its own cover.
-  aoide.song = "sonata";
+  # baseline this host opts into by name. "cadenza": the phosphor key, a
+  # green-CRT termui console.
+  aoide.song = "cadenza";
 
   # Wave-1 facets — the whole desktop, one line each.
   aoide.facets.quickshell.enable = true;
