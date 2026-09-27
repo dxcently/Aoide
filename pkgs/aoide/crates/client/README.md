@@ -470,6 +470,15 @@ never the inbound/serve half (that's `aoide-server`).
   got a response does not poll; and because nothing attemptable means no
   dial at all, a `--hold`-only spool does not contact the node (`mail send
   --hold`'s own post-spool report therefore still reads `queued`).
+  **P-CHARTER adds the `poll` address to the same three places, from ONE
+  predicate** (`node_store::Node::never_dialled`, the record's address
+  being `poll`): `spool_entry` holds such an entry whatever its caller asked
+  for — the ack path's own literal `false` is covered by that line rather than
+  by an argument it must remember — `drain_node` returns before the link lock
+  and before the binding exchange (a dial held entries are filtered too late
+  for), and `pollable_nodes()` leaves such a node out, so a bare
+  `aoide mail poll` never dials a node that has no inbound transport to answer
+  on.
   `post_signed(node, method, params)` is the dial/bearer/sign/POST/parse
   half both methods share — `attempt_deposit` and `poll_node` are two
   readings of its `SignedCall`, never two copies of the wire machinery.

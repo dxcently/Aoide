@@ -810,7 +810,7 @@ pub use aoide_protocol::wire::gen_message_id;
 /// second `add`).
 fn handle_node_add(inv: &Invocation) -> Outcome {
     let cmd = "node.add";
-    const USAGE: &str = "usage: aoide node add <name> <url> [--autogate] [--no-verify] [--via ssh://[user@]host[:port]] [--json]";
+    const USAGE: &str = "usage: aoide node add <name> <url|poll> [--autogate] [--no-verify] [--via ssh://[user@]host[:port]] [--json]";
     let name = match inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         Some(n) => n.to_string(),
         None => return Outcome::usage(cmd, USAGE),
@@ -840,7 +840,15 @@ fn handle_node_add(inv: &Invocation) -> Outcome {
         .with_data(json!({ "reason": "invalid-name", "name": name }));
     }
     let autogate = inv.flag_present("autogate");
-    let no_verify = inv.flag_present("no-verify");
+    // **A `poll` address is the design's third transport member, and it names
+    // the ABSENCE of an inbound one** (`docs/architecture/HTTPS-MESH-API.md`
+    // "Transports and relays"): the node connects out and asks, so there is no
+    // AgentCard to fetch and the fetch below is skipped exactly as
+    // `--no-verify` skips it. It is still recorded as given — `verified` is
+    // `false` on this path either way, because a card fetch is reachability
+    // and never identity.
+    let poll_address = url.eq_ignore_ascii_case(aoide_storage::charter::DEFAULT_ADDRESS);
+    let no_verify = inv.flag_present("no-verify") || poll_address;
     let token_file = inv.flags.get("token-file").cloned().filter(|s| !s.is_empty());
     let bearer_secret = inv.flags.get("bearer-secret").cloned().filter(|s| !s.is_empty());
 
@@ -6803,6 +6811,28 @@ mod tests {
         );
         let err = parse_via_flag(&inv(&[("via", "http://not-ssh")])).unwrap_err();
         assert!(!err.is_empty(), "an invalid --via is Err, never silently treated as absent");
+    }
+
+    /// **`node add <name> poll` is the third transport member, and it never
+    /// dials.** The AgentCard fetch is skipped for it (there is no inbound
+    /// transport to fetch from — the same reason `--no-verify` exists), so the
+    /// node registers with no network at all, and the record it writes is one
+    /// the mail path will hold for rather than dial.
+    #[test]
+    fn handle_node_add_with_a_poll_address_registers_without_a_dial() {
+        with_node_state("add-poll", || {
+            let out = handle_node_add(&Invocation {
+                path: vec!["node".to_string(), "add".to_string()],
+                args: vec!["laptop".to_string(), "poll".to_string()],
+                flags: Default::default(),
+                door: aoide_protocol::Door::Cli,
+            });
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "a poll address registers with no fetch: {out:?}");
+            let nodes = aoide_storage::node_store::load_nodes();
+            assert_eq!(nodes.len(), 1);
+            assert_eq!(nodes[0].url, "poll");
+            assert!(nodes[0].never_dialled(), "and the predicate reads it for the mail path");
+        });
     }
 
     #[test]

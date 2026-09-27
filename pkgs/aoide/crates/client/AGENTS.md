@@ -762,7 +762,13 @@
   node that does not; a box that can only receive must ask. Nothing about
   `drain_node`'s dial policy changes for it (a pass with nothing
   attemptable still dials nothing), and the sweep must never let one
-  node's `Err` stop the next. `settle_deposit` is the ONE place an outcome
+  node's `Err` stop the next. **A `poll` address is never dialled, and that
+  is decided in ONE place: `spool_entry` computes the `hold` flavor itself
+  from `node_store::Node::never_dialled`, so no caller can forget it (the
+  ack path's literal `false` included), `drain_node` returns before the link
+  lock AND before the binding exchange, and `pollable_nodes` excludes such a
+  node.** Do not add a second address test for this, and do not push the
+  decision back out to callers. `settle_deposit` is the ONE place an outcome
   turns into spool side effects (ack minted and spooled on a filed letter
   or a letter duplicate, `retire_by_ack` on a filed receipt); the door
   reaches it through `aoide_conduct::mail_bridge::settle_deposit`, so

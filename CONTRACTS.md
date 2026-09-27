@@ -3218,6 +3218,29 @@ flavor is a LOCAL fact of the entry and never a field of the sealed
 envelope — the `msgid` covers every byte of the envelope, and the flavor
 is the sender's routing intent, not part of the letter.
 
+**Amendment (P-CHARTER): a `poll` destination's entry is `hold`, decided for
+the caller.** The design's third transport member name is the ABSENCE of an
+inbound transport ("a node's address selects the transport by URL scheme";
+`poll` = "it connects out to its mesh's relay, deposits, and polls for its own
+letters"), and its rule is a `hold` flavor: "a hub's outbox entry for a `poll`
+node is `hold`-flavored. The hub never dials it, and only the node's own
+`mailPoll` drains it." Three places enforce it from ONE predicate
+(`node_store::Node::never_dialled`, which reads the record's address and
+nothing else):
+
+- `aoide_client::mail_wire::spool_entry` holds the entry whatever its caller
+  asked for — so no caller has to remember, including `spool_and_drain_ack`,
+  whose own argument is a literal `false` and whose ack toward a `poll` origin
+  is held by this line;
+- `drain_node` returns without opening a link at all, BEFORE the binding
+  exchange — a dial a held-entry filter runs too late to prevent;
+- `pollable_nodes` leaves such a node out of a bare `aoide mail poll`: polling
+  is a dial, and this address is the one that has none to answer on.
+
+`node add <name> poll` is legal and skips the AgentCard fetch (there is no
+inbound transport to fetch from) — reachability is never identity, and
+`verified` stays `false` on that path either way.
+
 The envelope is stored VERBATIM — a retry resends the exact signed bytes,
 never re-mints (a re-mint would also mint a fresh, different `msgid`,
 defeating the far end's dedup in `state/mail/seen.jsonl`). `refused` is

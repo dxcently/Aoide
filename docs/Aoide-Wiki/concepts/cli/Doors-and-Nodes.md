@@ -368,7 +368,7 @@ aoide a2a serve [--bind <addr>] [--port <n>] [--spawn-agent <cmd>]
 ### aoide node add
 
 ```
-aoide node add <name> <url> [--autogate] [--no-verify]
+aoide node add <name> <url|poll> [--autogate] [--no-verify]
                [--via ssh://[user@]host[:port]]
                [--token-file <path>] [--bearer-secret <name>] [--json]
 ```
@@ -377,7 +377,11 @@ aoide node add <name> <url> [--autogate] [--no-verify]
   (`curl` GET on the resolved card URL) before registering anything — a node
   that fails the fetch is never added; `--no-verify` skips the fetch for a
   node that serves no card (reachability, never identity — the record lands
-  `verified: false` either way). `--via ssh://[user@]host[:port]` records an
+  `verified: false` either way). `poll` is the third member of the address
+  grammar and names the ABSENCE of an inbound transport: it is legal here, it
+  skips the fetch for the same reason `--no-verify` does, and every mail path
+  then HOLDS entries toward that node and never dials it ([[HTTPS-Mesh-API]]
+  "Transports and relays", `Node::never_dialled`). `--via ssh://[user@]host[:port]` records an
   ssh-transport marker: every later call dials through a lazily opened ssh
   forward instead of `url` directly ([[Node-Transport]]). Name must match
   `^[a-z0-9][a-z0-9-]*$` (it is joined into `state/node-cache/<name>.json`;

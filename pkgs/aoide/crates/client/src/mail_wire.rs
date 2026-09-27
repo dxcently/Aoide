@@ -312,6 +312,16 @@ pub fn spool_entry(
 ) -> Result<aoide_storage::outbox::OutboxEntry, String> {
     use aoide_storage::outbox::OutboxEntry;
     let now = aoide_storage::time::now_iso_utc();
+    // **A `poll` destination is held, whatever the caller asked for** — the
+    // design's rule at the one place the flavor is decided, so that EVERY
+    // caller inherits it and none can forget it: "a hub's outbox entry for a
+    // `poll` node is `hold`-flavored. The hub never dials it, and only the
+    // node's own `mailPoll` drains it" (`docs/architecture/HTTPS-MESH-API.md`
+    // "Transports and relays"). [`spool_and_drain_ack`] is the caller this
+    // matters for most: it passes a literal `false`, and its ack toward a
+    // `poll` origin is held by this line rather than by an argument it would
+    // have to remember to compute.
+    let hold = hold || dest_is_never_dialled(node_name);
     match aoide_storage::seal::usable_binding_for(node_name, &now) {
         Some(binding) => {
             let container = aoide_storage::seal::seal_envelope(
@@ -347,6 +357,20 @@ pub fn spool_entry(
             Ok(entry)
         }
     }
+}
+
+/// **Is this box's destination one it must never dial** — the record's address
+/// is `poll` (`Node::never_dialled`, the design's third transport)? The ONE
+/// by-name reader of that predicate on the mail path: [`spool_entry`] holds an
+/// entry toward such a node, [`drain_node`] returns without opening a link to
+/// one, and [`pollable_nodes`] leaves it out of a bare `mail poll` — it has no
+/// inbound transport to be asked on. A node this box has no record of is NOT
+/// never-dialled (there is no address to read, and the existing
+/// "not registered" answers stand).
+fn dest_is_never_dialled(node_name: &str) -> bool {
+    aoide_storage::node_store::load_nodes()
+        .iter()
+        .any(|n| n.name == node_name && n.never_dialled())
 }
 
 /// Poll `node_name` once — the relay-first half of the model (MAIL.md §Wire,
@@ -574,11 +598,17 @@ pub fn exchange_bindings(node: &Node, named_mesh: Option<&str>) -> Result<aoide_
 /// without `message` on either side is not one this box trades mail with.
 /// P-M4's declared `down`/`hold` status narrows this set further, at the same
 /// predicate the door's own admission uses.
+///
+/// **A `poll` node is not in it.** Polling is a DIAL, and that address says
+/// this node has no inbound transport to be dialled on — it is the one that
+/// asks. Its letters reach it through the relay's own spool and its own
+/// `aoide mail poll`; a bare `aoide mail poll` here asking it would be a dial
+/// that can only fail.
 pub fn pollable_nodes() -> Vec<String> {
     let home = aoide_storage::config::home_mesh();
     let mut out: Vec<String> = aoide_storage::node_store::load_nodes()
         .into_iter()
-        .filter(|node| node.verified && node.grant(&home).iter().any(|a| a == "message"))
+        .filter(|node| node.verified && !node.never_dialled() && node.grant(&home).iter().any(|a| a == "message"))
         .map(|node| node.name)
         .collect();
     out.sort();
@@ -618,6 +648,16 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
     let Some(node) = nodes.iter().find(|n| n.name == node_name) else {
         return Ok(());
     };
+    // **A `poll` node is never dialled, so a drain of one opens no link at
+    // all** — before the link lock, before the binding exchange (which is a
+    // dial in its own right, and the one a held-entry filter would not have
+    // saved us from), before anything. Its entries are HELD
+    // ([`spool_entry`]) and leave only through this box's own
+    // `aoide/mailPoll` at the far end. Silent success, like every other
+    // "nothing to do here" in this function.
+    if node.never_dialled() {
+        return Ok(());
+    }
 
     let Some(_link_lock) = aoide_storage::outbox::try_take_link_lock(node_name)? else {
         return Ok(());
@@ -1273,6 +1313,85 @@ mod tests {
         );
 
         drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A `poll` address is never dialled** (P-CHARTER, "Transports and
+    /// relays": "a hub's outbox entry for a `poll` node is `hold`-flavored.
+    /// The hub never dials it, and only the node's own `mailPoll` drains it").
+    /// Three halves, at the three places the mail path could dial:
+    ///
+    /// 1. `spool_entry` — asked for a `now` entry, it spools HELD, because the
+    ///    destination's address is `poll`;
+    /// 2. `drain_node` — returns without opening a link at all, so the BINDING
+    ///    EXCHANGE (a dial that a held-entry filter runs too late to prevent)
+    ///    never happens either;
+    /// 3. the ACK path — `spool_and_drain_ack` passes a literal `false`, and
+    ///    the ack toward a `poll` origin comes out held by the same line,
+    ///    which is the caller this rule exists to protect.
+    ///
+    /// Nothing listens for `laptop` in this test, and nothing could: a `poll`
+    /// node has no inbound transport.
+    #[test]
+    fn a_poll_address_is_never_dialled_and_its_entry_is_held() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("poll-node-never-dialled");
+
+        let laptop = Node {
+            url: aoide_storage::charter::DEFAULT_ADDRESS.to_string(),
+            ..unpaired_node("laptop")
+        };
+        let laptop = Node { pubkey: Some("cc33".to_string()), verified: true, ..laptop };
+        let laptop = Node { grants: aoide_storage::node_store::grants_in("home", &["message"]), ..laptop };
+        assert!(laptop.never_dialled(), "the predicate reads the address, by scheme");
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        aoide_storage::node_store::insert_node(&mut nodes, laptop.clone());
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+
+        // 1. The spool decides HELD although the caller asked for `now`.
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", "laptop", "bob", "for the laptop").unwrap();
+        let entry = spool_entry("laptop", letter.clone(), false).unwrap();
+        assert!(
+            entry.is_held(),
+            "a `poll` destination's entry is hold-flavored whatever the caller asked for"
+        );
+        aoide_storage::outbox::write_entry("laptop", &entry).unwrap();
+
+        // 2. A drain pass does not dial it — not even for the binding exchange.
+        drain_node("laptop").unwrap();
+        let rows = aoide_storage::outbox::list_entries("laptop").unwrap();
+        let row = rows.iter().find(|e| e.envelope.msgid == letter.msgid).expect("still spooled");
+        assert_eq!(row.tries, 0, "never attempted");
+        assert!(row.last_try_at.is_empty(), "and no attempt was even recorded: {}", row.last_try_at);
+        assert!(row.is_held(), "it stays held, for the far end's own poll");
+        assert!(
+            aoide_storage::outbox::read_link_state("laptop").unwrap().is_none(),
+            "no link was ever opened, so no link state was written"
+        );
+
+        // 3. The same line covers the ack path's literal `false`.
+        let mut inbound = aoide_storage::mail::mint_outbound_letter("bob", "somewhere", "conductor", "hi").unwrap();
+        inbound.header.from.node = "laptop".to_string();
+        inbound.header.from.name = "bob".to_string();
+        settle_deposit(
+            &inbound,
+            &aoide_storage::mail::DepositOutcome::Filed {
+                msgid: inbound.msgid.clone(),
+                kind: aoide_storage::mail::ENTRY_TYPE_LETTER.to_string(),
+            },
+        );
+        let ack = aoide_storage::outbox::list_entries("laptop")
+            .unwrap()
+            .into_iter()
+            .find(|e| e.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT)
+            .expect("the ack toward the `poll` origin was spooled");
+        assert!(ack.is_held(), "and it is held too — the ack path cannot get this wrong");
+        assert_eq!(ack.tries, 0);
+        assert!(
+            !pollable_nodes().contains(&"laptop".to_string()),
+            "and a bare `mail poll` does not ask a node that has no inbound transport"
+        );
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

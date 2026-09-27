@@ -246,6 +246,21 @@ impl Node {
     pub fn refused(&self, mesh: &str) -> &[String] {
         self.narrowed.get(mesh).map(Vec::as_slice).unwrap_or(&[])
     }
+
+    /// **Is this record's address the third member of the design's transport
+    /// grammar** — `poll`, "it has no address: the node connects out to its
+    /// mesh's relay, deposits, and polls for its own letters"
+    /// (`docs/architecture/HTTPS-MESH-API.md` "Transports and relays")?
+    ///
+    /// The ONE predicate behind "a hub never dials a `poll` node": a mail path
+    /// that would otherwise dial this record asks this and holds instead
+    /// (`aoide_client::mail_wire`). Addressed by SCHEME, exactly as the design
+    /// says ("a node's address selects the transport by URL scheme") — so this
+    /// is a scheme test and never a hostname one, and a node with no such
+    /// address is dialled as before. Pure, and total for any string.
+    pub fn never_dialled(&self) -> bool {
+        self.url.trim().eq_ignore_ascii_case(crate::charter::DEFAULT_ADDRESS)
+    }
 }
 
 /// Which mesh a LOCAL command acts in when the operator named none — the
