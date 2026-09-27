@@ -1564,7 +1564,7 @@ mod tests {
     use crate::graph::model::{load_stage, sessions_path, write_stage, SessionsFile};
     use crate::graph::session_store::{do_session_start, stamp_headless};
     use crate::graph::testutil::*;
-    use std::io::Read as _;
+    use aoide_test_support::{accept_one, read_delivery};
     #[cfg(unix)]
     use std::os::unix::net::UnixListener;
     #[cfg(windows)]
@@ -2038,10 +2038,11 @@ mod tests {
     }
 
     fn read_all(listener: UnixListener) -> Vec<u8> {
-        let (mut conn, _) = listener.accept().unwrap();
-        let mut buf = Vec::new();
-        let _ = conn.read_to_end(&mut buf);
-        buf
+        // The bounded rig (`aoide_test_support`): a payload this pass never
+        // writes must fail the test rather than park its `accept` — and, under
+        // `env_lock`, the whole suite queued behind it.
+        let mut conn = accept_one(&listener, "the pass under test delivers to the fixture's socket");
+        read_delivery(&mut conn, "the pass under test delivers to the fixture's socket")
     }
 
     /// A `TurnSettled` record with an arbitrary id — the shape a test uses to

@@ -66,7 +66,14 @@ A fixture that pastes a path into hand-built JSON or creates a file/dir with
 (escape them — `send`'s `jp`, or build with `serde_json`), a feed's DACL must be
 owner-only, and a socket path must fit `sun_path` (use
 `aoide_test_support::short_tmp`). Each of those three cost real diagnosis time
-once; none of them is a style preference.
+once; none of them is a style preference. One more of the same kind: a fixture
+that binds a listener and waits for a delivery reads it through
+`aoide_test_support`'s bounded rig (`expect_delivery`/`accept_one`/
+`read_delivery`), never a hand-rolled `accept`/`read_to_end` thread — a
+delivery this crate withholds (a held-pending send, a ring that never fires)
+would otherwise park that thread, and under `env_lock` every test queued
+behind it, instead of failing the one test with the fixture's own expectation
+in the message.
 
 - **Session actions preserve identity and scope.** Project assignment changes
   `project`, never `cwd` or ancestry. Termination is local daemon-only:
