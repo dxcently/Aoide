@@ -52,7 +52,7 @@ installed either way.
 
 If the `lyra` binary resolves, `onboard` then delegates the nix half to `lyra onboard`:
 
-1. Generate `./aoide.nix` (or `--out <path>`): every `aoide.*` module option — 142 today, derived live from the modules through the flake's `aoideOptions` output, never a hand-list — with its default commented out and a one-line description, plus an appendix listing the env knobs (`AOIDE_CONDUCT_AUTOGATE`, `AOIDE_TERMINAL`, `AOIDE_CORE_BIN`/`AOIDE_RICE_BIN`, `AOIDE_DISCOVERY_ADVERTISE`) as comments.
+1. Generate `./aoide.nix` (or `--out <path>`): every `aoide.*` module option — 161 today, derived live from the modules through the flake's `aoideOptions` output, never a hand-list — with its default commented out and a one-line description, plus an appendix listing the env knobs (`AOIDE_CONDUCT_AUTOGATE`, `AOIDE_TERMINAL`, `AOIDE_CORE_BIN`/`AOIDE_RICE_BIN`, `AOIDE_DISCOVERY_ADVERTISE`) as comments.
 2. Print the `imports = [ ./aoide.nix ];` line for the user's own flake. Onboard never edits the flake; adding the import is the user's one manual step.
 
 Re-running `lyra onboard` warns and backs the old file up to `<out>.bak`; a file it did not generate is refused, never overwritten.

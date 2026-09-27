@@ -377,7 +377,7 @@ conducting orchestration is `aoide`'s identity, painting is `lyra`'s:
   `healthcheck`, the placeholder-screen lockup watchdog), `herald push`,
   `onboard` (the nix half of installation: generates `./aoide.nix` — or
   `--out <path>` — listing every
-  `aoide.*` module option, 142 today, derived live from the modules via the
+  `aoide.*` module option, 161 today, derived live from the modules via the
   flake's `aoideOptions` output, defaults commented out with one-line
   descriptions, plus the env-knob appendix as comments, and prints the
   `imports = [ ./aoide.nix ];` line for the user's own flake — it never edits
