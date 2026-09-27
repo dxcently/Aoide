@@ -33,13 +33,13 @@ let
       config,
       lib,
       pkgs,
-      inputs,
+      aoideInputs,
       ...
     }:
     let
       # The Quickshell binary from the pre-declared flake input (flake.nix). The
       # upstream package lives there, not in this flake's own pkgs/ walk.
-      quickshellPkg = inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      quickshellPkg = aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
       # The directory the shell runs. `null` is the bare shape above.
       configDir = config.aoide.quickshell.config;

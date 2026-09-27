@@ -55,7 +55,7 @@
   config,
   lib,
   pkgs,
-  inputs,
+  aoideInputs,
   ...
 }:
 
@@ -302,7 +302,7 @@ lib.mkMerge [
         ]
         ++
           lib.optional config.aoide.lyra.enable
-            inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
+            aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
         serviceConfig = {
           Type = "simple";

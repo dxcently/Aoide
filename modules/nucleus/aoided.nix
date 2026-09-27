@@ -15,7 +15,7 @@
   config,
   lib,
   pkgs,
-  inputs,
+  aoideInputs,
   ...
 }:
 
@@ -217,7 +217,7 @@ lib.mkIf config.aoide.enable {
         ]
         ++
           lib.optional config.aoide.lyra.enable
-            inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
+            aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
         serviceConfig = {
           Type = "simple";

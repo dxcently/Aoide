@@ -12,11 +12,11 @@
 #     telescope, which-key, neo-tree, dashboards, lualine, bufferline,
 #     nvim-cmp/luasnip, the complete keymap set (clipboard leaders,
 #     insert-mode hjkl, neo-tree/cheatsheet toggles).
-#   - nvf rides in through the `nvf` flake input; this dendrite imports
-#     `inputs.nvf.homeManagerModules.default` into the aoide user's HM config.
-#     `inputs` arrives via specialArgs (mkHost and the VM test both pass it),
-#     so the HM submodule reaches nvf by closure — no extraSpecialArgs needed
-#     here, though mkHost threads them for future dendrites.
+#   - nvf rides in through the `nvf` flake input; the nucleus lane hands every
+#     home-manager module Aoide's own inputs as `aoideInputs` (via
+#     `home-manager.sharedModules`), so this dendrite imports
+#     `aoideInputs.nvf.homeManagerModules.default` into the aoide user's HM
+#     config and nothing has to be threaded through a consumer's specialArgs.
 #
 # LANGUAGES — Aoide keeps enabled only what Aoide work actually uses:
 #   nix (this repo) · rust (aoide CLI/aoided) · ts/js (notes package) ·
@@ -36,7 +36,6 @@ let
     {
       config,
       lib,
-      inputs,
       ...
     }:
     {
@@ -44,9 +43,14 @@ let
 
       config = lib.mkIf config.aoide.neovim.enable {
         home-manager.users.${config.aoide.user} =
-          { pkgs, lib, ... }:
           {
-            imports = [ inputs.nvf.homeManagerModules.default ];
+            pkgs,
+            lib,
+            aoideInputs,
+            ...
+          }:
+          {
+            imports = [ aoideInputs.nvf.homeManagerModules.default ];
 
             # nvf provides the only `nvim` in the profile (header), so the dendrite
             # that installs the editor also declares it the default — EDITOR/VISUAL

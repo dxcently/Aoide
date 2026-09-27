@@ -520,6 +520,110 @@ assumption:
   host's song selection and generates the manifest — so there is nothing left
   for a second walker to do.
 
+## The root flake — AoideOS's export surface
+
+`flake.nix` (this repo) is the seam a consumer builds AoideOS against, and it is
+consumed ONLY through these outputs — never through a path into this tree, which
+is the reach-in the table below retires. `tests/consumer/` is the fixture that
+proves it: a stranger's flake selecting the nucleus lane, the shell, the songs and
+the theme, whose only inputs besides nixpkgs are home-manager and Aoide.
+
+```
+flake.nix
+├── nixosModules.nucleus      the nucleus lane: the ONE module that closes over
+│                             Aoide's own flake inputs and hands them to every
+│                             lane as `aoideInputs`
+├── nixosModules.<name>       ONE per catalogue name (`modules/default.nix`),
+│                             each that capability's PATH — `import`ing it
+│                             yields the lane record `{ body; nixos; }`, which
+│                             is exactly what a catalogue value is
+├── lib.composition           the constructor, a function of `{ lib }`
+├── lib.livery                the venue-recolour resolver, a function of `{ lib }`
+├── lib.songbook              discovery, selection and the songs' module list,
+│                             a function of `{ lib, songbook ? … }`
+├── lib.catalogue             the whole catalogue as DATA — the bulk form of
+│                             `nixosModules.<name>`
+└── overlays.default          every `pkgs/<name>` this tree discovers plus
+                              `aoide` (never `lyra`: nixpkgs owns that name)
+```
+
+What a consumer's flake writes, in the shapes the outputs are:
+
+| consumer's reach-in (before) | replacement export | produced by |
+|---|---|---|
+| `inputs.aoide + "/modules/default.nix"` | `nixosModules.nucleus` + `nixosModules.<name>` per catalogue entry; `lib.catalogue` for bulk use | S10 |
+| five `song/songbook/*/rice.nix` | `lib.songbook.{discover,selectionModule,songModules}` passed to `lib.composition`'s `selectionModules` / `extraModulesFor` | S8 (exported S10) |
+| an `import` of `lib/pkgs.nix` for the overlay | `overlays.default` | S10 |
+| `inputs.aoide.packages.<sys>.default` | `packages.<sys>.aoide` (and `.lyra`, `.lyra-shell`, `.lyra-songbook`) | exists / S3 |
+| `import … "/lib/livery.nix"` `.resolve` | `lib.livery.resolve` | S10 |
+| `inputs.aoide = inputs.aoide.inputs.aoide` | none: `nixosModules.nucleus` closes over Aoide's own inputs | S10 |
+| a private copy of `lib/composition.nix` | `lib.composition` | S1 (exported S10) |
+| six `aoide.facets.*` reads | the facts `aoide.{quickshell,lyra,stylix,compositor,greeter}.enable` | S2/S5 |
+
+The stability contract:
+
+- `nixosModules.nucleus` is a module a NixOS host imports; `nixosModules.<name>`
+  is a PATH a consumer's own `registry.catalogue` takes unchanged, because a
+  catalogue's values ARE paths (`lib/composition.nix` imports them).
+- `lib.*` are their files' own functions, still UNAPPLIED: a consumer applies
+  them with ITS lib (and its own songbook), so selection runs on the consumer's
+  evaluation and not on this flake's.
+- `overlays.default` is the base package set. A lane's replacement of a name the
+  walker also supplies stands only for a name listed in `lib/pkgs.nix`'s
+  `intentionalOverrides`; any other replacement is an evaluation error naming
+  the package.
+
+### `aoideInputs` — the three doors, and which moment each answers
+
+A lane reads Aoide's own flake inputs (quickshell, nvf, stylix, hyprland, the
+core) as the module argument `aoideInputs`, and a consumer threads nothing. The
+value is closed over in `nixosModules.nucleus` (`lib/aoideos.nix`). It arrives
+through three doors because the module system asks for an argument in three
+different moments, and a door that answers the wrong moment is a broken
+evaluation, not a style choice:
+
+- **inside `config`** — `_module.args.aoideInputs`, set by that one module.
+  `_module.args` is `raw`, so a second definition is a conflict: nucleus is the
+  only site.
+- **while an `imports` LIST is resolved** — by nucleus importing, BY VALUE, the
+  two upstream modules whose lanes used to name them (the core's module, which
+  was `modules/nucleus/options.nix`'s import, and stylix's, which was the stylix
+  lane's) and by `lib/options.nix` importing the core's for its bare doc-list
+  evaluation. An `imports` list is what the module list is built from, and a
+  `_module.args` value is read out of `config`, which is computed FROM that
+  list — reading one there is an infinite recursion, which nixpkgs reports as
+  "argument `x` is not externally provided, so querying `_module.args` instead,
+  requiring `config`". A lexical value in the file that does the importing costs
+  no argument at all.
+- **inside a Home Manager evaluation** — `home-manager.extraSpecialArgs.aoideInputs`,
+  guarded on `options ? home-manager` (asked inside `config`, for the reason
+  above). Home Manager runs its own module system, where `extraSpecialArgs` IS
+  its specialArgs — external, therefore available while its own module
+  collection runs, which is what the neovim lane's
+  `imports = [ aoideInputs.nvf… ]` needs. An outer `_module.args` does not cross
+  into that evaluation; `home-manager.sharedModules` puts the name back into
+  `config` and meets the same wall as the `imports` door.
+
+### Songs, from a consumer's side
+
+A consumer's songs live in the CONSUMER's tree. `lib.songbook` takes the
+directory (`songbook ? …`); the consumer passes it, once, into the songs hook it
+writes for `extraModulesFor` (`_module.args.songbook`, beside `song` and
+`borrow`); and the lane that paints the built-in songs and `pkgs/lyra-songbook`
+take it as an argument instead of naming a path in this repo. A host says what it
+performs (`song.declared`) and what it merely builds in (`song.available`), with
+the borrow closure and the machine-owned songbook unchanged from §5.
+
+**Stylix.** A consumer must NOT import the stylix module itself once it selects
+the `stylix` lane: the lane's module comes from Aoide's own inputs, and two
+copies through different input values do not deduplicate.
+
+**Deliberately not exported:** `lib/options.nix` (it reads this tree's
+`modules/`), the aggregations and override records (a registry's groupings and
+fixes are the consumer's own data), this repo's `hosts/` and `users/` (machines
+and people are a machine's business, and `tests/consumer/` writes its own), and
+anything Quickshell-shaped (paint ships as `packages.<sys>.lyra-*`).
+
 ## Open questions (each tagged with when it must be settled)
 
 - **Naming — DECIDED (hybrid).** Plain names where the concept is universal

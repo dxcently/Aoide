@@ -72,10 +72,20 @@ let
   # overlay, which auto-discovers pkgs/<name> and guards each name against
   # shadowing a nixpkgs attribute. `aoide` itself is self-flaked
   # (pkgs/aoide/flake.nix) and named by neither aggregate — it arrives via
-  # `inputs.aoide.nixosModules.default`, imported by `modules/nucleus/options.nix`
-  # and carrying `overlays.default` with it, the same way a real host picks it up.
+  # `aoideInputs.aoide.nixosModules.default`, imported by
+  # `modules/nucleus/options.nix` and carrying `overlays.default` with it, the
+  # same way a real host picks it up.
   overlay = (import ../lib/pkgs.nix { inherit lib; }).overlay {
     stock = inputs.nixpkgs.legacyPackages.${system};
+  };
+
+  # The nucleus lane as `lib/aoideos.nix` builds it for a real host — the same
+  # value the flake exports as `nixosModules.nucleus`, and the ONE module that
+  # sets `_module.args.aoideInputs` (which is how every lane reaches Aoide's
+  # own inputs now; nothing threads them through specialArgs).
+  aoideos = import ../lib/aoideos.nix {
+    inherit inputs lib system;
+    username = "khoa";
   };
 
   # The VM's host record — the same interface `hosts/<name>/default.nix`
@@ -105,15 +115,14 @@ let
   resolved = composition.mkNixosModules {
     hostName = "vm-test";
     registry = import ../modules;
-    nucleus = ../modules/nucleus;
+    nucleus = aoideos.nucleusModule;
     hostModules = [ vmHost ];
     homeManagerModule = inputs.home-manager.nixosModules.home-manager;
     overlays = [ overlay ];
-    # specialArgs mirror what lib/aoideos.nix passes (host/inputs/username).
-    # Modules that reference these args (e.g. the lyra lane uses `inputs`)
-    # receive the real values; the node is named "vm-test".
+    # specialArgs mirror what lib/aoideos.nix passes: `username`, and NOT
+    # `inputs` — the lanes reach Aoide's own inputs as `aoideInputs`, which the
+    # nucleus lane above defines once. The node is named "vm-test".
     specialArgs = {
-      inherit inputs;
       username = "khoa";
     };
     inherit system;

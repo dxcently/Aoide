@@ -38,7 +38,7 @@
 {
   lib,
   pkgs,
-  inputs,
+  aoideInputs,
 }:
 let
   registry = import ../modules;
@@ -65,10 +65,16 @@ let
   evaled = lib.evalModules {
     modules = bodies ++ [
       ../modules/nucleus
+      # The core's own module, straight from this flake's input — the same
+      # value `lib/aoideos.nix`'s nucleus lane imports into a host. It comes
+      # from HERE rather than through `../modules/nucleus` because the
+      # `aoide.*` option contract is part of the doc list this file renders,
+      # and a bare `evalModules` has no lane to close over the inputs for it.
+      aoideInputs.aoide.nixosModules.default
       { config._module.check = false; }
     ];
     specialArgs = {
-      inherit inputs pkgs;
+      inherit aoideInputs pkgs;
       inherit (pkgs) system;
       username = "khoa";
       host = "aoide-options-eval";

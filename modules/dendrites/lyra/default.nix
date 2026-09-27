@@ -28,7 +28,8 @@ let
       config,
       lib,
       pkgs,
-      inputs,
+      aoideInputs,
+      songbook,
       ...
     }:
     let
@@ -37,7 +38,11 @@ let
       # build time (nothing here reads a song/ RUNTIME dir; the check that used
       # to assert that scanned module PATHS and is gone — what replaced it is
       # `checks.song-shape`'s `strayNixFiles` and `checks.song-runtime-untracked`).
-      songbook = ../../../song/songbook;
+      #
+      # Handed in as a module argument by the same hook that sets
+      # `aoide.songbook.builtIn` (lib/aoideos.nix, and every consumer's copy of
+      # that wiring): a consumer's songs live in the CONSUMER's tree, so this
+      # lane must not name a path inside Aoide's.
 
       # ── What this host BUILDS IN ────────────────────────────────────────────
       # `song.declared ∪ song.available` on its record, derived by the
@@ -56,12 +61,12 @@ let
       # (`lib/options.nix`) — `lyra onboard`'s offline source, and the reason
       # the shipped `lyra-songbook` needs an argument `callPackage` cannot
       # fill. Derived here rather than handed down: this lane is what builds
-      # `pkgs.lyra-songbook` for the host, and the value needs `inputs`, which
-      # is a module argument. Lazily forced — a host that never reads
+      # `pkgs.lyra-songbook` for the host, and the value needs `aoideInputs`,
+      # which is a module argument. Lazily forced — a host that never reads
       # `pkgs.lyra-songbook` never evaluates it.
       aoideOptions = import ../../../lib/options.nix {
-        inherit lib inputs;
-        pkgs = inputs.nixpkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system};
+        inherit lib aoideInputs;
+        pkgs = aoideInputs.nixpkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system};
       };
 
       builtIn = config.aoide.songbook.builtIn;
@@ -387,7 +392,7 @@ let
                 songs = builtIn;
                 packages = songbookLib.packagesFor builtIn;
               };
-              inherit aoideOptions;
+              inherit aoideOptions songbook;
             };
           })
         ];

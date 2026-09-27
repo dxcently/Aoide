@@ -23,10 +23,12 @@ module builds against what nucleus declares.
   that owns a fact sets it `mkDefault true`; every reader — a nucleus file or
   another lane — reads the FACT and never the owning lane's own option. The
   CORE half (`enable`, `root`, `checkout`, `auditLog`, `terminal`, `user`,
-  `sessionTarget`) arrives by import: one `imports = [
-  inputs.aoide.nixosModules.default ]` line pulls it in from
-  `pkgs/aoide/module/options.nix` — the core flake's own option contract,
-  nixpkgs-only and portable to any consumer. `aoide.config` is the one
+  `sessionTarget`) arrives by import from `pkgs/aoide/module/options.nix` — the
+  core flake's own option contract, nixpkgs-only and portable to any consumer.
+  The import is written by the LANE that closes over Aoide's own inputs
+  (`lib/aoideos.nix`'s `nucleusModule`, exported as `nixosModules.nucleus`), not
+  by a file here: a file in this directory cannot see the flake's inputs, and an
+  `imports` list cannot read a value that `_module.args` supplies. `aoide.config` is the one
   namespace declared elsewhere, in `config.nix` beside the rendering it
   exists for: its `settings` type comes from `pkgs.formats.toml`, so the
   option and the generator are one unit.

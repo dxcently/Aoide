@@ -30,7 +30,6 @@ let
       options,
       lib,
       pkgs,
-      inputs,
       ...
     }:
     let
@@ -290,22 +289,24 @@ in
 {
   inherit body;
 
-  # The Stylix NixOS module is this lane's own dependency, imported HERE — the
-  # lane is what the constructor imports, so a host that selects `stylix` gets
-  # the module with it and nothing else has to know. Gated on the input being
-  # present so a consumer without `stylix` still evaluates.
+  # The Stylix NixOS module is this lane's own dependency, and it is imported by
+  # the NUCLEUS lane (`lib/aoideos.nix`'s `nucleusModule`), not here — the one
+  # place that closes over Aoide's own inputs lexically. An `imports` list is
+  # resolved while the module list is still being built, and a name provided
+  # through `_module.args` is read from `config`, which is computed FROM that
+  # list: `imports = [ … aoideInputs.stylix.nixosModules.stylix ]` is an
+  # infinite recursion, not a style question. Gated there on the input being
+  # present, so an input set without `stylix` still evaluates.
   #
-  # It must NOT ride `body`: `lib/options.nix` imports every body into a bare
-  # `evalModules` to render `aoideOptions`, and Stylix's home-manager half
+  # It must NOT ride `body` either: `lib/options.nix` imports every body into a
+  # bare `evalModules` to render `aoideOptions`, and Stylix's home-manager half
   # reads NixOS options (`options.programs`) that a bare eval has not declared.
-  # So the lane imports it here, and this lane is the ONLY path that adds it —
-  # the whole-tree path went with `lib/mkHost.nix` (S7). `lib.optional` returns
-  # a LIST, so it is appended rather than nested: a list inside `imports` is a
-  # module-system error, not a shorthand.
+  # So the lane below carries only what SELECTING stylix means: the fact, and
+  # the livery-driven configuration the rest of this file writes.
   nixos =
-    { lib, inputs, ... }:
+    { lib, ... }:
     {
-      imports = [ body ] ++ lib.optional (inputs ? stylix) inputs.stylix.nixosModules.stylix;
+      imports = [ body ];
       config.aoide.stylix.enable = lib.mkDefault true;
     };
 }

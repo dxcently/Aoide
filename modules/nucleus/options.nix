@@ -12,7 +12,6 @@
 # it wires no behaviour, so an empty config evaluates cleanly.
 {
   lib,
-  inputs,
   ...
 }:
 let
@@ -373,8 +372,13 @@ let
 
 in
 {
-  imports = [ inputs.aoide.nixosModules.default ];
-
+  # The core's own module (`pkgs/aoide/module`, `nixosModules.default` of the
+  # `aoide` input) is imported by the nucleus LANE that closes over this flake's
+  # inputs — `lib/aoideos.nix`'s `nucleusModule` — and not here: an `imports`
+  # list cannot read a module argument that `_module.args` supplies (the module
+  # list is what `config` is assembled from, so the read is a cycle), and this
+  # file must keep evaluating when a bare `evalModules` imports it without any
+  # lane around it (`lib/options.nix` reads the option declarations that way).
   options.aoide = {
     # ── Song selection — the replay seam ───────────────────────────────────
     # The song (rice) this host performs. A song is host-agnostic: ANY host in

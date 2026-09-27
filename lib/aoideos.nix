@@ -36,7 +36,21 @@
 let
   composition = import ./composition.nix { inherit lib; };
 
-  songbook = import ./songbook.nix { inherit lib; };
+  # The committed songbook this flake's hosts' songs live in. Named ONCE here,
+  # as the caller's answer to `lib/songbook.nix`'s own default (`songbook ?
+  # ../song/songbook` — the same directory): the selection validates a host
+  # against it, the hook below hands the same value to the lane that paints the
+  # built-in songs, and a consumer's own songbook arrives through that same
+  # argument. `lib/songbook.nix` itself is deliberately NOT touched for this:
+  # it is COPIED into `pkgs/lyra-songbook` (`share/lyra/nix/songbook.nix`, the
+  # shipped generator), so a single added line there moves every host's
+  # templates path — and every session variable and unit `Environment` that
+  # interpolates it.
+  songbookRoot = ../song/songbook;
+  songbook = import ./songbook.nix {
+    inherit lib;
+    songbook = songbookRoot;
+  };
 
   # Every immediate child directory of `hosts/` holding a `default.nix`, minus
   # the `_`-prefixed shelved ones.
@@ -58,9 +72,65 @@ let
   overlay = (import ./pkgs.nix { inherit lib; }).overlay {
     stock = inputs.nixpkgs.legacyPackages.${system};
   };
+
+  # The nucleus lane, as a CONSUMER takes it — and the ONE place Aoide's own
+  # flake inputs reach a module evaluation.
+  #
+  # What a lane reads is the module argument `aoideInputs`, and there are
+  # exactly two doors for it, because the module system asks for arguments in
+  # two different moments:
+  #
+  #   - INSIDE `config` (every lane's reads except the imports below), through
+  #     `_module.args`, which is `raw`: exactly ONE module defines it, and this
+  #     is that module. Both this file's `mkHost` and the flake's
+  #     `nixosModules.nucleus` output are that same value.
+  #   - While an `imports` LIST is being resolved, through specialArgs — and
+  #     only specialArgs. An `imports` list is what the module list is built
+  #     from, and a name provided by `_module.args` is read out of `config`,
+  #     which is computed FROM that module list. Nixpkgs names the wall itself
+  #     when it happens ("argument `x' is not externally provided, so querying
+  #     `_module.args` instead, requiring `config`" → infinite recursion). So
+  #     the two upstream modules a lane used to name in its own `imports` are
+  #     imported HERE, by value, where `inputs` is a LEXICAL value of this file
+  #     and costs no argument at all: the core's module (was
+  #     `modules/nucleus/options.nix`) and stylix's (was
+  #     `modules/dendrites/stylix.nix`).
+  #   - The HOME lane gets a third door for the same reason: home-manager
+  #     evaluates its own module system, and `extraSpecialArgs` IS its
+  #     specialArgs (external, available during its own module collection), so
+  #     `aoideInputs.nvf` works in an HM `imports` list the way
+  #     `aoideInputs.quickshell` works in a NixOS one. `sharedModules` would put
+  #     the name back in `config` and hit the wall above.
+  #
+  # `options ? home-manager` is asked INSIDE this module's `config`, never at
+  # module-application time: a guard forced in the top-level attrset asks the
+  # same question the wrong way (the error above). A host that never imports
+  # home-manager's NixOS module gets no option named that from here.
+  nucleusModule =
+    { options, ... }:
+    let
+      imports = [
+        ../modules/nucleus
+        inputs.aoide.nixosModules.default
+      ]
+      ++ lib.optional (inputs ? stylix) inputs.stylix.nixosModules.stylix;
+    in
+    {
+      inherit imports;
+      config = {
+        _module.args.aoideInputs = inputs;
+      }
+      // lib.optionalAttrs (options ? home-manager) {
+        home-manager.extraSpecialArgs.aoideInputs = inputs;
+      };
+    };
 in
 {
   inherit hostNames;
+
+  # The nucleus lane as a consumer takes it — the same module value
+  # `nixosModules.nucleus` exports (see the let-block above).
+  inherit nucleusModule;
 
   mkHost =
     name:
@@ -75,7 +145,7 @@ in
       knownHosts = hostNames;
 
       registry = import ../modules;
-      nucleus = ../modules/nucleus;
+      nucleus = nucleusModule;
       hostModules = [ ../hosts/${name} ];
       homeManagerModule = inputs.home-manager.nixosModules.home-manager;
       overlays = [ overlay ];
@@ -108,6 +178,11 @@ in
             # `../` path out of its own folder.
             _module.args = {
               inherit (songbook) song borrow;
+              # …and the directory they were discovered in, for the lane that
+              # paints a host's built-in songs: a consumer's songs live in the
+              # CONSUMER's tree, so the lyra lane reads this instead of naming a
+              # repository path of Aoide's own (`lib/songbook.nix`'s own root).
+              songbook = songbookRoot;
             };
             aoide.song = song.declared;
             aoide.songbook.builtIn = songbook.builtIn song;
@@ -118,7 +193,10 @@ in
       # record states its own platform (`nixpkgs.hostPlatform` in its `nixos`
       # half), because the constructor assembles the module list and lets the
       # platform come from the modules it assembled. `host` and `username` ride
-      # along because modules and test fixtures have always had them.
-      specialArgs = { inherit inputs username; };
+      # along because modules and test fixtures have always had them — and
+      # `inputs` does NOT: every lane reads Aoide's own inputs as `aoideInputs`
+      # (`nucleusModule` above), so threading them through specialArgs would be
+      # a second, drifting answer to a question already answered once.
+      specialArgs = { inherit username; };
     };
 }

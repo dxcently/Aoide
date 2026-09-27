@@ -4813,6 +4813,13 @@ arrive as ARGUMENTS, injected at the two sites that evaluate a song:
   composition that dresses a slot with another song's body borrows it BY NAME —
   `borrow "sonata" // { inherit (borrow "fugue") bar herald; }`. An unknown name,
   or a song with no `_widgets/` shelf, throws a message naming the discovered set.
+- **`songbook`** is the directory those songs were discovered in, injected the
+  same way (`_module.args.songbook`, set by the same hook that sets `song` and
+  `borrow`). It exists so the lane that PAINTS a host's built-in songs — which
+  copies their folders, resolves their `packages` and builds the shipped
+  templates — never names a repository path: a consumer's songs live in the
+  consumer's tree (`lib/songbook.nix` takes the directory, `pkgs/lyra-songbook`
+  takes it as an argument). A `rice.nix` itself never reads it.
 - **A borrow JOINS the built-in set.** The songs a host builds in are closed
   under the owners its records name: a host that declares quodlibet alone builds
   in `fugue` and `sonata` as well, because quodlibet's records borrow slots from
@@ -4824,8 +4831,7 @@ arrive as ARGUMENTS, injected at the two sites that evaluate a song:
   host. There is no separate field for it: the closure is what
   `song.declared ∪ song.available` would have said if the host had written the
   lenders out by hand.
-- **A `.nix` under a song folder carries no `../` path literal.** The rule is
-  about the TEXT, and that is what `checks.song-shape` scans
+- **A `.nix` under a song folder carries no `../` path literal.** The rule is  about the TEXT, and that is what `checks.song-shape` scans
   (`escapingNixFiles`): the escape SHAPE the injected arguments replaced, caught
   whether or not it would resolve — including one written inside a comment, which
   is the price of a scan that does not have to evaluate a song to judge it.

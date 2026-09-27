@@ -93,6 +93,10 @@
           };
         };
       };
+
+      # The catalogue, read once: `lib.catalogue` and `nixosModules` are two
+      # views of this one record (`modules/default.nix` is plain data).
+      registry = import ./modules;
     in
     {
       # ── NixOS configurations ───────────────────────────────────────────────
@@ -173,7 +177,8 @@
       # flake ref (`nix eval --json <checkout>#aoideOptions`) with no system
       # attrpath to get right.
       aoideOptions = import ./lib/options.nix {
-        inherit lib inputs;
+        inherit lib;
+        aoideInputs = inputs;
         pkgs = nixpkgs.legacyPackages.x86_64-linux;
       };
 
@@ -191,9 +196,49 @@
       # consumer's lib and not on this flake's, and dxflake migrates onto it
       # rather than onto a copy of its own. `tests/selection` imports the file
       # by path — the file is what the suites exercise, not this output.
+      #
+      # Each entry is its file's own function, still UNAPPLIED (so a consumer
+      # applies it with its own `lib`), except `catalogue`, which is data: the
+      # same `name = <path>` record `nixosModules.<name>` spells one name at a
+      # time, for a consumer that wants all of them at once. `lib/options.nix`
+      # is NOT here: it reads this tree's modules, which a consumer neither has
+      # nor should name.
       lib = {
         composition = import ./lib/composition.nix;
+        livery = import ./lib/livery.nix;
+        songbook = import ./lib/songbook.nix;
+        catalogue = registry.catalogue;
       };
+
+      # ── The export surface a consumer builds against ───────────────────────
+      # Everything here is for a flake that consumes AoideOS as a stranger
+      # (PACKAGE-LAYOUT's "AoideOS's export surface"): it names no path inside
+      # this tree, and the flake inputs Aoide's own lanes need are closed over
+      # by `nixosModules.nucleus` instead of being threaded through the
+      # consumer's `specialArgs`.
+      #
+      # `nixosModules` is the catalogue plus `nucleus`: one entry per catalogue
+      # name, each the PATH this flake's own registry holds for that capability
+      # (`import`ing it yields the lane record `{ body; nixos; }` the
+      # constructor's `registry.catalogue` takes — the same value, spelled one
+      # name at a time), and `nucleus` the ONE module that sets
+      # `_module.args.aoideInputs`, which is also what `mkHost` passes. A
+      # consumer's catalogue is that attrset minus `nucleus`.
+      nixosModules = {
+        nucleus = aoideos.nucleusModule;
+      }
+      // registry.catalogue;
+
+      # The base package overlay: every `pkgs/<name>` this tree discovers plus
+      # `aoide`, the self-flaked core — the same set the `packages` output names
+      # (R8: `lyra` is deliberately NOT here, nixpkgs owns that name; the rice
+      # binary is the `aoide` derivation's `rice` output).
+      overlays.default =
+        final: prev:
+        (pkgsWalk.overlay { stock = nixpkgs.legacyPackages.${prev.stdenv.hostPlatform.system}; }) final prev
+        // {
+          aoide = inputs.aoide.packages.${prev.stdenv.hostPlatform.system}.default;
+        };
 
       # ── Checks ─────────────────────────────────────────────────────────────
       # The contractual coupling discipline (lib/checks.nix). They pass

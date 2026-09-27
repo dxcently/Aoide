@@ -22,6 +22,16 @@ let
 
   composition = import (src + "/lib/composition.nix") { inherit lib; };
 
+  # The nucleus lane as the ref itself builds it (`lib/aoideos.nix`) — the same
+  # value the flake exports as `nixosModules.nucleus`, and the ONE module that
+  # defines `_module.args.aoideInputs`. Read out of the ref rather than
+  # reconstructed here, so the fixtures cannot drift from what a host really
+  # gets; `specialArgs` therefore carries no `inputs` at all.
+  aoideos = import (src + "/lib/aoideos.nix") {
+    inherit inputs lib system;
+    username = "khoa";
+  };
+
   host =
     name:
     (composition.mkNixosHost {
@@ -29,10 +39,9 @@ let
       hostName = name;
       registry = import (src + "/modules");
       hostModules = [ (src + "/tests/quickshell-seam/hosts/${name}.nix") ];
-      nucleus = src + "/modules/nucleus";
+      nucleus = aoideos.nucleusModule;
       homeManagerModule = inputs.home-manager.nixosModules.home-manager;
       specialArgs = {
-        inherit inputs;
         username = "khoa";
       };
       # `mkNixosHost` hands `system` to the modules but not to `nixosSystem`

@@ -16,8 +16,10 @@ covers only what's specific to nucleus.
 - **Core options live in the core flake; nucleus declares only the paint
   half.** `enable`/`root`/`checkout`/`auditLog`/`terminal`/`user`/
   `sessionTarget` are
-  `pkgs/aoide/module/options.nix`'s contract now, pulled in by nucleus's
-  own `imports = [ inputs.aoide.nixosModules.default ]` line. A new CORE
+  `pkgs/aoide/module/options.nix`'s contract now, pulled in by the nucleus LANE
+  (`lib/aoideos.nix`'s `nucleusModule`) — the one place that closes over Aoide's
+  own flake inputs, since neither a file here nor an `imports` list can read a
+  module argument that `_module.args` supplies. A new CORE
   option (portable, cargo-buildable, no `modules/`/`song/` reach) is added
   there, never here; a new PAINT option (livery, arrangement, surfaces, an
   enable fact, a lane toggle) is added here, never there. A core door toggle whose unit

@@ -34,7 +34,7 @@
   config,
   lib,
   pkgs,
-  inputs,
+  aoideInputs,
   ...
 }:
 
@@ -43,7 +43,7 @@ let
   # daemon's rice-toggle path re-execs `aoide rice …`, whose widget-sync half
   # shells out to `quickshell ipc call shell reload`; the client binary must
   # be the build the live shell actually runs.
-  quickshellPkg = inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
+  quickshellPkg = aoideInputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default;
 in
 
 # Gated on the master switch and the lyra fact — `aoide.enable &&

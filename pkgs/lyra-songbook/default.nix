@@ -70,9 +70,13 @@
   # The host's selection as lyra records it: `{ declared, songs, packages }`.
   # `null` = none, and no `builtin.json` is written.
   builtin ? null,
+  # The songbook those names live in. A consumer's songs are in the CONSUMER's
+  # tree, so this is an argument and not a path literal into Aoide's own
+  # (`lib/songbook.nix`'s `root` is what the lanes pass; the flake's own
+  # `packages` output keeps its default).
+  songbook ? ../../song/songbook,
 }:
 let
-  songbook = ../../song/songbook;
   songbookData = import ../../lib/songbook.nix { inherit lib songbook; };
 
   # ── The offline generator (§9) ──────────────────────────────────────────
