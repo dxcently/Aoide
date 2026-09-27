@@ -318,6 +318,12 @@ mod tests {
         // — reached 87. Bumped by 1 for `mesh.join` (the trust-entry step every
         // machine but the operator's own performs: one operator key, or one
         // LAN ceremony) — reached 88.
+        //
+        // **The running total above is the CHAIN's history, not this list's
+        // length: the vec below holds 109 paths** (counted, review F7 — the
+        // chain lost count with it somewhere around "+1 for bare `node list`",
+        // and a comment that asserts a wrong number is worse than no number).
+        // Treat THIS line as the authority and the chain as the history.
         let mut expected: Vec<&str> = vec![
             "a2a.serve",
             "adapter.melete",

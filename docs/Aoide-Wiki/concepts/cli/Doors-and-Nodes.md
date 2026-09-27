@@ -774,8 +774,10 @@ aoide mesh [--json]
   accused, no drift count, no suggested action. A mesh whose declared keys
   do not include this box's own name gets one more note line saying so —
   never a drift row, never counted in `declared`. `--json` emits the same
-  comparison structured under `data.report`:
-  `{"sections": [{"name", "source", "grant", "sameOperator", …}], "undeclared": [...]}`.
+  comparison structured under `data.report` (one shape, the same one the
+  P-CHARTER subsection below repeats): `{"sections": [{"name", "source",
+  "grant", "sameOperatorNote"?, "grants", "declared", "selfDeclared", "rows":
+  [{"node", "class", …}]}], "undeclared": [...], "charters": []}`.
 - **`--json` (P-CHARTER).** `data.report` is
   `{"sections": [{"name", "source", "grant", "sameOperatorNote"?,
   "grants", "declared", "selfDeclared", "rows": [{"node", "class", …}]}],

@@ -699,8 +699,18 @@ count.
   read — a config that fails to load returns `Outcome::error` with
   `data.reason` naming why and no `data.report`, same as any other command
   whose config read fails. `--json`'s `data.report` shape: `{"sections":
-  [{"name", "grant", "sameOperator", "declared", "selfDeclared", "rows":
-  [{"node", "class", …}]}], "undeclared": [...]}`.
+  [{"name", "source", "grant", "sameOperatorNote"?, "grants", "declared",
+  "selfDeclared", "rows": [{"node", "class", …}]}], "undeclared": [...],
+  "charters": [{"mesh", "declared", "version", "operator", "operatorKey",
+  "trust", "trusted", "highWater", "rekeyed", "inert", "nodes"}]}`.
+  **P-CHARTER changed this shape non-additively**: the section's
+  `sameOperator` BOOLEAN is gone, replaced by `sameOperatorNote` (an optional
+  string, present only while a config still declares the retired key) — a
+  consumer reading `sameOperator` sees the field disappear, and it does so
+  because the flag was RETIRED (one operator is one charter signer, so the
+  note only says nothing acts on it). `source` is `"charter"`/`"paired"`,
+  each section carries the `grants` map it always had per node, and
+  `charters` carries one row per mesh with a charter in force at this node.
 - `mesh pair [<mesh>]`, appended newest, task #135 P5 — the converge: makes
   a declared mesh true by running the ORDINARY pairing ceremony against the
   nodes it is missing. Runs the same `mesh` comparison above (there is no
@@ -7619,7 +7629,11 @@ node remove <name>` deregisters; a **missing name is an error**, not
 idempotent-silent — following `rice draft drop <name>`'s precedent (§4).
 `aoide node status --json` enumerates the registry — its `data.nodes`
 carries every registered node's full row (name/url/autogate/tokenFile/
-bearerSecret/hub/pubkey/verified/allows/addedAt) layered with that node's
+bearerSecret/hub/pubkey/verified/addedAt, plus **`grants`** — the per-mesh
+capability map (P-CHARTER, which replaced the flat `allows` field A2
+migrated) — and **`narrowed`**, the per-mesh refusals a local `node allow …
+off --mesh` recorded, present only when non-empty; `data` also carries
+`homeMesh`, the mesh an unnamed request resolves to) layered with that node's
 last-pull outcome (below); it is THE deep per-node registry view (the
 human-readable `node status` line stays a terse count; names and URLs live
 in `--json`). `aoide node list` is a different projection, never a registry
@@ -7721,7 +7735,9 @@ serve` in `schema --json`'s order (nothing existing reorders). `node pull`
 with no name pulls EVERY registered node; with a name, just that one.
 `node status --json` is this group's list-the-registry command — its
 `data.nodes` carries every registered node's full row (name/url/autogate/
-tokenFile/bearerSecret/hub/pubkey/verified/allows/addedAt) alongside that
+tokenFile/bearerSecret/hub/pubkey/verified/addedAt/`grants`/`narrowed` — see
+the registry-view paragraph above for those last two, which are P-CHARTER's
+per-mesh map and the local refusals narrowed onto it) alongside that
 node's last-pull outcome: the deep per-node detail view, which `node list`
 below never duplicates.
 
