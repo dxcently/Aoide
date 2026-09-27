@@ -216,8 +216,9 @@ stdin; the door does the mapping:
 All nine events (`SessionStart`, `UserPromptSubmit`, `PreToolUse`,
 `PostToolUse`, `Notification`, `SubagentStart`, `SubagentStop`, `Stop`,
 `SessionEnd`) carry the identical command shown above, each under its own
-event key. Writing it by hand is not required: `aoide hooks install claude`
-merges the same nine entries into `~/.claude/settings.json` (idempotent
+event key. Writing it by hand is not required: `aoide hooks install <agent>`
+merges the same nine entries into that harness's own settings file
+(`~/.claude/settings.json` for claude) (idempotent
 JSON merge, the rest of the document preserved — see [[Agent-Interface]]).
 
 `Notification` + `PostToolUse` are what make **blocked** visible — without them a session on a permission prompt reads `running` forever. `SubagentStart` / `SubagentStop` are what put a spawned sub-agent (e.g. an `Agent`-tool call) on the graph as its own row, parented to the session that spawned it, rather than folding invisibly into the parent's activity.
@@ -250,7 +251,7 @@ Kimi speaks the same stdin-JSON hook transport with the same core event names, s
 - **Kimi-only events are ok no-ops** — `PermissionResult`, `Interrupt`, `PreCompact`, `PostCompact`, `StopFailure`, `PostToolUseFailure` all map to `Unknown`. Two 0.31.1 gaps ride on that: `SubagentStop` never fires (a sub-agent node closes on the synchronous `PostToolUse` of its `Agent` tool call instead — kimi's `Agent` tool returns `status: completed` in `tool_output`), and `Stop` does NOT fire on an Esc interrupt, so an interrupted turn reads `working` until the next hook arrives.
 - **Transcript layout** — a per-session DIRECTORY at `${KIMI_CODE_HOME:-~/.kimi-code}/sessions/wd_*/<session_id>/` (the `wd_` hash is opaque, so the locator globs for the `<session_id>` child) holding `state.json` (`title`, honored only when `isCustomTitle`) and `agents/main/wire.jsonl` (the transcript; each sub-agent gets its own `agents/agent-<N>/wire.jsonl`). Assistant prose is the last `context.append_loop_event` `content.part` of type `text` (`think` parts are chain-of-thought, not words); the model comes from `usage.record.model` / `llm.request.modelAlias`; context fill is the freshest `usage.record`'s `inputOther + inputCacheRead + inputCacheCreation`. Model ceilings: `k3` → 1M, `k3-256k` / `kimi-for-coding(-highspeed)` → 256K, anything else → the conservative 200K — matched on the basename after the last `/`, because on-disk ids arrive provider-prefixed (`kimi-code/kimi-for-coding`). A kimi sub-node has no transcript probe: 0.31.1 writes no correlator between a hook's `tool_call_id` and its `agent-<N>` dir.
 
-Wiring: `aoide hooks install kimi` (see [[Agent-Interface]]) merges ten `[[hooks]]` tables (the nine core events + `PermissionRequest`) into `config.toml`, honoring `KIMI_CODE_HOME`; by hand, one table per event:
+Wiring (kimi): `aoide hooks install <agent>` (see [[Agent-Interface]]) merges ten `[[hooks]]` tables (the nine core events + `PermissionRequest`) into `config.toml`, honoring `KIMI_CODE_HOME`; by hand, one table per event:
 
 ```toml
 [[hooks]]

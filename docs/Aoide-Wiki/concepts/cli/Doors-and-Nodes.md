@@ -12,7 +12,8 @@ surface: the stdio [[Agent-Interface|MCP]] façade (`mcp serve` — `lyra mcp
 serve` is the same façade over lyra's own 48-path registry), the [[aoided]]
 policy skeleton (`daemon`, `events tail`, `adapter melete`), the desktop
 state bridge (`shellbridge`), the interactive session UI (`conductor`,
-detailed at [[Conductor-TUI]]), live presence (`who`), the [[A2A-Door]]
+detailed at [[Conductor-TUI]]), live presence (bare `session` — the roster,
+grouped by project or by host; documented on [[Graph-and-Conduct]]), the [[A2A-Door]]
 server (`a2a serve`), and [[Node-Federation]] (`node *`) — the node family is
 also the outbound A2A client, driving remote instances over the same wire.
 Handlers are spread across
@@ -255,29 +256,6 @@ aoide events tail [--class <c1,c2,…>] [--json]
   `dismissed`/`expired`, name-only) and the hand-edit watcher over the
   broker-owned stage files. See [[aoided]].
 
-### aoide who
-
-```
-aoide who [<filter>] [--all] [--json]
-```
-
-- **Reads:** every registered node, probed LIVE on every invocation — one
-  thread per node, bounded by curl's own `--max-time` inside
-  `aoide_client::commands::pull_node_live` (~2 s/node). A projection, never
-  a store: it never writes `state/node-cache/<name>.json`; the cache
-  (`state/node-cache/<name>.json`) is consulted only as the fallback for a
-  node this invocation's live probe fails to reach, so an unreachable node
-  still renders. `<filter>` resolves through `storage::addr::resolve`
-  first (a local id/tail4/petname, a host/role/petname line, or
-  `node/<rest>`), falling back to a substring match.
-- **Writes:** nothing.
-- **Output:** a Unicode roster; `--json` emits the structured presence
-  document. Node presence: `online` / `unreachable` / `never-pulled`.
-  Session presence: `online` / `stale` / `done` (`done` omitted without
-  `--all`).
-- **Notes:** not gated. `<filter>` narrows what is DISPLAYED only — every
-  registered node is probed regardless. See [[Node-Federation]].
-
 ### aoide a2a serve
 
 ```
@@ -401,7 +379,7 @@ aoide node add <name> <url|poll> [--autogate] [--no-verify]
   the [[Secrets-Broker|secrets broker]] (consumer `a2a-client`, fresh on
   every request, never cached) and presents as `Authorization: Bearer
   <value>` on every outbound call to that node's own A2A door (`node pull`,
-  `send --to`, `who`'s live probe). Absent by default — an unmarked
+  `send --to`, the roster's live probe). Absent by default — an unmarked
   node's outbound calls carry no bearer header, unchanged. A resolve
   failure fails that outbound call outright rather than sending it
   unauthenticated. See [[Node-Federation]].
@@ -723,11 +701,11 @@ aoide node list [--json]
 ```
 
 - **Reads:** `state/nodes.json`, the pull caches, and the LAN — presence
-  and sessions from `who`'s own live-probe-with-cache-fallback core (one
-  bounded ~2 s probe per node, in parallel) plus ONE bounded ~2 s
-  discovery sweep run concurrently with the probes
+  and sessions from the roster core's own live-probe-with-cache-fallback
+  pipeline (one bounded ~2 s probe per node, in parallel) plus ONE bounded
+  ~2 s discovery sweep run concurrently with the probes
   (`aoide-conduct::graph::node_list`; lives in `aoide-conduct` because the
-  roster folds `who`'s probe core, which `aoide-client` cannot depend on).
+  roster folds that core, which `aoide-client` cannot depend on).
 - **Writes:** nothing — not `state/nodes.json`, not `state/node-cache/`.
 - **Output:** the one-glance mesh roster — one row per known node (this
   host first, then every registered node, then every advertising instance
