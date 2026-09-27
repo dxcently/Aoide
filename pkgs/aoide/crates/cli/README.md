@@ -62,9 +62,9 @@ as an exact set — core's headless-capable, agent-orchestration surface: the
 project/session graph (including `resurrect`, its ledger-backed
 session revival), A2A, nodes (including the `node hub` designation,
 P-D5, the `aoide pair [<name|url|id>]`/`pair reject`/`pair watch`
-one-command pairing ceremony, P-P2/P-P5/P-PV2/task #135 P3', the `node allow <name> <cap> on|off`
+one-command pairing ceremony, P-P2/P-P5/P-PV2/task #135 P3', the `node allow <name> <cap> on|off [--mesh <m>]`
 closed-capability grant/revoke command backing the A2A spawn arm's hard
-gate, P-P3, `node spawn <name> -- <text…>`, P-P5b, the signed
+gate, P-P3 (per mesh since P-CHARTER), `node spawn <name> -- <text…>`, P-P5b, the signed
 spawn-shaped `message/send` that actually reaches that gate, and `node
 discover [--secs N]`/`node advertise on|off`, P-P6 + task #120, the LAN
 discovery advertisement's read-only sweep (`pair`'s own hostname arm

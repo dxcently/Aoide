@@ -462,7 +462,7 @@ const SWEEP_SECS: u64 = 2;
 /// [`node_list_with`].
 pub fn node_list(inv: &Invocation) -> Outcome {
     let pull: PullFn =
-        Arc::new(|p: &Node| aoide_client::commands::pull_node_live(p, NODE_PROBE_TIMEOUT_SECS));
+        Arc::new(|p: &Node| aoide_client::commands::pull_node_live(p, NODE_PROBE_TIMEOUT_SECS, None));
     let sweep: SweepFn = Box::new(|| {
         aoide_client::discover::run_sweep(SWEEP_SECS)
             .map_err(|e| aoide_client::discover::describe_sweep_error(&e))
@@ -487,7 +487,7 @@ mod tests {
             hub: false,
             pubkey: None,
             verified: false,
-            allows: Vec::new(),
+            grants: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-14T00:00:00Z".to_string(),
         }

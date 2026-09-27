@@ -287,7 +287,7 @@ fn node_add_against_an_unreachable_url_never_registers_and_pull_of_a_down_node_m
         hub: false,
         pubkey: None,
         verified: false,
-        allows: Vec::new(),
+        grants: aoide_storage::node_store::Grants::new(),
         via: None,
         added_at: aoide_storage::time::now_iso_utc(),
     });
@@ -870,7 +870,7 @@ fn node_pair_approve_on_an_outbound_entry_with_no_via_leaves_a_previously_record
         hub: false,
         pubkey: Some("oldkey".repeat(8)),
         verified: true,
-        allows: vec!["read".to_string(), "spawn".to_string()],
+        grants: aoide_storage::node_store::grants_in("home", &["read", "spawn"]),
         via: Some("ssh://khoa@previously-recorded".to_string()),
         added_at: "2026-08-14T00:00:00Z".to_string(),
     }])

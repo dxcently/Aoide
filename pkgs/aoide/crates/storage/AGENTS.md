@@ -195,7 +195,7 @@
   time — there is no equivalent for a directory).
 - **`config` holds INTENT; every other module here holds STATE — never move
   a value across that line (task #135 P-C).** `config.toml` records what an
-  operator WANTS ahead of anything happening; `nodes.json`'s records/allows/
+  operator WANTS ahead of anything happening; `nodes.json`'s records/grants/
   hub, the pairing park queues, `advertise.json`'s switch, `undying.json`
   record what HAPPENED. A new decision an operator makes UP FRONT gets a
   `config` key; a fact the system observes or commits gets a state file.
@@ -462,7 +462,7 @@
   all when the ceremony resolved an actual via; a re-pair that named none
   leaves a previously-recorded `via` (e.g. one `aoide pair`'s hostname arm set) exactly
   as it was, the same untouched-unless-named stance `upsert_paired_node`
-  itself holds for `autogate`/`tokenFile`/`bearerSecret`/`hub`/`allows`.
+  itself holds for `autogate`/`tokenFile`/`bearerSecret`/`hub`/`grants`.
 - **`pairing`'s request ids are deliberately NOT `state/stage/pending.json`'s
   array-position ids.** A pairing correlation must survive the requester's
   CLI process exiting and an async `aoide/pairPoll` (Design A, task #119 —

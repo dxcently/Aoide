@@ -79,6 +79,22 @@ pub const HEADER_NONCE: &str = "X-Aoide-Nonce";
 /// The ed25519 signature over [`canonical_string`], hex-encoded, no
 /// separator — 128 hex chars (64 raw bytes).
 pub const HEADER_SIGNATURE: &str = "X-Aoide-Signature";
+/// The mesh this request ACTS IN (P-CHARTER, `docs/architecture/
+/// HTTPS-MESH-API.md` "Trust per mesh": "Every signed request names the mesh
+/// it acts in, inside the per-request signature"). One of the four signed
+/// headers' siblings, and the same `node_store::valid_node_name` vocabulary
+/// every other mesh name takes (`[mesh.<name>]`, `aoide pair --mesh`).
+///
+/// **Absent is a real, supported state, not an error**: a peer running a
+/// pre-P-CHARTER aoide signs the five-field canonical string and sends no
+/// such header, and its request is verified against that old string and
+/// evaluated in the home mesh only ([`canonical_string`]'s doc, and the
+/// door's `verify_signed_request`). It can never be *added* to an already
+/// signed request — a request whose signature covers five fields stops
+/// verifying the moment a sixth is present, because the verifier builds the
+/// string from what arrived. So a stripped header is a refused request, and
+/// there is no downgrade path.
+pub const HEADER_MESH: &str = "X-Aoide-Mesh";
 
 /// Env override for the replay-guard's timestamp window, in seconds
 /// (PAIRING.md: "±120s default, env knob"). Same tolerant-fallback shape
@@ -145,16 +161,33 @@ fn hex_decode(s: &str) -> Option<Vec<u8>> {
 /// Pure; both the signer and the verifier call this with values they each
 /// hold independently, never a wire-carried canonical string.
 ///
-/// Pinned by `tests::canonical_string_stability_vectors_never_drift` — a
-/// future change to the field order, the separator, the case-folding, or
-/// the digest algorithm breaks that test, not just "looks different";
-/// CONTRACTS.md §6's own copy of this shape must move in the same commit
-/// as any change here.
-pub fn canonical_string(method: &str, path: &str, timestamp: &str, nonce: &str, body: &[u8]) -> String {
+/// **`mesh` is the sixth field when a request names one** (P-CHARTER): the
+/// mesh the request acts in, appended AFTER the body digest — so the
+/// pre-charter five-field string is a strict PREFIX of every string this
+/// function now builds, and `None` reproduces it byte for byte. That is the
+/// whole compatibility story: an un-upgraded peer has no mesh to name, signs
+/// the five fields it knows, and its request is verified by the same
+/// `None` arm; an upgraded peer names a mesh and its signature covers it, so
+/// the mesh a request acts in cannot be changed in flight by anyone who
+/// cannot re-sign. The two forms never collide: the prefix is short by one
+/// `\x00`-terminated field, and the empty mesh is not a name
+/// (`HEADER_MESH`'s doc).
+///
+/// Pinned by `tests::canonical_string_stability_vectors_never_drift` (both
+/// forms) — a future change to the field order, the separator, the
+/// case-folding, or the digest algorithm breaks that test, not just "looks
+/// different"; CONTRACTS.md §6's own copy of this shape must move in the same
+/// commit as any change here.
+pub fn canonical_string(method: &str, path: &str, timestamp: &str, nonce: &str, body: &[u8], mesh: Option<&str>) -> String {
     let digest_hex = hex_encode(&Sha256::digest(body));
     let mut s = String::new();
-    for field in [method, path, timestamp, nonce, digest_hex.as_str()] {
+    let fields = [method, path, timestamp, nonce, digest_hex.as_str()];
+    for field in fields {
         s.push_str(&field.trim().to_ascii_lowercase());
+        s.push('\u{0}');
+    }
+    if let Some(mesh) = mesh {
+        s.push_str(&mesh.trim().to_ascii_lowercase());
         s.push('\u{0}');
     }
     s
@@ -210,7 +243,7 @@ mod tests {
     /// so this test actually pins the algorithm, not just self-agreement.
     #[test]
     fn canonical_string_stability_vectors_never_drift() {
-        let s = canonical_string("POST", "/", "2026-08-25T00:00:00Z", "abcd1234", b"{}");
+        let s = canonical_string("POST", "/", "2026-08-25T00:00:00Z", "abcd1234", b"{}", None);
         // body digest: sha256("{}") = 44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a
         assert_eq!(
             s,
@@ -218,18 +251,47 @@ mod tests {
         );
     }
 
+    /// The P-CHARTER form, pinned the same way: the pre-charter string plus
+    /// ONE `\x00`-terminated mesh field, so the old bytes are a strict prefix
+    /// and the two forms can never collide.
+    #[test]
+    fn the_mesh_bearing_canonical_string_is_the_old_one_plus_one_field() {
+        let old = canonical_string("POST", "/", "2026-08-25T00:00:00Z", "abcd1234", b"{}", None);
+        let new = canonical_string("POST", "/", "2026-08-25T00:00:00Z", "abcd1234", b"{}", Some("home"));
+        assert_eq!(
+            new,
+            "post\u{0}/\u{0}2026-08-25t00:00:00z\u{0}abcd1234\u{0}44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\u{0}home\u{0}"
+        );
+        assert!(new.starts_with(&old), "the pre-charter bytes are a strict prefix: {old:?} vs {new:?}");
+        assert_ne!(old, new);
+    }
+
+    /// The mesh is a SIGNED field, not a label: two requests differing only
+    /// in the mesh they act in have different canonical strings, so a
+    /// signature made for one mesh can never be replayed as the other.
+    #[test]
+    fn the_named_mesh_changes_the_canonical_string() {
+        let home = canonical_string("POST", "/", "ts", "nonce", b"body", Some("home"));
+        let away = canonical_string("POST", "/", "ts", "nonce", b"body", Some("away"));
+        assert_ne!(home, away, "a grant in one mesh must not be reachable by a request naming another");
+        let upper = canonical_string("POST", "/", "ts", "nonce", b"body", Some("HOME"));
+        assert_eq!(home, upper, "case-folds like every other field");
+        let padded = canonical_string("POST", "/", "ts", "nonce", b"body", Some("  home  "));
+        assert_eq!(home, padded, "trims like every other field");
+    }
+
     #[test]
     fn canonical_string_is_case_and_whitespace_insensitive_but_content_sensitive() {
-        let lower = canonical_string("post", "/x", "ts", "nonce", b"body");
-        let upper = canonical_string("POST", "/X", "TS", "NONCE", b"body");
-        let padded = canonical_string("  post  ", "/x", "ts", "nonce", b"body");
+        let lower = canonical_string("post", "/x", "ts", "nonce", b"body", None);
+        let upper = canonical_string("POST", "/X", "TS", "NONCE", b"body", None);
+        let padded = canonical_string("  post  ", "/x", "ts", "nonce", b"body", None);
         assert_eq!(lower, upper, "method/path/timestamp/nonce case must not change the canonical string");
         assert_eq!(lower, padded, "surrounding whitespace must not change the canonical string");
 
-        let different_body = canonical_string("post", "/x", "ts", "nonce", b"different");
+        let different_body = canonical_string("post", "/x", "ts", "nonce", b"different", None);
         assert_ne!(lower, different_body, "a different body must change the canonical string (via its digest)");
 
-        let different_path = canonical_string("post", "/y", "ts", "nonce", b"body");
+        let different_path = canonical_string("post", "/y", "ts", "nonce", b"body", None);
         assert_ne!(lower, different_path, "a different path must change the canonical string");
     }
 
@@ -244,7 +306,7 @@ mod tests {
 
         let (kp, _) = identity::load_or_mint().unwrap();
         let pubkey_hex = kp.info().pubkey_hex;
-        let canonical = canonical_string("POST", "/", "2026-08-25T00:00:00Z", "n1", b"{\"a\":1}");
+        let canonical = canonical_string("POST", "/", "2026-08-25T00:00:00Z", "n1", b"{\"a\":1}", Some("home"));
         let sig_hex = sign_hex(&kp, canonical.as_bytes());
 
         assert!(verify_signature_hex(&pubkey_hex, canonical.as_bytes(), &sig_hex), "a genuine signature must verify");
@@ -253,10 +315,26 @@ mod tests {
             "a signature over a DIFFERENT message must not verify"
         );
 
-        let other_canonical = canonical_string("POST", "/other-path", "2026-08-25T00:00:00Z", "n1", b"{\"a\":1}");
+        let other_canonical = canonical_string("POST", "/other-path", "2026-08-25T00:00:00Z", "n1", b"{\"a\":1}", Some("home"));
         assert!(
             !verify_signature_hex(&pubkey_hex, other_canonical.as_bytes(), &sig_hex),
             "a tampered PATH changes the canonical string, so the same signature must not verify against it"
+        );
+
+        // P-CHARTER: the same signature under a DIFFERENT mesh is a different
+        // message — a captured request cannot be re-aimed at another mesh's
+        // grant without the caller's key.
+        assert!(
+            !verify_signature_hex(
+                &pubkey_hex,
+                canonical_string("POST", "/", "2026-08-25T00:00:00Z", "n1", b"{\"a\":1}", Some("away")).as_bytes(),
+                &sig_hex
+            ),
+            "re-aiming a signed request at another mesh invalidates its signature"
+        );
+        assert!(
+            !verify_signature_hex(&pubkey_hex, canonical_string("POST", "/", "2026-08-25T00:00:00Z", "n1", b"{\"a\":1}", None).as_bytes(), &sig_hex),
+            "and stripping the mesh field back to the pre-charter five is refused too — no downgrade path"
         );
 
         let wrong_pubkey = "a".repeat(64);

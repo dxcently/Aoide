@@ -255,17 +255,26 @@ by decision — no embedded database yet
   none) — the ONE function both `aoide-client`'s signer and
   `aoide-server`'s HTTP request parser derive a wire path from, so a
   signature's canonical string binds to the exact same string on both
-  ends. `allows` (P-P3, `docs/architecture/PAIRING.md`
-  decision 5) is a CLOSED capability set (`NODE_CAPABILITIES`: `"read"`,
+  ends. `grants` (P-CHARTER, was P-P3's flat `allows`) is a per-MESH CLOSED
+  capability set (`NODE_CAPABILITIES`: `"read"`,
   `"spawn"`, `"message"` — the third joined at P-M2, gating
   `aoide/mailDeposit` the way `"spawn"` gates `message/send`'s spawn arm) —
   never a per-capability serde bool scatter — additive,
-  empty for every unpaired/legacy node; `upsert_paired_node` stamps the
+  empty for every unpaired/legacy node, keyed by the mesh each set holds in
+  (P-CHARTER: a grant is given in one mesh and holds only there, and the
+  door reads it with `aoide_server::a2a::grant_in_mesh(mesh, caller_key)`);
+  `upsert_paired_node` stamps the
   grant its CALLER resolved (`config.toml`'s `[pairing] defaultGrant`, or a
   `--allow` typed on that one commit — never a literal here) the moment a
-  node FIRST becomes verified, and leaves it untouched on a later key rotation (a
-  revoked capability survives re-pairing). `set_node_allow` (`node allow
-  <name> <cap> on|off`'s library half) is the only OTHER writer —
+  node FIRST becomes verified, INTO THE MESH THAT PAIRING NAMES, and leaves it
+  untouched on a later key rotation (a
+  revoked capability survives re-pairing). A `nodes.json` written before
+  per-mesh grants is migrated on load (`migrate_grants`): every record's
+  `allows` folds into `grants[<home>]` byte-identical, one-shot and
+  idempotent, and a malformed value costs that ONE record its grant (the
+  record, its other fields and every other record are kept, and the skip is
+  reported). `set_node_allow` (`node allow
+  <name> <cap> on|off [--mesh <m>]`'s library half) is the only OTHER writer —
   idempotent, refuses an unknown node or an unknown capability (the
   capability check runs first). `resolve_node` (decision 6) is the
   caller-identity ladder the A2A door keys off, returning WHICH `NodeRung`
@@ -754,8 +763,9 @@ by decision — no embedded database yet
   fingerprint, mint time) is the only serializable shape this module
   emits, and a source-scanning test in `identity.rs` mechanically holds
   that boundary. The pairing ceremony (`aoide pair`, P-P2) builds on this
-  directly (`node_store`/`pairing` above); the `allows` set + A2A spawn-gate
-  flip (P-P3, `node_store::allows`/`resolve_node` above) also build on it;
+  directly (`node_store`/`pairing` above); the `grants` map + A2A spawn-gate
+  flip (P-P3, per mesh since P-CHARTER —
+  `node_store::grant`/`granted_meshes`/`resolve_mesh` above) also build on it;
   so does `wire_auth` below (P-P4) — `Keypair::sign`/`Keypair::verify` are
   its ONLY two entry points into `ed25519_dalek`, so neither
   `aoide-client` nor `aoide-server` needs that dependency directly.

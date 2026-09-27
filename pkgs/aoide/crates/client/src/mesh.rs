@@ -135,17 +135,32 @@ pub struct MeshRow {
     pub class: DriftClass,
 }
 
-/// One declared `[mesh.<name>]`, compared. `grant`/`same_operator` are
+/// One declared `[mesh.<name>]`, compared. `grant`/`same_operator_note` are
 /// copied straight off the declaration for display — [`drift`] never
-/// compares them against anything (see the module doc's note on `allows`).
+/// compares them against anything (see the module doc's note on grants).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MeshSection {
     pub name: String,
+    /// The mesh's DECLARED grant — the default a pair minted here gets,
+    /// never a continuous invariant over the live registry.
     pub grant: Option<Vec<String>>,
-    /// Renamed on the wire — matches `config::Mesh::same_operator`'s own
-    /// `sameOperator`, the same declaration this field is copied from.
-    #[serde(rename = "sameOperator")]
-    pub same_operator: bool,
+    /// The pre-charter `sameOperator` claim, RETIRED (P-CHARTER: one operator
+    /// is one charter signer). Present only when the mesh still declares it,
+    /// and only ever a sentence: the flag changes no row, no count and no
+    /// status, and nothing acts on it. `config::Mesh::same_operator_note` is
+    /// the one place the sentence is written.
+    #[serde(rename = "sameOperatorNote", skip_serializing_if = "Option::is_none")]
+    pub same_operator_note: Option<String>,
+    /// **The nodelist view's per-mesh grants** (P-CHARTER): every declared
+    /// node COMPARED in this mesh, mapped to the grant the live registry
+    /// holds for it in this mesh ([`Node::grant`]) — `[]` for a node with a
+    /// record that is trusted in no mesh at all, and no entry at all for a
+    /// node with no record (`rows` already says `missing`). This is the fact
+    /// the door reads, shown where the operator declares meshes: a grant in
+    /// another mesh never appears here, which is the whole point of a
+    /// per-mesh view — the same node's row in another section will carry
+    /// that mesh's grant instead.
+    pub grants: BTreeMap<String, Vec<String>>,
     /// How many of this mesh's declared nodes were actually COMPARED — the
     /// local host's own entry (if declared) is excluded, the same as it is
     /// from `rows`, so `declared - rows.len()` (the "N/M ok" ratio) is never
@@ -194,6 +209,7 @@ pub fn drift(meshes: &BTreeMap<String, Mesh>, nodes: &[Node], local_name: &str) 
 
     for (name, mesh) in meshes {
         let mut rows = Vec::new();
+        let mut grants: BTreeMap<String, Vec<String>> = BTreeMap::new();
         let mut compared = 0usize;
         for (node_name, hop) in &mesh.nodes {
             if node_name == local_name {
@@ -201,7 +217,11 @@ pub fn drift(meshes: &BTreeMap<String, Mesh>, nodes: &[Node], local_name: &str) 
             }
             compared += 1;
             declared_names.insert(node_name.as_str());
-            let class = match nodes.iter().find(|p| &p.name == node_name) {
+            let record = nodes.iter().find(|p| &p.name == node_name);
+            if let Some(p) = record {
+                grants.insert(node_name.clone(), p.grant(name).to_vec());
+            }
+            let class = match record {
                 None => DriftClass::Missing,
                 Some(p) if !p.verified => DriftClass::Unverified,
                 Some(p) if p.via.as_deref() != Some(hop.as_str()) => {
@@ -214,7 +234,8 @@ pub fn drift(meshes: &BTreeMap<String, Mesh>, nodes: &[Node], local_name: &str) 
         sections.push(MeshSection {
             name: name.clone(),
             grant: mesh.grant.clone(),
-            same_operator: mesh.same_operator,
+            same_operator_note: mesh.same_operator_note(name),
+            grants,
             declared: compared,
             self_declared: mesh.nodes.contains_key(local_name),
             rows,
@@ -248,9 +269,12 @@ fn render_report(report: &MeshReport, local_name: &str) -> String {
     for section in &report.sections {
         let clean = section.declared.saturating_sub(section.rows.len());
         lines.push(format!(
-            "mesh.{}  {clean}/{} ok  sameOperator={}",
-            section.name, section.declared, section.same_operator,
+            "mesh.{}  {clean}/{} ok",
+            section.name, section.declared,
         ));
+        for (node, caps) in &section.grants {
+            lines.push(format!("  {node}: {}", if caps.is_empty() { "—".to_string() } else { caps.join(",") }));
+        }
         for row in &section.rows {
             lines.push(format!("  {}", render_row(row)));
         }
@@ -440,25 +464,23 @@ pub struct ConvergeReport {
     pub same_operator_note: Option<String>,
 }
 
-/// What a declared `sameOperator = true` gets: a sentence, and nothing
-/// else. Whether a converge may ever act on that claim — satisfying the far
-/// side's typed code on an operator's behalf — is undecided
-/// (`docs/architecture/PAIRING.md`'s "Mesh declaration" section), so the
-/// converge runs the flag's `false` path exactly: every node paired with
-/// both codes typed, by two people or by one person at two screens. The
-/// note says so rather than leaving the operator to wonder whether a
-/// declared flag quietly did something.
-const SAME_OPERATOR_NOTE: &str = "declares sameOperator = true, which is not yet ruled: a converge cannot act on it. \
-                                  Nodes were paired with both codes typed, as normal.";
+/// What a declared `sameOperator = true` gets: a sentence, and nothing else.
+/// The flag is RETIRED (P-CHARTER: one operator is one charter signer, so
+/// nodes sharing a charter need no pairing between them and a converge has
+/// nothing to skip), so a converge runs the flag's `false` path exactly —
+/// every node paired with both codes typed, by two people or by one person at
+/// two screens — and says so rather than leaving the operator to wonder
+/// whether a declared flag quietly did something. The sentence itself is
+/// `config::Mesh::same_operator_note`'s, the one place it is written.
 
-/// Assemble one converge's report. Pure, so the `sameOperator` ruling above
-/// is a unit test over in-memory values: the note's presence is the ONLY
-/// thing `same_operator` changes about a report.
+/// Assemble one converge's report. Pure, so the retirement above is a unit
+/// test over in-memory values: the note's presence is the ONLY thing
+/// `same_operator` changes about a report.
 fn converge_report(mesh_name: &str, mesh: &Mesh, rows: Vec<ConvergeRow>) -> ConvergeReport {
     ConvergeReport {
         mesh: mesh_name.to_string(),
         rows,
-        same_operator_note: mesh.same_operator.then(|| format!("mesh.{mesh_name} {SAME_OPERATOR_NOTE}")),
+        same_operator_note: mesh.same_operator_note(mesh_name),
     }
 }
 
@@ -856,7 +878,7 @@ mod tests {
             hub: false,
             pubkey: None,
             verified,
-            allows: Vec::new(),
+            grants: aoide_storage::node_store::Grants::new(),
             via: via.map(str::to_string),
             added_at: String::new(),
         }
@@ -1014,12 +1036,12 @@ mod tests {
     // ── allows divergence is not drift ──────────────────────────────────────
 
     #[test]
-    fn allows_divergent_from_grant_produces_no_row_and_is_never_inspected() {
+    fn grants_divergent_from_grant_produce_no_row_and_are_never_inspected() {
         let mut m = mesh(&[("sakaki", "ssh://khoa@h")]);
         m.grant = Some(vec!["read".to_string()]);
         let meshes = BTreeMap::from([("home".to_string(), m)]);
         let mut p = node("sakaki", true, Some("ssh://khoa@h"));
-        p.allows = vec!["spawn".to_string()]; // deliberately NOT "read" — still no row
+        p.grants = aoide_storage::node_store::grants_in("home", &["spawn"]); // deliberately NOT "read" — still no row
         let report = drift(&meshes, &[p], "this-box");
         assert_eq!(report.sections[0].rows, Vec::new());
     }
@@ -1279,8 +1301,8 @@ mod tests {
         assert!(a.same_operator_note.is_none());
         let note = b.same_operator_note.as_deref().expect("a declared sameOperator is noted");
         assert!(note.starts_with("mesh.home declares sameOperator = true"), "{note}");
-        assert!(note.contains("not yet ruled"), "{note}");
-        assert!(note.contains("both codes typed"), "{note}");
+        assert!(note.contains("RETIRED"), "{note}");
+        assert!(note.contains("charter"), "{note}");
     }
 
     #[test]

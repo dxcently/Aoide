@@ -776,7 +776,21 @@ pub fn file_letter(from_name: &str, to_name: &str, text: &str) -> Result<Entry, 
 /// mailbase; a letter to another node is never also a local copy) for the
 /// caller to hand to the outbox. `mail send`'s command layer is what
 /// decides self vs. remote and calls the matching one of these two.
-pub fn mint_outbound_letter(from_name: &str, to_node: &str, to_name: &str, text: &str) -> Result<Envelope, String> {
+/// **The mesh-aware mint** (P-CHARTER, review finding 1). `origin_mesh` is
+/// SIGNED into the header (`seal`), so it cannot be patched after the fact —
+/// and it is one of the two signed values the receiver compares
+/// (`seal::deposit_container`: the container's `ctx.origin_mesh` against the
+/// mesh the request's own signature covers). A letter minted in the home mesh
+/// while its request is signed for another mesh is therefore undepositable,
+/// which is exactly the bug this parameter fixes: the SENDER's mint and the
+/// SENDER's signing derive the mesh from one rule and cannot disagree.
+pub fn mint_outbound_letter_in_mesh(
+    from_name: &str,
+    to_node: &str,
+    to_name: &str,
+    text: &str,
+    mesh: &str,
+) -> Result<Envelope, String> {
     if !crate::node_store::valid_node_name(to_name) {
         return Err("invalid mailbox name: must match ^[a-z0-9][a-z0-9-]*$".to_string());
     }
@@ -787,10 +801,58 @@ pub fn mint_outbound_letter(from_name: &str, to_node: &str, to_name: &str, text:
         to: Address { node: to_node.to_string(), name: to_name.to_string() },
         kind: ENTRY_TYPE_LETTER.to_string(),
         minted_at: now_iso_utc(),
-        origin_mesh: String::new(),
+        origin_mesh: mesh.to_string(),
     };
     let (sig, msgid) = seal(&header, text, &kp);
     Ok(Envelope { header, text: text.to_string(), sig, msgid })
+}
+
+/// The mesh a letter or ack to `node` is minted in when the caller names
+/// none: the destination's sole granted mesh, else the home mesh — the same
+/// rule the request-signing path applies
+/// (`aoide_storage::node_store::resolve_mesh`, over the destination record's
+/// granted meshes). `""` (UNNAMED) when this box knows the destination in
+/// more than one mesh: a mint cannot guess which one the request will be
+/// signed for, and an unnamed letter is the pre-charter shape the door reads
+/// as the home mesh. The operator's lever for that case is `--mesh` on the
+/// sending command, which mints through
+/// [`mint_outbound_letter_in_mesh`] outright.
+pub fn mesh_for_node(node: &str) -> String {
+    let known = crate::node_store::load_nodes()
+        .into_iter()
+        .find(|p| p.name == node)
+        .map(|p| crate::node_store::granted_meshes(&p))
+        .unwrap_or_default();
+    crate::node_store::resolve_mesh(None, &known, &crate::config::home_mesh()).unwrap_or_default()
+}
+
+/// Mint a letter for the mesh this box derives for its destination
+/// ([`mesh_for_node`]) — the plain entry point every caller that has no
+/// `--mesh` to honour uses, tests included. `mail send` goes through
+/// [`mint_outbound_letter_in_mesh`] instead, because it has an operator's
+/// `--mesh` to apply.
+pub fn mint_outbound_letter(from_name: &str, to_node: &str, to_name: &str, text: &str) -> Result<Envelope, String> {
+    let mesh = mesh_for_node(to_node);
+    mint_outbound_letter_in_mesh(from_name, to_node, to_name, text, &mesh)
+}
+
+/// [`mint_ack`]'s mesh-aware form, the same rule [`mint_outbound_letter_in_mesh`]
+/// states: an ack rides ONE mesh back to the origin, and the mesh its header
+/// names is a SIGNED value the destination compares against the request's.
+/// `spool_and_drain_ack` passes the incoming letter's own `origin_mesh`, so an
+/// ack travels in the mesh the letter arrived in.
+pub fn mint_ack_in_mesh(from_name: &str, to: Address, acked_msgid: &str, mesh: &str) -> Result<Envelope, String> {
+    let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
+    let header = Header {
+        version: ENVELOPE_VERSION.to_string(),
+        from: Address { node: display::local_node_name(), name: from_name.to_string() },
+        to,
+        kind: ENTRY_TYPE_RECEIPT.to_string(),
+        minted_at: now_iso_utc(),
+        origin_mesh: mesh.to_string(),
+    };
+    let (sig, msgid) = seal(&header, acked_msgid, &kp);
+    Ok(Envelope { header, text: acked_msgid.to_string(), sig, msgid })
 }
 
 /// Mint a receipt envelope ACKing `acked_msgid` back to `to` — the ack this
@@ -801,19 +863,12 @@ pub fn mint_outbound_letter(from_name: &str, to_node: &str, to_name: &str, text:
 /// `to` is the original letter's own `header.from` (origin, not hop —
 /// P-M2's two lookups stay distinct even here). Not filed into this box's
 /// own mailbase (an ack is outbound-only until IT is deposited somewhere,
-/// same as [`mint_outbound_letter`]).
+/// same as [`mint_outbound_letter`]). The mesh comes from the origin's own
+/// record ([`mesh_for_node`]); the ack-while-filing path names the incoming
+/// letter's mesh outright ([`mint_ack_in_mesh`]).
 pub fn mint_ack(from_name: &str, to: Address, acked_msgid: &str) -> Result<Envelope, String> {
-    let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
-    let header = Header {
-        version: ENVELOPE_VERSION.to_string(),
-        from: Address { node: display::local_node_name(), name: from_name.to_string() },
-        to,
-        kind: ENTRY_TYPE_RECEIPT.to_string(),
-        minted_at: now_iso_utc(),
-        origin_mesh: String::new(),
-    };
-    let (sig, msgid) = seal(&header, acked_msgid, &kp);
-    Ok(Envelope { header, text: acked_msgid.to_string(), sig, msgid })
+    let mesh = mesh_for_node(&to.node);
+    mint_ack_in_mesh(from_name, to, acked_msgid, &mesh)
 }
 
 /// Verify `envelope`'s origin signature against the ONE key `nodes.json`
@@ -1372,6 +1427,7 @@ mod tests {
             &alice_kp.info().pubkey_hex,
             "2026-09-06T00:00:00Z",
             &["message".to_string()],
+            "home",
         );
         crate::node_store::upsert_paired_node(
             &mut nodes,
@@ -1380,6 +1436,7 @@ mod tests {
             &mallory_kp.info().pubkey_hex,
             "2026-09-06T00:00:00Z",
             &["message".to_string()],
+            "home",
         );
         crate::node_store::save_nodes(&nodes).unwrap();
 
@@ -1433,6 +1490,7 @@ mod tests {
             &kp.info().pubkey_hex,
             "2026-09-06T00:00:00Z",
             &["message".to_string()],
+            "home",
         );
         crate::node_store::save_nodes(&nodes).unwrap();
 

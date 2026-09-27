@@ -839,14 +839,142 @@ const OUTPUT_READ_REFUSED: &str = "output read refused: reading a session's outp
 const HISTORY_READ_REFUSED: &str = "output read refused: a session's ping-back history is readable \
      only with `read` on this host AND the key this node stamped for the parent that spawned the \
      child — on its record, or on the ring entry that outlives it";
-/// The output-read gate (CONTRACTS.md §6, P-RSA S6). True only when all three
+/// The caller's capabilities IN ONE MESH — the door's only grant shape, and
+/// the thing every policy site reads. Built by [`grant_in_mesh`] and by
+/// nothing else: no arm scans a registry itself, so "what may this caller do
+/// here" has one answer and one implementation.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Grant {
+    caps: std::collections::BTreeSet<String>,
+}
+
+impl Grant {
+    /// Does this grant hold `cap`? The ONE predicate every gated arm asks.
+    fn holds(&self, cap: &str) -> bool {
+        self.caps.contains(cap)
+    }
+
+    /// Nothing granted: the answer for a caller that resolved to no record,
+    /// and for a caller whose record holds nothing in this mesh. Not an
+    /// error: an unknown caller and a known-but-ungranted one are
+    /// indistinguishable from outside by construction (`Grant` carries no
+    /// "why"), the same no-existence-oracle shape
+    /// [`verify_signed_request`]'s single refusal keeps.
+    fn none() -> Self {
+        Grant::default()
+    }
+}
+
+/// **The ONE grant lookup in this door.** The caller's capabilities in
+/// `mesh`, and in no other mesh: `caller_key` is the stored public key the
+/// request's signature verified against (#63 P-ID5 — identity is the key, so
+/// a name that follows a rename can never widen or lose a grant), and `mesh`
+/// is the mesh the request acts in ([`effective_mesh`]).
+///
+/// **Today's only source is the paired records** (`state/nodes.json`,
+/// `Node::grants`): the door finds the verified record whose stored pubkey is
+/// `caller_key` and answers with that record's grant in this mesh. The
+/// charter is NOT consulted — no charter exists in the tree yet, and no
+/// arm may grow a second lookup path when one lands.
+///
+/// **A3 adds the charter line as a SECOND SOURCE BEHIND THIS SAME
+/// FUNCTION**, not beside it: the caller's charter line in a charter mesh
+/// (`docs/architecture/HTTPS-MESH-API.md` "Charters"), with the local
+/// narrowing this crate already reads from `nodes.json` winning over it
+/// (`aoide node allow <node> <cap> off --mesh <m>`; nothing local ever
+/// WIDENS a charter grant). Two constraints that add up to "shape it here,
+/// not at the call sites":
+/// - **One node, one identity key, in every mesh**: A3 resolves the same
+///   way, by `caller_key`, so its lookup must key on the key and never on a
+///   name.
+/// - **A request naming no mesh never matches a charter mesh**: the
+///   named/unnamed fact is [`effective_mesh`]'s caller's (`SignedCaller::
+///   mesh`), and A3 needs it — so the source choice cannot be hidden behind
+///   `mesh: &str` alone without losing the distinction. When A3 lands, it
+///   takes the named-ness as its own parameter here, at this one function,
+///   exactly as `effective_mesh` documents the rule today.
+///
+/// Reads the registry fresh on every call (never cached: revoking a grant
+/// takes effect on the very next request, the same stance `bearerSecret`
+/// holds). Twin records sharing one stored pubkey — a hand-edited registry
+/// only, and `verify_signed_request` already requires an exact-name header to
+/// resolve them — answer in REGISTRY ORDER, the tie-break CONTRACTS.md §7
+/// already documents for `resolve_node`'s ladder.
+fn grant_in_mesh(mesh: &str, caller_key: &str) -> Grant {
+    paired_grant(&aoide_storage::node_store::load_nodes(), mesh, caller_key)
+}
+
+/// [`grant_in_mesh`]'s pure core — the same answer without the disk read, so
+/// the whole table is provable against fixtures.
+///
+/// **The answer is the UNION across every same-key record in this mesh**
+/// (review finding 6; CONTRACTS.md §6, word for word: "a key's effective
+/// grant set is the UNION across every record sharing it — revoking a
+/// capability from a key means revoking it on EVERY such record, or `node
+/// remove`-ing the duplicates"). Twin records exist because
+/// `upsert_paired_node` matches by name alone, so one remote instance paired
+/// under two names yields two records with one key; `verify_signed_request`
+/// then resolves the IDENTITY by exact name, and this resolves the GRANT.
+/// Taking the first record in registry order would let a capability the
+/// contract grants vanish, and would make a revocation on the non-first twin
+/// a silent no-op — so the union is the only answer that keeps the two halves
+/// consistent. A revocation therefore has to be applied to every twin: that
+/// is the contract's own instruction, not an omission here.
+fn paired_grant(nodes: &[aoide_storage::node_store::Node], mesh: &str, caller_key: &str) -> Grant {
+    let caps = nodes
+        .iter()
+        .filter(|n| n.verified)
+        .filter(|n| n.pubkey.as_deref().is_some_and(|k| !k.is_empty() && k.eq_ignore_ascii_case(caller_key)))
+        .flat_map(|n| n.grant(mesh).iter().cloned())
+        .collect();
+    Grant { caps }
+}
+
+/// The mesh a request acts in: the one it NAMED, or the home mesh
+/// ([`aoide_storage::config::home_mesh`], `[pairing] homeMesh`, default
+/// `home`) when it named none. The single place the unnamed case becomes a
+/// mesh name — a pre-P-CHARTER peer's request is evaluated in the home mesh
+/// and nowhere else, which is exactly where its migrated grant lives.
+///
+/// Deliberately takes the NAMED value rather than a [`SignedCaller`]: the
+/// mail arm compares a request's mesh against a container's, and a container's
+/// mesh can be checked for a caller that resolved through no signature at all.
+/// An empty string is the same as absent — a container minted before the mesh
+/// was carried (`seal::seal_envelope`'s callers pass the envelope's own
+/// `origin_mesh`, still `""` at P-SEAL) says "unnamed", not "a mesh called
+/// nothing".
+fn effective_mesh(named: Option<&str>) -> String {
+    match named.map(str::trim).filter(|m| !m.is_empty()) {
+        Some(m) => m.to_ascii_lowercase(),
+        None => aoide_storage::config::home_mesh(),
+    }
+}
+
+/// The caller's grant in the mesh its request acts in — the ONE place a call
+/// site turns a [`SignedCaller`] into a [`Grant`]. [`Grant::none`] when there
+/// is no caller at all (no signature headers, or a weaker rung, which
+/// produces no `SignedCaller` by construction); an unnamed request resolves
+/// through [`effective_mesh`] to the home mesh.
+fn caller_grant(caller: Option<SignedCaller<'_>>) -> Grant {
+    match caller {
+        Some(c) => grant_in_mesh(&effective_mesh(c.mesh), c.key),
+        None => Grant::none(),
+    }
+}
+
+/// The output-read gate (CONTRACTS.md §6, P-RSA S6). True only when both
 /// hold:
 /// - `read_ok` — the door's own bearer gate ([`token_authorized`]), the same
 ///   one every other read arm carries. With no token configured it is true
 ///   for everyone; that is exactly why this predicate exists;
-/// - the caller resolved through the SIGNATURE rung, i.e. a signature this
-///   door verified against some node record's stored pubkey;
-/// - that record is `verified` with `read` in its `allows` ([`node_may_read`]).
+/// - the caller's grant IN THE MESH ITS REQUEST NAMES holds `read` — read
+///   through [`grant_in_mesh`], the door's one lookup, and reached only
+///   through a [`SignedCaller`], which exists for the SIGNATURE rung and for
+///   nothing else (a bare address or token match carries no proof of
+///   possession and produces no caller at all). The old name-based "this
+///   record is verified with `read` in its `allows`" is the same question
+///   with the mesh added: the grant is per mesh now, and this arm reads the
+///   request's mesh and no other.
 ///
 /// **Wider than the Inject arm on purpose** (User ruling, 2026-09-25): a
 /// signed, verified node holding `read` may read ANY session's frame on this
@@ -854,22 +982,8 @@ const HISTORY_READ_REFUSED: &str = "output read refused: a session's ping-back h
 /// wider than writing, and steering a child without pending (S5) or pulling
 /// its ping-back history still needs the key. Pure, so the whole table is
 /// provable without a socket, a stage file or a live registry entry.
-fn output_read_admitted(
-    read_ok: bool,
-    caller: Option<(&aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)>,
-) -> bool {
-    read_ok
-        && matches!(
-            caller,
-            Some((node, aoide_storage::node_store::NodeRung::Signature)) if node_may_read(node)
-        )
-}
-
-/// The node-side half of the output-read gate — [`node_may_spawn`]'s twin,
-/// one capability over: a paired node whose `allows` contains `"read"`.
-/// Pure.
-fn node_may_read(node: &aoide_storage::node_store::Node) -> bool {
-    node.verified && node.allows.iter().any(|a| a == "read")
+fn output_read_admitted(read_ok: bool, caller: Option<SignedCaller<'_>>) -> bool {
+    read_ok && caller_grant(caller).holds("read")
 }
 
 /// The ping-back HISTORY gate (CONTRACTS.md §6, P-RSA S8/S9): the output gate
@@ -897,13 +1011,12 @@ fn node_may_read(node: &aoide_storage::node_store::Node) -> bool {
 fn history_admitted(
     read_ok: bool,
     signed: Option<SignedCaller<'_>>,
-    nodes: &[aoide_storage::node_store::Node],
     target_key: Option<&str>,
 ) -> bool {
     let Some(caller) = signed else {
         return false;
     };
-    output_read_admitted(read_ok, resolved_caller(nodes, signed))
+    output_read_admitted(read_ok, signed)
         && target_key.is_some_and(|k| !k.is_empty() && k == caller.key)
 }
 
@@ -914,23 +1027,6 @@ fn history_admitted(
 fn stamped_key(id: &str) -> Option<String> {
     aoide_storage::pingback_remote::ring_key(id)
         .or_else(|| session_remote_parent(id).map(|rp| rp.key).filter(|k| !k.is_empty()))
-}
-
-/// The caller as the frame gate judges it: the CURRENT record for the name
-/// [`verify_signed_request`] resolved, carrying the rung that proof IS. The
-/// rung is not a second lookup — a [`SignedCaller`] exists for the signature
-/// rung and for nothing else (`claimable_caller`'s own statement), and
-/// `signed?` is that fact: an unsigned, bearer or address caller has no
-/// proof, so this is `None` and [`output_read_admitted`] refuses it.
-fn resolved_caller<'a>(
-    nodes: &'a [aoide_storage::node_store::Node],
-    signed: Option<SignedCaller<'_>>,
-) -> Option<(&'a aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)> {
-    let caller = signed?;
-    nodes
-        .iter()
-        .find(|p| p.name == caller.name)
-        .map(|p| (p, aoide_storage::node_store::NodeRung::Signature))
 }
 
 /// The frame a `tasks/get` request asks for: `Some(tail)` when
@@ -1053,8 +1149,7 @@ fn task_get_outputs(
     read_ok: bool,
     signed_caller: Option<SignedCaller<'_>>,
 ) -> Result<Value, (i64, String)> {
-    let nodes = aoide_storage::node_store::load_nodes();
-    if !output_read_admitted(read_ok, resolved_caller(&nodes, signed_caller)) {
+    if !output_read_admitted(read_ok, signed_caller) {
         return Err((OUTPUT_READ_REFUSED_CODE, OUTPUT_READ_REFUSED.to_string()));
     }
     // The ring's own stamped key is the gate input for history, and the record
@@ -1072,7 +1167,7 @@ fn task_get_outputs(
         if key.is_none() {
             return Err((TASK_NOT_FOUND_CODE, "task not found".to_string()));
         }
-        if !history_admitted(read_ok, signed_caller, &nodes, key.as_deref()) {
+        if !history_admitted(read_ok, signed_caller, key.as_deref()) {
             return Err((OUTPUT_READ_REFUSED_CODE, HISTORY_READ_REFUSED.to_string()));
         }
     }
@@ -2558,8 +2653,20 @@ fn message_send(
     let token_autogate = presented_token
         .map(|t| aoide_storage::node_store::is_autogated_node_token(&nodes, t))
         .unwrap_or(false);
-    let sig_autogate =
-        matches!(resolved_node, Some((node, aoide_storage::node_store::NodeRung::Signature)) if node.autogate);
+    // P-CHARTER (review finding 5): `autogate` is a per-RECORD flag, and a
+    // record can be marked in one mesh while the request names another — so
+    // the signature rail asks the mesh too: the caller must hold `message`
+    // IN THE MESH ITS REQUEST NAMES. Without this, a caller the operator
+    // marked autogate skips the pending review queue while naming a mesh it
+    // holds nothing in, which is per-mesh trust leaking on the delivery rail.
+    // The addr/token rails are untouched: they resolve no signature, so they
+    // have no signed mesh to read a grant in, and they were never per-mesh
+    // grant-bearing (they admit only their own `autogate`-marked records).
+    let sig_autogate = matches!(
+        resolved_node,
+        Some((node, aoide_storage::node_store::NodeRung::Signature))
+            if node.autogate && may_message(&caller_grant(signed_caller))
+    );
     let autogate_match = ip_autogate || token_autogate || sig_autogate;
 
     // Uniform-response guard (see the amendment above) — mirrors
@@ -2631,7 +2738,15 @@ fn message_send(
                     Some(claim),
                     session_remote_parent(&session_id).as_ref(),
                 )
-            });
+            })
+            // P-CHARTER (review finding 5): the §32 remote-parent inject rule
+            // reads the grant in the request's mesh like the other two, and
+            // the capability it needs is the one the delivery itself needs —
+            // `message`. A caller whose key is stamped as a child's remote
+            // parent but who holds no grant in the mesh its request names
+            // does NOT get the without-pending delivery; it falls through to
+            // the pending queue, exactly as a stranger does.
+            && may_message(&caller_grant(signed_caller));
             if remote_parent_hit {
                 let _ = audit(
                     audit_log,
@@ -2720,11 +2835,11 @@ fn message_send(
             do_inject(&session_id, &prompt, audit_log, deliver_now, from.as_deref())
         }
         SendAction::Spawn { agent_cmd } => {
-            if spawn_admitted(resolved_node) {
+            if spawn_admitted(resolved_node, &caller_grant(signed_caller)) {
                 let node = resolved_node.expect("spawn_admitted only returns true when resolved_node is Some").0;
                 do_spawn(&agent_cmd, &prompt, audit_log, &node.name, spawn_cwd, remote_parent, task.as_deref())
             } else {
-                let (code, msg) = spawn_refusal(resolved_node);
+                let (code, msg) = spawn_refusal(resolved_node, &effective_mesh(signed_caller.and_then(|c| c.mesh)));
                 let _ = audit(
                     audit_log,
                     Door::A2a,
@@ -2741,14 +2856,15 @@ fn message_send(
 }
 
 /// The node-side half of the Spawn admission check (P-P3, PAIRING.md
-/// decision 6) — a paired node whose `allows` contains `"spawn"`. Pure,
-/// split out of [`message_send`] so the gate table (paired+allowed /
-/// paired+denied / unpaired) is directly unit-testable against plain
-/// `Node` fixtures, without ever touching [`do_spawn`]'s real OS-level
-/// process spawn. Deliberately says nothing about HOW the caller resolved
-/// to this node — that question is [`spawn_admitted`]'s job, one layer up.
-fn node_may_spawn(node: &aoide_storage::node_store::Node) -> bool {
-    node.verified && node.allows.iter().any(|a| a == "spawn")
+/// decision 6; per mesh from P-CHARTER) — the caller's grant
+/// ([`grant_in_mesh`], in the mesh its request names) holds `"spawn"`. Pure,
+/// split out of [`message_send`] so the gate table (granted / not granted /
+/// no resolution at all) is directly unit-testable against a plain [`Grant`],
+/// without ever touching [`do_spawn`]'s real OS-level process spawn.
+/// Deliberately says nothing about HOW the caller resolved to this node —
+/// that question is [`spawn_admitted`]'s job, one layer up.
+fn may_spawn(grant: &Grant) -> bool {
+    grant.holds("spawn")
 }
 
 /// The Spawn arm's FULL admission check (P-P3 decision 6, narrowed
@@ -2761,13 +2877,18 @@ fn node_may_spawn(node: &aoide_storage::node_store::Node) -> bool {
 /// true node or an impersonator ever sends. Both rungs keep resolving a
 /// node identity for every OTHER purpose (Inject's `from` attribution,
 /// origin-stamping); this function is the ONE place the narrowing to
-/// signature-only lives, rather than re-derived at each call site. Pure —
-/// unit-testable directly against `(Node, NodeRung)` fixtures without
-/// touching [`do_spawn`]'s real OS-level process spawn, the same
-/// "predicate-level, not through `message_send`" precedent
-/// [`node_may_spawn`]'s own doc comment already established.
-fn spawn_admitted(resolved: Option<(&aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)>) -> bool {
-    matches!(resolved, Some((node, aoide_storage::node_store::NodeRung::Signature)) if node_may_spawn(node))
+/// signature-only lives, rather than re-derived at each call site — and with
+/// it the GRANT, read in the request's mesh and no other
+/// ([`grant_in_mesh`]). Pure — unit-testable directly against
+/// `(&Node, NodeRung, &Grant)` fixtures without touching [`do_spawn`]'s real
+/// OS-level process spawn, the same "predicate-level, not through
+/// `message_send`" precedent [`may_spawn`]'s own doc comment already
+/// established.
+fn spawn_admitted(
+    resolved: Option<(&aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)>,
+    grant: &Grant,
+) -> bool {
+    matches!(resolved, Some((_, aoide_storage::node_store::NodeRung::Signature))) && may_spawn(grant)
 }
 
 /// The `-32006` refusal every Spawn attempt that fails [`spawn_admitted`]
@@ -2786,13 +2907,17 @@ fn spawn_admitted(resolved: Option<(&aoide_storage::node_store::Node, aoide_stor
 ///   this request. Told to sign, not to re-pair; re-pairing would be
 ///   nonsensical noise for a caller whose only problem is an old client
 ///   that predates P-P4.
-/// - **Resolved via Signature but `allows` lacks `spawn`**: pairing and
-///   signing both succeeded — only the capability grant is missing. Told
-///   the exact `node allow` fix, not to re-pair or re-sign.
+/// - **Resolved via Signature but the grant in the request's MESH lacks
+///   `spawn`**: pairing and signing both succeeded — only the capability
+///   grant is missing there. Told the exact `node allow … --mesh <m>` fix
+///   (review finding 11), not to re-pair or re-sign: a bare `node allow` is
+///   a command that would itself refuse on a two-mesh record, and on a
+///   one-mesh record would act in the record's mesh rather than the one the
+///   request named.
 /// - **Every other shape** (Addr rung, no resolution at all, an
 ///   unverified Token match): told to pair AND sign, the original P-P3
 ///   message's grounding, now naming the signature requirement too.
-fn spawn_refusal(resolved: Option<(&aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)>) -> (i64, String) {
+fn spawn_refusal(resolved: Option<(&aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)>, mesh: &str) -> (i64, String) {
     use aoide_storage::node_store::NodeRung;
     match resolved {
         Some((node, NodeRung::Token)) if node.verified => (
@@ -2808,9 +2933,10 @@ fn spawn_refusal(resolved: Option<(&aoide_storage::node_store::Node, aoide_stora
         Some((node, NodeRung::Signature)) => (
             -32006,
             format!(
-                "spawn refused: node `{}` is paired and this request is validly signed, but THIS \
-                 node's `allows` for it does not include `spawn` — on this (receiving) host run \
-                 `aoide node allow {} spawn on`; the caller's own allows are not consulted",
+                "spawn refused: node `{}` is paired and this request is validly signed, but its grant \
+                 in mesh `{mesh}` does not include `spawn` — on this (receiving) host run \
+                 `aoide node allow {} spawn on --mesh {mesh}`; the caller's own grant is not consulted, \
+                 and a grant in another mesh is not a grant here",
                 node.name, node.name
             ),
         ),
@@ -2855,23 +2981,21 @@ fn graph_summary(node_name: &str, self_url: &str) -> Result<Value, (i64, String)
 // carried the request here and the ORIGIN that minted it are two
 // independent lookups, coincident only because P-M2 has no relay yet).
 
-/// The node-side half of the Message admission check — a paired node whose
-/// `allows` contains `"message"`. Mirrors [`node_may_spawn`] exactly, one
-/// capability over.
-fn node_may_message(node: &aoide_storage::node_store::Node) -> bool {
-    node.verified && node.allows.iter().any(|a| a == "message")
+/// The node-side half of the Message admission check — the caller's grant
+/// ([`grant_in_mesh`], in the mesh its request names) holds `"message"`.
+/// Mirrors [`may_spawn`] exactly, one capability over.
+fn may_message(grant: &Grant) -> bool {
+    grant.holds("message")
 }
 
 /// The Message arm's full admission check. Unlike [`spawn_admitted`], there
 /// is no now-superseded Token-rung history to migrate off of — `message`
 /// is introduced AFTER that narrowing already happened — so resolution
-/// here is signature-only from the start, with no Addr/Token fallback rung
-/// to even consider: `resolved` is `None` whenever the request carried no
-/// verified signature, or the signature verified against a name that
-/// (impossibly, absent a bug upstream) doesn't resolve to a registered
-/// node.
-fn deposit_admitted(resolved: Option<&aoide_storage::node_store::Node>) -> bool {
-    matches!(resolved, Some(node) if node_may_message(node))
+/// here is signature-only from the start: a [`Grant`] is `none()` unless a
+/// verified signature resolved a record whose grant in this mesh holds the
+/// capability, and there is no Addr/Token fallback rung to even consider.
+fn deposit_admitted(grant: &Grant) -> bool {
+    may_message(grant)
 }
 
 /// The refusal every deposit attempt that fails [`deposit_admitted`]
@@ -2879,29 +3003,33 @@ fn deposit_admitted(resolved: Option<&aoide_storage::node_store::Node>) -> bool 
 /// own; never `-32007`, already taken by `verify_signed_request`'s
 /// incomplete-headers/signature-mismatch refusals, CONTRACTS.md §6). Two
 /// shapes only (simpler than [`spawn_refusal`]'s three: no historical
-/// Token-rung caller to distinguish here) — paired-but-not-allowed, told
-/// the exact `node allow` fix AND where it runs (the RECEIVING host: the
-/// `allows` set is the receiver's record of the sender, never the sender's
-/// own) plus the `mail outbox retry --refused` that then moves the parked
-/// letters; everything else (unpaired, unsigned, no
-/// resolution at all) told to pair and allow.
-fn deposit_refusal(resolved: Option<&aoide_storage::node_store::Node>) -> (i64, String) {
-    match resolved {
-        Some(node) => (
+/// Token-rung caller to distinguish here) — paired-but-not-allowed in THIS
+/// MESH, told the exact `node allow --mesh` fix AND where it runs (the
+/// RECEIVING host: the gift is the receiver's record of the sender, never the
+/// sender's own) plus the `mail outbox retry --refused` that then moves the
+/// parked letters; everything else (unpaired, unsigned, no resolution at all)
+/// told to pair and allow. `mesh` is the mesh the request acted in, named in
+/// both the refusal and its fix: a grant in another mesh is not a grant here,
+/// and saying which mesh was read is the difference between a fixable refusal
+/// and a mystery.
+fn deposit_refusal(signed: Option<SignedCaller<'_>>, mesh: &str) -> (i64, String) {
+    match signed {
+        Some(caller) => (
             -32010,
             format!(
-                "mail deposit refused: node `{}` is paired and this request is validly signed, but THIS \
-                 node's `allows` for it does not include `message` — on this (receiving) host run \
-                 `aoide node allow {} message on`, then on `{}` run `aoide mail outbox retry \
-                 --refused` so its parked letters move; the sender's own allows are not consulted",
-                node.name, node.name, node.name
+                "mail deposit refused: node `{}` is paired and this request is validly signed, but its \
+                 grant in mesh `{mesh}` does not include `message` — on this (receiving) host run \
+                 `aoide node allow {} message on --mesh {mesh}`, then on `{}` run `aoide mail outbox \
+                 retry --refused` so its parked letters move; the sender's own grant is not consulted, \
+                 and a grant in another mesh is not a grant here",
+                caller.name, caller.name, caller.name
             ),
         ),
         None => (
             -32010,
             "mail deposit refused: this method requires the caller be identified via a verified, \
              per-request SIGNED request from a paired node — pair first via `aoide pair`, then \
-             `node allow <name> message on` ON THE RECEIVING host (the sender's own allows are not \
+             `node allow <name> message on` ON THE RECEIVING host (the sender's own grant is not \
              consulted)"
                 .to_string(),
         ),
@@ -2961,10 +3089,10 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
             Err(e) => return Err((-32602, format!("invalid params: envelope: {e}"))),
         };
 
-    let nodes = aoide_storage::node_store::load_nodes();
-    let resolved = ctx.signed_caller.and_then(|c| nodes.iter().find(|p| p.name == c.name));
-    if !deposit_admitted(resolved) {
-        let (code, msg) = deposit_refusal(resolved);
+    let mesh = effective_mesh(ctx.signed_caller.and_then(|c| c.mesh));
+    let grant = caller_grant(ctx.signed_caller);
+    if !deposit_admitted(&grant) {
+        let (code, msg) = deposit_refusal(ctx.signed_caller, &mesh);
         let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "unauthorized", &msg);
         return Err((code, msg));
     }
@@ -3047,8 +3175,21 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
 /// that clause to this same predicate; `aoide node allow <node> message off`
 /// is the per-request quarantine that IS expressible today, and it lands on
 /// the `message` half).
-fn poll_admitted(resolved: Option<&aoide_storage::node_store::Node>, claimed: &str) -> bool {
-    matches!(resolved, Some(node) if node_may_message(node) && node.name == claimed)
+/// The poll arm's admission check. `caller` is the caller via a verified
+/// per-request signature ([`deposit_admitted`]'s own narrowing — signature
+/// only, no Addr/Token rung to fall back to); `grant` is that caller's grant
+/// in the mesh its request names ([`caller_grant`]); `claimed` is
+/// `params.node`, the node whose outbox the caller is asking about. Both
+/// halves matter: MAIL.md §Wire's "the caller's verified identity must BE
+/// `node` (no polling on another's behalf)" is the `==`, and "hold
+/// `message`, and not be `down`" is [`may_message`] — which today is exactly
+/// "granted `message` in this mesh", since `down` is a mesh-declaration fact
+/// this door does not read yet (P-M4 adds that clause to this same
+/// predicate; `aoide node allow <node> message off --mesh <m>` is the
+/// per-request quarantine that IS expressible today, and it lands on the
+/// `message` half).
+fn poll_admitted(caller: Option<SignedCaller<'_>>, grant: &Grant, claimed: &str) -> bool {
+    matches!(caller, Some(c) if may_message(grant) && c.name == claimed)
 }
 
 /// The poll arm's refusal — the SAME `-32010` `mail_deposit` uses (one code
@@ -3056,24 +3197,24 @@ fn poll_admitted(resolved: Option<&aoide_storage::node_store::Node>, claimed: &s
 /// shapes: claiming a node this request is not signed as, paired but missing
 /// `message` (the same `node allow` fix deposit names), or no verified
 /// signature resolution at all.
-fn poll_refusal(resolved: Option<&aoide_storage::node_store::Node>, claimed: &str) -> (i64, String) {
-    match resolved {
-        Some(node) if node.name != claimed => (
+fn poll_refusal(caller: Option<SignedCaller<'_>>, mesh: &str, claimed: &str) -> (i64, String) {
+    match caller {
+        Some(c) if c.name != claimed => (
             -32010,
             format!(
                 "mail poll refused: this request is validly signed as node `{}`, which is not the node it \
                  asks for (`{claimed}`) — a poll asks for the CALLER's own outbox, never another node's; \
                  sign as `{claimed}` or ask for `{}`",
-                node.name, node.name
+                c.name, c.name
             ),
         ),
-        Some(node) => (
+        Some(c) => (
             -32010,
             format!(
-                "mail poll refused: node `{}` is paired and this request is validly signed, but THIS \
-                 node's `allows` for it does not include `message` — on this (polled) host run \
-                 `aoide node allow {} message on`; the poller's own allows are not consulted",
-                node.name, node.name
+                "mail poll refused: node `{}` is paired and this request is validly signed, but its grant \
+                 in mesh `{mesh}` does not include `message` — on this (polled) host run \
+                 `aoide node allow {} message on --mesh {mesh}`; the poller's own grant is not consulted",
+                c.name, c.name
             ),
         ),
         None => (
@@ -3107,14 +3248,14 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
         return Err((-32602, "invalid params: node is required".to_string()));
     }
 
-    let nodes = aoide_storage::node_store::load_nodes();
-    let resolved = ctx.signed_caller.and_then(|c| nodes.iter().find(|p| p.name == c.name));
-    if !poll_admitted(resolved, &claimed) {
-        let (code, msg) = poll_refusal(resolved, &claimed);
+    let mesh = effective_mesh(ctx.signed_caller.and_then(|c| c.mesh));
+    let grant = caller_grant(ctx.signed_caller);
+    if !poll_admitted(ctx.signed_caller, &grant, &claimed) {
+        let (code, msg) = poll_refusal(ctx.signed_caller, &mesh, &claimed);
         let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailPoll", "unauthorized", &msg);
         return Err((code, msg));
     }
-    let poller = resolved.map(|n| n.name.clone()).unwrap_or_default();
+    let poller = ctx.signed_caller.map(|c| c.name.to_string()).unwrap_or_default();
 
     let payloads = aoide_storage::outbox::poll_payloads(&poller)
         .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
@@ -3178,10 +3319,20 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
             Err(e) => return Err((-32602, format!("invalid params: container: {e}"))),
         };
 
-    let nodes = aoide_storage::node_store::load_nodes();
-    let resolved = ctx.signed_caller.and_then(|c| nodes.iter().find(|p| p.name == c.name));
-    if !deposit_admitted(resolved) {
-        let (code, msg) = deposit_refusal(resolved);
+    // P-CHARTER (review finding 4, and the design ruling it carries): the
+    // mesh a letter rides is checked ONE layer down, inside
+    // `seal::deposit_container`, AFTER the origin signature and against
+    // SIGNED values only (`ctx.origin_mesh` versus the mesh THIS request's
+    // per-request signature covers). It is deliberately not checked here
+    // against `container.mesh`: that field is hop-mutable by design, so a
+    // spooling relay or a TLS edge could turn an accepted deposit into a
+    // permanent refusal by flipping one unsigned byte — a cheap mail-delivery
+    // DoS. The request's own mesh is what admission reads the grant in.
+    let request_mesh = effective_mesh(ctx.signed_caller.and_then(|c| c.mesh));
+
+    let grant = caller_grant(ctx.signed_caller);
+    if !deposit_admitted(&grant) {
+        let (code, msg) = deposit_refusal(ctx.signed_caller, &request_mesh);
         let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "unauthorized", &msg);
         return Err((code, msg));
     }
@@ -3191,7 +3342,7 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
         .expect("deposit_admitted only returns true when a signed caller resolved")
         .to_string();
 
-    let outcome = aoide_storage::seal::deposit_container(&container)
+    let outcome = aoide_storage::seal::deposit_container(&container, &request_mesh)
         .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
 
     let (audit_status, audit_detail) = match &outcome {
@@ -3295,14 +3446,14 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
 /// TO this node, so refusing it to a node that may already deposit mail
 /// would leave the two halves of the same exchange gated differently.
 fn node_binding(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
-    let nodes = aoide_storage::node_store::load_nodes();
-    let resolved = ctx.signed_caller.and_then(|c| nodes.iter().find(|p| p.name == c.name));
-    if !deposit_admitted(resolved) {
-        let (code, msg) = deposit_refusal(resolved);
+    let mesh = effective_mesh(ctx.signed_caller.and_then(|c| c.mesh));
+    let grant = caller_grant(ctx.signed_caller);
+    if !deposit_admitted(&grant) {
+        let (code, msg) = deposit_refusal(ctx.signed_caller, &mesh);
         let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/binding", "unauthorized", &msg);
         return Err((code, msg));
     }
-    let caller = resolved.map(|n| n.name.clone()).unwrap_or_default();
+    let caller = ctx.signed_caller.map(|c| c.name.to_string()).unwrap_or_default();
 
     if let Some(raw) = params.get("binding").filter(|v| !v.is_null()) {
         match serde_json::from_value::<aoide_storage::seal::Binding>(raw.clone()) {
@@ -3820,7 +3971,7 @@ fn pair_poll(params: &Value, audit_log: &Path) -> Result<Value, (i64, String)> {
         return Ok(pending);
     }
 
-    let canonical = aoide_storage::wire_auth::canonical_string("PAIRPOLL", id, timestamp, nonce_hex, &[]);
+    let canonical = aoide_storage::wire_auth::canonical_string("PAIRPOLL", id, timestamp, nonce_hex, &[], None);
     if !aoide_storage::wire_auth::verify_signature_hex(&entry.pubkey_hex, canonical.as_bytes(), signature_hex) {
         // A bad signature against a REAL entry answers exactly like an
         // unknown one — no distinct code, nothing for an outsider to learn.
@@ -4194,6 +4345,14 @@ struct HttpRequest {
     signed_timestamp: Option<String>,
     signed_nonce: Option<String>,
     signed_signature: Option<String>,
+    /// The mesh this request acts in (`wire_auth::HEADER_MESH`, P-CHARTER),
+    /// raw header VALUE, unvalidated — `None` for a request that names none,
+    /// which is a pre-P-CHARTER peer and NOT an error (see
+    /// `wire_auth::canonical_string`'s doc: the five-field signature is what
+    /// such a peer can produce). Never a member of the "all present together
+    /// or not at all" quartet above: the four `X-Aoide-*` headers are the
+    /// signature, and this one is a field the signature COVERS.
+    signed_mesh: Option<String>,
 }
 
 /// Extract the bearer token from a raw `Authorization` header VALUE (the
@@ -4304,6 +4463,7 @@ fn parse_http_request<R: BufRead>(r: &mut R, start: Instant) -> Result<HttpReque
     let mut signed_timestamp: Option<String> = None;
     let mut signed_nonce: Option<String> = None;
     let mut signed_signature: Option<String> = None;
+    let mut signed_mesh: Option<String> = None;
     let mut header_count: usize = 0;
     loop {
         if header_count >= MAX_HEADERS {
@@ -4333,6 +4493,8 @@ fn parse_http_request<R: BufRead>(r: &mut R, start: Instant) -> Result<HttpReque
                 signed_nonce = (!value.is_empty()).then(|| value.to_string());
             } else if name.eq_ignore_ascii_case(aoide_storage::wire_auth::HEADER_SIGNATURE) {
                 signed_signature = (!value.is_empty()).then(|| value.to_string());
+            } else if name.eq_ignore_ascii_case(aoide_storage::wire_auth::HEADER_MESH) {
+                signed_mesh = (!value.is_empty()).then(|| value.to_string());
             }
         }
     }
@@ -4375,6 +4537,7 @@ fn parse_http_request<R: BufRead>(r: &mut R, start: Instant) -> Result<HttpReque
         signed_timestamp,
         signed_nonce,
         signed_signature,
+        signed_mesh,
     })
 }
 
@@ -4503,8 +4666,25 @@ struct SignedCaller<'a> {
     name: &'a str,
     /// The resolved record's stored public key, the one the signature was
     /// verified against. Never empty: `verify_signed_request` resolves only a
-    /// record whose non-empty stored key verified.
+    /// record whose non-empty stored key verified. This is also the key
+    /// [`grant_in_mesh`] reads the caller's grant by (#63 P-ID5: identity is
+    /// the key).
     key: &'a str,
+    /// The mesh this request NAMED (`X-Aoide-Mesh`, P-CHARTER), or `None`
+    /// when it named none — a pre-P-CHARTER peer, NOT an error
+    /// (`wire_auth::canonical_string`'s five-field form is what such a peer
+    /// can sign). [`effective_mesh`] is the one place the unnamed case
+    /// becomes the home mesh, and this is the only thing that tells the two
+    /// apart: A3's charter source must NOT answer an unnamed request ("a
+    /// request naming no mesh is evaluated in the home mesh only, and only
+    /// against a migrated paired record. It never matches a charter mesh" —
+    /// HTTPS-MESH-API.md, "Trust per mesh").
+    ///
+    /// It rides with the caller rather than beside it because only a VERIFIED
+    /// signature proves it: the four `X-Aoide-*` headers and this one are one
+    /// signed fact. A request with no caller has no mesh to act in, which is
+    /// exactly what [`caller_grant`] answers with `Grant::none()`.
+    mesh: Option<&'a str>,
 }
 
 /// [`verify_signed_request`]'s result — three shapes, not a `Result`,
@@ -4524,8 +4704,10 @@ enum SignedRequestOutcome {
     /// downstream. `claimed` is what the `X-Aoide-Node` header said —
     /// display/attribution only, carried so the caller can audit a
     /// claimed-vs-resolved mismatch as attribution drift; it is never
-    /// trusted and never wins over `resolved` anywhere.
-    Verified { resolved: String, key: String, claimed: String },
+    /// trusted and never wins over `resolved` anywhere. `mesh` is the mesh
+    /// the request NAMED (`X-Aoide-Mesh`, P-CHARTER), `None` when it named
+    /// none.
+    Verified { resolved: String, key: String, claimed: String, mesh: Option<String> },
     /// Signature headers were present but verification failed somewhere —
     /// the JSON-RPC `(code, message)` the WHOLE request refuses with, no
     /// matter which method it named.
@@ -4594,6 +4776,19 @@ fn verify_signed_request(req: &HttpRequest, now_epoch: i64) -> SignedRequestOutc
     if !aoide_storage::node_store::valid_node_name(node_name) {
         return SignedRequestOutcome::Refused(-32007, format!("`{HEADER_NODE}` is not a well-formed node name: `{node_name}`"));
     }
+    // P-CHARTER: the mesh is validated the same wire-format way, BEFORE the
+    // signature is built over it, and never selects a record either — it
+    // selects which GRANT of the resolved record applies
+    // ([`grant_in_mesh`]). A malformed name is refused outright rather than
+    // looked up, so a typo is a taught error and not a silent "no grants".
+    if let Some(mesh) = req.signed_mesh.as_deref() {
+        if !aoide_storage::node_store::valid_node_name(mesh) {
+            return SignedRequestOutcome::Refused(
+                -32007,
+                format!("`{}` is not a well-formed mesh name: `{mesh}`", aoide_storage::wire_auth::HEADER_MESH),
+            );
+        }
+    }
 
     let Some(ts_epoch) = aoide_storage::time::parse_iso_utc(timestamp) else {
         return SignedRequestOutcome::Refused(-32007, format!("`{HEADER_TIMESTAMP}` is not a valid ISO-8601 timestamp: `{timestamp}`"));
@@ -4621,7 +4816,7 @@ fn verify_signed_request(req: &HttpRequest, now_epoch: i64) -> SignedRequestOutc
     // any existing signature's canonical string or the pinned vectors
     // (CONTRACTS.md §6) — it only makes the module doc's "binds method"
     // claim structurally true instead of coincidentally true.
-    let canonical = aoide_storage::wire_auth::canonical_string(&req.method, &req.path, timestamp, nonce, &req.body);
+    let canonical = aoide_storage::wire_auth::canonical_string(&req.method, &req.path, timestamp, nonce, &req.body, req.signed_mesh.as_deref());
     let nodes = aoide_storage::node_store::load_nodes();
     // By-key resolution (fn doc): every verified record whose stored pubkey
     // verifies this signature. An unverified or keyless record never enters
@@ -4681,6 +4876,7 @@ fn verify_signed_request(req: &HttpRequest, now_epoch: i64) -> SignedRequestOutc
         // only records with a non-empty stored pubkey.
         key: resolved.pubkey.clone().unwrap_or_default(),
         claimed: node_name.to_string(),
+        mesh: req.signed_mesh.clone(),
     }
 }
 
@@ -5185,13 +5381,13 @@ fn handle_connection(
     // Owned here, borrowed below: the outcome owns its two strings, and the
     // borrowed `SignedCaller` is what this door threads through `route` and
     // `stream_task`.
-    let verified: Option<(String, String)> = match verify_signed_request(&req, now_epoch) {
+    let verified: Option<(String, String, Option<String>)> = match verify_signed_request(&req, now_epoch) {
         SignedRequestOutcome::Unsigned => None,
-        SignedRequestOutcome::Verified { resolved, key, claimed } => {
+        SignedRequestOutcome::Verified { resolved, key, claimed, mesh } => {
             if let Some(detail) = attribution_drift_detail(&claimed, &resolved) {
                 let _ = audit(audit_log, Door::A2a, EventClass::Audit, "a2a.signed-request", "attribution-drift", &detail);
             }
-            Some((resolved, key))
+            Some((resolved, key, mesh))
         }
         SignedRequestOutcome::Refused(code, message) => {
             let body_val = jsonrpc_error_value(code, message.clone());
@@ -5209,7 +5405,7 @@ fn handle_connection(
     };
     let signed_caller = verified
         .as_ref()
-        .map(|(name, key)| SignedCaller { name: name.as_str(), key: key.as_str() });
+        .map(|(name, key, mesh)| SignedCaller { name: name.as_str(), key: key.as_str(), mesh: mesh.as_deref() });
 
     // Phase C: a `message/stream` / `tasks/resubscribe` POST takes over the
     // socket — headers-once + an SSE event loop in `stream_task` — instead of
@@ -5315,7 +5511,34 @@ mod tests {
     /// stamped key take it from `verify_signed_request`'s own outcome — the
     /// only thing that can produce a real one.
     fn caller(name: &str) -> SignedCaller<'_> {
-        SignedCaller { name, key: "" }
+        // The stored key that VERIFIED — the fact a real `SignedCaller`
+        // always carries. P-CHARTER reads the grant BY KEY
+        // (`grant_in_mesh`), so a hand-built caller with an empty or stale key
+        // holds nothing in every mesh and would silently change what the arm
+        // under test does; resolving it here keeps every fixture honest about
+        // the identity the door would have proved. `""` (no record, or a
+        // record with no key) is exactly what an unpaired caller resolves to.
+        let key = aoide_storage::node_store::load_nodes()
+            .into_iter()
+            .find(|p| p.name == name)
+            .and_then(|p| p.pubkey)
+            .unwrap_or_default();
+        SignedCaller { name, key: Box::leak(key.into_boxed_str()), mesh: None }
+    }
+
+    /// A `Grant` fixture built straight from a capability list — the shape
+    /// every gate test wants (`Grant`'s own field is private to the module,
+    /// and `paired_grant` is the real lookup these tests exercise
+    /// separately).
+    fn grant_of(_mesh: &str, caps: &[&str]) -> Grant {
+        Grant { caps: caps.iter().map(|c| c.to_string()).collect() }
+    }
+
+    /// The grant a fixture RECORD would produce in `mesh` — the same answer
+    /// [`paired_grant`] gives for that record and mesh, without needing the
+    /// registry.
+    fn grant_for(node: &aoide_storage::node_store::Node, mesh: &str) -> Grant {
+        Grant { caps: node.grant(mesh).iter().cloned().collect() }
     }
 
     /// A minimal `Node` fixture (P-P3) — unpaired/unautogated/no-token by
@@ -5335,7 +5558,7 @@ mod tests {
             hub: false,
             pubkey: None,
             verified: false,
-            allows: Vec::new(),
+            grants: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-25T00:00:00Z".to_string(),
         }
@@ -5869,7 +6092,7 @@ mod tests {
     fn claimed_remote_parent_is_honoured_on_the_signature_rung_only() {
         let node = fixture_node("yomi-strix", "http://10.0.0.9:8710/", false);
         let key = "ab".repeat(32);
-        let signed = SignedCaller { name: "yomi-strix", key: &key };
+        let signed = SignedCaller { name: "yomi-strix", key: &key, mesh: None };
 
         for rung in [
             aoide_storage::node_store::NodeRung::Token,
@@ -6006,7 +6229,7 @@ mod tests {
             .map(|p| (p, aoide_storage::node_store::NodeRung::Signature));
         let caller = claimable_caller(
             resolved,
-            Some(SignedCaller { name: &signed_caller, key: &signed_key }),
+            Some(SignedCaller { name: &signed_caller, key: &signed_key, mesh: None }),
         );
         let stamped = claimed_remote_parent(caller, parse_message_send_params(&body["params"]).3.as_deref())
             .unwrap()
@@ -6714,6 +6937,7 @@ mod tests {
             signed_timestamp: None,
             signed_nonce: None,
             signed_signature: None,
+            signed_mesh: None,
         };
 
         let mut out: Vec<u8> = Vec::new();
@@ -6802,6 +7026,7 @@ mod tests {
             signed_timestamp: None,
             signed_nonce: None,
             signed_signature: None,
+            signed_mesh: None,
         };
 
         let audit_log = root.join("log");
@@ -6882,6 +7107,7 @@ mod tests {
             signed_timestamp: None,
             signed_nonce: None,
             signed_signature: None,
+            signed_mesh: None,
         };
 
         let mut out: Vec<u8> = Vec::new();
@@ -7497,50 +7723,51 @@ mod tests {
     // itself for the REFUSAL branches, which never reach `do_spawn` at all.
 
     #[test]
-    fn node_may_spawn_covers_paired_allowed_paired_denied_and_unpaired() {
-        let mut paired_allowed = fixture_node("box-b", "http://10.0.0.5:8710/", false);
-        paired_allowed.verified = true;
-        paired_allowed.allows = vec!["read".to_string(), "spawn".to_string()];
-        assert!(node_may_spawn(&paired_allowed), "paired + spawn in allows");
-
-        let mut paired_denied = paired_allowed.clone();
-        paired_denied.allows = vec!["read".to_string()]; // spawn revoked.
-        assert!(!node_may_spawn(&paired_denied), "paired but spawn NOT in allows");
-
-        let mut unpaired = paired_allowed.clone();
-        unpaired.verified = false; // never completed the ceremony.
-        assert!(!node_may_spawn(&unpaired), "allows populated but never verified — still refused");
+    fn may_spawn_reads_the_grant_and_nothing_else() {
+        // P-CHARTER: the capability question is `Grant::holds("spawn")` and
+        // nothing more — the grant ALREADY carries "a verified record said
+        // so in this mesh" (`paired_grant` builds it that way), so there is
+        // no second `verified` check to forget here.
+        assert!(may_spawn(&grant_of("home", &["read", "spawn"])), "spawn in the grant");
+        assert!(!may_spawn(&grant_of("home", &["read"])), "spawn revoked — not in the grant");
+        assert!(!may_spawn(&Grant::none()), "no record, no resolution, nothing: still refused");
     }
 
     #[test]
     fn spawn_admitted_requires_the_signature_rung_specifically() {
         // P-P4's narrowing (superseding the 2026-08-25/P-P3 narrowing this
-        // test used to pin): `node_may_spawn` alone says nothing about HOW
-        // the caller resolved to this node — `spawn_admitted` is the full
-        // check, and it must refuse the SAME paired+allowed node whenever
-        // anything less than a verified per-request SIGNATURE resolved it,
-        // including the Token rung that P-P3 itself admitted. Proven at the
-        // predicate/wiring level directly against `(Node, NodeRung)`
-        // fixtures, the same "never through `message_send`/`do_spawn`"
-        // precedent this suite already holds for the positive case.
+        // test used to pin): the grant alone says nothing about HOW the
+        // caller resolved to this node — `spawn_admitted` is the full check,
+        // and it must refuse the SAME spawn-holding caller whenever anything
+        // less than a verified per-request SIGNATURE resolved it, including
+        // the Token rung that P-P3 itself admitted. Proven at the
+        // predicate/wiring level directly against `(Node, NodeRung)` +
+        // `Grant` fixtures, the same "never through `message_send`/
+        // `do_spawn`" precedent this suite already holds for the positive
+        // case.
         let mut paired_allowed = fixture_node("box-b", "http://10.0.0.5:8710/", false);
         paired_allowed.verified = true;
-        paired_allowed.allows = vec!["read".to_string(), "spawn".to_string()];
+        paired_allowed.grants = aoide_storage::node_store::grants_in("home", &["read", "spawn"]);
+        let grant = grant_for(&paired_allowed, "home");
 
         assert!(
-            spawn_admitted(Some((&paired_allowed, aoide_storage::node_store::NodeRung::Signature))),
-            "paired + spawn in allows + resolved via a VERIFIED SIGNATURE — admitted"
+            spawn_admitted(Some((&paired_allowed, aoide_storage::node_store::NodeRung::Signature)), &grant),
+            "paired + spawn in the grant + resolved via a VERIFIED SIGNATURE — admitted"
         );
         assert!(
-            !spawn_admitted(Some((&paired_allowed, aoide_storage::node_store::NodeRung::Token))),
-            "the SAME paired+allowed node, resolved only via its bare token — refused as of P-P4: \
+            !spawn_admitted(Some((&paired_allowed, aoide_storage::node_store::NodeRung::Token)), &grant),
+            "the SAME grant holder, resolved only via its bare token — refused as of P-P4: \
              a shared secret is no longer sufficient, only a per-request signature is"
         );
         assert!(
-            !spawn_admitted(Some((&paired_allowed, aoide_storage::node_store::NodeRung::Addr))),
-            "the SAME paired+allowed node, resolved only by address — refused: address alone never admits spawn"
+            !spawn_admitted(Some((&paired_allowed, aoide_storage::node_store::NodeRung::Addr)), &grant),
+            "the SAME grant holder, resolved only by address — refused: address alone never admits spawn"
         );
-        assert!(!spawn_admitted(None), "no resolution at all — refused");
+        assert!(!spawn_admitted(None, &grant), "no resolution at all — refused");
+        assert!(
+            !spawn_admitted(Some((&paired_allowed, aoide_storage::node_store::NodeRung::Signature)), &Grant::none()),
+            "a signed caller with no grant in THIS mesh — refused: the mesh is part of the question"
+        );
     }
 
     #[test]
@@ -7553,25 +7780,30 @@ mod tests {
         use aoide_storage::node_store::NodeRung;
         let mut paired_allowed = fixture_node("box-b", "http://10.0.0.5:8710/", false);
         paired_allowed.verified = true;
-        paired_allowed.allows = vec!["spawn".to_string()];
+        paired_allowed.grants = aoide_storage::node_store::grants_in("home", &["spawn"]);
 
-        let (code, msg) = spawn_refusal(Some((&paired_allowed, NodeRung::Token)));
+        let (code, msg) = spawn_refusal(Some((&paired_allowed, NodeRung::Token)), "home");
         assert_eq!(code, -32006);
         assert!(msg.contains("was not signed"), "Token-rung-but-verified must name signing specifically: {msg:?}");
 
         let mut paired_denied = paired_allowed.clone();
-        paired_denied.allows = vec!["read".to_string()];
-        let (code, msg) = spawn_refusal(Some((&paired_denied, NodeRung::Signature)));
+        paired_denied.grants = aoide_storage::node_store::grants_in("home", &["read"]);
+        let (code, msg) = spawn_refusal(Some((&paired_denied, NodeRung::Signature)), "home");
         assert_eq!(code, -32006);
         assert!(msg.contains("node allow"), "Signature-rung-but-not-allowed must name the `node allow` fix: {msg:?}");
+        assert!(
+            msg.contains("--mesh home"),
+            "review finding 11: the taught fix must be a command the operator can actually type on a \
+             two-mesh record — it names the mesh the request acted in: {msg:?}"
+        );
 
-        let (code, msg) = spawn_refusal(None);
+        let (code, msg) = spawn_refusal(None, "home");
         assert_eq!(code, -32006);
         assert!(msg.contains("aoide pair"), "no resolution at all must point at the pairing ceremony: {msg:?}");
 
         let mut unverified = fixture_node("box-c", "http://10.0.0.6:8710/", false);
-        unverified.allows = vec!["spawn".to_string()]; // allows populated but never actually paired.
-        let (code, msg) = spawn_refusal(Some((&unverified, NodeRung::Token)));
+        unverified.grants = aoide_storage::node_store::grants_in("home", &["spawn"]); // a granted set that was never actually paired.
+        let (code, msg) = spawn_refusal(Some((&unverified, NodeRung::Token)), "home");
         assert_eq!(code, -32006);
         assert!(
             msg.contains("aoide pair"),
@@ -7609,7 +7841,7 @@ mod tests {
         let mut node = fixture_node(node_name, "http://node/", false);
         node.verified = true;
         node.pubkey = Some(kp.info().pubkey_hex);
-        node.allows = allows.iter().map(|s| s.to_string()).collect();
+        node.grants = aoide_storage::node_store::grants_in("home", allows);
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
         kp
     }
@@ -7619,8 +7851,23 @@ mod tests {
     /// of `aoide-client`'s real wire builder, built directly against
     /// `aoide_storage::wire_auth` rather than through a real curl call.
     fn signed_request(kp: &aoide_storage::identity::Keypair, node_name: &str, path: &str, body: &[u8], ts_epoch: i64, nonce: &str) -> HttpRequest {
+        signed_request_in_mesh(kp, node_name, path, body, ts_epoch, nonce, None)
+    }
+
+    /// [`signed_request`] with the `X-Aoide-Mesh` header (P-CHARTER) — the
+    /// pre-charter shape is the `None` arm above, so every test written
+    /// before per-mesh trust keeps signing exactly what it signed before.
+    fn signed_request_in_mesh(
+        kp: &aoide_storage::identity::Keypair,
+        node_name: &str,
+        path: &str,
+        body: &[u8],
+        ts_epoch: i64,
+        nonce: &str,
+        mesh: Option<&str>,
+    ) -> HttpRequest {
         let timestamp = aoide_storage::time::iso_utc_from_epoch(ts_epoch);
-        let canonical = aoide_storage::wire_auth::canonical_string("POST", path, &timestamp, nonce, body);
+        let canonical = aoide_storage::wire_auth::canonical_string("POST", path, &timestamp, nonce, body, mesh);
         let signature = aoide_storage::wire_auth::sign_hex(kp, canonical.as_bytes());
         HttpRequest {
             method: "POST".to_string(),
@@ -7631,6 +7878,7 @@ mod tests {
             signed_timestamp: Some(timestamp),
             signed_nonce: Some(nonce.to_string()),
             signed_signature: Some(signature),
+            signed_mesh: mesh.map(str::to_string),
         }
     }
 
@@ -7656,6 +7904,7 @@ mod tests {
             signed_timestamp: None,
             signed_nonce: None,
             signed_signature: None,
+            signed_mesh: None,
         };
         assert_eq!(
             verify_signed_request(&req, 0),
@@ -7678,6 +7927,7 @@ mod tests {
             signed_timestamp: None,
             signed_nonce: None,
             signed_signature: None,
+            signed_mesh: None,
         };
         match verify_signed_request(&req, 0) {
             SignedRequestOutcome::Refused(code, msg) => {
@@ -7707,7 +7957,8 @@ mod tests {
             SignedRequestOutcome::Verified {
                 resolved: "box-b".to_string(),
                 key: kp.info().pubkey_hex.clone(),
-                claimed: "box-b".to_string()
+                claimed: "box-b".to_string(),
+                mesh: None,
             }
         );
 
@@ -7883,7 +8134,8 @@ mod tests {
             SignedRequestOutcome::Verified {
                 resolved: "box-b".to_string(),
                 key: kp.info().pubkey_hex.clone(),
-                claimed: "box-b".to_string()
+                claimed: "box-b".to_string(),
+                mesh: None,
             },
             "the FIRST use of this nonce must verify"
         );
@@ -8170,7 +8422,7 @@ mod tests {
             .iter()
             .find(|p| p.name == signed_caller)
             .map(|p| (p, aoide_storage::node_store::NodeRung::Signature));
-        assert!(spawn_admitted(resolved), "a genuinely signed, paired, spawn-allowed node must be ADMITTED");
+        assert!(spawn_admitted(resolved, &grant_for(&nodes[0], "home")), "a genuinely signed, paired, spawn-allowed node must be ADMITTED");
         // The exact name that would flow into `do_spawn`'s `node_name` arg,
         // and hence into `origin: format!("node:{name}")` — the wire-verified
         // name, not a guess.
@@ -8213,7 +8465,7 @@ mod tests {
             SignedRequestOutcome::Verified { resolved, key, .. } => (resolved, key),
             other => panic!("expected a REAL genuine signature to verify, got {other:?}"),
         };
-        let caller = SignedCaller { name: &signed_name, key: &signed_key };
+        let caller = SignedCaller { name: &signed_name, key: &signed_key, mesh: None };
 
         let err = message_send(
             &body["params"],
@@ -8283,7 +8535,7 @@ mod tests {
             ConnOrigin::Loopback,
             "",
             None,
-            Some(SignedCaller { name: &signed_name, key: &signed_key }),
+            Some(SignedCaller { name: &signed_name, key: &signed_key, mesh: None }),
         )
         .unwrap_err();
         assert_eq!(err.0, -32602, "a signed caller's malformed claim is invalid params, never a silent drop");
@@ -8393,7 +8645,7 @@ mod tests {
             ConnOrigin::Loopback,
             "",
             None,
-            Some(SignedCaller { name: &signed_name, key: &signed_key }),
+            Some(SignedCaller { name: &signed_name, key: &signed_key, mesh: None }),
         );
         let task = result.unwrap_or_else(|e| {
             panic!("a malformed claim on the Inject arm must not be refused: {e:?}")
@@ -8487,7 +8739,7 @@ mod tests {
             "the find-by-name really does land on the impostor — the point of this test",
         );
         let stamped = claimed_remote_parent(
-            claimable_caller(resolved, Some(SignedCaller { name: &signed_name, key: &signed_key })),
+            claimable_caller(resolved, Some(SignedCaller { name: &signed_name, key: &signed_key, mesh: None })),
             Some("conduct-1-2"),
         )
         .unwrap()
@@ -8520,7 +8772,7 @@ mod tests {
 
         let mut node = fixture_node("denied-node", "http://10.0.0.5:8710/", false);
         node.verified = true;
-        node.allows = vec!["read".to_string()]; // spawn explicitly absent (revoked or never granted).
+        node.grants = aoide_storage::node_store::grants_in("home", &["read"]); // spawn explicitly absent (revoked or never granted).
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
         let params = json!({ "message": { "parts": [{ "kind": "text", "text": "hi" }] } });
@@ -8568,7 +8820,7 @@ mod tests {
 
         let mut node = fixture_node("addr-only-node", "http://10.0.0.5:8710/", false);
         node.verified = true;
-        node.allows = vec!["read".to_string(), "spawn".to_string()];
+        node.grants = aoide_storage::node_store::grants_in("home", &["read", "spawn"]);
         // `token_file` deliberately left `None` — this node can only ever
         // resolve via the address rung.
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
@@ -10118,7 +10370,7 @@ mod tests {
             hub: false,
             pubkey: None,
             verified: false,
-            allows: Vec::new(),
+            grants: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-14T00:00:00Z".into(),
         }])
@@ -10218,7 +10470,7 @@ mod tests {
             hub: false,
             pubkey: None,
             verified: false,
-            allows: Vec::new(),
+            grants: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-18T00:00:00Z".into(),
         }])
@@ -10386,6 +10638,12 @@ mod tests {
         // must not cost it that.
         let mut signed_node = fixture_node("trusted-tunneled-node", "http://10.0.0.9:8710/", true);
         signed_node.verified = true;
+        // The caller's own key and the grant the delivery needs, both of which
+        // a real door would have proved before this arm ran (review finding 5):
+        // autogate delivery is `message` in the request's mesh, and the grant is
+        // read by KEY.
+        signed_node.pubkey = Some("ab".repeat(32));
+        signed_node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
         aoide_storage::node_store::save_nodes(&[signed_node]).unwrap();
 
         let id = "sig-loop-autogate-tgt";
@@ -10491,6 +10749,13 @@ mod tests {
         let mut node = fixture_node(node_name, "http://192.0.2.51:8710/", autogate);
         node.verified = true;
         node.pubkey = Some(key.to_string());
+        // P-CHARTER (review finding 5): delivering a `message/send` needs the
+        // caller to hold `message` IN THE MESH ITS REQUEST NAMES — the same
+        // capability the delivery itself needs. A fixture without it would
+        // exercise the pending queue, not the arm under test, and would leave
+        // the test's own accept-thread waiting on a connection this door
+        // never dials.
+        node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
         aoide_storage::node_store::save_nodes(&[node]).unwrap();
 
         let socket = aoide_conduct::graph::conduct_socket_path(REMOTE_CHILD);
@@ -10560,7 +10825,7 @@ mod tests {
             extra: Default::default(),
         };
         let key = PARENT_KEY.to_string();
-        let caller = SignedCaller { name: "nodeb", key: &key };
+        let caller = SignedCaller { name: "nodeb", key: &key, mesh: None };
 
         assert!(
             remote_parent_match(Some(&caller), Some(PARENT_SESSION), Some(&target)),
@@ -10568,7 +10833,7 @@ mod tests {
         );
         assert!(!remote_parent_match(None, Some(PARENT_SESSION), Some(&target)), "unsigned: no verified key to compare");
         assert!(
-            !remote_parent_match(Some(&SignedCaller { name: "nodeb", key: "ff99" }), Some(PARENT_SESSION), Some(&target)),
+            !remote_parent_match(Some(&SignedCaller { name: "nodeb", key: "ff99", mesh: None }), Some(PARENT_SESSION), Some(&target)),
             "another node's key never matches — a node steers only children stamped with its OWN key"
         );
         assert!(
@@ -10582,7 +10847,7 @@ mod tests {
         assert!(!remote_parent_match(Some(&caller), None, Some(&target)), "no claim, nothing asked for");
         assert!(!remote_parent_match(Some(&caller), Some(PARENT_SESSION), None), "a target with no remoteParent");
         assert!(
-            remote_parent_match(Some(&SignedCaller { name: "renamed-nodeb", key: &key }), Some(PARENT_SESSION), Some(&target)),
+            remote_parent_match(Some(&SignedCaller { name: "renamed-nodeb", key: &key, mesh: None }), Some(PARENT_SESSION), Some(&target)),
             "the stored NAME is a label, not the identity: a renamed record still matches on the key"
         );
     }
@@ -10619,7 +10884,7 @@ mod tests {
             ConnOrigin::Remote("192.0.2.51".parse().unwrap()),
             "",
             None,
-            Some(SignedCaller { name: "parent-node", key: &key }),
+            Some(SignedCaller { name: "parent-node", key: &key, mesh: None }),
         );
         assert!(result.is_ok(), "{:?}", result.err());
         assert_eq!(
@@ -10669,7 +10934,7 @@ mod tests {
             ConnOrigin::Remote("192.0.2.51".parse().unwrap()),
             "",
             None,
-            Some(SignedCaller { name: "parent-node", key: &key }),
+            Some(SignedCaller { name: "parent-node", key: &key, mesh: None }),
         );
         assert!(result.is_ok(), "{:?}", result.err());
         assert_eq!(String::from_utf8(acc.join().unwrap()).unwrap(), "steer it\r");
@@ -10709,11 +10974,27 @@ mod tests {
         };
 
         let acc = std::thread::spawn(move || {
-            let (mut conn, _) = listener.accept().unwrap();
-            use std::io::Read as _;
-            let mut buf = Vec::new();
-            let _ = conn.read_to_end(&mut buf);
-            buf
+            // Bounded, so a delivery this door WITHHELD (a fixture whose grant
+            // no longer matches the rule) fails the assertion below instead of
+            // hanging the suite on an `accept` that never returns — and, under
+            // `env_lock`, hanging every other test queued behind it.
+            listener.set_nonblocking(true).unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while std::time::Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((mut conn, _)) => {
+                        use std::io::Read as _;
+                        let mut buf = Vec::new();
+                        let _ = conn.read_to_end(&mut buf);
+                        return buf;
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(e) => panic!("the fixture listener failed: {e}"),
+                }
+            }
+            Vec::new()
         });
         let result = message_send(
             &body,
@@ -10723,7 +11004,7 @@ mod tests {
             ConnOrigin::Remote("192.0.2.51".parse().unwrap()),
             "",
             None,
-            Some(SignedCaller { name: &signed_name, key: &signed_key }),
+            Some(SignedCaller { name: &signed_name, key: &signed_key, mesh: None }),
         );
         assert!(result.is_ok(), "{:?}", result.err());
         assert_eq!(
@@ -10758,7 +11039,7 @@ mod tests {
         let origin = ConnOrigin::Remote("192.0.2.51".parse().unwrap());
         let key = PARENT_KEY.to_string();
         let send = |claim: Option<&str>, caller_key: Option<&str>| {
-            let caller = caller_key.map(|k| SignedCaller { name: "parent-node", key: k });
+            let caller = caller_key.map(|k| SignedCaller { name: "parent-node", key: k, mesh: None });
             message_send(&remote_parent_body(claim), &audit_log, "", "", origin, "", None, caller)
                 .expect("every non-match is answered exactly as before this phase")
         };
@@ -10845,7 +11126,7 @@ mod tests {
             ConnOrigin::Loopback,
             "",
             None,
-            Some(SignedCaller { name: "parent-node", key: &key }),
+            Some(SignedCaller { name: "parent-node", key: &key, mesh: None }),
         );
         assert!(result.is_ok(), "{:?}", result.err());
         assert!(
@@ -10890,7 +11171,7 @@ mod tests {
             ConnOrigin::Loopback,
             "door-secret",
             None,
-            Some(SignedCaller { name: "parent-node", key: &key }),
+            Some(SignedCaller { name: "parent-node", key: &key, mesh: None }),
         )
         .expect("the uniform response is an ANSWER, not a refusal");
 
@@ -11287,7 +11568,7 @@ mod tests {
             hub: false,
             pubkey: None,
             verified: false,
-            allows: Vec::new(),
+            grants: aoide_storage::node_store::Grants::new(),
             via: None,
             added_at: "2026-08-20T00:00:00Z".into(),
         }])
@@ -11882,7 +12163,7 @@ mod tests {
     /// would (`aoide-client`'s own poll body-builder, unit-tested separately
     /// against this same shape).
     fn sign_poll(kp: &aoide_storage::identity::Keypair, id: &str, timestamp: &str, nonce: &str) -> String {
-        let canonical = aoide_storage::wire_auth::canonical_string("PAIRPOLL", id, timestamp, nonce, &[]);
+        let canonical = aoide_storage::wire_auth::canonical_string("PAIRPOLL", id, timestamp, nonce, &[], None);
         aoide_storage::wire_auth::sign_hex(kp, canonical.as_bytes())
     }
 
@@ -12432,7 +12713,7 @@ mod tests {
         // still find it; nothing here dials A's `url` at all.
         aoide_storage::pairing::mark_inbound_approved(&id, now_epoch).unwrap();
         let mut nodes_b = aoide_storage::node_store::load_nodes();
-        aoide_storage::node_store::upsert_paired_node(&mut nodes_b, &entry.name, &entry.url, &entry.pubkey_hex, &now_iso_utc(), &["read".to_string()]);
+        aoide_storage::node_store::upsert_paired_node(&mut nodes_b, &entry.name, &entry.url, &entry.pubkey_hex, &now_iso_utc(), &["read".to_string()], "home");
         aoide_storage::node_store::save_nodes(&nodes_b).unwrap();
 
         // B's own record for A: pubkey = A's real key, verified, name =
@@ -12479,7 +12760,7 @@ mod tests {
         assert_eq!(reply_sas_a, reply_sas_b, "A independently re-derives the IDENTICAL reply code B already computed at approve time");
         assert_ne!(reply_sas_a, sas_a, "A's own confirm gates on the reply code, never the gate code its own screen already showed");
         let mut nodes_a = aoide_storage::node_store::load_nodes();
-        aoide_storage::node_store::upsert_paired_node(&mut nodes_a, &marked.name, &marked.url, &marked.pubkey_hex, &now_iso_utc(), &["read".to_string()]);
+        aoide_storage::node_store::upsert_paired_node(&mut nodes_a, &marked.name, &marked.url, &marked.pubkey_hex, &now_iso_utc(), &["read".to_string()], "home");
         aoide_storage::node_store::save_nodes(&nodes_a).unwrap();
         aoide_storage::pairing::take_outbound(&id, now_epoch).unwrap();
 
@@ -12694,6 +12975,7 @@ mod tests {
             signed_timestamp: None,
             signed_nonce: None,
             signed_signature: None,
+            signed_mesh: None,
         };
         assert_eq!(
             streaming_method(&mk("POST", "/", r#"{"method":"message/stream"}"#)).as_deref(),
@@ -12726,6 +13008,7 @@ mod tests {
                 signed_timestamp: None,
                 signed_nonce: None,
                 signed_signature: None,
+                signed_mesh: None,
             },
             "127.0.0.1",
             8710,
@@ -12752,6 +13035,7 @@ mod tests {
                 signed_timestamp: None,
                 signed_nonce: None,
                 signed_signature: None,
+                signed_mesh: None,
             },
             "127.0.0.1",
             8710,
@@ -12792,6 +13076,7 @@ mod tests {
                 signed_timestamp: None,
                 signed_nonce: None,
                 signed_signature: None,
+                signed_mesh: None,
             };
             let (status, body, label) = route(
                 &req,
@@ -12829,6 +13114,7 @@ mod tests {
             signed_timestamp: None,
             signed_nonce: None,
             signed_signature: None,
+            signed_mesh: None,
         };
         let (status, body, label) = route(
             &req,
@@ -12873,6 +13159,7 @@ mod tests {
             signed_timestamp: None,
             signed_nonce: None,
             signed_signature: None,
+            signed_mesh: None,
         };
         let (status, body, _) = route(
             &req,
@@ -12907,6 +13194,7 @@ mod tests {
             signed_timestamp: None,
             signed_nonce: None,
             signed_signature: None,
+            signed_mesh: None,
         };
         let (status, body, _) = route(
             &req,
@@ -13198,46 +13486,59 @@ mod tests {
             self_url: "",
             expected_token: "",
             presented_token: None,
-            signed_caller: name.map(|name| SignedCaller { name, key: "aa11" }),
+            // P-CHARTER: the grant is read by the stored KEY, so this fixture
+            // must carry the key the record actually holds — the same value
+            // `verify_signed_request` would have resolved for a real signed
+            // request — rather than a literal no record ever carries. The key
+            // is leaked because the ctx BORROWS it for the test's lifetime
+            // and the registry's own copy is dropped with its `Vec`; one
+            // short string per test process, never a production path.
+            signed_caller: name.map(|name| SignedCaller {
+                name,
+                key: Box::leak(
+                    aoide_storage::node_store::load_nodes()
+                        .into_iter()
+                        .find(|p| p.name == name)
+                        .and_then(|p| p.pubkey)
+                        .unwrap_or_default()
+                        .into_boxed_str(),
+                ),
+                mesh: None,
+            }),
         }
     }
 
     #[test]
-    fn node_may_message_covers_paired_allowed_paired_denied_and_unpaired() {
-        let mut paired_allowed = fixture_node("box-b", "http://10.0.0.5:8710/", false);
-        paired_allowed.verified = true;
-        paired_allowed.allows = vec!["read".to_string(), "message".to_string()];
-        assert!(node_may_message(&paired_allowed), "paired + message in allows");
-
-        let mut paired_denied = paired_allowed.clone();
-        paired_denied.allows = vec!["read".to_string()]; // message revoked.
-        assert!(!node_may_message(&paired_denied), "paired but message NOT in allows");
-
-        let mut unpaired = paired_allowed.clone();
-        unpaired.verified = false; // never completed the ceremony.
-        assert!(!node_may_message(&unpaired), "allows populated but never verified — still refused");
+    fn may_message_reads_the_grant_so_a_revoked_capability_refuses() {
+        // P-CHARTER shape: the capability question over a `Grant`, which is
+        // `none()` for a caller that resolved to nothing at all (no
+        // signature, no record, or a record granted nothing in this mesh) —
+        // so a revoked capability and an unknown caller refuse through the
+        // SAME answer, by construction.
+        assert!(may_message(&grant_of("home", &["read", "message"])), "message in the grant");
+        assert!(!may_message(&grant_of("home", &["read"])), "message revoked, read kept — refused");
+        assert!(!may_message(&Grant::none()), "no record, no resolution, nothing granted — refused");
     }
 
     #[test]
-    fn deposit_admitted_requires_the_signature_rung_specifically() {
-        // Unlike `spawn_admitted`, `deposit_admitted` takes a plain
-        // `Option<&Node>`, never `Option<(&Node, NodeRung)>` — `message` has
-        // no now-superseded Token-rung history to migrate off of
-        // (`node_may_message`'s own doc: "signature-only from the start"),
-        // so there is no THIRD rung to construct a case from. `resolved` is
-        // populated ONLY by `mail_deposit`'s own `ctx.signed_caller.
-        // and_then(...)` line, so `Some` here already MEANS "resolved via a
-        // verified per-request signature" — this test pins that a
-        // paired+allowed node still refuses the instant resolution drops to
-        // `None`, the shape an unsigned, addr-only, or bare-token caller
-        // collapses to (proven at the integration level by
-        // `an_unsigned_caller_is_refused_by_mail_deposit`, below).
+    fn deposit_admitted_needs_a_grant_the_caller_cannot_fake() {
+        // `deposit_admitted` is `may_message` and nothing else, and a
+        // `Grant` exists only for a caller a verified signature resolved to
+        // a record holding the capability IN THE MESH ITS REQUEST NAMES
+        // (`grant_in_mesh`/`paired_grant`, exercised above against a real
+        // registry). `Grant::none()` is what every other shape collapses to
+        // — unsigned, addr-only, bare token, unknown key, or a grant in
+        // another mesh — and this pins that it refuses.
         let mut paired_allowed = fixture_node("box-b", "http://10.0.0.5:8710/", false);
         paired_allowed.verified = true;
-        paired_allowed.allows = vec!["message".to_string()];
+        paired_allowed.grants = aoide_storage::node_store::grants_in("home", &["message"]);
 
-        assert!(deposit_admitted(Some(&paired_allowed)), "paired + message in allows + signature-resolved — admitted");
-        assert!(!deposit_admitted(None), "no signature resolution at all — refused, with no fallback rung to try instead");
+        assert!(deposit_admitted(&grant_for(&paired_allowed, "home")), "granted `message` in this mesh: admitted");
+        assert!(!deposit_admitted(&Grant::none()), "no signature resolution at all — refused, with no fallback rung to try instead");
+        assert!(
+            !deposit_admitted(&grant_for(&paired_allowed, "away")),
+            "the same record, a request naming another mesh it is not in — refused"
+        );
     }
 
     #[test]
@@ -13670,7 +13971,7 @@ mod tests {
         let mut nodes = aoide_storage::node_store::load_nodes();
         let mut box_c = fixture_node("box-c", "http://node/", false);
         box_c.verified = true;
-        box_c.allows = vec!["message".to_string()];
+        box_c.grants = aoide_storage::node_store::grants_in("home", &["message"]);
         nodes.push(box_c);
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
@@ -13683,20 +13984,27 @@ mod tests {
     }
 
     #[test]
-    fn poll_admitted_requires_a_verified_message_holder_asking_for_its_own_node() {
+    fn poll_admitted_requires_a_signed_message_holder_asking_for_its_own_node() {
         let mut paired = fixture_node("box-b", "http://10.0.0.5:8710/", false);
         paired.verified = true;
-        paired.allows = vec!["read".to_string(), "message".to_string()];
-        assert!(poll_admitted(Some(&paired), "box-b"), "paired + message + asking for itself");
+        paired.grants = aoide_storage::node_store::grants_in("home", &["read", "message"]);
+        let grant = grant_for(&paired, "home");
+        let sig = |name: &'static str| Some(SignedCaller { name, key: "aa11", mesh: None });
 
-        assert!(!poll_admitted(Some(&paired), "box-c"), "no polling on another's behalf");
+        assert!(poll_admitted(sig("box-b"), &grant, "box-b"), "granted `message` + asking for itself");
+
+        assert!(!poll_admitted(sig("box-b"), &grant, "box-c"), "no polling on another's behalf");
+        assert!(!poll_admitted(sig("box-c"), &grant, "box-b"), "nor the other way round — the CLAIM must be the caller's own name");
+
         let mut denied = paired.clone();
-        denied.allows = vec!["read".to_string()];
-        assert!(!poll_admitted(Some(&denied), "box-b"), "paired but message revoked");
-        let mut unpaired = paired.clone();
-        unpaired.verified = false;
-        assert!(!poll_admitted(Some(&unpaired), "box-b"), "allows populated but never verified — still refused");
-        assert!(!poll_admitted(None, "box-b"), "no verified signature resolution at all");
+        denied.grants = aoide_storage::node_store::grants_in("home", &["read"]);
+        assert!(!poll_admitted(sig("box-b"), &grant_for(&denied, "home"), "box-b"), "message revoked — refused");
+        assert!(
+            !poll_admitted(sig("box-b"), &grant_for(&paired, "away"), "box-b"),
+            "the same record, a request naming a mesh it holds nothing in — refused"
+        );
+        assert!(!poll_admitted(None, &grant, "box-b"), "no verified signature resolution at all");
+        assert!(!poll_admitted(sig("box-b"), &Grant::none(), "box-b"), "and no grant to speak with either");
     }
 
     /// Spec, P-M3: **a poller receives only its own entries.** box-b asks for
@@ -14033,59 +14341,130 @@ mod tests {
     /// refused, a signature-rung node is admitted on `verified` + `read` and
     /// on nothing else — the target's own `remoteParent` never enters into it.
     #[test]
-    fn output_read_admitted_is_a_signed_verified_node_with_read() {
+    fn output_read_admitted_is_a_signed_caller_holding_read_in_the_mesh_it_names() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = aoide_test_support::short_tmp("a2a-read-gate-mesh");
+        std::env::set_var("AOIDE_STATE_DIR", &root);
+
         let mut reader = fixture_node("box-b", "http://10.0.0.5:8710/", false);
         reader.verified = true;
-        reader.allows = vec!["read".to_string()];
-        fn sig(
-            node: &aoide_storage::node_store::Node,
-        ) -> Option<(&aoide_storage::node_store::Node, aoide_storage::node_store::NodeRung)> {
-            Some((node, aoide_storage::node_store::NodeRung::Signature))
-        }
+        reader.pubkey = Some("aa11".to_string());
+        reader.grants = aoide_storage::node_store::grants_in("home", &["read"]);
+        aoide_storage::node_store::save_nodes(&[reader.clone()]).unwrap();
 
-        assert!(output_read_admitted(true, sig(&reader)), "signed, verified, `read`: admitted");
-        assert!(!output_read_admitted(true, None), "unsigned with no door token (read_ok true): refused");
-        assert!(!output_read_admitted(false, sig(&reader)), "the bearer gate still runs first");
+        // The caller signature verification would produce for this record:
+        // its own stored key, and the mesh its request names.
+        let signed = |mesh: Option<&'static str>| Some(SignedCaller { name: "box-b", key: "aa11", mesh });
+
         assert!(
-            !output_read_admitted(true, Some((&reader, aoide_storage::node_store::NodeRung::Token))),
-            "bearer rung: refused"
+            output_read_admitted(true, signed(None)),
+            "signed, granted `read` in the home mesh (and the request names none): admitted"
         );
+        assert!(output_read_admitted(true, signed(Some("home"))), "naming the home mesh explicitly is the same grant");
+        assert!(!output_read_admitted(true, None), "unsigned with no door token (read_ok true): refused");
+        assert!(!output_read_admitted(false, signed(None)), "the bearer gate still runs first");
         assert!(
-            !output_read_admitted(true, Some((&reader, aoide_storage::node_store::NodeRung::Addr))),
-            "address rung: refused"
+            !output_read_admitted(true, signed(Some("away"))),
+            "the SAME caller acting in another mesh holds nothing there: a grant is given in one mesh and holds only there"
         );
 
         let mut no_read = reader.clone();
-        no_read.allows = vec!["spawn".to_string()];
-        assert!(!output_read_admitted(true, sig(&no_read)), "signed but `read` was never granted");
+        no_read.grants = aoide_storage::node_store::grants_in("home", &["spawn"]);
+        aoide_storage::node_store::save_nodes(&[no_read.clone()]).unwrap();
+        assert!(!output_read_admitted(true, signed(None)), "signed but `read` was never granted");
+
         let mut unverified = reader.clone();
         unverified.verified = false;
-        assert!(!output_read_admitted(true, sig(&unverified)), "an allows set without a pairing grants nothing");
+        aoide_storage::node_store::save_nodes(&[unverified]).unwrap();
+        assert!(!output_read_admitted(true, signed(None)), "a grant map without a pairing grants nothing");
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
     }
 
-    /// The rung comes from the PROOF, not from a second lookup: no
-    /// `SignedCaller` (unsigned, bearer, address) is `None` whatever the
-    /// registry holds, and a proof only names the record its KEY resolved to.
+    /// **The mesh decides which grant answers** — the whole point of
+    /// per-mesh trust: the same caller, the same signature, a different mesh
+    /// named, and a grant it does not hold there is not a grant. Two meshes
+    /// sharing a third node is the case the design calls out by name.
+    ///
+    /// Review finding 6 lives at the end: twin records with ONE key answer by
+    /// UNION, per CONTRACTS.md §6.
     #[test]
-    fn resolved_caller_needs_a_proof_and_finds_its_own_record() {
-        let mut reader = fixture_node("box-b", "http://10.0.0.5:8710/", false);
-        reader.verified = true;
-        reader.allows = vec!["read".to_string()];
-        let nodes = vec![reader.clone()];
+    fn a_grant_in_one_mesh_never_answers_for_another_mesh() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = aoide_test_support::short_tmp("a2a-mesh-scope");
+        std::env::set_var("AOIDE_STATE_DIR", &root);
 
-        assert!(resolved_caller(&nodes, None).is_none(), "no signature headers, no rung");
-        let found = resolved_caller(&nodes, Some(caller("box-b"))).expect("the proved name resolves");
-        assert_eq!(found.0.name, "box-b");
-        assert_eq!(
-            found.1,
-            aoide_storage::node_store::NodeRung::Signature,
-            "a proof IS the signature rung"
-        );
+        let mut node = fixture_node("box-b", "http://10.0.0.5:8710/", false);
+        node.verified = true;
+        node.pubkey = Some("aa11".to_string());
+        node.grants = std::collections::BTreeMap::from([
+            ("away".to_string(), vec!["read".to_string()]),
+            ("home".to_string(), vec!["spawn".to_string()]),
+        ]);
+        aoide_storage::node_store::save_nodes(&[node.clone()]).unwrap();
+
+        // The pure core, so the table is provable without the disk at all.
+        assert!(paired_grant(std::slice::from_ref(&node), "away", "aa11").holds("read"));
         assert!(
-            resolved_caller(&nodes, Some(caller("box-z"))).is_none(),
-            "a name this registry does not hold resolves to nothing"
+            !paired_grant(std::slice::from_ref(&node), "home", "aa11").holds("read"),
+            "`read` was granted in `away` and nowhere else"
         );
+        assert!(paired_grant(std::slice::from_ref(&node), "home", "aa11").holds("spawn"));
+        assert!(!paired_grant(std::slice::from_ref(&node), "away", "aa11").holds("spawn"));
+
+        // And through the real lookup the door uses.
+        assert!(grant_in_mesh("away", "aa11").holds("read"));
+        assert!(!grant_in_mesh("home", "aa11").holds("read"));
+        assert!(grant_in_mesh("home", "aa11").holds("spawn"));
+        assert!(
+            grant_in_mesh(&effective_mesh(None), "aa11").holds("spawn"),
+            "an unnamed request reads the HOME mesh's grant, and only that one"
+        );
+        assert!(grant_in_mesh("never-declared", "aa11") == Grant::none(), "a mesh the record is not in grants nothing");
+        assert!(grant_in_mesh("home", "ff99") == Grant::none(), "a key no record holds grants nothing");
+
+        // Review finding 6 / CONTRACTS.md §6: twin records sharing ONE key
+        // answer by UNION, so a capability either twin grants is held, and a
+        // revocation is only real once it lands on BOTH.
+        let mut twin_a = fixture_node("twin-a", "http://a/", false);
+        twin_a.verified = true;
+        twin_a.pubkey = Some("aa11".to_string());
+        twin_a.grants = aoide_storage::node_store::grants_in("home", &["spawn"]);
+        let mut twin_b = fixture_node("twin-b", "http://b/", false);
+        twin_b.verified = true;
+        twin_b.pubkey = Some("aa11".to_string());
+        twin_b.grants = std::collections::BTreeMap::from([("home".to_string(), vec!["read".to_string()])]);
+        let twins = vec![twin_a.clone(), twin_b.clone()];
+
+        let union = paired_grant(&twins, "home", "aa11");
+        assert!(union.holds("spawn"), "the first twin's capability survives: {union:?}");
+        assert!(union.holds("read"), "and so does the second's — the union, never the first match");
+        assert!(!union.holds("message"), "a capability NEITHER twin grants is not there");
+
+        let mut revoked = twins.clone();
+        revoked[0].grants = aoide_storage::node_store::grants_in("home", &["read"]);
+        assert!(
+            !paired_grant(&revoked, "home", "aa11").holds("spawn"),
+            "revoking on EVERY twin is what actually revokes (the contract's own instruction)"
+        );
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
     }
+
+    /// Review finding 9: the deleted helper's guard is the COMPILER's own
+    /// `never used` warning — the tree builds warning-free, and a helper
+    /// nothing calls would show up there. No source-scanning test sits here
+    /// (a first cut spelled the name it searched for, which the search found
+    /// in itself); the live answer to "which record is this caller" is
+    /// `grant_in_mesh`, exercised by the gate tests above.
 
     /// `tail` is read off `params.metadata` only, clamped to `1..=200`, and
     /// its absence is a plain status read.
@@ -14155,7 +14534,7 @@ mod tests {
         let kp = setup_signed_node_with_allows("yomi-strix", &["spawn"]);
         let body = serde_json::to_vec(&frame_request("sess-1", Some(5))).unwrap();
         let (name, key) = verified_caller(&kp, &body);
-        let ctx = RequestCtx { signed_caller: Some(SignedCaller { name: &name, key: &key }), ..test_ctx(Path::new("/dev/null"), "") };
+        let ctx = RequestCtx { signed_caller: Some(SignedCaller { name: &name, key: &key, mesh: None }), ..test_ctx(Path::new("/dev/null"), "") };
         let parsed = serde_json::from_slice::<Value>(&body).unwrap();
 
         let resp = handle_jsonrpc(&parsed, &ctx);
@@ -14176,7 +14555,7 @@ mod tests {
         let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
         let body = serde_json::to_vec(&frame_request("sess-1", Some(5))).unwrap();
         let (name, key) = verified_caller(&kp, &body);
-        let ctx = RequestCtx { signed_caller: Some(SignedCaller { name: &name, key: &key }), ..test_ctx(Path::new("/dev/null"), "") };
+        let ctx = RequestCtx { signed_caller: Some(SignedCaller { name: &name, key: &key, mesh: None }), ..test_ctx(Path::new("/dev/null"), "") };
         let parsed = serde_json::from_slice::<Value>(&body).unwrap();
 
         let resp = handle_jsonrpc(&parsed, &ctx);
@@ -14207,7 +14586,7 @@ mod tests {
         let kp = setup_signed_node_with_allows("yomi-strix", &["read"]);
         let body = serde_json::to_vec(&frame_request("ghost", Some(5))).unwrap();
         let (name, key) = verified_caller(&kp, &body);
-        let ctx = RequestCtx { signed_caller: Some(SignedCaller { name: &name, key: &key }), ..test_ctx(Path::new("/dev/null"), "") };
+        let ctx = RequestCtx { signed_caller: Some(SignedCaller { name: &name, key: &key, mesh: None }), ..test_ctx(Path::new("/dev/null"), "") };
         let parsed = serde_json::from_slice::<Value>(&body).unwrap();
 
         let resp = handle_jsonrpc(&parsed, &ctx);
@@ -14394,11 +14773,18 @@ mod tests {
     /// Nothing else — not the stored `node` label, and never a wildcard.
     #[test]
     fn history_is_admitted_only_for_the_key_this_door_stamped() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = aoide_test_support::short_tmp("a2a-history-gate");
+        std::env::set_var("AOIDE_STATE_DIR", &root);
+
         let mut reader = fixture_node("box-b", "http://10.0.0.5:8710/", false);
         reader.verified = true;
-        reader.allows = vec!["read".to_string()];
-        let nodes = vec![reader.clone()];
-        let sig = |key: &'static str| Some(SignedCaller { name: "box-b", key });
+        reader.pubkey = Some("key-of-mine".to_string());
+        reader.grants = aoide_storage::node_store::grants_in("home", &["read"]);
+        aoide_storage::node_store::save_nodes(&[reader.clone()]).unwrap();
+
+        let sig = |key: &'static str| Some(SignedCaller { name: "box-b", key, mesh: None });
         let stamp = |key: &str| RemoteParent {
             node: "sakaki".to_string(),
             key: key.to_string(),
@@ -14408,15 +14794,15 @@ mod tests {
 
         let _mine = stamp("key-of-mine");
         assert!(
-            history_admitted(true, sig("key-of-mine"), &nodes, Some("key-of-mine")),
+            history_admitted(true, sig("key-of-mine"), Some("key-of-mine")),
             "the key this door stamped for the child reads it"
         );
         assert!(
-            !history_admitted(true, sig("key-of-someone-else"), &nodes, Some("key-of-mine")),
-            "a foreign key does not"
+            !history_admitted(true, sig("key-of-someone-else"), Some("key-of-mine")),
+            "a foreign key does not (and holds no grant of its own either)"
         );
         assert!(
-            !history_admitted(true, sig("key-of-mine"), &nodes, None),
+            !history_admitted(true, sig("key-of-mine"), None),
             "an id with neither a record nor a ring has no key to match"
         );
 
@@ -14424,21 +14810,28 @@ mod tests {
         // hand-written record) matches nobody, and an empty caller key is not
         // a `SignedCaller` at all (the door resolves one only from a key that
         // verified).
-        assert!(!history_admitted(true, sig("key-of-mine"), &nodes, Some("")));
+        assert!(!history_admitted(true, sig("key-of-mine"), Some("")));
 
         // Unsigned, a weaker rung, no `read`, unverified: all refused, and all
         // by the output gate that runs first.
-        assert!(!history_admitted(true, None, &nodes, Some("key-of-mine")), "no proof, no key to match");
+        assert!(!history_admitted(true, None, Some("key-of-mine")), "no proof, no key to match");
         assert!(
-            !history_admitted(false, sig("key-of-mine"), &nodes, Some("key-of-mine")),
+            !history_admitted(false, sig("key-of-mine"), Some("key-of-mine")),
             "the bearer gate still runs first"
         );
         let mut no_read = reader.clone();
-        no_read.allows = vec!["spawn".to_string()];
-        assert!(!history_admitted(true, sig("key-of-mine"), &[no_read], Some("key-of-mine")), "`read` is still required");
+        no_read.grants = aoide_storage::node_store::grants_in("home", &["spawn"]);
+        aoide_storage::node_store::save_nodes(&[no_read]).unwrap();
+        assert!(!history_admitted(true, sig("key-of-mine"), Some("key-of-mine")), "`read` is still required");
         let mut unverified = reader.clone();
         unverified.verified = false;
-        assert!(!history_admitted(true, sig("key-of-mine"), &[unverified], Some("key-of-mine")), "a pairing is still required");
+        aoide_storage::node_store::save_nodes(&[unverified]).unwrap();
+        assert!(!history_admitted(true, sig("key-of-mine"), Some("key-of-mine")), "a pairing is still required");
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
     }
 
     /// The matching key reads the ring: the events after the cursor, the
@@ -14453,7 +14846,7 @@ mod tests {
         let body = serde_json::to_vec(&history_request("sess-1", 0)).unwrap();
         let (name, key_used) = signed_ctx(&kp, &body);
         let ctx = RequestCtx {
-            signed_caller: Some(SignedCaller { name: &name, key: &key_used }),
+            signed_caller: Some(SignedCaller { name: &name, key: &key_used, mesh: None }),
             ..test_ctx(Path::new("/dev/null"), "")
         };
         let parsed = serde_json::from_slice::<Value>(&body).unwrap();
@@ -14480,7 +14873,7 @@ mod tests {
         let body = serde_json::to_vec(&history_request("sess-1", 2)).unwrap();
         let (name, key_used) = signed_ctx(&kp, &body);
         let ctx = RequestCtx {
-            signed_caller: Some(SignedCaller { name: &name, key: &key_used }),
+            signed_caller: Some(SignedCaller { name: &name, key: &key_used, mesh: None }),
             ..test_ctx(Path::new("/dev/null"), "")
         };
         let resp = handle_jsonrpc(&serde_json::from_slice::<Value>(&body).unwrap(), &ctx);
@@ -14506,7 +14899,7 @@ mod tests {
             let body = serde_json::to_vec(&request).unwrap();
             let (name, key) = signed_ctx(&kp, &body);
             let ctx = RequestCtx {
-                signed_caller: Some(SignedCaller { name: &name, key: &key }),
+                signed_caller: Some(SignedCaller { name: &name, key: &key, mesh: None }),
                 ..test_ctx(Path::new("/dev/null"), "")
             };
             handle_jsonrpc(&serde_json::from_slice::<Value>(&body).unwrap(), &ctx)
@@ -14566,7 +14959,7 @@ mod tests {
         let ask = |request: Value, caller_key: &str| -> Value {
             let body = serde_json::to_vec(&request).unwrap();
             let ctx = RequestCtx {
-                signed_caller: Some(SignedCaller { name: "yomi-strix", key: caller_key }),
+                signed_caller: Some(SignedCaller { name: "yomi-strix", key: caller_key, mesh: None }),
                 ..test_ctx(Path::new("/dev/null"), "")
             };
             handle_jsonrpc(&serde_json::from_slice::<Value>(&body).unwrap(), &ctx)
@@ -14586,8 +14979,22 @@ mod tests {
         assert_eq!(ring["last"], 2);
 
         // Any other key is refused, with the history's own words — a ring does
-        // not become public just because its record is gone.
-        let resp = ask(history_request("sess-1", 0), &"dd".repeat(32));
+        // not become public just because its record is gone. The stranger is
+        // a real, verified node holding `read` in this mesh (a caller whose
+        // key verifies NOTHING would never reach this gate at all: it has no
+        // grant, so the output gate refuses it first — pinned by
+        // `output_read_admitted_is_a_signed_caller_holding_read_in_the_mesh_it_names`).
+        let stranger = aoide_storage::identity::mint_ephemeral().unwrap();
+        let stranger_key = stranger.info().pubkey_hex;
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        let mut other = fixture_node("other-box", "http://other/", false);
+        other.verified = true;
+        other.pubkey = Some(stranger_key.clone());
+        other.grants = aoide_storage::node_store::grants_in("home", &["read"]);
+        nodes.push(other);
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+
+        let resp = ask(history_request("sess-1", 0), &stranger_key);
         assert_eq!(resp["error"]["code"], OUTPUT_READ_REFUSED_CODE);
         assert_eq!(resp["error"]["message"], HISTORY_READ_REFUSED);
 

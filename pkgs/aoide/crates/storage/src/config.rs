@@ -144,15 +144,50 @@ pub struct Pairing {
     /// explicit widening.
     #[serde(rename = "defaultGrant", default = "default_grant")]
     pub default_grant: Vec<String>,
+    /// The mesh that owns this box's pre-P-CHARTER grants — the mesh every
+    /// existing paired record migrates into, and the mesh a signed request
+    /// that names none is evaluated in
+    /// (`crate::node_store::migrate_grants`, `aoide_server::a2a::
+    /// grant_in_mesh`). Default `"home"`: the name the design already uses
+    /// for the User's own fleet (`docs/architecture/HTTPS-MESH-API.md`,
+    /// "Trust per mesh"), so a box that never names one behaves exactly as
+    /// the design's own example does. Validated as a mesh name, the same
+    /// shape `[mesh.<name>]` keys take.
+    #[serde(rename = "homeMesh", default = "default_home_mesh")]
+    pub home_mesh: String,
 }
 
 fn default_grant() -> Vec<String> {
     vec!["read".to_string()]
 }
 
+pub fn default_home_mesh() -> String {
+    "home".to_string()
+}
+
+/// This box's home mesh, tolerantly: `[pairing] homeMesh` when the config
+/// loads, else the built-in default. For readers that must DEGRADE rather
+/// than fail — the door deciding which mesh an unnamed request acts in (a
+/// refusal there would answer every request with an error, which is worse
+/// than the pre-charter behaviour) and the outbound signing path. It is
+/// NEVER the fallback the MIGRATION uses: a config that will not parse must
+/// not be guessed at while folding grants into a mesh
+/// ([`home_mesh_fallible`] is what `node_store::load_nodes` reads).
+pub fn home_mesh() -> String {
+    home_mesh_fallible().unwrap_or_else(|_| default_home_mesh())
+}
+
+/// `[pairing] homeMesh` or the error that stopped the config loading — the
+/// strict half of [`home_mesh`], for the one caller that must NOT guess:
+/// `node_store::load_nodes`, which folds pre-charter grants into whatever
+/// mesh this returns and cannot take them back out.
+pub fn home_mesh_fallible() -> Result<String, LoadError> {
+    load().map(|l| l.config.pairing.home_mesh)
+}
+
 impl Default for Pairing {
     fn default() -> Self {
-        Pairing { default_grant: default_grant() }
+        Pairing { default_grant: default_grant(), home_mesh: default_home_mesh() }
     }
 }
 
@@ -194,20 +229,22 @@ pub struct Mesh {
     /// a second list. `aoide mesh pair` stamps it at a FIRST verification —
     /// it rides the ceremony as `PairFinish::grant` exactly as a typed
     /// `aoide pair --allow` would, so `node_store::upsert_paired_node`
-    /// leaves an already-verified node's `allows` untouched and a re-pair
+    /// leaves an already-verified node's grant untouched and a re-pair
     /// never re-grants. Absent means "this mesh declares no override": the
     /// commit then falls through to `resolve_grant` (`aoide-client`), which
     /// reads `pairing.defaultGrant`. An EMPTY list is the distinct, real
     /// "grant nothing" intent, never the same thing as absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grant: Option<Vec<String>>,
-    /// A declared claim that every node in this mesh is operated by the
-    /// SAME human. Validated and stored; shown back by `aoide config` and
-    /// `aoide mesh`, and read by `mesh pair` for the one line saying the
-    /// claim was declared and not acted on. What, if anything, may ever act
-    /// on it is not yet decided — it touches the mutual-code pairing
-    /// invariant (`docs/architecture/PAIRING.md`'s "Mesh declaration"
-    /// section) and is deferred. Default `false`.
+    /// A RETIRED declaration. It was a claim that every node in this mesh is
+    /// operated by the SAME human, read (before P-CHARTER) by `mesh pair` for
+    /// one line saying the claim was declared and not acted on. P-CHARTER
+    /// answers it — one operator is one charter signer
+    /// (`docs/architecture/HTTPS-MESH-API.md`, "Charters") — so the flag
+    /// buys nothing and is acted on by NOTHING: see
+    /// [`same_operator_note`], the one reader left, which only reports that
+    /// a mesh still declares it. Kept (rather than refused) so a config
+    /// written before the ruling still loads.
     #[serde(rename = "sameOperator", default)]
     pub same_operator: bool,
     /// `name -> ssh hop` (`tunnel::parse_via`'s own `ssh://[user@]host
@@ -226,6 +263,26 @@ pub struct Mesh {
     /// already carries for a custom `--node-name` (`PAIRING.md:599-612`).
     #[serde(default)]
     pub nodes: BTreeMap<String, String>,
+}
+
+/// The ONE reader of [`Mesh::same_operator`] left in the tree: the sentence a
+/// mesh that still declares the flag gets, and nothing else. It is a note —
+/// never a row, never a status, never a refusal — because the flag is retired
+/// and nothing acts on it (P-CHARTER: one operator is one charter signer, so
+/// nodes on one charter need no pairing between them and a converge has
+/// nothing to skip). `None` when the mesh does not declare it, so a caller
+/// carries nothing rather than an empty note.
+impl Mesh {
+    pub fn same_operator_note(&self, mesh_name: &str) -> Option<String> {
+        self.same_operator.then(|| {
+            format!(
+                "mesh.{mesh_name} declares sameOperator = true, which is RETIRED and acted on by \
+                 nothing: one operator is one charter signer (`aoide mesh charter init`), so nodes \
+                 sharing a charter need no pairing between them and `aoide mesh pair` has nothing \
+                 to skip here. Remove the line; it is read only to be reported"
+            )
+        })
+    }
 }
 
 /// What shape a key's value takes, and what it may contain. A scalar key has
@@ -277,6 +334,12 @@ pub const SCHEMA: &[SectionSpec] = &[
             kind: ValueKind::ClosedList(crate::node_store::NODE_CAPABILITIES),
             summary: "Capabilities a node is granted when it first becomes verified.",
             read: |c| c.pairing.default_grant.clone(),
+        },
+        KeySpec {
+            name: "homeMesh",
+            kind: ValueKind::Scalar,
+            summary: "The mesh pre-P-CHARTER grants migrate into, and the one a signed request naming no mesh acts in.",
+            read: |c| vec![c.pairing.home_mesh.clone()],
         }],
     },
     SectionSpec {
@@ -421,6 +484,17 @@ pub fn validate(config: &Config, path: &Path) -> Result<(), LoadError> {
             }
         }
     }
+    if !crate::node_store::valid_node_name(&config.pairing.home_mesh) {
+        return Err(LoadError::InvalidValue {
+            path: path.to_path_buf(),
+            key: "pairing.homeMesh".to_string(),
+            detail: format!(
+                "`{}` is not a valid mesh name — expected the same shape a mesh section's own key \
+                 takes: lowercase letters, digits, and `-`, starting with a letter or digit",
+                config.pairing.home_mesh
+            ),
+        });
+    }
     validate_mesh(&config.mesh, path)?;
     validate_context(&config.context, path)
 }
@@ -473,11 +547,14 @@ fn validate_context(context: &Context, path: &Path) -> Result<(), LoadError> {
 /// every hop must parse through [`crate::tunnel::parse_via`], whose own
 /// message becomes the detail; every `grant` element must be in
 /// [`crate::node_store::NODE_CAPABILITIES`], the same closed vocabulary
-/// `pairing.defaultGrant` uses. Phase 1 has one global node namespace
-/// (`state/nodes.json` is keyed by name alone), so a node name declared in
-/// two meshes is an unresolvable declaration and is refused, naming both.
+/// `pairing.defaultGrant` uses. **A node name may be declared in several
+/// meshes** (P-CHARTER: "one node, one identity key, in every mesh" — a mesh
+/// is a trust scope, and the same machine legitimately sits in more than one
+/// with a different grant in each; `state/nodes.json` is keyed by name alone,
+/// so its ONE record carries the grant map). The earlier refusal of a shared
+/// name was the pre-charter "one global node namespace" assumption and is
+/// gone.
 fn validate_mesh(mesh: &BTreeMap<String, Mesh>, path: &Path) -> Result<(), LoadError> {
-    let mut owner: BTreeMap<&str, &str> = BTreeMap::new();
     for (name, m) in mesh {
         if !crate::node_store::valid_node_name(name) {
             return Err(LoadError::InvalidValue {
@@ -518,17 +595,6 @@ fn validate_mesh(mesh: &BTreeMap<String, Mesh>, path: &Path) -> Result<(), LoadE
                     detail,
                 });
             }
-            if let Some(&first) = owner.get(node.as_str()) {
-                return Err(LoadError::InvalidValue {
-                    path: path.to_path_buf(),
-                    key: format!("mesh.{name}.nodes.{node}"),
-                    detail: format!(
-                        "`{node}` is declared in both `mesh.{first}` and `mesh.{name}` — a node \
-                         name must be unique across every declared mesh"
-                    ),
-                });
-            }
-            owner.insert(node.as_str(), name.as_str());
         }
     }
     Ok(())
@@ -638,6 +704,12 @@ pub enum SetRefusal {
     Unloadable { detail: String },
     /// The write itself failed.
     Io { path: PathBuf, detail: String },
+    /// A `pairing.homeMesh` change that would STRAND live grants: records
+    /// hold their capabilities in the current home mesh, the migration is
+    /// one-way, and an unnamed request would afterwards be evaluated in the
+    /// new mesh where those records hold nothing (finding 7 — the fleet goes
+    /// dark with nothing to report it).
+    StrandsGrants { current: String, wanted: String, records: Vec<String> },
 }
 
 impl std::fmt::Display for SetRefusal {
@@ -666,6 +738,17 @@ impl std::fmt::Display for SetRefusal {
                 write!(f, "refusing to write on top of a config that does not load: {detail}")
             }
             SetRefusal::Io { path, detail } => write!(f, "{}: {detail}", path.display()),
+            SetRefusal::StrandsGrants { current, wanted, records } => write!(
+                f,
+                "refusing to move the home mesh from `{current}` to `{wanted}`: {} node record(s) hold their \
+                 grant in `{current}` ({}), the migration into a home mesh is ONE-WAY, and an unnamed request \
+                 would afterwards be evaluated in `{wanted}` where they hold nothing. Re-grant each one where \
+                 you want it to live first (`aoide node allow <node> <cap> on --mesh <mesh>`), or move them \
+                 (`aoide node allow <node> <cap> on --mesh {wanted}` then `... off --mesh {current}`), then set \
+                 this key",
+                records.len(),
+                records.join(", ")
+            ),
         }
     }
 }
@@ -718,6 +801,28 @@ pub fn set(key: &str, raw: &str) -> Result<SetOutcome, SetRefusal> {
 
     let value = parse_value(&spec.kind, raw)
         .map_err(|detail| SetRefusal::BadValue { key: key.to_string(), detail })?;
+    // P-CHARTER (review finding 7): moving the home mesh is not a harmless
+    // edit. Grants are stored PER MESH and the migration out of `allows` runs
+    // once, into the home mesh that was current at the time — so pointing
+    // `homeMesh` somewhere else afterwards leaves every live grant behind,
+    // and unnamed requests are then evaluated where those records hold
+    // nothing. Refused while any verified record still holds a grant in the
+    // CURRENT home mesh; the refusal names the records and the two commands
+    // that fix it.
+    if section.name == "pairing" && spec.name == "homeMesh" {
+        let wanted = value.first().cloned().unwrap_or_default();
+        let current = before.pairing.home_mesh.clone();
+        if wanted != current {
+            let stranded: Vec<String> = crate::node_store::load_nodes()
+                .into_iter()
+                .filter(|n| n.verified && !n.grant(&current).is_empty())
+                .map(|n| n.name)
+                .collect();
+            if !stranded.is_empty() {
+                return Err(SetRefusal::StrandsGrants { current, wanted, records: stranded });
+            }
+        }
+    }
     // A section the file does not carry yet is created as a REAL `[section]`
     // header, never the inline `section = { key = ... }` an implicitly-created
     // table renders as. Same shape the nix front-end renders and the same shape
@@ -839,7 +944,7 @@ mod tests {
     fn the_key_listing_and_the_lookup_agree_with_the_table() {
         assert_eq!(
             keys(),
-            vec!["pairing.defaultGrant".to_string(), "upkeep.verifyCommand".to_string()]
+            vec!["pairing.defaultGrant".to_string(), "pairing.homeMesh".to_string(), "upkeep.verifyCommand".to_string()]
         );
         for dotted in keys() {
             assert!(lookup(&dotted).is_some(), "{dotted} lists but does not resolve");
@@ -1025,18 +1130,104 @@ mod tests {
     }
 
     #[test]
-    fn one_node_name_declared_in_two_meshes_is_refused_naming_both() {
-        let err = parse(
+    fn one_node_name_may_be_declared_in_several_meshes() {
+        // P-CHARTER: a mesh is a trust scope, the same machine legitimately
+        // sits in more than one with a different grant in each, and
+        // `state/nodes.json` carries ONE record per name holding every
+        // mesh's grant. The pre-charter "one global node namespace"
+        // refusal is gone.
+        let c = parse(
             "[mesh.home.nodes]\nsakaki = \"ssh://khoa@192.168.1.202\"\n\
              [mesh.away.nodes]\nsakaki = \"ssh://khoa@10.0.0.5\"\n",
             &probe(),
         )
-        .unwrap_err();
+        .unwrap();
+        assert_eq!(c.mesh["home"].nodes["sakaki"], "ssh://khoa@192.168.1.202");
+        assert_eq!(c.mesh["away"].nodes["sakaki"], "ssh://khoa@10.0.0.5");
+    }
+
+    // ── `[pairing] homeMesh` (P-CHARTER) ───────────────────────────────────
+
+    #[test]
+    fn home_mesh_defaults_to_home_and_round_trips_a_named_one() {
+        assert_eq!(parse("", &probe()).unwrap().pairing.home_mesh, "home");
+        let c = parse("[pairing]\nhomeMesh = \"fleet\"\n", &probe()).unwrap();
+        assert_eq!(c.pairing.home_mesh, "fleet");
+    }
+
+    #[test]
+    fn a_home_mesh_outside_the_mesh_name_grammar_is_refused_by_name() {
+        let err = parse("[pairing]\nhomeMesh = \"Not Valid\"\n", &probe()).unwrap_err();
         let msg = err.to_string();
         assert!(matches!(err, LoadError::InvalidValue { .. }), "{msg}");
-        assert!(msg.contains("home"), "{msg}");
-        assert!(msg.contains("away"), "{msg}");
-        assert!(msg.contains("sakaki"), "{msg}");
+        assert!(msg.contains("pairing.homeMesh"), "{msg}");
+    }
+
+    #[test]
+    fn config_set_reaches_home_mesh() {
+        assert_eq!(lookup("pairing.homeMesh").map(|(s, _)| s.name), Some("pairing"));
+        with_temp_root("home-mesh-set", |_| {
+            let out = set("pairing.homeMesh", "fleet").unwrap();
+            assert_eq!(out.value, "\"fleet\"", "a Scalar renders as a TOML string");
+            assert_eq!(load().unwrap().config.pairing.home_mesh, "fleet");
+        });
+    }
+
+    /// **Review finding 7.** Moving the home mesh is not a harmless edit:
+    /// grants live per mesh and the migration out of `allows` runs once, so
+    /// pointing it elsewhere afterwards strands every live grant and an
+    /// unnamed request is then evaluated where those records hold nothing.
+    #[test]
+    fn config_set_refuses_to_move_the_home_mesh_while_records_hold_grants_in_it() {
+        with_temp_root("home-mesh-strands", |_| {
+            let me = "peer-box";
+            let mut nodes = crate::node_store::load_nodes();
+            nodes.push(crate::node_store::Node {
+                name: me.to_string(),
+                url: "http://p/".to_string(),
+                autogate: false,
+                token_file: None,
+                bearer_secret: None,
+                hub: false,
+                pubkey: Some("aa".to_string()),
+                verified: true,
+                grants: crate::node_store::grants_in("home", &["read"]),
+                via: None,
+                added_at: "2026-09-26T00:00:00Z".to_string(),
+            });
+            crate::node_store::save_nodes(&nodes).unwrap();
+
+            let err = set("pairing.homeMesh", "fleet").unwrap_err();
+            let msg = err.to_string();
+            assert!(matches!(err, SetRefusal::StrandsGrants { .. }), "{msg}");
+            assert!(msg.contains(me), "the refusal names the record: {msg}");
+            assert!(msg.contains("--mesh"), "and both fixes: {msg}");
+            assert_eq!(load().unwrap().config.pairing.home_mesh, "home", "nothing was written");
+
+            // Re-granted where it is wanted, the move is allowed.
+            let mut nodes = crate::node_store::load_nodes();
+            crate::node_store::set_node_allow(&mut nodes, me, "read", true, "fleet").unwrap();
+            crate::node_store::set_node_allow(&mut nodes, me, "read", false, "home").unwrap();
+            crate::node_store::save_nodes(&nodes).unwrap();
+            assert!(set("pairing.homeMesh", "fleet").is_ok(), "no grant is stranded any more");
+        });
+    }
+
+    // ── `sameOperator` — retired, read only to be reported ─────────────────
+
+    #[test]
+    fn a_mesh_declaring_same_operator_loads_with_a_note_and_the_note_says_it_is_retired() {
+        let c = parse("[mesh.home]\nsameOperator = true\n[mesh.home.nodes]\n", &probe()).unwrap();
+        let note = c.mesh["home"].same_operator_note("home").expect("a declared sameOperator is noted");
+        assert!(note.starts_with("mesh.home declares sameOperator = true"), "{note}");
+        assert!(note.contains("RETIRED"), "{note}");
+        assert!(note.contains("charter"), "{note}");
+        assert!(
+            parse("[mesh.home]\nsameOperator = false\n[mesh.home.nodes]\n", &probe()).unwrap().mesh["home"]
+                .same_operator_note("home")
+                .is_none(),
+            "an undeclared flag carries nothing at all"
+        );
     }
 
     #[test]

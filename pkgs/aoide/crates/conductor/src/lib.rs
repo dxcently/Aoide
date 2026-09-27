@@ -1553,7 +1553,7 @@ mod tests {
         app.nodes = Some(
             aoide_protocol::output::Outcome::ok("node.status", "1 node(s) registered")
                 .with_data(serde_json::json!({ "nodes": [{
-                    "name": "osaka", "verified": true, "allows": ["read", "spawn"],
+                    "name": "osaka", "verified": true, "grants": { "home": ["read", "spawn"] },
                     "state": "fresh", "url": "http://127.0.0.1:8710/",
                 }] })),
         );
