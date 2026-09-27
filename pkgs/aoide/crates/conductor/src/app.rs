@@ -653,27 +653,24 @@ pub struct NodeTrustRow {
 }
 
 impl NodeTrustRow {
-    /// The one mesh a bare `node allow` would act in for this record: its
-    /// sole granted mesh, else the home mesh **the CLI reported**
-    /// (`node status --json`'s `data.homeMesh`, `[pairing] homeMesh`) — the
-    /// same rule `node_store::resolve_mesh` applies and the same default,
-    /// read off the command rather than restated with a literal of its own
-    /// (review finding 12: a hardcoded `"home"` described a mesh no command
-    /// would act in on a box whose home mesh is something else). `None` when
-    /// the record is trusted in several meshes and the payload carried no
-    /// home mesh: the cell is unknown, and the toggle's own dispatch refuses
-    /// by naming the meshes — never a silent guess here.
+    /// The one mesh a bare `node allow` would act in for this record: its SOLE
+    /// granted mesh, and nothing else — with TWO or more the bare command
+    /// refuses ("knows 2 meshes … add `--mesh`"), so this pane must not
+    /// describe a mesh no bare command would act in (review N15: reporting the
+    /// home mesh's caps there was a description of a command the operator
+    /// cannot run). `None` is that honest "unknown from here".
     fn acted_mesh(&self) -> Option<String> {
         match self.grants.len() {
             1 => self.grants.keys().next().cloned(),
-            _ if !self.home_mesh.is_empty() => Some(self.home_mesh.clone()),
             _ => None,
         }
     }
 
     /// The capabilities a bare `node allow` would see for this record in the
     /// mesh it would act in — what the Mesh pane's cell and the toggle's
-    /// on/off are read from, never guessed.
+    /// on/off are read from, never guessed. Empty when
+    /// [`NodeTrustRow::acted_mesh`] is `None`: the toggle still dispatches
+    /// (idempotently, "on"), and the CLI's own refusal names the meshes.
     pub fn acted_grant(&self) -> Vec<String> {
         self.acted_mesh()
             .and_then(|mesh| self.grants.get(&mesh).cloned())
@@ -7053,30 +7050,26 @@ mod tests {
         }
     }
 
-    /// **Review finding 12.** The pane must describe the mesh a command would
-    /// actually act in: the one `node status --json` reported as the box's
-    /// home mesh, never a literal `"home"` (which on a box whose home mesh is
-    /// `fleet` described a mesh no command would touch).
+    /// **Review N12/N15.** The pane must describe the mesh a bare command would
+    /// actually act in: the record's SOLE granted mesh, and nothing at all when
+    /// it is trusted in two (where a bare `node allow` refuses and names the
+    /// meshes) — never a guessed home mesh.
     #[test]
-    fn the_trust_row_acts_in_the_home_mesh_the_cli_reported_never_a_literal() {
+    fn the_trust_row_acts_in_a_sole_mesh_and_says_nothing_for_several() {
         let mut row = NodeTrustRow { name: "n".to_string(), verified: true, ..Default::default() };
         row.grants = std::collections::BTreeMap::from([
             ("fleet".to_string(), vec!["spawn".to_string()]),
             ("home".to_string(), vec!["read".to_string()]),
         ]);
         row.home_mesh = "fleet".to_string();
-        assert_eq!(row.acted_grant(), ["spawn".to_string()], "two meshes trusted: the reported home mesh decides");
-
-        let mut unreported = row.clone();
-        unreported.home_mesh = String::new();
         assert!(
-            unreported.acted_grant().is_empty(),
-            "no home mesh in the payload and two meshes trusted: UNKNOWN, never a guess at `home`"
+            row.acted_grant().is_empty(),
+            "two meshes trusted: a bare command refuses, so the pane claims no mesh"
         );
 
         let mut single = NodeTrustRow { name: "n".to_string(), verified: true, ..Default::default() };
         single.grants = std::collections::BTreeMap::from([("away".to_string(), vec!["read".to_string()])]);
-        assert_eq!(single.acted_grant(), ["read".to_string()], "a sole granted mesh needs no home mesh at all");
+        assert_eq!(single.acted_grant(), ["read".to_string()], "a sole granted mesh is the one a bare command acts in");
     }
 
     #[test]

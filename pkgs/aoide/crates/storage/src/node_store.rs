@@ -212,22 +212,66 @@ impl Node {
 }
 
 /// Which mesh a LOCAL command acts in when the operator named none — the
-/// rule `aoide pair --mesh`, `aoide mesh pair` and `aoide node allow --mesh`
-/// all share, and the same one an outbound signed request uses to name its
-/// mesh (`aoide-client`).
+/// rule `aoide pair --mesh`, `aoide node allow --mesh` and every outbound
+/// signed request share, and the one P-CHARTER's "one node, one key, several
+/// meshes" needs to stay usable.
 ///
-/// `named` wins when given (and must be a mesh name, [`valid_node_name`]'s
-/// grammar, so a typo cannot become a silently empty grant scope). Otherwise
-/// the answer is `known`'s sole entry — one mesh is unambiguous and needs no
-/// flag — and the home mesh ([`crate::config::home_mesh`]) when `known` is
-/// empty, the same default the pre-charter grants migrated into. **More than
-/// one known mesh is an error naming them**: with two, a bare command would
-/// be a guess about the operator's intent at the one moment a wrong guess
-/// silently widens or drops a grant. `known` is whatever the caller
-/// legitimately knows about the target: a record's grant keys
-/// ([`Node::grants`]) for an existing node, the declared `[mesh.*]` names for
-/// a pair that has no record yet. Pure, so the whole table is a unit test.
-pub fn resolve_mesh(named: Option<&str>, known: &BTreeSet<String>, home: &str) -> Result<String, String> {
+/// **`cap` is what makes it a rule rather than a guess** (review N2/N3/N4/N12,
+/// one rule): a request is asking for a CAPABILITY — `message` for a mail
+/// deposit, poll, ack or binding exchange; `read` for a frame, a ping-back
+/// history or a roster probe; `spawn` for a spawn — so the mesh that matters
+/// is the one where the record actually holds it. Order:
+///
+/// 1. `named` wins (and must be a mesh name, [`valid_node_name`]'s grammar, so
+///    a typo cannot become a silently empty grant scope);
+/// 2. else the SOLE mesh `grants` holds `cap` in;
+/// 3. else `home`, when `home` is among the meshes that hold it — the
+///    pre-charter default, and the only unambiguous choice when several do;
+/// 4. else [`resolve_mesh_any`]'s old answer (home when nothing holds it —
+///    the door then refuses with the grant error, which is the honest one);
+/// 5. and a REFUSAL, naming them, when the record holds `cap` in two meshes
+///    that do not include the home mesh: one is not more likely than the
+///    other, and guessing would silently address a grant the operator did not
+///    mean.
+///
+/// Steps 2-3 are what let a peer trusted only in `away` be reached with no
+/// flag at all — and what keeps a two-mesh record reachable when only ONE of
+/// its meshes carries the capability the call needs. Pure, so the whole table
+/// is a unit test.
+pub fn resolve_mesh(named: Option<&str>, grants: &Grants, home: &str, cap: &str) -> Result<String, String> {
+    if let Some(m) = named.map(str::trim).filter(|m| !m.is_empty()) {
+        if !valid_node_name(m) {
+            return Err(format!(
+                "`{m}` is not a valid mesh name — expected the same shape a mesh nickname takes: \
+                 lowercase letters, digits, and `-`, starting with a letter or digit"
+            ));
+        }
+        return Ok(m.to_string());
+    }
+    let holders: Vec<&String> = grants
+        .iter()
+        .filter(|(_, caps)| caps.iter().any(|c| c == cap))
+        .map(|(mesh, _)| mesh)
+        .collect();
+    match holders.as_slice() {
+        [only] => Ok((*only).clone()),
+        [] => resolve_mesh_any(None, &grants.keys().cloned().collect(), home),
+        _ if holders.iter().any(|m| m.as_str() == home) => Ok(home.to_string()),
+        several => Err(format!(
+            "this box holds `{cap}` for the target in {} meshes ({}) and none of them is the home mesh \
+             `{home}`, so the command has to say which one it acts in — add `--mesh <name>`",
+            several.len(),
+            several.iter().map(|m| m.as_str()).collect::<Vec<_>>().join(", ")
+        )),
+    }
+}
+
+/// The mesh-name-only form of [`resolve_mesh`], for the two callers that have
+/// no capability to ask about: `aoide pair` (the grant does not exist yet) and
+/// `aoide node allow`'s own ambiguity check (which is deciding what to WRITE,
+/// so no existing capability can pick for it). `named` wins; else `known`'s
+/// sole entry; else the home mesh; more than one known is an error naming them.
+pub fn resolve_mesh_any(named: Option<&str>, known: &BTreeSet<String>, home: &str) -> Result<String, String> {
     if let Some(m) = named.map(str::trim).filter(|m| !m.is_empty()) {
         if !valid_node_name(m) {
             return Err(format!(
@@ -401,17 +445,25 @@ pub fn migrate_grants(raw: &str, home: &str) -> Migration {
         match obj.get("grants") {
             None => {}
             Some(Value::Object(m)) => {
-                let bad: Vec<&String> = m
+                // Review N9: only the MALFORMED ENTRY is dropped — the
+                // hand-edited `{"home":["read"],"away":"read"}` keeps home's
+                // `read` and loses only `away`, which is what the
+                // field-by-field contract asks for.
+                let bad: Vec<String> = m
                     .iter()
                     .filter(|(_, caps)| !caps.as_array().is_some_and(|a| a.iter().all(Value::is_string)))
-                    .map(|(mesh, _)| mesh)
+                    .map(|(mesh, _)| mesh.clone())
                     .collect();
                 if !bad.is_empty() {
                     skipped.push(format!(
-                        "node `{who}`: `grants` entries {bad:?} are not arrays of capability strings — \
-                         that record's grant is dropped, the record and every other record are kept"
+                        "node `{who}`: `grants` entries {bad:?} are not arrays of capability strings — those \
+                         entries are dropped, the record's other meshes and every other record are kept"
                     ));
-                    obj.remove("grants");
+                    if let Some(grants) = obj.get_mut("grants").and_then(Value::as_object_mut) {
+                        for mesh in &bad {
+                            grants.remove(mesh);
+                        }
+                    }
                 }
             }
             Some(_) => {
@@ -1576,6 +1628,19 @@ mod tests {
         assert_eq!(m.registry.nodes.len(), 1);
         assert!(m.registry.nodes[0].grants.is_empty());
         assert_eq!(m.skipped.len(), 1, "{:?}", m.skipped);
+
+        // Review N9: ONE bad entry, and the record's OTHER meshes survive it.
+        let raw = r#"{"nodes":[{"name":"half","url":"http://h/","verified":true,
+                       "grants":{"home":["read"],"away":"read"}}]}"#;
+        let m = migrate_grants(raw, "home");
+        assert_eq!(
+            m.registry.nodes[0].grant("home"),
+            ["read".to_string()],
+            "the well-formed entry is kept — the removal is per ENTRY, not per record"
+        );
+        assert!(m.registry.nodes[0].grant("away").is_empty(), "and the malformed one is gone");
+        assert_eq!(m.skipped.len(), 1, "{:?}", m.skipped);
+        assert!(m.skipped[0].contains("away"), "{}", m.skipped[0]);
     }
 
     /// Review finding 13: a malformed LEGACY value is reported too — the
@@ -1735,33 +1800,81 @@ mod tests {
 
     // ── `resolve_mesh` (which mesh a bare command acts in) ───────────────────
 
+    /// Review N2/N3/N4/N12, ONE RULE: the mesh that matters is the one where
+    /// the record holds THE CAPABILITY THE CALL NEEDS.
+    #[test]
+    fn a_bare_request_resolves_to_the_mesh_that_holds_the_capability_it_needs() {
+        // Two meshes, `message` in one: a mail call resolves with no flag —
+        // the peer trusted only outside the home mesh stays reachable.
+        let mail_only_away = grants_in("away", &["message"]);
+        assert_eq!(resolve_mesh(None, &mail_only_away, "home", "message").unwrap(), "away");
+        // The SAME record for a `read` call: no mesh holds it, so the answer is
+        // the record's sole mesh (the old no-capability fallback) and the door
+        // refuses on the grant — the honest error, not a silent re-aim.
+        assert_eq!(resolve_mesh(None, &mail_only_away, "home", "read").unwrap(), "away");
+
+        // Both meshes hold it, home among them: home, the pre-charter default.
+        let both = BTreeMap::from([
+            ("away".to_string(), vec!["read".to_string()]),
+            ("home".to_string(), vec!["read".to_string()]),
+        ]);
+        assert_eq!(resolve_mesh(None, &both, "home", "read").unwrap(), "home");
+
+        // Two NON-home meshes hold it: refuse, naming them (a guess would
+        // address a grant the operator did not mean).
+        let two_away = BTreeMap::from([
+            ("club".to_string(), vec!["read".to_string()]),
+            ("fleet".to_string(), vec!["read".to_string()]),
+        ]);
+        let err = resolve_mesh(None, &two_away, "home", "read").unwrap_err();
+        assert!(err.contains("club") && err.contains("fleet"), "{err}");
+        assert!(err.contains("--mesh"), "{err}");
+
+        // And `read` in one mesh while `message` sits in another: each call
+        // finds its own.
+        let split = BTreeMap::from([
+            ("away".to_string(), vec!["read".to_string()]),
+            ("home".to_string(), vec!["message".to_string()]),
+        ]);
+        assert_eq!(resolve_mesh(None, &split, "home", "read").unwrap(), "away", "the read surface resolves to the mesh that holds `read`");
+        assert_eq!(resolve_mesh(None, &split, "home", "message").unwrap(), "home");
+    }
+
     #[test]
     fn a_named_mesh_always_wins_even_when_the_target_has_exactly_one() {
-        let known: BTreeSet<String> = ["home".to_string()].into_iter().collect();
-        assert_eq!(resolve_mesh(Some("away"), &known, "home").unwrap(), "away");
-        assert_eq!(resolve_mesh(Some("  away  "), &BTreeSet::new(), "home").unwrap(), "away", "the flag is trimmed");
+        let grants = grants_in("home", &["read"]);
+        assert_eq!(resolve_mesh(Some("away"), &grants, "home", "read").unwrap(), "away");
+        assert_eq!(
+            resolve_mesh(Some("  away  "), &Grants::new(), "home", "read").unwrap(),
+            "away",
+            "the flag is trimmed, and names the mesh even when nothing is granted in it"
+        );
     }
 
     #[test]
     fn a_bare_command_takes_the_sole_mesh_a_node_is_trusted_in_else_the_home_mesh() {
-        let one: BTreeSet<String> = ["away".to_string()].into_iter().collect();
-        assert_eq!(resolve_mesh(None, &one, "home").unwrap(), "away");
-        assert_eq!(resolve_mesh(None, &BTreeSet::new(), "home").unwrap(), "home", "no grant anywhere falls back to the home mesh, the same one pre-charter grants migrated into");
-        assert_eq!(resolve_mesh(Some(""), &one, "home").unwrap(), "away", "an empty --mesh is the same as naming none");
+        let one = grants_in("away", &["read"]);
+        assert_eq!(resolve_mesh(None, &one, "home", "read").unwrap(), "away");
+        assert_eq!(
+            resolve_mesh(None, &Grants::new(), "home", "read").unwrap(),
+            "home",
+            "no grant anywhere falls back to the home mesh, the same one pre-charter grants migrated into"
+        );
+        assert_eq!(resolve_mesh(Some(""), &one, "home", "read").unwrap(), "away", "an empty --mesh is the same as naming none");
     }
 
     #[test]
-    fn more_than_one_known_mesh_is_refused_naming_them_all() {
+    fn the_name_only_form_still_answers_the_two_callers_that_have_no_capability_to_ask_about() {
+        let one: BTreeSet<String> = ["away".to_string()].into_iter().collect();
+        assert_eq!(resolve_mesh_any(None, &one, "home").unwrap(), "away");
+        assert_eq!(resolve_mesh_any(None, &BTreeSet::new(), "home").unwrap(), "home");
         let many: BTreeSet<String> = ["away".to_string(), "home".to_string()].into_iter().collect();
-        let err = resolve_mesh(None, &many, "home").unwrap_err();
-        assert!(err.contains("away") && err.contains("home"), "{err}");
-        assert!(err.contains("--mesh"), "{err}");
-        assert_eq!(resolve_mesh(Some("home"), &many, "home").unwrap(), "home", "naming one is the whole fix");
+        assert!(resolve_mesh_any(None, &many, "home").is_err(), "a pair still refuses an ambiguous box");
     }
 
     #[test]
     fn an_unnameable_mesh_is_refused_rather_than_becoming_an_empty_grant_scope() {
-        let err = resolve_mesh(Some("Not Valid"), &BTreeSet::new(), "home").unwrap_err();
+        let err = resolve_mesh(Some("Not Valid"), &Grants::new(), "home", "read").unwrap_err();
         assert!(err.contains("Not Valid"), "{err}");
     }
 

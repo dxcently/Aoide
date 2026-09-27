@@ -49,7 +49,7 @@ audit JSONL ─────── bounded full events ────────�
 roster dispatch ─── live/cache classification ──┤           │
 pair --json ─────── parked pairing requests ────┤           │
 secrets pending ─── parked TOTP asks ───────────┤           │
-node status ─────── registry + allows ──────────┤           │
+node status ─────── registry + grants ──────────┤           │
 mesh ────────────── declared-vs-registered ─────┤           │
 config / secrets status ── keys + references ───┤
 rice stage ──────── palette only ───────────────┘     shared geometry
@@ -84,7 +84,8 @@ also expose Write letter. Project actions reuse the recipient chooser,
 Add folder and existing undying resurrection. Historical resurrection
 requires a registered project plus native session ID or restore snapshot
 and dispatches the exact project and ID. It never substitutes live focus.
-A Mesh row's menu snapshots the node's `allows` set and its registry record, so
+A Mesh row's menu snapshots the node's per-mesh grant set (the sole granted
+mesh's capabilities, or nothing when a bare command would refuse) and its registry record, so
 a capability toggle states the change it showed and an unknown name offers only
 pairing; a Status row's menu offers Edit value for a config key and the two
 consumer verbs for a secret. Removal — project or node — confirms an exact name
