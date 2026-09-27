@@ -2124,26 +2124,58 @@ project/parent inheritance across local/remote/app/subagents;
   host's scheduler would be deployment logic inside the portable binary.
   `aoide identity` minted this node's keypair (`state\identity`) — pairing needs
   one, and that node had none.
-- Native<->WSL pairing on ONE box (the two nodes ThinkChiyo runs) is BLOCKED on
-  the WSL side's build, and the block is measured rather than assumed. The ruled
-  path needs no inbound dial — the ceremony is requester-dials
-  (`aoide/pairRequest`/`aoide/pairPoll` ride the REQUESTER's own forward dial,
-  and `aoide/pairRequest`'s observed origin is display data, never a decision),
-  Windows reaches the WSL door through WSL2's own localhost forwarding, and the
-  LAN guard's loopback refusal (`-32007` on `aoide/charterFetch`) is bypassed by
-  taking `mesh join --operator`/`charter accept <file>` instead. What stops it
-  is the version: the WSL node's daemon and CLI are `~/.local/bin`'s
-  **0.0.23** (Sep 25; `~/.cargo/bin` holds 0.0.25, and this tree is 0.0.26),
-  and a byte-level read of those artifacts gives `pairRequest`/`pairReveal`/
-  `pairPoll`/`selfVia` present — design A's poll ceremony IS there — but
-  `aoide/mailPoll` present only from 0.0.25 on and `aoide/charterFetch` and the
-  `mesh` grant field only in 0.0.26 (P-CHARTER). So the ruled mail flow (the WSL
-  side holds, Windows polls) cannot be served by that door, and a pair committed
-  by it would write a pre-charter grant the 0.0.26 side now judges delivery by.
-  The User's install was NOT replaced (ruled out in this lane), so the ceremony
-  waits on a ruling: upgrade the WSL node's `~/.local/bin` build keeping its name
-  and port (its yomi pairing rides the same name), or accept a pre-charter
-  asymmetric grant.
+- Native<->WSL pairing on ONE box (the two nodes ThinkChiyo runs) is COMPLETE,
+  measured end to end, and the WSL side is now supervised rather than
+  hand-started. Its checkout `~/src/aoide` was fast-forwarded `724fe0f5` → main
+  (clean: no stash, no unpushed commit, one untracked operator seed preserved)
+  and `cargo install --path pkgs/aoide/crates/cli --bins --locked --root
+  ~/.local` put 0.0.26 in `~/.local/bin` — cargo refuses to clobber an existing
+  install without `--force`, by name. The User's `aoided.service` runs the
+  daemon again and a hand-written `aoide-a2a.service` twin (`BindsTo`/`After`
+  aoided, bind 127.0.0.1, port 8710) serves the door; both `enable`d, both
+  `active`, the door's AgentCard 200 from inside the VM and from Windows
+  localhost (WSL2's own forwarding). The hand-started daemon retired cleanly:
+  `kill -INT` was a NO-OP because THAT process had SIGINT ignored (`SigIgn` bit
+  set — an asynchronous job in a non-interactive shell), so `kill -TERM` is what
+  ended it, after which the socket belonged to the unit's pid alone. The
+  ceremony then ran with the native Windows node as requester:
+  `aoide pair http://127.0.0.1:8710/ --name thinkchiyo`, approved on the WSL
+  side with the code it showed and finished from the requester with the reply
+  code — two nodes named per the ruling, `thinkchiyo` (WSL, 8710) and
+  `thinkchiyo-win` (native, 8720). Mail proved both directions: Windows→WSL
+  DELIVERED on the send (the sender's outbox empty right after, the letter read
+  on the WSL side as from `thinkchiyo-win`), WSL→Windows HELD (`mail send
+  --hold`: "a drain never dials it; it leaves when thinkchiyo-win polls") and
+  then pulled by ONE bare `aoide mail poll` on the native side ("polled 1
+  node(s): 1 envelope(s) filed"), which also carried that node's receipt back.
+- What the ceremony taught twice, and both are docs now rather than
+  workarounds: a pair stamps the DEFAULT grant (`read` on a stock config) into
+  the mesh both ends agreed (unset ⇒ `home`), so the first deposit was refused
+  with its own fix in the message ("its grant in mesh `home` does not include
+  `message` — on this (receiving) host run `aoide node allow thinkchiyo-win
+  message on --mesh home`, then … `aoide mail outbox retry --refused`"); and a
+  URL-dialled peer is nicknamed after the URL's sanitized host unless `--name`
+  is passed, which the receiver refuses ("addressing-mismatch: container is
+  addressed to `127-0-0-1`, not this node"). A re-pair with `--name thinkchiyo`
+  fixed the second — a node record's name IS the wire address, and no command
+  renames one.
+- Residue, stated rather than tidied: the WSL node cannot dial the native one at
+  all (its self-url `http://thinkchiyo-win:8720/` names no address that VM can
+  resolve, and the door it would reach is loopback-only), so anything the WSL
+  side INITIATES — a `now`-flavor letter, a receipt's own drain — sits in its
+  outbox as `transport: could not reach the agent` while the same content
+  reaches the native side on the poll. The ruled shape therefore covers letters
+  marked `--hold` AND receipts handed over on the poll; the sender's own
+  bookkeeping does not learn the poll carried it.
+- The upgrade's one cross-version consequence, measured: `aoide node pull` from
+  the WSL node now answers `signature verification failed` for `yomi-strix`,
+  whose live daemon is `/nix/store/…-aoide-0.0.25/bin/aoided` (started
+  2026-09-27 02:46). The pairing RECORD is intact (name, pubkey, `verified`,
+  `via: ssh://khoa@192.168.1.175`) and the transport works (`ssh` into that host
+  succeeds) — the response-signature rail changed inside 0.0.26, so a mixed
+  0.0.26/0.0.25 mesh fails its live operations until the older side moves. Not
+  this lane's to fix (that rebuild is User-gated); named because the ruled
+  upgrade is what exposed it.
 - The managed task wrapper (`spawn --task`, `session watch`) claims no Windows
   support today. Its two named prerequisites — the conduct-owned PTY
   transcript its live view reads, and the stage lock its record writes and
@@ -2170,13 +2202,14 @@ project/parent inheritance across local/remote/app/subagents;
   polls, and a WSL-side dial INTO the Windows door would need an address and a
   key Windows sshd does not authorize today (`administrators_authorized_keys`,
   one key, `khoa@yomi-strix`).
-- Next, in order: (1) the User's ruling on the WSL node's build, then the
-  ceremony on one box (its own gate); (2) the WSL node's `aoide a2a serve` as a
-  sibling process (nothing runs it today — no listener on 8710 in that VM);
-  (3) a WSL->Windows hop, if it is ever wanted, is a key authorization on that
-  host's sshd (one key today, `khoa@yomi-strix`) — not ruled on, not needed for
-  the ruled direction; (4) the `boot_epoch` row's non-Linux arm; (5) the
-  managed-task wrapper's native measurement.
+- Next, in order: (1) bring yomi's `aoided` to 0.0.26 (its own User-gated
+  rebuild/activation) so the WSL↔yomi live rail verifies again — the pairing and
+  the mesh need no re-pairing, the wire version does; (2) decide whether a
+  WSL-INITIATED drain is wanted on one box, which takes a WSL→Windows address
+  (a LAN-bound door, or an ssh hop with a key that host's sshd would have to
+  authorize — one key today, `khoa@yomi-strix`, and neither is ruled); (3) the
+  `boot_epoch` row's non-Linux arm; (4) the managed-task wrapper's native
+  measurement.
 
 ## 29. HTTPS mesh with end-to-end encrypted letters
 

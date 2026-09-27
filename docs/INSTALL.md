@@ -182,6 +182,56 @@ What a healthy start writes: the audit log line
 in `$AOIDE_ROOT/log`, and a control socket `aoided.sock` plus `events.jsonl` in
 `$XDG_RUNTIME_DIR/aoide/` (default `/run/user/<uid>/aoide/`).
 
+### The door beside it (a user unit)
+
+`aoided` binds no TCP port: the A2A door is its own process, exactly as
+`pkgs/aoide/module/aoided.nix` declares them as two units. The portable
+equivalent, beside the unit above —
+`~/.config/systemd/user/aoide-a2a.service`:
+
+```ini
+[Unit]
+Description=Aoide A2A (Agent2Agent) door (loopback by default, user-only)
+After=aoided.service
+BindsTo=aoided.service
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/aoide a2a serve
+Restart=on-failure
+RestartSec=5s
+Environment=AOIDE_A2A_BIND=127.0.0.1
+Environment=AOIDE_A2A_PORT=8710
+Environment=AOIDE_AUDIT_LOG=%h/.aoide/log
+Environment=AOIDE_USER=%u
+Environment=AOIDE_ROOT=%h/.aoide
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=aoided.service
+```
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now aoide-a2a
+systemctl --user is-active aoide-a2a
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  http://127.0.0.1:8710/.well-known/agent-card.json     # 200
+```
+
+- `WantedBy=aoided.service` is the nix module's own `wantedBy`; `BindsTo` +
+  `After` are its `bindsTo`/`after` — the door starts with the daemon and goes
+  down with it, never the other way round. Enabling writes the symlink under
+  `aoided.service.wants/`, so the door is never a second thing to remember.
+- The door is loopback-only by construction; `AOIDE_A2A_BIND` exists for an
+  operator's deliberate choice, not as a default.
+- `AOIDE_FLAKE_ROOT` is song/paint data — a host that has a checkout to rice
+  sets it (the WSL twin in § 7.3 does); core's door runs without it.
+- On a host running two nodes (native + WSL, § 7.3), this unit is where one
+  node's identity and port differ from the other's.
+
 ### Without systemd
 
 There is no supervisor to write the unit into, so run the same binary under
@@ -206,6 +256,15 @@ aoided
   process. Before trusting the socket, check for a straggler:
   `ss -xlp | grep aoide` (or `pgrep -a aoided`) — and stop the one you started
   (`systemctl --user stop aoided`) when you are done with it.
+- **A daemon started as a background job IGNORES `SIGINT`.** The shell sets
+  `SIGINT`/`SIGQUIT` to *ignored* for an asynchronous job in a non-interactive
+  shell (`sh -c 'aoided &'`, `setsid aoided &`), so `kill -INT <pid>` is a
+  silent no-op — it returns 0 and nothing happens. Use `SIGTERM`, which is what
+  systemd sends and what the unit's `Restart=on-failure` is written around.
+  Measured on a hand-started `aoided`: `/proc/<pid>/status` had the `SIGINT` bit
+  set in `SigIgn`, and `kill -TERM` ended it cleanly where `kill -INT` had not.
+  If a hand-started daemon has to go, that is the honest order: TERM it, watch
+  it leave, *then* let the unit start its own.
 
 ## 7. Windows
 
@@ -345,6 +404,29 @@ already waiting for them:
   (`aoide pair http://127.0.0.1:8710/`); the other way round the VM's
   `127.0.0.1` is the VM's own loopback, so a WSL-side dial needs an ssh hop by
   address. The one-box path is therefore: **Windows is the requester.**
+- **The name has to be the peer's own, at pair time.** `pair <url>` nicknames
+  the far side after the URL's sanitized host (`http://127.0.0.1:8710/` →
+  `127-0-0-1`), and that nickname is what this side then writes into a letter's
+  address — the receiving node refuses a container addressed to anyone but the
+  name it knows itself by:
+
+  ```
+  refused: addressing-mismatch: container is addressed to `127-0-0-1`, not this node
+  ```
+
+  So a URL pair against a node that calls itself `thinkchiyo` passes
+  `--name thinkchiyo` at the ceremony. Afterwards it is a re-pair: a node
+  record's name *is* the address, and no command renames one.
+- **Grants are the mesh's, and a pair stamps the default.** The pair above lands
+  whatever `[pairing] defaultGrant` names (`read` on a stock config) in the mesh
+  both ends agreed (unset here, so `home`). Mail needs `message`, and the
+  deposit refusal teaches the fix rather than dropping the letter — on the
+  *receiving* host `aoide node allow <peer> message on --mesh <mesh>`, then on
+  the sender `aoide mail outbox retry --refused`.
+- **The install on this side is § 6's pair of units.** `aoided.service` plus its
+  `aoide-a2a.service` twin, `enable --now`, the door on `8710`, this box's own
+  node name unchanged — what distinguishes two nodes on one box is their names,
+  ports and grants, never the box.
 
 - **Keep the clone and `target/` on ext4, never `/mnt/c`.** `/mnt/c` is 9p
   (`type=v9fs`), measured at 169 MB/s fsync write against 1.3 GB/s on ext4, and
