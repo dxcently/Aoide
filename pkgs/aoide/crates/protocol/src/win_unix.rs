@@ -500,6 +500,17 @@ impl UnixStream {
         Ok(())
     }
 
+    /// The `SOCKET` itself, for the one thing a socket cannot be asked in
+    /// bytes: waiting on it. A caller that must arm a Winsock EVENT for this
+    /// socket (`WSAEventSelect`) needs the handle, and there is no
+    /// `AsRawSocket`-shaped trait on this type — the `cfg(windows)` arm of
+    /// `conduct`'s injection inbox is the only caller. Read-only borrowing
+    /// accessor: the socket's ownership does not move, and closing it stays
+    /// this type's `Drop`.
+    pub fn as_raw_socket(&self) -> SOCKET {
+        self.sock
+    }
+
     /// Wait until `sock` is writable or `timeout` runs out — `select`'s write
     /// set, which is Winsock's way to wait on a socket's state. `false` is
     /// the timeout, never an error.
@@ -714,6 +725,13 @@ impl UnixListener {
             return Err(last_error());
         }
         Ok(())
+    }
+
+    /// The listening `SOCKET`, for [`UnixStream::as_raw_socket`]'s own reason:
+    /// a caller that waits on the accept door with a Winsock EVENT (rather
+    /// than polling it) needs the handle itself.
+    pub fn as_raw_socket(&self) -> SOCKET {
+        self.sock
     }
 }
 

@@ -1159,6 +1159,80 @@ pub fn create_new_private(path: &std::path::Path) -> std::io::Result<std::fs::Fi
     }
 }
 
+/// Open `path` for APPEND, creating it if absent, with the private discipline
+/// [`create_new_private`] states on the CREATE side — the shape a log that
+/// grows across runs needs, where `create_new_private`'s one-shot `CREATE_NEW`
+/// is the wrong question.
+///
+/// Unix: `OpenOptions::mode(0o600)` + `create(true)` + `append(true)` —
+/// created AT 0600, and `append` means every write lands at the end whatever
+/// else shares the file. Windows: the owner-only DACL is attached by the
+/// `CreateFileW` that makes the file (`owner_only::create_new`, the same call
+/// [`create_new_private`] makes), and an ALREADY-present file — the second
+/// run of the same session id — is opened for append and then asked for its
+/// privacy, refusing a file this process cannot prove is owner-only rather
+/// than appending to something another user may read. `AlreadyExists` is not
+/// a failure here: it is the normal second-run path.
+///
+/// **The two arms are the same discipline on CREATE, and Windows is stricter
+/// on OPEN.** Unix's `mode(0o600)` applies only when the file is made, so an
+/// existing file whose mode someone has since widened is appended to without a
+/// readback; the Windows arm asks the existing file for its policy and refuses
+/// a wider one. That asymmetry is deliberate rather than a missing check (the
+/// directory is owner-only on both hosts, and the Unix arm's own `chmod`-style
+/// readback is what [`atomic_write_private`] performs for the case that needs
+/// it), and it is stated here because the shorter claim — "the same
+/// discipline" — is only true of the create branch.
+pub fn open_private_append(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .open(path)
+    }
+    #[cfg(windows)]
+    {
+        match aoide_protocol::owner_only::create_new(path) {
+            Ok(file) => match aoide_protocol::owner_only::file_privacy(path)? {
+                None => Ok(file),
+                Some(reason) => {
+                    drop(file);
+                    let _ = std::fs::remove_file(path);
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        format!(
+                            "refusing the private file {} this process just created: {reason} \
+                             (this filesystem may not persist ACLs, and nothing here writes a \
+                             private file it cannot prove is owner-only; the file was removed \
+                             again)",
+                            path.display()
+                        ),
+                    ))
+                }
+            },
+            Err(aoide_protocol::owner_only::CreateError::Exists) => {
+                let file = std::fs::OpenOptions::new().append(true).open(path)?;
+                match aoide_protocol::owner_only::file_privacy(path)? {
+                    None => Ok(file),
+                    Some(reason) => Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        format!(
+                            "refusing to append to {}: {reason} (this file is not provably \
+                             owner-only, and nothing here appends to a private log it cannot \
+                             prove is private)",
+                            path.display()
+                        ),
+                    )),
+                }
+            }
+            Err(aoide_protocol::owner_only::CreateError::Failed(e)) => Err(e),
+        }
+    }
+}
+
 /// Create `dir` (if absent) and lock it down to `0700` (owner rwx only) —
 /// the directory-level half of [`atomic_write_private`]'s discipline
 /// (review rider: nothing else in this crate secured the DIRECTORY a
