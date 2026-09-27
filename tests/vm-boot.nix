@@ -72,8 +72,8 @@ let
   # overlay, which auto-discovers pkgs/<name> and guards each name against
   # shadowing a nixpkgs attribute. `aoide` itself is self-flaked
   # (pkgs/aoide/flake.nix) and named by neither aggregate — it arrives via
-  # `aoideInputs.aoide.nixosModules.default`, imported by
-  # `modules/nucleus/options.nix` and carrying `overlays.default` with it, the
+  # `aoideInputs.aoide.nixosModules.default`, imported by the nucleus lane
+  # (`lib/aoideos.nix`'s `nucleusModule`) and carrying `overlays.default` with it, the
   # same way a real host picks it up.
   overlay = (import ../lib/pkgs.nix { inherit lib; }).overlay {
     stock = inputs.nixpkgs.legacyPackages.${system};

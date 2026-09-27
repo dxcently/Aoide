@@ -2993,3 +2993,11 @@ re-read the tree against its own prose.
   record is this line. (For scale, not identity: the same fixture on the S11
   branch prints `b4gvs1vj…`, measured by `tests/consumer/run.sh` after the
   reach-in grep was widened — a later tree, a later drv.)
+- **The line above misquotes its own measurement, corrected here.** The
+  `b4gvs1vj…` value was not printed by the run it names: that run printed
+  `ymrd22x2…`, and the same fixture under a frozen `git+file://…?rev=` ref
+  prints a third value again (`p3w8jx2l…` on `6943f0a`) — the drvPath moves with
+  the ref SPELLING as well as with the tree, so it is not an identity and never
+  was a scale anchor worth citing. What is an identity: the toplevel drvPath a
+  tree reports to `tests/inventory.sh`, and the `packages.aoide` drvPath, both
+  read from that tree.

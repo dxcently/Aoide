@@ -31,7 +31,7 @@ management seam"). This lane completes that seam.
    first (the runtime substrate), capture-as-rice second (the
    authoring tool), foreign-flake drop-in polish last (the venue).
    The design center is the EDIT/SAVE/DRAFT loop for element rices.
-2. **Runtime mirrors `run/qml`.** The facet renders the declared
+2. **Runtime mirrors `run/qml`.** The elements lane renders the declared
    song's element configs into `$AOIDE_ROOT/run/elements/<element>/`;
    units and exec-onces point THERE — never store symlinks in
    `~/.config`. `lyra rice stage` overwrites the staged configs and
@@ -50,7 +50,7 @@ management seam"). This lane completes that seam.
    optional reload/restart overrides). The element set flows through
    `aoide.arrangement` (the existing "which TYPES a song brings into
    existence" namespace) and each element declares `aoide.surfaces`
-   ownership — waybar owning `bar` makes the Quickshell facet and
+   ownership — waybar owning `bar` makes the quickshell lane and
    Stylix stand down through the EXISTING
    `surfaceToStylixTargets`/mkForce-false seam. House rule 5's
    whitelist (livery/arrangement/surfaces) does NOT grow.
@@ -83,7 +83,7 @@ restarted. That is the whole contract, and it is uniform:
 
 - **Config dir**: `$AOIDE_ROOT/run/elements/<element>/` — the ONLY
   place the running program reads config from. The unit or exec line
-  the facet generates points there; nothing under `~/.config` is
+  the elements lane generates points there; nothing under `~/.config` is
   managed, symlinked, or fought over.
 - **Restart**: derived from how the element starts. A unit-run
   element restarts via `systemctl --user restart
@@ -100,7 +100,7 @@ directory existing at `song/songbook/<song>/elements/<name>/`, needs
 no import-list edit anywhere, and is removable without trace by
 deleting that directory. The `_`-prefix shelving convention applies
 (`elements/_waybar/` is skipped everywhere a `_widgets/` slot would
-be). The delete-every-qml test passes: with every facet gone,
+be). The delete-every-qml test passes: with every paint lane gone,
 `lyra element seed` and `lyra rice stage` still drive
 `run/elements/` from a bare shell.
 
@@ -141,16 +141,16 @@ same commit that lands the parser):
   it and rewrites the bytes, and nothing else in the pipeline
   changes.
 - `surfaces` — optional list of surface names this element claims
-  (`["bar"]`). The elements facet folds these into `aoide.surfaces`
+  (`["bar"]`). The elements lane folds these into `aoide.surfaces`
   with `owner = "<element>"`; Stylix and Quickshell stand down for
   them (below).
 - `run.exec` — the full command line, with the literal token `{run}`
   substituted at generation time with the absolute
   `run/elements/<element>` path (never expanded at runtime; units
   and exec-once lines both get a finished string).
-- `run.via` — `"unit"` (the facet generates
+- `run.via` — `"unit"` (the elements lane generates
   `aoide-element-<element>.service`, a systemd user unit with that
-  ExecStart) or `"exec-once"` (the facet emits a compositor
+  ExecStart) or `"exec-once"` (the elements lane emits a compositor
   exec-once line). Exactly these two; anything else refuses.
 - `reload` — optional command; when present, `rice stage` runs it
   instead of the restart after a changed write. This is the tiering
@@ -171,8 +171,8 @@ $AOIDE_ROOT/run/elements/            (sibling of run/qml — storage
 Two writers, one rank rule — the same stage-beats-declared convention
 `run/qml` and the stage twin already hold. Between rebuilds, `rice
 stage` overwrites freely (the sketch); a rebuild reasserts the
-declared song's store truth (the truth), exactly as the quickshell
-facet's `rsync -a --delete` reasserts `run/qml`.
+declared song's store truth (the truth), exactly as the lyra
+lane's `rsync -a --delete` reasserts `run/qml`.
 
 ## Flows
 
@@ -196,7 +196,7 @@ lyra rice stage <song>
 
 ```
 nixos-rebuild / home-manager switch          (user-gated, house rule 2)
-  eval: elements facet readDirs the declared song's elements/
+  eval: the elements lane readDirs the declared song's elements/
     ├─ aoide.arrangement.elements.<e> = { surfaces, via }   (the TYPE set)
     ├─ aoide.surfaces.<s>.owner = "<e>"                     (claims)
     └─ units / exec-once lines generated, ExecStart → run/elements/<e>/
@@ -205,7 +205,7 @@ nixos-rebuild / home-manager switch          (user-gated, house rule 2)
     declared livery → run/elements/   (re-seeds; then EVERY element
     unit is try-restarted unconditionally — the house ruling that
     activation always brings the rice elements back up, same as the
-    quickshell facet's aoideRestartRice hook; changed-unit-only
+    lyra lane's aoideRestartRice hook; changed-unit-only
     restarts leave a wedged element invisible to every rebuild)
 ```
 
@@ -248,10 +248,10 @@ per-file flag is its complete seam.
 `aoide.surfaces` (nucleus options.nix, `attrsOf { owner }`) is
 already the one registry; Stylix already derives its target-disable
 set from "owner is not stylix" (`surfaceToStylixTargets` +
-`presentDisables`, facets/stylix). Two small moves complete the
+`presentDisables`, dendrites/stylix). Two small moves complete the
 picture, and the whitelist does not grow:
 
-- The quickshell facet's nine owner declarations become
+- The lyra lane's nine owner declarations become
   `lib.mkDefault "quickshell"`, so an element's normal-priority claim
   wins without an override dance; `checks.surface-ownership` still
   sees exactly one owner per surface, and two elements claiming the
@@ -277,7 +277,7 @@ the same commit as the seams they describe.
   `run_elements_dir()` in `storage/src/fs.rs` beside
   `run_qml_dir()`. Plumbing command `lyra element seed <song>` (golden
   +1) doing a full render into `run/elements/` from the songbook —
-  the shell-reachable bridge the facet will call. CONTRACTS §5
+  the shell-reachable bridge the elements lane will call. CONTRACTS §5
   "Elements" subsection in the same commit. Tests: descriptor
   parse/refuse vectors, byte-identity for verbatim files, template
   render, unknown-placeholder structured error, traversal refusal,
@@ -292,8 +292,8 @@ the same commit as the seams they describe.
   changed-detection (unchanged element is not poked), restart
   derivation table (unit/exec-once/reload/override), render failure
   leaves the old config and reports.
-- **L-E3 — the elements facet (nix, L).** `modules/facets/elements/`
-  (default.nix + README + AGENTS): readDir the declared song's
+- **L-E3 — the elements lane (nix, L).** `modules/dendrites/elements/`
+  (its lane record, README + AGENTS): readDir the declared song's
   `elements/`, parse descriptors at eval, populate
   `aoide.arrangement.elements` (new option under the existing
   arrangement namespace, declared in nucleus options.nix) and the
@@ -305,7 +305,7 @@ the same commit as the seams they describe.
   (drv-identity check — pass the worktree as a path literal); a
   fixture song with a waybar element produces the unit, the claims,
   and the seeded tree.
-- **L-E4 — surface stand-down (nix, S).** Quickshell facet owners →
+- **L-E4 — surface stand-down (nix, S).** Lyra-lane owners →
   `mkDefault`; bar render gated on ownership;
   `checks.surface-ownership` untouched and passing. Gate: fixture
   with waybar claiming `bar` — Stylix disables the mapped targets,
@@ -322,7 +322,7 @@ the same commit as the seams they describe.
 - **L-E6 — the waybar venue proof (nix + live, M).** Capture
   dxflake's waybar into a song for real: `rice capture` against the
   rendered `~/.config` ground truth, agent-edited descriptor
-  (`{run}` paths, `reload` = SIGUSR2), declared through the facet on
+  (`{run}` paths, `reload` = SIGUSR2), declared through the lane on
   the User's rig. The rebuild is user-run (house rule 2). Live
   gates: `rice stage` restyles the running waybar without a rebuild;
   a switch re-seeds `run/elements/` and the unit points nowhere near
@@ -362,7 +362,7 @@ the built system.
   gate on a no-elements fixture is exactly for this; run it before
   believing any red result (the path-literal trap is on record).
 - **Eval-time descriptor parsing in nix duplicates the parser.** The
-  facet needs `files`/`surfaces`/`run` at eval (units, claims) while
+  lane needs `files`/`surfaces`/`run` at eval (units, claims) while
   cargo owns the full semantics. Held narrow: nix reads only the
   three fields it generates from, treats the descriptor as data, and
   every content decision (render, validate, refuse) stays in the one
@@ -384,7 +384,7 @@ the built system.
 - No per-element-class hot-reload engineering, no inotify/watch
   daemon for elements, no niri live seam — one descriptor line
   (`reload`) is the entire tiering mechanism.
-- No fourth facet-readable namespace, no new `aoide.*` whitelist
+- No fourth paint-readable namespace, no new `aoide.*` whitelist
   entry — arrangement and surfaces carry everything (house rule 5).
 - No `~/.config` management, ever — not even a symlink. The config
   dir contract is `run/elements/` or nothing.

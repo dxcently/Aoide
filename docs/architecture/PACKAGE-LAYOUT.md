@@ -484,10 +484,14 @@ The stability contract — what a consumer may rely on staying true:
   `wantedBy`/`after` read it, never a lane's option directly, and the
   anchor decides only when the unit starts — no `partOf`, so a desktop
   that dies leaves the daemon and its doors running.
-  `modules/nucleus/options.nix` is this repo's own consumer: both the
-  constructor (`lib/aoideos.nix`) and `tests/vm-boot.nix` read the overlay
-  through it
-  instead of each carrying their own copy of the injection lambda, and
+  `modules/nucleus/options.nix` is this repo's own consumer of the CORE option
+  contract (it declares none of `enable`/`root`/`checkout`/`auditLog`/
+  `terminal`/`user`/`sessionTarget` itself): the module that carries
+  `overlays.default` is the core one (`pkgs/aoide/module`'s
+  `nixosModules.default`), and it is imported by the nucleus lane
+  (`lib/aoideos.nix`'s `nucleusModule`), which is also what `tests/vm-boot.nix`
+  takes — so the constructor and the VM read one import site rather than each
+  carrying their own copy of the injection lambda. And
   `modules/dendrites/quickshell.nix` sets `aoide.sessionTarget` to
   `graphical-session.target` when it has a shell config to run. Editing
   `module/` never rebuilds the binaries: `pkgs/aoide/default.nix`'s

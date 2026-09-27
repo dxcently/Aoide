@@ -5,6 +5,12 @@
 > engine name to find every affected file — the rename surface is enumerated
 > in §2.2.
 >
+> **Paths in this document are the tree as the plan found it.** Its step list
+> records what each step edited, so a path below names where a file was at that
+> time, not where it is now — the tree has moved on (`modules/facets/**` became
+> paint lanes under `modules/dendrites/`, the QML skeleton lives in
+> `pkgs/lyra-shell/`).
+>
 > **Status: ALL PHASES LANDED — Phase 4 committed and switched
 > (2026-08-13).**
 > The name is confirmed: **livery** (§7.1). Phase 1 (native engine +
@@ -204,6 +210,9 @@ the deep-pantheon crate scheme; offered as the in-voice runner-up.
 > name-independent.**
 
 ### 2.2 Full rename surface (grep census — every consumer)
+
+Paths below are as of the plan (see the header): they name what each step found
+and edited, not the tree's present layout.
 
 **Code — Rust (`pkgs/aoide/crates/`)**
 - `song/src/notes.rs` — drop the binary-locate env var/PATH lookup + `run_lint` shell-out (becomes native call).

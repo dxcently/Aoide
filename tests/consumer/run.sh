@@ -38,12 +38,15 @@ printf '%s\n' "-----------------------------------------------------------------
 
 # ── 1. No reach-in ──────────────────────────────────────────────────────────
 # Three shapes are banned, and each is caught by its own control below:
-#   - `<aoide> + "/…"`            a path built onto the aoide input, through any
-#                                 attribute chain (`aoide.outPath`, `aoide.inputs.
-#                                 aoide`, a let-bound alias of any of them);
+#   - `<aoide> + "/…"`            a path built onto the aoide input, through an
+#                                 attribute chain (`aoide.outPath`,
+#                                 `aoide.inputs.aoide`);
 #   - `aoide.inputs.<x>`          Aoide's own inputs threaded by hand;
 #   - `getFlake(…)`               the ref re-imported so a path can be read off
 #                                 it, the shape that dodges both greps above.
+# A name the grep cannot follow (`let p = aoide.outPath; in p + "/modules"`) is
+# a reach-in this grep does NOT catch: the controls below are the honest
+# statement of what it does reach, and the evaluation proof is the real answer.
 # `aoide.lib.…` and `aoide.nixosModules.…` are the shape being REQUIRED, and
 # neither mentions a path or a ref. Both greps run over
 # every file in this directory, so a new fixture file cannot opt out.

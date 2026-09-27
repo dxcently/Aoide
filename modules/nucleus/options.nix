@@ -1,11 +1,13 @@
 # modules/nucleus/options.nix — THE OPTION CONTRACT.
 #
 # Every other module (dendrites) builds against the options
-# declared here. This is versioned in CONTRACTS.md (livery schema v0). Paint
-# read ONLY `aoide.livery`, `aoide.arrangement` and `aoide.surfaces` — an
-# enumerated, closed whitelist (AGENTS.md house rule 5); no module reads another
-# module. The coupling discipline is enforced by lib/checks.nix, not by
-# politeness.
+# declared here. This is versioned in CONTRACTS.md (livery schema v0). A paint
+# lane reads `aoide.livery`, `aoide.arrangement` and `aoide.surfaces` from here,
+# plus the core scalars and the song selection declared beside them — the
+# enumerated, closed set root `AGENTS.md` house rule 5 states in full; no module
+# reads another module. That discipline is a documented convention, backed by
+# code review — `lib/checks.nix` has no check that inspects a lane's reads, as
+# rule 5 says.
 #
 # Discovered and applied unconditionally on every host (like dxflake's
 # nucleus — no mkIf guard). It declares options and eval-clean defaults only;
