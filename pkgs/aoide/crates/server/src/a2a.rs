@@ -3359,6 +3359,28 @@ fn node_binding(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
     Ok(json!({ "binding": mine }))
 }
 
+/// The mail family's whole method table — the three methods the H1 mail
+/// adapter serves, and the door's own three mail arms, as ONE function.
+///
+/// `None` is not a refusal: it means "this name is not a mail method at all".
+/// The door falls through to its own table below; the adapter
+/// ([`serve_mail`]) answers `-32601`. Extracting it is what keeps the two
+/// listeners from drifting on what a mail call MEANS — the adapter's dispatch
+/// table *is* this function, never a second copy of the three arms.
+fn mail_rpc(method: &str, params: &Value, ctx: &RequestCtx) -> Option<Result<Value, (i64, String)>> {
+    match method {
+        "aoide/mailDeposit" => Some(mail_deposit(params, ctx)),
+        "aoide/mailPoll" => Some(mail_poll(params, ctx)),
+        // P-SEAL: the binding exchange. A signed READ of this node's own
+        // current binding, and — when the caller includes its own — the
+        // moment this node stores the caller's. One round trip both ways,
+        // which is what a direct lane wants and what the per-peer upgrade
+        // needs before the first sealed letter can go anywhere.
+        "aoide/binding" => Some(node_binding(params, ctx)),
+        _ => None,
+    }
+}
+
 // ── The pairing ceremony wire (CONTRACTS.md §6, P-P2,
 // ── `docs/architecture/PAIRING.md`) ─────────────────────────────────────────
 //
@@ -3897,45 +3919,40 @@ fn handle_jsonrpc(req: &Value, ctx: &RequestCtx) -> Value {
         classify_token(ctx.expected_token, ctx.presented_token),
     );
 
-    let result: Result<Value, (i64, String)> = match method {
-        "tasks/get" if !read_ok => Err(unauthorized()),
-        "tasks/get" => {
-            let task_id = params.get("id").and_then(Value::as_str).unwrap_or("");
-            // `metadata["aoide/frame"]` asks for the watch frame (CONTRACTS.md
-            // §6, P-RSA S6); a request without it is the untouched status read.
-            match (frame_tail(&params), lines_after(&params)) {
-                (None, None) => task_get(task_id),
-                (frame, history) => task_get_outputs(task_id, frame, history, read_ok, ctx.signed_caller),
+    let result: Result<Value, (i64, String)> = match mail_rpc(method, &params, ctx) {
+        Some(mail) => mail,
+        None => match method {
+            "tasks/get" if !read_ok => Err(unauthorized()),
+            "tasks/get" => {
+                let task_id = params.get("id").and_then(Value::as_str).unwrap_or("");
+                // `metadata["aoide/frame"]` asks for the watch frame (CONTRACTS.md
+                // §6, P-RSA S6); a request without it is the untouched status read.
+                match (frame_tail(&params), lines_after(&params)) {
+                    (None, None) => task_get(task_id),
+                    (frame, history) => task_get_outputs(task_id, frame, history, read_ok, ctx.signed_caller),
+                }
             }
-        }
-        "message/send" => message_send(
-            &params,
-            ctx.audit_log,
-            ctx.spawn_agent,
-            ctx.spawn_cwd,
-            ctx.origin,
-            ctx.expected_token,
-            ctx.presented_token,
-            ctx.signed_caller,
-        ),
-        "aoide/graphSummary" if !read_ok => Err(unauthorized()),
-        "aoide/graphSummary" => graph_summary(ctx.node_name, ctx.self_url),
-        // Deliberately UNGATED by `read_ok` — the pairing bootstrap has no
-        // established credential to check yet (see the section doc above
-        // `pair_request`).
-        "aoide/pairRequest" => pair_request(&params, ctx.origin, ctx.audit_log),
-        "aoide/pairReveal" => pair_reveal(&params, ctx.audit_log),
-        "aoide/pairPoll" => pair_poll(&params, ctx.audit_log),
-        "aoide/mailDeposit" => mail_deposit(&params, ctx),
-        "aoide/mailPoll" => mail_poll(&params, ctx),
-        // P-SEAL: the binding exchange. A signed READ of this node's own
-        // current binding, and — when the caller includes its own — the
-        // moment this node stores the caller's. One round trip both ways,
-        // which is what a direct lane wants and what the per-peer upgrade
-        // needs before the first sealed letter can go anywhere.
-        "aoide/binding" => node_binding(&params, ctx),
-        "" => Err((-32600, "invalid request: missing method".to_string())),
-        other => Err((-32601, format!("method not found: {other}"))),
+            "message/send" => message_send(
+                &params,
+                ctx.audit_log,
+                ctx.spawn_agent,
+                ctx.spawn_cwd,
+                ctx.origin,
+                ctx.expected_token,
+                ctx.presented_token,
+                ctx.signed_caller,
+            ),
+            "aoide/graphSummary" if !read_ok => Err(unauthorized()),
+            "aoide/graphSummary" => graph_summary(ctx.node_name, ctx.self_url),
+            // Deliberately UNGATED by `read_ok` — the pairing bootstrap has no
+            // established credential to check yet (see the section doc above
+            // `pair_request`).
+            "aoide/pairRequest" => pair_request(&params, ctx.origin, ctx.audit_log),
+            "aoide/pairReveal" => pair_reveal(&params, ctx.audit_log),
+            "aoide/pairPoll" => pair_poll(&params, ctx.audit_log),
+            "" => Err((-32600, "invalid request: missing method".to_string())),
+            other => Err((-32601, format!("method not found: {other}"))),
+        },
     };
 
     let resp = match result {
@@ -4404,6 +4421,31 @@ fn write_http_response<W: Write>(w: &mut W, status: u16, body: &[u8]) -> std::io
 
 // ── Routing ──────────────────────────────────────────────────────────────────
 
+/// The audit-log command label for one POST `/` body's method: the JSON-RPC
+/// method name *whitelisted* against the door's known set, never interpolated
+/// verbatim out of the untrusted body (a hostile body could otherwise bloat
+/// the audit log or plant a misleading label — e.g. `a2a.graph.session
+/// delete`, or a multi-KB string). Shared by the door's [`route`] and the
+/// mail adapter's [`route_mail`], so the two listeners agree on every label
+/// they emit. `history_asked` wins the tie over `frame_asked` (the stricter
+/// read is the one worth naming). Pure.
+fn rpc_method_label(parsed_method: Option<&str>, history_asked: bool, frame_asked: bool) -> &'static str {
+    match parsed_method {
+        Some("tasks/get") if history_asked => "tasks/get.history",
+        Some("tasks/get") if frame_asked => "tasks/get.frame",
+        Some("tasks/get") => "tasks/get",
+        Some("message/send") => "message/send",
+        Some("aoide/graphSummary") => "aoide/graphSummary",
+        Some("aoide/pairRequest") => "aoide/pairRequest",
+        Some("aoide/pairReveal") => "aoide/pairReveal",
+        Some("aoide/pairPoll") => "aoide/pairPoll",
+        Some("aoide/mailDeposit") => "aoide/mailDeposit",
+        Some("aoide/mailPoll") => "aoide/mailPoll",
+        Some("aoide/binding") => "aoide/binding",
+        _ => "rpc",
+    }
+}
+
 fn not_found(method: &str, path: &str) -> (u16, Vec<u8>, String) {
     let body = jsonrpc_error_value(-32601, format!("not found: {method} {path}"));
     (
@@ -4784,20 +4826,7 @@ fn route(
                 let parsed_params = parsed.as_ref().and_then(|v| v.get("params"));
                 let history_asked = parsed_params.and_then(lines_after).is_some();
                 let frame_asked = parsed_params.and_then(frame_tail).is_some();
-                let label = match parsed_method.as_deref() {
-                    Some("tasks/get") if history_asked => "tasks/get.history",
-                    Some("tasks/get") if frame_asked => "tasks/get.frame",
-                    Some("tasks/get") => "tasks/get",
-                    Some("message/send") => "message/send",
-                    Some("aoide/graphSummary") => "aoide/graphSummary",
-                    Some("aoide/pairRequest") => "aoide/pairRequest",
-                    Some("aoide/pairReveal") => "aoide/pairReveal",
-                    Some("aoide/pairPoll") => "aoide/pairPoll",
-                    Some("aoide/mailDeposit") => "aoide/mailDeposit",
-                    Some("aoide/mailPoll") => "aoide/mailPoll",
-                    Some("aoide/binding") => "aoide/binding",
-                    _ => "rpc",
-                };
+                let label = rpc_method_label(parsed_method.as_deref(), history_asked, frame_asked);
                 let self_url = self_url(bind, port);
                 let ctx = RequestCtx {
                     audit_log,
