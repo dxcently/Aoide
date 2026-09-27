@@ -3093,6 +3093,30 @@ fn deposit_admitted(grant: &Grant) -> bool {
 /// and saying which mesh was read is the difference between a fixable refusal
 /// and a mystery.
 fn deposit_refusal(signed: Option<SignedCaller<'_>>, mesh: &str) -> (i64, String) {
+    // **A charter-shaped mesh whose operator key is undecidable is its own
+    // refusal** (re-review N5). The generic text below tells the operator to
+    // run `aoide node allow <name> message on --mesh <m>` — which in this
+    // window answers `widens-charter` and changes nothing, and which may name a
+    // caller that has no record here at all (a charter-resolved identity). So
+    // say what is actually wrong, name the mesh, say WHY the key is
+    // undecidable, and point at the one command that shows it.
+    if aoide_storage::charter::charter_shaped(mesh) && aoide_storage::charter::governing(mesh).is_none() {
+        let why = match aoide_storage::charter::trusted_operator(mesh) {
+            Err(refusal) => format!("{}: {}", refusal.reason, refusal.detail),
+            Ok(_) => "the charter's operator key cannot be read".to_string(),
+        };
+        return (
+            -32010,
+            format!(
+                "mail deposit refused: mesh `{mesh}` is a CHARTER mesh on this host and its operator key \
+                 is UNDECIDABLE right now ({why}). Nothing in that mesh is granted to anybody until it is \
+                 resolved — the charter is the only trust there, so there is no paired-record fallback and \
+                 no local `node allow … on --mesh {mesh}` that could widen it. See `aoide mesh charter show \
+                 {mesh}` for the recorded key, where it is written down (config line vs state record), and \
+                 `aoide mesh` for the mesh's own row"
+            ),
+        );
+    }
     match signed {
         Some(caller) => (
             -32010,
@@ -14089,6 +14113,86 @@ mod tests {
         assert!(bad.1.contains("mesh name"), "{}", bad.1);
 
         let _ = std::fs::remove_dir_all(&root);
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
+    /// **The door's refusal in a shaped mesh with an undecidable key is TAUGHT**
+    /// (re-review N5): it names the mesh, says the operator key is undecidable
+    /// and WHY (the `trusted_operator` reason), says there is no paired-record
+    /// fallback and no local `on` that could widen it, and points at the one
+    /// command that shows the recorded key — never the generic "run `node allow
+    /// <name> message on`", which in that window answers `widens-charter` and
+    /// which may name a caller that has no record here at all.
+    #[test]
+    fn a_shaped_mesh_with_an_undecidable_key_refuses_with_a_taught_reason() {
+        use aoide_storage::node_store::AllowError;
+
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_root = std::env::var("AOIDE_ROOT").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = mail_deposit_root("shaped-taught-refusal");
+
+        // A charter in force, whose operator key the config line then
+        // contradicts: shaped, undecidable.
+        charter_machine(&root, "operator", "opbox");
+        let init = aoide_storage::charter::init("home").unwrap();
+        let line = aoide_storage::charter::node_line().unwrap();
+        let src = format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{line}\n");
+        std::fs::write(aoide_storage::charter::source_path("home"), &src).unwrap();
+        aoide_storage::charter::sign("home", None).unwrap();
+        let listed_key = aoide_storage::charter::parse(&src).unwrap().nodes["opbox"].key.clone();
+
+        charter_machine(&root, "receiver", "receiverbox");
+        // The receiver records ONE operator key in state (a `mesh join`) and
+        // its config line names a DIFFERENT one: shaped, and `operator-mismatch`.
+        let state_key = "ab".repeat(32);
+        let config_key = "cd".repeat(32);
+        aoide_storage::charter::trust_operator("home", &format!("ed25519:{state_key}")).unwrap();
+        std::fs::write(
+            root.join("receiver").join("config.toml"),
+            format!("[mesh.home]\noperator = \"ed25519:{config_key}\"\n"),
+        )
+        .unwrap();
+        assert!(aoide_storage::charter::charter_shaped("home"), "charter-shaped");
+        assert!(
+            aoide_storage::charter::governing("home").is_none(),
+            "and the key is undecidable — that is the window"
+        );
+
+        let (code, message) = deposit_refusal(
+            Some(SignedCaller { name: "box-a", key: &listed_key, mesh: Some("home") }),
+            "home",
+        );
+        assert_eq!(code, -32010);
+        assert!(message.contains("CHARTER mesh"), "{message}");
+        assert!(message.contains("UNDECIDABLE"), "{message}");
+        assert!(message.contains("operator-mismatch"), "and says why: {message}");
+        assert!(message.contains("mesh charter show home"), "and points at the one command that shows it: {message}");
+        assert!(
+            !message.contains("node allow box-a message on"),
+            "this window is not a grant to fix with `node allow`: {message}"
+        );
+
+        // And the local widening refusal tells the same truth.
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        let mut record = fixture_node("box-a", "http://10.0.0.9:8710/", false);
+        record.verified = true;
+        record.pubkey = Some("bb".repeat(32));
+        nodes.push(record);
+        assert_eq!(
+            aoide_storage::node_store::set_node_allow(&mut nodes, "box-a", "read", true, "home").unwrap_err(),
+            AllowError::WidensCharter
+        );
+        let _ = init;
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_root {
+            Some(v) => std::env::set_var("AOIDE_ROOT", v),
+            None => std::env::remove_var("AOIDE_ROOT"),
+        }
         match saved_state {
             Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
             None => std::env::remove_var("AOIDE_STATE_DIR"),

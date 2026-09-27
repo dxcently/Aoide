@@ -1075,13 +1075,27 @@ fn handle_node_allow(inv: &Invocation) -> Outcome {
                 .with_data(json!({ "reason": "unknown-node", "name": name }));
         }
         Err(aoide_storage::node_store::AllowError::WidensCharter) => {
-            return Outcome::error(
-                cmd,
+            // Two different truths behind one refusal (review N5): the charter
+            // may simply not grant it, or the mesh may be charter-shaped with
+            // an UNDECIDABLE operator key — where there is no readable line at
+            // all, and the fix is to resolve the key, not to sign a new
+            // charter. Say which.
+            let undecidable = aoide_storage::charter::charter_shaped(&mesh)
+                && aoide_storage::charter::governing(&mesh).is_none();
+            let message = if undecidable {
+                format!(
+                    "`{name}` cannot be granted `{cap}` in mesh `{mesh}`: that mesh is a CHARTER mesh here and its \
+                     operator key is UNDECIDABLE right now, so no charter line can be read and nothing local widens \
+                     anything. Resolve the key first — `aoide mesh charter show {mesh}` shows which key is recorded \
+                     and where it is written down (config line vs state record)"
+                )
+            } else {
                 format!(
                     "`{name}` is on mesh `{mesh}`'s charter, and that charter does not grant it `{cap}` — nothing local widens a charter grant; the operator's line in the charter must change (`aoide mesh charter sign {mesh}`), or narrow it here with `off`"
-                ),
-            )
-            .with_data(json!({ "reason": "widens-charter", "name": name, "cap": cap, "mesh": mesh }));
+                )
+            };
+            return Outcome::error(cmd, message)
+                .with_data(json!({ "reason": "widens-charter", "name": name, "cap": cap, "mesh": mesh, "operatorUndecidable": undecidable }));
         }
     };
 

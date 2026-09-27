@@ -737,13 +737,18 @@ pub enum AllowError {
 /// | mesh | `off` | `on` |
 /// |---|---|---|
 /// | pair | removes the cap from [`Node::grants`] — the door's source there | adds it to [`Node::grants`] |
-/// | charter | records the cap in [`Node::narrowed`]; the door subtracts it from the charter's line | clears the cap from [`Node::narrowed`], or refuses [`AllowError::WidensCharter`] if the charter's line does not grant it |
+/// | charter (key decidable) | records the cap in [`Node::narrowed`]; the door subtracts it from the charter's line | clears the cap from [`Node::narrowed`], or refuses [`AllowError::WidensCharter`] if the charter's line does not grant it |
+/// | charter-SHAPED, operator key UNDECIDABLE | [`AllowChange::NoOp`] — it records NOTHING, because there is no line to narrow against (`granted` is false, so the call falls to the no-op arm) | refuses [`AllowError::WidensCharter`] |
 ///
-/// In a charter mesh `on` can never widen, and it cannot be a silent no-op
-/// either: an operator who typed it meant to grant something, so it answers
-/// [`AllowError::WidensCharter`] and names the line that would have to change.
-/// `off` for a capability the charter does not grant is a genuine
-/// [`AllowChange::NoOp`] — the door already refuses it.
+/// **The branch is `charter_shaped`, not "a charter governs"** (review F2/N5):
+/// a shaped mesh whose operator key is undecidable is not a licence to widen
+/// locally through the paired record. In that window `on` can never widen, and
+/// it cannot be a silent no-op either — an operator who typed it meant to grant
+/// something, so it answers [`AllowError::WidensCharter`]. `off` there is a
+/// genuine no-op that writes nothing: there is no decidable line for it to
+/// narrow, and the door already refuses the capability (in a pair mesh `off`
+/// for a capability the record does not hold is a no-op for the same reason —
+/// the door already refuses it).
 ///
 /// Turning OFF the last capability of a mesh in a PAIR mesh drops that mesh's
 /// entry rather than storing an empty list: "granted nothing here" and "not in
@@ -762,7 +767,9 @@ pub fn set_node_allow(nodes: &mut [Node], name: &str, cap: &str, on: bool, mesh:
         // F2: the branch is on CHARTER-SHAPED, not on "the key is decidable
         // right now". A shaped mesh whose operator key is undecidable must not
         // become a licence to widen locally through the paired record — `on`
-        // answers `WidensCharter` and `off` still records the refusal.
+        // answers `WidensCharter` (always, since no line is readable), while
+        // `off` finds `granted` false and is a genuine no-op that writes
+        // nothing (there is no line for it to narrow against).
         let granted = crate::charter::governing(mesh)
             .and_then(|charter| {
                 p.pubkey

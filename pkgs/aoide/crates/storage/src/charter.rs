@@ -793,6 +793,19 @@ pub fn in_force_charter(mesh: &str) -> Option<Charter> {
 ///
 /// `false` for a mesh nothing was ever accepted for — the ordinary pair mesh,
 /// where the paired records are the source and always were.
+///
+/// **The sharp edge, named** (re-review (E)): the trigger is a `charter.toml`
+/// on disk or a non-empty operator in `trust.json`, and the document test is
+/// PRESENCE, not parseability. So a stray or corrupt
+/// `state/mesh/<mesh>/charter.toml` — a hand edit, or any other writer with
+/// access to the state dir; `atomic_write` makes a torn write unlikely — makes
+/// the mesh charter-shaped and, with no decidable operator record, refuses
+/// every named request in it, including on a mesh that had been working as a
+/// PAIR mesh. A stray EMPTY DIRECTORY cannot: `mkdir` alone gives neither file.
+/// That is accepted, not overlooked: detecting a charter by PARSING it is
+/// exactly the silent fallback F2 removed (a corrupt document would read as
+/// "no charter here" and reopen the paired-records door). Fail closed on
+/// presence; the operator resolves it where `aoide mesh charter show` points.
 pub fn charter_shaped(mesh: &str) -> bool {
     if in_force_path(mesh).is_file() {
         return true;
