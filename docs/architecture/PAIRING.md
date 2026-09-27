@@ -345,13 +345,33 @@ Per-request detached signature replaces bearer comparison for paired
 nodes:
 
 - Headers: node name (attribution only — see below), timestamp, nonce,
-  signature. Signature is
+  signature, and the mesh the request acts in (P-CHARTER). Signature is
   ed25519 over a canonical string binding method, path, timestamp,
-  nonce, and the body digest (`sha2`). The executor writes the exact
-  canonical form into CONTRACTS §6 in the same commit that lands it.
+  nonce, the body digest (`sha2`), and — when the request names one —
+  that mesh, as a sixth field appended after the digest. The executor
+  writes the exact canonical form into CONTRACTS §6 in the same commit
+  that lands it.
 - Replay guard: timestamp window (±120s default) + a bounded nonce
   cache. Clock skew beyond the window earns a taught error naming
   the skew.
+- **The wire is one-way across the mesh field, and there is no fallback.**
+  A `< 0.0.26` verifier rebuilds five fields and has no mesh arm, so every
+  signed command from a `>= 0.0.26` node to a `< 0.0.26` one is refused
+  `-32007` "signature verification failed", while the same command from the
+  older node to the newer one works (the `None` arm, judged in
+  `[pairing] homeMesh`). The ceremony itself crosses both ways — its own
+  signatures carry no mesh — so a cross-version pair succeeds and is
+  ONE-WAY: the older node commands the newer one and not the reverse, which
+  `node list` cannot show. Accepting both encodings for a release would need
+  a fallback on the refusal, and whoever can answer with that refusal could
+  strip the mesh from the signed bytes and have the request judged in the
+  receiving box's home mesh — the exact re-aiming the sixth field is for. So
+  the remedy is upgrading every node (CONTRACTS.md §6 "Mixed versions", the
+  pin in `aoide-storage::wire_auth::tests`). The same release's
+  `state/nodes.json` is one-way too, and destructive in the older
+  direction: a `< 0.0.26` binary writes the whole registry from a model with
+  no `grants`/`narrowed`, so its first write erases per-mesh grants
+  (CONTRACTS.md §4's rollback-scope paragraph, §7's `grants` record).
 - Unpaired callers keep today's door-wide bearer path (read arms
   only, per decision 6). Fail-closed discipline mirrors #84
   (sentinel on resolve failure, constant-time comparisons where

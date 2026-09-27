@@ -423,6 +423,20 @@ already waiting for them:
   deposit refusal teaches the fix rather than dropping the letter — on the
   *receiving* host `aoide node allow <peer> message on --mesh <mesh>`, then on
   the sender `aoide mail outbox retry --refused`.
+- **Upgrade every node together: the wire is one-way across versions.** From
+  `0.0.26` on, a signed request carries the mesh it acts in as a sixth field of
+  the bytes its signature covers. A door older than that rebuilds five fields,
+  so every signed command from the upgraded node to the un-upgraded one is
+  refused `-32007` `signature verification failed` while the reverse still
+  works, and a pair across the two versions succeeds and looks healthy in
+  `node list` while reaching only one way. No fallback exists, deliberately:
+  accepting both encodings would let whoever can answer with the refusal strip
+  the mesh from the signed bytes. Pair, `node pull`, `send`, `node spawn`, mail
+  deposit and mail poll are the ones that bite; the ceremony is not. The same
+  release also replaces `state/nodes.json`'s `allows` with per-mesh `grants`,
+  and an older binary's first write of that file erases them — so a rollback
+  keeps the file, or re-grants from the charter.
+  `docs/Aoide-Wiki/concepts/orchestration/Node-Federation.md` has the table.
 - **The install on this side is § 6's pair of units.** `aoided.service` plus its
   `aoide-a2a.service` twin, `enable --now`, the door on `8710`, this box's own
   node name unchanged — what distinguishes two nodes on one box is their names,
