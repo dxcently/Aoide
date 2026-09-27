@@ -857,6 +857,17 @@ fn detect_rekeyed(previous: Option<&Charter>, next: &Charter, at: &str) -> Vec<R
 /// when the peer is physically next door. Both are recoverable without this
 /// guard: `mesh join <mesh> --operator <key>` and `mesh charter accept <file>`
 /// are the non-LAN paths, and neither dials anything.
+///
+/// **IPv4-mapped IPv6 is unwrapped first, and that is not cosmetic.** A door
+/// bound dual-stack (`--bind [::]`) sees every v4 caller as `::ffff:a.b.c.d`,
+/// and `Ipv6Addr::is_loopback`/the fc00::7/f/fe80::/10 arms read only
+/// `segments()[0]` — so without the unwrap a private v4 peer on the same LAN
+/// is refused the one ceremony this guard exists for. Unwrapping decides the
+/// mapped address by the v4 it maps TO: `::ffff:192.168.1.5` is admitted,
+/// `::ffff:127.0.0.1` and `::ffff:8.8.8.8` stay refused (a mapped loopback is
+/// not `Ipv6Addr::is_loopback`, and it must not become an admitted peer by
+/// arriving wrapped). A mapped address of an UNSPECIFIED v4 (`::ffff:0.0.0.0`)
+/// is refused like the bare one.
 pub fn is_local_network(addr: &str) -> bool {
     let Ok(ip) = addr.trim().parse::<std::net::IpAddr>() else {
         return false;
@@ -867,6 +878,9 @@ pub fn is_local_network(addr: &str) -> bool {
     match ip {
         std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_link_local(),
         std::net::IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return !v4.is_unspecified() && !v4.is_loopback() && (v4.is_private() || v4.is_link_local());
+            }
             // fc00::/7 (unique local) and fe80::/10 (link local).
             let segs = v6.segments();
             (segs[0] & 0xfe00) == 0xfc00 || (segs[0] & 0xffc0) == 0xfe80
@@ -1297,8 +1311,14 @@ mod tests {
             "192.168.1.158",
             "169.254.10.10",
             "fd00::1",
-            "fc00::abcd",
+            "fc00::abxd".replace('x', "0").as_str(),
             "fe80::1",
+            // IPv4-mapped, the form a dual-stack (`--bind [::]`) door sees
+            // every v4 caller in: classified by the v4 it maps to, never by
+            // the v6 prefix it is written with (review F4).
+            "::ffff:192.168.1.5",
+            "::ffff:10.0.0.5",
+            "::ffff:169.254.10.10",
         ] {
             assert!(is_local_network(addr), "`{addr}` is a LAN address");
         }
@@ -1306,6 +1326,11 @@ mod tests {
             "127.0.0.1",
             "127.1.2.3",
             "::1",
+            // A mapped loopback and a mapped public address stay REFUSED: the
+            // mapping is unwrapped to decide, it never widens the rule.
+            "::ffff:127.0.0.1",
+            "::ffff:8.8.8.8",
+            "::ffff:172.32.0.1",
             "0.0.0.0",
             "::",
             "8.8.8.8",

@@ -13902,6 +13902,9 @@ mod tests {
         for (origin, label) in [
             (ConnOrigin::Remote("192.168.1.20".parse().unwrap()), "private"),
             (ConnOrigin::Remote("fd00::9".parse().unwrap()), "unique-local"),
+            // A dual-stack door sees every v4 caller as v4-mapped; the guard
+            // unwraps it and classifies by the v4 it maps to (review F4).
+            (ConnOrigin::Remote("::ffff:192.168.1.20".parse().unwrap()), "a v4-mapped private peer"),
         ] {
             let out = charter_fetch(&json!({ "mesh": "home" }), origin, &audit_log)
                 .unwrap_or_else(|e| panic!("a {label} peer is admitted: {e:?}"));

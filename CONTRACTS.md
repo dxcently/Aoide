@@ -7124,7 +7124,11 @@ A refused peer is `-32007` with a taught message naming the non-LAN paths
 this machine has no charter for is its own refusal. The rule is a property of
 the ADDRESS alone (`charter::is_local_network`) — no interface table, no
 route lookup, no `/proc`, no per-OS branch — so the same peer is admitted or
-refused identically on every platform this crate builds on.
+refused identically on every platform this crate builds on. An IPv4-mapped
+IPv6 address (`::ffff:a.b.c.d`, what a dual-stack `--bind [::]` door sees
+every v4 caller as) is unwrapped first and classified by the v4 it maps to:
+`::ffff:192.168.1.5` is admitted, `::ffff:127.0.0.1` and `::ffff:8.8.8.8` stay
+refused.
 
 **Where the grant COMES FROM (P-CHARTER).** `a2a::grant_in_mesh` has two
 sources and picks one at one place:
