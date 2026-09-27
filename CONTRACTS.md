@@ -7121,7 +7121,8 @@ spooling relay or a TLS edge could otherwise turn an accepted deposit into
 a permanent refusal by flipping one unsigned byte. P-M4's transit is where
 a hop's `mesh` is checked, at the hop, against the zone clause. A request
 that names no mesh (a pre-charter peer) is evaluated in `[pairing]
-homeMesh`.
+homeMesh` **by that mesh's rules** — its governing charter first, its paired
+records only where no charter is shaped for it (review N1; the row below).
 
 **`aoide/charterFetch` (P-CHARTER) — the LAN join's one read.** `params` is
 `{ "mesh": "<name>" }`; the result is
@@ -7147,13 +7148,24 @@ refused.
 **Where the grant COMES FROM (P-CHARTER).** `a2a::grant_in_mesh` has two
 sources and picks one at one place:
 
-| the request | is the mesh charter-SHAPED here? | the caller's grant |
+| the request | is the RESOLVED mesh charter-SHAPED here? | the caller's grant |
 |---|---|---|
-| names no mesh | — (never matches a charter mesh) | the home mesh's paired record |
+| names no mesh | judged as `effective_mesh(None)` — `[pairing] homeMesh` | exactly the row below for that mesh: charter first, paired records only where no charter is shaped for it |
 | names a mesh | no | that mesh's paired records, unioned by key |
 | names a mesh | yes, and the charter governs | the charter LINE for the caller's identity key, minus this box's local refusals |
 | names a mesh | yes, key not listed on the line | nothing — a paired record in a charter mesh is inert |
 | names a mesh | yes, but the operator key is UNDECIDABLE | **nothing** — every request in that mesh is refused |
+
+**The first row is a resolution, not a carve-out** (review N1, the user's
+ruling): `grant_in_mesh` resolves the mesh with `effective_mesh` BEFORE any of
+the three reads, so a request that names nothing is judged by the home mesh's
+rules and nothing else — the same governing lookup, the same shaped test, the
+same paired fallback. Where home is a pair mesh, a pre-charter peer's migrated
+grant is read exactly as it always was; where home has a CHARTER, the charter
+is the only trust, so that peer is refused unless its key is on the line,
+whatever its stale `grants[home]` holds. Before this, the unnamed case skipped
+the charter entirely and went straight to the paired records — a removed or
+never-listed key came back in by omitting one header.
 
 `aoide_storage::charter::charter_shaped` decides "is the mesh charter-shaped"
 (a charter was accepted for it — a document on disk, or a trust record naming

@@ -907,21 +907,29 @@ impl Grant {
 /// documents for `resolve_node`'s ladder.
 fn grant_in_mesh(named: Option<&str>, caller_key: &str) -> Grant {
     let nodes = aoide_storage::node_store::load_nodes();
-    let named_mesh = named.map(str::trim).filter(|mesh| !mesh.is_empty());
-    let governing = named_mesh.and_then(aoide_storage::charter::governing);
+    // **One mesh, resolved once** (review N1): a request that named none is
+    // judged by the rules of `effective_mesh(None)` — the home mesh — and every
+    // read below uses THAT mesh. Before this, the unnamed case skipped both the
+    // governing lookup and the shaped test and went straight to the paired
+    // records, so a pre-charter peer whose key a charter had since REMOVED was
+    // still admitted by its stale `grants[home]` — the pre-charter fallback F2
+    // exists to remove, reachable by omitting one header.
+    let mesh = effective_mesh(named);
+    let governing = aoide_storage::charter::governing(&mesh);
     // F2: a mesh a charter was accepted for is a charter mesh even while its
     // operator key is undecidable, and a charter mesh never falls back to the
     // pre-charter source — that fallback is how a revoked or unlisted key got
     // back in through a stale pairing.
-    let shaped = named_mesh.is_some_and(aoide_storage::charter::charter_shaped);
-    grant_from(&nodes, governing.as_ref(), shaped, named, caller_key)
+    let shaped = aoide_storage::charter::charter_shaped(&mesh);
+    grant_from(&nodes, governing.as_ref(), shaped, &mesh, caller_key)
 }
 
 /// [`grant_in_mesh`]'s pure core — the whole table without the disk reads, so
-/// both branches are provable against fixtures. `governing` is the charter
-/// that governs the mesh the request NAMED ([`aoide_storage::charter::
-/// governing`]), or `None` for a pair mesh, for a mesh no charter governs, and
-/// for every request that named no mesh at all.
+/// both branches are provable against fixtures. `mesh` is the RESOLVED mesh
+/// ([`effective_mesh`], already applied by the caller — the unnamed case never
+/// reaches here unresolved). `governing` is the charter that governs it
+/// ([`aoide_storage::charter::governing`]), or `None` for a pair mesh and for
+/// a charter-shaped mesh whose operator key is undecidable.
 ///
 /// The charter branch answers with the caller's LINE, keyed by `caller_key`
 /// (`Charter::grant_for_key`) — never the paired records, whatever this box
@@ -934,7 +942,7 @@ fn grant_from(
     nodes: &[aoide_storage::node_store::Node],
     governing: Option<&aoide_storage::charter::Charter>,
     shaped: bool,
-    named: Option<&str>,
+    mesh: &str,
     caller_key: &str,
 ) -> Grant {
     let Some(charter) = governing else {
@@ -942,12 +950,13 @@ fn grant_from(
         // (review F2): the mesh's trust is a charter's, and a charter that
         // cannot be honoured right now grants nothing — never the paired
         // records, which is what a revoked key would come back through. The
-        // operator faces a taught refusal and `aoide mesh` reports the mesh as
-        // charter-shaped with `trusted: false`.
+        // door tells the operator so in the refusal (`deposit_refusal`) and
+        // `aoide mesh` reports the mesh as charter-shaped with `trusted:
+        // false`.
         if shaped {
             return Grant::none();
         }
-        return paired_grant(nodes, &effective_mesh(named), caller_key);
+        return paired_grant(nodes, mesh, caller_key);
     };
     let caps = charter.grant_for_key(caller_key).unwrap_or(&[]);
     let refused = nodes
@@ -989,8 +998,18 @@ fn paired_grant(nodes: &[aoide_storage::node_store::Node], mesh: &str, caller_ke
 /// The mesh a request acts in: the one it NAMED, or the home mesh
 /// ([`aoide_storage::config::home_mesh`], `[pairing] homeMesh`, default
 /// `home`) when it named none. The single place the unnamed case becomes a
-/// mesh name — a pre-P-CHARTER peer's request is evaluated in the home mesh
-/// and nowhere else, which is exactly where its migrated grant lives.
+/// mesh name.
+///
+/// **It is a RESOLUTION, not a hint** (review N1): whatever this returns is
+/// the mesh whose rules decide the request — governing charter, shaped test
+/// and paired fallback all read it, and `grant_in_mesh` reads it FIRST so the
+/// unnamed case cannot skip any of them. A pre-P-CHARTER peer that names no
+/// mesh is therefore judged by the home mesh's rules like anyone else naming
+/// it: where home is a pair mesh its migrated grant is read exactly as before,
+/// and where home has a CHARTER the charter is the only trust — its key must
+/// be on the line, whatever its stale `grants[home]` says. "Evaluated in the
+/// home mesh" was always the doctrine; it used to be true of the grants and
+/// false of the charter.
 ///
 /// Deliberately takes the NAMED value rather than a [`SignedCaller`]: the
 /// mail arm compares a request's mesh against a container's, and a container's
@@ -1010,8 +1029,9 @@ fn effective_mesh(named: Option<&str>) -> String {
 /// site turns a [`SignedCaller`] into a [`Grant`]. [`Grant::none`] when there
 /// is no caller at all (no signature headers, or a weaker rung, which
 /// produces no `SignedCaller` by construction); a request that named no mesh
-/// resolves through [`effective_mesh`] to the home mesh and through
-/// [`grant_from`] to its paired records.
+/// resolves through [`effective_mesh`] to the home mesh and is then judged by
+/// THAT mesh's rules — charter first, paired records only where no charter is
+/// shaped for it (review N1).
 fn caller_grant(caller: Option<SignedCaller<'_>>) -> Grant {
     match caller {
         Some(c) => grant_in_mesh(c.mesh, c.key),
@@ -15198,10 +15218,21 @@ mod tests {
             "a mesh no charter governs and no record holds grants nothing"
         );
 
-        // 2. Unnamed never matches a charter mesh — `home` IS one here.
+        // 2. **A request naming no mesh is judged by the HOME mesh's rules**
+        // (review N1, the user's ruling): it resolves to `effective_mesh(None)`
+        // = `home`, and EVERY read — the governing charter, the shaped test,
+        // the paired fallback — is that mesh's. Asserted here with the
+        // dangerous record NOT YET installed; the fixture that carries a stale
+        // `grants[home]` for a key the charter does not list is asserted below,
+        // where it can catch the loophole this test used to pass trivially.
         assert!(
-            grant_in_mesh(None, &receiver_key) == Grant::none(),
-            "a request naming no mesh is evaluated against a migrated paired record only"
+            grant_in_mesh(None, &receiver_key).holds("message"),
+            "unnamed resolves to home, and home's charter line answers — not the paired records"
+        );
+        assert_eq!(
+            grant_in_mesh(None, &receiver_key),
+            grant_in_mesh(Some("home"), &receiver_key),
+            "and it is indistinguishable from naming `home` — one rule, not two"
         );
 
         // 3. A paired record in a charter mesh is INERT.
@@ -15236,6 +15267,25 @@ mod tests {
         assert!(
             grant_in_mesh(Some("away"), &receiver_key).holds("read"),
             "and the paired source still answers per mesh for a listed key, in the mesh the charter does not govern"
+        );
+        // **The unnamed path, with the dangerous record INSTALLED** (review
+        // N1): `stranger` holds `[read, spawn, message]` in `home` — the
+        // migrated shape of every machine that became a charter mesh after it
+        // was paired — and `home` is charter-shaped. Naming `home` and naming
+        // nothing must give the same answer, and that answer is the charter's
+        // (nothing), never the stale record's.
+        assert!(
+            grant_in_mesh(Some("home"), "bb22") == Grant::none(),
+            "the charter's rule refuses it"
+        );
+        assert!(
+            grant_in_mesh(None, "bb22") == Grant::none(),
+            "and OMITTING the mesh header is not a way around that — the loophole this test used to pass with an empty registry"
+        );
+        assert_eq!(
+            grant_in_mesh(None, "bb22"),
+            grant_in_mesh(Some("home"), "bb22"),
+            "one rule for the unnamed request: home's"
         );
 
         // 4. Local narrowing wins over the charter; nothing local widens one.
