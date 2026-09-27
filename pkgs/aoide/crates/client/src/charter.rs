@@ -70,6 +70,125 @@ pub fn register(r: &mut Registry) {
         handler: handle_charter_reroot,
         examples: ["mesh charter reroot home"],
     ));
+    r.insert(cmd!(
+        path: ["mesh", "charter", "show"],
+        summary: "Print the charter IN FORCE at this node and its status: the version, the operator key and its durable fingerprint, where this node's trust in that key is written (config line, state record, both, or neither), whether the key is decidable (a config/state disagreement is `operator-mismatch`, and then nothing about the mesh is honoured), the high-water version applied under that key, every node line the charter carries, and the re-keyed nodes the last applied version changed — a charter applied by an unattended poll has to be visible afterwards. Omitted <mesh>: every mesh with a charter on disk.",
+        args: [arg!("mesh", "string", false, "The mesh whose charter to print. Omitted: every mesh with a charter in force here.")],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: handle_charter_show,
+        examples: ["mesh charter show", "mesh charter show home", "mesh charter show home --json"],
+    ));
+}
+
+fn handle_charter_show(inv: &Invocation) -> Outcome {
+    let cmd = "mesh.charter.show";
+    let named = inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()).map(str::to_string);
+    let meshes: Vec<String> = match &named {
+        Some(m) => vec![m.clone()],
+        None => charter::meshes_with_state(),
+    };
+    let mut rows = Vec::new();
+    for mesh in &meshes {
+        let Some(in_force) = charter::in_force_charter(mesh) else {
+            if named.is_none() {
+                continue;
+            }
+            return Outcome::error(
+                cmd,
+                format!(
+                    "no charter in force for mesh `{mesh}` at this node — its state is {}/charter.toml, \
+                     written by `aoide mesh charter accept <file>` or by a charter letter",
+                    charter::mesh_state_dir(mesh).display()
+                ),
+            )
+            .with_data(json!({ "reason": "no-charter", "mesh": mesh }));
+        };
+        let trust = charter::load_trust(mesh).ok().flatten().unwrap_or_default();
+        let declared = charter::config_operator(mesh).ok().flatten();
+        let state_key = Some(trust.operator.clone()).filter(|k| !k.is_empty());
+        let governed = charter::trusted_operator(mesh);
+        let mut node_rows: Vec<serde_json::Value> = Vec::new();
+        for (name, line) in &in_force.nodes {
+            node_rows.push(json!({
+                "name": name,
+                "key": line.key,
+                "fingerprint": charter::fingerprint_of_key(&line.key),
+                "address": line.address,
+                "grant": line.grant,
+            }));
+        }
+        rows.push(json!({
+            "mesh": mesh,
+            "version": in_force.version,
+            "operatorKey": trust.operator,
+            "operator": charter::fingerprint_of_key(&trust.operator),
+            "trust": match (&declared, &state_key) {
+                (Some(_), Some(_)) => "both",
+                (Some(_), None) => "config",
+                (None, Some(_)) => "state",
+                (None, None) => "none",
+            },
+            "honoured": governed.is_ok(),
+            "highWater": trust.versions.get(&trust.operator).copied().unwrap_or(0),
+            "relays": in_force.relays,
+            "nodes": node_rows,
+            "rekeyed": trust.rekeyed,
+            "paths": {
+                "charter": charter::in_force_path(mesh).to_string_lossy(),
+                "trust": charter::trust_path(mesh).to_string_lossy(),
+                "source": charter::source_path(mesh).to_string_lossy(),
+            },
+        }));
+    }
+    if rows.is_empty() {
+        return Outcome::ok(
+            cmd,
+            "no charter in force at this node — root one with `aoide mesh charter init <mesh>`, or take one with `aoide mesh charter accept <file>`",
+        )
+        .with_data(json!({ "meshes": [] }));
+    }
+    let mut lines = Vec::new();
+    for row in &rows {
+        let mesh = row["mesh"].as_str().unwrap_or("");
+        lines.push(format!(
+            "charter {} v{} — operator {} ({}) — trust: {}, {} — high-water v{}",
+            mesh,
+            row["version"],
+            row["operator"],
+            row["operatorKey"],
+            row["trust"],
+            if row["honoured"].as_bool().unwrap_or(false) {
+                "honoured here".to_string()
+            } else {
+                "NOT HONOURED (the operator key is undecidable — resolve `operator-mismatch`)".to_string()
+            },
+            row["highWater"],
+        ));
+        if let Some(relays) = row["relays"].as_array().filter(|r| !r.is_empty()) {
+            lines.push(format!(
+                "  relays: {}",
+                relays.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(", ")
+            ));
+        }
+        for node in row["nodes"].as_array().into_iter().flatten() {
+            lines.push(format!(
+                "  {}: {}  address {}  grant {}",
+                node["name"],
+                node["fingerprint"],
+                node["address"],
+                node["grant"].as_array().map(|g| g.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(",")).unwrap_or_default(),
+            ));
+        }
+        for r in row["rekeyed"].as_array().into_iter().flatten() {
+            lines.push(format!(
+                "  RE-KEYED {}: {} -> {} (v{}, {})",
+                r["node"], r["from"], r["to"], r["version"], r["at"]
+            ));
+        }
+    }
+    Outcome::ok(cmd, lines.join("\n")).with_data(json!({ "meshes": rows }))
 }
 
 fn handle_charter_init(inv: &Invocation) -> Outcome {
@@ -295,4 +414,71 @@ fn rekey_note(rekeyed: &[charter::Rekeyed]) -> String {
         " — RE-KEYED: {} (a new key on an old name is what a stolen operator key would sign)",
         names.join(", ")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aoide_protocol::Door;
+
+    /// Sandboxes the handler's two reads (`AOIDE_ROOT` for the charter state,
+    /// `AOIDE_STATE_DIR` for the node registry) at one scratch dir — the same
+    /// shape `crate::mesh`'s own tests use.
+    fn with_root<T>(tag: &str, f: impl FnOnce(&Path) -> T) -> T {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _saver = aoide_test_support::EnvSaver::capture(&["AOIDE_ROOT", "AOIDE_STATE_DIR", "AOIDE_CONFIG"]);
+        let dir = aoide_test_support::unique_tmp(&format!("charter-show-{tag}"));
+        std::env::set_var("AOIDE_ROOT", &dir);
+        std::env::set_var("AOIDE_STATE_DIR", &dir);
+        std::env::remove_var("AOIDE_CONFIG");
+        let out = f(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        out
+    }
+
+    fn inv(args: &[&str]) -> Invocation {
+        Invocation {
+            path: ["mesh", "charter", "show"].iter().map(|s| s.to_string()).collect(),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            flags: Default::default(),
+            door: Door::Cli,
+        }
+    }
+
+    /// **The read side of the charter** (P-CHARTER, surfaces slice):
+    /// `mesh charter show` prints the charter in force with its status — the
+    /// version, the operator key and fingerprint, where this node's trust is
+    /// written, the high-water mark, and every node line — and answers a
+    /// taught `no-charter` for a mesh that has none, rather than inventing a
+    /// status for a charter nobody signed.
+    #[test]
+    fn charter_show_prints_the_charter_in_force_and_refuses_an_unknown_mesh() {
+        with_root("in-force", |_dir| {
+            let init = charter::init("home").unwrap();
+            let line = charter::node_line().unwrap();
+            let src = format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{line}\n");
+            std::fs::write(charter::source_path("home"), &src).unwrap();
+            charter::sign("home", None).unwrap();
+
+            // No argument: every mesh with a charter on disk.
+            let out = handle_charter_show(&inv(&[]));
+            assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+            let row = &out.data.as_ref().unwrap()["meshes"][0];
+            assert_eq!(row["mesh"], "home");
+            assert_eq!(row["version"], 1);
+            assert_eq!(row["operatorKey"], init.operator);
+            assert_eq!(row["operator"], init.fingerprint);
+            assert_eq!(row["trust"], "state", "`init` recorded the key in state, and no config line exists");
+            assert_eq!(row["honoured"], true);
+            assert_eq!(row["highWater"], 1);
+            assert_eq!(row["nodes"][0]["grant"][0], "message", "no grant key on a line means `message`");
+            assert!(out.message.contains("high-water v1"), "{}", out.message);
+            assert!(out.message.contains(&init.fingerprint), "{}", out.message);
+
+            // A mesh with no charter is a taught refusal, not an empty report.
+            let missing = handle_charter_show(&inv(&["away"]));
+            assert_eq!(missing.status, aoide_protocol::output::Status::Error, "{missing:?}");
+            assert_eq!(missing.data.as_ref().unwrap()["reason"], "no-charter");
+        });
+    }
 }

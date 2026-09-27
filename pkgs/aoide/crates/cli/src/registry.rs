@@ -312,7 +312,10 @@ mod tests {
         // `aoide_client::charter`): one operator's machines, rooted once and
         // signed by that operator's own key. They sort inside the existing
         // `mesh.*` family, between bare `mesh` and `mesh.pair`. Net: 82 + 4
-        // = 86.
+        // = 86. Bumped by 1 more for `mesh.charter.show` (the same slice's
+        // read side: the charter in force and its status, which a charter
+        // applied by an unattended poll needs an operator to be able to see)
+        // — reached 87.
         let mut expected: Vec<&str> = vec![
             "a2a.serve",
             "adapter.melete",
@@ -353,6 +356,7 @@ mod tests {
             "mesh.charter.accept",
             "mesh.charter.init",
             "mesh.charter.reroot",
+            "mesh.charter.show",
             "mesh.charter.sign",
             "mesh.pair",
             "node.add",

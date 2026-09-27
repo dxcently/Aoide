@@ -759,14 +759,32 @@ aoide mesh [--json]
   `via-mismatch` (verified, but the recorded `via` does not match the
   declared hop; a recorded `via` of none is the severe case — a call then
   dials the node's bare address directly, commonly this box's own
-  loopback). A node that matches gets no line. A separate trailing line
+  loopback). A node that matches gets no line. Each mesh's header says which
+  source answers a caller's grant there — `source: charter v<N>
+  (SHA256:…)` or `source: paired records` — and a **charter row** follows for
+  every mesh with a charter in force, declared or not: its version, the
+  operator key's fingerprint, where this node's trust in that key is written
+  (`config`/`state`/`both`/`none`), whether it is HONOURED here (an
+  `operator-mismatch` is reported as not honoured, because nothing about that
+  mesh is decidable while it holds), the re-keyed nodes the last applied
+  version changed, and which of this box's own paired records are INERT in
+  that mesh (a charter's line is what the door reads, so a record's own grant
+  entry is reported rather than left to look live). A separate trailing line
   lists any verified node named in no declared mesh — reported, never
   accused, no drift count, no suggested action. A mesh whose declared keys
   do not include this box's own name gets one more note line saying so —
   never a drift row, never counted in `declared`. `--json` emits the same
   comparison structured under `data.report`:
-  `{"sections": [{"name", "grant", "sameOperator", "declared",
-  "selfDeclared", "rows": [{"node", "class", …}]}], "undeclared": [...]}`.
+  `{"sections": [{"name", "source", "grant", "sameOperator", …}], "undeclared": [...]}`.
+- **`--json` (P-CHARTER).** `data.report` is
+  `{"sections": [{"name", "source", "grant", "sameOperatorNote"?,
+  "grants", "declared", "selfDeclared", "rows": [{"node", "class", …}]}],
+  "undeclared": [...], "charters": [CharterRow]}` — `source` is
+  `"charter"`/`"paired"`, and each `CharterRow` is
+  `{"mesh", "declared", "version", "operator", "operatorKey", "trust",
+  "trusted", "highWater", "rekeyed": [{"node", "from", "to", "version",
+  "at"}], "inert": [...], "nodes"}` where `operator` is the `SHA256:`
+  fingerprint and `operatorKey` the bare hex.
 - **Notes:** unlike `node list`'s roster above, this reads only what a
   human explicitly named in `[mesh.<name>]` — an unregistered or
   undeclared node never appears as a row, only in `undeclared`. Drift is
@@ -786,6 +804,44 @@ aoide mesh [--json]
   that actually populates `state/nodes.json`, and
   `docs/architecture/PAIRING.md`'s "Mesh declaration" section for why this
   stays intent, never a wire-level object.
+
+### aoide mesh charter
+
+```
+aoide mesh charter init <mesh>
+aoide mesh charter sign <mesh> [--file <path>]
+aoide mesh charter accept <file>
+aoide mesh charter reroot <mesh>
+aoide mesh charter show [<mesh>]
+```
+
+The operator's side of a charter mesh — one operator key signs a machine list
+([[HTTPS-Mesh-API]] "Charters"). `init` roots a mesh on the operator's machine
+(mints `state/operator/<mesh>.key`, 0600, never printed, never in the nix
+store) and writes an empty source at `$AOIDE_ROOT/charters/<mesh>.toml`;
+`sign` validates the source, writes the next version into it, signs those exact
+bytes, applies the charter here and spools it to every node on it — **the same
+file it signs is the last write to it, ever** (a formatter or a trailing
+newline invalidates the signature; the fix is to sign again); `accept` applies
+one carried by hand; `reroot` replaces a lost or compromised operator key.
+
+- **`show [<mesh>]`** prints the charter IN FORCE at this node with its status:
+  the version, the operator key AND its `SHA256:` fingerprint, where this
+  node's trust in that key is written down (`config` line, `state` record,
+  `both`, or `none`), whether it is HONOURED here — a config/state
+  disagreement is `operator-mismatch`, and no charter governs the mesh while
+  it holds — the high-water version applied under that key, the mesh's relays,
+  every node line (name, key fingerprint, address, grant) and the RE-KEYED
+  nodes the last applied version changed. With no argument it prints every
+  mesh with a charter on disk; a named mesh with none is a taught
+  `no-charter` refusal, never an empty report.
+- **`--json` (P-CHARTER).** `data.meshes` is a list of
+  `{"mesh", "version", "operatorKey", "operator", "trust", "honoured",
+  "highWater", "relays", "nodes": [{"name", "key", "fingerprint", "address",
+  "grant"}], "rekeyed", "paths": {"charter", "trust", "source"}}`.
+- **Notes:** all five are local reads/writes of this node's own state plus the
+  operator's source file; none is a wire call. `init` never overwrites an
+  existing source, and `show` never writes anything.
 
 ### aoide mesh pair
 

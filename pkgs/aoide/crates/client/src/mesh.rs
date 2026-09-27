@@ -141,6 +141,12 @@ pub struct MeshRow {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MeshSection {
     pub name: String,
+    /// Which source answers a caller's grant in this mesh HERE — the same
+    /// choice `aoide-server::a2a::grant_in_mesh` makes at one function.
+    /// [`drift`] is pure and knows nothing about charters, so it always sets
+    /// [`MeshSource::Paired`]; [`report`] is the one place that flips it, from
+    /// the charter state it reads beside the comparison.
+    pub source: MeshSource,
     /// The mesh's DECLARED grant — the default a pair minted here gets,
     /// never a continuous invariant over the live registry.
     pub grant: Option<Vec<String>>,
@@ -193,6 +199,88 @@ pub struct MeshReport {
     /// Verified nodes named in no declared mesh. Reported, never accused
     /// — see the module doc.
     pub undeclared: Vec<String>,
+    /// **The charter rows** (P-CHARTER): every mesh with a charter IN FORCE at
+    /// this node, declared or not — one row per mesh, [`CharterRow`]'s own doc
+    /// for what each field answers. Empty on a box that has accepted none,
+    /// which is every box before P-CHARTER.
+    pub charters: Vec<CharterRow>,
+}
+
+/// Where one mesh's trust comes from — the source choice every gated arm makes
+/// at one function (`aoide-server::a2a::grant_in_mesh`), shown where the
+/// operator declares and reviews meshes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MeshSource {
+    /// A charter governs this mesh here: the caller's line is the grant, a
+    /// paired record's own entry is inert, and local `node allow … off` is
+    /// the only thing that narrows it.
+    Charter,
+    /// The ordinary pair mesh: the pairwise records are the grant.
+    Paired,
+}
+
+/// **One charter in force at this node**, as the operator needs to review it:
+/// which mesh, how far it has been seen, who signed it, what the last version
+/// re-keyed, and which of this box's own paired records its rule makes inert.
+///
+/// The re-keyed list is the reason this row exists at all: a charter applied
+/// by an unattended poll can land with nobody watching, and "a new key on an
+/// old name is what a stolen operator key would sign"
+/// (`docs/architecture/HTTPS-MESH-API.md` "Charters") is something an operator
+/// has to be able to SEE afterwards, not only read in a log.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CharterRow {
+    pub mesh: String,
+    /// Does `config.toml` also declare this mesh (`[mesh.<name>]`)? A charter
+    /// mesh need not be declared — a machine that took its first charter by
+    /// file has state and no declaration — so this says whether the section
+    /// above is about the same mesh, never whether the charter is real.
+    pub declared: bool,
+    /// The version in force.
+    pub version: u64,
+    /// The operator key's durable fingerprint (`SHA256:<hex>`,
+    /// `charter::fingerprint_of_key`) — the value an operator compares out of
+    /// band, and the one every refusal names.
+    pub operator: String,
+    /// The operator key itself, bare hex: public material, printed by
+    /// `mesh charter init` as `operator = "ed25519:<hex>"`, and shown here so
+    /// the row and the config line can be compared without a second command.
+    #[serde(rename = "operatorKey")]
+    pub operator_key: String,
+    /// Where this node's trust in that key is written down —
+    /// `config`, `state`, `both`, or `none` (the last being
+    /// `unknown-operator`: a charter on disk this node has no way to honour).
+    /// A DISAGREEMENT between the two is `operator-mismatch`, and then nothing
+    /// about the mesh is decidable, which `trusted` below says.
+    pub trust: String,
+    /// Is the operator key decidable (`charter::trusted_operator`)? `false` is
+    /// `operator-mismatch` or an unreadable config — no charter governs the
+    /// mesh while it holds, and its grants are not read.
+    pub trusted: bool,
+    /// The highest version applied for the key this node trusts, out of
+    /// `trust.json`'s per-operator high-water mark.
+    #[serde(rename = "highWater")]
+    pub high_water: u64,
+    /// The nodes the LAST applied version changed the identity key of.
+    pub rekeyed: Vec<RekeyedRow>,
+    /// Nodes on the charter that this box ALSO holds a paired record for, in
+    /// this mesh: the record's `grants` entry is not what the door reads (the
+    /// charter's line is), so the row reports it rather than letting an
+    /// operator believe the record's own grant is live.
+    pub inert: Vec<String>,
+    /// How many nodes the charter lists.
+    pub nodes: usize,
+}
+
+/// One re-keyed node, flattened for display: who, from, to, when.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RekeyedRow {
+    pub node: String,
+    pub from: String,
+    pub to: String,
+    pub version: u64,
+    pub at: String,
 }
 
 /// Compare every declared mesh against the live node registry. Pure — see
@@ -233,6 +321,7 @@ pub fn drift(meshes: &BTreeMap<String, Mesh>, nodes: &[Node], local_name: &str) 
         }
         sections.push(MeshSection {
             name: name.clone(),
+            source: MeshSource::Paired,
             grant: mesh.grant.clone(),
             same_operator_note: mesh.same_operator_note(name),
             grants,
@@ -249,7 +338,75 @@ pub fn drift(meshes: &BTreeMap<String, Mesh>, nodes: &[Node], local_name: &str) 
         .collect();
     undeclared.sort();
 
-    MeshReport { sections, undeclared }
+    MeshReport { sections, undeclared, charters: Vec::new() }
+}
+
+/// **The whole report the handler renders: the pure comparison above, plus the
+/// charter rows.** The ONE place that reads charter state on this path —
+/// `drift` stays a pure comparison of declarations against the live registry,
+/// and this composes what an operator actually needs to see: which source
+/// answers each declared mesh, and every charter in force whether declared or
+/// not.
+pub fn report(meshes: &BTreeMap<String, Mesh>, nodes: &[Node], local_name: &str) -> MeshReport {
+    let mut report = drift(meshes, nodes, local_name);
+    report.charters = charter_rows(&meshes.keys().cloned().collect(), nodes);
+    for section in &mut report.sections {
+        if report.charters.iter().any(|c| c.mesh == section.name) {
+            section.source = MeshSource::Charter;
+        }
+    }
+    report
+}
+
+/// The charter rows: every mesh with a charter on disk at this node
+/// (`charter::meshes_with_state`, so an undeclared one is reported too), with
+/// the facts [`CharterRow`] carries. Reads `state/mesh/<m>/` only — the same
+/// state `charter::governing` reads, minus its trust gate, because a report
+/// must be able to say `trusted: false` about a charter the door would refuse
+/// to honour rather than hiding it.
+pub fn charter_rows(declared: &BTreeSet<String>, nodes: &[Node]) -> Vec<CharterRow> {
+    let mut out = Vec::new();
+    for mesh in aoide_storage::charter::meshes_with_state() {
+        let Some(charter) = aoide_storage::charter::in_force_charter(&mesh) else {
+            continue;
+        };
+        let trust = aoide_storage::charter::load_trust(&mesh).ok().flatten().unwrap_or_default();
+        let config_line = aoide_storage::charter::config_operator(&mesh).ok().flatten();
+        let state_key = Some(trust.operator.clone()).filter(|k| !k.is_empty());
+        out.push(CharterRow {
+            declared: declared.contains(&mesh),
+            mesh: charter.mesh.clone(),
+            version: charter.version,
+            operator: aoide_storage::charter::fingerprint_of_key(&trust.operator),
+            operator_key: trust.operator.clone(),
+            trust: match (&config_line, &state_key) {
+                (Some(_), Some(_)) => "both".to_string(),
+                (Some(_), None) => "config".to_string(),
+                (None, Some(_)) => "state".to_string(),
+                (None, None) => "none".to_string(),
+            },
+            trusted: aoide_storage::charter::trusted_operator(&mesh).is_ok(),
+            high_water: trust.versions.get(&trust.operator).copied().unwrap_or(0),
+            rekeyed: trust
+                .rekeyed
+                .iter()
+                .map(|r| RekeyedRow {
+                    node: r.node.clone(),
+                    from: r.from.clone(),
+                    to: r.to.clone(),
+                    version: r.version,
+                    at: r.at.clone(),
+                })
+                .collect(),
+            inert: nodes
+                .iter()
+                .filter(|n| n.verified && !n.grant(&mesh).is_empty())
+                .map(|n| n.name.clone())
+                .collect(),
+            nodes: charter.nodes.len(),
+        });
+    }
+    out
 }
 
 /// The human-text rendering `aoide mesh`'s message carries — `--json`
@@ -268,8 +425,17 @@ fn render_report(report: &MeshReport, local_name: &str) -> String {
     let mut lines = Vec::new();
     for section in &report.sections {
         let clean = section.declared.saturating_sub(section.rows.len());
+        let source = match report.charters.iter().find(|c| c.mesh == section.name) {
+            Some(charter) => format!(
+                "source: charter v{} ({}{})",
+                charter.version,
+                charter.operator,
+                if charter.trusted { "" } else { ", NOT HONOURED: the operator key is undecidable here" }
+            ),
+            None => "source: paired records".to_string(),
+        };
         lines.push(format!(
-            "mesh.{}  {clean}/{} ok",
+            "mesh.{}  {clean}/{} ok  —  {source}",
             section.name, section.declared,
         ));
         for (node, caps) in &section.grants {
@@ -286,11 +452,57 @@ fn render_report(report: &MeshReport, local_name: &str) -> String {
             ));
         }
     }
+    // The charter meshes a config never declared, and the re-keyed nodes every
+    // charter row reports: a charter applied by an unattended poll has to be
+    // visible afterwards, which is the whole reason these rows exist.
+    let undeclared_charters: Vec<&CharterRow> = report.charters.iter().filter(|c| !c.declared).collect();
+    if !report.charters.is_empty() {
+        lines.push(String::new());
+        for charter in &report.charters {
+            lines.push(render_charter(charter));
+        }
+        if !undeclared_charters.is_empty() {
+            lines.push(format!(
+                "  ({} of them are not declared in config.toml — reported, never accused)",
+                undeclared_charters.len()
+            ));
+        }
+    }
     if !report.undeclared.is_empty() {
         lines.push(String::new());
         lines.push(render_undeclared(&report.undeclared));
     }
     lines.join("\n")
+}
+
+/// One charter row, human-rendered: what it is, how far it is seen, who signed
+/// it, what it re-keyed, and which local records its rule makes inert.
+fn render_charter(charter: &CharterRow) -> String {
+    let mut line = format!(
+        "charter {} v{} — operator {} (trust: {}, {}){}",
+        charter.mesh,
+        charter.version,
+        charter.operator,
+        charter.trust,
+        if charter.trusted { "honoured" } else { "NOT HONOURED — resolve the operator key" },
+        if charter.declared { "" } else { ", undeclared" },
+    );
+    if charter.nodes > 0 {
+        line.push_str(&format!(", {} node(s)", charter.nodes));
+    }
+    for r in &charter.rekeyed {
+        line.push_str(&format!(
+            "\n  RE-KEYED {}: {} -> {} (v{}, {})",
+            r.node, r.from, r.to, r.version, r.at
+        ));
+    }
+    if !charter.inert.is_empty() {
+        line.push_str(&format!(
+            "\n  inert here (paired, but the charter's line is what this door reads): {}",
+            charter.inert.join(", ")
+        ));
+    }
+    line
 }
 
 fn render_row(row: &MeshRow) -> String {
@@ -335,7 +547,7 @@ fn handle_mesh(_inv: &Invocation) -> Outcome {
     // host-case argument). See `MeshSection::self_declared`'s field doc for the
     // defect this closes.
     let local_name = aoide_storage::display::local_node_name();
-    let report = drift(&loaded.config.mesh, &nodes, &local_name);
+    let report = report(&loaded.config.mesh, &nodes, &local_name);
     let text = render_report(&report, &local_name);
     Outcome::ok(cmd, text).with_data(json!({ "report": report }))
 }
@@ -957,8 +1169,68 @@ mod tests {
         );
     }
 
-    // ── drift: matches produce nothing ──────────────────────────────────────
+    /// **The charter rows** (P-CHARTER, the surfaces slice): a mesh with a
+    /// charter in force is reported as `source: charter` with its version, the
+    /// operator's fingerprinted key and its trust source — and a paired record
+    /// this box also holds in that mesh is reported INERT, because the
+    /// charter's line, not the record's own grant, is what the door reads.
+    /// The row exists whether or not the config declares the mesh.
+    #[test]
+    fn a_charter_in_force_reports_its_source_operator_and_inert_records() {
+        with_config_root("charter-rows", |dir| {
+            // The charter: this machine roots `home`, lists its own node line,
+            // signs — and `sign` applies it here, so it is in force.
+            let init = aoide_storage::charter::init("home").unwrap();
+            let line = aoide_storage::charter::node_line().unwrap();
+            let src = format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{line}\n");
+            std::fs::write(aoide_storage::charter::source_path("home"), &src).unwrap();
+            aoide_storage::charter::sign("home", None).unwrap();
 
+            // A verified record in that mesh which the charter does not list:
+            // its own grant entry is not what the door reads there.
+            let mut peer = node("peerbox", true, Some("ssh://k@h"));
+            peer.pubkey = Some("aa".repeat(32));
+            peer.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+            aoide_storage::node_store::save_nodes(&[peer]).unwrap();
+
+            // Declared, so the section's own `source` is exercised too.
+            std::fs::write(
+                std::path::Path::new(dir).join("config.toml"),
+                "[mesh.home]\nnodes = { peerbox = \"ssh://k@h\" }\n",
+            )
+            .unwrap();
+
+            let loaded = aoide_storage::config::load().unwrap();
+            let nodes = aoide_storage::node_store::load_nodes();
+            let report = report(&loaded.config.mesh, &nodes, "this-box");
+
+            assert_eq!(report.charters.len(), 1, "one charter in force: {:?}", report.charters);
+            let row = &report.charters[0];
+            assert_eq!(row.mesh, "home");
+            assert_eq!(row.version, 1);
+            assert!(row.declared, "the mesh is also declared in config.toml");
+            assert!(row.trusted, "this machine rooted it, so the key is decidable");
+            assert_eq!(row.operator, aoide_storage::charter::fingerprint_of_key(&init.operator));
+            assert_eq!(row.operator_key, init.operator);
+            assert_eq!(row.high_water, 1, "the version just applied is the mark");
+            assert!(row.rekeyed.is_empty(), "nothing was re-keyed by v1");
+            assert_eq!(row.inert, vec!["peerbox".to_string()], "the record's own grant is not the answer here");
+
+            assert_eq!(
+                report.sections[0].source,
+                MeshSource::Charter,
+                "and the declared section says which source answers there"
+            );
+
+            // The pure comparison alone never claims a charter: `drift` knows
+            // nothing about them, and `report` is the one place that flips it.
+            let pure = drift(&loaded.config.mesh, &nodes, "this-box");
+            assert!(pure.charters.is_empty());
+            assert_eq!(pure.sections[0].source, MeshSource::Paired);
+        });
+    }
+
+    // ── drift: matches produce nothing ──────────────────────────────────────
     #[test]
     fn a_verified_node_whose_via_matches_the_declared_hop_produces_no_row() {
         let meshes = BTreeMap::from([("home".to_string(), mesh(&[("sakaki", "ssh://khoa@h")]))]);

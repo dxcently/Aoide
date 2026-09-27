@@ -576,6 +576,18 @@
   `handle_mesh` is the one impure edge; every ruling below is enforced
   THERE, in the comparison, never smuggled into a handler-only code path
   that a unit test can't reach.
+  - **P-CHARTER splits the two halves and keeps both honest: `drift` stays
+    pure and `mesh::report` is the ONE reader of charter state.** `report`
+    calls `drift`, then adds `MeshReport::charters` (one row per mesh with a
+    charter in force, declared or not — `charter::meshes_with_state` lists
+    them, so a machine that took its first charter by file is reported too)
+    and flips `MeshSection::source` from `Paired` to `Charter`. `drift`'s own
+    field says `Paired` because it knows nothing about charters: do not teach
+    it to read state, and do not let a second place flip `source`. A charter
+    row is also where a paired record in a charter mesh is REPORTED inert
+    (`CharterRow::inert`) — the record's own grant entry is not what the door
+    reads there, and an operator must not have to infer that from the door's
+    code.
   - **`Node` gains no field for this.** A mesh's shape lives entirely in
     `config.toml`'s `[mesh.*]`; the live registry (`node_store::Node`) is
     read, never written, by this comparison, and never grows a

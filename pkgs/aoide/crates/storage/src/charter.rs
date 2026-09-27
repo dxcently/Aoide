@@ -127,6 +127,27 @@ pub fn mesh_state_dir(mesh: &str) -> PathBuf {
     fs::state_dir().join("mesh").join(mesh)
 }
 
+/// Every mesh with a charter ON DISK at this node — `state/mesh/*/charter.toml`,
+/// sorted. The one directory read this module does, and it exists for exactly
+/// one reason: `aoide mesh` must report a charter mesh the config never
+/// declared (a machine that took its first charter by file, or by a LAN join,
+/// has state and no `[mesh.<name>]` row). A path that cannot be listed is an
+/// empty list, never an error — this is a REPORT's read, and a report that
+/// refuses to render because a directory is missing is worse than one that
+/// says nothing about it.
+pub fn meshes_with_state() -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(fs::state_dir().join("mesh")) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().join("charter.toml").is_file())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    out.sort();
+    out
+}
+
 /// The charter in force at this node: `state/mesh/<mesh>/charter.toml`.
 pub fn in_force_path(mesh: &str) -> PathBuf {
     mesh_state_dir(mesh).join("charter.toml")
