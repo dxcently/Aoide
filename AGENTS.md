@@ -49,8 +49,8 @@ and the staging/declarative/draft modes:
 
 ## House rules (hard constraints)
 
-1. **A rice agent writes `song/` and nothing else.** You commit to
-   `song/songbook/<song>/` and to no other path. Everything outside `song/` —
+1. **A rice agent writes `song/songbook/<song>/` and nothing else.** You commit
+   to that folder and to no other path. Everything outside `song/` —
    `modules/`, `pkgs/`, `lib/`, `hosts/`, `users/`, `tests/`, `docs/` — changes
    only on a lane the User ordered, with that lane's scope named. A new
    `modules/dendrites/` lane is additive: one file plus its one catalogue line.
