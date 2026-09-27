@@ -127,9 +127,22 @@ pub const ENTRY_TYPE_LETTER: &str = "letter";
 /// `Header.kind`/`Entry.kind`'s value for a delivery receipt (what
 /// `inbox.json` carried, per MAIL.md "Store").
 pub const ENTRY_TYPE_RECEIPT: &str = "receipt";
+/// The taught word for a `charter` envelope that arrived as PLAINTEXT: the
+/// kind exists, but a plaintext envelope carries no charter to apply, and
+/// filing it as correspondence would file a letter whose only content is a
+/// claim about itself.
+pub const REFUSAL_NOT_CORRESPONDENCE: &str = "not-correspondence";
+/// `Header.kind`'s value for a `charter` letter (P-CHARTER) — a signed charter
+/// travelling as mail. Unlike a letter and a receipt this kind is never FILED:
+/// the enclosed charter is applied to `state/mesh/`, and the letter's local
+/// envelope exists only as the outbox's bookkeeping key. Which is also why
+/// [`arms`] is false for it and why the drain retires it on a delivered
+/// deposit instead of waiting for an ack — there is no mailbox to ack from.
+pub const ENTRY_TYPE_CHARTER: &str = "charter";
 
 /// Which entry kinds ARM a reader's doorbell. A `receipt` (a delivery
-/// record, or a deposit ack filed under the origin's name) never does.
+/// record, or a deposit ack filed under the origin's name) never does, and
+/// neither does a `charter` letter (applied, never filed).
 pub fn arms(kind: &str) -> bool {
     kind == ENTRY_TYPE_LETTER
 }
@@ -777,6 +790,31 @@ pub fn file_letter(from_name: &str, to_name: &str, text: &str) -> Result<Entry, 
 /// caller to hand to the outbox. `mail send`'s command layer is what
 /// decides self vs. remote and calls the matching one of these two.
 pub fn mint_outbound_letter(from_name: &str, to_node: &str, to_name: &str, text: &str) -> Result<Envelope, String> {
+    mint_kind(ENTRY_TYPE_LETTER, from_name, to_node, to_name, text)
+}
+
+/// Mint the local envelope a `charter` letter spools under (P-CHARTER).
+///
+/// The envelope is **bookkeeping only**: a charter container's payload is the
+/// charter file and its `.sig`, never this envelope, so nothing on the far end
+/// ever sees these bytes. What the entry needs from it is its `kind` (the drain
+/// retires a delivered charter like a receipt) and its `msgid` (the spool file's
+/// name) — and both sides of a charter are operators, which is the free-text
+/// attribution `to.name`/`from.name` carry.
+pub fn mint_charter_letter(to_node: &str, text: &str) -> Result<Envelope, String> {
+    mint_kind(ENTRY_TYPE_CHARTER, "operator", to_node, "operator", text)
+}
+
+/// The one mint every typed letter goes through — `from_name` is the sender's
+/// mailbox (a session id for a letter, `operator` for a charter), and `kind`
+/// is the only field that differs between them.
+fn mint_kind(
+    kind: &str,
+    from_name: &str,
+    to_node: &str,
+    to_name: &str,
+    text: &str,
+) -> Result<Envelope, String> {
     if !crate::node_store::valid_node_name(to_name) {
         return Err("invalid mailbox name: must match ^[a-z0-9][a-z0-9-]*$".to_string());
     }
@@ -785,7 +823,7 @@ pub fn mint_outbound_letter(from_name: &str, to_node: &str, to_name: &str, text:
         version: ENVELOPE_VERSION.to_string(),
         from: Address { node: display::local_node_name(), name: from_name.to_string() },
         to: Address { node: to_node.to_string(), name: to_name.to_string() },
-        kind: ENTRY_TYPE_LETTER.to_string(),
+        kind: kind.to_string(),
         minted_at: now_iso_utc(),
         origin_mesh: String::new(),
     };
@@ -863,6 +901,9 @@ pub enum DepositOutcome {
     BadMsgid,
     /// [`verify_origin_signature`] returned `false`.
     UnverifiedOrigin,
+    /// A `charter` envelope arrived as plaintext ([`REFUSAL_NOT_CORRESPONDENCE`])
+    /// — a kind that is applied from a sealed container and never filed.
+    NotCorrespondence,
 }
 
 // L2 (the branch review): there was a `Refused { reason, detail }` variant
@@ -899,6 +940,15 @@ pub fn deposit(envelope: Envelope, via: &str) -> Result<DepositOutcome, String> 
         }
         if !verify_origin_signature(&envelope) {
             return Ok(DepositOutcome::UnverifiedOrigin);
+        }
+        // A `charter` envelope is APPLIED from the sealed container it arrives
+        // in, never filed: the container's payload is the charter, and a
+        // plaintext envelope claiming this kind has no charter in it at all.
+        // Filing it would put a letter in a mailbox whose whole content is a
+        // claim about itself — so it is refused, with its own word, before the
+        // dedup read or any write.
+        if envelope.header.kind == ENTRY_TYPE_CHARTER {
+            return Ok(DepositOutcome::NotCorrespondence);
         }
         let seen = read_seen_msgids_unlocked()?;
         if seen.contains(&envelope.msgid) {
@@ -1352,6 +1402,45 @@ mod tests {
         assert!(
             !outbox_dir.to_string_lossy().contains("/.aoide/"),
             "must never resolve into a real ~/.aoide tree"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_plaintext_charter_envelope_is_refused_and_never_filed() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("plaintext-charter");
+
+        // A peer this node has paired with, holding `message` — so the
+        // envelope clears origin verification and reaches the kind check.
+        let kp = identity::mint_ephemeral().unwrap();
+        let mut nodes = Vec::new();
+        crate::node_store::upsert_paired_node(
+            &mut nodes,
+            "alice-host",
+            "https://alice",
+            &kp.info().pubkey_hex,
+            "2026-09-06T00:00:00Z",
+            &["message".to_string()],
+        );
+        crate::node_store::save_nodes(&nodes).unwrap();
+
+        let mut h = header("alice", "bob", ENTRY_TYPE_CHARTER, "2026-09-06T00:00:00Z");
+        h.from.node = "alice-host".to_string();
+        let text = "charter home v1";
+        let (sig, msgid) = seal(&h, text, &kp);
+        let envelope = Envelope { header: h, text: text.to_string(), sig, msgid };
+
+        assert_eq!(
+            deposit(envelope.clone(), "alice-host").unwrap(),
+            DepositOutcome::NotCorrespondence,
+            "a charter is applied from a sealed container; a plaintext one has nothing to apply"
+        );
+        assert!(read_base().unwrap().is_empty(), "nothing is filed");
+        assert!(
+            filed_kind(&envelope.msgid).is_none(),
+            "and nothing is recorded as filed — the filed record is the truth about filing"
         );
 
         let _ = std::fs::remove_dir_all(&dir);

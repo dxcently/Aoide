@@ -627,7 +627,7 @@ fn handle_usage(_inv: &Invocation) -> Outcome {
 pub fn register_identity(r: &mut Registry) {
     r.insert(cmd!(
         path: ["identity"],
-        summary: "Show this instance's ed25519 identity (pubkey, fingerprint, created-at). Mints one lazily on first call; every later call is a no-op read. The private key is never shown.",
+        summary: "Show this instance's ed25519 identity (pubkey, its durable SHA256 node fingerprint, the local display label, created-at) plus the node line an operator pastes into a charter. Mints the identity lazily on first call, and the age binding the node line publishes, then every later call is a no-op read. The private keys are never shown.",
         args: [],
         flags: [],
         gated: false,
@@ -651,15 +651,29 @@ fn handle_identity(_inv: &Invocation) -> Outcome {
         }
     };
     let info = kp.info();
-    let message = format!(
-        "{} pubkey {} (fingerprint {}, created {})",
+    let binding_held = crate::seal::own_binding().is_some();
+    let node = crate::charter::node_line();
+    let mut message = format!(
+        "{} pubkey {} (fingerprint {}, node fingerprint {}, created {})",
         if minted { "minted new identity —" } else { "identity" },
         info.pubkey_hex,
         info.fingerprint,
+        info.node_fingerprint,
         info.created_at,
     );
-    let mut out = Outcome::ok(cmd, message).with_data(json!(info));
-    if minted {
+    let mut data = json!(info);
+    match &node {
+        Ok(line) => {
+            message.push_str(&format!("\n{line}"));
+            data["nodeLine"] = json!(line);
+        }
+        Err(e) => {
+            message.push_str(&format!("\nnode line unavailable: {e}"));
+            data["nodeLineError"] = json!(e);
+        }
+    }
+    let mut out = Outcome::ok(cmd, message).with_data(data);
+    if minted || !binding_held {
         out = out.changed(vec![crate::identity::identity_dir().to_string_lossy().into_owned()]);
     }
     out
@@ -739,8 +753,12 @@ fn handle_config(_inv: &Invocation) -> Outcome {
             ),
             None => "absent (no override declared here — not the same as pairing.defaultGrant)".to_string(),
         };
+        let operator = match &mesh.operator {
+            Some(key) => key.clone(),
+            None => "absent".to_string(),
+        };
         lines.push(format!(
-            "mesh.{name}  nodes={}  grant={}  sameOperator={}   (file-declared; `aoide mesh` reads it)",
+            "mesh.{name}  operator={operator}  nodes={}  grant={}  sameOperator={}   (file-declared; `aoide mesh` reads it)",
             mesh.nodes.len(),
             grant,
             mesh.same_operator,

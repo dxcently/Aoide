@@ -226,6 +226,22 @@ pub struct Mesh {
     /// already carries for a custom `--node-name` (`PAIRING.md:599-612`).
     #[serde(default)]
     pub nodes: BTreeMap<String, String>,
+    /// `operator = "ed25519:<hex>"` — the ONE key that signs this mesh's
+    /// charter (P-CHARTER, `docs/architecture/HTTPS-MESH-API.md` "Charters").
+    ///
+    /// **A charter mesh's config declares this and nothing else.** The charter
+    /// itself IS the mesh declaration — nodes, grants, relays, addresses and
+    /// status all come from the signed file — so `nodes`, `grant` and
+    /// `sameOperator` beside `operator` are refused at load ([`validate_mesh`]):
+    /// two sources for one mesh's node list is the drift this design exists to
+    /// remove. `pins` (the optional end-to-end TLS pin map of H3) is the one
+    /// other key a charter mesh's section may carry, and does not exist yet.
+    ///
+    /// Appended LAST in the struct on purpose: a config that declares no
+    /// `operator` serializes byte-identically to before this field existed
+    /// (the same additive/v0-safe discipline every other new key here holds).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator: Option<String>,
 }
 
 /// What shape a key's value takes, and what it may contain. A scalar key has
@@ -488,6 +504,30 @@ fn validate_mesh(mesh: &BTreeMap<String, Mesh>, path: &Path) -> Result<(), LoadE
                      takes: lowercase letters, digits, and `-`, starting with a letter or digit"
                 ),
             });
+        }
+        if let Some(operator) = &m.operator {
+            if crate::charter::key_hex(operator).is_err() {
+                return Err(LoadError::InvalidValue {
+                    path: path.to_path_buf(),
+                    key: format!("mesh.{name}.operator"),
+                    detail: format!(
+                        "`{operator}` is not an `ed25519:` key — the line reads `operator = \"ed25519:<64 lowercase hex>\"`"
+                    ),
+                });
+            }
+            // One source per mesh: the signed charter is the whole declaration,
+            // so a node list, a grant or a same-operator claim beside the
+            // operator line would be a second one.
+            if !m.nodes.is_empty() || m.grant.is_some() || m.same_operator {
+                return Err(LoadError::InvalidValue {
+                    path: path.to_path_buf(),
+                    key: format!("mesh.{name}"),
+                    detail: format!(
+                        "`mesh.{name}` declares an operator, so it is a CHARTER mesh: its nodes, grants and relays come from the signed charter and nothing else. \
+                         Remove `nodes`/`grant`/`sameOperator` from this section — leave the `operator` line, then edit `$AOIDE_ROOT/charters/{name}.toml` and run `aoide mesh charter sign {name}`"
+                    ),
+                });
+            }
         }
         if let Some(grant) = &m.grant {
             for cap in grant {

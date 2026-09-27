@@ -652,6 +652,54 @@
     `aoide pair` runs write five. That coarsening is deliberate: a converge
     audit line belongs to the pairing-audit-sweep slice (design record §7,
     T4), which owns the three ceremony audit sites, not to this command.
+- **The deposit-outcome vocabulary is interpreted in ONE place, and a
+  delivered deposit settles in ONE place.** `classify_deposit_response` is the
+  only reader of the far end's `aoide/mailDeposit` reply, and `settle_delivered`
+  is the only implementation of what a delivered deposit does to the entry it
+  carried ([`drain_node`]'s arm calls it, and so does its test). The three words
+  MAIL.md §Wire closes that vocabulary to — `accepted`, `duplicate`, `refused`
+  — are what a sender is taught, and **any string this client does not
+  recognise means the entry did NOT land**: assuming success for an unknown
+  status leaves a letter waiting forever for an ack nobody will send, and a
+  door that answers a word the sender was never taught parks a charter that
+  already landed. A new outcome a door wants to report belongs in `data`, never
+  as a fourth status.
+- **`settle_delivered`'s retire set is `receipt` and `charter`, and a letter
+  waits.** A receipt's deposit outcome is its confirmation; a `charter` letter
+  is applied rather than filed, so there is no mailbox on the far end to ack
+  from and its own outcome is the whole confirmation there can be. Widening
+  that set to letters would retire a letter on a delivery nobody acked.
+- **`charter`'s handlers render; `aoide_storage::charter` acts (P-CHARTER).**
+  The document, its validation, the five accept steps, the operator key, the
+  trust record, the high-water mark and the spool all live in storage —
+  because the door and the poll read the same state this module's commands
+  write, and a second implementation of an accept step is exactly the fork
+  that would let two nodes disagree about the same bytes. A handler here adds
+  an invocation parse, a render, and two things storage cannot do for it:
+  **the best-effort drain** of what `sign`/`reroot` spooled (a node that
+  cannot be dialed is `mail outbox`'s story, never a failed `sign`), and
+  **one audit line per re-keyed node** — the durable mark is in
+  `state/mesh/<mesh>/trust.json`, and the audit line is what an operator's
+  log shows.
+  - **`init` refuses an existing source and never overwrites a mesh root.**
+    Re-running it on a rooted mesh is answered by the file that is there.
+    `reroot` is the only command that replaces an operator key, and it says
+    so in its own name.
+  - **`accept` refuses without writing.** Every taught word
+    (`unknown-operator`, `stale-charter`, `charter-tampered`,
+    `operator-mismatch`, and `local-io` for this node's own failed write) comes
+    back as an error with `reason`/`detail` in `data`, and the state on disk is
+    untouched — a caller must never have to guess whether a refusal was partial.
+  - **A refusal names the action, not just the defect.** `reroot`'s refusal and
+    its success message both name the trust-entry step a machine takes a new
+    key by — its `[mesh.<m>] operator` line, or `aoide mesh join <mesh>
+    --operator <key>` (the trust-per-mesh slice's) — and say plainly that
+    `state/mesh/<m>/trust.json` is never hand-edited: that file holds the
+    version mark.
+  - **Do not add a mesh's trust here.** `aoide mesh join`, the LAN join and
+    the grant checks at a door are the trust-per-mesh slice's; this module
+    writes `state/mesh/<mesh>/` only through `charter::accept`, which is the
+    one writer of the in-force charter and its record.
 - **`mail_wire::drain_node` is the ONE place a spooled mail envelope is
   ever dialed out (P-M2) — never re-implement `attempt_deposit`'s POST at
   a second call site.** Three callers converge on it — the daemon's

@@ -362,6 +362,26 @@ never the inbound/serve half (that's `aoide-server`).
   a self-contained file, own handler, own tests, appended last into
   `commands::all()`).
 
+- `charter` (P-CHARTER) — `aoide mesh charter init|sign|accept|reroot`, the
+  operator's four commands: one operator's machines, rooted once and signed
+  by that operator's own key. Own module, own `register`, appended after
+  `mesh` into `commands::all()`, and — like every handler here — a thin edge:
+  the mechanism (`aoide_storage::charter`) parses, validates, signs, accepts,
+  keeps the high-water mark and spools, and these handlers render what it
+  returns.
+
+  What they do beyond rendering is the best-effort drain of what `sign`/
+  `reroot` spooled (`mail_wire::drain_node`, one node at a time, a failure
+  reported rather than fatal — the write already happened and `mail outbox`
+  is where a spooled entry's story lives) and one audit line per re-keyed
+  node, because `init`/`sign` on the operator's machine are the only place a
+  re-key is seen by a person at all.
+
+  **`aoide mesh`'s own report is unchanged by this**: `crate::mesh` still
+  reads the declaration against the registry, and a charter mesh's config
+  section (its `operator` line) is what the door and the charter reader
+  consume — never `drift`.
+
   **The read.** `aoide mesh` compares the declaration against the live node
   registry (`aoide_storage::node_store::load_nodes`) and reports where they
   diverge. The compare itself, `drift`, is pure — no I/O, no clock, no env

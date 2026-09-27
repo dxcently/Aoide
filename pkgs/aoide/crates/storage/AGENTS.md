@@ -44,6 +44,53 @@
   Deleting `seal.rs` and the workspace `Cargo.toml`'s one `age` line removes
   the dependency from the tree, which is the test this module has to keep
   passing.
+- **The charter's frames live in `seal.rs` too, and `charter.rs` builds none of
+  its own.** `charter_sig_input`, `charter_sig_frame` and `charter_payload` are
+  where the label table is; `charter` calls them. A new charter frame adds a
+  label in `seal.rs` and nothing else changes.
+- **`accept` checks the digest BEFORE the signature and BEFORE the parse, and
+  writes nothing until every step has passed.** The order is the point: a
+  touched file (a trailing newline, a formatter, a line-ending change) must
+  answer `charter-tampered` and never "this node does not trust the key", and a
+  refusal must leave no charter, no `.sig`, no version mark and no re-key mark
+  behind. `trust.json` that exists but does not parse is an ERROR, never "no
+  record" — reading it as nothing would silently reset the trusted key and the
+  high-water mark.
+- **One apply per mesh, one write order, and the mark last.** `accept`'s
+  read-modify-write of `charter.toml`/`.sig`/`trust.json` runs entirely under
+  `fs::lock_path(charter_lock_path(mesh))` — the door is thread-per-connection
+  and a poll process can run beside it, and two applies that both read the old
+  mark let the OLDER version win the write (a revocation silently un-applied).
+  Under that lock the order is `.sig` → charter → mark: a failure between them
+  leaves a detectable pair or an unclaimed application, never a silent success,
+  and it is refused `local-io` (the charter was fine; this node could not finish
+  writing it) rather than with one of the four words that answer for the
+  charter.
+- **`init` and `reroot` refuse before they change anything.** `init` refuses on
+  a machine that already trusts an operator for that mesh (config line or state
+  record) and mints nothing — that machine is a node, not its root. `reroot`
+  checks `trusted_operator` FIRST and refuses before minting, bumping or
+  signing when a config line pins the key it is about to replace (the line and
+  the record would disagree, and even the new charter would be refused), naming
+  `aoide mesh join --operator` as the trust-entry step.
+- **A `charter` kind is never filed, in either lane.** The container path
+  applies it; `mail::deposit` refuses a PLAINTEXT envelope with that kind
+  (`not-correspondence`), because it carries no charter at all.
+- **The charter arm's zone check answers to the charter, not to a registry.** A
+  carrier that relabels `mesh`/`originMesh` is refused `zone-violation` after
+  the charter is applied — the charter's authority is the operator signature,
+  and the letter's routing claim never overrides it.
+- **`sign` is the last write to a charter file.** The signature covers the
+  digest of the operator's own bytes, so anything that rewrites the file after
+  `sign` invalidates it. Never normalize on read to make a touched file verify.
+- **The config operator line and the state record are two sources that must
+  agree.** `charter::trusted_operator` is the one reader; a disagreement is
+  `operator-mismatch` and refuses every charter for that mesh until a human
+  resolves it. Do not let one silently win.
+- **`state/operator/<mesh>.key` is a mesh root, not a node key.** It signs
+  charters (and later board takeovers) and nothing else, it is never the
+  identity key even on the machine that is both, and `reroot` DELETES the old
+  one — trust is replaced, not added, so nothing archives it.
 - **No private key ever enters a `Serialize`/`Deserialize` type here, and
   `seal.rs` enforces that on itself.** The age key is the stock
   `AGE-SECRET-KEY-1…` text at `state/identity/age.key`, `0600`, beside

@@ -35,7 +35,10 @@ correspondence").
   registers the clone, seeds the songbook, wires harness hooks by calling
   the already-registered `hooks.install` handler directly off the registry,
   probes for `lyra` and delegates the nix half to `lyra onboard` as a child
-  process when it resolves, prints the closing guide), `infra` (`mcp
+  process when it resolves, prints the closing guide, then prints this
+  machine's **node line** — `aoide_storage::charter::node_line`, the one
+  public key plus binding an operator pastes into a charter, and the last
+  thing the operator walks away with), `infra` (`mcp
   serve`'s tool-count reporting). Every other command group lives in its
   domain crate and is pulled in here by `commands::all()`.
 - `a2a`/`mcp`/`daemon`/`graph`/`output` — thin root-level wiring over the

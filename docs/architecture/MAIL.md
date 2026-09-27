@@ -166,6 +166,7 @@ FidoNet node could.
 | name     | free-text recipient name inside a letter                           | `toUserName`                |
 | mailbox  | a `<node>/<name>` address: where letters file; how a board member is named | netmail address     |
 | letter   | an envelope of type `letter`                                       | netmail message             |
+| charter letter | an envelope of type `charter`, whose sealed payload is a signed charter and its `.sig`: applied on receipt, never filed, never acked | — |
 | envelope | the signed, immutable unit that moves: header + text               | packed message              |
 | sealed   | age-encrypted inside the container; opened only at the destination | —                           |
 | binding  | a node's age key, signed by its own identity key                   | —                           |
@@ -485,7 +486,10 @@ door's audit name whitelist gains both names so they never log as bare
   outcome itself, `accepted` or `duplicate` — an ack needs no ack
   because an ack IS what confirmation looks like, and a lost one is
   recovered by the origin's next re-offer, which re-spools a fresh
-  receipt. Acks are still spooled like any entry, so an ack survives a
+  receipt. For a `charter` letter the same holds for a stronger reason:
+  the enclosed charter is APPLIED, not filed, so there is no mailbox on
+  the far end to ack from at all, and its own deposit outcome is the
+  whole confirmation there can be. Acks are still spooled like any entry, so an ack survives a
   dead link instead of vanishing on it. A hub can mint a receipt; it
   cannot sign as the destination, so it cannot make an origin stop
   retrying.
@@ -630,9 +634,15 @@ append the hub's chained hop signature naming the `next` node the route
 picks, re-spool by the four steps. Loops die twice over:
 `msgid` seen, and any envelope whose transit chain already names self is
 dropped. Deposit `refused` reasons — `no-route`, `down`, `unknown-mesh`,
-`zone-violation`, `unverified-origin`, `bad-msgid` — return to the
+`zone-violation`, `unverified-origin`, `bad-msgid`, `not-correspondence` —
+return to the
 depositing hop, which records `lastOutcome` on that entry and stops
 retrying it; the origin learns through `aoide mail outbox`.
+
+`not-correspondence` is the plaintext lane's own: an envelope whose `type`
+is `charter` carries no charter — a charter letter is applied from the
+container's `aoide/charter-payload`, never filed — so it is refused rather
+than filed as a letter whose only content is a claim about itself.
 
 Self-membership uses the node's mesh-declared name; the drift report
 flags a box whose local name resolution disagrees with it.

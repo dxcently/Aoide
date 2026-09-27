@@ -306,6 +306,13 @@ mod tests {
         // the launcher's bare-path read of a bound project's first folder, the
         // second special-cased command here after the `secrets` value-printers
         // (`cli/README.md`'s named-seam list).
+        //
+        // Bumped by 4 for the P-CHARTER charter family
+        // (`mesh.charter.init`/`sign`/`accept`/`reroot`, registered from
+        // `aoide_client::charter`): one operator's machines, rooted once and
+        // signed by that operator's own key. They sort inside the existing
+        // `mesh.*` family, between bare `mesh` and `mesh.pair`. Net: 82 + 4
+        // = 86.
         let mut expected: Vec<&str> = vec![
             "a2a.serve",
             "adapter.melete",
@@ -343,6 +350,10 @@ mod tests {
             "melete.graph",
             "melete.status",
             "mesh",
+            "mesh.charter.accept",
+            "mesh.charter.init",
+            "mesh.charter.reroot",
+            "mesh.charter.sign",
             "mesh.pair",
             "node.add",
             "node.advertise",
