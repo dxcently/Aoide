@@ -605,6 +605,36 @@ pub fn park_inbound(
     expires_at: &str,
     self_via: Option<&str>,
 ) -> Result<(InboundPairingRequest, Option<String>), String> {
+    park_inbound_with_mesh(
+        pubkey_hex, name, origin_addr, url, commit_hex, requested_at, expires_at, self_via, None,
+    )
+}
+
+/// [`park_inbound`] with the ceremony's mesh (P-CHARTER), written **in the
+/// same save as the entry itself**.
+///
+/// That is the whole reason this is a second entry point rather than a
+/// sibling writer beside the park: a mesh recorded by a SECOND, best-effort
+/// write can silently fail to land (review F6), and the parked entry is then
+/// meshless — at which point the approver's commit resolves the mesh LOCALLY
+/// and the two ends land an asymmetric pair, which is exactly what the field
+/// was added to make impossible. One write, one failure mode, and no caller
+/// with a failure to ignore.
+///
+/// `mesh` is validated as a mesh name at the door (`a2a::pair_request`)
+/// before it ever reaches here; this stores it as given.
+#[allow(clippy::too_many_arguments)]
+pub fn park_inbound_with_mesh(
+    pubkey_hex: &str,
+    name: &str,
+    origin_addr: &str,
+    url: &str,
+    commit_hex: &str,
+    requested_at: &str,
+    expires_at: &str,
+    self_via: Option<&str>,
+    mesh: Option<&str>,
+) -> Result<(InboundPairingRequest, Option<String>), String> {
     let _guard = PARK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     with_stage_lock(|| {
         // `requested_at` is the caller's own "now" (module doc) — reused as the
@@ -645,45 +675,12 @@ pub fn park_inbound(
             approved: false,
             tries: 0,
             self_via: self_via.map(|s| s.to_string()),
-            mesh: None,
+            mesh: mesh.map(|s| s.to_string()),
             binding: None,
         };
         requests.push(entry.clone());
         save_inbound(&requests)?;
         Ok((entry, evicted_id))
-    })
-}
-
-/// **Attach the mesh a parked inbound request names** (P-CHARTER) — the
-/// requester's `--mesh`, straight off `aoide/pairRequest`'s params, and the
-/// mesh `pair <id>`'s commit writes the grant into ON THIS SIDE TOO.
-///
-/// A separate writer, not a `park_inbound` argument, for the reason
-/// [`set_inbound_binding`] is: a meshless park is a LEGAL state — every
-/// requester older than P-CHARTER sends none, and such a pairing commits
-/// exactly as it always did by resolving the mesh locally — and threading it
-/// through parking would make every caller that has none, every test
-/// included, pay for a field it does not use. An unknown or expired id is a
-/// no-op, not an error.
-///
-/// The mesh is already VALIDATED as a mesh name at the door
-/// (`a2a::pair_request`), because it names a trust scope rather than a
-/// transport marker; this function records what arrived and nothing more.
-///
-/// **It deliberately does not sweep.** Every other writer here sweeps the
-/// queue as it writes, because each of them already owns the queue's
-/// lifetime; a field write must not, because then a caller whose clock is
-/// ahead of the parked entry — a test, or a box whose time moved — would turn
-/// "record this mesh" into a silent DELETION of the request it belongs to.
-/// The lookup is by id alone, and an unknown id is a no-op.
-pub fn set_inbound_mesh(id: &str, mesh: &str) -> Result<(), String> {
-    with_stage_lock(|| {
-        let mut requests = load_inbound_raw();
-        let Some(entry) = requests.iter_mut().find(|r| r.id == id) else {
-            return Ok(());
-        };
-        entry.mesh = Some(mesh.to_string());
-        save_inbound(&requests)
     })
 }
 

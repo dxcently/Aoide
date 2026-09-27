@@ -7934,10 +7934,23 @@ mod tests {
         self_via: Option<&str>,
         url: &str,
     ) -> (aoide_storage::pairing::InboundPairingRequest, String) {
+        parked_revealed_inbound_full(now_epoch, self_via, url, None)
+    }
+
+    /// The innermost fixture: adds P-CHARTER's `mesh`, the field the ceremony
+    /// carries on the wire and the door records **in the same write as the
+    /// park** (`park_inbound_with_mesh`, review F6 — there is no second,
+    /// best-effort write for anything to ignore).
+    fn parked_revealed_inbound_full(
+        now_epoch: i64,
+        self_via: Option<&str>,
+        url: &str,
+        mesh: Option<&str>,
+    ) -> (aoide_storage::pairing::InboundPairingRequest, String) {
         let requester_pk = "e".repeat(64);
         let nonce = "aabbccdd11223344";
         let commit = aoide_storage::pairing::derive_commit(&requester_pk, nonce);
-        let (entry, _) = aoide_storage::pairing::park_inbound(
+        let (entry, _) = aoide_storage::pairing::park_inbound_with_mesh(
             &requester_pk,
             "box-a",
             "10.0.0.5",
@@ -7946,6 +7959,7 @@ mod tests {
             &aoide_storage::time::iso_utc_from_epoch(now_epoch),
             &aoide_storage::pairing::expires_at_from(now_epoch),
             self_via,
+            mesh,
         )
         .unwrap();
         let entry = aoide_storage::pairing::reveal_inbound(&entry.id, nonce, now_epoch).unwrap();
@@ -8018,12 +8032,17 @@ mod tests {
         with_node_state("approve-inbound-wire-mesh", || {
             let now_epoch = 1_700_000_000_i64;
             let now = aoide_storage::time::iso_utc_from_epoch(now_epoch);
-            let (entry, sas) = parked_revealed_inbound(now_epoch);
+            let (entry, sas) = parked_revealed_inbound_full(now_epoch, None, "http://box-a:8710/", Some("away"));
             let id = entry.id.clone();
 
-            // What the door records off the wire (`a2a::pair_request`'s own
-            // `set_inbound_mesh` call), and what `pair <id>` then reads.
-            aoide_storage::pairing::set_inbound_mesh(&id, "away").unwrap();
+            // What the door records off the wire, in the same write as the
+            // park itself (`a2a::pair_request` → `park_inbound_with_mesh`),
+            // and what `pair <id>` then reads.
+            assert_eq!(
+                aoide_storage::pairing::list_inbound(now_epoch)[0].mesh.as_deref(),
+                Some("away"),
+                "the parked entry carries the mesh it was sent, in the park's own write"
+            );
             let fresh = aoide_storage::pairing::list_inbound(now_epoch)
                 .into_iter()
                 .find(|e| e.id == id)

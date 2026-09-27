@@ -781,13 +781,14 @@ only there.
 
 **The pairing's own mesh rides the ceremony** (P-CHARTER): `aoide pair …
 --mesh <m>` names it, the request's body carries it (`aoide/pairRequest`'s
-optional `mesh`, validated as a mesh name at the door and parked on the
-inbound entry by its own writer), and BOTH ends' commits take it — above every
-local source (`--mesh` on that side, the target's known meshes, the home mesh)
-— so the two sides agree by construction. A pairing that names none is the
-pre-charter shape and still works: each side resolves the mesh locally, exactly
-as before, and a box that knows more than one mesh for a target refuses rather
-than guessing.
+optional `mesh`, validated as a mesh name at the door and written onto the
+parked entry IN THE SAME WRITE as the park itself — `park_inbound_with_mesh`,
+so a park that lands always carries its mesh), and BOTH ends' commits take it
+— above every local source (`--mesh` on that side, the target's known meshes,
+the home mesh) — so the two sides agree by construction. A pairing that names
+none is the pre-charter shape and still works: each side resolves the mesh
+locally, exactly as before, and a box that knows more than one mesh for a
+target refuses rather than guessing.
 
 The mesh is self-asserted DATA of the same class as `url` and `selfVia` —
 validated for SHAPE, never trusted for authority (trust stays in pubkeys + the

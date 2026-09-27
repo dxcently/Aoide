@@ -6473,7 +6473,11 @@ asymmetric pair whose grant the other end could never read. B validates it as
 a mesh NAME (`valid_node_name`, the grammar `--mesh` and `[mesh.<name>]` take)
 and refuses `-32602` by name otherwise — it names a trust scope, not a
 transport marker — then records it on the parked entry
-(`pairing::set_inbound_mesh`, a sibling writer beside `park_inbound`, because
+(`pairing::park_inbound_with_mesh`, the mesh written in the park's OWN write,
+because a second best-effort write could silently leave a meshless entry and
+the approver would then resolve the mesh locally — the asymmetry the field
+exists to prevent; the plain `park_inbound` is for a requester that named
+none), because
 a meshless park is the legal pre-charter shape every old requester sends).
 `pair <id>` on either leg commits it ABOVE every local source, so both ends
 write the same mesh. Same trust class as `url`/`selfVia` (self-asserted DATA;

@@ -4003,7 +4003,7 @@ fn pair_request(params: &Value, origin: ConnOrigin, audit_log: &Path) -> Result<
     let now_epoch = aoide_storage::time::parse_iso_utc(&requested_at).unwrap_or_else(|| unix_ts_now() as i64);
     let expires_at = aoide_storage::pairing::expires_at_from(now_epoch);
 
-    let (entry, evicted_id) = aoide_storage::pairing::park_inbound(
+    let (entry, evicted_id) = aoide_storage::pairing::park_inbound_with_mesh(
         pubkey_hex,
         name,
         &origin_display(origin),
@@ -4012,17 +4012,14 @@ fn pair_request(params: &Value, origin: ConnOrigin, audit_log: &Path) -> Result<
         &requested_at,
         &expires_at,
         self_via,
+        // P-CHARTER: the mesh the requester named rides the SAME write as the
+        // entry, so there is no second, best-effort write that could silently
+        // fail and leave a meshless park behind (review F6) — a meshless park
+        // makes the approver resolve the mesh LOCALLY at commit, which is the
+        // asymmetry the field exists to make impossible.
+        mesh,
     )
     .map_err(|e| (-32000_i64, e))?;
-
-    // P-CHARTER: the mesh the requester named, recorded right after parking
-    // (its own sibling writer, the shape `set_inbound_binding` below already
-    // holds). Best-effort like that one: a failure leaves the entry meshless,
-    // which is the pre-charter state — this side then resolves the mesh
-    // LOCALLY at commit, exactly as it did before the wire carried one.
-    if let Some(mesh) = mesh {
-        let _ = aoide_storage::pairing::set_inbound_mesh(&entry.id, mesh);
-    }
 
     // P-SEAL: attach the requester's binding after parking, never as part of
     // it — a request that carries none (an older aoide) parks and pairs
@@ -13939,6 +13936,68 @@ mod tests {
             Some(v) => std::env::set_var("AOIDE_ROOT", v),
             None => std::env::remove_var("AOIDE_ROOT"),
         }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
+    }
+
+    /// **F6: the ceremony's mesh rides the park's own write, never a second
+    /// one.** `aoide/pairRequest` with a `mesh` leaves the parked entry
+    /// carrying it — there is no best-effort follow-up write that could fail
+    /// silently and leave the approver resolving the mesh locally (which is
+    /// the asymmetry the field exists to prevent).
+    #[test]
+    fn pair_request_parks_the_mesh_it_was_sent() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = aoide_test_support::short_tmp("a2a-pairrequest-mesh");
+        std::env::set_var("AOIDE_STATE_DIR", &root);
+        std::env::set_var("AOIDE_ROOT", &root);
+
+        let pubkey = "a".repeat(64);
+        let commit = aoide_storage::pairing::derive_commit(&pubkey, &"c".repeat(32));
+        let resp = pair_request(
+            &json!({
+                "pubkeyHex": pubkey,
+                "name": "box-a",
+                "commitHex": commit,
+                "url": "http://box-a:8710/",
+                "mesh": "away",
+            }),
+            ConnOrigin::Loopback,
+            &root.join("log"),
+        )
+        .expect("a well-formed request with a mesh parks");
+        assert!(resp["id"].is_string());
+
+        let parked = aoide_storage::pairing::list_inbound(
+            aoide_storage::time::parse_iso_utc(&now_iso_utc()).unwrap(),
+        );
+        assert_eq!(parked.len(), 1);
+        assert_eq!(
+            parked[0].mesh.as_deref(),
+            Some("away"),
+            "the mesh is on the entry the SAME write created — nothing was ignored"
+        );
+
+        // And a malformed mesh name is refused before anything is parked.
+        let bad = pair_request(
+            &json!({
+                "pubkeyHex": "b".repeat(64),
+                "name": "box-b",
+                "commitHex": aoide_storage::pairing::derive_commit(&"b".repeat(64), &"d".repeat(32)),
+                "url": "http://box-b:8710/",
+                "mesh": "Not A Mesh",
+            }),
+            ConnOrigin::Loopback,
+            &root.join("log"),
+        )
+        .unwrap_err();
+        assert_eq!(bad.0, -32602);
+        assert!(bad.1.contains("mesh name"), "{}", bad.1);
+
+        let _ = std::fs::remove_dir_all(&root);
         match saved_state {
             Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
             None => std::env::remove_var("AOIDE_STATE_DIR"),
