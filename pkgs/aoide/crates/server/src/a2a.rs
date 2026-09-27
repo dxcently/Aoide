@@ -876,15 +876,20 @@ impl Grant {
 /// `docs/architecture/HTTPS-MESH-API.md` "Trust per mesh"):
 ///
 /// ```text
-/// request named a mesh?
-///   no  ──────────────> the home mesh's PAIRED RECORDS only
-///                       (a request naming no mesh never matches a charter mesh)
-///   yes ──> does a charter GOVERN that mesh at this node?
-///             no  ──────> that mesh's PAIRED RECORDS (the ordinary pair mesh)
-///             yes ──────> the charter line for caller_key (by KEY, never by
-///                         name), MINUS this box's own `node allow … off --mesh`
-///                         refusals — and NOTHING when the key is not on the
-///                         line, whatever paired records it may also hold
+/// the request's mesh = effective_mesh(what it named)
+///   (naming no mesh RESOLVES to [pairing] homeMesh — it is not a second
+///    case, and it is judged by that mesh's rules exactly like a request
+///    that named it)
+///        │
+///        ▼
+///   does a charter GOVERN that mesh at this node?
+///     no  ──────> is the mesh CHARTER-SHAPED (a charter was accepted for it)?
+///                   no  ──────> that mesh's PAIRED RECORDS (the ordinary pair mesh)
+///                   yes ──────> NOTHING (an undecidable operator key fails closed)
+///     yes ──────> the charter line for caller_key (by KEY, never by
+///                 name), MINUS this box's own `node allow … off --mesh`
+///                 refusals — and NOTHING when the key is not on the
+///                 line, whatever paired records it may also hold
 /// ```
 ///
 /// The subtraction is the design's "Local narrowing only": a node's own `aoide
@@ -5001,11 +5006,11 @@ struct SignedCaller<'a> {
     /// when it named none — a pre-P-CHARTER peer, NOT an error
     /// (`wire_auth::canonical_string`'s five-field form is what such a peer
     /// can sign). [`effective_mesh`] is the one place the unnamed case
-    /// becomes the home mesh, and this is the only thing that tells the two
-    /// apart: A3's charter source must NOT answer an unnamed request ("a
-    /// request naming no mesh is evaluated in the home mesh only, and only
-    /// against a migrated paired record. It never matches a charter mesh" —
-    /// HTTPS-MESH-API.md, "Trust per mesh").
+    /// becomes the home mesh, and the door RESOLVES with it before any read:
+    /// the request's grant is then judged by that mesh's rules like anyone
+    /// else naming it — its governing charter first, its paired records only
+    /// where no charter is shaped for it (review N1, the user's ruling; the
+    /// old "never matches a charter mesh" rule was overruled and is gone).
     ///
     /// It rides with the caller rather than beside it because only a VERIFIED
     /// signature proves it: the four `X-Aoide-*` headers and this one are one
@@ -15253,9 +15258,12 @@ mod tests {
     ///
     /// 1. a key listed on an ACCEPTED charter holds that line's grant in that
     ///    mesh (`message` only, the line's default), with no paired record;
-    /// 2. an UNNAMED request is evaluated in the home mesh and only against a
-    ///    migrated paired record — "it never matches a charter mesh", even
-    ///    when the home mesh IS the charter mesh;
+    /// 2. an UNNAMED request resolves to `effective_mesh(None)` — the home
+    ///    mesh — and is judged by THAT mesh's rules: the charter's line where
+    ///    one governs, and NOTHING when the mesh is charter-shaped with an
+    ///    undecidable operator key. The paired records answer only where no
+    ///    charter is shaped for the mesh (review N1; the assertion below runs
+    ///    with a dangerous `grants[home]` record installed for exactly this);
     /// 3. a paired record in a charter mesh is INERT: for a listed key it
     ///    neither widens nor narrows the line, and for a key the charter does
     ///    not list it grants nothing there;

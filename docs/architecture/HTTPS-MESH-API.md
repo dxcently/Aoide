@@ -131,8 +131,11 @@ Rules:
   the User's home mesh (`[pairing] homeMesh`, default `home`). Its `allows` becomes
   its grant there, unchanged, so every trusted peer keeps exactly what it had. A
   request that names no mesh (a peer not yet upgraded) is evaluated in the home
-  mesh only, and only against a migrated paired record. It never matches a charter
-  mesh.
+  mesh **by that mesh's rules**: its governing charter first, and its migrated
+  paired record only where no charter is shaped for the mesh. So a peer whose
+  key the home charter does not list — or once listed and since removed — is
+  refused there, and the migration's "keeps exactly what it had" holds exactly
+  as long as home stays a pair mesh.
 - **Rooting a mesh that holds paired records.** When the User runs `aoide mesh
   charter init home`, the charter becomes the home mesh's trust. `init` lists the
   mesh's paired records: each of the User's own machines is added to the charter,
@@ -1406,8 +1409,10 @@ scheduler (`aoide mail poll`).
   - Local `node allow … off --mesh` narrows a charter grant; nothing local widens one.
   - A paired record in a charter mesh for a listed key is inert and reported.
 - **Migration:** every existing paired record lands in the home mesh with its grant
-  byte-identical; trusted peers keep working; a request naming no mesh matches only
-  a migrated home-mesh record.
+  byte-identical; trusted peers keep working **while home is a pair mesh**; a
+  request naming no mesh is judged by the home mesh's rules (its charter first
+  where one governs — a key the charter does not list is refused there, whatever
+  the migrated record says).
 - **Re-root:** after the new key is trusted, charters under the old key are refused and
   the high-water mark restarts; a node that has not been re-rooted keeps working on
   its last charter.

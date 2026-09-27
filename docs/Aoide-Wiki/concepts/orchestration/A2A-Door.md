@@ -199,10 +199,12 @@ to **rebuild time** instead.
   `a2a::grant_in_mesh`, and it has two sources: the caller's PAIRED RECORD in
   the mesh its signed request names, and — when a charter governs that mesh at
   this node — the caller's line on that CHARTER, read by identity key and by
-  no name. A request that names no mesh is evaluated in the home mesh and only
-  against a paired record, so it never matches a charter mesh; a key a
-  charter does not list holds nothing in that mesh however it is paired. Local
-  `aoide node allow <name> <cap> off --mesh <m>` narrows a charter line and
+  no name. A request that names no mesh is RESOLVED to the home mesh and then
+  judged by that mesh's rules like any other: the charter's line where one
+  governs, nothing at all where the mesh is charter-shaped with an undecidable
+  operator key, and paired records only where no charter is shaped for it. A
+  key a charter does not list holds nothing in that mesh however it is paired.
+  Local `aoide node allow <name> <cap> off --mesh <m>` narrows a charter line and
   wins over it; nothing local widens one. See
   [[HTTPS-Mesh-API]]'s "Trust per mesh".
 - **A secrets-broker-resolved bearer takes precedence over the file.**
