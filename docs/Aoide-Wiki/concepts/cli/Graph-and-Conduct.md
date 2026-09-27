@@ -21,11 +21,12 @@ hook` is the [[Agent-Hooking]] door agent harnesses (Claude Code, kimi, pi)
 fire into, and — like `session start`/`phase`/`end` — is marked `internal`
 in the schema: hook plumbing a harness's own lifecycle drives, hidden from
 `aoide guide`'s human listing though still enumerated by `schema`/MCP/A2A.
-The durable-sessions surface (command-defrag task #101, Lane U) adds
-`session undying on|off` (the mark, renamed from its prototype name
-"carry"), bare `session` (the undying picker), and a project manifest
-(`.aoide/project.json`) that `resurrect` reads bare — see `session undying`,
-bare `session`, and `resurrect` below. Handlers live in
+The durable-sessions surface (command-defrag task #101, Lane U — its
+standalone `session undying` spelling later absorbed by `session grant`)
+adds `session grant undying on|off` (the mark, renamed from its prototype
+name "carry"), the `session grant` picker (bare `session grant undying`),
+and a project manifest (`.aoide/project.json`) that `resurrect` reads bare —
+see `session grant`, bare `session`, and `resurrect` below. Handlers live in
 `pkgs/aoide/crates/conduct/src/graph/{commands,session_store,send,pending,spawn,resurrect,undying,session_pick,permit,window,conduct,doc,model,common}.rs`
 and `pkgs/aoide/crates/conduct/src/reap.rs`; registrations in
 `pkgs/aoide/crates/conduct/src/commands/graph.rs` (the registered `path:`
@@ -301,76 +302,116 @@ aoide session end --id <id> [--json]
   `state/stage/hooks.json`, re-stages `graph.json`.
 - **Output:** `data: {sessionId, file}`; an unknown id is an ok no-op.
 
-### aoide session undying
+### aoide session grant
 
 Not internal — an operator command, unlike `start`/`phase`/`end`/`hook` above.
-The mark was prototyped under the name "carry" (task #96); this is its
-shipped name.
+The GRANT family (session-surface redesign, command-defrag lane X): one
+positional `<kind> [on|off]` grammar, the shape `secrets automate <name>
+on|off` already holds, rather than a flag on bare `session` — which no longer
+picks anything, it renders the roster (below). Bare `session grant` teaches
+the grantable set; an unknown kind is a taught refusal. Two kinds ship:
+`undying`, whose mark was prototyped under the name "carry" (task #96) and
+which ABSORBS the standalone `session undying` command (hard cutover, no
+alias: that spelling is unknown, same as a typo), and `exempt` (task #20).
 
 ```
-aoide session undying (on|off) [--self | --id <id>] [--json]
+aoide session grant [<kind>] [<state>] [--self | --id <id>] [--json]
 ```
 
-- **Reads:** `state/undying.json` (the durable mark — durable-sessions plan
-  P-C4); `state/stage/sessions.json`, only to answer the informational
-  `live` field below, never to gate the write.
-- **Writes:** `state/undying.json` directly — atomic write, no stage lock, and
-  no `daemon_dispatch` routing, unlike every other `session *` command
-  above: `undying.json` is not a `state/stage/` file, so it sits outside that
-  dual-writer surface entirely. `on` adds the target id to the undying set
-  (or refreshes its `markedAt` if already present); `off` removes it.
-- **Output:** `data: {sessionId, undying, live}`; `changed` names the
-  transition (`"<id>: undying"` / `"<id>: not undying"`) and stays empty on a
-  re-mark that changed nothing.
-- **Notes:** the target resolves from `--id <id>` (any session id, including
-  one that has already left the roster — no roster lookup gates the write,
-  which is what makes the mark flippable post-mortem, off a bare ledger id),
-  or from `--self`/a bare invocation, both of which read `$AOIDE_SESSION_ID`.
-  `--self` and `--id` together is a usage error; neither an `--id` nor a
-  resolvable `$AOIDE_SESSION_ID` is likewise a usage error naming both
-  flags — never a silent no-op. `live` reports whether the id is currently in
-  `sessions.json`; it is informational only. The mark itself is the input
-  bare `resurrect`'s selection reads (below) and `spawn --undying` writes at
-  birth. On first load, `load_undying` renames a pre-existing
-  `state/carry.json` onto `state/undying.json` — a one-shot, narrated,
-  never-clobbering migration; the read side tolerates the legacy `"carried"`
-  key until the next save normalizes it.
+- **Reads:** for `undying`, `state/undying.json` (the durable mark —
+  durable-sessions plan P-C4) and `state/stage/sessions.json`, the latter
+  only to answer the informational `live` field below, never to gate the
+  write. For bare `session grant undying` (the picker) this host's own
+  `state/stage/sessions.json` plus every registered node's CACHED
+  `state/node-cache/<name>.json` (no live pulls), via `who.rs`'s
+  `sessions_from_graph`. `exempt` reads `state/stage/sessions.json` — its
+  target must currently be on the roster.
+- **Writes:** `undying on|off` writes `state/undying.json` directly — atomic
+  write, no stage lock, and no `daemon_dispatch` routing, unlike every other
+  `session *` command above: `undying.json` is not a `state/stage/` file, so
+  it sits outside that dual-writer surface entirely. `on` adds the target id
+  to the undying set (or refreshes its `markedAt` if already present); `off`
+  removes it. The picker opens a `tty`+`inquire` multi-select
+  (`aoide_protocol::pick::choose_many`) over the combined local+node roster,
+  each row pre-checked by its current undying state. Confirming toggles land
+  in one batch: a local row's mark goes through one `load_undying`, N
+  `set_undying` mutations, one `save_undying` — the same discipline the
+  scripted single-id write already holds. A node row's mark can't touch
+  `undying.json` (the id lives on the node) — it writes a `{host, dir,
+  agent}` spec into the CURRENT project's `.aoide/project.json` manifest
+  instead, resolved via the same `walk_up` bare `resurrect` uses below; no
+  manifest above cwd reports every node mark/unmark as `skipped` with a
+  taught reason while local marks in the same confirm still land. A node cwd
+  that cannot relativize under the local project root is rejected the same
+  way, never saved with a raw absolute `dir` (`save_manifest` refuses the
+  whole batch on an absolute `dir`, so a single bad node spec never poisons
+  the local+valid-node rows landing beside it). `exempt on|off` instead
+  writes `SessionRecord::exempt` in the stage tree — a stage-tree field, not
+  a durable state file, because an exemption's meaning ENDS at death where
+  undying's begins there.
+- **Output:** `undying on|off` → `data: {sessionId, undying, live}`; `changed`
+  names the transition (`"<id>: undying"` / `"<id>: not undying"`) and stays
+  empty on a re-mark that changed nothing. The picker →
+  `data: {changed: [...], skipped: [...]}` naming each row's disposition; a
+  clean cancel changes nothing. `exempt` reports the mark it set or cleared.
+- **Notes:** the scripted target resolves from `--id <id>` (for `undying`,
+  any session id, including one that has already left the roster — no roster
+  lookup gates the write, which is what makes the mark flippable
+  post-mortem, off a bare ledger id; for `exempt`, the id must be ON the
+  roster), or from `--self`/a bare invocation, both of which read
+  `$AOIDE_SESSION_ID`. `--self` and `--id` together is a usage error; neither
+  an `--id` nor a resolvable `$AOIDE_SESSION_ID` is likewise a usage error
+  naming both flags — never a silent no-op. `live` reports whether the id is
+  currently in `sessions.json`; it is informational only. Only `undying` has
+  a picker, and it is Cli+tty only — a non-CLI door, no tty, or `--json`
+  always steers to `session grant undying on|off --id <id>`, the one scripted
+  spelling; `exempt`'s bare form is a taught refusal naming the scripted
+  form, since its motivating caller is a script, not an interactive session.
+  The undying mark itself is the input bare `resurrect`'s selection reads
+  (below) and `spawn --undying` writes at birth; the exempt mark vetoes the
+  reaper's staleness judgments for a LIVE session, never its window-gone/
+  pid-gone/ghost/orphan signals. On first load, `load_undying` renames a
+  pre-existing `state/carry.json` onto `state/undying.json` — a one-shot,
+  narrated, never-clobbering migration; the read side tolerates the legacy
+  `"carried"` key until the next save normalizes it. Registered as a parent
+  command alongside `session.*`, the same pattern bare `graph` sits beside
+  `graph link`. See the manifest section under `aoide resurrect` below for
+  `.aoide/project.json`'s shape and discovery rule.
 
 ### aoide session (bare)
 
-Cli+tty only — the undying picker. A non-CLI door, no tty, or `--json`
-always steers to `session undying on|off --id <id>`, the one scripted
-spelling; this command is never duplicated as a machine-reachable form.
+The roster — this box's own sessions plus every registered node. It absorbed
+the standalone `who` command: `--hosts` renders byte-identically to what
+`who` used to, and bare `session` groups by PROJECT instead.
 
 ```
-aoide session [--json]
+aoide session [<filter>] [--hosts] [--all] [--json]
 ```
 
-- **Reads:** `state/undying.json` and this host's own `state/stage/
-  sessions.json` for the local roster; every registered node's CACHED
-  `state/node-cache/<name>.json` (no live pulls) for node rows, via `who.rs`'s
-  `sessions_from_graph` (widened `pub(super)` for this second consumer).
-- **Writes:** a `tty`+`inquire` multi-select (`aoide_protocol::pick::
-  choose_many`) opens over the combined local+node roster, each row
-  pre-checked by its current undying state. Confirming toggles land in one
-  batch: a local row's mark goes through one `load_undying`, N
-  `set_undying` mutations, one `save_undying` — the same discipline
-  `session undying`'s own single-id write already holds. A node row's mark
-  can't touch `undying.json` (the id lives on the node) — it writes a
-  `{host, dir, agent}` spec into the CURRENT project's `.aoide/project.json`
-  manifest instead, resolved via the same `walk_up` bare `resurrect` uses
-  below; no manifest above cwd reports every node mark/unmark as `skipped`
-  with a taught reason while local marks in the same confirm still land. A
-  node cwd that cannot relativize under the local project root is rejected
-  the same way, never saved with a raw absolute `dir` (`save_manifest`
-  refuses the whole batch on an absolute `dir`, so a single bad node spec
-  never poisons the local+valid-node rows landing beside it).
-- **Output:** `data: {changed: [...], skipped: [...]}` naming each row's
-  disposition; a clean cancel out of the picker changes nothing.
-- **Notes:** registered as a parent command alongside `session.*`, the same
-  pattern bare `graph` sits beside `graph link`. See the manifest section
-  under `aoide resurrect` below for `.aoide/project.json`'s shape and
-  discovery rule.
+- **Reads:** `state/stage/sessions.json` for this box's own sessions; every
+  registered node, probed LIVE on every invocation — one thread per node,
+  bounded by curl's own `--max-time` inside
+  `aoide_client::commands::pull_node_live` (~2 s/node). A projection, never a
+  store: it never writes `state/node-cache/<name>.json`; the cache is
+  consulted only as the fallback for a node this invocation's live probe
+  fails to reach, so an unreachable node still renders. `<filter>` resolves
+  through `storage::addr::resolve` first (a local id/tail4/petname, a
+  host/role/petname line, or `node/<rest>`), falling back to a substring
+  match.
+- **Writes:** nothing.
+- **Output:** a Unicode roster grouped by PROJECT — a registered
+  `projects.json` name, else a `.aoide/project.json` manifest directory's own
+  basename, else a trailing `(no project)` bucket — or, under `--hosts`, by
+  HOST: this host, then each node. Node presence: `online` /
+  `unreachable` / `never-pulled`. Session presence: `online` / `stale` /
+  `done` (`done` omitted without `--all`). `--json` mirrors either grouping
+  structurally.
+- **Notes:** not gated. `<filter>` narrows what is DISPLAYED only — every
+  registered node is probed regardless. This is the command the conductor's
+  ROSTER panel dispatches (`session --hosts --json`, throttled ~15 s); the
+  prober itself is `pkgs/aoide/crates/conduct/src/graph/who.rs`'s roster
+  core, which `node list` folds too. See [[Session-Graph]] and
+  [[Node-Federation]].
 
 ### aoide session hook
 
@@ -442,7 +483,7 @@ aoide spawn [--agent <name>] [--parent <sessionId>] [--id <id>] [--prompt <text>
   a `{cmd}` placeholder) instead of a detached headless child — the same
   path bare `resurrect` uses to revive a candidate. `--undying` marks the
   spawned session durable in `state/undying.json` once it registers (a
-  no-op if it never does) — the same mark `session undying on` sets, so this
+  no-op if it never does) — the same mark `session grant undying on` sets, so this
   project's whole undying set can later be resurrected together. See
   "Headless conduct" under [[Conductor-Channel]] for the pty/log mechanism
   the re-exec'd child uses.
@@ -480,7 +521,7 @@ no-op — writes exactly one audit line.
   if both are given), and bare-with-`--project` (neither `--all` nor `--id`)
   resumes the project's WHOLE undying set (`state/undying.json`,
   durable-sessions plan P-C4) — anchored entries currently marked durable
-  via `session undying on`, minus any id already alive (non-`done`) in
+  via `session grant undying on`, minus any id already alive (non-`done`) in
   `sessions.json`, deduped by `sessionId` keeping the entry with the newest
   `endedAt` (an undying id resurrected and exited again can appear twice in
   the append-only ledger). `--all`/`--id` never consult the undying mark. An

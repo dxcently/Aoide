@@ -217,7 +217,7 @@ ceremony over every declared node with no verified record; see
 ## Sending across the fold — `send --to node/<query>`
 
 [[Conductor-Channel|`send`]]'s `--to` flag resolves a target name
-through the same tiered address grammar `aoide who` uses; a `node/<query>`
+through the same tiered address grammar bare `session` uses; a `node/<query>`
 form is its remote tier. It resolves `<query>` against a registered node's
 CACHED graph (the same `state/node-cache/<name>.json` the fold above reads)
 and, on a match, delivers the message over A2A `message/send` instead of

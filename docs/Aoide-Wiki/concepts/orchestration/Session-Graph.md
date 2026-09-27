@@ -191,7 +191,7 @@ should follow).
   the desktop herald surface renders it with approve/deny buttons whose click
   types the verdict back through the session's socket. The hook door raises
   it automatically the moment a session goes `awaiting`.
-- **`session undying on|off`** — mark or unmark a session DURABLE in
+- **`session grant undying on|off`** — mark or unmark a session DURABLE in
   `state/undying.json`, so a project's whole undying set can later be
   resurrected together. A separate, freely-mutated set beside the ledger:
   writes only `undying.json`, atomic, no stage lock, outside the `state/stage/`

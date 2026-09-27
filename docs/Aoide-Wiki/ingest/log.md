@@ -137,6 +137,44 @@ deleted outright — and `peer.*` (5), where the live `peer` group is 15
 paths. None of this was in scope for a count-only pass; a content sweep
 against the actual `session grant`/`peer`/`who` surface is queued here.
 
+**Closed 2026-09-27** (lane `eidolon/nits-2026-09-27`, item 2): the content
+sweep landed. Every page that presented `who` as a live command now presents
+the roster instead — [[Graph-and-Conduct]]'s `### aoide session (bare)` was
+rewritten from the old undying-picker text to the roster (`session
+[<filter>] [--hosts] [--all] [--json]`, project grouping by default, `who`'s
+byte-identical host grouping under `--hosts`), carrying the live-probe/
+cache-fallback/presence detail that `concepts/cli/Doors-and-Nodes.md`'s
+`### aoide who` entry used to hold — that entry is deleted, and the page's
+intro, its `--bearer-secret` probe list and its `### aoide node list` reads
+now say "the roster"/"the roster core" (`graph/who.rs` keeps its module
+name). [[aoide-cli]]'s command table gained `session grant` in the session
+row and lost `who` from the "further commands" enumeration; [[CLI-Reference]]
+lost `who` from the [[Doors-and-Nodes]] group list; [[Conductor-TUI]]'s
+ROSTER panel now dispatches `session --hosts --json` (the throttle and the
+skipped-`App::dispatch` reasoning unchanged); [[Node-Federation]]'s `--to`
+grammar sentence names bare `session` instead of `aoide who`;
+[[Package-Layout]]'s `conduct` row names bare `session` where it named
+`who`.
+
+Same pass, same family: `session undying` → `session grant`.
+[[Graph-and-Conduct]]'s `### aoide session undying` section became `### aoide
+session grant` (`[<kind>] [<state>] [--self | --id <id>]`, kinds `undying`
+and `exempt`, the picker at bare `session grant undying`, `exempt`'s
+stage-tree field and its veto of only the reaper's staleness band), the old
+picker text moved into it, and the surviving `session undying on` mentions
+(`spawn --undying`, bare `resurrect`'s selection) now spell `session grant
+undying on`. Same rename in [[aoide-cli]] (command tree, table row),
+[[CLI-Reference]], [[Session-Graph]] and [[Codebase]].
+
+[[Package-Layout]]'s `client` crate row is corrected to the live set
+(`adapter.melete`, `context`, `pair`/`reject`/`watch`, `node.*` (9),
+`mesh.*` (8), `melete.*` (3), `mail.*` (11) — `mail ring` registers from
+`conduct`, `mail serve` from `server`). Residual (still owed, NOT closed
+here): the per-page command-TOTAL counts ([[Codebase]]'s "80 paths; 48" and
+its "20 commands" figures predate both this sweep and the mail/mesh/pair
+landings — the live goldens are 110 core paths and 57 lyra paths), and
+`peer`/`a2a.agent` mentions outside the `client` row.
+
 ### [2026-09-07] open: the mesh speaks two wire vocabularies
 yomi-strix runs 0.0.22, which sends `X-Aoide-Node` and stamps session
 origins `node:<name>`; osaka (0.0.21), sakaki (0.0.13) and chiyo answer the

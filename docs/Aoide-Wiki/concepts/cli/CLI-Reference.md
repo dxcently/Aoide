@@ -58,8 +58,9 @@ start at [[aoide-cli]] and the group pages linked below.
   `graph`/`graph link` (the read/analysis lens), `project add/list/remove`,
   `workspace set/clear/list/root` (the compositor workspace ↔ project binding;
   `root` prints one bare path for a launcher),
-  `session start/phase/end/hook/undying/permit/pending list/approve/deny/
-  prune/reap`, bare `session` (the undying picker), bare `send`/`spawn`/
+  `session start/phase/end/hook/grant/permit/pending list/approve/deny/
+  prune/reap`, bare `session` (the roster — by project, or by host under
+  `--hosts`), bare `send`/`spawn`/
   `resurrect` (bare `resurrect` also walks up to a `.aoide/project.json`
   manifest), `conduct`, and `mail`/`mail read`/`mail poll` (the receive half
   of `send`).
@@ -71,7 +72,7 @@ start at [[aoide-cli]] and the group pages linked below.
   in `state/captures/`; pointer position in `state/pointer-pos.json`.
 - [[Doors-and-Nodes|Doors-and-Nodes]] — the other doors:
   `mcp serve`, `daemon`, `events tail`, `shellbridge`, `adapter melete`,
-  `conductor` (signature + pointer to [[Conductor-TUI]]), `who`, `a2a serve`,
+  `conductor` (signature + pointer to [[Conductor-TUI]]), `a2a serve`,
   and the `node` federation group (the outbound A2A client). Registries:
   `state/nodes.json`, `state/node-cache/<name>.json`.
 - [[Conductor-TUI|Conductor-TUI]] — the `aoide conductor` interactive
