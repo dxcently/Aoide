@@ -937,3 +937,64 @@ fn node_pair_approve_on_an_outbound_entry_with_no_via_leaves_a_previously_record
     std::env::remove_var("XDG_RUNTIME_DIR");
     std::env::remove_var("AOIDE_AUDIT_LOG");
 }
+
+/// **Rollback safety: no default path may write a key the DEPLOYED binary
+/// refuses.** The pre-P-CHARTER binary answers `[pairing] homeMesh` with
+/// `TOML parse error … unknown field 'homeMesh'` (measured against the
+/// installed 0.0.25), so a config that gains that key — or `[mesh.<name>]
+/// operator`, same class — becomes unreadable to it. Everything a machine
+/// really runs is exercised here, and `config.toml` must come out of it either
+/// absent or free of both keys. An operator who sets one explicitly gets it
+/// written: that is the one documented way to opt into a P-CHARTER key, and it
+/// is their own decision to make.
+#[test]
+fn no_default_path_writes_a_key_the_deployed_binary_refuses() {
+    let _guard = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let root = unique_root("rollback-config");
+    let _stage = setup_env(&root);
+    std::env::set_var("AOIDE_ROOT", &root);
+    std::env::remove_var("AOIDE_CONFIG");
+
+    // 1. A legacy registry, whose load MIGRATES `allows` into `grants` and
+    //    then rewrites the file on the next save.
+    std::fs::create_dir_all(root.join("state")).unwrap();
+    std::fs::write(
+        root.join("state").join("nodes.json"),
+        r#"{"nodes":[{"name":"peerbox","url":"http://10.0.0.5:8710/","pubkey":"aa11","verified":true,"allows":["read"],"addedAt":"2026-09-01T00:00:00Z"}]}"#,
+    )
+    .unwrap();
+    let _ = dispatch(&cli_invocation(&["node", "status"], &[], &[]));
+    let _ = dispatch(&cli_invocation(&["mesh"], &[], &[]));
+    let _ = dispatch(&cli_invocation(&["mesh", "charter", "show"], &[], &[]));
+
+    // 2. The join path this slice ships, then the operator's own four.
+    let key = format!("ed25519:{}", "ab".repeat(32));
+    let joined = dispatch(&cli_invocation(&["mesh", "join"], &["home"], &[("operator", &key)]));
+    assert_eq!(joined.status, Status::Ok, "{}", joined.message);
+    let _ = dispatch(&cli_invocation(&["mesh", "charter", "init"], &["home"], &[]));
+    let _ = dispatch(&cli_invocation(&["mesh", "charter", "sign"], &["home"], &[]));
+    let _ = dispatch(&cli_invocation(&["mesh", "charter", "show"], &["home"], &[]));
+
+    assert!(
+        root.join("state").join("mesh").join("home").join("trust.json").exists(),
+        "the join really recorded its trust in state"
+    );
+    let config_path = root.join("config.toml");
+    if let Ok(text) = std::fs::read_to_string(&config_path) {
+        assert!(!text.contains("homeMesh"), "no default path writes `[pairing] homeMesh`:\n{text}");
+        assert!(!text.contains(".operator"), "nor `[mesh.<name>] operator`:\n{text}");
+    }
+
+    // 3. The operator's explicit set DOES write it — and the same key is what
+    //    a rollback has to be aware of. The record has to go first: A2's own
+    //    guard refuses to strand a grant in a mesh nothing will read any more
+    //    (`config_set_refuses_to_move_the_home_mesh_while_records_hold_grants_in_it`),
+    //    which is why this slice's own paths must never write the key.
+    let _ = dispatch(&cli_invocation(&["node", "remove"], &["peerbox"], &[]));
+    let set = dispatch(&cli_invocation(&["config", "set"], &["pairing.homeMesh", "fleet"], &[]));
+    assert_eq!(set.status, Status::Ok, "{}", set.message);
+    let text = std::fs::read_to_string(&config_path).unwrap();
+    assert!(text.contains("homeMesh"), "an explicit set is written, as asked:\n{text}");
+
+    let _ = std::fs::remove_dir_all(&root);
+}

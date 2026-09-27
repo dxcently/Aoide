@@ -824,6 +824,106 @@ fn detect_rekeyed(previous: Option<&Charter>, next: &Charter, at: &str) -> Vec<R
 
 // ── The operator's side: init, sign, reroot ─────────────────────────────
 
+/// **Is `addr` a LOCAL-NETWORK address** — the one portable answer to "may a
+/// LAN ceremony happen with this peer"? (P-CHARTER; the approved rule.)
+///
+/// A LAN ceremony (`aoide mesh join`, and any later arm that says it is one)
+/// is admitted only when the connection's observed peer address is PRIVATE or
+/// LINK-LOCAL, and loopback is explicitly NOT admitted:
+///
+/// - **Private** (`10/8`, `172.16/12`, `192.168/16`, IPv6 `fc00::/7`) means
+///   "same network". A tailnet hub is a ULA, so a tailnet join is refused by
+///   the same rule that refuses a VPS — which is the design's own "never a
+///   relay".
+/// - **Link-local** (`169.254/16`, `fe80::/10`) is the no-DHCP LAN case.
+/// - **Loopback is refused** even though it is "local" in the loose sense,
+///   because it is precisely what a RELAYED request looks like from here: a
+///   relay's forward to the loopback door arrives from loopback, and so does
+///   an ssh tunnel. Admitting loopback would admit every relay, which is the
+///   one thing this guard exists to refuse.
+///
+/// **It is a property of the ADDRESS and nothing else** — no interface
+/// enumeration, no route lookup, no `/proc`, no `cfg(target_os)`. Every
+/// platform this crate builds on computes `IpAddr::is_loopback`/
+/// `is_private`-equivalent ranges from the parsed address alone, so the same
+/// peer is admitted or refused identically on Linux, macOS, Windows and BSD.
+/// A rule that needed the local interface table would be a second discovery
+/// path per OS, which is exactly what the house style forbids.
+///
+/// The KNOWN COST, stated rather than hidden: a same-LAN box reached through
+/// an ssh tunnel is refused here (that is a tunneled ceremony, and its own
+/// path is pairing's `selfVia` or a hand-carried `mesh charter accept`), and
+/// an IPv6 address a router hands out with a global prefix is refused even
+/// when the peer is physically next door. Both are recoverable without this
+/// guard: `mesh join <mesh> --operator <key>` and `mesh charter accept <file>`
+/// are the non-LAN paths, and neither dials anything.
+pub fn is_local_network(addr: &str) -> bool {
+    let Ok(ip) = addr.trim().parse::<std::net::IpAddr>() else {
+        return false;
+    };
+    if ip.is_loopback() || ip.is_unspecified() || ip.is_multicast() {
+        return false;
+    }
+    match ip {
+        std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_link_local(),
+        std::net::IpAddr::V6(v6) => {
+            // fc00::/7 (unique local) and fe80::/10 (link local).
+            let segs = v6.segments();
+            (segs[0] & 0xfe00) == 0xfc00 || (segs[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// **Enter a mesh by trusting its operator key** — `aoide mesh join <mesh>
+/// --operator <key>`, and the first half of the LAN join. The one write a
+/// machine that is NOT the operator makes, and the reason it exists: the
+/// design gives a machine two ways to trust a mesh's root, "the operator line
+/// in its config, rendered by Nix or written by hand" and this one, "which
+/// records the same key in state on a host whose config is not hand-editable"
+/// (`docs/architecture/HTTPS-MESH-API.md` "Charters", step 4).
+///
+/// It writes the STATE record only — never `config.toml`. That is deliberate
+/// and it is a ROLLBACK requirement, not tidiness: `[mesh.<name>] operator`
+/// is a key a pre-P-CHARTER binary refuses to parse, so a machine that joined
+/// a mesh and then went back to the older build must be able to read its own
+/// config. `trusted_operator` reads either source, so state alone is a
+/// complete trust entry.
+///
+/// The key is validated as an `ed25519:<hex>` line ([`key_hex`]) before
+/// anything is written, and a machine that ALREADY trusts a different key for
+/// this mesh is refused rather than silently repointed — replacing a mesh's
+/// root is `reroot` on the operator's machine plus one join per node, and a
+/// typo must not be able to do it.
+pub fn trust_operator(mesh: &str, key_field: &str) -> Result<String, String> {
+    if !node_store::valid_node_name(mesh) {
+        return Err(format!(
+            "`{mesh}` is not a valid mesh name — lowercase letters, digits, and `-`, starting with a letter or digit"
+        ));
+    }
+    let key = key_hex(key_field)?;
+    let mut trust = load_trust(mesh).map_err(|e| format!("this machine's trust record for `{mesh}` cannot be read: {e}"))?.unwrap_or_default();
+    let existing = if trust.operator.is_empty() { None } else { Some(trust.operator.clone()) };
+    if let Some(declared) = config_operator(mesh).map_err(|e| format!("config.toml cannot be read: {e}"))? {
+        if declared != key {
+            return Err(format!(
+                "config.toml declares `mesh.{mesh}.operator = \"ed25519:{declared}\"`, and you named `ed25519:{key}` — the two must agree, and config is the hand-edited source. Change the config line, or join with the key it names"
+            ));
+        }
+    }
+    if let Some(existing) = existing {
+        if existing != key {
+            return Err(format!(
+                "this machine already trusts operator {} for mesh `{mesh}`. Trust is REPLACED, never added, and only by the operator: run `aoide mesh charter reroot {mesh}` on the operator's machine, then join each node again",
+                fingerprint_of_key(&existing)
+            ));
+        }
+        return Ok(key);
+    }
+    trust.operator = key.clone();
+    write_trust(mesh, &trust)?;
+    Ok(key)
+}
+
 /// What `init` did, for the command to print.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Init {
@@ -1180,6 +1280,86 @@ mod tests {
             std::fs::read(source_under(root, mesh)).unwrap(),
             std::fs::read(sig_under(root, mesh)).unwrap(),
         )
+    }
+
+    /// **The approved portable local-network rule**: private and link-local
+    /// admitted, loopback refused (a relayed or tunneled request arrives from
+    /// loopback, so admitting it would admit every relay), and the answer is a
+    /// property of the ADDRESS alone — the same on every platform this crate
+    /// builds on, with no interface table and no `/proc`.
+    #[test]
+    fn the_local_network_rule_is_an_address_property() {
+        for addr in [
+            "10.0.0.5",
+            "10.255.255.254",
+            "172.16.0.1",
+            "172.31.255.1",
+            "192.168.1.158",
+            "169.254.10.10",
+            "fd00::1",
+            "fc00::abcd",
+            "fe80::1",
+        ] {
+            assert!(is_local_network(addr), "`{addr}` is a LAN address");
+        }
+        for addr in [
+            "127.0.0.1",
+            "127.1.2.3",
+            "::1",
+            "0.0.0.0",
+            "::",
+            "8.8.8.8",
+            "172.32.0.1",
+            "192.169.0.1",
+            "203.0.113.9",
+            "2001:db8::1",
+            "224.0.0.1",
+            "ff02::1",
+            "sakaki",
+            "not-an-address",
+            "",
+        ] {
+            assert!(!is_local_network(addr), "`{addr}` is NOT a LAN address (or not an address at all)");
+        }
+    }
+
+    /// **The trust-entry step writes STATE and never config.toml** — which is
+    /// the rollback requirement, not tidiness: `[mesh.<name>] operator` is a
+    /// key the pre-P-CHARTER binary refuses to parse, so a machine that joined
+    /// a mesh and then went back to the older build must still be able to read
+    /// its own config. And it is a complete trust entry on its own:
+    /// `trusted_operator` reads either source.
+    #[test]
+    fn joining_by_operator_key_writes_state_only_and_never_config() {
+        let (_guard, _saver) = isolate();
+        let machine_dir_path = machine_dir("join-state-only");
+        machine(&machine_dir_path, "peerbox");
+        let config = machine_dir_path.join("config.toml");
+        assert!(!config.exists(), "a fresh machine has no config at all");
+
+        let key = "ab".repeat(32);
+        assert_eq!(trust_operator("home", &format!("ed25519:{key}")).unwrap(), key);
+        assert!(!config.exists(), "joining writes NO config.toml");
+        assert_eq!(trusted_operator("home").unwrap(), key, "and the state record is a complete entry");
+        assert_eq!(load_trust("home").unwrap().unwrap().operator, key);
+        assert_eq!(load_trust("home").unwrap().unwrap().versions.get(&key), None, "no version seen yet");
+
+        // Idempotent for the same key, refused for a different one: replacing a
+        // mesh's root is `reroot` on the operator's machine plus one join per
+        // node, never a typo.
+        assert_eq!(trust_operator("home", &format!("ed25519:{key}")).unwrap(), key);
+        let err = trust_operator("home", &format!("ed25519:{}", "cd".repeat(32))).unwrap_err();
+        assert!(err.contains("already trusts operator"), "{err}");
+        assert!(err.contains("reroot"), "and names the only way to replace it: {err}");
+
+        // A config line that names a DIFFERENT key is refused, never silently
+        // overridden: config is the hand-edited source and must agree.
+        fs::atomic_write(&config, &format!("[mesh.home]\n{}\n", operator_line(&"ee".repeat(32)))).unwrap();
+        let err = trust_operator("home", &format!("ed25519:{key}")).unwrap_err();
+        assert!(err.contains("declares"), "{err}");
+        // And a key that is not a key is refused before anything is written.
+        assert!(trust_operator("home", "not-a-key").is_err());
+        let _ = std::fs::remove_dir_all(&machine_dir_path);
     }
 
     /// The node line is the operator's paste target, so it must survive being

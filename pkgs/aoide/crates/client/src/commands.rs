@@ -626,7 +626,7 @@ pub(crate) fn post_json_to_node_with_via_override(
 /// ceremony's own protocol, `client/AGENTS.md`) — kept as parameters
 /// anyway so this stays [`post_json`]'s same general shape, not a
 /// ceremony-only special case.
-fn post_json_via(
+pub(crate) fn post_json_via(
     logical_url: &str,
     via: Option<&aoide_storage::tunnel::Via>,
     tunnel_key: &str,

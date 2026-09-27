@@ -27,6 +27,7 @@ use aoide_protocol::registry::{arg, cmd, flag, Registry};
 use aoide_protocol::Invocation;
 use aoide_storage::charter;
 use serde_json::json;
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 pub fn register(r: &mut Registry) {
@@ -80,8 +81,264 @@ pub fn register(r: &mut Registry) {
         handler: handle_charter_show,
         examples: ["mesh charter show", "mesh charter show home", "mesh charter show home --json"],
     ));
+    r.insert(cmd!(
+        path: ["mesh", "join"],
+        summary: "Enter a mesh by trusting its operator key — the one trust-entry step every machine but the operator's own performs. Two ways: `--operator <key>` records the operator line in STATE (never in config.toml, so a machine that rolls back to a pre-P-CHARTER build can still read its own config), or a LAN address runs the one local-network ceremony that fetches the operator key AND the charter in force from the operator's machine, prints the key's fingerprint and every node line for the operator to compare out of band, and then records the key and applies the charter. A relay, the HTTPS adapter, a tailnet and an ssh tunnel are all refused: the guard admits a private or link-local peer address and never loopback.",
+        args: [
+            arg!("mesh", "string", true, "The mesh to join."),
+            arg!("host", "string", false, "The operator's machine on the local network — a bare host/IP (`sakaki`, `192.168.1.158`), or host:port; the door port defaults to AOIDE_A2A_PORT, else 8710. Omitted: --operator is required instead."),
+        ],
+        flags: [
+            flag!("operator", "string", "The operator line the operator's machine printed (`ed25519:<hex>`) — the non-LAN path, no dial at all. Refused when the machine already trusts a different key for this mesh."),
+            flag!("yes", "bool", "Skip the fingerprint confirm on the LAN arm. The fingerprint is the whole trust step there (this is a first-use ceremony), so skipping it commits to a key nobody compared — the same stance `pair --yes` takes on pairing's codes."),
+        ],
+        gated: false,
+        implemented: true,
+        handler: handle_charter_join,
+        examples: ["mesh join home --operator ed25519:…", "mesh join home sakaki", "mesh join home 192.168.1.158 --yes --json"],
+    ));
 }
 
+/// `aoide mesh join` — the trust-entry step, both arms. **No pairwise record is
+/// ever written**: a join adds no `state/nodes.json` entry, because the
+/// charter IS the mesh's node list, and the door reads a caller's line out of
+/// it (`docs/architecture/HTTPS-MESH-API.md` "Charters": "it rides pairing's
+/// ceremony and its local-network guard, never a relay, and it creates no
+/// pairwise record").
+fn handle_charter_join(inv: &Invocation) -> Outcome {
+    let cmd = "mesh.join";
+    const USAGE: &str = "usage: aoide mesh join <mesh> (--operator ed25519:<hex> | <host>[:port]) [--yes] [--json]";
+    let Some(mesh) = inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()) else {
+        return Outcome::usage(cmd, USAGE);
+    };
+    let host_arg = inv.args.get(1).map(|s| s.trim()).filter(|s| !s.is_empty());
+    let operator_flag = inv.flags.get("operator").cloned().filter(|s| !s.is_empty());
+    if host_arg.is_some() == operator_flag.is_some() {
+        return Outcome::usage(
+            cmd,
+            format!("{USAGE} — name exactly one source of trust: `--operator <key>` or the operator's LAN address"),
+        );
+    }
+
+    // The LAN arm. The address is checked HERE, on the dial side, because the
+    // ceremony is a local-network one by definition: a relay, the HTTPS
+    // adapter, a tailnet and an ssh tunnel are all refused before anything is
+    // posted, so a join never travels further than the LAN it is meant for.
+    let (operator_key, charter_pair) = match (&operator_flag, host_arg) {
+        (Some(field), _) => match charter::trust_operator(mesh, field) {
+            Ok(key) => (key, None),
+            Err(e) => return Outcome::error(cmd, e).with_data(json!({ "reason": "trust-refused", "mesh": mesh })),
+        },
+        (None, Some(host)) => {
+            let (addr, port) = split_host_port(host);
+            let resolved = match addr.parse::<std::net::IpAddr>() {
+                Ok(ip) => ip.to_string(),
+                Err(_) => match resolve_host_to_ip(&addr) {
+                    Some(ip) => ip.to_string(),
+                    None => {
+                        return Outcome::error(
+                            cmd,
+                            format!("`{host}` does not resolve to an address — name the operator's machine by IP, or use `--operator <key>`"),
+                        )
+                        .with_data(json!({ "reason": "unresolved-host", "host": host }))
+                    }
+                },
+            };
+            if !charter::is_local_network(&resolved) {
+                return Outcome::error(
+                    cmd,
+                    format!(
+                        "`{host}` resolves to {resolved}, which is not a local-network address — a LAN join is admitted only over a private or link-local one \
+                         (never loopback: a relayed or tunneled request arrives from loopback). Take the mesh without a LAN: `aoide mesh join {mesh} --operator <key>`, \
+                         or `aoide mesh charter accept <file>` with the file the operator hands you"
+                    ),
+                )
+                .with_data(json!({ "reason": "not-local-network", "host": host, "address": resolved }));
+            }
+            let url = format!("http://{resolved}:{port}/");
+            let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "aoide/charterFetch", "params": { "mesh": mesh } });
+            let (code, body_text) = match crate::commands::post_json_via(&url, None, "", &body.to_string(), None, &[], 15) {
+                Ok(v) => v,
+                Err(e) => {
+                    return Outcome::error(cmd, format!("asking {url} for mesh `{mesh}`: {e}"))
+                        .with_data(json!({ "reason": "unreachable", "url": url }))
+                }
+            };
+            if code != 200 {
+                return Outcome::error(cmd, format!("asking {url} for mesh `{mesh}`: HTTP {code} with body {body_text}"))
+                    .with_data(json!({ "reason": "fetch-http-error", "url": url, "httpCode": code }));
+            }
+            let parsed: serde_json::Value = match serde_json::from_str(&body_text) {
+                Ok(v) => v,
+                Err(e) => {
+                    return Outcome::error(cmd, format!("asking {url} for mesh `{mesh}`: unparseable response: {e}"))
+                        .with_data(json!({ "reason": "unparseable", "url": url }))
+                }
+            };
+            if let Some(err) = parsed.get("error") {
+                return Outcome::error(cmd, format!("`{}` refused the join: {err}", host))
+                    .with_data(json!({ "reason": "refused", "host": host, "error": err }));
+            }
+            let result = &parsed["result"];
+            let key = result["operator"].as_str().unwrap_or_default().to_string();
+            let bytes = match base64_decode(result["charter"].as_str().unwrap_or_default()) {
+                Ok(b) => b,
+                Err(e) => return Outcome::error(cmd, format!("the charter body from `{host}` is not decodable: {e}")),
+            };
+            let sig = match base64_decode(result["sig"].as_str().unwrap_or_default()) {
+                Ok(b) => b,
+                Err(e) => return Outcome::error(cmd, format!("the charter signature from `{host}` is not decodable: {e}")),
+            };
+            let version = result["version"].as_u64().unwrap_or(0);
+            // The fingerprint is the trust step: printed for the operator to
+            // compare with what the operator's machine shows, before anything
+            // is recorded. This is a first-use ceremony, and its authority is
+            // that comparison — never the transport, never the LAN guard.
+            let fingerprint = charter::fingerprint_of_key(&key);
+            if !inv.flag_present("yes") {
+                if !confirm_join(mesh, &fingerprint, version) {
+                    return Outcome::ok(cmd, "not confirmed — nothing recorded".to_string())
+                        .with_data(json!({ "confirmed": false, "mesh": mesh }));
+                }
+            }
+            (key, Some((bytes, sig)))
+        }
+        (None, None) => return Outcome::usage(cmd, USAGE),
+    };
+
+    // Record the trust FIRST and only then apply: `accept` reads the operator
+    // key it must verify under, so a charter applied before its key is
+    // recorded would be refused `unknown-operator` by this very machine.
+    let field = format!("ed25519:{operator_key}");
+    let trusted = match charter::trust_operator(mesh, &field) {
+        Ok(k) => k,
+        Err(e) => return Outcome::error(cmd, e).with_data(json!({ "reason": "trust-refused", "mesh": mesh })),
+    };
+
+    let mut applied = serde_json::Value::Null;
+    let mut message = format!(
+        "joined mesh `{mesh}` — this machine now trusts operator {} (recorded in state, never in config.toml)",
+        charter::fingerprint_of_key(&trusted)
+    );
+    if let Some((bytes, sig)) = charter_pair {
+        match charter::accept(&bytes, &sig) {
+            Ok(accepted) => {
+                message.push_str(&format!(
+                    "\ncharter v{} applied here ({} node(s){})",
+                    accepted.charter.version,
+                    accepted.charter.nodes.len(),
+                    rekey_note(&accepted.rekeyed),
+                ));
+                applied = json!({
+                    "version": accepted.charter.version,
+                    "nodes": accepted.charter.nodes.len(),
+                    "rekeyed": accepted.rekeyed.iter().map(|r| json!({ "node": r.node, "from": r.from, "to": r.to })).collect::<Vec<_>>(),
+                });
+            }
+            Err(refusal) => {
+                message.push_str(&format!(
+                    "\nthe operator key is recorded, but the charter it offered was refused ({}): {}",
+                    refusal.reason, refusal.detail
+                ));
+            }
+        }
+    }
+    Outcome::ok(cmd, message).with_data(json!({
+        "mesh": mesh,
+        "operator": trusted,
+        "fingerprint": charter::fingerprint_of_key(&trusted),
+        "charter": applied,
+    }))
+}
+
+/// The LAN arm's one human gate: the operator key's fingerprint, printed for
+/// the operator to compare with what their own machine shows. Deliberately its
+/// own five lines rather than a shared prompt helper — this crate's prompts
+/// are each shaped by what their own arm asks, and `--yes` skips exactly this
+/// one question and no other.
+fn confirm_join(mesh: &str, fingerprint: &str, version: u64) -> bool {
+    eprint!(
+        "join mesh `{mesh}` with operator key {fingerprint} (charter v{version})? \
+         Compare it with the fingerprint the operator's machine printed. [y/N] "
+    );
+    let _ = std::io::Write::flush(&mut std::io::stderr());
+    let mut line = String::new();
+    let read = std::io::stdin().lock().read_line(&mut line).unwrap_or(0);
+    read > 0 && matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+/// `host`, `host:port`, `[v6]:port` or a bare address → (address text, port).
+/// The port defaults to `AOIDE_A2A_PORT`, else 8710, exactly as every other
+/// LAN dial in this crate does.
+fn split_host_port(host: &str) -> (String, u16) {
+    let default_port = crate::commands::default_a2a_port();
+    if let Some(rest) = host.strip_prefix('[') {
+        if let Some((addr, tail)) = rest.split_once(']') {
+            let port = tail.strip_prefix(':').and_then(|p| p.parse().ok()).unwrap_or(default_port);
+            return (addr.to_string(), port);
+        }
+    }
+    match host.rsplit_once(':') {
+        Some((addr, port)) if !addr.contains(':') && port.chars().all(|c| c.is_ascii_digit()) && !port.is_empty() => {
+            (addr.to_string(), port.parse().unwrap_or(default_port))
+        }
+        _ => (host.to_string(), default_port),
+    }
+}
+
+/// Resolve a hostname to one address, without pulling a resolver dependency:
+/// `getent ahostsv4`/`ahostsv6` where they exist (glibc and musl both ship
+/// `getent`), and no answer at all otherwise — the join then tells the operator
+/// to name the machine by IP rather than guessing. Deliberately NOT a second
+/// transport: it is one `getent` call feeding the ADDRESS CHECK, and the dial
+/// itself still goes to the literal address this returns.
+fn resolve_host_to_ip(host: &str) -> Option<String> {
+    for family in ["ahostsv4", "ahostsv6"] {
+        let out = std::process::Command::new("getent").arg(family).arg(host).output().ok()?;
+        if !out.status.success() {
+            continue;
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        if let Some(first) = text.split_whitespace().next() {
+            if first.parse::<std::net::IpAddr>().is_ok() {
+                return Some(first.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// `aoide/charterFetch`'s decoder — the exact inverse of the door's
+/// `base64_bytes`, total (a malformed body is an `Err` the join prints, never
+/// a panic, and never a partially-trusted blob).
+fn base64_decode(text: &str) -> Result<Vec<u8>, String> {
+    let mut out = Vec::with_capacity(text.len() / 4 * 3);
+    let mut acc: u32 = 0;
+    let mut bits = 0u32;
+    for (i, c) in text.trim().bytes().enumerate() {
+        if c == b'=' {
+            break;
+        }
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'\n' | b'\r' => continue,
+            _ => return Err(format!("not base64 at byte {i}: {}", c as char)),
+        } as u32;
+        acc = (acc << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    Ok(out)
+}
+
+/// `aoide mesh charter show [<mesh>]` — the charter in force and its status.
 fn handle_charter_show(inv: &Invocation) -> Outcome {
     let cmd = "mesh.charter.show";
     let named = inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()).map(str::to_string);

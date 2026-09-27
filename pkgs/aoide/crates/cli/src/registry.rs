@@ -315,7 +315,9 @@ mod tests {
         // = 86. Bumped by 1 more for `mesh.charter.show` (the same slice's
         // read side: the charter in force and its status, which a charter
         // applied by an unattended poll needs an operator to be able to see)
-        // — reached 87.
+        // — reached 87. Bumped by 1 for `mesh.join` (the trust-entry step every
+        // machine but the operator's own performs: one operator key, or one
+        // LAN ceremony) — reached 88.
         let mut expected: Vec<&str> = vec![
             "a2a.serve",
             "adapter.melete",
@@ -358,6 +360,7 @@ mod tests {
             "mesh.charter.reroot",
             "mesh.charter.show",
             "mesh.charter.sign",
+            "mesh.join",
             "mesh.pair",
             "node.add",
             "node.advertise",

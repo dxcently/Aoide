@@ -3778,6 +3778,106 @@ fn emit_pairing_event(kind: &str, payload: Value) {
     }));
 }
 
+/// `aoide/charterFetch` (P-CHARTER): **the LAN join's one read.** A machine
+/// that trusts nothing yet asks a machine it can reach on the local network
+/// for a mesh's operator key and the charter in force, so it can enter the
+/// mesh in one ceremony instead of hand-copying a key and a file.
+///
+/// What it returns is public material — an operator PUBLIC key and a charter
+/// document that is already operator-signed — so it carries no bearer and no
+/// per-request signature, exactly like `aoide/pairRequest`'s own bootstrap
+/// answer. Its AUTHORITY is not this method at all: the caller verifies the
+/// charter's signature under the key it just received (which proves only that
+/// that key signed that charter — the trust step is the fingerprint the
+/// operator compares out of band, the same class as pairing's typed code) and
+/// then records the key in STATE through `aoide_storage::charter::
+/// trust_operator`.
+///
+/// **The local-network guard is the whole access rule**, and it is the
+/// approved portable one (`aoide_storage::charter::is_local_network`): the
+/// observed peer must be a private or link-local address, and loopback is
+/// REFUSED, because a relayed forward and an ssh tunnel both arrive as
+/// loopback here — admitting loopback would admit every relay. A refused peer
+/// answers `-32007` with a taught message naming the non-LAN paths, never a
+/// silent empty result.
+///
+/// A mesh this node itself has no charter for is refused with a taught
+/// message (the caller reached the wrong machine, or the name is a typo) —
+/// this method never mints, never signs and never writes: a LAN join must not
+/// be able to change the operator's machine.
+fn charter_fetch(params: &Value, origin: ConnOrigin, audit_log: &Path) -> Result<Value, (i64, String)> {
+    let mesh = params.get("mesh").and_then(Value::as_str).unwrap_or("");
+    if !aoide_storage::node_store::valid_node_name(mesh) {
+        return Err((-32602, format!("invalid params: mesh `{mesh}` is not a mesh name")));
+    }
+    let non_lan = match origin {
+        ConnOrigin::Remote(ip) if aoide_storage::charter::is_local_network(&ip.to_string()) => None,
+        ConnOrigin::Remote(ip) => Some(ip.to_string()),
+        ConnOrigin::Loopback => Some("127.0.0.1".to_string()),
+        ConnOrigin::Unknown => Some("an undetermined address".to_string()),
+    };
+    if let Some(peer) = non_lan {
+        let detail = format!(
+            "a LAN join from {peer}: `aoide/charterFetch` is admitted only over a local network \
+             (private or link-local addresses, never loopback — a relayed or tunneled request \
+             arrives from loopback). Take the mesh without a LAN: `aoide mesh join {mesh} \
+             --operator <key>` with the operator's own operator line, or `aoide mesh charter \
+             accept <file>` with the signed file they hand you"
+        );
+        let _ = audit(audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/charterFetch", "unauthorized", &detail);
+        return Err((-32007, detail));
+    }
+    let Some(charter) = aoide_storage::charter::in_force_charter(mesh) else {
+        return Err((
+            -32000,
+            format!(
+                "mesh `{mesh}` has no charter in force on this machine — the operator must run \
+                 `aoide mesh charter init {mesh}` and `aoide mesh charter sign {mesh}` there first"
+            ),
+        ));
+    };
+    let operator = aoide_storage::charter::trusted_operator(mesh)
+        .map_err(|r| (-32000, format!("this machine cannot decide which key signs `{mesh}`: {r}")))?;
+    let bytes = std::fs::read(aoide_storage::charter::in_force_path(mesh))
+        .map_err(|e| (-32603, format!("reading the charter in force: {e}")))?;
+    let sig = std::fs::read(aoide_storage::charter::in_force_sig_path(mesh))
+        .map_err(|e| (-32603, format!("reading the charter's signature: {e}")))?;
+    let _ = audit(
+        audit_log,
+        Door::A2a,
+        EventClass::Audit,
+        "a2a.aoide/charterFetch",
+        "ok",
+        &format!("charter `{mesh}` v{} released to a local-network join", charter.version),
+    );
+    Ok(json!({
+        "mesh": charter.mesh,
+        "version": charter.version,
+        "operator": operator,
+        "charter": base64_bytes(&bytes),
+        "sig": base64_bytes(&sig),
+    }))
+}
+
+/// The tiny encoder this door needs for handing two blobs to a join: the
+/// charter document and its signature, the latter raw bytes that are not
+/// UTF-8-safe to embed in JSON as text. Standard base64 with padding, written
+/// here rather than pulling a dependency for fourteen lines, and it has
+/// exactly one caller — nothing else in this door emits a blob.
+fn base64_bytes(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+        out.push(ALPHABET[((n >> 18) & 63) as usize] as char);
+        out.push(ALPHABET[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 { ALPHABET[((n >> 6) & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { ALPHABET[(n & 63) as usize] as char } else { '=' });
+    }
+    out
+}
+
 /// `aoide/pairRequest` (CONTRACTS.md §6, P-P2): the pairing ceremony's
 /// bootstrap request. Box A POSTs `{pubkeyHex, name, commitHex, url}` — its
 /// own public key, its own SELF-CLAIMED instance name (A's
@@ -4233,6 +4333,9 @@ fn handle_jsonrpc(req: &Value, ctx: &RequestCtx) -> Value {
         "aoide/pairRequest" => pair_request(&params, ctx.origin, ctx.audit_log),
         "aoide/pairReveal" => pair_reveal(&params, ctx.audit_log),
         "aoide/pairPoll" => pair_poll(&params, ctx.audit_log),
+        // P-CHARTER: the LAN join's one read — the mesh's operator key and
+        // the charter in force, over a local-network connection only.
+        "aoide/charterFetch" => charter_fetch(&params, ctx.origin, ctx.audit_log),
         "aoide/mailDeposit" => mail_deposit(&params, ctx),
         "aoide/mailPoll" => mail_poll(&params, ctx),
         // P-SEAL: the binding exchange. A signed READ of this node's own
@@ -13771,6 +13874,72 @@ mod tests {
         assert!(msg.contains("node allow box-b message on"), "names the exact fix: {msg}");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **The LAN guard on the door's join read** (`aoide/charterFetch`): a
+    /// private peer is answered, and loopback, an undetermined address and a
+    /// public address are all refused `-32007` with a taught message naming
+    /// the non-LAN paths. Loopback is the case that matters most — a relayed
+    /// forward and an ssh tunnel both arrive as loopback here, so admitting it
+    /// would admit every relay the rule exists to refuse.
+    #[test]
+    fn charter_fetch_admits_the_local_network_and_refuses_everything_else() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_root = std::env::var("AOIDE_ROOT").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let root = mail_deposit_root("charter-fetch-guard");
+
+        // A machine that has rooted and signed `home`, so there IS something
+        // to fetch — the guard is what is under test, not an empty mesh.
+        charter_machine(&root, "operator", "opbox");
+        let init = aoide_storage::charter::init("home").unwrap();
+        let line = aoide_storage::charter::node_line().unwrap();
+        let src = format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{line}\n");
+        std::fs::write(aoide_storage::charter::source_path("home"), &src).unwrap();
+        aoide_storage::charter::sign("home", None).unwrap();
+        let audit_log = root.join("log");
+
+        for (origin, label) in [
+            (ConnOrigin::Remote("192.168.1.20".parse().unwrap()), "private"),
+            (ConnOrigin::Remote("fd00::9".parse().unwrap()), "unique-local"),
+        ] {
+            let out = charter_fetch(&json!({ "mesh": "home" }), origin, &audit_log)
+                .unwrap_or_else(|e| panic!("a {label} peer is admitted: {e:?}"));
+            assert_eq!(out["mesh"], "home");
+            assert_eq!(out["operator"], init.operator);
+            assert_eq!(out["version"], 1);
+            assert!(out["charter"].as_str().is_some_and(|s| !s.is_empty()), "the document rides it");
+            assert!(out["sig"].as_str().is_some_and(|s| !s.is_empty()), "and its signature");
+        }
+
+        for (origin, label) in [
+            (ConnOrigin::Loopback, "loopback"),
+            (ConnOrigin::Unknown, "an undetermined address"),
+            (ConnOrigin::Remote("203.0.113.9".parse().unwrap()), "a public address"),
+            (ConnOrigin::Remote("8.8.8.8".parse().unwrap()), "another public address"),
+        ] {
+            let err = charter_fetch(&json!({ "mesh": "home" }), origin, &audit_log)
+                .unwrap_err();
+            assert_eq!(err.0, -32007, "{label} is refused with the unauthorized code: {err:?}");
+            assert!(err.1.contains("local network"), "and says why: {}", err.1);
+            assert!(err.1.contains("--operator"), "and names the non-LAN path: {}", err.1);
+        }
+
+        // A mesh this machine has no charter for is its own taught answer, not
+        // a guard refusal.
+        let err = charter_fetch(&json!({ "mesh": "away" }), ConnOrigin::Remote("192.168.1.20".parse().unwrap()), &audit_log)
+            .unwrap_err();
+        assert!(err.1.contains("no charter in force"), "{err:?}");
+
+        let _ = std::fs::remove_dir_all(&root);
+        match saved_root {
+            Some(v) => std::env::set_var("AOIDE_ROOT", v),
+            None => std::env::remove_var("AOIDE_ROOT"),
+        }
+        match saved_state {
+            Some(v) => std::env::set_var("AOIDE_STATE_DIR", v),
+            None => std::env::remove_var("AOIDE_STATE_DIR"),
+        }
     }
 
     /// **F1's door half.** A charter letter the door admits and applies is

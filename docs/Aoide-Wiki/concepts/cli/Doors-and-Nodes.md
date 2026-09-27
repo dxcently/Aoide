@@ -843,6 +843,48 @@ one carried by hand; `reroot` replaces a lost or compromised operator key.
   operator's source file; none is a wire call. `init` never overwrites an
   existing source, and `show` never writes anything.
 
+### aoide mesh join
+
+```
+aoide mesh join <mesh> (--operator ed25519:<hex> | <host>[:port]) [--yes] [--json]
+```
+
+**The trust-entry step** — the one thing every machine but the operator's own
+does to enter a charter mesh ([[HTTPS-Mesh-API]] "Charters", step 4).
+
+- **`--operator <key>`** records the operator line in state
+  (`state/mesh/<mesh>/trust.json`) and nothing else: **never `config.toml`**,
+  because `[mesh.<name>] operator` is a key the pre-P-CHARTER binary refuses
+  to parse, and a machine that rolls back to it must still be able to read its
+  own config. A machine that already trusts a DIFFERENT key for the mesh is
+  refused, naming `reroot` — replacing a mesh's root is the operator's
+  decision, never a typo's.
+- **`<host>`** runs the one local-network ceremony: it asks the operator's
+  machine for the operator key and the charter in force
+  (`aoide/charterFetch`), prints the key's fingerprint and the charter's
+  version for the operator to compare with what the operator's own machine
+  shows, then records the key and applies the charter. `--yes` skips that
+  comparison, which is the whole trust step here — this is a first-use
+  ceremony, and its authority is the human check, never the transport.
+- **LAN only, and the rule is portable.** The peer must be a private (`10/8`,
+  `172.16/12`, `192.168/16`, `fc00::/7`) or link-local (`169.254/16`,
+  `fe80::/10`) address. **Loopback is refused**, and that is the point: a
+  relayed forward and an ssh tunnel both arrive as loopback, so admitting
+  loopback would admit every relay. The rule is a property of the ADDRESS and
+  nothing else — no interface table, no route lookup, no `/proc`, no per-OS
+  branch — so the same peer is admitted or refused identically everywhere.
+  The cost, stated: a same-LAN box reached *through* a tunnel, and a tailnet
+  or VPS-mediated peer, are refused here — both have non-LAN paths
+  (`--operator`, `mesh charter accept`).
+- **Writes:** `state/mesh/<mesh>/trust.json` (and, on the LAN arm, the
+  charter in force under `state/mesh/<mesh>/`). **No `state/nodes.json` entry
+  is ever created** — the charter is the mesh's node list, and a join is not a
+  pairing.
+- **Output:** the mesh, the operator key and its fingerprint, and the charter
+  version applied. `--json` emits
+  `{"mesh", "operator", "fingerprint", "charter": {"version", "nodes",
+  "rekeyed": [...]}}`.
+
 ### aoide mesh pair
 
 ```

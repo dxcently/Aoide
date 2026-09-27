@@ -1173,6 +1173,22 @@ sameOperator = true
 sakaki = "ssh://khoa@192.168.1.202"
 ```
 
+**Rollback safety: nothing core ships writes a P-CHARTER key into this file by
+default.** `[pairing] homeMesh` and `[mesh.<name>] operator` are keys the
+pre-P-CHARTER binary refuses to PARSE (`TOML parse error … unknown field
+'homeMesh'`, measured against the deployed 0.0.25), so a machine that takes a
+charter, joins a mesh, migrates its registry or runs any other default path
+must come out of it with a `config.toml` the older binary can still read.
+Every one of those paths writes STATE instead — `mesh join --operator` records
+the operator key in `state/mesh/<mesh>/trust.json` (`charter::trust_operator`),
+never in the config, and a LAN join records the same key the same way — so a
+rollback is a binary swap, not a config edit. The keys ARE written when an
+operator sets them explicitly (`aoide config set pairing.homeMesh …`, or by
+hand for the nix-rendered `[mesh.<name>] operator` line), which is the one
+documented way to opt in, and the one thing a rollback has to know about.
+`cli/tests/node_connectivity.rs::no_default_path_writes_a_key_the_deployed_binary_refuses`
+drives those paths and asserts it.
+
 - `pairing.defaultGrant` (list of strings, default `["read"]`) — the
   capability set a node is granted when it FIRST becomes verified. The
   vocabulary IS §7's own closed node-capability set
@@ -7092,6 +7108,23 @@ a permanent refusal by flipping one unsigned byte. P-M4's transit is where
 a hop's `mesh` is checked, at the hop, against the zone clause. A request
 that names no mesh (a pre-charter peer) is evaluated in `[pairing]
 homeMesh`.
+
+**`aoide/charterFetch` (P-CHARTER) — the LAN join's one read.** `params` is
+`{ "mesh": "<name>" }`; the result is
+`{ "mesh", "version", "operator": "<bare hex>", "charter": "<base64>", "sig":
+"<base64>" }` — the operator PUBLIC key and the charter in force, both public
+material, so the method carries no bearer and no signature, exactly like
+`aoide/pairRequest`'s bootstrap answer. **Its access rule is the portable
+local-network guard**: the observed peer address must be private (`10/8`,
+`172.16/12`, `192.168/16`, `fc00::/7`) or link-local (`169.254/16`,
+`fe80::/10`), and loopback is REFUSED — a relayed forward and an ssh tunnel
+both arrive as loopback here, so admitting loopback would admit every relay.
+A refused peer is `-32007` with a taught message naming the non-LAN paths
+(`mesh join <mesh> --operator <key>`, `mesh charter accept <file>`); a mesh
+this machine has no charter for is its own refusal. The rule is a property of
+the ADDRESS alone (`charter::is_local_network`) — no interface table, no
+route lookup, no `/proc`, no per-OS branch — so the same peer is admitted or
+refused identically on every platform this crate builds on.
 
 **Where the grant COMES FROM (P-CHARTER).** `a2a::grant_in_mesh` has two
 sources and picks one at one place:
