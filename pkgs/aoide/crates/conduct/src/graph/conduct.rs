@@ -1,58 +1,35 @@
-//! `aoide conduct` — the PTY-backed, controllable conducted session: its
-//! own PTY + controlling tty, a per-session injection socket, and the raw
-//! `poll()` multiplexer that shuttles stdin/stdout/injections. The unsafe libc
-//! here is confined to `spawn_on_pty`, the raw-mode guard, the winsize
-//! ioctls, and the multiplexer; each is documented where the ordering
-//! matters.
+//! `aoide conduct` — the controllable conducted session: a child spawned onto
+//! a terminal, a per-session injection socket `send` types into, and the
+//! multiplexer that shuttles stdin/stdout/injections between them. The
+//! capability itself — the terminal, this process's real console, the
+//! injection inbox and the one readiness wait — lives in `super::pty`, one
+//! seam with an arm per host; nothing here names an fd, a signal or a
+//! `HANDLE`.
 //!
-//! **`allow(dead_code)` on native Windows, stated once instead of marked
-//! item-by-item.** The refused PTY capability (see "the PTY capability" below)
-//! leaves its whole support cluster unreachable on that host — the `proc_*`
-//! readers, the shell snapshot/restore pair, the typed-line buffer, the
-//! session-stamp helpers this file no longer calls — and `#[cfg(unix)]` on each
-//! of them would be churn the ConPTY slice (W5) un-does the moment it lands.
-//! The allowance is therefore scoped to `cfg(windows)` on THIS module: there, a
-//! dead-code warning is a fact about a refused capability, not about the code —
-//! the PTY cluster is unreachable because the capability is refused BY NAME, so
-//! nothing genuinely dead can hide behind this on Unix, which keeps every
-//! warning it had.
-#![cfg_attr(windows, allow(dead_code))]
+//! What is left in this file is registration and policy: spawn FIRST so a
+//! failed exec registers no ghost, the roster upsert and its stamps, the log
+//! tee, the shell tick, and the end vocabulary (`exit`/`signal`/`timeout`/
+//! `stopped`) derived ONLY from the status this process observed.
 
 use super::doc::restage_graph;
 use super::model::{
     canonical_state, load_stage, sessions_path, write_stage, RestoreSnapshot, SessionRecord,
     SessionsFile, STAGE_GRAPH_VERSION,
 };
-// The PTY capability's own imports, `#[cfg(unix)]` with it: each names
-// something only the conducted session's Unix arm calls — the `UnixStream`
-// peer read, the registration stamps, phase-② window discovery, the session
-// log's directory and clock, the node-origin gate `session_conduct` applies,
-// and the `json!` bodies it builds. Marked rather than left as
-// `allow(unused_imports)` so the Unix build keeps every warning it had.
+use super::pty::{spawn_on_pty, wait_ready, Console, Ended, Inbox, Pty, PtyChild, WinSize};
 #[cfg(unix)]
-use super::identity::peer_cred;
-#[cfg(unix)]
+use super::pty::signal_name;
 use super::session_store::{
     do_session_end, do_session_start, set_session_log_path, stamp_headless, stamp_origin,
     stamp_session_exit, stamp_shell, stamp_spawned, stamp_task,
 };
-#[cfg(unix)]
 use super::window::{discover_window_address, resolve_registration_parent};
 use aoide_protocol::Invocation;
 use aoide_protocol::output::Outcome;
-#[cfg(unix)]
 use aoide_storage::attest::is_node_origin;
-#[cfg(unix)]
-use aoide_storage::fs::session_logs_dir;
 use aoide_storage::fs::with_stage_lock;
-#[cfg(unix)]
 use aoide_storage::time::now_iso_utc;
-#[cfg(unix)]
 use serde_json::json;
-#[cfg(unix)]
-use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
-#[cfg(unix)]
-use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 
 /// The command's basename (the agent-name default), e.g. `/usr/bin/claude` →
@@ -319,123 +296,14 @@ pub fn channel_socket_path(id: &str) -> PathBuf {
     aoide_storage::runtime_dir::socket_dir().join(format!("channel-{id}.sock"))
 }
 
-// ── the PTY capability: Unix only, and that is a REFUSAL on native Windows ──
+// ── the PTY capability lives in `super::pty` ─────────────────────────────
 //
-// Everything from here to `session_conduct`'s own `#[cfg(not(unix))]` twin is
-// the interactive/headless conduct channel, and all of it is built on a
-// CONTROLLING TTY: `openpty` + `setsid` + `TIOCSCTTY` + `dup2` to spawn, a raw
-// `poll()` loop over the master fd and two injection sockets to multiplex, and
-// termios/winsize ioctls to keep the wrapped TUI honest. Native Windows has no
-// such object; the equivalent is ConPTY (`CreatePseudoConsole`), which no call
-// in this tree makes — so this is a missing CAPABILITY, not a `cfg` branch, and
-// the honest answer there is the named refusal below rather than a silent
-// stub, a pipes-only pretend-tty, or an unverified second discovery path.
-// `docs/architecture/CORE-POSIX.md`'s "PTY / controlling tty" row carries the
-// reasoning and the next layer.
+// The terminal the child is spawned onto, this process's real console and its
+// resize source, the injection inbox, and the one readiness wait are the seam
+// in `super::pty` — an arm per host behind one contract, with the host
+// differences named there in a table rather than discovered here. This file
+// multiplexes over that seam and owns the policy around it.
 
-// SIGWINCH latch: the handler only flips a flag (async-signal-safe); the poll
-// loop services it (re-reading the real tty size and pushing it to the master).
-#[cfg(unix)]
-static WINCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-#[cfg(unix)]
-extern "C" fn on_winch(_sig: libc::c_int) {
-    WINCH.store(true, std::sync::atomic::Ordering::SeqCst);
-}
-
-/// Install the SIGWINCH handler WITHOUT `SA_RESTART`, so a resize interrupts
-/// `poll()` (returns `EINTR`) and the loop can propagate the new size promptly.
-#[cfg(unix)]
-fn install_winch_handler() {
-    unsafe {
-        let mut sa: libc::sigaction = std::mem::zeroed();
-        sa.sa_sigaction = on_winch as *const () as libc::sighandler_t;
-        libc::sigemptyset(&mut sa.sa_mask);
-        sa.sa_flags = 0;
-        libc::sigaction(libc::SIGWINCH, &sa, std::ptr::null_mut());
-    }
-}
-
-/// The current window size of a tty fd, or `None` when it is not a terminal
-/// (a pipe / redirected stdin in a test) or reports a zero geometry.
-#[cfg(unix)]
-fn tty_winsize(fd: RawFd) -> Option<libc::winsize> {
-    let mut ws: libc::winsize = unsafe { std::mem::zeroed() };
-    let rc = unsafe { libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws as *mut libc::winsize) };
-    if rc == 0 && (ws.ws_row != 0 || ws.ws_col != 0) {
-        Some(ws)
-    } else {
-        None
-    }
-}
-
-/// Push a window size onto the pty master (TIOCSWINSZ → the child sees SIGWINCH).
-#[cfg(unix)]
-fn set_winsize(master: RawFd, ws: &libc::winsize) {
-    unsafe {
-        libc::ioctl(master, libc::TIOCSWINSZ, ws as *const libc::winsize);
-    }
-}
-
-/// RAII raw-mode guard for the REAL controlling tty. `enter` saves the current
-/// termios and switches to raw (so the wrapped TUI gets keystrokes unbuffered,
-/// unechoed, and Ctrl-C flows to it as a byte instead of a signal). Drop —
-/// which runs on normal return AND on unwind (panic=unwind) — restores it, so no
-/// exit path can leave a wedged terminal. When the fd is not a tty (a test / a
-/// pipe) the guard is inert: conduct still runs, it just touches no terminal.
-#[cfg(unix)]
-struct TtyRaw {
-    fd: RawFd,
-    saved: libc::termios,
-    active: bool,
-}
-#[cfg(unix)]
-impl TtyRaw {
-    fn enter(fd: RawFd) -> Self {
-        unsafe {
-            let mut saved: libc::termios = std::mem::zeroed();
-            if libc::isatty(fd) != 1 || libc::tcgetattr(fd, &mut saved) != 0 {
-                return TtyRaw {
-                    fd,
-                    saved,
-                    active: false,
-                };
-            }
-            let mut raw = saved;
-            libc::cfmakeraw(&mut raw);
-            let _ = libc::tcsetattr(fd, libc::TCSANOW, &raw);
-            TtyRaw {
-                fd,
-                saved,
-                active: true,
-            }
-        }
-    }
-    fn restore(&mut self) {
-        if self.active {
-            unsafe {
-                libc::tcsetattr(self.fd, libc::TCSANOW, &self.saved);
-            }
-            self.active = false;
-        }
-    }
-}
-#[cfg(unix)]
-impl Drop for TtyRaw {
-    fn drop(&mut self) {
-        self.restore();
-    }
-}
-
-/// Open a PTY and spawn `program args` on the SLAVE as a fresh session that owns
-/// the slave as its controlling terminal. Returns the (reapable) child plus the
-/// MASTER fd (owned, so it closes on every drop path).
-///
-/// The child's `pre_exec` ordering is load-bearing and each step is a raw libc
-/// call (async-signal-safe): `setsid()` starts a new session with NO controlling
-/// tty; `ioctl(slave, TIOCSCTTY)` then acquires the slave as this session's ctty
-/// (only a session leader without a ctty may do this — hence setsid FIRST); the
-/// slave is dup'd over fds 0/1/2 so the child's std streams ARE the pty; and the
-/// master + spare slave fd are closed in the child. All of this precedes exec.
 /// The managed-task context a `conduct` run carries into its own child: the
 /// task slug and the absolute path of the write-once instruction sidecar
 /// (`spawn --task`, `docs/Aoide-Wiki/concepts/orchestration/
@@ -457,9 +325,12 @@ pub(in crate::graph) struct TaskContext {
 /// reads: `AOIDE_TASK` names its task slug and child inbox, while
 /// `AOIDE_TASK_INSTRUCTIONS` names the absolute path of its write-once
 /// instruction sidecar. Set beside the long-standing
-/// `AOIDE_SESSION_ID` export, nothing removed, nothing else added.
-const CHILD_TASK_ENV: &str = "AOIDE_TASK";
-const CHILD_TASK_INSTRUCTIONS_ENV: &str = "AOIDE_TASK_INSTRUCTIONS";
+/// `AOIDE_SESSION_ID` export ([`CHILD_SESSION_ENV`]), nothing removed,
+/// nothing else added. `pub(in crate::graph)` because the seam that exec's the
+/// child names them (`super::pty`), once per host.
+pub(in crate::graph) const CHILD_SESSION_ENV: &str = "AOIDE_SESSION_ID";
+pub(in crate::graph) const CHILD_TASK_ENV: &str = "AOIDE_TASK";
+pub(in crate::graph) const CHILD_TASK_INSTRUCTIONS_ENV: &str = "AOIDE_TASK_INSTRUCTIONS";
 
 /// Drop every harness session marker from `cmd`'s environment before exec
 /// ([`aoide_protocol::agents::session_env_markers`]): the variables that say
@@ -470,112 +341,20 @@ const CHILD_TASK_INSTRUCTIONS_ENV: &str = "AOIDE_TASK_INSTRUCTIONS";
 /// servers carried by that marker, which is the doorbell channel
 /// (`TASK-REGISTER.md` §3).
 ///
-/// ONE place, because there is ONE place an agent child is exec'd
+/// ONE list, because there is ONE place an agent child is exec'd
 /// ([`spawn_on_pty`]): `spawn`'s headless and windowed arms, plain `conduct`,
 /// `resurrect`'s reopen and the A2A door's remote child all reach an agent
 /// through it. The aoide parent edge is untouched by construction —
 /// `AOIDE_SESSION_ID` is not a harness marker, and `spawn_on_pty` exports the
-/// child's own value a line above this call.
-fn scrub_session_markers(cmd: &mut std::process::Command) {
+/// child's own value a line above this call. Unix's own shape: native Windows
+/// takes a `Command`-shaped environment nowhere — `CreateProcessW` is handed a
+/// block — so that arm applies the same list while BUILDING the block
+/// (`super::pty`'s `environment_block`), and this `Command`-shaped helper has
+/// no caller there.
+#[cfg(unix)]
+pub(in crate::graph) fn scrub_session_markers(cmd: &mut std::process::Command) {
     for name in aoide_protocol::agents::session_env_markers() {
         cmd.env_remove(name);
-    }
-}
-
-#[cfg(unix)]
-fn spawn_on_pty(
-    program: &str,
-    args: &[String],
-    session_id: &str,
-    ws: Option<libc::winsize>,
-    task: Option<&TaskContext>,
-) -> std::io::Result<(std::process::Child, OwnedFd)> {
-    use std::os::unix::process::CommandExt;
-
-    let mut master: RawFd = -1;
-    let mut slave: RawFd = -1;
-    let wsp = ws
-        .as_ref()
-        .map(|w| w as *const libc::winsize)
-        .unwrap_or(std::ptr::null());
-    let rc = unsafe {
-        libc::openpty(
-            &mut master,
-            &mut slave,
-            std::ptr::null_mut(),
-            std::ptr::null(),
-            wsp,
-        )
-    };
-    if rc != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    // Own the master at once: it is now closed on any early return / on drop.
-    let master_owned = unsafe { OwnedFd::from_raw_fd(master) };
-
-    let slave_fd = slave;
-    let master_fd = master;
-    let mut cmd = std::process::Command::new(program);
-    cmd.args(args).env("AOIDE_SESSION_ID", session_id);
-    scrub_session_markers(&mut cmd);
-    if let Some(task) = task {
-        cmd.env(CHILD_TASK_ENV, &task.slug);
-        if let Some(path) = &task.instructions_path {
-            cmd.env(CHILD_TASK_INSTRUCTIONS_ENV, path);
-        }
-    }
-    unsafe {
-        cmd.pre_exec(move || {
-            if libc::setsid() == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            if libc::ioctl(slave_fd, libc::TIOCSCTTY, 0) == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            for target in 0..3 {
-                if libc::dup2(slave_fd, target) == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-            }
-            libc::close(master_fd);
-            if slave_fd > 2 {
-                libc::close(slave_fd);
-            }
-            Ok(())
-        });
-    }
-    let spawned = cmd.spawn();
-    // The parent never speaks on the slave — close it whatever spawn returned.
-    unsafe {
-        libc::close(slave);
-    }
-    let child = spawned?;
-    Ok((child, master_owned))
-}
-
-#[cfg(unix)]
-fn pollfd(fd: RawFd, events: libc::c_short) -> libc::pollfd {
-    libc::pollfd {
-        fd,
-        events,
-        revents: 0,
-    }
-}
-
-/// Write every byte of `data` to `fd`, retrying on `EINTR`. A best-effort mirror
-/// helper for the multiplexer (a torn write on abrupt child exit is tolerated).
-#[cfg(unix)]
-fn write_all_fd(fd: RawFd, mut data: &[u8]) {
-    while !data.is_empty() {
-        let n = unsafe { libc::write(fd, data.as_ptr() as *const libc::c_void, data.len()) };
-        if n <= 0 {
-            let err = std::io::Error::last_os_error();
-            if n < 0 && err.raw_os_error() == Some(libc::EINTR) {
-                continue;
-            }
-            break;
-        }
-        data = &data[n as usize..];
     }
 }
 
@@ -587,19 +366,18 @@ fn write_all_fd(fd: RawFd, mut data: &[u8]) {
 /// `StdoutAndLog` is interactive conduct (task #15, "everything tees"):
 /// the real stdout, unchanged, PLUS the same master-read bytes mirrored
 /// into the per-session log.
-#[cfg(unix)]
 enum OutputSink {
     Stdout,
     Log(std::fs::File),
     StdoutAndLog(std::fs::File),
 }
-#[cfg(unix)]
 impl OutputSink {
-    /// Mirror `bytes` to the sink. The `Stdout` arm is exactly today's
-    /// `write_all_fd(stdout_fd, …)` call. The `Log`/`StdoutAndLog` log
-    /// write appends (retrying a short write, same as `write_all_fd`'s own
+    /// Mirror `bytes` to the sink. The `Stdout` arm writes this process's own
+    /// stdout (`std::io`'s portable handle, retrying a short write). The
+    /// `Log`/`StdoutAndLog` log
+    /// write appends (retrying a short write, same as `write_all`'s own
     /// retry loop) and, on a write error, DEGRADES rather than killing the
-    /// session — mirroring `write_all_fd` itself, which just stops
+    /// session — mirroring `write_all` itself, which just stops
     /// mirroring on an unrecoverable write error instead of tearing down
     /// the conducted child. This matters most for `StdoutAndLog`: the
     /// interactive pump is raw-mode and latency-sensitive, so a full disk
@@ -607,16 +385,18 @@ impl OutputSink {
     /// only the log side of the tee drops.
     fn write(&mut self, bytes: &[u8]) {
         match self {
-            OutputSink::Stdout => write_all_fd(libc::STDOUT_FILENO, bytes),
+            OutputSink::Stdout => Self::write_stdout(bytes),
             OutputSink::Log(f) => Self::write_log(f, bytes),
             OutputSink::StdoutAndLog(f) => {
-                write_all_fd(libc::STDOUT_FILENO, bytes);
+                Self::write_stdout(bytes);
                 Self::write_log(f, bytes);
             }
         }
     }
-    fn write_log(f: &mut std::fs::File, bytes: &[u8]) {
-        use std::io::Write as _;
+    fn write_stdout(bytes: &[u8]) {
+        super::pty::write_stdout(bytes);
+    }
+    fn write_log(f: &mut impl std::io::Write, bytes: &[u8]) {
         let mut data = bytes;
         while !data.is_empty() {
             match f.write(data) {
@@ -633,26 +413,21 @@ impl OutputSink {
 /// `state/sessions/<id>.log`, the ONE open+stamp path both the headless and
 /// interactive arms of [`session_conduct`] call — never duplicated per
 /// path. Private end to end and structurally so, not by umask luck: the
-/// directory is force-set to `0700` and the file opened with an explicit
-/// `0600` mode via `OpenOptionsExt`, so a permissive umask (e.g. `0000`)
-/// can never widen either past what the ruling requires (task #15: local,
-/// private, no opt-out flag). Returns `None` on any failure (an unwritable
-/// state dir, a permissions call that errors, …) — the caller degrades to
-/// `OutputSink::Stdout` on `None`, same best-effort posture as every other
-/// side-channel write in this file.
-#[cfg(unix)]
+/// directory is locked down and the file opened through the crate's own
+/// private-create seams (`storage::fs::secure_private_dir` /
+/// `open_private_append`), which on Unix means `0700` + an explicit `0600`
+/// mode — so a permissive umask (e.g. `0000`) can never widen either past what
+/// the ruling requires (task #15: local, private, no opt-out flag) — and on
+/// native Windows means the owner-only DACL attached at creation and read
+/// back. Returns `None` on any failure (an unwritable state dir, a
+/// permissions call that errors, a filesystem that will not keep the policy)
+/// — the caller degrades to `OutputSink::Stdout` on `None`, same best-effort
+/// posture as every other side-channel write in this file.
 fn open_session_log(id: &str) -> Option<(std::fs::File, PathBuf)> {
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-    let dir = session_logs_dir();
-    std::fs::create_dir_all(&dir).ok()?;
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).ok()?;
+    let dir = aoide_storage::fs::session_logs_dir();
+    aoide_storage::fs::secure_private_dir(&dir).ok()?;
     let log_path = dir.join(format!("{id}.log"));
-    let f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(&log_path)
-        .ok()?;
+    let f = aoide_storage::fs::open_private_append(&log_path).ok()?;
     Some((f, log_path))
 }
 
@@ -775,7 +550,10 @@ fn proc_command(pid: i32) -> Option<String> {
 /// Pure NUL-split of a raw `/proc/<pid>/cmdline` buffer into argv — split out
 /// of [`proc_command`]/[`proc_argv`] so the split itself is unit-testable
 /// against a synthesized buffer without a real `/proc` read. Empty segments
-/// (a trailing NUL, or two in a row) are dropped.
+/// (a trailing NUL, or two in a row) are dropped. Unix's own shape: the
+/// Windows arm of [`proc_argv`] asks the process-table seam, which re-splits
+/// with that host's own parser.
+#[cfg(unix)]
 fn parse_cmdline(raw: &[u8]) -> Vec<String> {
     raw.split(|b| *b == 0)
         .filter(|p| !p.is_empty())
@@ -1041,26 +819,29 @@ fn restore_snapshot(
     }
 }
 
-/// One conduct-tick refresh for a SHELL session: read the pty's foreground
-/// process group and the live cwd, and push cwd + the current command + the
-/// idle/working state via [`shell_snapshot`], plus the P-C5 restore snapshot
-/// via [`restore_snapshot`]. `typed` comes from `conduct_multiplex`'s own
-/// typed-line buffer (`None` for a headless session, which never reads
-/// stdin) — this function has no access to the keystroke stream itself.
+/// One conduct-tick refresh for a SHELL session: read the child terminal's
+/// foreground process group and the live cwd, and push cwd + the current
+/// command + the idle/working state via [`shell_snapshot`], plus the P-C5
+/// restore snapshot via [`restore_snapshot`]. `typed` comes from
+/// `conduct_multiplex`'s own typed-line buffer (`None` for a headless session,
+/// which never reads stdin) — this function has no access to the keystroke
+/// stream itself.
 ///
-/// Unix only with the rest of the PTY capability: its first fact is
-/// `tcgetpgrp(2)` on a pty MASTER fd, which is the foreground process group of
-/// a controlling tty — an object native Windows does not have (see the module's
-/// own "the PTY capability" note).
-#[cfg(unix)]
+/// The foreground process group comes from the seam
+/// ([`Pty::foreground_pgid`]), which is `tcgetpgrp(2)` on Unix and `0` — "no
+/// foreground command" — on native Windows, where no such group exists. The
+/// live cwd is `proc_cwd`'s, which has its own named refusal there. So a
+/// conducted shell's tick on Windows reports the idle state with the shell's
+/// own process name and the cwd its record stamped at registration, and says
+/// so here rather than pretending to know what is running.
 fn conduct_refresh_shell(
     id: &str,
-    master: RawFd,
+    pty: &Pty,
     shell_pid: i32,
     booster_recent: bool,
     typed: Option<String>,
 ) {
-    let fg = unsafe { libc::tcgetpgrp(master) };
+    let fg = pty.foreground_pgid();
     let cwd = cwd_for(fg, shell_pid, proc_cwd);
     let (state, activity, needs_sudo) = shell_snapshot(
         fg,
@@ -1180,36 +961,6 @@ fn typed_capture_active(is_shell: bool, read_stdin: bool) -> bool {
     is_shell && read_stdin
 }
 
-/// The signal that killed a status, off `ExitStatusExt` (Unix). A status with
-/// no signal has `None` — that is the honest "no exit code" case.
-#[cfg(unix)]
-fn signal_number(status: &std::process::ExitStatus) -> Option<i32> {
-    use std::os::unix::process::ExitStatusExt;
-    status.signal()
-}
-
-/// A signal's conventional name, for the outcome vocabulary's `signal` field
-/// (`"TERM"`, `"KILL"`, …). An unmapped number keeps its number rather than
-/// guessing a name.
-#[cfg(unix)]
-fn signal_name(signo: i32) -> String {
-    match signo {
-        libc::SIGHUP => "HUP",
-        libc::SIGINT => "INT",
-        libc::SIGQUIT => "QUIT",
-        libc::SIGKILL => "KILL",
-        libc::SIGTERM => "TERM",
-        libc::SIGPIPE => "PIPE",
-        libc::SIGALRM => "ALRM",
-        libc::SIGSEGV => "SEGV",
-        libc::SIGABRT => "ABRT",
-        libc::SIGUSR1 => "USR1",
-        libc::SIGUSR2 => "USR2",
-        _ => return format!("signal {signo}"),
-    }
-    .to_string()
-}
-
 /// The wrapper's own END vocabulary — a CLOSED set, derived ONLY from the
 /// status THIS process observed and its own wall-clock deadline:
 /// `exit` (with a real code), `signal` (the agent died by a signal — no code,
@@ -1217,11 +968,11 @@ fn signal_name(signo: i32) -> String {
 /// or killed outside the wrapper). Pure, so every row is a table test. Nothing
 /// here reads a harness trace, which is what makes the wrapper's
 /// error/timeout/completion reporting independent of the ping-back path.
-#[cfg(unix)]
-fn classify_end(
-    timed_out: bool,
-    status: Option<&std::process::ExitStatus>,
-) -> (String, Option<String>, Option<i32>) {
+///
+/// The status arrives as the seam's own [`Ended`], so this one table serves
+/// both hosts; `signal` is Unix's alone, because no other host has signals to
+/// be killed by.
+fn classify_end(timed_out: bool, status: Option<Ended>) -> (String, Option<String>, Option<i32>) {
     if timed_out {
         // The wrapper's kill is the WRAPPER's act, not the child's exit: no
         // exit code is claimed for it (the post-kill status travels
@@ -1229,36 +980,11 @@ fn classify_end(
         return ("timeout".to_string(), None, None);
     }
     match status {
-        Some(st) => match signal_number(st) {
-            Some(signo) => ("signal".to_string(), Some(signal_name(signo)), None),
-            None => match st.code() {
-                Some(code) => ("exit".to_string(), None, Some(code)),
-                None => ("stopped".to_string(), None, None),
-            },
-        },
-        None => ("stopped".to_string(), None, None),
+        #[cfg(unix)]
+        Some(Ended::Signal(signo)) => ("signal".to_string(), Some(signal_name(signo)), None),
+        Some(Ended::Code(code)) => ("exit".to_string(), None, Some(code)),
+        Some(Ended::Unknown) | None => ("stopped".to_string(), None, None),
     }
-}
-
-/// Whether the master reports ANY readable byte right now (a zero-timeout
-/// `poll`) — used to drain what a just-exited child already wrote before the
-/// loop stops.
-#[cfg(unix)]
-fn master_has_data(master: RawFd) -> bool {
-    let mut fds = [pollfd(master, libc::POLLIN)];
-    let rc = unsafe { libc::poll(fds.as_mut_ptr(), 1, 0) };
-    rc > 0 && (fds[0].revents & libc::POLLIN) != 0
-}
-
-/// Is every holder of the PTY slave gone? The master reports `POLLHUP` once
-/// the last slave fd closes and nothing else — which is exactly the "no
-/// descendant is holding the terminal" fact, recorded when a child exits while
-/// a descendant still owns the slave.
-#[cfg(unix)]
-fn pty_hung_up(master: RawFd) -> bool {
-    let mut fds = [pollfd(master, libc::POLLIN)];
-    let rc = unsafe { libc::poll(fds.as_mut_ptr(), 1, 0) };
-    rc > 0 && (fds[0].revents & libc::POLLHUP) != 0
 }
 
 /// Where the multiplex loop ended: whether the wrapper's own deadline fired,
@@ -1267,50 +993,56 @@ fn pty_hung_up(master: RawFd) -> bool {
 /// only — the post-kill status as SECONDARY evidence (`killedWith`), never
 /// presented as the child's result.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg(unix)]
 struct MultiplexEnd {
     timed_out: bool,
     killed_with: Option<String>,
-    pty_held_after_exit: bool,
+    /// `Some(true)` only where the host could answer the question and the
+    /// answer was "a descendant still holds the terminal"; `None` where it
+    /// cannot (see `Pty::hung_up`), so a host that cannot answer never has a
+    /// guessed fact stamped into every run's outcome.
+    pty_held_after_exit: Option<bool>,
 }
 
-/// The single-thread `poll()` multiplexer. Shuttles: real stdin → master (you
-/// type normally), master → real stdout (you read normally), and each accepted
-/// injection connection → master (INJECTION). A pending SIGWINCH re-sizes the
-/// master. Returns HOW it ended ([`MultiplexEnd`]); the caller reads the
-/// child's real status off the cached `ExitStatus`.
-#[cfg(unix)]
+/// The single-thread multiplexer. Shuttles: real stdin → terminal (you type
+/// normally), terminal → real stdout (you read normally), and every byte an
+/// injection connection delivers → terminal (INJECTION). A resize the host
+/// reports re-sizes the child's terminal. Returns HOW it ended
+/// ([`MultiplexEnd`]); the caller reads the child's real status off the seam's
+/// cached [`Ended`].
+///
+/// Every fd, signal and handle this loop touches is behind `super::pty`'s
+/// seam, so the loop itself is one function on both hosts: it asks
+/// [`wait_ready`] which of its three inputs is readable, services them, and
+/// ticks.
 fn conduct_multiplex(
-    master: RawFd,
-    listener: Option<&UnixListener>,
-    child: &mut std::process::Child,
+    pty: &mut Pty,
+    console: &mut Console,
+    mut inbox: Option<&mut Inbox>,
+    child: &mut PtyChild,
     id: &str,
     is_shell: bool,
     read_stdin: bool,
     sink: &mut OutputSink,
     deadline: Option<std::time::Instant>,
 ) -> MultiplexEnd {
-    use std::sync::atomic::Ordering;
-    let stdin_fd = libc::STDIN_FILENO;
-    let listener_fd = listener.map(|l| l.as_raw_fd());
-    let mut conns: Vec<RawFd> = Vec::new();
-    // Headless: no controlling tty to read from — never push the stdin
-    // pollfd, and start already-EOF so the loop never touches it.
+    // Headless: no controlling tty to read from — the wait is never asked
+    // about stdin, and the flag starts already-EOF so the loop never touches
+    // it.
     let mut stdin_eof = !read_stdin;
     let mut buf = [0u8; 8192];
 
     // Live cwd/command tick for a conducted SHELL. A `tail -f` (or any quiet TUI)
     // never produces I/O, so we can't hang the refresh off output — instead the
-    // poll gets a ~1s timeout and the tick fires on the elapsed clock. Agents
+    // wait gets a ~1s timeout and the tick fires on the elapsed clock. Agents
     // also wake to observe child exit when a descendant keeps the PTY open.
-    let shell_pid = child.id() as i32;
-    let poll_timeout: libc::c_int = 1000;
+    let shell_pid = child.id();
+    const WAIT_TIMEOUT_MS: i32 = 1000;
     let tick_period = std::time::Duration::from_millis(950);
     let mut last_tick = std::time::Instant::now();
     // The sudo-prompt TEXT-SCAN booster: the instant a `[sudo] password for`
-    // prompt is seen crossing master→stdout, latch a timestamp so the next
+    // prompt is seen crossing terminal→stdout, latch a timestamp so the next
     // tick(s) within `SUDO_BOOSTER_WINDOW` treat the shell as sudo-blocked
-    // even if `tcgetpgrp` hasn't caught `sudo` as the foreground pgid yet.
+    // even if the foreground pgid read hasn't caught `sudo` yet.
     let mut sudo_prompt_seen_at: Option<std::time::Instant> = None;
     const SUDO_BOOSTER_WINDOW: std::time::Duration = std::time::Duration::from_secs(2);
     // P-C5: the typed-line buffer only exists for an interactive shell — a
@@ -1323,7 +1055,7 @@ fn conduct_multiplex(
     };
     if is_shell {
         let typed = typed_buf.as_ref().and_then(|b| b.typed());
-        conduct_refresh_shell(id, master, shell_pid, false, typed); // stamp initial cwd/state now.
+        conduct_refresh_shell(id, pty, shell_pid, false, typed); // stamp initial cwd/state now.
     }
 
     let mut timed_out = false;
@@ -1332,22 +1064,30 @@ fn conduct_multiplex(
     // finished run "running" — nor make the deadline fire on a child that
     // exited long ago.
     let mut child_exited = false;
-    let mut pty_held_after_exit = false;
+    let mut pty_held_after_exit: Option<bool> = None;
+    let mut exited_at: Option<std::time::Instant> = None;
     loop {
         // Nothing left to read from a child that has already exited: stop.
         // (Reached only after every readable byte was serviced, so a finished
-        // child's last output is never lost.)
-        if child_exited && !master_has_data(master) {
-            break;
-        }
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                if !child_exited {
-                    child_exited = true;
-                    pty_held_after_exit = !pty_hung_up(master);
-                }
+        // child's last output is never lost.) The seam says how long "nothing
+        // readable right now" must hold before that is believed — a pty's
+        // buffered output is already in the master, while a pseudo console
+        // renders on its own pipeline and can still be a beat behind.
+        if child_exited && !pty.has_output() {
+            let settled =
+                exited_at.is_none_or(|at| at.elapsed() >= pty.after_exit_settle());
+            if settled {
+                break;
             }
-            _ => {}
+        }
+        if child.exited() && !child_exited {
+            child_exited = true;
+            exited_at = Some(std::time::Instant::now());
+            // The host's own answer, kept as an Option: a host that cannot ask
+            // "is a descendant still holding the terminal" contributes NOTHING
+            // rather than a default, so `ptyHeldAfterExit` appears only where
+            // it is a fact.
+            pty_held_after_exit = pty.hung_up().map(|hung| !hung);
         }
         // A6: the wrapper's own WALL-CLOCK deadline — but a child that has
         // ALREADY exited is finished, never "timed out": the deadline is
@@ -1358,287 +1098,138 @@ fn conduct_multiplex(
             timed_out = true;
             break;
         }
-        // Service a pending resize before blocking again.
-        if WINCH.swap(false, Ordering::SeqCst) {
-            if let Some(ws) = tty_winsize(stdin_fd) {
-                set_winsize(master, &ws);
-            }
+        // Service a pending resize before blocking again: a SIGWINCH latch
+        // re-read on Unix, the console's own size compared on Windows.
+        if let Some(ws) = console.resized() {
+            pty.resize(&ws);
         }
 
-        let mut fds: Vec<libc::pollfd> = Vec::new();
-        if !stdin_eof {
-            fds.push(pollfd(stdin_fd, libc::POLLIN));
-        }
-        fds.push(pollfd(master, libc::POLLIN));
-        if let Some(lfd) = listener_fd {
-            fds.push(pollfd(lfd, libc::POLLIN));
-        }
-        for &c in &conns {
-            fds.push(pollfd(c, libc::POLLIN));
-        }
-
-        // Bounded wait: `min(remaining, poll_timeout)`, checked on both sides —
+        // Bounded wait: `min(remaining, wait_timeout)`, checked on both sides —
         // a huge `--timeout` can neither overflow into a negative (blocking)
         // wait nor spin, and a conducted shell's own ~1s tick still applies.
         // Once the child has exited the wait is zero, so the loop only drains
         // what is already there and stops.
-        let wait_ms: libc::c_int = if child_exited {
+        let wait_ms: i32 = if child_exited {
             0
         } else {
             match deadline {
                 Some(d) => {
                     let remaining = d.saturating_duration_since(std::time::Instant::now());
                     let ms = remaining.as_millis().min(i32::MAX as u128) as i32;
-                    if poll_timeout < 0 {
-                        ms.max(1)
-                    } else {
-                        poll_timeout.min(ms.max(1))
-                    }
+                    WAIT_TIMEOUT_MS.min(ms.max(1))
                 }
-                None => poll_timeout,
+                None => WAIT_TIMEOUT_MS,
             }
         };
-        let rc = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, wait_ms) };
-        if rc < 0 {
-            let err = std::io::Error::last_os_error();
-            if err.raw_os_error() == Some(libc::EINTR) {
-                continue; // a signal (SIGWINCH) — reloop to service the latch.
-            }
-            break;
-        }
+        let ready = wait_ready(pty, console, inbox.as_deref(), !stdin_eof, wait_ms);
         // Refresh the conducted shell's live cwd/command/state on the ~1s clock
-        // (rc==0 is a plain timeout; a busy shell also ticks at most this often).
+        // (a plain timeout also ticks; a busy shell ticks at most this often).
         if is_shell && last_tick.elapsed() >= tick_period {
             let booster_recent = sudo_prompt_seen_at
                 .map(|t| t.elapsed() < SUDO_BOOSTER_WINDOW)
                 .unwrap_or(false);
             let typed = typed_buf.as_ref().and_then(|b| b.typed());
-            conduct_refresh_shell(id, master, shell_pid, booster_recent, typed);
+            conduct_refresh_shell(id, pty, shell_pid, booster_recent, typed);
             last_tick = std::time::Instant::now();
         }
 
-        let revents = |want: RawFd| -> libc::c_short {
-            fds.iter()
-                .find(|p| p.fd == want)
-                .map(|p| p.revents)
-                .unwrap_or(0)
-        };
-
-        // master → stdout, and hangup detection (the child's slave closed).
-        let mrev = revents(master);
-        if mrev & libc::POLLIN != 0 {
-            let n =
-                unsafe { libc::read(master, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
-            if n > 0 {
-                let n = n as usize;
-                // Booster text-scan: shells only, a cheap byte-substring search
-                // (never a String allocation of the whole buffer) over exactly
-                // what was just read, gated to a line-start match.
-                if is_shell && scan_for_sudo_prompt(&buf[..n]) {
-                    sudo_prompt_seen_at = Some(std::time::Instant::now());
+        // child terminal → stdout, and EOF (every holder of the slave gone).
+        if ready.master {
+            match pty.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    // Booster text-scan: shells only, a cheap byte-substring search
+                    // (never a String allocation of the whole buffer) over exactly
+                    // what was just read, gated to a line-start match.
+                    if is_shell && scan_for_sudo_prompt(&buf[..n]) {
+                        sudo_prompt_seen_at = Some(std::time::Instant::now());
+                    }
+                    sink.write(&buf[..n]);
+                    // A byte that arrived is the settle window's own reset: it
+                    // is quiet, not the clock, that ends a drain.
+                    if child_exited {
+                        exited_at = Some(std::time::Instant::now());
+                    }
                 }
-                sink.write(&buf[..n]);
-            } else {
-                break;
+                // A readiness that turned out to be nothing is not an end; a
+                // hard read error is.
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(_) => break,
             }
-        }
-        if mrev & (libc::POLLHUP | libc::POLLERR) != 0 {
-            let n =
-                unsafe { libc::read(master, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
-            if n > 0 {
-                sink.write(&buf[..n as usize]);
-            }
-            break;
         }
 
-        // real stdin → master.
-        if !stdin_eof {
-            let srev = revents(stdin_fd);
-            if srev & libc::POLLIN != 0 {
-                let n = unsafe {
-                    libc::read(stdin_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
-                };
-                if n > 0 {
-                    let n = n as usize;
+        // real stdin → child terminal.
+        if ready.stdin && !stdin_eof {
+            match console.read(&mut buf) {
+                Ok(0) => stdin_eof = true, // our own stdin closed; keep bridging the rest.
+                Ok(n) => {
                     if let Some(tb) = typed_buf.as_mut() {
                         tb.feed(&buf[..n]);
                     }
-                    write_all_fd(master, &buf[..n]);
-                } else {
-                    stdin_eof = true; // our own stdin closed; keep bridging the rest.
+                    pty.write(&buf[..n]);
                 }
-            } else if srev & (libc::POLLHUP | libc::POLLERR) != 0 {
-                stdin_eof = true;
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(_) => stdin_eof = true,
             }
         }
 
-        // listener → accept new injection connections.
-        if let (Some(lfd), Some(l)) = (listener_fd, listener) {
-            if revents(lfd) & libc::POLLIN != 0 {
-                loop {
-                    match l.accept() {
-                        Ok((stream, _)) => {
-                            // LANE IDENTITY P-ID2 (`CONTRACTS.md`'s identity
-                            // section; review round 1 MUST-FIX — the FIRST
-                            // shape of this check refused any connection
-                            // whose ancestry merely CONTAINED this
-                            // session's own pid anywhere upstream, which
-                            // silently broke the single most common flow:
-                            // `session_conduct` registers WITHOUT
-                            // detaching, so a legitimate CHILD session's
-                            // pid is a genuine OS descendant of its
-                            // parent's registered pid, and a child sending
-                            // to its own live parent via `aoide send --id
-                            // <parent> --yes` was dropped downstream of the
-                            // gate with a bare broken pipe `--yes` cannot
-                            // route around). Read `SO_PEERCRED` on the
-                            // CONNECTING stream and refuse it outright —
-                            // never forwarded to `conns`, never touches the
-                            // pty — ONLY when the CONNECTOR's OWN nearest
-                            // live registered session (`identity::
-                            // is_self_originated`'s own doc: the same
-                            // nearest-first walk `attested_sender` uses,
-                            // without seal verification — a narrow
-                            // UX/loop defense, not the security boundary
-                            // the raw same-uid socket door already is,
-                            // OQ1-A/P-ID3) resolves to THIS session's own
-                            // id — true self-injection, never a nested
-                            // child whose OWN nearest session is itself.
-                            // Both a `peer_cred` failure and an
-                            // unresolvable connector fail OPEN (allowed) —
-                            // this guard only ever refuses the one narrow,
-                            // known shape it exists to catch.
-                            let self_injection = peer_cred(&stream)
-                                .map(|cred| {
-                                    let sessions = load_stage::<SessionsFile>(&sessions_path())
-                                        .map(|f| f.sessions)
-                                        .unwrap_or_default();
-                                    super::identity::is_self_originated(cred.pid, &sessions, id)
-                                })
-                                .unwrap_or(false);
-                            if self_injection {
-                                continue; // dropped outright — never accepted into `conns`.
-                            }
-                            let _ = stream.set_nonblocking(true);
-                            let fd = stream.as_raw_fd();
-                            std::mem::forget(stream); // fd owned raw; closed on drain-EOF below.
-                            conns.push(fd);
-                        }
-                        Err(_) => break, // EAGAIN — no more pending.
-                    }
-                }
-            }
-        }
-
-        // injection connections → master.
-        let mut still: Vec<RawFd> = Vec::new();
-        for &c in &conns {
-            let cr = revents(c);
-            if cr & libc::POLLIN != 0 {
-                let n =
-                    unsafe { libc::read(c, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
-                if n > 0 {
-                    let n = n as usize;
+        // injection connections → child terminal.
+        if ready.inbox {
+            if let Some(inbox) = inbox.as_mut() {
+                for chunk in inbox.drain() {
                     // Injected bytes reach the same readline buffer, but
                     // they are not what anyone TYPED — and a delivered
                     // payload carries its provenance prefix, so replaying
                     // them would preload a line no human composed.
                     if let Some(tb) = typed_buf.as_mut() {
-                        tb.feed_injected(&buf[..n]);
+                        tb.feed_injected(&chunk);
                     }
-                    write_all_fd(master, &buf[..n]);
-                    still.push(c);
-                } else {
-                    unsafe {
-                        libc::close(c);
-                    } // EOF — this injection is done.
+                    pty.write(&chunk);
                 }
-            } else if cr & (libc::POLLHUP | libc::POLLERR) != 0 {
-                loop {
-                    let n =
-                        unsafe { libc::read(c, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
-                    if n > 0 {
-                        let n = n as usize;
-                        if let Some(tb) = typed_buf.as_mut() {
-                            tb.feed_injected(&buf[..n]);
-                        }
-                        write_all_fd(master, &buf[..n]);
-                    } else {
-                        break;
-                    }
-                }
-                unsafe {
-                    libc::close(c);
-                }
-            } else {
-                still.push(c);
             }
         }
-        conns = still;
     }
 
-    for c in conns {
-        unsafe {
-            libc::close(c);
-        }
-    }
-    // A real exit status is read by the CALLER (`std::process::Child` caches
-    // it, so its own `wait` returns the same `ExitStatus` immediately) — this
-    // loop only reports HOW it ended. A deadline kill happens here, on the
-    // DIRECT child this process spawned: never a roster-resolved id, never an
-    // ancestry walk, so no unrelated session can ever be the target. The
-    // post-kill status is kept as `killedWith` — secondary evidence, never the
-    // result.
-    // A deadline kill targets the DIRECT child's OWN PROCESS GROUP: `setsid` in
-    // `spawn_on_pty`'s `pre_exec` already made that child a group leader, so
-    // `killpg(child_pid)` reaches it and whatever job is still in ITS group (an
-    // `sh -c 'sleep 300 &'` background job dies with the group), and can never
-    // reach an unrelated session — the same "never a roster id, never an
-    // ancestry walk" guarantee `Child::kill` carries. A descendant that called
-    // `setsid` for itself left the session BY ITS OWN ACT and is deliberately
-    // NOT signalled: the wrapper cleans up what it started, and the wiki says
-    // exactly that rather than promising arbitrary descendant cleanup. The
-    // post-kill status is kept as `killedWith` — secondary evidence, never the
-    // result.
+    // A real exit status is read by the CALLER (the seam caches it, so its own
+    // `ended` returns the same value immediately) — this loop only reports HOW
+    // it ended. A deadline kill happens here, on the DIRECT child this process
+    // spawned: never a roster-resolved id, never an ancestry walk, so no
+    // unrelated session can ever be the target. The post-kill status is kept as
+    // `killedWith` — secondary evidence, never the result.
     let killed_with = if timed_out {
-        let pgid = child.id() as i32;
-        if unsafe { libc::killpg(pgid, libc::SIGKILL) } != 0 {
-            let _ = child.kill();
-        }
-        let give_up = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        let mut seen: Option<std::process::ExitStatus> = None;
-        while std::time::Instant::now() < give_up {
-            match child.try_wait() {
-                Ok(Some(st)) => {
-                    seen = Some(st);
-                    break;
-                }
-                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
-                Err(_) => break,
-            }
-        }
-        seen.map(|st| match signal_number(&st) {
-            Some(signo) => format!("signal({})", signal_name(signo)),
-            None => format!("exit({})", st.code().unwrap_or_default()),
-        })
+        child.kill();
+        child
+            .wait_for(std::time::Duration::from_secs(2))
+            .map(|ended| killed_with_label(&ended))
     } else {
         None
     };
+
     MultiplexEnd { timed_out, killed_with, pty_held_after_exit }
 }
 
+/// The `killedWith` label: the post-kill status as SECONDARY evidence, in the
+/// same vocabulary the outcome uses — `signal(KILL)` where the host has
+/// signals, `exit(<code>)` where the kill was a `TerminateProcess` and the
+/// code is therefore this seam's own.
+fn killed_with_label(ended: &Ended) -> String {
+    match ended {
+        #[cfg(unix)]
+        Ended::Signal(signo) => format!("signal({})", signal_name(*signo)),
+        Ended::Code(code) => format!("exit({code})"),
+        _ => "stopped".to_string(),
+    }
+}
+
 /// `aoide conduct [--agent A] [--parent P] [--id I] -- <command …>` — the
-/// PTY-backed, controllable conducted session. Registration semantics
+/// controllable conducted session on a terminal. Registration semantics
 /// (spawn FIRST so a failed exec registers no ghost; running → done; exit
-/// mirrored, real code in `data.exitCode`; `AOIDE_SESSION_ID` exported) PLUS: its
-/// own PTY + controlling tty, a per-session injection socket, the
+/// mirrored, real code in `data.exitCode`; `AOIDE_SESSION_ID` exported) PLUS:
+/// its own terminal + controlling tty, a per-session injection socket, the
 /// `conductable`/`socket` fields on the record so `graph send` can steer it, and
 /// a best-effort `windowAddress` (phase ② discovery) so the focus jump
-/// (`focus_session`) can reach it.
-///
-/// Unix only: see the module's own "the PTY capability" note and the
-/// `#[cfg(not(unix))]` twin below.
-#[cfg(unix)]
+/// (`focus_session`) can reach it. Both hosts: the terminal itself is
+/// `super::pty`'s seam.
 pub fn session_conduct(inv: &Invocation) -> Outcome {
     let cmd = "conduct";
     if inv.args.is_empty() {
@@ -1663,18 +1254,16 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         .map(|p| p.to_string_lossy().into_owned());
     let socket_path = conduct_socket_path(&id);
 
-    // Seed the pty with the real tty's geometry so a TUI opens correctly
-    // sized. A headless conduct usually has NO controlling tty (spawned by
-    // another process), which would hand openpty a NULL winsize and leave the
-    // pty at 0 rows x 0 cols — a geometry full-screen TUIs misrender against
-    // or refuse outright. Fall back to a conventional 80x24 there; the
-    // interactive no-tty case keeps its historical None so nothing changes.
+    // Seed the child's terminal with the real console's geometry so a TUI
+    // opens correctly sized. A headless conduct usually has NO console
+    // (spawned by another process), which would leave the terminal at
+    // 0 rows x 0 cols — a geometry full-screen TUIs misrender against or
+    // refuse outright. Fall back to a conventional 80x24 there; the
+    // interactive no-console case keeps its historical None so nothing
+    // changes (on native Windows the seam's own arm substitutes that same
+    // conventional size, because a 0x0 pseudo console is not a console).
     let headless = inv.flag_present("headless");
-    let ws = tty_winsize(libc::STDIN_FILENO).or(if headless {
-        Some(libc::winsize { ws_row: 24, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0 })
-    } else {
-        None
-    });
+    let ws = Console::size().or(if headless { Some(WinSize::conventional()) } else { None });
 
     // Managed task wrapper mode (`spawn --task <slug>`): the slug (also the
     // task mailbox name) and the absolute path of the write-once instruction
@@ -1747,23 +1336,15 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     };
 
     // Spawn FIRST: a failed exec must register no session (parity with `wrap`).
-    let (mut child, master) = match spawn_on_pty(&program, &inv.args[1..], &id, ws, task.as_ref()) {
+    let (mut child, mut pty) = match spawn_on_pty(&program, &inv.args[1..], &id, ws, task.as_ref()) {
         Ok(v) => v,
         Err(e) => return Outcome::error(cmd, format!("failed to conduct `{program}`: {e}")),
     };
-    let master_fd = master.as_raw_fd();
 
     // Bind the per-session injection socket (best-effort: a bind failure leaves
     // the session running but un-injectable — recorded as conductable=false).
-    if let Some(parent) = socket_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::remove_file(&socket_path); // clear a stale socket from a prior crash.
-    let listener = UnixListener::bind(&socket_path).ok();
-    if let Some(l) = &listener {
-        let _ = l.set_nonblocking(true);
-    }
-    let conductable = listener.is_some();
+    let inbox = Inbox::bind(&socket_path, &id).ok();
+    let conductable = inbox.is_some();
     let socket_str = socket_path.to_string_lossy().into_owned();
 
     // Phase ②: best-effort window-address discovery (never fails/slows
@@ -1919,31 +1500,28 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     // permissions call that fails) must not kill the session — degrade to
     // `Stdout` alone, same posture as the socket-bind best-effort above.
 
-    // Raw-mode the real tty + arm resize passthrough (interactive only — a
-    // headless session has no controlling tty to raw-mode or resize). The
-    // TtyRaw guard restores the terminal on EVERY path below — normal return
-    // and unwind alike.
-    let mut tty = if headless {
-        None
-    } else {
-        install_winch_handler();
-        let t = TtyRaw::enter(libc::STDIN_FILENO);
+    // Raw-mode the real console + arm its resize source (interactive only — a
+    // headless session has no console to raw-mode or resize). The guard
+    // restores the console on EVERY path below — normal return and unwind
+    // alike.
+    let mut console = Console::attach(headless);
+    if !headless {
         if let Some(ws) = ws {
-            set_winsize(master_fd, &ws);
+            pty.resize(&ws);
         }
-        Some(t)
-    };
+    }
 
-    // `conduct_multiplex` already waited on the child, and
-    // `std::process::Child` CACHES that status — so this `wait` returns the
-    // SAME `ExitStatus` immediately rather than blocking or lying. It is how
-    // the REAL status is read here: `code()` is `None` for a SIGNAL death (the
-    // agent was killed), and that absence is the honest answer — a kill is
-    // never dressed as a numeric code on the record or in the report (plan
-    // §3.1: absent, never 0).
+    // `conduct_multiplex` already waited on the child, and the seam CACHES
+    // that status — so this read returns the SAME `Ended` immediately rather
+    // than blocking or lying. It is how the REAL status is read here:
+    // `Ended::Signal` carries no code (the agent was killed), and that absence
+    // is the honest answer — a kill is never dressed as a numeric code on the
+    // record or in the report (plan §3.1: absent, never 0).
+    let mut inbox = inbox;
     let end = conduct_multiplex(
-        master_fd,
-        listener.as_ref(),
+        &mut pty,
+        &mut console,
+        inbox.as_mut(),
         &mut child,
         &id,
         program_is_a_shell(&inv.args),
@@ -1951,17 +1529,20 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         &mut sink,
         deadline,
     );
-    // The child's REAL status, read off the cached `ExitStatus` (the
-    // multiplexer already waited, so this returns the same value at once), and
-    // the discriminated end: exit / signal / timeout / stopped. A signal death
-    // has NO exit code — the old `code().unwrap_or(-1)` collapse is gone.
-    let status = child.wait().ok();
-    let (outcome, signal, exit_code) = classify_end(end.timed_out, status.as_ref());
+    // The child's REAL status, read off the seam's cache (the multiplexer
+    // already waited, so this returns the same value at once), and the
+    // discriminated end: exit / signal / timeout / stopped. A signal death has
+    // NO exit code — the old `code().unwrap_or(-1)` collapse is gone.
+    let ended = child.ended();
+    let (outcome, signal, exit_code) = classify_end(end.timed_out, Some(ended));
 
-    // Restore tty, unlink socket, resolve the session — whatever happened.
-    if let Some(t) = tty.as_mut() {
-        t.restore();
-    }
+    // Restore the console, close the channel and unlink the socket, resolve
+    // the session — whatever happened. The terminal closes AFTER the output is
+    // drained (the multiplexer returned only once it was), which is the order
+    // `ClosePseudoConsole` requires.
+    console.restore();
+    pty.close();
+    drop(inbox);
     let _ = std::fs::remove_file(&socket_path);
     // A managed task run's END facts, stamped before the roster exit below so
     // the record carries them the moment it goes `done`. The code is the one
@@ -1998,8 +1579,9 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     }
     // The PTY outliving its child is its own fact (a descendant holding the
     // slave after the agent exited), never a timeout and never a reason to
-    // pretend the run is still going.
-    if end.pty_held_after_exit {
+    // pretend the run is still going — and it is stamped only where the host
+    // answered the question (`Pty::hung_up`'s `Option`).
+    if end.pty_held_after_exit == Some(true) {
         data["ptyHeldAfterExit"] = json!(true);
     }
     let result = match (outcome.as_str(), exit_code) {
@@ -2023,30 +1605,6 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
     }
 }
 
-/// Native Windows: the honest answer to `aoide conduct`, and it names the
-/// missing CAPABILITY rather than a missing `cfg` branch. The channel this
-/// command IS — a live view of a managed task run's transcript, and a socket
-/// `send` types into — is a CONTROLLING TTY, which native Windows builds with
-/// ConPTY (`CreatePseudoConsole`) and this tree does not build at all. The two
-/// honest ways forward are both next-layer work and are named here so nobody
-/// reads this refusal as "unimplemented plumbing": ConPTY for interactive
-/// parity, or a pipes-only transport for headless parity (no controlling tty,
-/// so `send`-injection and windowed launch stay refused by name too).
-///
-/// What this arm does NOT do: spawn anything, register a session record, or
-/// write a log. A refused command leaves no ghost to reap — the same posture
-/// the Unix arm takes when its spawn fails.
-#[cfg(not(unix))]
-pub fn session_conduct(_inv: &Invocation) -> Outcome {
-    Outcome::error(
-        "conduct",
-        "aoide conduct needs a controlling tty: native Windows builds one with ConPTY \
-         (`CreatePseudoConsole`), which this build has no call for — so the PTY-backed \
-         conducted session (interactive or --headless) is unavailable here, not silently \
-         degraded. Run the command directly, or use a host with a PTY.",
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2058,6 +1616,11 @@ mod tests {
     /// the operator's own variables are not. The command under test is built
     /// exactly as [`spawn_on_pty`] builds its own, so a marker that slipped
     /// back into that function would have to slip past this assertion too.
+    /// Unix's own shape of the pin: the Windows arm hands `CreateProcessW` a
+    /// built environment block and pins that instead
+    /// (`pty::tests::environment_block_shapes_the_childs_own_environment`),
+    /// against the same marker list.
+    #[cfg(unix)]
     #[test]
     fn spawn_on_pty_drops_the_parent_harnesss_session_markers_and_keeps_the_rest() {
         let id = "scrub-target";
@@ -2173,8 +1736,8 @@ mod tests {
         );
 
         let mut child = child;
-        let _ = child.kill();
-        let _ = child.wait();
+        child.kill();
+        let _ = child.wait_for(std::time::Duration::from_secs(2));
     }
 
     #[test]
@@ -2529,6 +2092,7 @@ mod tests {
         );
         assert_eq!(cwd_for(0, SHELL_PID, lookup), Some("/home/khoa".to_string()));
     }
+    #[cfg(unix)]
     #[test]
     fn parse_cmdline_splits_on_nul_and_drops_empty_segments() {
         // A synthesized raw `/proc/<pid>/cmdline` buffer: NUL-separated,
@@ -2865,6 +2429,11 @@ mod tests {
     /// speaks to the injection socket with raw `sockaddr_un`/`connect(2)`
     /// syscalls — no `fork`, no `sockaddr_un` and no `sh` script on native
     /// Windows (see `spawn_unrelated_writer`'s own gate).
+    /// The OTHER side of that gate is what the Windows end-to-end run
+    /// (`a_connection_to_a_live_inbox_types_into_the_conducted_child`) has:
+    /// there the connector is this process — the conducted child's PARENT — and
+    /// it is admitted, because the gate walks UP from the connector and a
+    /// parent is not a descendant of its own child.
     #[cfg(unix)]
     #[test]
     fn accept_refuses_a_connection_from_within_its_own_session_subtree() {
@@ -3051,11 +2620,13 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&root);
     }
-    /// GATED on Unix with its reason: this drives `session_conduct`, i.e. the
-    /// PTY-backed channel, which native Windows refuses BY NAME (it builds a
-    /// controlling tty with ConPTY, and no call in this tree makes one). The
-    /// refusal's own contract is covered natively by
-    /// `conduct_refuses_by_name_and_registers_no_session_on_a_host_without_a_pty`.
+    /// GATED on Unix with its reason: the fixture's child is a POSIX `sh -c`
+    /// script and the assertions are POSIX facts (a signal number, a shell
+    /// exit code). The capability itself is native on both hosts — the
+    /// Windows arm's own end-to-end runs are
+    /// `conduct_runs_a_child_on_a_pseudo_console_and_resolves_its_session`,
+    /// `a_pseudo_console_child_is_read_resized_typed_into_and_observed_to_exit`
+    /// and `typing_into_the_pseudo_console_reaches_the_childs_own_stdin`.
     #[cfg(unix)]
     #[test]
     fn conduct_mirrors_a_nonzero_child_exit() {
@@ -3208,49 +2779,577 @@ mod tests {
         let file_mode = std::fs::metadata(&log_path).unwrap().permissions().mode() & 0o777;
         assert_eq!(file_mode, 0o600, "log file mode: {file_mode:o}");
         let dir_mode =
-            std::fs::metadata(session_logs_dir()).unwrap().permissions().mode() & 0o777;
+            std::fs::metadata(aoide_storage::fs::session_logs_dir()).unwrap().permissions().mode()
+                & 0o777;
         assert_eq!(dir_mode, 0o700, "sessions dir mode: {dir_mode:o}");
 
         let _ = std::fs::remove_dir_all(&root);
     }
-    /// Native Windows, the PTY capability's contract THERE: the refusal is the
-    /// capability's answer, so this pins it — `conduct` refuses BY NAME (the
-    /// missing capability is ConPTY, never "unimplemented" and never a silent
-    /// degradation), and it registers no session record, exactly as the Unix
-    /// arm leaves no ghost when its spawn fails. Runs on the host whose build
-    /// has no `spawn_on_pty` at all, so it also proves the refusal is reachable
-    /// with the whole PTY cluster compiled out.
+    /// Native Windows, the PTY capability's contract THERE, end to end:
+    /// a real child on a real pseudo console, its output read, its geometry
+    /// set at spawn, a resize accepted while it ran, and its exit code
+    /// observed. This replaces the refusal test this slice retired: what
+    /// used to be "nothing here makes a `CreatePseudoConsole` call" is now the
+    /// capability, and this is the run that says so.
+    ///
+    /// The child is `cmd /C echo`, which both this host's console and the C
+    /// runtime's own command-line parser understand — the same parser the
+    /// seam quotes for.
     #[cfg(windows)]
     #[test]
-    fn conduct_refuses_by_name_and_registers_no_session_on_a_host_without_a_pty() {
+    fn a_pseudo_console_child_is_read_resized_typed_into_and_observed_to_exit() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _env = EnvVars::save(&["AOIDE_STAGE_DIR", "XDG_RUNTIME_DIR"]);
-
-        let root = unique_stage("conduct-no-pty");
-        let stage = root.join("stage");
-        std::fs::create_dir_all(&stage).unwrap();
-        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let root = unique_stage("conpty-seam");
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
         std::env::set_var("XDG_RUNTIME_DIR", &root);
 
-        let out = session_conduct(&conduct_invocation(
-            &["cmd", "/C", "echo never-runs"],
-            &[("id", "conduct-no-pty")],
-        ));
-        assert_eq!(out.status, aoide_protocol::output::Status::Error, "msg: {}", out.message);
+        let (mut child, mut pty) = spawn_on_pty(
+            "cmd",
+            &["/C".to_string(), "echo seam-marker".to_string()],
+            "conpty-seam",
+            Some(WinSize { rows: 24, cols: 80, xpixel: 0, ypixel: 0 }),
+            None,
+        )
+        .expect("a child starts on a pseudo console");
+        assert!(child.id() > 0, "a real process, with a real pid");
+
+        let out = read_to_exit(&mut pty, &mut child);
+        let text = String::from_utf8_lossy(&out).into_owned();
+        let code = ended_code(&mut child);
+        // Resize while nothing is reading: `ResizePseudoConsole` on a live
+        // pseudo console must be accepted (and is what the width test below
+        // reads back).
+        pty.resize(&WinSize { rows: 30, cols: 100, xpixel: 0, ypixel: 0 });
+        pty.close();
         assert!(
-            out.message.contains("ConPTY"),
-            "the refusal must NAME the missing capability (ConPTY), not read as unimplemented \
-             plumbing: {}",
-            out.message
+            text.contains("seam-marker"),
+            "the child's output was read: {text:?} (exit code {code:?})"
         );
+        assert_eq!(ended_code(&mut child), Some(0), "the child exited with its own code");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A line typed into the pseudo console reaches the child's own standard
+    /// input and comes back through its own echo — the shape `aoide send`
+    /// depends on, pinned at the seam, with no session and no inbox in the way
+    /// (the session-level run is
+    /// `a_connection_to_a_live_inbox_types_into_the_conducted_child`, and the
+    /// accept gate's own refusal of a true descendant has its gate-and-test on
+    /// the Unix side).
+    #[cfg(windows)]
+    #[test]
+    fn typing_into_the_pseudo_console_reaches_the_childs_own_stdin() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = unique_stage("conpty-type");
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+
+        let (mut child, mut pty) = spawn_on_pty(
+            "powershell",
+            &[
+                "-NoProfile".to_string(),
+                "-Command".to_string(),
+                "$x = Read-Host; Write-Output ('GOT-' + $x)".to_string(),
+            ],
+            "conpty-type",
+            Some(WinSize::conventional()),
+            None,
+        )
+        .expect("a child starts on a pseudo console");
+
+        // A single write, because the channel is a channel: the child's console
+        // input buffers, and the earlier shape's "type until it lands" loop was
+        // the symptom of the child's stdin being the very pipe conhost reads
+        // (two readers on one pipe) — the documented shape gives it to the
+        // console instead. The child is killed on the way out whatever
+        // happened, so a failed run leaves no reader behind.
+        pty.write(b"typed-from-the-parent\r");
+        let mut out = Vec::new();
+        let mut buf = [0u8; 8192];
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
+            while pty.has_output() {
+                match pty.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => out.extend_from_slice(&buf[..n]),
+                    Err(_) => break,
+                }
+            }
+            if String::from_utf8_lossy(&out).contains("GOT-typed-from-the-parent") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        let text = String::from_utf8_lossy(&out).into_owned();
+        child.kill();
+        let _ = child.wait_for(std::time::Duration::from_secs(3));
+        pty.close();
+
+        assert!(
+            text.contains("GOT-typed-from-the-parent"),
+            "the child read the typed line off its console: {text:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A newline-free chunk is ON stdout the moment `write_stdout` returns —
+    /// the property the interactive pump depends on and the one Rust's
+    /// `Stdout` (`LineWriter`) does not have: it holds bytes until the last
+    /// newline in the chunk or its ~1 KiB buffer fills, which is latency a
+    /// raw-mode TUI cannot afford. Measured against the seam itself, with fd 1
+    /// redirected to a pipe and read back NON-BLOCKING (a buffered stdout would
+    /// leave the pipe empty and read 0 rather than blocking).
+    #[cfg(unix)]
+    #[test]
+    fn a_newline_free_chunk_reaches_stdout_without_waiting() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let payload = b"\x1b[1mno-newline-here".to_vec();
+        let mut fds = [0i32; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0, "the fixture's pipe");
+        let (read_fd, write_fd) = (fds[0], fds[1]);
+        let saved = unsafe { libc::dup(libc::STDOUT_FILENO) };
+        assert!(saved >= 0, "dup of this process's stdout");
+        assert_eq!(
+            unsafe { libc::dup2(write_fd, libc::STDOUT_FILENO) },
+            libc::STDOUT_FILENO
+        );
+
+        crate::graph::pty::write_stdout(&payload);
+
+        unsafe { libc::fcntl(read_fd, libc::F_SETFL, libc::O_NONBLOCK) };
+        let mut buf = [0u8; 128];
+        let n = unsafe {
+            libc::read(read_fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
+        };
+        // Restore this process's stdout whatever the read said.
+        unsafe {
+            libc::dup2(saved, libc::STDOUT_FILENO);
+            libc::close(saved);
+            libc::close(read_fd);
+            libc::close(write_fd);
+        }
+        assert!(n > 0, "nothing was on stdout yet — a buffered write would hold it here");
+        assert_eq!(&buf[..n as usize], payload.as_slice());
+    }
+
+    /// The end-to-end Windows test the review's finding 1 asked for: a LIVE
+    /// conducted session, a connection to its own inbox, and the bytes that
+    /// connection delivers ARRIVING AT THE CHILD. Everything else in this
+    /// file's Windows set drives the seam directly or asserts registration
+    /// alone; this is the run that proves the loop's own readiness wait can
+    /// report the inbox, which is the whole point of `aoide send`.
+    ///
+    /// What is SEPARATE here is the SESSION, not the connector: the session is
+    /// a real `aoide conduct --headless` child process, driven exactly as
+    /// `aoide send` drives one, while the connection is made from this test
+    /// process — the session's PARENT, which the self-injection gate lets
+    /// through (it walks UP from the connector looking for the connector's own
+    /// nearest registered session; a parent is not a descendant of its child,
+    /// so nothing here resolves to the session being typed into).
+    #[cfg(windows)]
+    #[test]
+    fn a_connection_to_a_live_inbox_types_into_the_conducted_child() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = unique_stage("conduct-inbox-e2e");
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+
+        let id = "conduct-inbox-e2e";
+        let socket = conduct_socket_path(id);
+        let mut conduct = std::process::Command::new(built_aoide_bin())
+            .arg("conduct")
+            .arg("--headless")
+            .arg("--id")
+            .arg(id)
+            .arg("--")
+            .arg("powershell")
+            .arg("-NoProfile")
+            .arg("-Command")
+            .arg("$x = Read-Host; Write-Output ('GOT-' + $x)")
+            .env("AOIDE_STAGE_DIR", &stage)
+            .env("AOIDE_STATE_DIR", &state)
+            .env("AOIDE_AUDIT_LOG", root.join("log"))
+            .env("XDG_RUNTIME_DIR", &root)
+            .env_remove("AOIDE_SESSION_ID")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("aoide conduct starts");
+
+        // Budgets with room in them: this run is the ONLY one that proves the
+        // channel end to end, so a loaded box must not be able to make it
+        // flake — the child then has 60 s to answer, and a failure kills it.
+        let door_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !socket.exists() && std::time::Instant::now() < door_deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(
+            socket.exists(),
+            "the session's injection socket was never bound: {}",
+            socket.display()
+        );
+
+        use std::io::Write as _;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let mut exited = false;
+        let mut delivered = false;
+        while std::time::Instant::now() < deadline {
+            // ONE line, once the door exists: the child's console input buffers
+            // a line it is not reading yet, so there is nothing to retry — and
+            // a second connection would be a second line.
+            if !delivered {
+                if let Ok(mut door) = aoide_protocol::win_unix::UnixStream::connect(&socket) {
+                    let _ = door.write_all(b"INBOX-hello\r\n");
+                    delivered = true;
+                }
+            }
+            if conduct.try_wait().ok().flatten().is_some() {
+                exited = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        if !exited {
+            let _ = conduct.kill();
+            let _ = conduct.wait();
+        }
+        assert!(exited, "the conducted child never answered the injected line");
 
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = s.sessions.iter().find(|r| r.session_id == id).expect("registered");
+        let log = std::fs::read_to_string(rec.log_path.clone().expect("logPath stamped"))
+            .unwrap_or_default();
         assert!(
-            s.sessions.iter().all(|r| r.session_id != "conduct-no-pty"),
-            "a refused conduct must register no ghost session — found one: {:?}",
-            s.sessions.iter().find(|r| r.session_id == "conduct-no-pty")
+            log.contains("GOT-INBOX-hello"),
+            "the injected bytes reached the child's own stdin: {log:?}"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
+    /// N2 of the re-review, and the shape `ssh` without a tty gives
+    /// (`producer | aoide conduct`): an INTERACTIVE (not `--headless`) conduct
+    /// whose own stdin is a PIPE must still be a channel. `GetConsoleMode` says
+    /// it is not a console, so it is not offered to `WaitForMultipleObjects`
+    /// (a pipe's read handle is ALWAYS signalled and would win the array
+    /// forever), and it is POLLED and read without blocking instead — the pipe
+    /// is asked how many bytes it has and exactly those are read, so an empty
+    /// one answers "nothing yet" rather than parking the multiplex in a
+    /// blocking `ReadFile` (measured, before the polling: the log held nothing
+    /// past conhost's own header, the child never answered, and the process
+    /// never returned). This run drives that shape end to end: the child's
+    /// output is mirrored, an INJECTED line reaches its own stdin, the child
+    /// answers, and the session resolves.
+    ///
+    /// The line is typed a bounded number of times, as an operator types until
+    /// the child takes it; a single connection can land before `powershell` has
+    /// begun reading.
+    #[cfg(windows)]
+    #[test]
+    fn an_interactive_conduct_with_a_piped_stdin_still_types_into_its_child() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = unique_stage("conduct-piped-stdin");
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+
+        let id = "conduct-piped-stdin";
+        let socket = conduct_socket_path(id);
+        let mut conduct = std::process::Command::new(built_aoide_bin())
+            .arg("conduct")
+            .arg("--id")
+            .arg(id)
+            .arg("--")
+            .arg("powershell")
+            .arg("-NoProfile")
+            .arg("-Command")
+            .arg("$x = Read-Host; Write-Output ('GOT-' + $x)")
+            .env("AOIDE_STAGE_DIR", &stage)
+            .env("AOIDE_STATE_DIR", &state)
+            .env("AOIDE_AUDIT_LOG", root.join("log"))
+            .env("XDG_RUNTIME_DIR", &root)
+            .env_remove("AOIDE_SESSION_ID")
+            .stdin(std::process::Stdio::piped()) // the pipe this test is about
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("aoide conduct starts");
+
+        let door_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !socket.exists() && std::time::Instant::now() < door_deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(socket.exists(), "the session's injection socket was never bound");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let mut exited = false;
+        let mut attempted = 0;
+        while std::time::Instant::now() < deadline {
+            if attempted < 6 {
+                use std::io::Write as _;
+                if let Ok(mut door) = aoide_protocol::win_unix::UnixStream::connect(&socket) {
+                    let _ = door.write_all(b"piped-line\r\n");
+                    attempted += 1;
+                }
+            }
+            if conduct.try_wait().ok().flatten().is_some() {
+                exited = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = s.sessions.iter().find(|r| r.session_id == id);
+        let conductable = rec.and_then(|r| r.conductable);
+        let log = rec
+            .and_then(|r| r.log_path.clone())
+            .map(|p| std::fs::read_to_string(p).unwrap_or_default())
+            .unwrap_or_default();
+        if !exited {
+            let _ = conduct.kill();
+            let _ = conduct.wait();
+        }
+
+        assert_eq!(conductable, Some(true), "the channel was bound");
+        assert!(
+            log.contains("GOT-piped-line"),
+            "a non-headless conduct with a piped stdin types the injected line into its child \
+             (the parked loop typed nothing and never returned): {log:?}"
+        );
+        assert_eq!(rec.map(|r| r.state.clone()).as_deref(), Some("done"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The other half of the same contract, and the half the re-review found
+    /// missing: a PIPED STDIN's bytes reach the child. Unix gets this from
+    /// `poll` (an empty pipe is not `POLLIN`, so it is bridged without ever
+    /// blocking); Windows now polls the pipe the same way it polls the output
+    /// pipe — `PeekNamedPipe` for the count, `ReadFile` for exactly that many —
+    /// and treats the writer's close as the Unix arm treats a 0-byte read. This
+    /// is `producer | aoide conduct`, whose bytes used to be dropped here.
+    ///
+    /// The test holds the producer's write end itself, writes one line, and
+    /// closes it (the EOF the loop must survive), then requires the child to
+    /// answer with that line and the session to resolve.
+    #[cfg(windows)]
+    #[test]
+    fn a_piped_stdin_forwards_the_producers_bytes_to_the_child() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+            "AOIDE_SESSION_ID",
+        ]);
+        let root = unique_stage("conduct-piped-producer");
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+
+        let id = "conduct-piped-producer";
+        let mut conduct = std::process::Command::new(built_aoide_bin())
+            .arg("conduct")
+            .arg("--id")
+            .arg(id)
+            .arg("--")
+            .arg("powershell")
+            .arg("-NoProfile")
+            .arg("-Command")
+            .arg("$x = Read-Host; Write-Output ('FROM-STDIN-' + $x)")
+            .env("AOIDE_STAGE_DIR", &stage)
+            .env("AOIDE_STATE_DIR", &state)
+            .env("AOIDE_AUDIT_LOG", root.join("log"))
+            .env("XDG_RUNTIME_DIR", &root)
+            .env_remove("AOIDE_SESSION_ID")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("aoide conduct starts");
+
+        // The producer's write waits for the CLIENT to exist: conhost drops
+        // input written into a pseudo console before a client is attached
+        // (measured — the same reason the injected-line run above types a
+        // bounded number of times), and the client's own title sequence in the
+        // log is the moment it is there. After that, one write and one EOF,
+        // which is what a real `producer | aoide conduct` does.
+        let attach_deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let reader = |rec_path: &Option<String>| -> String {
+            rec_path
+                .as_ref()
+                .map(|p| std::fs::read_to_string(p).unwrap_or_default())
+                .unwrap_or_default()
+        };
+        let log_path = load_stage::<SessionsFile>(&sessions_path())
+            .ok()
+            .and_then(|s| {
+                s.sessions
+                    .iter()
+                    .find(|r| r.session_id == id)
+                    .and_then(|r| r.log_path.clone())
+            });
+        while std::time::Instant::now() < attach_deadline {
+            if reader(&log_path).contains("powershell.exe") {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        {
+            use std::io::Write as _;
+            let mut sink = conduct.stdin.take().expect("the producer's write end");
+            sink.write_all(b"producer-line\r\n").expect("the producer writes");
+            sink.flush().expect("the producer flushes");
+        } // dropping the write end is the producer's EOF.
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let mut exited = false;
+        while std::time::Instant::now() < deadline {
+            if conduct.try_wait().ok().flatten().is_some() {
+                exited = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = s.sessions.iter().find(|r| r.session_id == id);
+        let log = rec
+            .and_then(|r| r.log_path.clone())
+            .map(|p| std::fs::read_to_string(p).unwrap_or_default())
+            .unwrap_or_default();
+        if !exited {
+            let _ = conduct.kill();
+            let _ = conduct.wait();
+        }
+        assert!(exited, "the session resolved; log={log:?}");
+        assert!(
+            log.contains("FROM-STDIN-producer-line"),
+            "the producer's bytes reached the child's own stdin: {log:?}"
+        );
+        assert_eq!(rec.map(|r| r.state.clone()).as_deref(), Some("done"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `aoide conduct` itself, on Windows, headless: the whole command — spawn,
+    /// register, mirror the child's output into its per-session log, resolve
+    /// the record `done` with the child's real exit code. This is the gate the
+    /// old refusal test cannot be: the capability is here, so the command runs.
+    #[cfg(windows)]
+    #[test]
+    fn conduct_runs_a_child_on_a_pseudo_console_and_resolves_its_session() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _env = EnvVars::save(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_STATE_DIR",
+            "XDG_RUNTIME_DIR",
+            "AOIDE_AUDIT_LOG",
+        ]);
+
+        let root = unique_stage("conduct-conpty");
+        let stage = root.join("stage");
+        let state = root.join("state");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::set_var("AOIDE_STATE_DIR", &state);
+        std::env::set_var("AOIDE_AUDIT_LOG", root.join("log"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+
+        let id = "conduct-conpty";
+        let socket = conduct_socket_path(id);
+        let out = session_conduct(&conduct_invocation(
+            &["cmd", "/C", "echo conduct-on-a-pseudo-console"],
+            &[("id", id), ("headless", "true")],
+        ));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        let data = out.data.as_ref().expect("an outcome body");
+        assert_eq!(data["exitCode"], 0, "the child's own code: {data}");
+        assert_eq!(data["conductable"], true, "its injection socket was bound: {data}");
+
+        let s: SessionsFile = load_stage(&sessions_path()).unwrap();
+        let rec = s.sessions.iter().find(|r| r.session_id == id).expect("registered");
+        assert_eq!(rec.state, "done");
+        assert!(
+            data.get("ptyHeldAfterExit").is_none(),
+            "a host that cannot answer whether a descendant holds the console must not \
+             stamp the fact: {data}"
+        );
+        let log = std::fs::read_to_string(rec.log_path.clone().expect("logPath stamped"))
+            .unwrap_or_default();
+        assert!(
+            log.contains("conduct-on-a-pseudo-console"),
+            "the child's output was read off the pseudo console and mirrored: {log:?}"
+        );
+        assert!(!socket.exists(), "the control socket is unlinked on exit");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A resize is not merely accepted: the CHILD's own console reports the
+    /// geometry the parent set. `mode con` asks the console device
+    /// (`CONOUT$`) rather than this process's stream handles, so its
+    /// `Columns:` line is the pseudo console's answer, read after a resize
+    /// that happened while the child was running.
+    #[cfg(windows)]
+    #[test]
+    fn a_resize_reaches_the_childs_own_console() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = unique_stage("conpty-resize");
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("stage"));
+        std::env::set_var("AOIDE_STATE_DIR", root.join("state"));
+        std::env::set_var("XDG_RUNTIME_DIR", &root);
+
+        let (mut child, mut pty) = spawn_on_pty(
+            "cmd",
+            &[
+                "/C".to_string(),
+                "ping -n 2 127.0.0.1 >nul & mode con".to_string(),
+            ],
+            "conpty-resize",
+            Some(WinSize { rows: 24, cols: 80, xpixel: 0, ypixel: 0 }),
+            None,
+        )
+        .expect("a child starts on a pseudo console");
+
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        pty.resize(&WinSize { rows: 30, cols: 100, xpixel: 0, ypixel: 0 });
+
+        let out = read_to_exit(&mut pty, &mut child);
+        let text = String::from_utf8_lossy(&out).into_owned();
+        pty.close();
+
+        assert!(
+            text.contains("Columns:") && text.contains("100"),
+            "the child's own console reports the resized geometry: {text:?}"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

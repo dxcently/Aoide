@@ -337,5 +337,10 @@ project's capability matrix owns: peer credentials for the daemon door, unix
 sockets and the runtime dir for the per-session control socket, the stage/state
 lock's open-file-description guarantees, `/proc`-based process liveness, verified
 termination for the deadline's kill, and a controlling PTY. The matrix's PTY/ctty
-row records that: interactive parity needs ConPTY, headless parity over pipes is
-the earliest honest Windows milestone, and a `cfg` branch alone proves nothing.
+row records how that row closed: both hosts build the terminal behind ONE seam
+(`conduct/src/graph/pty.rs` — `CreatePseudoConsole` with the
+`PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE` attribute on the Windows arm), the
+conducted session runs and is tested on both, and what remains host-specific is
+named by name rather than hidden behind a `cfg` (no signals, no process group,
+no foreground pgid, and a post-exit settle window the pseudo console's renderer
+needs).

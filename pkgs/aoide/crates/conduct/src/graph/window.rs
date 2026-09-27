@@ -4,15 +4,14 @@
 //! `socket2` event listener, and the untracked-terminal (`win:*`)
 //! synthetic-record reconciler.
 //!
-//! **`allow(dead_code)` on native Windows, stated once.** Phase-② discovery
+//! **Both hosts reach this now.** Phase-② discovery
 //! (`discover_window_address`, `ancestry_parent`, `resolve_registration_parent`)
-//! is called ONLY from the conducted session's registration — the refused PTY
-//! capability on that host — so nothing there can reach it, and `#[cfg(unix)]`
-//! item-by-item is churn the ConPTY slice (W5) un-does. Scoped to `cfg(windows)`;
-//! Unix keeps every warning it had. The compositor adapter itself degrades on
-//! both hosts through its own "no adapter" path, which is untouched.
-
-#![cfg_attr(windows, allow(dead_code))]
+//! is called from the conducted session's registration, which is `graph/pty`'s
+//! seam on both hosts — so the `allow(dead_code)` this module carried while the
+//! PTY was refused on native Windows is gone with the refusal. On native
+//! Windows the compositor adapter itself still degrades through its own "no
+//! adapter" path, which is untouched: the discovery runs and answers `None`,
+//! rather than not being reached at all.
 
 use super::codex_app::sync_codex_app_threads;
 use super::conduct::proc_cwd;

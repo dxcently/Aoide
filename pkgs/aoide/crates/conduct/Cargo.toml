@@ -41,3 +41,20 @@ aoide-upkeep = { workspace = true }
 # The commands/hooks tests share the workspace rig (scratch dirs, EnvSaver,
 # `env_lock`) — dev-only edge.
 aoide-test-support = { workspace = true }
+
+# The ConPTY arm of the PTY seam (`graph/pty.rs`): `CreatePseudoConsole` +
+# the `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE` attribute on `CreateProcessW`, the
+# two pipes the pseudo console speaks through, `ResizePseudoConsole` /
+# `ClosePseudoConsole`, the console's own mode and geometry, and the
+# `WSAEventSelect` events the injection inbox is waited on with. Only Windows
+# needs any of them, and this is the whole set.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Networking_WinSock",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
