@@ -1167,8 +1167,8 @@ and keys are 0600. No at-rest secrecy is claimed.
 - A transit hop records node names, `msgid`, size and outcome only, and **never
   mailbox names**. A hub cannot know them and must not claim them.
 
-Refusals name their reason: `downgrade-refused`, `unverified-origin`, `bad-msgid`,
-`wrong-recipient`, `context-mismatch`, `addressing-mismatch`, `broken-chain`,
+Refusals name their reason: `downgrade-refused`, `sealed-required`, `unverified-origin`,
+`bad-msgid`, `wrong-recipient`, `context-mismatch`, `addressing-mismatch`, `broken-chain`,
 `stale-binding`, `key-retired`, `not-in-mesh`, `unknown-operator`, `stale-charter`,
 `operator-mismatch`, `not-a-member`, `stale-epoch`, `not-owner`, `stale-takeover`.
 
@@ -1246,6 +1246,12 @@ acted.
 - Doorbells are fixed nudges that the recipient controls, and they carry no letter
   or post bytes.
 - Control actions use explicit capabilities and the existing admission gates.
+- **An agent-triggered cross-node send is mail only, and off by default.** A
+  conducted session reaching another node deposits a letter; it never reaches the
+  conduct channel (`aoide send --id … --submit`), whose gates are not on this
+  profile's path at all. Sending on a session's behalf is a per-session opt-in, and
+  the originating session rides the audit line, so a letter's provenance is legible
+  at the node that filed it.
 
 ## Migration and coexistence
 
@@ -1266,11 +1272,14 @@ just another transport for sealed letters.
   enforces it.** Once a node holds a destination's binding it never sends that
   destination plaintext again — not the entry it spooled before the binding arrived
   (it re-seals that entry before dialing it), not on the push direction and not on
-  the pull one. The **receiver** keeps accepting a plaintext envelope from an
-  admitted peer, deliberately: a peer running an older aoide has no binding to
-  publish and must still be able to deliver, and refusing its plaintext would break
-  the per-peer upgrade in the direction that actually matters. So "no plaintext
-  fallback" is a property of what a sealed-aware node *sends*, never a door rule.
+  the pull one. On the **SSH direct lane** the receiver keeps accepting a plaintext
+  envelope from an admitted peer, deliberately: a peer running an older aoide has no
+  binding to publish and must still be able to deliver, and refusing its plaintext
+  would break the per-peer upgrade in the direction that actually matters. That
+  acceptance is the direct lane's own and stops there — the HTTPS adapter refuses a
+  plaintext envelope `sealed-required` — so "no plaintext fallback" is a property of
+  what a sealed-aware node *sends* plus of every hop that is not that lane, never a
+  rule the direct lane's own receiver needs.
 - **Grants move into meshes** as Trust per mesh describes: every existing paired
   record moves into the home mesh with its grant unchanged.
 
@@ -1313,12 +1322,19 @@ the same slices. They are required, not suggestions.
 2. **P-SEAL: sealing and key bindings**, on the SSH direct lane, the only transport
    the slice has.
 3. **P-CHARTER: the charter and trust per mesh.**
-4. **H1: the mail-only HTTPS adapter on the relay.** The loopback HTTPS adapter on
-   the relay, fronted by a tunnel, a VPS or a tailnet; `https://` and `poll`
+4. **H1: the mail-only HTTPS adapter on the relay.** The loopback mail adapter
+   (`aoide mail serve`) on the relay — a plain-HTTP listener, TLS terminating at
+   the front — fronted by a tunnel, a VPS or a tailnet; `https://` and `poll`
    addresses; signed requests on every call; deposit, poll and receipts for letters
-   already sealed at P-SEAL; hold-flavored spooling for `poll` nodes. No node accepts
-   inbound connections except the relay's loopback adapter. Until P-M4, a `poll` node
-   exchanges letters with the relay node itself only.
+   already sealed at P-SEAL; hold-flavored spooling for `poll` nodes. It serves the
+   three mail methods and the stripped AgentCard, and no other method: the door's
+   `message/send`, `tasks/get`, `message/stream` and the pairing ceremony are not
+   reachable from it. The relay's ingress target is the mail adapter's port, and
+   the A2A door is never fronted by a TLS-terminating front — an unsigned loopback
+   request reaching that door is conduct. No node accepts inbound connections
+   except the relay's loopback adapter. Until P-M4, a `poll` node exchanges letters
+   with the relay node itself only, which is also the bound on its charter: the
+   first one arrives by LAN join or as a file.
 5. **P-M4: transit with the `next` hop chain.** MAIL.md.
 6. **P-BOARD: boards.** MAIL.md.
 
@@ -1326,8 +1342,11 @@ After the beta path, each only after its own review:
 
 7. **H2: state snapshots and WSS events**, after the reviewed end-to-end design.
 8. **H3: direct HTTPS edges (optional).** For a node that legitimately exposes a URL,
-   such as a VPS, with optional pins. It is never a routable Aoide door on a home
-   node.
+   such as a VPS, with optional pins, and this is where the pinning tests live: a bad
+   pin where one is declared is rejected here, and **never** on a hostname fronted by
+   a TLS-terminating front — pinning applies only where TLS is end to end, and no
+   test may assume a pin through Cloudflare. It is never a routable Aoide door on a
+   home node.
 9. **H4: typed control actions**, using existing policy and audit only, and only after
    the same reviewed end-to-end design.
 
@@ -1434,10 +1453,10 @@ scheduler (`aoide mail poll`).
   may re-spool one. No receipt chain.
 - **Windows and Linux, no SSH:** send, poll, fetch and ack work end to end with the
   relay node, with a `poll` node on each OS that has no SSH account or binary.
-- **Downgrade:** a plaintext request is refused with a taught error and an audit
-  line.
-- **Invalid credential, a bad pin where one is declared, and an unauthorized inbox**
-  are rejected, as in the plaintext profile's negative tests.
+- **Downgrade:** a plaintext request is refused with the taught word
+  `sealed-required` and an audit line.
+- **Invalid credential and an unauthorized inbox** are rejected, as in the
+  plaintext profile's negative tests.
 
 **P-M4 tests (relay side; the hop-chain and zone tests are MAIL.md P-M4's):**
 

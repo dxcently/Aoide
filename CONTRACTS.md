@@ -7114,6 +7114,14 @@ becomes two lists, `containers` and `envelopes`: a sealed entry hands over
 its container and NO plaintext, and only an entry spooled before the
 destination published a binding appears in `envelopes`.
 
+A plaintext envelope posted to the **mail adapter** (`aoide mail serve`,
+below) is refused with the taught word `sealed-required` — a REFUSED RESULT,
+the same kind of answer every step above gives, plus one audit line under
+`a2a.aoide/mailDeposit`. The receiver that keeps accepting a plaintext
+envelope from an admitted peer deliberately, for the per-peer upgrade, is
+the SSH direct lane's (HTTPS-MESH-API.md's "No plaintext fallback" ruling):
+no relay, hub or HTTPS hop ever carries plaintext.
+
 **The mesh rule (P-CHARTER).** Every signed request names the mesh it acts
 in, inside its per-request signature (`X-Aoide-Mesh`, a sixth field of
 `wire_auth::canonical_string`), and the caller's grant is read in that mesh
@@ -7374,14 +7382,24 @@ server, no new port, no new file — a poll is a READ.
 lookup (the same shape-before-existence precedence `aoide/pairPoll`
 holds). **Admission** resolves the caller exactly as `mailDeposit` does —
 a verified per-request signature, key-resolved — and then requires BOTH
-`node_may_message` (paired, `verified`, `"message"` in this node's
-`allows`) AND `params.node` equal to the caller's own resolved name:
+`node_may_message` (paired, `verified`, `"message"` in the caller's grant for
+this mesh) AND `params.node` equal to the caller's own resolved name:
 MAIL.md §Wire's "the caller's verified identity must BE `node` (no polling
 on another's behalf)". A refusal is `-32010`, the SAME code the deposit arm
-mints (never `-32006`/`-32007`), in one of three shapes: the claim is not
-the signer (told both names), paired but `message` missing (told the exact
-`aoide node allow <name> message on` fix, which runs on the POLLED host),
-or no verified signature resolution at all (told to pair first).
+mints (never `-32006`/`-32007`), and it comes off the SAME helper the deposit
+arm uses (`charter_refusal`) so the two arms can never teach different fixes
+for one state: when the mesh is charter-SHAPED that refusal preempts the rest —
+an undecidable operator key (the deposit arm's N5 shape: the reason word to the
+caller, the detail naming both operator keys to the host's own audit line), or a
+charter IN FORCE whose line for the caller carries no `message`, which nothing
+local can fix (`aoide node allow … on --mesh <m>` answers `widens-charter`
+there; re-listing the key is the charter's OPERATOR signing a version that
+carries it, and `aoide mesh charter show <mesh>` reads what is in force). Only
+in a mesh no charter governs do the remaining shapes speak: the claim is not
+the signer (told both names), paired but `message` missing from the grant (told
+the exact `aoide node allow <name> message on --mesh <m>` fix, which runs on
+the POLLED host), or no verified signature resolution at all (told to pair
+first).
 
 **`down` is not enforced here yet.** It is declared in
 `[mesh.<name>.status]`, a declaration the door does not read until P-M4
@@ -7433,27 +7451,24 @@ spooled them.
 two triggers, and they are the same call:
 
 - **`aoide mail poll [<node>]`** — the explicit ask. With a `<node>` it dials
-  that node's record (`state/nodes.json`); a name this box holds NO record for
-  is not dialled at all, and a caller that reports the attempt (the charter
-  spool does: `client::charter::drain_spooled`) must say `no-record` rather
-  than claim a drain — a charter line's `address` is P-M4's to route, not a
-  dial target yet (§4's charter carriage). This is also how a
-  `mail poll` with no argument is scoped: the roster it walks is the record
-  set, so a charter node with no record is simply not asked.
   that node alone; a name this box is not paired with is refused BEFORE any
   dial (`unknown-node` for a name the registry has never seen,
   `unpaired-node` for one registered but never verified — the same two
   refusals `mail send`'s node branch makes). With no argument it asks every
   node `mail_wire::pollable_nodes` returns: registered, `verified`, and
-  carrying `message` in THIS box's own `allows` for it — the same gate a
-  letter has to clear to be spooled there, so "a node this box sends to" and
+  carrying `message` in THIS box's own per-mesh `grants` for it — the same gate
+  a letter has to clear to be spooled there, so "a node this box sends to" and
   "a node this box asks" stay one set. Per node the answer reports
   `polled`/`filed` or `unreachable`/`reason`; one node's failure never stops
   the sweep, and the command's own status reports that the ASK was made
   (write-is-the-report), never the far end's outcome. This is the receive
   trigger a node with nothing to send needs: an empty outbox never dials, so
   poll-on-contact alone can never reach it, and an OS timer driving this
-  command is H1's own scope.
+  command is H1's own scope. A charter line's `address` is P-M4's to route, not
+  a dial target yet (§4's charter carriage), so a charter node this box holds
+  no record for is simply not asked — and a caller that reports the attempt
+  (`client::charter::drain_spooled`) must say `no-record` rather than claim a
+  drain.
 - **poll-on-contact** — the end of any drain pass that actually reached a
   node (see MAIL.md §Outbox). The drain's dial policy is unchanged by the
   command above: a pass with nothing attemptable still dials nothing.
@@ -7467,6 +7482,70 @@ JSON array of whole envelopes: a hub holding more than the client's
 `MAX_RESPONSE_BYTES` (20 MiB) of held mail for one node would otherwise
 answer with a body the poller refuses outright, a head-of-line stall no
 retry could clear.
+
+### `aoide mail serve` — the mail adapter (H1, `docs/architecture/HTTPS-MESH-API.md`)
+
+A SECOND listener, and not a second door: its own process, its own loopback
+port (`8712`; `--port` → `AOIDE_MAIL_ADAPTER_PORT`), built so that a
+TLS-terminating front — a Cloudflare Tunnel, a VPS with public 443, a tailnet
+— can be pointed at something whose method set is mail and nothing else.
+
+```json
+{ "jsonrpc": "2.0", "id": 1, "method": "aoide/mailPoll", "params": { "node": "laptop" } }
+```
+
+- **Binds `127.0.0.1` absolutely.** There is no `--bind`, no bind env var, no
+  option: a routable bind is not a configuration of this listener, it is the
+  removal of the boundary that makes it one. (Contrast `aoide.a2a.bindAddress`,
+  which is a deliberate user choice.)
+- **Serves exactly four things**: `aoide/mailDeposit`, `aoide/mailPoll`,
+  `aoide/binding`, and `GET /.well-known/agent-card.json`. Every other method
+  name is `-32601`, and is *unreachable* rather than refused —
+  `message/send`, `tasks/get`, `message/stream`, `tasks/resubscribe`,
+  `aoide/graphSummary`, the `pair*` ceremony and the SSE takeover are not
+  compiled into this listener's path at all.
+- **Sealed only, in both directions.** A plaintext (`envelope`) deposit here
+  is refused as a result carrying `sealed-required`, with one audit line: an
+  HTTPS hop never carries plaintext, and the receiver that still accepts one
+  from an admitted peer — deliberately, for the per-peer upgrade — is the SSH
+  direct lane's. A sealed `container` is the only shape this listener files.
+  The PULL direction is held to it too: an entry spooled toward a poller that
+  held no binding when it was written is **withheld** rather than handed over
+  as a plaintext envelope — it stays spooled, the answer names it in a
+  `withheld` list (`{msgid, reason: "sealed-required", detail}`), and the
+  audit line counts it. The door's own poll, which is not an HTTPS hop, hands
+  that same entry over unchanged.
+- **The card is the stripped three-key shape unconditionally** — `name`,
+  `protocolVersion`, `url`. The door strips it only for an unauthorized caller;
+  the mail profile has no door-wide token concept, so there is no caller to
+  hand the full card to, and the relay's skills inventory stays off the open
+  internet.
+- **Shares the door's transport**: `MAX_CONN`/`MAX_BODY`/`MAX_LINE`/
+  `MAX_HEADERS`/`MAX_REQUEST`, per-request signature verification with the
+  same process-local nonce cache and the same ±`AOIDE_SIGNATURE_SKEW_SECS`
+  window, `write_http_response`, and the single audit log (house rule 6).
+  Refusals are the door's own: `-32007` signature, `-32008` skew, `-32009`
+  nonce replay, `-32010` admission. It carries no bearer and no spawn
+  configuration.
+- **The same admission, never a copy.** The three methods ARE the door's
+  (`mail_rpc` is one function, called from both dispatch tables), so
+  everything the door reads to admit a caller is read here unchanged: the
+  charter rung of `verify_signed_request` (a key listed on an in-force
+  charter's line resolves with no paired record), the grant read by that key
+  in the mesh the request SIGNED (`grant_in_mesh`), an unnamed request judged
+  by `[pairing] homeMesh`'s own rules, and a charter-shaped mesh whose
+  operator key is undecidable failing CLOSED. A revoked key is therefore
+  refused through the adapter exactly as it is at the door — the difference
+  between the two listeners is the method table, the bind, and sealing — and
+  nothing else on the admission path.
+- **The Host header is never consulted.** Through a tunnel it is the front's
+  own hostname, which names nothing this process decides.
+- **Audit**: the door's own labels (`a2a.aoide/mailDeposit`,
+  `a2a.aoide/mailPoll`, `a2a.aoide/binding`, `a2a.agent-card`) under
+  `Door::A2a`, with a detail that names the listener and the connection's
+  origin (`HTTP 200 from loopback via mail-adapter`) — a front dials from
+  loopback, so the origin alone cannot separate tunnel traffic from door
+  traffic.
 
 ---
 
@@ -7640,6 +7719,21 @@ scenario `--via` exists for (a loopback-bound door reachable only through
 the tunnel) — `node add` would fail verification before ever registering
 such a node if this one call bypassed the funnel. Either way `node add`
 registers the node under its LOGICAL `url`, never the rewritten one.
+**A record carrying an `https://` url AND a `via` is refused** — at all three
+call sites: `node add --via` (refused before its verification fetch, so
+nothing is dialled or registered), `set_node_via` (refused before the field
+is touched, so a refused call writes nothing — the pairing ceremony's own
+commit is a caller of this one, and there the url may be the peer's
+self-asserted `https://…` rather than one this box chose), and the dial seam
+every outbound URL resolves through (`aoide_client::commands::
+resolve_dial_url`, which is how a hand-edited `state/nodes.json` reaches it)
+— with the taught message
+`aoide_storage::node_store::transport_conflict` builds: the two fields name
+two transports at once, and together they would dial
+`https://127.0.0.1:<forward port>`, a TLS handshake into the far box's
+plain listener, on a port picked for `https`'s conventional 443 rather than
+the door's. An `https://` record is dialled directly, with no `via`; a
+`via` belongs to an `http://` url on the ssh lane.
 `set_node_via` is the only writer, a sibling to `upsert_paired_node` rather
 than a parameter on it — and a caller passing `None` means "nothing to
 record," never "clear a previously-set marker": a plain `aoide pair`

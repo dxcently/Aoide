@@ -13,7 +13,9 @@ correspondence").
 - `bin/{aoide,aoided}` — the two binary entry points.
 - `cli`/`dispatch` — argv parsing and the dispatcher, over
   `aoide_protocol::door::run`'s shared skeleton with core's own `special`
-  hook (`mcp serve --stdio`, `a2a serve`, `secrets serve`, `secrets exec`,
+  hook (`mcp serve --stdio`, `a2a serve`, `mail serve` (the mail adapter,
+  H1, which blocks in `serve_mail`'s own loopback accept loop),
+  `secrets serve`, `secrets exec`,
   `secrets enroll`, `secrets watch`, `events tail`, `pair watch`
   (P-P5), `conductor`, `guide`/`schema` raw output, `workspace root` — one
   bare path on stdout and NOTHING on stdout when it refuses, because a
@@ -50,6 +52,17 @@ The graph-residency integration tests run the resident daemon in an owned
 child process with a fixed environment. Fixture teardown kills and waits for
 the child before restoring the test environment; lifecycle tests cover normal
 teardown and readiness failure.
+
+`mail_adapter_round_trip.rs` is the same child-process shape one capability
+over (H1): the RELAY is a real `aoide mail serve` child with its own
+`AOIDE_ROOT`, and this test process is the poller with a second one, because
+two isolated roots in one process would race the serve thread against the
+client calls reading the global env. Both sides carry hand-written VERIFIED
+node records (P-CHARTER supplies them in a real run), the relay presents
+itself under its own `AOIDE_A2A_NODE_NAME`, and the fixture ends by killing
+and waiting for the child before restoring the environment. `#[ignore]`'d
+like the node-connectivity pair: it needs real loopback TCP, real `curl` and
+the built binary.
 
 ## What it consumes
 

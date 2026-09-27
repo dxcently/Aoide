@@ -526,6 +526,16 @@ fn resolve_dial_url(
     let Some(via) = via else {
         return Ok(logical_url.to_string());
     };
+    // H1: a node record (or a `--via` override) naming two transports at once
+    // is refused BEFORE anything is dialled — `https` + a via would rewrite
+    // the authority to a loopback port and hand a TLS client a plain
+    // listener. See `aoide_storage::node_store::transport_conflict`'s own doc
+    // for why the pair exists at all and why it is this seam's business.
+    if let Some(conflict) =
+        aoide_storage::node_store::transport_conflict(tunnel_key, logical_url, Some(&via.to_string()))
+    {
+        return Err(conflict);
+    }
     let remote_port = remote_port_from_url(logical_url)?;
     let session_id = tunnel_session_id();
     let local_port = crate::tunnel::open_or_reuse(&session_id, tunnel_key, via, "127.0.0.1", remote_port)?;
@@ -841,6 +851,20 @@ fn handle_node_add(inv: &Invocation) -> Outcome {
             ),
         )
         .with_data(json!({ "reason": "invalid-name", "name": name }));
+    }
+    // H1: an `https://` url with a `via` names two transports at once and is
+    // refused here rather than at handshake time
+    // (`node_store::transport_conflict`'s own doc has the full reasoning) —
+    // before the verification fetch, so nothing is dialled and nothing is
+    // registered.
+    let via_spec = via.as_ref().map(|v| v.to_string());
+    if let Some(conflict) = aoide_storage::node_store::transport_conflict(&name, &url, via_spec.as_deref()) {
+        return Outcome::error(cmd, conflict).with_data(json!({
+            "reason": "transport-conflict",
+            "name": name,
+            "url": url,
+            "via": via_spec,
+        }));
     }
     let autogate = inv.flag_present("autogate");
     // **A `poll` address is the design's third transport member, and it names
@@ -5456,20 +5480,26 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
     let mut rows: Vec<Value> = Vec::new();
     let mut filed = 0usize;
     let mut refused_total = 0usize;
+    let mut withheld_total = 0usize;
     for node in &targets {
         match crate::mail_wire::poll_node(node, inv.flags.get("mesh").map(String::as_str)) {
             Ok(outcome) => {
                 filed += outcome.filed;
                 refused_total += outcome.refused.len();
+                withheld_total += outcome.withheld.len();
                 // Review N13: a refused container is REPORTED, not only
                 // audited — the row names its msgid and the taught word, so a
                 // mesh-mismatched hand-over is visible where the operator is
-                // looking.
+                // looking. H1's `withheld` rides the same row for the same
+                // reason: a sealed-only listener holding an entry back is
+                // exactly the "0 filed and no reason" answer this projection
+                // exists to prevent.
                 rows.push(json!({
                     "node": node,
                     "status": "polled",
                     "filed": outcome.filed,
                     "refused": outcome.refused,
+                    "withheld": outcome.withheld,
                 }));
             }
             Err(e) => rows.push(json!({ "node": node, "status": "unreachable", "filed": 0, "reason": e })),
@@ -5480,15 +5510,20 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
         "no paired node holds `message` — nothing to poll".to_string()
     } else {
         format!(
-            "polled {} node(s): {filed} envelope(s) filed{}{}",
+            "polled {} node(s): {filed} envelope(s) filed{}{}{}",
             targets.len(),
             if refused_total == 0 { String::new() } else { format!(", {refused_total} container(s) refused") },
+            if withheld_total == 0 {
+                String::new()
+            } else {
+                format!(", {withheld_total} withheld (sealed-required — they stay on the far side until this box publishes a binding)")
+            },
             if unreachable == 0 { String::new() } else { format!(", {unreachable} unreachable") }
         )
     };
     Outcome::ok(cmd, message)
         .changed(vec![format!("state/mail/base.jsonl: +{filed} on poll")])
-        .with_data(json!({ "nodes": rows, "filed": filed }))
+        .with_data(json!({ "nodes": rows, "filed": filed, "withheld": withheld_total }))
 }
 
 /// [`handle_mail_outbox_retry`]'s `--refused` half. `target` narrows the
@@ -6928,6 +6963,70 @@ mod tests {
             let out = handle_node_add(&inv);
             assert_eq!(out.status, aoide_protocol::output::Status::Usage, "{out:?}");
             assert!(aoide_storage::node_store::load_nodes().is_empty(), "an invalid --via registers nothing");
+        });
+    }
+
+    #[test]
+    fn handle_node_add_with_an_https_url_and_a_via_is_refused_and_registers_nothing() {
+        // H1: the pair names two transports at once, so it is refused as a
+        // SHAPE error — before the AgentCard verification fetch (nothing is
+        // dialled) and before anything is written. No curl, no socket: the
+        // refusal happens strictly earlier than the verify block.
+        with_node_state("add-https-via", || {
+            let inv = Invocation {
+                path: vec!["node".to_string(), "add".to_string()],
+                args: vec!["relay".to_string(), "https://aoide.necoconeco.net/".to_string()],
+                flags: [("via".to_string(), "ssh://khoa@sakaki".to_string())].into_iter().collect(),
+                door: aoide_protocol::Door::Cli,
+            };
+            let out = handle_node_add(&inv);
+            assert_eq!(out.status, aoide_protocol::output::Status::Error, "{out:?}");
+            assert!(out.message.contains("https://aoide.necoconeco.net/"), "{}", out.message);
+            assert!(out.message.contains("ssh://khoa@sakaki"), "{}", out.message);
+            assert_eq!(
+                out.data.as_ref().unwrap()["reason"], "transport-conflict",
+                "the machine-readable reason"
+            );
+            assert!(
+                aoide_storage::node_store::load_nodes().is_empty(),
+                "a refused url+via pair registers nothing"
+            );
+        });
+    }
+
+    #[test]
+    fn a_hand_written_https_plus_via_record_is_refused_at_the_dial_seam() {
+        // The write paths above are not the only way in: an operator can
+        // hand-edit `state/nodes.json`. Every outbound call to that node
+        // resolves its url through `resolve_dial_url`, which refuses before
+        // any tunnel is opened or any byte is posted — so the failure is the
+        // taught one, never a TLS handshake into a plain listener.
+        with_node_state("dial-https-via", || {
+            let mut node = aoide_storage::node_store::Node {
+                name: "relay".to_string(),
+                url: "https://aoide.necoconeco.net/".to_string(),
+                autogate: false,
+                token_file: None,
+                bearer_secret: None,
+                hub: false,
+                pubkey: None,
+                verified: false,
+                grants: aoide_storage::node_store::Grants::new(),
+                narrowed: aoide_storage::node_store::Grants::new(),
+                via: Some("ssh://khoa@sakaki".to_string()),
+                added_at: "2026-09-26T00:00:00Z".to_string(),
+            };
+            aoide_storage::node_store::save_nodes(&[node.clone()]).unwrap();
+
+            let err = post_json_to_node(&node, "{}", None, &[], 5).expect_err("must refuse");
+            assert!(err.contains("https://aoide.necoconeco.net/"), "{err}");
+            assert!(err.contains("ssh://khoa@sakaki"), "{err}");
+
+            // The same record with the via cleared is dialable again (it
+            // refuses for a network reason, not on the shape).
+            node.via = None;
+            let err = post_json_to_node(&node, "{}", None, &[], 5).expect_err("nothing listens there");
+            assert!(!err.contains("TLS handshake into"), "the shape refusal is gone once the via is: {err}");
         });
     }
 
@@ -9012,6 +9111,55 @@ mod tests {
             r#"{{"jsonrpc":"2.0","id":1,"result":{{"envelopes":[{}]}}}}"#,
             serde_json::to_string(envelope).unwrap()
         )
+    }
+
+    /// **H1's `withheld` surface, at the command.** A sealed-only listener
+    /// answers a poll with `withheld` entries rather than letter bytes (the
+    /// adapter's `sealed-required`), and before this the operator saw
+    /// `0 envelope(s) filed` and nothing else. The row and the summary both
+    /// have to name it.
+    #[test]
+    fn mail_poll_reports_what_a_sealed_only_listener_withheld() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-poll-withheld");
+
+        let msgid = "ab".repeat(32);
+        let withheld_answer = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"result":{{"containers":[],"envelopes":[],"withheld":[{{"msgid":"{msgid}","reason":"sealed-required","detail":"publish an age binding and poll again"}}]}}}}"#
+        );
+        let (listener, port, _hits) = spawn_fixed_answer_door(withheld_answer);
+        let relay = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[verified_node("relay", &relay)]).unwrap();
+
+        let out = handle_mail_poll(&mail_inv(&["mail", "poll"], &["relay"]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
+        assert_eq!(out.data.as_ref().unwrap()["filed"], 0, "{:?}", out.data);
+        assert_eq!(
+            out.data.as_ref().unwrap()["withheld"], 1,
+            "the count rides the outcome: {:?}",
+            out.data
+        );
+        let row = &out.data.as_ref().unwrap()["nodes"][0];
+        assert_eq!(row["node"], "relay");
+        assert_eq!(row["refused"], json!([]), "and nothing was refused: {row}");
+        assert!(
+            row["withheld"][0].as_str().unwrap().contains(&msgid) && row["withheld"][0].as_str().unwrap().contains("sealed-required"),
+            "the row names the entry and the taught word: {row}"
+        );
+        assert!(
+            out.message.contains("1 withheld (sealed-required"),
+            "and the summary says why nothing was filed: {}",
+            out.message
+        );
+
+        // The far side holds it, so this box filed nothing and has nothing to
+        // ack — the letter is still on the relay, which is exactly what the
+        // message tells the operator.
+        assert!(aoide_storage::mail::read_base().unwrap().is_empty(), "nothing is filed");
+        assert!(aoide_storage::outbox::list_entries("relay").unwrap().is_empty(), "and nothing is spooled");
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// H1, as a test: **a node with NOTHING to send receives a held letter

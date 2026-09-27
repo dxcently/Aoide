@@ -500,7 +500,12 @@ never the inbound/serve half (that's `aoide-server`).
   `unpaired-node` BEFORE any dial. Hand-over is bounded by
   `aoide_storage::outbox::POLL_BATCH_CAP` (50, the drain's own batch), which
   is safe because the acks retire what was filed and the next poll
-  advances. `settle_deposit` is the ONLY
+  advances. The `PollOutcome` it returns carries all three answers the command
+  renders: `filed`, the `refused` containers (`<msgid>: <reason>`), and — H1 —
+  the `withheld` entries a sealed-only listener would not hand over
+  (`<msgid>: sealed-required — <detail>`), so a letter held at a relay for want
+  of a binding is reported where the operator is looking instead of as a bare
+  `0 envelope(s) filed`. `settle_deposit` is the ONLY
   implementation of that outcome-follows dispatch — `aoide-server::a2a::
   mail_deposit` reaches the same function through `aoide_conduct::
   mail_bridge` rather than keeping its own copy. **Two

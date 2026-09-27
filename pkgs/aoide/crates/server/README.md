@@ -567,6 +567,44 @@ the inbound half of the two-door contract (the outbound half is
   not read until P-M4 (MAIL.md §Status), so P-M3's reachable refusal is the
   `message` half (`aoide node allow <node> message off`, the per-request
   quarantine that already exists).
+- **The mail adapter (`aoide mail serve`, H1) — a second LISTENER, and not a
+  second door.** `serve_mail` binds `127.0.0.1` and nothing else (no bind
+  option, no flag, no env var: the front that faces the mesh is a
+  TLS-terminating one, and the A2A door is never fronted by it), and its whole
+  route is `route_mail`: `GET /.well-known/agent-card.json` answers
+  `stripped_card`'s three keys ALWAYS (the mail profile has no door-wide token,
+  so there is no credentialed caller to hand the full card to) and `POST /`
+  dispatches through `mail_rpc` — the same three-armed function the door's own
+  `handle_jsonrpc` falls through to first, so the two listeners cannot drift on
+  what a mail call means. Everything else is `-32601` by construction:
+  `message/send` (inject and spawn), `tasks/get`, `graphSummary`, the `pair*`
+  ceremony and the SSE takeover are not refused here, they are unreachable —
+  the functions behind them are never called from this process. A method name
+  it cannot serve audits under its OWN label (`a2a.mail-adapter.refused
+  message/send`), never a door method's name emitted by a listener that has no
+  such method; a mail method keeps the label the door emits for it.
+  `mailPoll` is sealed-only in the pull direction as well as `mailDeposit` in
+  the push one: an entry spooled toward a poller that held no binding is
+  WITHHELD (named in the answer's `withheld` list with `sealed-required`, and
+  counted in the audit line) instead of crossing an HTTPS hop in the clear.
+  `handle_connection` takes a `Listener` (plus `Option<&InboundBearerConfig>`,
+  `None` for the adapter) and is the ONE place that difference is checked, so
+  the shared transport hardening (`MAX_BODY`/`MAX_LINE`/`MAX_HEADERS`/
+  `MAX_REQUEST`/`MAX_CONN`, per-connection signature verification with its
+  process-local nonce cache, the single audit log) is inherited rather than
+  duplicated. Audit lines name their listener and the connection's origin
+  (`HTTP {status} from loopback via mail-adapter`; the door's own detail stays
+  exactly `HTTP {status}`) — the origin alone could not distinguish the two,
+  since a front dials this box from loopback. That holds on the EARLY paths
+  too: a malformed request and a refused signature are tagged by the same
+  `Listener`, so an operator can attribute a hostile flood to the listener it
+  hit. The Host header is never
+  consulted (through a tunnel it is the front's hostname, not this process's
+  business). The admission is the door's own too — one `verify_signed_request`
+  (charter rung included), one `mail_rpc` calling the same `mail_deposit`/
+  `mail_poll`/`node_binding`, one `grant_in_mesh` reading the caller's grant in
+  the mesh its request SIGNED — so a charter-listed key is admitted and a
+  revoked one refused through the adapter exactly as through the door.
 - `discovery` — the discovery advertisement's SEND half (P-P6 + task
   #120, `docs/architecture/PAIRING.md`'s "Discovery
   (advertise-but-locked)" section, CONTRACTS.md §6's "Discovery

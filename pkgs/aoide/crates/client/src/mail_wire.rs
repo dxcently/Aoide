@@ -411,13 +411,17 @@ fn dest_is_never_dialled(node_name: &str) -> bool {
 /// `Err` is the honest "we could not ask" — a refused or unreachable poll.
 /// Nothing is recorded on the spool either way: a poll writes nothing, and
 /// the entries the far end did not hand over are the far end's own state.
-/// What one poll did: how many envelopes it FILED, and the containers it
+/// What one poll did: how many envelopes it FILED, the containers it
 /// REFUSED, each `"<msgid>: <reason>"` (review N13 — a refusal a caller
-/// cannot see is a refusal nobody acts on).
+/// cannot see is a refusal nobody acts on), and the entries the far end
+/// WITHHELD rather than hand over, each `"<msgid>: <reason>"` (H1 — an
+/// adapter's `sealed-required` refusal is the one thing that explains a
+/// letter stuck at a relay with nothing filed on this end).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PollOutcome {
     pub filed: usize,
     pub refused: Vec<String>,
+    pub withheld: Vec<String>,
 }
 
 pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, String> {
@@ -582,7 +586,33 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
         }
         settle_deposit(&envelope, &outcome);
     }
-    Ok(PollOutcome { filed, refused })
+    // H1: what a sealed-only listener WITHHELD instead of handing over. The
+    // answer carries no letter bytes for those entries — they stay spooled at
+    // the far end — and without this the poll would report a bare "0 filed"
+    // for a mailbox that is holding letters the operator asked for. Named the
+    // same way the refused containers are, so `mail poll` renders both.
+    let mut withheld: Vec<String> = Vec::new();
+    for entry in result.get("withheld").and_then(Value::as_array).into_iter().flatten() {
+        let msgid = entry.get("msgid").and_then(Value::as_str).unwrap_or("(no msgid)");
+        let reason = entry.get("reason").and_then(Value::as_str).unwrap_or("withheld");
+        let detail = entry.get("detail").and_then(Value::as_str);
+        withheld.push(match detail {
+            Some(detail) => format!("{msgid}: {reason} — {detail}"),
+            None => format!("{msgid}: {reason}"),
+        });
+        // The audit line `mail poll` never had: a withheld entry is a
+        // deliberate refusal by the listener, and the operator's own box
+        // records it on its side of the wire.
+        let _ = aoide_protocol::audit::audit(
+            &aoide_protocol::audit::default_audit_log(),
+            aoide_protocol::audit::Door::Cli,
+            aoide_protocol::audit::EventClass::Audit,
+            "mail.poll.withheld",
+            "invalid",
+            &format!("{msgid} from `{node_name}` withheld: {reason}"),
+        );
+    }
+    Ok(PollOutcome { filed, refused, withheld })
 }
 
 /// Publish this node's binding to `node` and store the one it answers with,
