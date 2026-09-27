@@ -76,10 +76,13 @@
 - **A `charter` kind is never filed, in either lane.** The container path
   applies it; `mail::deposit` refuses a PLAINTEXT envelope with that kind
   (`not-correspondence`), because it carries no charter at all.
-- **The charter arm's zone check answers to the charter, not to a registry.** A
-  carrier that relabels `mesh`/`originMesh` is refused `zone-violation` after
-  the charter is applied — the charter's authority is the operator signature,
-  and the letter's routing claim never overrides it.
+- **The charter arm's zone check reads SIGNED values only.** The mesh the
+  carrier's own envelope signed (`ctx.origin_mesh`) is compared against the
+  mesh inside the operator's signature input, and a disagreement is refused
+  `zone-violation` after the charter is applied — the charter's authority is
+  the operator signature, and the letter's routing claim never overrides it.
+  The hop-mutable `container.mesh` is NOT read there: a relay flipping one
+  unsigned byte must neither admit a charter nor refuse one.
 - **`sign` is the last write to a charter file.** The signature covers the
   digest of the operator's own bytes, so anything that rewrites the file after
   `sign` invalidates it. Never normalize on read to make a touched file verify.

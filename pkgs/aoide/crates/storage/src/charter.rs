@@ -1741,13 +1741,20 @@ mod tests {
         let _ = std::fs::remove_dir_all(&op);
     }
 
-    /// The zone check, made operable on the one authority that can answer it
-    /// before any registry does: a letter whose carrier relabels the zone it
-    /// arrived in is refused `zone-violation` — and the charter it carried
-    /// stays in force, because the charter's authority is the operator
-    /// signature and never the letter's routing claim.
+    /// **The zone check reads SIGNED values only** (orchestrator ruling): the
+    /// mesh the carrier's own envelope signed (`ctx.origin_mesh`) against the
+    /// mesh inside the operator's signature input (`charter_sig_input`), so a
+    /// hop-mutated `container.mesh` neither admits nor refuses a charter by
+    /// itself.
+    ///
+    /// Two halves, and both matter at once: the relabelled container still
+    /// APPLIES its charter (a spooling relay or a TLS edge must not be able to
+    /// turn an accepted charter letter into a permanent refusal by flipping
+    /// one unsigned byte), and the relabel cannot rescue a container whose
+    /// SIGNED mesh disagrees with the charter it carries (`zone-violation`,
+    /// still refused).
     #[test]
-    fn a_charter_letter_in_the_wrong_zone_is_refused() {
+    fn a_hop_mutated_container_mesh_neither_admits_nor_refuses_a_charter() {
         let (_guard, _saver) = isolate();
         let op = machine_dir("zone-op");
         let peer = machine_dir("zone-peer");
@@ -1764,24 +1771,55 @@ mod tests {
         let (v1, v1_sig) = read_pair(&op, "home");
         let binding = parse(&src).unwrap().nodes["peerbox"].age.clone();
         let mut container = seal::seal_charter(&v1, &v1_sig, &binding, "home", 1, "peerbox", &now_iso_utc()).unwrap();
-        // `mesh` is hop-mutable and outside `ctx`, so a carrier can relabel it
-        // without touching a byte the origin signed — which is exactly the
-        // claim this check refuses.
+
+        // A carrier relabels the hop-mutable, UNSIGNED `mesh` — a byte outside
+        // everything the origin signed.
         container.mesh = "elsewhere".to_string();
 
         machine(&peer, "peerbox");
         trust_operator_line(&peer, "home", &rooted.operator);
         match seal::deposit_container(&container, &container.origin_mesh).unwrap() {
-            seal::ContainerOutcome::Refused { reason, detail } => {
-                assert_eq!(reason, seal::ZONE_VIOLATION, "{detail}");
-                assert!(detail.contains("elsewhere"), "and names the zone it actually arrived in: {detail}");
+            seal::ContainerOutcome::Applied { mesh, version, .. } => {
+                assert_eq!(mesh, "home", "the charter's own signed mesh decides, never the hop's label");
+                assert_eq!(version, 1);
             }
-            other => panic!("expected a zone violation, got {other:?}"),
+            other => panic!("a relabelled hop must not refuse a charter that verifies: {other:?}"),
         }
         assert_eq!(
             in_force_charter("home").unwrap().version,
             1,
-            "the charter it carried is applied anyway — its authority is the operator signature"
+            "the charter it carried is applied — its authority is the operator signature"
+        );
+
+        // And the relabel does not ADMIT one either: a container whose SIGNED
+        // mesh disagrees with the charter it carries is still refused, and the
+        // relabel cannot rescue it. Minted by the operator's own machine (a
+        // charter node, so the origin verifies) with `ctx.origin_mesh` naming
+        // `away`, carrying a `home` charter — the mislabelling only a member
+        // can construct — at a version above the mark, so the high-water
+        // check has nothing to say and the zone is the only answer left.
+        machine(&op, "opbox");
+        let src2 = format!("mesh = \"home\"\nversion = 1\nrelays = []\n\n[nodes]\n{op_line}\n{peer_line}\n");
+        fs::atomic_write(&source_path("home"), &src2).unwrap();
+        sign("home", None).unwrap();
+        let (v2, v2_sig) = read_pair(&op, "home");
+        let binding2 = parse(&src2).unwrap().nodes["peerbox"].age.clone();
+        let mislabelled = seal::seal_charter(&v2, &v2_sig, &binding2, "away", 2, "peerbox", &now_iso_utc()).unwrap();
+        assert_eq!(mislabelled.origin_mesh, "away", "the SIGNED zone names `away`");
+        assert_eq!(mislabelled.mesh, "away");
+
+        machine(&peer, "peerbox");
+        match seal::deposit_container(&mislabelled, &mislabelled.origin_mesh).unwrap() {
+            seal::ContainerOutcome::Refused { reason, detail } => {
+                assert_eq!(reason, seal::ZONE_VIOLATION, "{detail}");
+                assert!(detail.contains("signed in zone `away`"), "and says which signed zone it read: {detail}");
+            }
+            other => panic!("a container whose signed mesh names another zone is refused: {other:?}"),
+        }
+        assert_eq!(
+            in_force_charter("home").unwrap().version,
+            2,
+            "and the charter it carried is applied anyway — its authority is the operator signature"
         );
 
         let _ = std::fs::remove_dir_all(&op);

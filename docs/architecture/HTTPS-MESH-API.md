@@ -321,7 +321,10 @@ container names. The zone the letter claims is checked against the only authorit
 that can answer it before any registry does — the charter that just landed — so a
 carrier that relabels the zone is refused `zone-violation`, and the charter it
 carried stays in force, because the charter's authority is the operator signature
-and never the letter's routing claim. A charter that fails any accept step is
+and never the letter's routing claim. Both sides of that comparison are SIGNED —
+the mesh the carrier's own envelope signed, against the mesh inside the operator's
+signature input — so a hop that rewrites the container's hop-mutable `mesh` neither
+admits nor refuses a charter by itself. A charter that fails any accept step is
 refused before any part of the container is trusted, and nothing is written.
 Nothing is filed as correspondence and nothing is acked — a charter is a mesh's
 trust, not a letter, and the letter's own envelope never leaves the sender's own

@@ -889,10 +889,15 @@ pub const CONTEXT_MISMATCH: &str = "context-mismatch";
 /// `to`/`origin`.
 pub const ADDRESSING_MISMATCH: &str = "addressing-mismatch";
 /// The carrier's zone and the authority's disagree: a `charter` letter whose
-/// `originMesh` (or hop-mutable `mesh`) names a mesh other than the one the
-/// charter it carries was signed for. MAIL.md §Transit's own word for the
-/// receiver's zone check, made operable for the one purpose that can answer it
-/// before any registry does.
+/// SIGNED `originMesh` names a mesh other than the one the charter it carries
+/// was signed for (the charter's mesh is inside the operator's own signature
+/// input, so both sides of this comparison are signed). MAIL.md §Transit's own
+/// word for the receiver's zone check, made operable for the one purpose that
+/// can answer it before any registry does.
+///
+/// The hop-mutable `container.mesh` is deliberately NOT read by that check: a
+/// relay or a TLS edge could otherwise turn an accepted charter letter into a
+/// permanent refusal by flipping one unsigned byte.
 pub const ZONE_VIOLATION: &str = "zone-violation";
 /// Refusal: the hop chain does not walk from `msgid` to self.
 pub const BROKEN_CHAIN: &str = "broken-chain";
@@ -1698,17 +1703,29 @@ fn deposit_charter(
     };
 
     // The zone check, tied to the one authority that can answer it before any
-    // registry does: the charter that just landed. A container whose
-    // `originMesh` or hop-mutable `mesh` names something other than the mesh
-    // the operator signed is a carrier mislabelling its own route
+    // registry does: the charter that just landed. **Both sides of it are
+    // SIGNED** (orchestrator ruling): `ctx.origin_mesh` is the mesh the
+    // carrier's own envelope signed, and `accepted.charter.mesh` is the mesh
+    // inside the operator's signature input
+    // (`charter_sig_input(mesh, version, digest)`, checked by `accept` before
+    // the charter parsed at all). A carrier whose signed mesh names something
+    // other than the mesh the operator signed is mislabelling its own route
     // (`zone-violation`), and the charter stays in force either way — ITS
     // authority is the operator signature, not the letter's routing claim.
-    if ctx.origin_mesh != accepted.charter.mesh || container.mesh != accepted.charter.mesh {
+    //
+    // **`container.mesh` is deliberately NOT read here.** It is hop-mutable
+    // outside `ctx` by design, so a spooling relay or a TLS edge could
+    // otherwise turn an accepted charter letter into a permanent refusal by
+    // flipping one unsigned byte — the same mail-delivery DoS the mail arm's
+    // own mesh check was fixed for. It neither admits nor refuses a charter
+    // by itself; P-M4's transit is where a hop's `mesh` is checked, at the
+    // hop, against the zone clause.
+    if ctx.origin_mesh != accepted.charter.mesh {
         return Ok(refusal(
             ZONE_VIOLATION,
             format!(
-                "this charter letter arrived in zone `{}`/`{}`, but the charter it carries is mesh `{}`",
-                ctx.origin_mesh, container.mesh, accepted.charter.mesh
+                "this charter letter was signed in zone `{}`, but the charter it carries is mesh `{}`",
+                ctx.origin_mesh, accepted.charter.mesh
             ),
         ));
     }
