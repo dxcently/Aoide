@@ -2972,3 +2972,24 @@ project/parent inheritance across local/remote/app/subagents;
   backend allows it, else say what the key means for that backend; make each
   first-run refusal name its next command; code and `Secrets-Commands.md`
   agree.
+
+## 35. Corrections of record (S11 docs lane, 2026-09-27)
+
+Appended, never edited in place: an earlier entry stands as written, and the
+correction stands as a later line. Both were found while the S11 rule-book sweep
+re-read the tree against its own prose.
+
+- **§4's S8 entry counts the selection refusals wrong.** The line reads "the
+  song landmine pair and the four selection refusals, 49 → 57 cases". The
+  refusals are FIVE — an unknown `song.declared` name, an unknown
+  `song.available` name, a song with no `rice.nix`, a declared song with no lyra
+  lane, and an available song with no lyra lane — and the discovery landmine is
+  a sixth; with the landmine pair the S8 delta is 8, which is what makes the
+  same line's 49 → 57 arithmetic work. The count was the miscount, never the
+  total.
+- **S10's commit `74a4968` cites the wrong consumer drvPath.** Its body names
+  the `tests/consumer` toplevel as `nq75yvhx…`; the value that commit actually
+  produced is `hmhpnw4p…`. Commits are immutable here, so the correction of
+  record is this line. (For scale, not identity: the same fixture on the S11
+  branch prints `b4gvs1vj…`, measured by `tests/consumer/run.sh` after the
+  reach-in grep was widened — a later tree, a later drv.)
