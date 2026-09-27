@@ -120,6 +120,16 @@ fn handle_onboard(inv: &Invocation) -> Outcome {
 
     if !quiet {
         println!("{}", crate::guide::render(crate::dispatch::registry()));
+        // Last, deliberately: the node line is what the operator walks away
+        // with. It is the machine's own identity for someone else's charter
+        // (P-CHARTER) — public keys only, and the age binding is minted here
+        // on first call if it does not exist yet.
+        match aoide_storage::charter::node_line() {
+            Ok(line) => println!(
+                "onboard: this machine's node line — paste it under `[nodes]` in a charter:\n  {line}"
+            ),
+            Err(e) => println!("onboard: node line unavailable: {e}"),
+        }
     }
 
     let message = if project_registered {

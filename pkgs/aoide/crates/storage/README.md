@@ -20,7 +20,28 @@ by decision — no embedded database yet
   keys and validity window, the per-peer binding store
   (`binding_for`/`learn_binding`), `Container`/`Ctx` with
   `seal_envelope`/`deposit_container`, and the hop-chain and dedup frames. It
-  is the ONLY module in this workspace that depends on the `age` crate.
+  is the ONLY module in this workspace that depends on the `age` crate. Also
+  the P-CHARTER half of the same container: `charter_sig_input` /
+  `charter_sig_frame` (the operator's signature input and the detached `.sig`
+  file), `charter_payload` (what a `charter` letter carries instead of an
+  envelope), `seal_charter`, and `deposit_container`'s charter branch, which
+  applies the enclosed charter before judging the letter's origin.
+
+- `charter` — one operator's machines, signed by that operator's own key
+  (P-CHARTER, `docs/architecture/HTTPS-MESH-API.md` "Charters"). Exposes
+  `Charter`/`parse` (the document and every check a reader owes it: name
+  grammar, capability vocabulary, addresses, relays and `[status]`/`[gates]`
+  that are nodes of the mesh, one key on one line, each binding under the key
+  on its own line), `accept` (the five steps, digest first, nothing written
+  until all pass, all of it under `charter_lock_path`'s per-mesh lock) and its
+  taught refusals, the operator key at `state/operator/<mesh>.key`, the charter
+  in force and the trust record at `state/mesh/<mesh>/`, `node_line` (what
+  `aoide identity` and `aoide onboard` print for an operator to paste), and the
+  operator-side flows `init`, `sign`, `reroot` and `spool`. It reads the
+  operator key's trust out of both the config line and the state record and
+  refuses `operator-mismatch` when they disagree; `init` refuses to root a
+  machine that already trusts someone, and `reroot` refuses to move a machine
+  whose config pins the key it is replacing.
 
 - `letter` defines optional `AOIDE-LETTER/1` content within the existing
   signed envelope text: Subject, To, Cc, body, and optional threadId/replyTo.

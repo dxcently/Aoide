@@ -22,6 +22,12 @@
 //!   two verification halves [`deposit_container`] implements: the shared
 //!   keyless steps, then the destination branch that opens, matches and
 //!   files.
+//! - The **`charter` letter's own frames** (P-CHARTER): [`charter_sig_input`]
+//!   and [`charter_sig_frame`] (the operator's signature input and the
+//!   detached `.sig` file), [`charter_payload`] (the sealed payload a charter
+//!   letter carries) and [`seal_charter`]. The `charter` branch of
+//!   [`deposit_container`] applies the enclosed charter before it judges the
+//!   letter's origin, which is [`crate::charter`]'s half of the same slice.
 //!
 //! ## What is deliberately NOT here
 //!
@@ -69,6 +75,9 @@ const L_SUITES: &str = "aoide/mail-suites";
 const L_DEDUP: &str = "aoide/mail-dedup";
 const L_HOP: &str = "aoide/mail-hop";
 const L_HOP_ENTRY: &str = "aoide/mail-hop-entry";
+const L_CHARTER: &str = "aoide/charter";
+const L_CHARTER_SIG: &str = "aoide/charter-sig";
+const L_CHARTER_PAYLOAD: &str = "aoide/charter-payload";
 
 // ── Registered identifiers ──────────────────────────────────────────────
 
@@ -694,6 +703,62 @@ pub fn usable_binding_for(node_name: &str, now: &str) -> Option<Binding> {
     binding.suites.iter().any(|s| s == SUITE_AGE_V1_X25519).then_some(binding)
 }
 
+// ── The charter's two frames (P-CHARTER) ─────────────────────────────────
+
+/// The bytes an operator key signs: `frame("aoide/charter", [mesh, version,
+/// sha256(file bytes)])`. The third field is the **digest of the operator's
+/// own file bytes**, never a canonical re-serialization of their value — so
+/// nothing between `sign` and `accept` re-serializes, and a carrier cannot
+/// substitute a different file that happens to parse the same.
+///
+/// `pub` (and here, in the label block's home) because the charter module
+/// builds no frame of its own: the label table is this file's.
+pub fn charter_sig_input(mesh: &str, version: u64, file_digest: &[u8]) -> Vec<u8> {
+    frame(L_CHARTER, &[mesh.as_bytes(), &version.to_be_bytes(), file_digest])
+}
+
+/// The detached signature file's own frame:
+/// `frame("aoide/charter-sig", [sig, digest])` — the 64 signature bytes and
+/// the 32 digest bytes they were computed over. Carrying the digest BESIDE
+/// the signature is what makes a touched source diagnosable
+/// (`charter-tampered`) rather than merely rejected.
+pub fn charter_sig_frame(sig: &[u8], file_digest: &[u8]) -> Vec<u8> {
+    frame(L_CHARTER_SIG, &[sig, file_digest])
+}
+
+/// Parse a `.sig` file's frame back into its `(sig, digest)` pair, refusing
+/// any other shape. Both are raw bytes; a caller renders them hex.
+pub fn parse_charter_sig_frame(bytes: &[u8]) -> Result<(Vec<u8>, Vec<u8>), String> {
+    let fields = parse_frame(L_CHARTER_SIG, bytes)?;
+    if fields.len() != 2 {
+        return Err(format!("a charter signature carries 2 fields, found {}", fields.len()));
+    }
+    if fields[0].len() != 64 {
+        return Err(format!("a charter signature is 64 bytes, found {}", fields[0].len()));
+    }
+    if fields[1].len() != 32 {
+        return Err(format!("a charter digest is 32 bytes, found {}", fields[1].len()));
+    }
+    Ok((fields[0].to_vec(), fields[1].to_vec()))
+}
+
+/// The sealed payload of a `charter` letter:
+/// `frame("aoide/charter-payload", [file bytes, .sig bytes])`. A charter
+/// letter carries no envelope — its authority is the operator signature over
+/// the file, and the letter around it is carriage.
+pub fn charter_payload(file_bytes: &[u8], sig_bytes: &[u8]) -> Vec<u8> {
+    frame(L_CHARTER_PAYLOAD, &[file_bytes, sig_bytes])
+}
+
+/// Parse that payload back, refusing any other shape.
+pub fn parse_charter_payload(bytes: &[u8]) -> Result<(&[u8], &[u8]), String> {
+    let fields = parse_frame(L_CHARTER_PAYLOAD, bytes)?;
+    if fields.len() != 2 {
+        return Err(format!("a charter payload carries 2 fields, found {}", fields.len()));
+    }
+    Ok((fields[0], fields[1]))
+}
+
 // ── The container ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -823,6 +888,12 @@ pub const CONTEXT_MISMATCH: &str = "context-mismatch";
 /// Refusal: the inner envelope is addressed somewhere other than the outer
 /// `to`/`origin`.
 pub const ADDRESSING_MISMATCH: &str = "addressing-mismatch";
+/// The carrier's zone and the authority's disagree: a `charter` letter whose
+/// `originMesh` (or hop-mutable `mesh`) names a mesh other than the one the
+/// charter it carries was signed for. MAIL.md §Transit's own word for the
+/// receiver's zone check, made operable for the one purpose that can answer it
+/// before any registry does.
+pub const ZONE_VIOLATION: &str = "zone-violation";
 /// Refusal: the hop chain does not walk from `msgid` to self.
 pub const BROKEN_CHAIN: &str = "broken-chain";
 /// Refusal: a container for a suite this build does not implement.
@@ -972,6 +1043,83 @@ pub fn seal_envelope(
     container.sig = wire_auth::sign_hex(&kp, &outer_bytes(&ctx, &ct));
     container.transit.push(TransitEntry {
         node: ctx.origin_node.clone(),
+        next: to_node.to_string(),
+        at: at.to_string(),
+        mesh: mesh.to_string(),
+        sig: wire_auth::sign_hex(&kp, &hop_bytes(&msgid, &msgid, &ctx.origin_node, to_node, at, mesh)),
+    });
+    Ok(container)
+}
+
+/// Seal a signed charter to one recipient — the `charter` letter's container
+/// (P-CHARTER). A charter letter carries no envelope: the payload is
+/// [`charter_payload`] (the operator's file bytes and its `.sig` bytes) and
+/// the letter's authority is the operator signature inside it, never the
+/// envelope's own. The outer signature is still this machine's identity key,
+/// which is what `accept` checks the enclosed charter's origin against.
+///
+/// **`msgid` is the digest of the signature input** (`sha256` of
+/// [`charter_sig_input`]), so one charter version has ONE identity across
+/// every seal of it: a node that receives the same version twice by two
+/// routes recognises the second by its immutable bytes, and a re-sign always
+/// names a new version and so a new `msgid`.
+///
+/// `origin_mesh` and `mesh` are both the charter's own mesh at mint — the
+/// charter IS the mesh declaration, so there is no second zone to name.
+pub fn seal_charter(
+    file_bytes: &[u8],
+    sig_bytes: &[u8],
+    binding: &Binding,
+    mesh: &str,
+    version: u64,
+    to_node: &str,
+    at: &str,
+) -> Result<Container, String> {
+    let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
+    let origin_key_hex = kp.info().pubkey_hex;
+    let msgid: [u8; 32] = sha256(&charter_sig_input(mesh, version, &sha256(file_bytes)));
+    let origin_node = crate::display::local_node_name();
+    let ctx = Ctx {
+        v: CONTAINER_VERSION,
+        purpose: PURPOSE_CHARTER.to_string(),
+        msgid,
+        origin_node: origin_node.clone(),
+        origin_key: hex_array::<32>(&origin_key_hex)?,
+        to_node: to_node.to_string(),
+        to_age: binding.age_pubkey.clone(),
+        origin_mesh: mesh.to_string(),
+        suite: SUITE_AGE_V1_X25519.to_string(),
+        generation: binding.generation,
+        board: None,
+        epoch: 0,
+    };
+
+    let pt = frame(L_PT, &[&ctx.to_bytes(), &charter_payload(file_bytes, sig_bytes)]);
+    let recipient: age::x25519::Recipient = binding
+        .age_pubkey
+        .parse()
+        .map_err(|e| format!("binding recipient is not an age key ({e})"))?;
+    let ct = encrypt_to(&recipient, &pt)?;
+
+    let mut container = Container {
+        v: CONTAINER_VERSION,
+        purpose: ctx.purpose.clone(),
+        msgid: hex_encode(&ctx.msgid),
+        generation: ctx.generation,
+        origin: Party { node: origin_node.clone(), key: origin_key_hex },
+        to: Destination { node: to_node.to_string(), age: binding.age_pubkey.clone() },
+        origin_mesh: ctx.origin_mesh.clone(),
+        mesh: mesh.to_string(),
+        suite: ctx.suite.clone(),
+        ct: hex_encode(&ct),
+        sig: String::new(),
+        transit: Vec::new(),
+        board: None,
+        epoch: None,
+    };
+    container.sig = wire_auth::sign_hex(&kp, &outer_bytes(&ctx, &ct));
+    container.transit.push(TransitEntry {
+        node: origin_node,
         next: to_node.to_string(),
         at: at.to_string(),
         mesh: mesh.to_string(),
@@ -1163,6 +1311,21 @@ pub enum ContainerOutcome {
         /// [`record_admitted`] for why the record cannot be written here.
         digest: String,
     },
+    /// **`charter` only** (P-CHARTER): the enclosed charter verified under the
+    /// operator key this node trusts, was applied, and the letter's origin
+    /// checked out against it. Nothing is filed as correspondence — a charter
+    /// is the mesh's trust, not a letter — so there is no envelope to hand on
+    /// and no ack owed. `digest` is the dedup digest, recorded by the caller
+    /// once the charter is on disk (the same filed-then-recorded rule
+    /// `Opened` holds), and `rekeyed` names every existing node whose identity
+    /// key this version changed, which is what a stolen operator key would
+    /// sign.
+    Applied {
+        mesh: String,
+        version: u64,
+        rekeyed: Vec<crate::charter::Rekeyed>,
+        digest: String,
+    },
     Duplicate { filed_letter: bool },
     Refused { reason: String, detail: String },
 }
@@ -1181,6 +1344,12 @@ impl std::fmt::Debug for ContainerOutcome {
             ContainerOutcome::Duplicate { filed_letter } => f
                 .debug_struct("Duplicate")
                 .field("filed_letter", filed_letter)
+                .finish(),
+            ContainerOutcome::Applied { mesh, version, rekeyed, .. } => f
+                .debug_struct("Applied")
+                .field("mesh", mesh)
+                .field("version", version)
+                .field("rekeyed", &rekeyed.len())
                 .finish(),
             ContainerOutcome::Refused { reason, detail } => f
                 .debug_struct("Refused")
@@ -1229,6 +1398,17 @@ pub fn deposit_container(container: &Container) -> Result<ContainerOutcome, Stri
         Ok(sig) => sig,
         Err(e) => return Ok(refusal(CONTEXT_MISMATCH, format!("sig: {e}"))),
     };
+
+    // P-CHARTER: a `charter` letter verifies the other way round. Its
+    // authority is the operator signature over the enclosed file, so the
+    // charter is applied FIRST and the letter's origin is then checked
+    // AGAINST it — which is what lets a machine accept a charter from an
+    // origin it has not learned yet. `purpose` alone selects the branch: a
+    // charter container names no board, and `check_purpose_board` above has
+    // already refused one that does.
+    if container.purpose == PURPOSE_CHARTER {
+        return deposit_charter(container, &ctx, &ct, &sig);
+    }
 
     // 3. The outer origin signature, under the key `origin.key` names,
     //    resolved through the paired record (a charter mesh is P-CHARTER's).
@@ -1377,6 +1557,155 @@ pub fn deposit_container(container: &Container) -> Result<ContainerOutcome, Stri
     Ok(ContainerOutcome::Opened { envelope: Box::new(envelope), digest })
 }
 
+/// The `charter` letter's branch (P-CHARTER). Every step it shares with the
+/// mail branch it runs the same way; the two it does not share are the
+/// reason this branch exists at all:
+///
+/// - **The outer signature is verified against the key the container NAMES**,
+///   with no registry in the loop. A charter's whole point is a machine that
+///   does not yet know the signer, so "is `origin.node` in `nodes.json`" is
+///   the wrong question here — the answer comes after the charter, from the
+///   charter.
+/// - **The enclosed charter is applied before the letter's origin is
+///   judged** (`charter::accept`), and the origin is then required to be a
+///   node the accepted charter lists, holding the exact key `ctx` names.
+///
+/// Nothing is filed and nothing is acked: a charter is a mesh's trust, not
+/// correspondence. The caller records the container with `digest` once the
+/// charter is in force, the same filed-then-recorded rule `Opened` follows.
+fn deposit_charter(
+    container: &Container,
+    ctx: &Ctx,
+    ct: &[u8],
+    sig: &[u8],
+) -> Result<ContainerOutcome, String> {
+    let refusal = |reason: &str, detail: String| ContainerOutcome::Refused {
+        reason: reason.to_string(),
+        detail,
+    };
+
+    let outer = outer_bytes(ctx, ct);
+    if !wire_auth::verify_signature_hex(&hex_encode(&ctx.origin_key), &outer, &container.sig) {
+        return Ok(refusal(
+            "unverified-origin",
+            "the outer signature does not verify under the key it names".to_string(),
+        ));
+    }
+
+    let digest = hex_encode(&sha256(&dedup_bytes(ctx, ct, sig)));
+    match check_seen(container, &digest)? {
+        Seen::Collision => {
+            return Ok(refusal(
+                CONTEXT_MISMATCH,
+                format!("charter msgid {} reappeared with different immutable bytes", container.msgid),
+            ))
+        }
+        // A charter is never filed, so a duplicate owes no ack: the answer is
+        // the same `duplicate` a retried letter gets, with nothing behind it.
+        Seen::Duplicate { .. } => return Ok(ContainerOutcome::Duplicate { filed_letter: false }),
+        Seen::Fresh => {}
+    }
+
+    if container.to.node != crate::display::local_node_name() {
+        return Ok(refusal(
+            ADDRESSING_MISMATCH,
+            format!("charter is addressed to `{}`, not this node", container.to.node),
+        ));
+    }
+
+    let pt = match decrypt_with_identities(ct) {
+        Ok(pt) => pt,
+        Err(_) => {
+            let reason = if retired_and_closed(&container.to.age, &now_iso_utc()) {
+                OPEN_KEY_RETIRED
+            } else {
+                OPEN_FAILED
+            };
+            return Ok(refusal(
+                reason,
+                "the ciphertext does not open under any identity this node holds".to_string(),
+            ));
+        }
+    };
+    let fields = match parse_frame(L_PT, &pt) {
+        Ok(fields) => fields,
+        Err(e) => return Ok(refusal(CONTEXT_MISMATCH, e)),
+    };
+    if fields.len() != 2 {
+        return Ok(refusal(CONTEXT_MISMATCH, "the sealed plaintext is not a two-field frame".to_string()));
+    }
+    if fields[0] != ctx.to_bytes().as_slice() {
+        return Ok(refusal(CONTEXT_MISMATCH, "the inner ctx differs from the outer".to_string()));
+    }
+    let (file_bytes, sig_bytes) = match parse_charter_payload(fields[1]) {
+        Ok(pair) => pair,
+        Err(e) => return Ok(refusal(CONTEXT_MISMATCH, format!("charter payload: {e}"))),
+    };
+
+    // The enclosed charter, verified and applied before the carrier is
+    // judged on anything.
+    let accepted = match crate::charter::accept(file_bytes, sig_bytes) {
+        Ok(accepted) => accepted,
+        Err(e) => return Ok(refusal(&e.reason, e.detail)),
+    };
+
+    // The zone check, tied to the one authority that can answer it before any
+    // registry does: the charter that just landed. A container whose
+    // `originMesh` or hop-mutable `mesh` names something other than the mesh
+    // the operator signed is a carrier mislabelling its own route
+    // (`zone-violation`), and the charter stays in force either way — ITS
+    // authority is the operator signature, not the letter's routing claim.
+    if ctx.origin_mesh != accepted.charter.mesh || container.mesh != accepted.charter.mesh {
+        return Ok(refusal(
+            ZONE_VIOLATION,
+            format!(
+                "this charter letter arrived in zone `{}`/`{}`, but the charter it carries is mesh `{}`",
+                ctx.origin_mesh, container.mesh, accepted.charter.mesh
+            ),
+        ));
+    }
+
+    // Now the letter's origin, against the charter that just landed. The
+    // name must be one the charter lists and the key must be that line's
+    // exact key — a charter signer's own machine is a node like any other,
+    // and its identity key is never the operator key.
+    match accepted.charter.node_key(&ctx.origin_node) {
+        Some(key) if key == hex_encode(&ctx.origin_key) => {}
+        Some(_) => {
+            return Ok(refusal(
+                "unverified-origin",
+                format!("`{}` carries a charter letter, but its key is not the one the charter lists", ctx.origin_node),
+            ))
+        }
+        None => {
+            return Ok(refusal(
+                "unverified-origin",
+                format!("`{}` carries a charter letter but is not on that charter", ctx.origin_node),
+            ))
+        }
+    }
+
+    // The chain, with hop keys resolved the same way the origin was: the
+    // accepted charter first, `nodes.json` second. A charter node this box
+    // never paired with is a legitimate hop once the charter names it.
+    let nodes = node_store::load_nodes();
+    if let Err(e) = walk_chain_with(container, ctx, |name| {
+        accepted
+            .charter
+            .node_key(name)
+            .or_else(|| nodes.iter().find(|n| n.name == name).and_then(|n| n.pubkey.clone()))
+    }) {
+        return Ok(refusal(BROKEN_CHAIN, e));
+    }
+
+    Ok(ContainerOutcome::Applied {
+        mesh: accepted.charter.mesh,
+        version: accepted.charter.version,
+        rekeyed: accepted.rekeyed,
+        digest,
+    })
+}
+
 /// Walk the hop chain from `msgid` to self. Entry 1 must name the origin
 /// and verify under `origin.key` — that is what makes the origin
 /// unerasable, and what refuses a relay that dropped entry 1 and
@@ -1385,6 +1714,19 @@ pub fn walk_chain(
     container: &Container,
     ctx: &Ctx,
     nodes: &[node_store::Node],
+) -> Result<(), String> {
+    walk_chain_with(container, ctx, |name| {
+        nodes.iter().find(|n| n.name == name).and_then(|n| n.pubkey.clone())
+    })
+}
+
+/// [`walk_chain`] with the hop-key lookup supplied by the caller: a mail
+/// container resolves every hop through `nodes.json`, a `charter` container
+/// through the charter it just applied first. One walk, one rule.
+pub fn walk_chain_with(
+    container: &Container,
+    ctx: &Ctx,
+    key_for: impl Fn(&str) -> Option<String>,
 ) -> Result<(), String> {
     let msgid = ctx.msgid;
     let mut prev = msgid;
@@ -1404,7 +1746,7 @@ pub fn walk_chain(
             }
             container.origin.key.clone()
         } else {
-            match nodes.iter().find(|n| n.name == entry.node).and_then(|n| n.pubkey.clone()) {
+            match key_for(&entry.node) {
                 Some(key) => key,
                 None => return Err(format!("no key on record for hop `{}`", entry.node)),
             }
@@ -1760,6 +2102,7 @@ mod container_tests {
             ContainerOutcome::Refused { reason, .. } => reason.clone(),
             ContainerOutcome::Opened { .. } => "opened".to_string(),
             ContainerOutcome::Duplicate { .. } => "duplicate".to_string(),
+            ContainerOutcome::Applied { .. } => "applied".to_string(),
         }
     }
 

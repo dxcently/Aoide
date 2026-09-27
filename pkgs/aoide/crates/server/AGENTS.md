@@ -764,6 +764,17 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   the refusal, the both-keys rule and the no-existence-oracle pin,
   `an_unsigned_history_read_is_refused` the unsigned shape, and
   `lines_after_reads_only_params_metadata_and_tolerates_any_value` the reader.
+- **A sealed deposit's reply word is `accepted`, and an applied charter's detail
+  rides in `data` (P-CHARTER).** MAIL.md §Wire's outcome vocabulary is closed to
+  `accepted`/`duplicate`/`refused`, and a sender's classifier reads any other
+  string as a REFUSAL — so a door answering a word it was never taught parks a
+  charter that had already landed, its own spool saying it was refused forever.
+  `deposit_sealed`'s charter arm therefore answers
+  `{"status": "accepted", "msgid": …, "charter": {"mesh", "version", "rekeyed"}}`:
+  the word the sender knows, the detail in `data`. `aoide-client`'s
+  `a_landed_charter_retires_the_senders_entry` reads this exact shape, and this
+  crate's `a_landed_charter_is_answered_accepted_with_its_detail_in_data` is the
+  half that fails if the word changes.
 - **`aoide/mailDeposit` (P-M2) is the SECOND capability-gated A2A arm,
   after Spawn, and the first not gated on `spawn` — `deposit_admitted`
   mirrors `spawn_admitted` one capability over, but signature-only from

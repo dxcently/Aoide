@@ -3798,7 +3798,9 @@ written here or anywhere else on disk. See §4's `seal` paragraph for why.
 {
   "pubkeyHex": "676d9f745100a03b0a9832e9a8ebb36a140d964289b2d65076c71a7f6b9c36a",
   "fingerprint": "67:6d:9f:74:51:00:a0:3b",
-  "createdAt": "2026-08-25T00:00:00Z"
+  "nodeFingerprint": "SHA256:c983d5dcff529ca92d36347fe4f425c153ffb380cc54f843a54eae707dc91062",
+  "createdAt": "2026-08-25T00:00:00Z",
+  "nodeLine": "thinkchiyo = { key = \"ed25519:<hex>\", age = '<binding json>' }   # SHA256:<hex>"
 }
 ```
 
@@ -3806,8 +3808,15 @@ written here or anywhere else on disk. See §4's `seal` paragraph for why.
 `fingerprint` is the same key's first 8 bytes, hex, colon-separated — a
 short display label, distinct from P-P2's SAS (short authentication
 string), which is derived from BOTH sides' keys plus nonces at pairing
-time, not from one side's key alone. Nothing here is authenticated against
-a node until the pairing ceremony below runs.
+time, not from one side's key alone. `nodeFingerprint` (P-CHARTER) is the
+DURABLE one: `SHA256:<lowercase hex>` over the raw 32-byte key. That is the
+value two operators compare out of band and the value a charter line's
+`#` comment carries; the short label above is never compared across machines
+and never a trust input. `nodeLine` is the same key in its pasteable form
+(`$AOIDE_ROOT/charters/<mesh>.toml`'s `[nodes]` entry) and is ABSENT, with a
+`nodeLineError` beside it, when the age binding it publishes could not be
+written. Nothing here is authenticated against a node until the pairing
+ceremony below runs.
 
 ### `state/identity/age.key`, `state/identity/age-binding.json`, `state/identity/age-retired/` — **v0** (P-SEAL, `docs/architecture/HTTPS-MESH-API.md`)
 
@@ -3854,6 +3863,106 @@ key and is never derived from its seed, in either direction.
   P-CHARTER's, where a node's keys are managed; until it lands, no age key
   retires in the field and the grace/tombstone machinery above is reachable
   only from tests.
+
+### `$AOIDE_ROOT/charters/<mesh>.toml` and `<mesh>.toml.sig` — **v0** (P-CHARTER)
+
+One operator's machines, in one file: `mesh`, `version`, `relays`, and a
+`[nodes]` line per node carrying its identity key, its self-signed age
+binding, its `address` and its `grant` — plus optional `[status]` and
+`[gates]` (MAIL.md §Transit's meanings). Public keys and addresses only,
+which is what makes the file safe to keep in a Nix repository; `--file`
+points `sign` and `accept` at one kept anywhere, and the signature is then
+always `<file>.sig` (appended, never a replaced extension).
+
+**`sign` is the last write to the file.** The signature covers the digest of
+the file's own bytes, not a canonical re-serialization of their value, so
+`sign` writes the next `version` **in place** (`toml_edit`, comments and key
+order intact), hashes exactly what came out, and writes the detached
+`frame("aoide/charter-sig", [64 sig bytes, 32 digest bytes])` beside it. Any
+later rewrite — a formatter, an editor's trailing newline, a checkout that
+changes line endings — invalidates the signature, and the answer is to sign
+again, never to normalize on read: a touched file is refused
+`charter-tampered`, which the digest carried in the `.sig` is what makes
+distinguishable from a key that does not verify.
+
+The `age` value is the binding's own JSON inside a TOML **literal** string
+(single quotes) — exactly what `aoide identity` / `aoide onboard` print as
+the node line. A literal string is legal there because no field of a binding
+can contain a single quote, and it needs no escaping, so the line is
+pasteable as printed and hand-editable after.
+
+Both `sign` and `accept` validate the whole document before acting on it:
+name grammar (mesh and node names, the same `^[a-z0-9][a-z0-9-]*$` a node
+nickname takes), `ed25519:<64 lowercase hex>` keys, one key on one line only
+(two names for one key is refused), every binding verifying under the key on
+its own line, addresses limited to `poll` / `ssh://…` / `https://…`, grants
+drawn from `node_store::NODE_CAPABILITIES`, relays that are nodes of the
+mesh, and `[status]`/`[gates]` values in their own vocabularies. Unknown keys
+are refused by name (`deny_unknown_fields`).
+
+### `state/mesh/<mesh>/` — **v0** (P-CHARTER)
+
+What THIS node holds for one mesh: the charter in force, and its own record
+of who signs it and how far it has seen.
+
+- `charter.toml` and `charter.toml.sig` — the last charter this node
+  accepted, byte-identical to what arrived, with the `.sig` that verified it.
+  Both are written after every accept step passed, in this order: the `.sig`
+  first, then `charter.toml`, then `trust.json` — the mark last, because the
+  mark is the claim of application. A failure between the writes therefore
+  leaves either a `.sig` beside the PREVIOUS charter (the pair does not
+  verify, and the next accept of the same version writes both again) or a new
+  charter with a valid `.sig` and the mark not advanced (the next delivery
+  re-applies it: the same bytes, the same charter in force, no new key
+  material). A local failure is refused `local-io`, its own word — the four
+  charter refusals answer for the CHARTER, and this one says the charter was
+  fine and this node could not finish writing it.
+- `.charter.lock` — the mesh's own lock, held (`flock(LOCK_EX)`, blocking)
+  across every read and write of the three files above and nothing else. One
+  apply per mesh at a time: without it two applies can both read the old mark
+  and the OLDER version can win the write, silently un-applying a revocation
+  and leaving the mark below a version that has been applied. Two meshes never
+  contend, and no other reader in this crate takes a charter lock.
+- `trust.json` — `{ "operator": "<64 lowercase hex>", "versions":
+  { "<operator hex>": <highest version applied> }, "rekeyed": [ { "node",
+  "from", "to", "version", "at" } ] }`. The key **per operator key** is what
+  restarts a mesh's high-water mark on a re-root: the new key's first version
+  applies from zero while the old key's mark stays where it was. `rekeyed` is
+  the durable mark of the last accepted version's identity-key changes (a
+  charter applied by an unattended poll has no person reading its output),
+  and the fingerprints in it are `SHA256:<hex>` over the raw node key.
+
+A `trust.json` that exists but does not parse is an ERROR, never "no record":
+reading it as nothing would silently reset the trusted key and the mark, which
+is the one thing this file exists to prevent. A `charter.toml` that does not
+parse reads as none, and the next good accept overwrites it.
+
+The operator key is trusted from either the config line or this record
+(`[mesh.<name>] operator`), and the two must agree once both exist: a
+disagreement refuses every charter for that mesh `operator-mismatch` until a
+human resolves it. Which key signs a mesh is therefore never a guess — it is
+read in two places and has to say the same thing.
+
+### `state/operator/<mesh>.key` — **v0** (P-CHARTER)
+
+One mesh's operator key, on the operator's machine only: a raw 32-byte
+ed25519 seed, `0600` in a `0700` directory (`state/operator/`), written
+through the same `fs::secure_private_dir` / `fs::atomic_write_private` pair
+every other private key here uses, never in a JSON shape, never printed,
+never in an `Outcome`, never in the Nix store. It signs charters (and, later,
+board takeovers) and nothing else, and it is never a node's identity key —
+not even on the machine that is both.
+
+`aoide mesh charter init <mesh>` mints it (or keeps the one already there) and
+records it as this machine's root; `aoide mesh charter reroot <mesh>` DELETES
+it and mints a new one, because trust is replaced rather than added. Both
+refuse rather than guess: `init` refuses on a machine that already trusts an
+operator for that mesh (its config line or its state record) — that machine is
+a node of the mesh, not its root — and `reroot` refuses (before minting,
+bumping or signing anything) when this machine's config declares the mesh's
+operator key or when its config line and state record already disagree. Losing
+the key stops only changes, never the mesh: every node keeps the last charter it
+verified.
 
 ### `state/age-bindings/<node>.json` — **v0** (P-SEAL)
 
@@ -6976,15 +7085,19 @@ Past admission, the envelope's own content is entirely
 recompute `msgid` from `(header, text, sig)`; verify the ORIGIN
 signature — the two-lookup identity model, hop via the already-
 KEY-RESOLVED caller, origin via the one key on record for
-`header.from.node`; dedup against `state/mail/seen.jsonl`; file. A
-mismatched `msgid` or an unverified origin answers a REFUSED RESULT,
+`header.from.node`; refuse an envelope whose `type` this lane cannot
+file (`charter` — P-CHARTER); dedup against `state/mail/seen.jsonl`;
+file. A mismatched `msgid`, an unverified origin, or a kind that is
+applied rather than filed answers a REFUSED RESULT,
 never a JSON-RPC error: MAIL.md §Wire's admission/outcome split makes
 step 1 above (admission, `-32010`) the only error this method ever
 returns, because whether the caller may speak to the method at all is a
 different question from what became of a well-formed envelope. The zone
 check MAIL.md's step 3 describes is P-M4's, skipped here entirely, not
-stubbed — `header.originMesh` stays `""` (§4). A successful deposit
-answers:
+stubbed — this plaintext lane's envelope carries no `mesh` at all, and
+`header.originMesh` stays `""` (§4); a SEALED charter container has a
+zone check of its own, against the charter it applies (below). A
+successful deposit answers:
 
 ```json
 { "result": { "status": "accepted", "msgid": "<hex sha256>" } }
@@ -7003,12 +7116,28 @@ stop that ping-ponging forever). A rejected envelope answers instead:
 ```
 
 — `"unverified-origin"` replacing `"bad-msgid"` when no key on record
-verifies the origin signature. `reason` is exactly the token MAIL.md
-§Transit names for each of these two among its `refused` reasons (the
-other four in that list are later phases': the zone check and routing);
+verifies the origin signature, and `"not-correspondence"` (P-CHARTER)
+when the envelope's `type` is `charter`: a charter is applied from a
+sealed container's own payload, never filed as correspondence.
+`reason` is exactly the token MAIL.md
+§Transit names for each of these among its `refused` reasons; the rest
+of that list — `no-route`, `down`, `unknown-mesh`, `zone-violation` —
+belongs to the transit lane and to a sealed charter container's own
+zone check, below, not to this one.
 `detail` carries what the code used to raise as the `-32602` message's
 own text — which field mismatched, which node's key was missing — for a
 human reading `mail outbox`, never for a caller to match on.
+
+**A sealed deposit's `"accepted"` covers an APPLIED CHARTER too**
+(P-CHARTER). The vocabulary stays the three words a sender is taught:
+the container path answers `{"status": "accepted", "msgid": "<hex>",
+"charter": {"mesh": "<name>", "version": <n>, "rekeyed": [...]}}` —
+the charter's own detail in `data`, and never as the status itself,
+because a sender's classifier reads an unrecognised status as a
+REFUSAL and would park a charter that had already landed. An applied
+charter files nothing and acks nothing; its container is recorded in
+`state/mail/containers.jsonl` once it is in force, so a re-offer is
+answered `"duplicate"`.
 
 **This method self-audits UNCONDITIONALLY, under its own
 `a2a.aoide/mailDeposit` label, at both the admission refusal and the

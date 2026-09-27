@@ -122,6 +122,7 @@ fn post_signed(node: &Node, method: &str, params: Value) -> SignedCall {
 /// [`crate::commands::SpawnNodeError`]'s richer shape: a drain only ever
 /// needs to know which of the three buckets an attempt landed in, never a
 /// programmatic reason code.
+#[derive(Debug)]
 enum DepositAttempt {
     /// A result whose `status` is `"accepted"` or `"duplicate"`
     /// (mail::deposit's own vocabulary, wire-projected verbatim by
@@ -161,21 +162,31 @@ fn attempt_deposit(node: &Node, entry: &aoide_storage::outbox::OutboxEntry) -> D
         SignedCall::Refused(detail) => return DepositAttempt::Refused(detail),
         SignedCall::TransportFailed(reason) => return DepositAttempt::TransportFailed(reason),
     };
-    // A response with a `result` member but no (or non-string) `status` —
-    // or with neither `result` nor `error` at all — is weaker evidence of
-    // delivery than an unrecognised status string, and an unrecognised one
-    // already falls to the catch-all below. So this default must land
-    // there too, never on `"accepted"`: a malformed or non-conformant
-    // peer response must never be read as a confirmed deposit.
+    classify_deposit_response(&result)
+}
+
+/// The far end's `aoide/mailDeposit` reply, read into a [`DepositAttempt`] —
+/// **the one place the deposit outcome vocabulary is interpreted**, so the
+/// three words MAIL.md §Wire closes it to and the words this client accepts
+/// can never drift apart in two places.
+///
+/// A response with a `result` member but no (or non-string) `status` — or with
+/// neither `result` nor `error` at all — is weaker evidence of delivery than an
+/// unrecognised status string, and an unrecognised one already falls to the
+/// catch-all below. So this default must land there too, never on `"accepted"`:
+/// a malformed or non-conformant peer response must never be read as a
+/// confirmed deposit.
+///
+/// **Any string this client does not recognise means the entry did NOT land,
+/// never that it did.** Assuming success for an unrecognised status is the
+/// exact failure this arm exists to close: a letter waiting forever for an ack
+/// the far end was never going to send — and, when the door answers a word the
+/// sender was never taught, a mesh whose trust DID land while its own outbox
+/// says it was refused.
+fn classify_deposit_response(result: &Value) -> DepositAttempt {
     let status = result.get("status").and_then(Value::as_str).unwrap_or("missing-status");
     match status {
         "accepted" | "duplicate" => DepositAttempt::Delivered { status: status.to_string() },
-        // MAIL.md §Wire's outcome vocabulary is closed to the three above —
-        // `"refused"` and any string this client does not recognise both
-        // mean the entry did NOT land, never that it did. Assuming success
-        // for an unrecognised status is the exact failure this arm exists
-        // to close: a letter waiting forever for an ack the far end was
-        // never going to send.
         other => {
             let reason = result.get("reason").and_then(Value::as_str).unwrap_or(other);
             let detail = result.get("detail").and_then(Value::as_str);
@@ -412,6 +423,41 @@ pub fn poll_node(node_name: &str) -> Result<usize, String> {
                     }
                 }
             }
+            aoide_storage::seal::ContainerOutcome::Applied { mesh, version, rekeyed, digest } => {
+                // P-CHARTER: the enclosed charter verified and is in force —
+                // `deposit_container` wrote it before returning. Nothing is
+                // filed and nothing is acked; the container is recorded so a
+                // re-offered copy is a duplicate rather than a second apply.
+                if let Err(e) = aoide_storage::seal::record_admitted(&container, &digest) {
+                    let _ = aoide_protocol::audit::audit(
+                        &aoide_protocol::audit::default_audit_log(),
+                        aoide_protocol::audit::Door::Cli,
+                        aoide_protocol::audit::EventClass::Audit,
+                        "mail.poll.dedup-record-failed",
+                        "invalid",
+                        &format!("{}: {e}", container.msgid),
+                    );
+                }
+                let _ = aoide_protocol::audit::audit(
+                    &aoide_protocol::audit::default_audit_log(),
+                    aoide_protocol::audit::Door::Cli,
+                    aoide_protocol::audit::EventClass::Audit,
+                    "mail.poll.charter-applied",
+                    "ok",
+                    &format!(
+                        "charter `{mesh}` v{version} from `{}` via `{node_name}` applied{}",
+                        container.origin.node,
+                        if rekeyed.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                "; RE-KEYED: {}",
+                                rekeyed.iter().map(|r| r.node.as_str()).collect::<Vec<_>>().join(", ")
+                            )
+                        }
+                    ),
+                );
+            }
             aoide_storage::seal::ContainerOutcome::Refused { reason, detail } => {
                 // L9 (the branch review): a polled container that refuses used
                 // to vanish — no audit, no report — while the origin's `hold`
@@ -636,22 +682,7 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
             }
             DepositAttempt::Delivered { status } => {
                 contacted = true;
-                aoide_storage::outbox::clear_link_state(node_name)?;
-                if entry.envelope.header.kind == aoide_storage::mail::ENTRY_TYPE_RECEIPT {
-                    // Ruling 4: a receipt's own successful deposit outcome
-                    // (accepted OR duplicate — the far end has it now
-                    // either way) IS confirmation; there is no separate
-                    // ack-of-an-ack to wait for.
-                    aoide_storage::outbox::remove_entry(node_name, &entry.envelope.msgid)?;
-                } else {
-                    // A letter waits for a REAL ack (spec item 7) — record
-                    // the attempt and move on, never remove here.
-                    let mut updated = entry;
-                    updated.tries += 1;
-                    updated.last_try_at = aoide_storage::time::now_iso_utc();
-                    updated.last_outcome = status;
-                    aoide_storage::outbox::write_entry(node_name, &updated)?;
-                }
+                settle_delivered(node_name, entry, &status)?;
             }
         }
     }
@@ -662,6 +693,41 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
     // is not a local failure.
     if contacted {
         let _ = poll_node(node_name);
+    }
+    Ok(())
+}
+
+/// What a **delivered** deposit does to the entry it carried — the one
+/// implementation of that decision, so the arm [`drain_node`] runs and the
+/// test that pins it cannot drift.
+///
+/// **A receipt and a `charter` letter retire on the spot; a letter waits for a
+/// real ack.** For a receipt the deposit outcome *is* confirmation (there is no
+/// ack-of-an-ack). A `charter` letter is the same case for a stronger reason:
+/// the enclosed charter is APPLIED, never filed, so there is no mailbox on the
+/// far end to ack from at all, and the outcome of its own deposit is the whole
+/// confirmation there can be. A letter still waits for a receipt naming its
+/// `msgid` (spec item 7), so its attempt is recorded and it stays spooled.
+///
+/// `status` is the far end's own word, recorded verbatim as `last_outcome` —
+/// the same string [`DepositAttempt::Delivered`] carries, never re-derived.
+fn settle_delivered(
+    node_name: &str,
+    entry: aoide_storage::outbox::OutboxEntry,
+    status: &str,
+) -> Result<(), String> {
+    aoide_storage::outbox::clear_link_state(node_name)?;
+    if matches!(
+        entry.envelope.header.kind.as_str(),
+        aoide_storage::mail::ENTRY_TYPE_RECEIPT | aoide_storage::mail::ENTRY_TYPE_CHARTER
+    ) {
+        aoide_storage::outbox::remove_entry(node_name, &entry.envelope.msgid)?;
+    } else {
+        let mut updated = entry;
+        updated.tries += 1;
+        updated.last_try_at = aoide_storage::time::now_iso_utc();
+        updated.last_outcome = status.to_string();
+        aoide_storage::outbox::write_entry(node_name, &updated)?;
     }
     Ok(())
 }
@@ -1609,6 +1675,53 @@ mod tests {
             "and the reason is recorded for the operator: {}",
             three.last_outcome
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **F1's client half.** The door's own reply for a landed charter, read by
+    /// the client's OWN classifier and acted on by its OWN delivered-deposit
+    /// arm.
+    ///
+    /// The reply literal is the shape `aoide_server::a2a`'s `deposit_sealed`
+    /// answers for an applied charter — `aoide-server` cannot be reached from
+    /// here (this crate is beneath it), so the two halves of the wire meet in
+    /// one string, and the server-side test
+    /// `a_landed_charter_is_answered_accepted_with_its_detail_in_data` asserts
+    /// the same one. Changing the door's word breaks that test; teaching this
+    /// classifier a word the door does not answer breaks this one.
+    #[test]
+    fn a_landed_charter_retires_the_senders_entry() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("charter-retire");
+
+        let node = "peerbox";
+        let entry = OutboxEntry::fresh(
+            aoide_storage::mail::mint_charter_letter(node, "charter home v1").unwrap(),
+        );
+        aoide_storage::outbox::write_entry(node, &entry).unwrap();
+
+        let reply = json!({
+            "status": "accepted",
+            "msgid": entry.envelope.msgid,
+            "charter": { "mesh": "home", "version": 1, "rekeyed": [] },
+        });
+        match classify_deposit_response(&reply) {
+            DepositAttempt::Delivered { status } => settle_delivered(node, entry.clone(), &status).unwrap(),
+            other => panic!("a landed charter is a delivered deposit, got {other:?}"),
+        }
+        assert!(
+            aoide_storage::outbox::list_entries(node).unwrap().is_empty(),
+            "the charter entry retires on its own deposit outcome — there is no mailbox on the far end to ack it"
+        );
+
+        // And the word the door must not answer: an outcome this classifier
+        // was never taught reads as a REFUSAL, which is how a charter that
+        // landed ends up parked in the sender's own spool forever.
+        match classify_deposit_response(&json!({ "status": "applied", "mesh": "home", "version": 1 })) {
+            DepositAttempt::Refused(reason) => assert!(reason.contains("applied"), "{reason}"),
+            other => panic!("an unrecognised status must never read as delivery, got {other:?}"),
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }

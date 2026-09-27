@@ -2987,7 +2987,9 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
         envelope.header.from.node, envelope.header.from.name, envelope.header.to.node, envelope.header.to.name
     );
     let audit_status = match &outcome {
-        aoide_storage::mail::DepositOutcome::BadMsgid | aoide_storage::mail::DepositOutcome::UnverifiedOrigin => "invalid",
+        aoide_storage::mail::DepositOutcome::BadMsgid
+        | aoide_storage::mail::DepositOutcome::UnverifiedOrigin
+        | aoide_storage::mail::DepositOutcome::NotCorrespondence => "invalid",
         _ => "ok",
     };
     let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", audit_status, &audit_detail);
@@ -3015,6 +3017,11 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
                 "no key on record for `{}` verifies this envelope's origin signature",
                 envelope.header.from.node
             ),
+        })),
+        aoide_storage::mail::DepositOutcome::NotCorrespondence => Ok(json!({
+            "status": "refused",
+            "reason": aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE,
+            "detail": "a `charter` envelope is applied from a sealed container; this one arrived as plaintext, with nothing to apply",
         })),
     }
 }
@@ -3208,6 +3215,21 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
         aoide_storage::seal::ContainerOutcome::Duplicate { .. } => {
             ("ok", format!("sealed msgid {} via {hop_name}: duplicate", container.msgid))
         }
+        aoide_storage::seal::ContainerOutcome::Applied { mesh, version, rekeyed, .. } => (
+            "ok",
+            format!(
+                "charter `{mesh}` v{version} from `{}` via {hop_name}: applied{}",
+                container.origin.node,
+                if rekeyed.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " (RE-KEYED: {})",
+                        rekeyed.iter().map(|r| r.node.as_str()).collect::<Vec<_>>().join(", ")
+                    )
+                }
+            ),
+        ),
         aoide_storage::seal::ContainerOutcome::Refused { reason, detail } => {
             ("invalid", format!("sealed msgid {} via {hop_name}: {reason}: {detail}", container.msgid))
         }
@@ -3233,6 +3255,50 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
                 }
             }
             Ok(json!({ "status": "duplicate" }))
+        }
+        aoide_storage::seal::ContainerOutcome::Applied { mesh, version, rekeyed, digest } => {
+            // P-CHARTER: the enclosed charter verified and is in force —
+            // `deposit_container` wrote it before returning. Nothing is filed
+            // and nothing is acked; the container is recorded once so a
+            // re-offered copy is answered `duplicate` rather than applied
+            // twice, exactly as an opened letter is.
+            //
+            // The answer is `"accepted"` — MAIL.md §Wire's closed three-word
+            // vocabulary, and the ONLY word a sender retires an entry on. The
+            // charter detail rides in `data` beside it, where a word a sender's
+            // classifier has never heard of can never make the far end read a
+            // landed charter as a refusal (and leave its own outbox saying so
+            // forever).
+            if let Err(e) = aoide_storage::seal::record_admitted(&container, &digest) {
+                let _ = audit(
+                    ctx.audit_log,
+                    Door::A2a,
+                    EventClass::Audit,
+                    "a2a.aoide/mailDeposit",
+                    "invalid",
+                    &format!("dedup record write failed for {}: {e}", container.msgid),
+                );
+            }
+            for rekeyed in &rekeyed {
+                // A new key on an old name is what a stolen operator key would
+                // sign: every one is audited where the charter landed.
+                let _ = audit(
+                    ctx.audit_log,
+                    Door::A2a,
+                    EventClass::Audit,
+                    "a2a.aoide/mailDeposit",
+                    "rekeyed",
+                    &format!(
+                        "charter `{mesh}` v{version} re-keyed `{}`: {} -> {}",
+                        rekeyed.node, rekeyed.from, rekeyed.to
+                    ),
+                );
+            }
+            Ok(json!({
+                "status": "accepted",
+                "msgid": container.msgid,
+                "charter": { "mesh": mesh, "version": version, "rekeyed": rekeyed },
+            }))
         }
         aoide_storage::seal::ContainerOutcome::Opened { envelope, digest } => {
             let filed = aoide_storage::mail::deposit((*envelope).clone(), &hop_name)
@@ -3279,6 +3345,11 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
                     "status": "refused",
                     "reason": "unverified-origin",
                     "detail": "the inner envelope's origin signature does not verify",
+                })),
+                aoide_storage::mail::DepositOutcome::NotCorrespondence => Ok(json!({
+                    "status": "refused",
+                    "reason": aoide_storage::mail::REFUSAL_NOT_CORRESPONDENCE,
+                    "detail": "the opened envelope claims a `charter` kind, which is applied from a container's own payload and never filed",
                 })),
             }
         }
@@ -13279,6 +13350,119 @@ mod tests {
         assert!(msg.contains("node allow box-b message on"), "names the exact fix: {msg}");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **F1's door half.** A charter letter the door admits and applies is
+    /// answered with MAIL.md §Wire's own word — `"accepted"`, the only word a
+    /// sender retires an entry on — with the charter detail in `data` beside
+    /// it, never as the status itself.
+    ///
+    /// `aoide-client` cannot be reached from here (it sits beneath this
+    /// crate), so the other half of the wire lives in that crate's
+    /// `a_landed_charter_retires_the_senders_entry`, which reads this same
+    /// reply shape through the sender's own classifier. This test is the one
+    /// that fails if the door ever answers a word the sender was never taught.
+    #[test]
+    fn a_landed_charter_is_answered_accepted_with_its_detail_in_data() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_root = std::env::var("AOIDE_ROOT").ok();
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let saved_config = std::env::var("AOIDE_CONFIG").ok();
+        let saved_node = std::env::var("AOIDE_A2A_NODE_NAME").ok();
+        let root = mail_deposit_root("charter-applied");
+
+        // The receiving node prints its node line first — that is all the
+        // operator needs from it.
+        charter_machine(&root, "receiver", "receiverbox");
+        let receiver_line = aoide_storage::charter::node_line().unwrap();
+
+        // The operator's box: root the mesh, paste both lines under [nodes],
+        // sign v1.
+        charter_machine(&root, "operator", "opbox");
+        let init = aoide_storage::charter::init("home").unwrap();
+        let op_line = aoide_storage::charter::node_line().unwrap();
+        let src = format!(
+            "mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{op_line}\n{receiver_line}\n"
+        );
+        std::fs::write(aoide_storage::charter::source_path("home"), &src).unwrap();
+        aoide_storage::charter::sign("home", None).unwrap();
+        let bytes = std::fs::read(aoide_storage::charter::source_path("home")).unwrap();
+        let sig = std::fs::read(aoide_storage::charter::source_sig_path("home")).unwrap();
+        let binding = aoide_storage::charter::parse(&src).unwrap().nodes["receiverbox"].age.clone();
+        let container = aoide_storage::seal::seal_charter(
+            &bytes,
+            &sig,
+            &binding,
+            "home",
+            1,
+            "receiverbox",
+            &aoide_storage::time::now_iso_utc(),
+        )
+        .unwrap();
+
+        // The receiving node trusts ONLY the operator line — no pairing, no
+        // nodes.json entry for the origin — which is the bootstrap case the
+        // carriage rule exists for.
+        charter_machine(&root, "receiver", "receiverbox");
+        std::fs::write(
+            root.join("receiver").join("config.toml"),
+            format!("[mesh.home]\noperator = \"ed25519:{}\"\n", init.operator),
+        )
+        .unwrap();
+        setup_signed_node_with_allows("opbox", &["message"]);
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("opbox"));
+
+        let reply = mail_deposit(&json!({ "container": container }), &ctx)
+            .expect("an admitted charter deposit is answered, never refused");
+        assert_eq!(
+            reply["status"],
+            json!("accepted"),
+            "the sender's own vocabulary, or its outbox parks a charter that landed: {reply}"
+        );
+        assert_eq!(reply["charter"]["mesh"], json!("home"));
+        assert_eq!(reply["charter"]["version"], json!(1));
+        assert!(reply["msgid"].is_string(), "and the entry it retires is named: {reply}");
+        assert_eq!(
+            aoide_storage::charter::in_force_charter("home").unwrap().version,
+            1,
+            "the charter really is in force on this node"
+        );
+        assert_eq!(
+            aoide_storage::charter::load_trust("home").unwrap().unwrap().operator,
+            init.operator,
+            "and recorded under the operator key the config line named"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        for (key, value) in [
+            ("AOIDE_ROOT", saved_root),
+            ("AOIDE_STATE_DIR", saved_state),
+            ("AOIDE_STAGE_DIR", saved_stage),
+            ("AOIDE_CONFIG", saved_config),
+            ("AOIDE_A2A_NODE_NAME", saved_node),
+        ] {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+
+    /// A machine for the charter-carriage test: its own `AOIDE_ROOT`,
+    /// `AOIDE_STATE_DIR` and node name, so ONE process can be the operator's
+    /// box and the receiving node in turn. `act_as` deliberately does not set
+    /// `AOIDE_ROOT` (nothing else in this module reads a charter source or a
+    /// config file), and the charter path reads both.
+    fn charter_machine(root: &std::path::Path, who: &str, node_name: &str) {
+        let dir = root.join(who);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("AOIDE_ROOT", &dir);
+        std::env::set_var("AOIDE_STATE_DIR", dir.join("state"));
+        std::env::set_var("AOIDE_STAGE_DIR", dir.join("stage"));
+        std::env::remove_var("AOIDE_CONFIG");
+        std::env::set_var("AOIDE_A2A_NODE_NAME", node_name);
     }
 
     /// Registers a node under `display::local_node_name()` — the name this box
