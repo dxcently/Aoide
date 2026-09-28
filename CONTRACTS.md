@@ -241,7 +241,7 @@ A literal nix path (copied to the store — never a `song/` runtime read). The
 the stylix lane bakes it as the base-context image; `null` bakes the solid-colour
 fallback derived from `palette.bg`.
 
-### Font tier (v0 additive — `fonts.<role>`)
+### Font tier (v0 optional overrides — `fonts.<role>`)
 
 | Key               | Type                    | Default | Falls back to                                       |
 | ----------------- | ----------------------- | ------- | --------------------------------------------------- |
@@ -256,11 +256,19 @@ silently fall back. The remaining roles (`sansSerif`, `serif`, `emoji`, and
 `sizes`) stay the lane's.
 
 **Baked only** — the `wallpaper` tier's posture, not geometry's: no
-`stage/livery.json` twin, no engine schema, no `rice lint` validation, because
-nothing at runtime reads a face and a terminal cannot be re-faced mid-session.
-A face change lands on the user-gated rebuild (§2), and staging another song
-does not re-face the terminal. Wanting a live face is wanting a new emitter
-(OSC 50 against the terminal), not a change to this tier.
+`stage/livery.json` twin and no engine schema entry, because nothing at runtime
+reads a face and a terminal cannot be re-faced mid-session. The tier lives in
+`rice.nix` alone: a song does not mirror it into `livery.json`, since the
+activation seed copies that document into `song/stage/livery.json` verbatim
+(§4) and nothing on the live side would read the copy. "No lint rule" is a
+CONVENTION, not an enforced one: the livery schema closes `palette`, `base16`,
+each component group and each widget record, but it never walks a document's
+top-level keys — as `geometry` and `wallpaper` show — so a stray `fonts` key
+in a song's `livery.json` passes `rice lint` and rides the seed into the stage
+file unread, rather than being rejected. A face change lands on the user-gated
+rebuild (§2), and staging another song does not re-face the terminal. Wanting a
+live face is wanting a new emitter (OSC 50 against the terminal), not a change
+to this tier.
 
 ### Override tier (v0 additive — venue recolour, `override.*`)
 
@@ -5057,7 +5065,15 @@ arrive as ARGUMENTS, injected at the two sites that evaluate a song:
 - **Signatures.** A `rice.nix` declares `{ lib, config, song, borrow, ... }:`;
   a shelf's `default.nix` declares `{ lib, song, borrow, ... }:`. Both keep
   `...`: a file that wants only one of the two names it (`{ borrow, ... }:`),
-  and a third argument later does not break every song at once.
+  and a third argument later does not break every song at once. A `rice.nix`
+  may ALSO take the module system's **`pkgs`**, needed when the tier it sets
+  names a package (`fonts.monospace.package`, §1's font tier) — `pkgs` is the
+  one argument a real `nixosSystem` supplies that a bare `evalModules` does not
+  (`lib/options.nix`'s header). Every site that EVALUATES a song's `rice.nix`
+  is the module system: the offline generator, the songbook manifest and the
+  runtime staging path read a song's files without evaluating them
+  (`lib/songbook.nix`), so taking `pkgs` does not narrow what a repo-less host
+  can do. A `_widgets/` shelf does not take it — `borrow` is its entry point.
 
 ### The songbook is versioned score, not runtime
 

@@ -114,11 +114,15 @@ the lane's, and `null` means "the lane's own face" — Linux Libertine Mono O �
 so a song that sets no face bakes the theme it baked before.
 
 This tier is BAKED ONLY, the cover note's posture rather than geometry's: it
-has no `stage/livery.json` twin, no engine schema, and no `rice lint` rule,
-because nothing at runtime reads a face and a terminal cannot be re-faced
-mid-session. A face change lands on the user-gated rebuild, and staging
-another song does not re-face the terminal. A live face would be a new emitter
-(OSC 50 against the terminal), not a change to this tier.
+has no `stage/livery.json` twin and no engine schema entry, because nothing at
+runtime reads a face and a terminal cannot be re-faced mid-session — and no
+`rice lint` rule makes that so. The livery schema closes `palette`, `base16`,
+each component group and each widget record, but it never walks a document's
+top-level keys, so a stray `fonts` key in a song's `livery.json` passes lint
+and rides the activation seed into the stage file unread; the tier lives in
+`rice.nix` alone by convention. A face change lands on the user-gated rebuild,
+and staging another song does not re-face the terminal. A live face would be a
+new emitter (OSC 50 against the terminal), not a change to this tier.
 
 `cadenza` sets it to a CRT console face — its terminal is the key's own
 voice, not the desktop's default serif. Widget faces are the song's own

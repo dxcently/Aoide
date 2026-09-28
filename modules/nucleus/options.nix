@@ -106,7 +106,7 @@ let
     };
   };
 
-  # ── Font submodule (v0 optional tier: the face the song wears) ────────────
+  # ── Font submodule (v0 optional overrides: the face the song wears) ───────
   # Additive-optional, the geometry tier's posture: an absent tier means "the
   # stylix lane's own default". The ROLE shape is Stylix's own — `{ package,
   # name }` — because the stylix lane is the tier's one consumer and passes the
@@ -540,16 +540,17 @@ in
             type = fontType;
             default = { };
             description = ''
-              Font tier (v0 optional overrides): the face this song wears, per
-              Stylix font role — `monospace` today, the terminal an agent lands
-              in. Additive-optional: null means "the stylix lane's own default"
-              (Linux Libertine), so a song that sets no face bakes exactly the
-              theme it baked before.
+              Font tier (v0 optional overrides, the geometry tier's posture):
+              the face this song wears, per Stylix font role — `monospace`
+              today, the terminal an agent lands in. Null means "the stylix
+              lane's own default" (Linux Libertine), so a song that sets no
+              face bakes exactly the theme it baked before.
 
               BAKED ONLY — like `wallpaper`, and unlike `geometry`: this tier
-              has no `stage/livery.json` twin and no engine schema, because a
-              face cannot hot-swap. It lands on the user-gated rebuild, and a
-              staged song cannot re-face the terminal without one.
+              has no `stage/livery.json` twin and no engine schema entry,
+              because a face cannot hot-swap. It lands on the user-gated
+              rebuild, and a staged song cannot re-face the terminal without
+              one.
             '';
           };
           wallpaper = mkOption {
