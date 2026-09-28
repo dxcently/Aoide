@@ -9,7 +9,11 @@ a config file). Paint-side — ships in `lyra`, not core.
 
 ## Named seams (what it exposes)
 
-- `livery` — the design-token engine: schema, resolve, emit.
+- `livery` — the design-token engine: schema, resolve, emit. The schema also
+  validates top-level fields NO backend carries (CONTRACTS.md §1's `polarity`,
+  a baked-only register the stylix lane reads off the option; §5's `widgets`
+  block), so a document may legitimately hold more than the resolved set —
+  `tests/livery_goldens.rs`'s polarity fixture is the contract.
 - `live` — computes + (best-effort) applies the Hyprland geometry/border
   keyword list a staged notes document implies (`blurEnabled` also switches
   hyprglass's two live enable keys; no opinion restores `HYPRGLASS_BAKED`),

@@ -506,6 +506,29 @@ in
             default = { };
             description = "Palette tier (base16-derived): bg / fg / accent / urgent.";
           };
+          polarity = mkOption {
+            type = types.enum [
+              "light"
+              "dark"
+            ];
+            default = "light";
+            description = ''
+              The register the base16 ramp reads as — "light" or "dark". A song
+              declares it beside its palette (a palette brings its polarity),
+              and the stylix lane hands it to `stylix.polarity`, which themes
+              every Stylix-managed target from it. The default keeps every host
+              that names no polarity evaluating exactly as before.
+
+              BAKED ONLY, the font tier's posture: no emitter carries it and
+              `rice stage` does not apply it — GTK/Qt and Stylix read it at
+              build time, so flipping it is a user-gated rebuild, not a stage.
+              It is still carried in a song's `livery.json` beside `palette`
+              and validated by `rice lint` (exactly "light"|"dark", or absent
+              for "no opinion"), and it reaches `song/stage/livery.json` through
+              the activation seed like every other top-level key — where nothing
+              reads it today.
+            '';
+          };
           base16 = mkOption {
             type = types.nullOr base16Type;
             default = null;

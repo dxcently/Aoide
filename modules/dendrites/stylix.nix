@@ -231,7 +231,12 @@ let
         lib.optionalAttrs stylixPresent {
           stylix = {
             enable = true;
-            polarity = lib.mkDefault "light";
+            # The song's ground (CONTRACTS.md §1, polarity): the register the
+            # base16 ramp reads as, read straight off the option — the venue
+            # recolour `resolve` applies is a colour pass, and a register is not
+            # a colour. mkDefault, unchanged from before the field existed, so
+            # a venue or host can still name its own polarity and win.
+            polarity = lib.mkDefault config.aoide.livery.polarity;
 
             # The ONE base16 scheme — the baked fan-out's single source.
             base16Scheme = scheme;

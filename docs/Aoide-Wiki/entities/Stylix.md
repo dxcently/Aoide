@@ -47,13 +47,16 @@ keyed by hand from its wallpaper; see
 ## Polarity — light or dark, one switch
 
 `stylix.polarity` (`"light"` or `"dark"`) declares which register the base16
-ramp reads as, and every Stylix-managed target honours it. It is still the
-stylix lane's `mkDefault "light"`, not a livery field, so a dark key cannot
-flip it yet — `song/songbook/cadenza/design/intent.md` §5 carries the proposed
-`livery.polarity`. Because polarity is a single fan-out switch,
+ramp reads as, and every Stylix-managed target honours it. The song declares it
+as `aoide.livery.polarity` beside its palette (CONTRACTS.md §1; the option
+defaults to `"light"`), and this lane hands it to Stylix `mkDefault` — so a
+venue or host can still name its own polarity and win. Because polarity is a
+single fan-out switch,
 flipping it is cheap — the discipline that makes it *look* right everywhere
 (terminal, bar, every widget agreeing) is the vision-check in
-[[Ricing-Protocol|the Ricing Protocol]], not the switch itself.
+[[Ricing-Protocol|the Ricing Protocol]], not the switch itself. It is baked:
+no emitter carries it and staging applies nothing for it, so a polarity change
+lands on the user-gated rebuild ([[Self-Ricing|the rice loop]]).
 
 ## Related
 

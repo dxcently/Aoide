@@ -72,6 +72,7 @@ reads were dropped when Phase 4 closed the transition window
 | Component tier | Open (v1 design-system work) | Maps semantics to specific surfaces |
 | Geometry tier | Settled, nix + CLI only | `aoide.livery.geometry` — see below |
 | Font tier | Settled, nix only | `aoide.livery.fonts` — see below |
+| Polarity | Settled, baked only | `aoide.livery.polarity` (beside palette) — see below |
 
 The open schema question is scoped to the semantic and component tiers only.
 The palette tier is closed.
@@ -140,6 +141,29 @@ voice, not the desktop's default serif. Widget faces are the song's own
 business (`song/songbook/<song>/widgets/Kit.js`) and do not move with this
 tier.
 
+## Polarity — the register, beside the palette
+
+`aoide.livery.polarity` (`modules/nucleus/options.nix`) is one scalar beside
+`palette`: `"light"` or `"dark"` (option default `"light"`, so a song that says
+nothing keeps the ground it always had). A palette brings its polarity — the
+register its base16 ramp reads as — and the stylix lane hands it straight to
+`stylix.polarity`, which themes every Stylix-managed target from it
+([[Stylix]]). It is the one livery field outside the colour tiers that is a
+VALIDATED key: a document carrying it must spell one of the two, and `rice
+lint` refuses anything else by name — a misspelling, a number, a `{ $value }`
+note object — where the font tier's fields are a convention the lint does not
+enforce.
+
+It is BAKED, not staged. No emitter carries it: `livery resolve` and every
+`emit stage`/`hyprctl`/`osc`/`file`/`kitty` are byte-identical with and without
+it (the `livery_goldens` polarity fixture pins that), and `rice stage` applies
+nothing for it, because GTK/Qt and every Stylix target read the register when
+their theme is built. A polarity change lands on the user-gated rebuild, like a
+face change. A song nevertheless declares it in both halves —
+`aoide.livery.polarity` in `rice.nix` (the option the lane reads) and the same
+value in its `livery.json` beside `palette`, which the activation seed carries
+into `stage/livery.json` as data nothing reads today.
+
 ## Prior art — the Node engine that was folded in
 
 The engine began as a standalone Node package wrapping
@@ -176,7 +200,11 @@ CLI's `Invocation`/`Outcome` shell:
   (`bg/fg/accent/urgent`, unknown keys rejected) and the optional component
   tier (`bar.*` / `notif.*` / `window.*`, each field `nullOr` hex), accepting
   both bare hex strings and W3C `{ $value, $type }` token objects, and treating
-  `{group.name}` alias references as valid pending resolution. `lyra rice
+  `{group.name}` alias references as valid pending resolution. Beyond the
+  colour tiers it validates the two top-level fields that are not groups:
+  `polarity` — exactly `"light"` or `"dark"` when present, `null`/absent for
+  "no opinion" — and `geometry.terminalOpacity` (a plain number in [0, 1] or
+  null). `lyra rice
   lint` runs this engine natively — no binary locate, no shell-out.
 - **`lyra livery resolve [<song>|<path>]`** — print the fully-resolved,
   flattened livery set.

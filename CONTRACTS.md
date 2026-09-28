@@ -186,6 +186,38 @@ deliberately minimal:
 | `palette.accent` | hex `#rrggbb` | `#89b4fa` | base0D |
 | `palette.urgent` | hex `#rrggbb` | `#f38ba8` | base08 |
 
+### Polarity field (v0 — `polarity`, beside `palette`)
+
+A palette brings its polarity: the register its base16 ramp reads as. It is one
+top-level scalar beside `palette`, and the two values are exactly these — this
+is a VALIDATED key, unlike the baked-only font tier's convention (§1's font
+tier): a document that carries it must spell one of these two.
+
+| Key        | Type                 | Default   | Consumer                        |
+| ---------- | -------------------- | --------- | ------------------------------- |
+| `polarity` | `"light"`/`"dark"`   | `"light"` | the stylix lane → `stylix.polarity` |
+
+`rice lint` refuses anything else — a misspelling, a number, a `{ $value }`
+note object — by name; `null` (or the key absent, the ordinary case for a
+document written before the field existed) is "no opinion" and the option
+system's `"light"` stands. Unlike every colour tier, NO engine emitter carries
+it: `livery resolve` and `emit stage`/`hyprctl`/`osc`/`file`/`kitty` are
+byte-identical with and without it (`livery_goldens`' polarity fixture pins
+that), because it is not a colour a surface paints — it is the register the
+baked fan-out derives its colours from.
+
+**Baked only, the font tier's posture** — but carried, not dropped. A song
+declares it in BOTH halves: `aoide.livery.polarity` in `rice.nix` (what the
+stylix lane actually reads, through the option) and the same value in its
+`livery.json` beside `palette` (§4), which is the notes-document record of it
+and what `rice compose` copies for a scaffolded song. GTK/Qt and Stylix read
+the option at build time, so flipping it lands on the user-gated rebuild (§2):
+`rice stage` does not apply it and `lyra rice stage` makes no call for it. The
+committed `livery.json` reaches `song/stage/livery.json` through the activation
+seed like every other top-level key (§4), so a staged document may carry a
+`polarity` field — data nothing reads today, kept for a future live reader, and
+never a claim that staging applied it.
+
 ### Component tier (v0 overrides — `bar.*` / `notif.*` / `window.*`)
 
 Each field is `nullOr hex`; `null` means "fall back to the palette". Facets
@@ -1523,6 +1555,14 @@ field (string) — the name `lyra rice stage <name>` was invoked with. Set by
 §4's sessions.json). Absent means "no song identity" (a notes file staged some
 other way). `LiveryState.qml`'s `songName` property reads it to resolve
 per-song flavor widgets (§5) — readers must tolerate both forms.
+
+**Additive in v0:** the staged file MAY also carry an optional top-level
+`polarity` scalar (§1's polarity field) when the active song's committed
+`livery.json` carries one — the activation seed copies the document through
+`stagePatch`, so every top-level key the song wrote rides along. Baked-only
+data: nothing reads it on the live side, `rice stage` does not apply it, and a
+song that leaves it out (in `rice.nix` and `livery.json` alike) yields the
+option system's `"light"`.
 
 **Additive in v0:** the staged file MAY also carry an optional top-level
 `geometry` block, mirroring §1's geometry tier (`gapsOut`/`gapsIn`/

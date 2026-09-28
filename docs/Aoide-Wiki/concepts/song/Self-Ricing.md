@@ -280,6 +280,18 @@ no `blurEnabled` opinion restores the baked default (both on,
 `live::HYPRGLASS_BAKED`), so a no-opinion song staged after cadenza gets its
 glass back.
 
+**Polarity is the one livery field `rice stage` does not apply.** A song's
+`aoide.livery.polarity` (`"light"`/`"dark"`, beside its palette) is read by the
+stylix lane alone and lands on the [[Self-Ricing#The Rice Loop|gated rebuild]],
+the font tier's posture: GTK/Qt and every Stylix target take the register when
+their theme is built, so no keyword, no file and no emitter call carries it —
+`rice stage` neither applies it nor claims to, and a staged song cannot flip a
+live desktop's polarity. A song's committed `livery.json` does carry it beside
+`palette`, and the activation seed copies that document into
+`song/stage/livery.json` ([[livery#Two fan-outs, one source]]), so the staged
+document may hold a `polarity` value as data for a future live reader; nothing
+reads it today.
+
 `lyra rice mode status` reports the current mode plus, in `staging`/
 `draft`, which song (and, in `draft`, which draft) it is pointed at and
 since when. `lyra rice mode stage [<name>]` unlocks staging AND leaves

@@ -121,6 +121,17 @@
   `geometry.terminalOpacity` is linted in `livery::schema` as a plain
   number in [0, 1] or null, through `schema::terminal_opacity_value`, the
   same predicate the hot path uses to fall back.
+- **`polarity` is a LINTED top-level field and no emitter carries it**
+  (`livery::schema::POLARITY_VALUES`, exactly `"light"`/`"dark"`; absent or
+  null is "no opinion"). It is the baked fan-out's register — the stylix lane
+  reads `aoide.livery.polarity` off the option, never off a stage file — so it
+  must stay out of `Resolved` and out of every backend's output. The goldens
+  pin that as a contract: `tests/fixtures/valid-polarity.json` is `valid.json`
+  plus `"polarity": "dark"`, and
+  `polarity_is_lint_only_and_moves_no_emitted_byte` asserts every emitter
+  produces byte-identical output with and without it. `rice compose` copies the
+  field into a scaffolded `rice.nix` (`aoide.livery.polarity`), defaulting to
+  `schema::POLARITY_DEFAULT` when the source notes carry none.
 - **A song with no `blurEnabled` opinion restores the baked hyprglass
   switches** (`live::HYPRGLASS_BAKED`, both on), so every
   `geometry_keywords` call carries the two hyprglass keywords — which
