@@ -23,6 +23,20 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # skwd-wall — the external wallpaper provider a host can choose
+    # (`aggregation.aoideos.wallpaper.provider = "skwd-wall"`), consumed by the
+    # provider file that installs it
+    # (`modules/dendrites/wallpaper/skwd-wall.nix`): the picker, the control
+    # daemon and the paper renderer. NOT the suite `default` (it drags the
+    # semantic-search lens and its model pack) and never the unfree steamworks
+    # helper. `v2` is the release branch, whose own flake re-exports the `nix`
+    # branch's packages; both nixpkgs hops follow ours, so the lock gains no
+    # second nixpkgs.
+    skwd-wall = {
+      url = "github:liixini/skwd-wall/v2";
+      inputs.release.inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     hyprland.url = "github:hyprwm/Hyprland";
 
     # nvf (Neovim-Flake) — the neovim dendrite's config framework (dxflake
