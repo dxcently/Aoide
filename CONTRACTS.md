@@ -1700,7 +1700,9 @@ the release has one, the transparent step-aside image otherwise. That is what
 makes a song switch step
 aside with no extra call: the pick stops applying, so the provider stops showing
 it. The shell's own layer is given nothing — it watches `stage/cover.json`
-itself. It runs after every write that changes what should show: `cover set`
+itself. A pick RECORDED while the lock was on is re-applied by the next sync
+exactly like one the user made: the lock governs who WRITES `stage/cover.json`,
+never what a provider paints. It runs after every write that changes what should show: `cover set`
 (plain), `cover set --clear`, `rice stage` (and therefore `rice mode
 stage`/`declarative`, which route through it) and `rice back`; never from
 `--from-skwd`, which only records. It is best-effort and never fatal, the same

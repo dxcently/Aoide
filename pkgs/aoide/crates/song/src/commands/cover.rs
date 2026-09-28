@@ -31,12 +31,14 @@ pub fn register(r: &mut Registry) {
 }
 
 /// `cover sync` — the bridge's one write to an EXTERNAL wallpaper provider, and
-/// the door the provider's own unit calls in `ExecStartPost` (CONTRACTS.md §4).
+/// the door a provider's own unit calls in `ExecStartPost` (CONTRACTS.md §4).
 /// Pure decision in [`crate::wallpaper_provider::action`]; this is its envelope.
+/// It is the ONLY caller that holds the reachable wait, because it is the only
+/// one whose provider may still be starting up.
 fn handle_cover_sync(_inv: &Invocation) -> Outcome {
     let provider = crate::wallpaper_provider::provider();
-    let status = crate::wallpaper_provider::sync();
-    Outcome::ok("cover.sync", format!("wallpaper setter `{provider}`: {status}"))
+    let status = crate::wallpaper_provider::sync_waiting();
+    Outcome::ok("cover.sync", format!("wallpaper provider `{provider}`: {status}"))
         .with_data(json!({
             "provider": provider,
             "status": status,
@@ -67,21 +69,8 @@ fn handle_cover_set_entry(inv: &Invocation) -> Outcome {
     }
     let mut out = handle_cover_set(inv);
 
-    // Auto-take (phase A3) — same hook, same posture, same rationale as
-    // `rice stage`'s own in `commands/rice.rs::handle_rice_stage_entry`; see
-    // that function's doc comment for the full write-up (Draft-mode-only
-    // gate off `mode_marker` read before the write; unconditional
-    // `snapshot` — not the drift-checking core — because a take records
-    // every write and the resulting noise is pruning's problem, not
-    // write-time suppression's; the non-fatal `"take"/"takeError"`
-    // reporting posture). `cause` is `"cover-set"` and `cmd` is
-    // `"cover.set"` — its own dotted name, not `rice.stage`'s, so a
-    // refusal names the command that actually ran.
-    //
-    // The RECORD door's no-ops are not writes: `recorded: false` means the
-    // provider's report changed nothing (ignored, or already true), so there is
-    // nothing to mint a take of — a running provider would otherwise fill the
-    // take tree with the same non-event.
+    // Auto-take (A3) — the same hook `rice stage` has; `recorded_nothing` keeps
+    // the RECORD door's no-ops out of it.
     let recorded_nothing = out
         .data
         .as_ref()
@@ -129,6 +118,16 @@ fn handle_cover_set_entry(inv: &Invocation) -> Outcome {
 /// song leaves it alone. Nothing is committed; the baked `AOIDE_WALLPAPER`
 /// remains the boot fallback.
 fn handle_cover_set(inv: &Invocation) -> Outcome {
+    // Opposite intents, refused together rather than silently picking one (and
+    // never a way past the declarative lock: the record door's exemption covers
+    // a RECORD, not a clear in disguise).
+    if inv.flag_present("clear") && inv.flag_present("from-skwd") {
+        return Outcome::usage(
+            "cover.set",
+            "usage: `--clear` drops a pick, `--from-skwd` records one — pass one of them",
+        )
+        .with_data(json!({ "reason": "clear-with-from-skwd" }));
+    }
     if inv.flag_present("clear") {
         return handle_cover_clear(inv);
     }
@@ -265,6 +264,16 @@ fn handle_cover_from_skwd(inv: &Invocation) -> Outcome {
                 .with_data(json!({ "reason": "missing-identity" }));
         }
     };
+    // A provider reports a scene as its workshop id, never as the `we:<id>` key
+    // the CLI spells elsewhere: taking a token here would record `we:123` AS the
+    // id, which no later apply could resolve.
+    if crate::cover::parse_scene_token(&identity).is_some() {
+        return Outcome::usage("cover.set", USAGE).with_data(json!({
+            "reason": "scene-token-not-an-id",
+            "identity": identity,
+            "hint": "pass the bare workshop id with `--kind we`",
+        }));
+    }
 
     let song = super::mode::current_staged_song();
 
@@ -709,6 +718,64 @@ mod tests {
     }
 
     // ── cover set: the declarative-mode write guard (khoa 2026-08-14) ────────
+
+    /// The lock's exemption covers a RECORD, not a clear in disguise: `--clear`
+    /// with `--from-skwd` is a usage refusal, and the pick stands untouched.
+    #[test]
+    fn clear_with_from_skwd_is_a_usage_refusal_and_keeps_the_pick() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
+        let root = unique_tmp("cover-clear-from-skwd");
+        let stage = root.join("stage");
+        stage_livery(&stage, Some("skwd-wall"));
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
+
+        // A recorded pick first, then the locked combination.
+        let recorded = handle_cover_set_entry(&set_inv(
+            &["/tmp/library/a.png"],
+            &[("from-skwd", "true"), ("kind", "static")],
+        ));
+        assert_eq!(recorded.status, Status::Ok, "{:?}", recorded.data);
+        let before = std::fs::read_to_string(stage.join("cover.json")).unwrap();
+
+        let both = set_inv(&[], &[("clear", "true"), ("from-skwd", "true")]);
+        let out = handle_cover_set_entry(&both);
+        assert_eq!(out.status, Status::Usage, "{:?}", out.data);
+        assert_eq!(
+            out.render(false).1,
+            aoide_protocol::output::exit::USAGE
+        );
+        assert_eq!(out.data.unwrap()["reason"], "clear-with-from-skwd");
+        assert_eq!(
+            std::fs::read_to_string(stage.join("cover.json")).unwrap(),
+            before,
+            "the refusal wrote nothing"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The provider reports a scene as its workshop id; a `we:<id>` token here
+    /// would be recorded AS the id and could never be applied later.
+    #[test]
+    fn from_skwd_refuses_a_scene_token_as_its_identity() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
+        let root = unique_tmp("cover-from-skwd-token");
+        let stage = root.join("stage");
+        stage_livery(&stage, Some("skwd-wall"));
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
+
+        let out = handle_cover_set(&set_inv(
+            &["we:123"],
+            &[("from-skwd", "true"), ("kind", "we")],
+        ));
+        assert_eq!(out.status, Status::Usage);
+        assert_eq!(out.data.unwrap()["reason"], "scene-token-not-an-id");
+        assert!(!stage.join("cover.json").exists(), "nothing recorded");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// The record door is EXEMPT from the declarative lock (CONTRACTS.md §4):
     /// what an external provider is already showing gets recorded even while nix

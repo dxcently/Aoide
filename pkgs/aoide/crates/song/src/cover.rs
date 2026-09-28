@@ -157,8 +157,9 @@ pub fn staged_we_id() -> Option<String> {
 
 /// What the staged pick NAMES, as `(kind, identity)`: the file path for a still
 /// or a video, the workshop id for a scene. `None` when nothing is named — no
-/// file, no marker, or an empty identity. This is the pair the provider sync
-/// compares against what the provider reports, so one function decides both.
+/// file, no marker, or an empty identity. This is the pair the RECORD door
+/// compares against a provider's report; [`crate::wallpaper_provider::sync`]
+/// applies it without comparing anything.
 pub fn staged_identity() -> Option<(String, String)> {
     match staged_kind().as_str() {
         KIND_WE => staged_we_id().map(|id| (KIND_WE.to_string(), id)),

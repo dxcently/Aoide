@@ -13,6 +13,13 @@
 //! lane publishes as `song/stage/wallpaper-provider` — one name, in the runtime
 //! root, so the CLI, the QML and this module read the same word. Absent (a host
 //! that never activated the lane) means the shell's own layer.
+//!
+//! TWO DOORS, one wait between them. `sync()` makes ONE attempt and is what
+//! every interactive writer calls — a `cover set` must not stall for five
+//! seconds because a daemon is down. `sync_waiting()` holds the reachable wait
+//! and is what `lyra cover sync` calls, because that is the door a unit's
+//! `ExecStartPost` runs while the daemon is still binding its socket: there, a
+//! refusal is a race worth waiting out on every output.
 
 use crate::cover;
 use serde_json::Value;
@@ -42,9 +49,8 @@ const HELM: &str = "skwd-helm";
 /// unbounded loop (measured 278 applies in 2 s). One wildcard target, one apply.
 const ALL_OUTPUTS: &str = "*";
 
-/// How long a call may keep finding the provider unreachable before it gives up.
-/// `ExecStartPost` runs while the daemon is still binding its socket, so exit 3
-/// here is a race, not an answer.
+/// How long `sync_waiting` keeps trying a provider that is not there yet, and
+/// how often it looks.
 const REACHABLE_WAIT: Duration = Duration::from_secs(5);
 const REACHABLE_POLL: Duration = Duration::from_millis(250);
 
@@ -130,10 +136,12 @@ fn apply_target(kind: &str, identity: &str) -> String {
 enum Helm {
     Ok,
     /// It ran and said the provider is not there (exit 3, the documented
-    /// unreachable code) — or is not installed at all. Both are "not yet".
+    /// unreachable code).
     Unreachable,
-    /// It ran and answered: a refusal this module cannot do anything about.
+    /// It ran and answered: a refusal nothing here can do anything about.
     Refused,
+    /// It did not run at all — no `skwd-helm` on `PATH`. An answer too.
+    Missing,
 }
 
 fn classify(out: &std::process::Output) -> Helm {
@@ -146,26 +154,34 @@ fn classify(out: &std::process::Output) -> Helm {
     }
 }
 
-/// `skwd-helm`, waiting out a provider that is still coming up. The wait lives
-/// here, in ONE place, because every call this module makes can lose the same
-/// race — a daemon that `ExecStartPost` beats to its own socket.
-fn run_helm(args: &[&str]) -> Helm {
+fn attempt(args: &[&str]) -> Helm {
+    Command::new(HELM)
+        .args(args)
+        .output()
+        .map(|out| classify(&out))
+        .unwrap_or(Helm::Missing)
+}
+
+/// One step of the wait loop: is another attempt due? Only an UNREACHABLE
+/// provider is worth asking again — a refusal and a missing client are answers,
+/// and the timeout is the caller's.
+fn another_attempt(outcome: Helm, wait: bool, expired: bool) -> bool {
+    wait && !expired && outcome == Helm::Unreachable
+}
+
+fn helm(args: &[&str], wait: bool) -> Helm {
     let deadline = Instant::now() + REACHABLE_WAIT;
     loop {
-        let outcome = Command::new(HELM)
-            .args(args)
-            .output()
-            .map(|out| classify(&out))
-            .unwrap_or(Helm::Unreachable);
-        if outcome != Helm::Unreachable || Instant::now() >= deadline {
+        let outcome = attempt(args);
+        if !another_attempt(outcome, wait, Instant::now() >= deadline) {
             return outcome;
         }
         std::thread::sleep(REACHABLE_POLL);
     }
 }
 
-fn apply(target: &str) -> Helm {
-    run_helm(&["apply", target, "-o", ALL_OUTPUTS])
+fn apply(target: &str, wait: bool) -> Helm {
+    helm(&["apply", target, "-o", ALL_OUTPUTS], wait)
 }
 
 /// Make the external provider show nothing. The clean primitive is the
@@ -174,41 +190,56 @@ fn apply(target: &str) -> Helm {
 /// stand-in image — the two answers are indistinguishable from here, and a
 /// `clear` that landed leaves nothing for the image to do. One function, so
 /// dropping the stand-in once `clear` is everywhere is one change.
-fn step_aside() -> &'static str {
-    if run_helm(&["clear", "-o", ALL_OUTPUTS]) == Helm::Ok {
-        return "stepped aside (cleared)";
-    }
-    match standin_png() {
-        Some(png) => match apply(&png) {
-            Helm::Ok => "stepped aside (stand-in image)",
-            Helm::Refused => "best-effort: the provider refused the step-aside image",
-            Helm::Unreachable => "best-effort: skwd-helm unreachable",
+fn step_aside(wait: bool) -> &'static str {
+    match helm(&["clear", "-o", ALL_OUTPUTS], wait) {
+        Helm::Ok => "stepped aside (cleared)",
+        // No client at all: the stand-in would fail the same way, so say it once.
+        Helm::Missing => "best-effort: skwd-helm is not on PATH",
+        _ => match standin_png() {
+            Some(png) => match apply(&png, wait) {
+                Helm::Ok => "stepped aside (stand-in image)",
+                Helm::Refused => "best-effort: the provider refused the step-aside image",
+                Helm::Unreachable => "best-effort: skwd-helm unreachable",
+                Helm::Missing => "best-effort: skwd-helm is not on PATH",
+            },
+            None => "best-effort: no step-aside image (AOIDE_SKWD_WALL_STANDIN unset)",
         },
-        None => "best-effort: no step-aside image (AOIDE_SKWD_WALL_STANDIN unset)",
     }
 }
 
 /// Make the provider agree with the stage files. Returns a short status string
 /// for the caller's outcome envelope; NEVER a `Result` — a failed or absent
 /// provider must not fail a stage, a pick or a revert (the stage files are
-/// already the source of truth for the shell's half of the picture).
+/// already the source of truth for the shell's half of the picture). ONE
+/// attempt: see the module doc for why the wait is `sync_waiting`'s.
 pub fn sync() -> &'static str {
+    sync_with(false)
+}
+
+/// [`sync`], holding the reachable wait — what `lyra cover sync` runs, and so
+/// what a unit's `ExecStartPost` runs.
+pub fn sync_waiting() -> &'static str {
+    sync_with(true)
+}
+
+fn sync_with(wait: bool) -> &'static str {
     match action(&provider(), applying_pick()) {
         Action::Nothing => "not the wallpaper provider (the shell's own layer paints)",
         Action::StandAside => {
             if cfg!(test) {
                 return "skipped (this crate's own test build: no live skwd-helm)";
             }
-            step_aside()
+            step_aside(wait)
         }
         Action::Apply { kind, identity } => {
             if cfg!(test) {
                 return "skipped (this crate's own test build: no live skwd-helm)";
             }
-            match apply(&apply_target(&kind, &identity)) {
+            match apply(&apply_target(&kind, &identity), wait) {
                 Helm::Ok => "applied the staged pick",
                 Helm::Refused => "best-effort: the provider refused the staged pick",
                 Helm::Unreachable => "best-effort: skwd-helm unreachable",
+                Helm::Missing => "best-effort: skwd-helm is not on PATH",
             }
         }
     }
@@ -218,6 +249,15 @@ pub fn sync() -> &'static str {
 mod tests {
     use super::*;
     use aoide_test_support::*;
+    use std::os::unix::process::ExitStatusExt;
+
+    fn output(code: i32) -> std::process::Output {
+        std::process::Output {
+            status: std::process::ExitStatus::from_raw(code << 8),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        }
+    }
 
     fn stage(root: &std::path::Path) -> std::path::PathBuf {
         let stage = root.join("stage");
@@ -257,6 +297,38 @@ mod tests {
         assert_eq!(apply_target(cover::KIND_WE, "123"), "we:123");
         assert_eq!(apply_target(cover::KIND_STATIC, "/tmp/a.png"), "/tmp/a.png");
         assert_eq!(apply_target(cover::KIND_VIDEO, "/tmp/a.mp4"), "/tmp/a.mp4");
+    }
+
+    /// The provider's own exit codes: 0 is done, 3 is "not there yet", anything
+    /// else is an answer (2 not found, 4 bad args, 6 invalid params — the ones
+    /// its `--help` documents).
+    #[test]
+    fn the_providers_exit_codes_classify_as_answers_or_a_missing_provider() {
+        assert_eq!(classify(&output(0)), Helm::Ok);
+        assert_eq!(classify(&output(3)), Helm::Unreachable);
+        for answer in [1, 2, 4, 5, 6] {
+            assert_eq!(classify(&output(answer)), Helm::Refused, "exit {answer}");
+        }
+    }
+
+    /// Who waits, and on what: only the `cover sync` door, and only for a
+    /// provider that is not there yet — a refusal and a missing client are
+    /// answers, and the deadline ends the wait either way.
+    #[test]
+    fn only_the_sync_door_waits_and_only_on_an_unreachable_provider() {
+        for outcome in [Helm::Ok, Helm::Refused, Helm::Missing] {
+            for wait in [false, true] {
+                for expired in [false, true] {
+                    assert!(
+                        !another_attempt(outcome, wait, expired),
+                        "{outcome:?} wait={wait} expired={expired}"
+                    );
+                }
+            }
+        }
+        assert!(another_attempt(Helm::Unreachable, true, false));
+        assert!(!another_attempt(Helm::Unreachable, false, false), "a writer makes one attempt");
+        assert!(!another_attempt(Helm::Unreachable, true, true), "the wait is bounded");
     }
 
     #[test]
@@ -336,10 +408,12 @@ mod tests {
         assert_eq!(standin_png(), None, "an empty export is not a path");
     }
 
-    /// In this crate's own test build `sync` is inert by construction: it
-    /// reports the decision and runs no client (`live::apply_live`'s gate).
+    /// Both doors are inert in this crate's own test build: they report the
+    /// decision and run no client (`live::apply_live`'s gate). Which door WAITS,
+    /// and on what, is `another_attempt`'s truth table — the loop itself cannot
+    /// be observed here without running the client.
     #[test]
-    fn sync_is_inert_in_this_crates_own_test_build() {
+    fn both_doors_are_inert_in_this_crates_own_test_build() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("provider-sync-test-build");
@@ -347,14 +421,14 @@ mod tests {
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
         assert!(sync().starts_with("not the wallpaper provider"));
+        assert!(sync_waiting().starts_with("not the wallpaper provider"));
 
         std::fs::write(stage.join(PROVIDER_FILE), PROVIDER_SKWD_WALL).unwrap();
         stage_song(&stage, "cadenza");
         cover::stage_scene("123", Some("cadenza")).unwrap();
-        assert_eq!(
-            sync(),
-            "skipped (this crate's own test build: no live skwd-helm)"
-        );
+        for status in [sync(), sync_waiting()] {
+            assert_eq!(status, "skipped (this crate's own test build: no live skwd-helm)");
+        }
         std::fs::remove_dir_all(&root).unwrap();
     }
 }
