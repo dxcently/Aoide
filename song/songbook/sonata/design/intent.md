@@ -46,8 +46,9 @@ fleet performs it with one line — `aoide.song = "sonata";` — and the whole
 ## Host-agnostic by construction
 
 This song sets ONLY `aoide.livery`. It names no host, enables no lane or
-dendrite, touches no hardware or service, and does not key `stylix.polarity`
-(the stylix lane pins polarity light — a song cannot flip it). The venue
+dendrite, touches no hardware or service, and keys its own polarity —
+`aoide.livery.polarity = "light"`, declared beside the palette in `rice.nix`
+(CONTRACTS.md §1). The venue
 (host) decides its instruments; sonata carries only the notes. That is exactly
 what lets one score be performed on any host with its own specifics and its own
 enabled lane/dendrite set (CONTRACTS.md §5).
@@ -64,7 +65,9 @@ opacity, not colour": kitty renders at `background_opacity` 0.86 and the bar
 sheet at ~0.30 opacity **over** this ground — `base00` stays in the pale
 marble-glass family, a warm sunlit stone.
 
-The polarity is **light** (the stylix lane pins it): `base00` is the lightest
+The polarity is **light**, the song's own declaration (`aoide.livery.polarity`
+in `rice.nix`, mirrored in `livery.json`; the stylix lane's default is the same
+value): `base00` is the lightest
 value and `base05`–`base07` are the dark inks.
 
 | Region of the Greek register | Slot(s) | Colour |

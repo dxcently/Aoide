@@ -559,12 +559,14 @@ reads a fixture path.
 
 ## 5. Hazards and open questions
 
-- **Polarity (needs a core change).** The stylix module sets `polarity =
-  lib.mkDefault "light"` and reads no polarity from the song; a song may
-  only set `aoide.livery` (house rule 5). Proposed: an
-  `aoide.livery.polarity` field (nucleus option, CONTRACTS §1, livery
-  schema/lint), read by the stylix dendrite that phase 5 S5 creates in
-  place of the lane. cadenza then declares `"dark"`.
+- **Polarity (settled).** The key's register is the song's own:
+  `aoide.livery.polarity = "dark"` is declared beside the palette
+  (`rice.nix` and `livery.json`), validated by `rice lint` (exactly
+  `"light"`/`"dark"`; CONTRACTS.md §1), and read by the stylix dendrite as
+  `stylix.polarity`, so every Stylix-managed target reads the phosphor ramp as
+  the dark register it is instead of the lane's light default. Baked only —
+  no emitter carries it and staging applies nothing for it, so a polarity
+  change lands on the user-gated rebuild, never on a stage.
 - **Glass (needs a core change).** The compositor module loads hyprglass,
   its config block and the `blur on` layer rules unconditionally;
   `geometry.blurEnabled = false` only stops Hyprland's blur. Proposed, the
@@ -632,3 +634,11 @@ reads a fixture path.
   truth), set here to ShureTechMono Nerd Font Mono; panes keep
   JetBrainsMono. Baked only: stylix is the one reader, so the face lands on
   the rebuild and staging cannot re-face a terminal (§2 Faces and the grid).
+- 2026-09-28 — khoa: the key's register is the SONG's, and the glass follows
+  it. `aoide.livery.polarity = "dark"` is declared beside the palette (nucleus
+  option, CONTRACTS §1, `rice lint`, read by the stylix dendrite) and mirrored
+  in `livery.json`; baked only, so flipping it is a rebuild, not a stage. The
+  terminal reads at `geometry.terminalOpacity` 0.7 (kitty
+  `background_opacity`, staged) and the compositor's hyprglass block now takes
+  its two enable keys from `geometry.blurEnabled`, so a booted desktop and a
+  staged one wear the same glassless CRT (§5).

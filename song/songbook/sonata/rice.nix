@@ -1,7 +1,9 @@
 # song/songbook/sonata/rice.nix — the "sonata" song (the Greek key).
 #
 # sonata is re-keyed to a GREEK register: a light MARBLE ground, plum/charcoal
-# ink kept dark (Stylix pins polarity light — the song cannot flip it), a deep
+# ink kept dark (its own polarity — declared below beside the palette as
+# `aoide.livery.polarity = "light"`, so the ground is the song's and not the
+# stylix lane's default), a deep
 # ATTIC-GOLD chrome accent, a TERRACOTTA urgent, and a true LAUREL leaf-green
 # one-hot trace — the single blaze the grammar reserves for the live/traced
 # element. Aegean blue steps back to a preview/info role. The look is a temple
@@ -69,6 +71,14 @@ in
       # ring, links), NOT active-state chrome. null → accent.
       hot = "#4e8b45"; # true laurel leaf-green            (base0B)
     };
+
+    # ── Polarity — the register the ramp reads as (CONTRACTS.md §1) ─────────
+    # Beside the palette, because a palette brings its polarity: a pale marble
+    # ground is read as LIGHT, and the stylix lane hands this value to
+    # `stylix.polarity` so every Stylix-managed target (GTK/Qt, terminal,
+    # editors) reads it as one register. Baked only: no emitter carries it and
+    # staging does not apply it, so flipping it is a rebuild, not a stage.
+    aoide.livery.polarity = "light";
 
     # ── Base16 tier — the Greek marble palette ──────────────────────────────
     # Keyed region-by-region in the Greek key: a warm marble ramp (00–07, from

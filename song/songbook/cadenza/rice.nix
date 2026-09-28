@@ -10,8 +10,10 @@
 #
 # HOST-AGNOSTIC DISCIPLINE (CONTRACTS.md §5): a song sets ONLY aoide.livery
 # and aoide.arrangement. All values are literal nix (no song/ runtime reads).
-# The key is DARK. Stylix polarity is not yet a livery field (mkDefault "light"
-# in the stylix module); intent.md §5 carries the proposed `livery.polarity`.
+# The key is DARK: it declares `aoide.livery.polarity = "dark"` beside its
+# palette, so the stylix lane bakes this phosphor ramp as a dark register
+# instead of the lane's own light default. Baked only — GTK/Qt take it at
+# build time, so a polarity change lands on the user-gated rebuild.
 {
   lib,
   config,
@@ -38,6 +40,14 @@
       urgent = "#ff4d4d"; # termui red — blocked, failed, summons (base08)
       hot = "#ffb000"; # amber tube — the ONE live element     (base0A)
     };
+
+    # ── Polarity — the register the ramp reads as (CONTRACTS.md §1) ──────────
+    # Beside the palette, because a palette brings its polarity: a CRT ground
+    # is read as DARK, and the stylix lane hands this value to
+    # `stylix.polarity` so every Stylix-managed target (GTK/Qt, terminal,
+    # editors) reads it as one register. Baked only: no emitter carries it and
+    # staging does not apply it, so flipping it is a rebuild, not a stage.
+    aoide.livery.polarity = "dark";
 
     # ── Base16 tier — the phosphor ramp + termui accents ─────────────────────
     aoide.livery.base16 = {
@@ -77,7 +87,11 @@
     };
 
     # ── Geometry tier ────────────────────────────────────────────────────────
-    # Square, thin, tight, opaque: the CRT is black glass, not frost.
+    # Square, thin, tight, and 0.7 opaque: the CRT is near-black glass, not
+    # frost. `terminalOpacity` is the one field here that is not a Hyprland
+    # keyword — it rides `song/stage/terminal-colors.conf` as kitty's
+    # `background_opacity` (CONTRACTS.md §1), so the phosphor tube stays
+    # readable over the wallpaper without going translucent.
     aoide.livery.geometry = {
       gapsOut = 8;
       gapsIn = 4;
@@ -86,6 +100,7 @@
       blurEnabled = false;
       blurSize = null;
       blurPasses = null;
+      terminalOpacity = 0.7;
     };
 
     # ── Font tier ────────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 {
   "schemaVersion": "0",
+  "polarity": "dark",
   "palette": {
     "bg":     "#050a06",
     "fg":     "#86f2a0",
