@@ -307,29 +307,39 @@ lyra rice mode draft <name> [--json]
 ### lyra cover set
 
 ```
-lyra cover set <path|name> [--json]
+lyra cover set <path|name|we:<id>> [--json]
 lyra cover set --clear [--json]
+lyra cover set --from-skwd --kind <static|video|we> <path|id> [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` (entrypoint guard); stats the resolved
   cover file (absolute `<path>` literal; a bare name resolves against
-  `song/covers/`); `song/stage/livery.json`'s own `"song"` field — the song
-  the pick is stamped for, and the song `--clear` derives a default for. In
+  `song/covers/`; a `we:<id>` token is a Wallpaper Engine scene and names no
+  file at all); `song/stage/livery.json`'s own `"song"` field — the song
+  the pick is stamped for, and the song `--clear` derives a default for; with
+  `--from-skwd`, `song/stage/wallpaper-provider` — the host's provider, which
+  decides whether a provider's report is Aoide's business at all. In
   Draft mode, also reads the staged livery/cover for the auto-take.
 - **Writes:** `song/stage/cover.json` — atomic, pretty
-  `{"path": "<abs>", "pick": true, "song": "<staged song>"}` + trailing
-  newline, the `song` field omitted only when nothing is staged
-  (CONTRACTS.md §4). NOT symlink-routed in Draft mode (only `livery.json`
-  is). `--clear` reverses it: the staged song gets its own default back — its
-  derivable cover, else `cover.json` removed (the baked/palette fallback,
-  plus the song's own live board). In Draft mode auto-mints a take (cause
-  `"cover-set"`): `takes/NNNN.json` + `takes/head.json` under the routed
-  draft, non-fatal on failure.
-- **Output:** data `{cover, coverJson, pick, song, seam}` (+ `take` when in
-  Draft mode); with `--clear`, `{cleared, droppedPick, cover, coverJson,
-  coverStage}`. The Quickshell wallpaper surface (`AoideWallpaper.qml`)
-  FileView-watches `stage/cover.json` and hot-swaps live — no IPC call — and
-  does not instantiate the song's live `wallpaper` board while a pick applies.
+  `{"path": "<abs>", "kind": "static|video", "pick": true, "song": "<staged song>"}`
+  (or `{"kind": "we", "weId": "<id>", …}` for a scene) + trailing newline, the
+  `song` field omitted only when nothing is staged (CONTRACTS.md §4). NOT
+  symlink-routed in Draft mode (only `livery.json` is). `--clear` reverses it:
+  the staged song gets its own default back — its derivable cover, else
+  `cover.json` removed (the baked/palette fallback, plus the song's own live
+  board). `--from-skwd` records an external provider's own report instead, and
+  writes nothing at all when that provider is not the host's, when the identity
+  is the step-aside image, or when the staged pick already names it. In Draft
+  mode auto-mints a take (cause `"cover-set"`): `takes/NNNN.json` +
+  `takes/head.json` under the routed draft, non-fatal on failure.
+- **Output:** data `{cover, coverJson, kind, pick, song, wallpaper, seam}`
+  (+ `take` when in Draft mode); with `--clear`, `{cleared, droppedPick,
+  cover, coverJson, coverStage, wallpaper}`; with `--from-skwd`, `{recorded,
+  kind, identity, provider, song, …}` and `recorded: false` with `ignored` or
+  `unchanged` for the no-op shapes. The Quickshell wallpaper surface
+  (`AoideWallpaper.qml`) FileView-watches `stage/cover.json` and hot-swaps live
+  — no IPC call — and both the song's live `wallpaper` board and the layer's
+  own image stand down while a pick applies.
 - **Notes:** refuses while declarative-locked (`declarative-mode-locked`).
   A path naming no existing file is `cover-not-found`, exit 1 — never stages
   a wallpaper that can't render. `--clear` with a `<path>` is
@@ -338,7 +348,34 @@ lyra cover set --clear [--json]
   another song is ignored, which is why a pick survives re-staging its own
   song (a bare `lyra rice stage`, the RICE toggle, a declarative re-seed, a
   rebuild) and never shows over a different one. Nothing is committed; the
-  baked `AOIDE_WALLPAPER` remains the boot/rebuild fallback.
+  baked `AOIDE_WALLPAPER` remains the boot/rebuild fallback. When the host's
+  wallpaper provider is not the shell's own layer (a page of its own:
+  [[skwd-wall]]), the pick is the provider's to draw — this layer paints nothing
+  while one applies — and every write here reconciles the provider with the stage
+  file through `lyra cover sync`.
+
+### lyra cover sync
+
+```
+lyra cover sync [--json]
+```
+
+- **Reads:** `song/stage/wallpaper-provider` (the host's provider — absent means
+  the shell's own layer), `song/stage/cover.json` and
+  `song/stage/livery.json` (does a pick apply to the staged song right now?),
+  `$AOIDE_SKWD_WALL_STANDIN` (the step-aside image's store path).
+- **Writes:** nothing. It runs `skwd-helm` — `apply <path|we:<id>> -o '*'` for
+  an applicable pick, `clear` (falling back to the step-aside image) when none
+  applies — and only when the host's provider is `skwd-wall`. Best-effort and
+  never fatal, the same tier as `rice stage`'s `hyprctl` call.
+- **Output:** data `{provider, status, pick}`; `status` names what happened
+  (`applied the staged pick`, `stepped aside (cleared)`, `stepped aside
+  (stand-in image)`, or that the shell's own layer paints and no call was made).
+- **Notes:** the repair door — for a dropped pick, for a provider that was
+  restarted, or for a hand-edited stage file. Every pick write calls the same
+  function, and the external provider's unit runs this command in
+  `ExecStartPost`, so a restarted provider re-asserts the staged state without a
+  rebuild.
 
 ### lyra livery emit
 

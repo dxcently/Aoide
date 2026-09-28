@@ -42,6 +42,16 @@ staged cover image (or the baked/palette fallback) stands alone. The anchor
 also destroys the board — not merely hides it — while a `cover set` pick
 applies (CONTRACTS.md §4's cover.json entry).
 
+**What a pick is painted BY is the host's choice**, and it decides whether this
+anchored layer draws at all: `song/stage/wallpaper-provider` names the provider
+(the fact `aoide.wallpaper.provider`), and while it is anything other than the
+shell's own layer AND a pick applies to the staged song, the anchor paints
+NOTHING — no cover image, no board, and no palette rectangle — because the
+external provider has that pick on screen and this surface stays mapped and
+transparent underneath it. Every other case is exactly what it always was: the
+song's own default (image, and its board if it authors one), or the user's pick
+for the shell to draw.
+
 ## The universal widget contract
 
 Any `song/songbook/<name>/widgets/<slot>.qml` file that a song drops is
@@ -102,7 +112,7 @@ anchor, viewport, fixture (`docs/Aoide-Wiki/concepts/desktop/Widget-Preview.md`)
 | `powermenu` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "powermenu" }`; the bar's clef calls `.item.toggle()` | none | none — sonata's `widgets/powermenu.qml` is the floor |
 | `launcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "launcher" }` | `clipboard` (the `AoideClipboard` instance), `ledger` (`GrimoireLedger` — stays in the lane, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |
 | `bar` | `WidgetSlot` | `shell.qml` (lane) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }` | `shared` (session-state QtObject), `powermenu` (the powermenu slot's live `.item`), `dock` (the dock slot's live `.item`), `stagingEngine` (so the bar's own embedded calendar `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
-| `wallpaper` | `WidgetSlot` | `AoideWallpaper.qml` (lane) — inside the per-screen Background layer surface, over the staged cover image | none | none — this slot has NO baseline floor: the anchor gates on `stagingEngine.has(<active song>, "wallpaper")`, so an unauthored `wallpaper` slot renders NOTHING and the cover image stands (sonata ships no body here, so its twin can never be resolved in as a floor); cadenza's `widgets/wallpaper.qml` is the live board, and the anchor DESTROYS it (not hides it) while a `cover set` pick applies |
+| `wallpaper` | `WidgetSlot` | `AoideWallpaper.qml` (lane) — inside the per-screen Background layer surface, over the staged cover image | none | none — this slot has NO baseline floor: the anchor gates on `stagingEngine.has(<active song>, "wallpaper")`, so an unauthored `wallpaper` slot renders NOTHING and the cover image stands (sonata ships no body here, so its twin can never be resolved in as a floor); cadenza's `widgets/wallpaper.qml` is the live board, and the anchor DESTROYS it (not hides it) while a `cover set` pick applies — and, when the host's provider is not the shell's own layer, paints nothing at all (no image, no board, no palette rectangle) while a pick applies, since that provider has the pick on screen |
 
 ### Window-owning slot namespaces (`SurfaceSlot` contract)
 

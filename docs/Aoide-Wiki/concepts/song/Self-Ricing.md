@@ -203,6 +203,22 @@ stage`, `cover set` and `rice back` (the lane's own
 `home.activation.aoideSeedStage` reseeds `livery.json` on every activation and
 never touches `cover.json`) — unaffected by which of
 `stage`/`declarative`/`draft` currently owns the routing, see below.
+
+**Who PAINTS a pick is the host's choice, not a song's.** The wallpaper PROVIDER
+is a provider capability (`modules/dendrites/wallpaper/`) with two alternatives
+today — `quickshell`, the shell's own `aoide-wallpaper` layer, which draws the
+song's own default and the user's picks, and `skwd-wall`, an external provider
+that draws picks on its own surface. A host picks one with
+`aggregation.aoideos.wallpaper.provider`, and the chosen provider file names
+itself in the fact `aoide.wallpaper.provider`; `lyra` publishes that one word to
+the runtime as `song/stage/wallpaper-provider`, which both the CLI
+(`wallpaper_provider::provider`) and `LiveryState.qml` read — absent means the
+shell's own layer. The song is not consulted: a pick is the same
+`stage/cover.json` either way, and the shell's layer simply paints nothing
+while an external provider has one on screen. `lyra cover sync` is the bridge —
+the staged pick applied while one applies, the step-aside image when none does —
+and every pick write calls it.
+
 `stage/mode.json` — a runtime stage-file under the root — records which of
 **three** modes currently owns those writes (`RiceMode`:
 `Staging | Declarative | Draft`):

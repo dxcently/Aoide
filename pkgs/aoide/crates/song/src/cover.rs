@@ -4,6 +4,10 @@
 //! `pkgs/aoide/src/commands/{rice,cover}.rs` (Phase 5b restructure,
 //! docs/architecture/PACKAGE-LAYOUT.md). Reads env-derived paths and stats
 //! candidates; the stage writers are the only side effects.
+//!
+//! A pick names WHAT it is as well as which file: `kind` is `static`, `video` or
+//! `we` (a Wallpaper Engine scene, whose identity is a workshop id in place of a
+//! path). Absent reads as `static` — see [`KIND_FIELD`].
 
 use std::path::{Path, PathBuf};
 
@@ -18,6 +22,60 @@ pub const PICK_FIELD: &str = "pick";
 /// The song a cover was staged for. Every writer stamps it; a file without it
 /// is legacy and applies to whichever song is staged.
 pub const SONG_FIELD: &str = "song";
+
+/// WHAT a pick is (CONTRACTS.md §4): a still, a video, or a Wallpaper Engine
+/// scene. Additive — absent reads as [`KIND_STATIC`], which is every file
+/// written before the field existed.
+pub const KIND_FIELD: &str = "kind";
+
+/// A scene's identity: the workshop id, in place of `path`. Only a `we` pick
+/// carries it.
+pub const WE_ID_FIELD: &str = "weId";
+
+/// The three pick kinds, spelled as the provider's own protocol spells them
+/// (`wall_proto::kind`).
+pub const KIND_STATIC: &str = "static";
+pub const KIND_VIDEO: &str = "video";
+pub const KIND_WE: &str = "we";
+
+/// The kinds a pick may carry, in the order CONTRACTS.md §4 lists them.
+pub const KINDS: [&str; 3] = [KIND_STATIC, KIND_VIDEO, KIND_WE];
+
+/// Extensions the PROVIDER recognises as video (`paper-control`'s `VIDEO_EXTS`,
+/// mirrored here so a pick made through Aoide lands on the same kind the
+/// provider derives for the same file). A `.gif` counts as one: upstream decides
+/// that by decoding the file, and this crate does not decode, so every gif
+/// stages as a video.
+pub const VIDEO_EXTS: &[&str] =
+    &["mp4", "mkv", "webm", "mov", "avi", "m4v", "flv", "wmv", "h264", "ivf", "gif"];
+
+/// The kind a file path implies: [`KIND_VIDEO`] for a video extension (case
+/// insensitive), [`KIND_STATIC`] otherwise.
+pub fn kind_for_path(path: &Path) -> &'static str {
+    let video = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| VIDEO_EXTS.iter().any(|v| e.eq_ignore_ascii_case(v)));
+    if video {
+        KIND_VIDEO
+    } else {
+        KIND_STATIC
+    }
+}
+
+/// The `we:<id>` token a scene pick is spelled with on the command line, and
+/// what the provider is applied with.
+pub fn scene_token(we_id: &str) -> String {
+    format!("{KIND_WE}:{we_id}")
+}
+
+/// `we:<id>` → the id, when the argument is a scene token with a non-empty id.
+/// Anything else — including a bare id — is not a token this reads as a scene.
+pub fn parse_scene_token(arg: &str) -> Option<&str> {
+    arg.strip_prefix("we:")
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+}
 
 /// Derive a physical cover-art file for a song, or `None` when none exists.
 ///
@@ -81,28 +139,91 @@ pub fn staged_song() -> Option<String> {
         .map(str::to_string)
 }
 
-/// Is the staged cover the user's pick? Requires the marker AND a path to
-/// render — the same pair the shell's own gate requires.
+/// The staged pick's kind: `kind` when the file spells one of [`KINDS`], else
+/// [`KIND_STATIC`] — null and a torn or unknown value read the same way a
+/// missing one does.
+pub fn staged_kind() -> String {
+    read_staged()
+        .and_then(|doc| doc.get(KIND_FIELD).and_then(|v| v.as_str()).map(str::to_string))
+        .filter(|k| KINDS.contains(&k.as_str()))
+        .unwrap_or_else(|| KIND_STATIC.to_string())
+}
+
+/// The staged scene's workshop id, when the pick is a scene.
+pub fn staged_we_id() -> Option<String> {
+    let id = read_staged()?.get(WE_ID_FIELD)?.as_str()?.to_string();
+    (!id.is_empty()).then_some(id)
+}
+
+/// What the staged pick NAMES, as `(kind, identity)`: the file path for a still
+/// or a video, the workshop id for a scene. `None` when nothing is named — no
+/// file, no marker, or an empty identity. This is the pair the provider sync
+/// compares against what the provider reports, so one function decides both.
+pub fn staged_identity() -> Option<(String, String)> {
+    match staged_kind().as_str() {
+        KIND_WE => staged_we_id().map(|id| (KIND_WE.to_string(), id)),
+        _ => staged_path().map(|path| (staged_kind(), path)),
+    }
+}
+
+/// Is the staged cover the user's pick? Requires the marker AND an identity to
+/// show — a path, or (for a scene) a workshop id. The same pair the shell's own
+/// gate requires.
 pub fn staged_is_pick() -> bool {
     let Some(doc) = read_staged() else {
         return false;
     };
-    doc.get(PICK_FIELD).and_then(|v| v.as_bool()).unwrap_or(false)
-        && doc
-            .get("path")
-            .and_then(|v| v.as_str())
-            .is_some_and(|path| !path.is_empty())
+    doc.get(PICK_FIELD).and_then(|v| v.as_bool()).unwrap_or(false) && staged_identity().is_some()
 }
 
 /// Stage a pick — what `cover set` writes. `song` is the song staged at write
 /// time; `None` (nothing staged) writes the legacy shape, which applies to
-/// whichever song loads.
+/// whichever song loads. The kind follows the file: a video extension stages a
+/// video pick, anything else a still.
 pub fn stage_pick(path: &Path, song: Option<&str>) -> std::io::Result<PathBuf> {
+    let kind = kind_for_path(path);
     let path = path.to_string_lossy();
     write_cover(match song {
-        Some(song) => serde_json::json!({ "path": path, PICK_FIELD: true, SONG_FIELD: song }),
-        None => serde_json::json!({ "path": path, PICK_FIELD: true }),
+        Some(song) => serde_json::json!({
+            "path": path, KIND_FIELD: kind, PICK_FIELD: true, SONG_FIELD: song
+        }),
+        None => serde_json::json!({
+            "path": path, KIND_FIELD: kind, PICK_FIELD: true
+        }),
     })
+}
+
+/// Stage a Wallpaper Engine scene as a pick: the workshop id IS the identity, so
+/// there is no path (CONTRACTS.md §4).
+pub fn stage_scene(we_id: &str, song: Option<&str>) -> std::io::Result<PathBuf> {
+    write_cover(match song {
+        Some(song) => serde_json::json!({
+            KIND_FIELD: KIND_WE, WE_ID_FIELD: we_id, PICK_FIELD: true, SONG_FIELD: song
+        }),
+        None => serde_json::json!({
+            KIND_FIELD: KIND_WE, WE_ID_FIELD: we_id, PICK_FIELD: true
+        }),
+    })
+}
+
+/// Stage what an external PROVIDER reports it now shows: `kind` plus the
+/// identity it named — a path for a still or a video, the workshop id for a
+/// scene. The shape is `stage_pick`'s, off the kind the CALLER resolved (the
+/// provider's own `%type%`), which is why the kind is not re-derived from the
+/// identity here.
+pub fn stage_provider_pick(kind: &str, identity: &str, song: Option<&str>) -> std::io::Result<PathBuf> {
+    let mut doc = if kind == KIND_WE {
+        serde_json::json!({ KIND_FIELD: KIND_WE, WE_ID_FIELD: identity })
+    } else {
+        serde_json::json!({ KIND_FIELD: kind, "path": identity })
+    };
+    if let Some(obj) = doc.as_object_mut() {
+        obj.insert(PICK_FIELD.to_string(), serde_json::Value::Bool(true));
+        if let Some(song) = song {
+            obj.insert(SONG_FIELD.to_string(), serde_json::Value::String(song.to_string()));
+        }
+    }
+    write_cover(doc)
 }
 
 /// Stage `song`'s own cover as a default — what `rice stage` writes.
@@ -348,6 +469,114 @@ mod tests {
             stage_for_song("nocturne").unwrap(),
             CoverStage::Wrote(CoverWrite::Absent)
         ));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ── The pick's KIND (CONTRACTS.md §4) ───────────────────────────────────
+
+    /// A video extension is a video, anything else a still — the provider's own
+    /// rule (`paper-control`'s `VIDEO_EXTS`), case-insensitively.
+    #[test]
+    fn kind_follows_the_files_extension_case_insensitively() {
+        for video in ["/x/clip.mp4", "/x/CLIP.MP4", "/x/a.webm", "/x/a.mkv", "/x/a.h264", "/x/anim.gif"] {
+            assert_eq!(kind_for_path(Path::new(video)), KIND_VIDEO, "{video}");
+        }
+        for still in ["/x/a.png", "/x/a.webp", "/x/noext", "/x/dir.mp4/a"] {
+            assert_eq!(kind_for_path(Path::new(still)), KIND_STATIC, "{still}");
+        }
+    }
+
+    /// The `we:<id>` token, and nothing else, is a scene.
+    #[test]
+    fn a_scene_token_is_we_colon_a_non_empty_id() {
+        assert_eq!(parse_scene_token("we:123"), Some("123"));
+        assert_eq!(parse_scene_token("we: 123 "), Some("123"));
+        assert_eq!(scene_token("123"), "we:123");
+        for not_a_token in ["123", "we:", "we: ", "web:1", "/x/a.png", ""] {
+            assert_eq!(parse_scene_token(not_a_token), None, "{not_a_token}");
+        }
+    }
+
+    /// A scene pick carries NO path: the identity is the workshop id, and it is
+    /// what makes the pick a pick (and what keeps it across a re-stage of its
+    /// own song).
+    #[test]
+    fn a_scene_pick_is_marked_with_an_id_and_no_path() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("cover-scene");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        stage_scene("123", Some("cadenza")).unwrap();
+        assert!(staged_is_pick(), "a scene with an id is a pick");
+        assert_eq!(staged_kind(), KIND_WE);
+        assert_eq!(staged_we_id().as_deref(), Some("123"));
+        assert_eq!(staged_path(), None, "a scene has no path to render");
+        assert_eq!(staged_identity(), Some((KIND_WE.to_string(), "123".to_string())));
+        assert!(matches!(
+            stage_for_song("cadenza").unwrap(),
+            CoverStage::PickKept
+        ));
+
+        // A still stages the path as its identity, with the kind the file
+        // implies.
+        stage_pick(Path::new("/tmp/clip.mp4"), Some("cadenza")).unwrap();
+        assert_eq!(staged_kind(), KIND_VIDEO);
+        assert_eq!(
+            staged_identity(),
+            Some((KIND_VIDEO.to_string(), "/tmp/clip.mp4".to_string()))
+        );
+
+        // A scene entry with an EMPTY id names nothing: not a pick.
+        std::fs::write(
+            staged_cover_json(),
+            "{\"kind\":\"we\",\"weId\":\"\",\"pick\":true}\n",
+        )
+        .unwrap();
+        assert!(!staged_is_pick());
+        assert_eq!(staged_identity(), None);
+
+        // An unknown kind reads as a still, the shape a path-only pick always
+        // had (additive field).
+        std::fs::write(
+            staged_cover_json(),
+            "{\"kind\":\"hologram\",\"path\":\"/tmp/a.png\",\"pick\":true}\n",
+        )
+        .unwrap();
+        assert_eq!(staged_kind(), KIND_STATIC);
+        assert_eq!(
+            staged_identity(),
+            Some((KIND_STATIC.to_string(), "/tmp/a.png".to_string()))
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// What a provider reports is stamped exactly like a pick the user made —
+    /// same marker, same `song` — off the kind the CALLER named.
+    #[test]
+    fn a_provider_pick_is_stamped_like_any_other() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("cover-engine-pick");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        stage_provider_pick(KIND_VIDEO, "/tmp/clip.mp4", Some("cadenza")).unwrap();
+        assert!(staged_is_pick());
+        assert_eq!(staged_song().as_deref(), Some("cadenza"));
+        assert_eq!(staged_kind(), KIND_VIDEO);
+        assert_eq!(staged_path().as_deref(), Some("/tmp/clip.mp4"));
+
+        stage_provider_pick(KIND_WE, "456", None).unwrap();
+        assert!(staged_is_pick(), "no song staged: the legacy shape still applies");
+        assert_eq!(staged_song(), None);
+        assert_eq!(staged_we_id().as_deref(), Some("456"));
+        assert_eq!(staged_path(), None);
 
         let _ = std::fs::remove_dir_all(&root);
     }

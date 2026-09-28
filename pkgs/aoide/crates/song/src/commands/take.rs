@@ -1698,6 +1698,7 @@ fn render_back_outcome(result: BackResult) -> Outcome {
             "to": result.to,
             "mark": result.mark,
             "drifted": result.drifted,
+            "wallpaper": crate::wallpaper_provider::sync(),
             "hyprctl": result.hyprctl_status,
             "terminal": result.terminal,
             "registry": result.registry_note,

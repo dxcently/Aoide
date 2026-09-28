@@ -389,7 +389,7 @@ serve --stdio`'s door loop).
 
 ## How it composes
 
-54 command paths: onboard/rice/draft/mode/cover/livery/quickshell/screen/
+55 command paths: onboard/rice/draft/mode/cover/livery/quickshell/screen/
 shellbridge/herald/take/element/secrets ask/pair ask/pair show/preview/
 preview set/preview declare/preview shot/preview tree/preview notes —
 everything that paints, or that only a desktop needs.

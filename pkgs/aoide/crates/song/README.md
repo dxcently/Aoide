@@ -35,6 +35,16 @@ a config file). Paint-side — ships in `lyra`, not core.
   CONTRACTS.md §4's cover.json entry). The rule that a cover applies only
   while its `song` matches the staged song is read-side — one rule, in
   `AoideWallpaper.qml`.
+- `wallpaper_provider` — the wallpaper provider's bridge: `provider()` (the
+  host's provider, off the word the `lyra` lane publishes at
+  `song/stage/wallpaper-provider`; absent means the shell's own layer),
+  `applying_pick()` (a pick that applies to the staged song, `(kind, identity)`),
+  `action()` (the whole decision, pure: `Apply` / `StandAside` / `Nothing`) and
+  `sync()` (best-effort, never fatal, inert under this crate's own test build
+  like `live::apply_live`). `lyra cover sync` runs it, and every write that
+  changes what should show calls it; `step_aside` tries the engine's `clear`
+  verb first and falls back to the transparent step-aside image
+  (`AOIDE_SKWD_WALL_STANDIN`), so swapping the two is one function.
 - `elements` — the element descriptor + render pipeline
   (docs/architecture/ELEMENTS.md): parses/validates a song's
   `elements/<name>/element.json` (v0 — name shape, directory-name match,
@@ -91,7 +101,8 @@ a config file). Paint-side — ships in `lyra`, not core.
   so both predicates stay. The judgement functions are pure (`&Value` in,
   data out); only `published_surfaces` touches the filesystem.
 - `commands` — this crate's CLI commands: `rice *`, `livery *`, `cover set`,
-  `element seed`, `rice take`/`take.*`/`rice back`, `quickshell healthcheck`,
+  `cover sync`, `element seed`, `rice take`/`take.*`/`rice back`,
+  `quickshell healthcheck`,
   and `reload` (`lyra reload` design, settled 2026-08-31 — the one
   mode-aware iteration command; absorbed `quickshell reload` outright).
   `rice compose --from <song>` resolves its source via

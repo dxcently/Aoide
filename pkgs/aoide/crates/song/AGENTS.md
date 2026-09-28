@@ -81,6 +81,19 @@
   writes that song's own default, so `rice stage`, the `rice mode` re-pins,
   `cover set --clear` and the lane's activation seed never need to know what
   was staged a moment ago — the seed touches `cover.json` not at all.
+- **Who PAINTS a pick is the HOST's choice — a provider, never a song's
+  field.** The fact is `aoide.wallpaper.provider` (nucleus), read at runtime by
+  `wallpaper_provider::provider()` off the one word the `lyra` lane publishes at
+  `song/stage/wallpaper-provider`; absent means the shell's own layer, which is
+  the default and needs no call. `wallpaper_provider::action()` is the whole
+  decision — an external provider shows the staged pick while one applies to the
+  staged song and the step-aside image otherwise, every other provider gets
+  nothing — and `sync()` is the ONE function that runs a provider, best-effort and
+  inert under this crate's test build. Call it from every write that changes
+  what should show (`cover set`, `--clear`, `rice stage`, `rice back`) and NEVER
+  from `--from-skwd`: that door only RECORDS, because the engine's own
+  post-processing hook re-enters it and the engine cannot tell an Aoide apply
+  from the user's own pick (an unbounded loop, measured).
 - **Staging/draft/declarative-mode gating lives in `commands`, not here.**
   `rice stage`/`cover set` refuse outside an unlocked mode — that gate is a
   `commands` concern layered over these pure/near-pure engine modules.

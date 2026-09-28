@@ -6,13 +6,14 @@
 // hot-swaps the wallpaper live via FileView's watcher). Colors from livery
 // (solid palette fallback when no cover is staged or the image fails).
 //
-// stage/cover.json contract (CONTRACTS.md §4):
-//   { "path": "/abs/cover", "song": "dusk" }               the song's own default
-//   { "path": "/abs/cover", "song": "dusk", "pick": true }  the user's pick
+// stage/cover.json contract (CONTRACTS.md §4): the staged cover — `path` for a
+// still or a video, `weId` for a scene — with `pick: true` when it is the
+// user's own choice and `song` naming the song it was staged for. A cover
+// naming another song is ignored.
 //
-// A cover carries the song it was staged for: one naming another song is
-// ignored (the baked/palette fallback shows instead), and a pick also stops
-// the song's own live `wallpaper` board being instantiated at all.
+// Who PAINTS that pick is the host's: while an external provider is active and
+// a pick applies, this layer paints nothing and the provider's own surface has
+// it; otherwise the layer behaves exactly as it always has.
 
 import QtQuick
 import Quickshell
@@ -41,13 +42,21 @@ Item {
     // and the layer falls back to the baked default below.
     property string stagedCoverPath: ""
     property string stagedCoverSong: ""
+    property string stagedCoverWeId: ""
     property bool stagedCoverPick: false
     readonly property bool stagedCoverApplies:
         root.stagedCoverSong.length === 0 || root.stagedCoverSong === root.livery.songName
 
-    // Is the user's own pick what shows right now?
-    readonly property bool pickStaged:
-        root.stagedCoverPick && root.stagedCoverApplies && root.stagedCoverPath.length > 0
+    // A pick APPLIES with an identity to show: a path, or a scene's workshop id
+    // (CONTRACTS.md §4). A marker with neither is nothing.
+    readonly property bool pickApplies:
+        root.stagedCoverPick && root.stagedCoverApplies
+        && (root.stagedCoverPath.length > 0 || root.stagedCoverWeId.length > 0)
+
+    // An EXTERNAL provider paints that pick on its own surface, so this layer
+    // paints nothing at all: no image, no board, no palette rectangle.
+    readonly property bool externalProviderShowsPick:
+        root.livery.wallpaperProvider === "skwd-wall" && root.pickApplies
 
     readonly property string wallpaperPath:
         root.stagedCoverApplies && root.stagedCoverPath.length > 0 ? root.stagedCoverPath : root.bakedWallpaper
@@ -64,10 +73,12 @@ Item {
                 var d = JSON.parse(coverFile.text())
                 root.stagedCoverPath = (d && d.path) ? ("" + d.path) : ""
                 root.stagedCoverSong = (d && d.song) ? ("" + d.song) : ""
+                root.stagedCoverWeId = (d && d.weId) ? ("" + d.weId) : ""
                 root.stagedCoverPick = !!(d && d.pick === true)
             } catch (e) {
                 root.stagedCoverPath = ""
                 root.stagedCoverSong = ""
+                root.stagedCoverWeId = ""
                 root.stagedCoverPick = false
             }
         }
@@ -79,7 +90,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: livery.paletteBg  // fallback when no image is set
-        visible: !wallpaperImage.visible
+        visible: !wallpaperImage.visible && !root.externalProviderShowsPick
     }
 
     Image {
@@ -89,7 +100,7 @@ Item {
         fillMode: Image.PreserveAspectCrop
         smooth: true
         asynchronous: true
-        visible: status === Image.Ready
+        visible: status === Image.Ready && !root.externalProviderShowsPick
     }
 
     // ── The song's own board, over that image ──────────────────────────────
@@ -101,7 +112,8 @@ Item {
     // manifest entry, and sonata ships no body for it. Loader, not visible: a
     // pick destroys the board so its timer stops.
     readonly property bool boardActive:
-        !root.pickStaged && root.stagingEngine.has(root.livery.songName, "wallpaper")
+        !root.pickApplies && !root.externalProviderShowsPick
+        && root.stagingEngine.has(root.livery.songName, "wallpaper")
 
     Loader {
         id: songBoard
