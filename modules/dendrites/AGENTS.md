@@ -12,10 +12,12 @@ covers only what's specific to dendrites.
   imports `body` and sets the flag `lib.mkDefault true`. Keep the options, the
   guard and the config on `body` — moving any of them into the lane makes the
   full tree and the constructor disagree about the same capability.
-- **A paint dendrite guards on a FACT, not on an option of its own.** The five
-  (`compositor`, `greeter`, `stylix`, `quickshell`, `lyra`) read the fact
-  `modules/nucleus/options.nix` declares; the lane sets it `mkDefault true`.
-  Never declare `aoide.<that name>.enable` a second time.
+- **A paint dendrite guards on a FACT, not on an option of its own.** The paint
+  lanes (`compositor`, `greeter`, `stylix`, `quickshell`, `lyra`, `wallpaper`)
+  read the fact `modules/nucleus/options.nix` declares; the lane sets it
+  `mkDefault true` — or, for a capability whose alternatives are named rather
+  than enabled (`wallpaper`), `mkDefault "<its own name>"`. Never declare
+  `aoide.<that name>.enable` a second time.
 - **A dependency rides the lane that needs it, never `body`.** `lib/options.nix`
   imports every `body` into a bare `evalModules` to render `aoideOptions`, so a
   body that pulls in a third-party NixOS module forces option trees a bare eval

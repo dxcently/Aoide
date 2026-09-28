@@ -27,7 +27,9 @@ covers only what's specific to nucleus.
   here beside its unit — core, not paint, just not yet relocated.
 - **Nucleus reads FACTS, never a lane's option.** The enable facts
   (`aoide.{quickshell,lyra,stylix,compositor,greeter}.enable`, each
-  defaulting `false`, and `aoide.quickshell.config`, defaulting `null`) are
+  defaulting `false`, `aoide.quickshell.config`, defaulting `null`, and
+  `aoide.wallpaper.provider` — the active provider's own name, defaulting
+  `"quickshell"`) are
   declared here; the lane that owns one sets it with `mkDefault`. A nucleus file that needs to
   know "is there a shell / a session here" reads the fact — never
   `aoide.<name>.enable`, never a lane's own option. `aoide.sessionTarget` is the
