@@ -567,14 +567,17 @@ reads a fixture path.
   the dark register it is instead of the lane's light default. Baked only —
   no emitter carries it and staging applies nothing for it, so a polarity
   change lands on the user-gated rebuild, never on a stage.
-- **Glass (needs a core change).** The compositor module loads hyprglass,
-  its config block and the `blur on` layer rules unconditionally;
-  `geometry.blurEnabled = false` only stops Hyprland's blur. Proposed, the
-  dxflake pattern: when phase 5 S5 splits the compositor into dendrites,
-  hyprglass becomes its own file gated on the song's livery (`blurEnabled`,
-  or a `glass` field). dxflake's own
-  `dendrites/compositor/hyprland/hyprglass.nix` also loads it whenever the
-  quickshell module is on, so it needs the same gate.
+- **Glass (settled).** The compositor lane loads hyprglass and its
+  `blur on` layer rules, and the SONG decides whether the glass is on:
+  `plugin:hyprglass`'s two enable keys (`enabled`, `layers.enabled`) and
+  Hyprland's own `decoration:blur:enabled` all come from
+  `geometry.blurEnabled`, baked into `hyprland.conf` and applied live by the
+  same value as keywords — so this key's `blurEnabled = false` reads glassless
+  whether the desktop booted into it or staged it, and a song with no opinion
+  keeps the lane's baked default (both on). The plugin stays LOADED either way
+  (live never unloads it); what the lane still fixes for every song is its own
+  set — the `light` preset override's glass opacity and the `aoide-*`
+  namespace list — which no song gates.
 - **Bar height** 28px vs sonata's 36; the lane reads it back, so it is the
   song's call.
 - **Unbuilt seams** — every "bridge not wired" above names its slice.

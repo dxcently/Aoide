@@ -135,9 +135,14 @@
 - **A song with no `blurEnabled` opinion restores the baked hyprglass
   switches** (`live::HYPRGLASS_BAKED`, both on), so every
   `geometry_keywords` call carries the two hyprglass keywords — which
-  `live::apply_live` partitions out and sends as their OWN second
-  `hyprctl --batch`, so a host without the plugin loses its glass batch
-  alone and the borders/gaps/blur batch is never entangled with it. Keep the
+  `live::apply_live` partitions out (`live::partition_keywords`) and sends as
+  their OWN second `hyprctl --batch`, so a host without the plugin loses its
+  glass batch alone and the borders/gaps/blur batch is never entangled with
+  it. The predicate is a `contains("plugin:hyprglass:")` on the EMITTED
+  keyword, which carries the `keyword ` prefix — matching the bare plugin
+  name by prefix silently puts both in the core batch, and
+  `every_glass_keyword_the_emitter_produces_lands_in_the_glass_batch` is the
+  test that catches it. Keep the
   constant equal to what the compositor lane bakes for a song with NO
   `blurEnabled` opinion — the lane's block takes both keys from that same
   field, so the bake follows the song. `decoration:blur:*`

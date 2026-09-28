@@ -91,12 +91,12 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
     // document when it carries one, and the option's own default otherwise, so
     // a composed song declares its ground explicitly in the same key as its
     // palette rather than inheriting whatever the default becomes later.
-    let polarity = notes
+    let declared = notes
         .get("polarity")
         .and_then(Value::as_str)
-        .filter(|s| POLARITY_VALUES.contains(s))
-        .unwrap_or(POLARITY_DEFAULT);
-    let polarity_comment = if notes.get("polarity").is_some() {
+        .filter(|s| POLARITY_VALUES.contains(s));
+    let polarity = declared.unwrap_or(POLARITY_DEFAULT);
+    let polarity_comment = if declared.is_some() {
         format!("inherited from song \"{from}\"")
     } else {
         format!(

@@ -151,12 +151,13 @@ let
             }
         }
 
-        # Glass for the quickshell surfaces. For THIS rice (sonata) the bar
-        # (aoide-bar) is OPAQUE marble and NOT glassed. The center-left dock
-        # (aoide-dock) layer IS blurred/glassed, but its panels are mostly opaque
-        # marble — only the TERMINALS temple is translucent, so the blur + hyprglass
-        # frost THROUGH it while the opaque Conductor/Meters/Power panels hide it.
-        # The launcher stays frosted glass. The wallpaper is never blurred.
+        # Glass for the quickshell surfaces — the lane's fixed namespace set,
+        # not a per-song choice: the bar (aoide-bar) is never glassed (opaque
+        # marble), the center-left dock (aoide-dock) layer IS blurred/glassed
+        # (its panels are mostly opaque marble — only the TERMINALS temple is
+        # translucent, so the blur + hyprglass
+        # frost THROUGH it while the opaque Conductor/Meters/Power panels hide it),
+        # the launcher stays frosted glass, and the wallpaper is never blurred.
         # blur_popups frosts the bar's popouts. ignore_alpha keeps transparent
         # regions from rendering as a grey blur stripe.
         # aoide-launcher: the summoned launcher pane rides the same frosted glass as
@@ -216,8 +217,10 @@ let
         # TRANSLUCENT content (it discards fully-transparent/opaque-covered
         # fragments), so opaque windows (Firefox &c.) are untouched while the
         # frosted kitty gains hyprglass refraction/fresnel ON TOP of Hyprland's own
-        # blur. The `light` preset override brightens the glass under sonata's light
-        # polarity (a whiter frost, per the same directive).
+        # blur. The `light` preset override below is the lane's fixed set, not a
+        # song choice (no song gates it): a slightly brighter frost, which reads
+        # right on the light keys this desktop ships and is one lane constant
+        # away from changing.
         plugin:hyprglass {
             enabled = ${if blurEnabled then "1" else "0"}
             manage_window_blur = 1

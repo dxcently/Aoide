@@ -177,12 +177,42 @@ pub fn apply_live(keywords: &[String]) -> &'static str {
         return "skipped (this crate's own test build: no live hyprctl)";
     }
 
-    let is_glass = |k: &String| k.starts_with("plugin:hyprglass:");
-    let glass: Vec<String> = keywords.iter().filter(|k| is_glass(k)).cloned().collect();
-    let core: Vec<String> = keywords.iter().filter(|k| !is_glass(k)).cloned().collect();
-
+    let (core, glass) = partition_keywords(keywords);
     let core = if core.is_empty() { Batch::Applied } else { run_batch(&core) };
     let glass = if glass.is_empty() { Batch::Applied } else { run_batch(&glass) };
+    live_status(core, glass)
+}
+
+/// Split a keyword list into the two batches [`apply_live`] runs, IN ORDER:
+/// `(core, glass)`, where every `plugin:hyprglass:*` keyword lands in the
+/// second one. That is the whole rule, stated once and unit-tested — an empty
+/// side means "nothing to run for it".
+///
+/// The test is `geometry_keywords`' own output, not a hand-written list: the
+/// emitted keywords carry the `keyword ` prefix (`keyword
+/// plugin:hyprglass:enabled 0`), so a prefix match on the bare plugin name
+/// would put both glass keywords in the CORE batch and the split would never
+/// happen — a bug this predicate and that test exist to catch.
+pub fn partition_keywords(keywords: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut core = Vec::new();
+    let mut glass = Vec::new();
+    for k in keywords {
+        if k.contains("plugin:hyprglass:") {
+            glass.push(k.clone());
+        } else {
+            core.push(k.clone());
+        }
+    }
+    (core, glass)
+}
+
+/// The status string for a pair of batch outcomes — the whole
+/// outcome→envelope mapping, pure so a test can reach it (`apply_live` itself
+/// is inert in this crate's test builds). A failed GLASS batch is reported as
+/// best-effort alongside a good core one rather than as a failure, because the
+/// borders, gaps and blur are what a stage is judged on; a bad CORE batch
+/// reports its own cause.
+pub fn live_status(core: Batch, glass: Batch) -> &'static str {
     match (core, glass) {
         (Batch::Applied, Batch::Applied) => "applied",
         (Batch::Applied, _) => {
@@ -198,7 +228,7 @@ pub fn apply_live(keywords: &[String]) -> &'static str {
 
 /// How one `hyprctl --batch` call went.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Batch {
+pub enum Batch {
     Applied,
     /// It ran and exited non-zero (an unknown keyword is one way).
     Failed,
@@ -620,6 +650,85 @@ mod tests {
     fn batch_command_joins_with_semicolons() {
         let kw = vec!["keyword a b".to_string(), "keyword c d".to_string()];
         assert_eq!(batch_command(&kw), "keyword a b; keyword c d");
+    }
+
+    // The two-batch split (F5) and its status mapping, reached directly —
+    // `apply_live` is inert in this crate's own test builds, so these pure
+    // halves are the only way to pin the behaviour they implement.
+    #[test]
+    fn partition_keywords_sends_the_glass_pair_second_and_keeps_order() {
+        let kw = vec![
+            "keyword general:gaps_out 8".to_string(),
+            "keyword plugin:hyprglass:enabled 0".to_string(),
+            "keyword general:border_size 1".to_string(),
+            "keyword plugin:hyprglass:layers:enabled 0".to_string(),
+        ];
+        let (core, glass) = partition_keywords(&kw);
+        assert_eq!(
+            core,
+            vec![
+                "keyword general:gaps_out 8".to_string(),
+                "keyword general:border_size 1".to_string(),
+            ]
+        );
+        assert_eq!(
+            glass,
+            vec![
+                "keyword plugin:hyprglass:enabled 0".to_string(),
+                "keyword plugin:hyprglass:layers:enabled 0".to_string(),
+            ]
+        );
+        // Every partition is complete and disjoint — nothing is dropped.
+        assert_eq!(core.len() + glass.len(), kw.len());
+        // A list with no glass keywords leaves the second batch empty.
+        assert_eq!(partition_keywords(&core).1, Vec::<String>::new());
+    }
+
+    /// The partition against the REAL emitted list — the assertion that
+    /// catches a predicate which never matches (`keyword plugin:hyprglass:…`
+    /// carries the `keyword ` prefix).
+    #[test]
+    fn every_glass_keyword_the_emitter_produces_lands_in_the_glass_batch() {
+        let kw = geometry_keywords(&json!({ "geometry": { "blurEnabled": false, "rounding": 0 } }));
+        let (core, glass) = partition_keywords(&kw);
+        assert_eq!(glass.len(), 2, "both hyprglass keys, and only those: {glass:?}");
+        assert!(
+            glass.iter().all(|k| k.contains("plugin:hyprglass:")),
+            "{glass:?}"
+        );
+        assert!(
+            core.iter().all(|k| !k.contains("plugin:hyprglass:")),
+            "the core batch must hold no glass keyword: {core:?}"
+        );
+        assert!(!core.is_empty(), "and it must not be empty for a real song");
+    }
+
+    #[test]
+    fn live_status_covers_every_outcome_pair() {
+        assert_eq!(live_status(Batch::Applied, Batch::Applied), "applied");
+        // A failed glass batch (or an absent `hyprctl` FOR it) never hides a
+        // good core batch: the borders and gaps did apply.
+        for glass in [Batch::Failed, Batch::Unavailable] {
+            assert_eq!(
+                live_status(Batch::Applied, glass),
+                "applied; best-effort: the hyprglass batch failed (plugin not loaded?) \
+                 — stage file already updated"
+            );
+        }
+        assert_eq!(
+            live_status(Batch::Failed, Batch::Applied),
+            "best-effort: hyprctl reported an error (stage file already updated)"
+        );
+        assert_eq!(
+            live_status(Batch::Unavailable, Batch::Applied),
+            "best-effort: hyprctl unavailable (stage file already updated)"
+        );
+        // The core failure wins the report even when the glass batch also
+        // failed — there is one string, and the core keyword is the reason.
+        assert_eq!(
+            live_status(Batch::Failed, Batch::Failed),
+            "best-effort: hyprctl reported an error (stage file already updated)"
+        );
     }
 
     #[test]

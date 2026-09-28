@@ -66,8 +66,7 @@ sheet at ~0.30 opacity **over** this ground — `base00` stays in the pale
 marble-glass family, a warm sunlit stone.
 
 The polarity is **light**, the song's own declaration (`aoide.livery.polarity`
-in `rice.nix`, mirrored in `livery.json`; the stylix lane's default is the same
-value): `base00` is the lightest
+in `rice.nix`, mirrored in `livery.json`): `base00` is the lightest
 value and `base05`–`base07` are the dark inks.
 
 | Region of the Greek register | Slot(s) | Colour |
