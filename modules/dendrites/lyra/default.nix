@@ -205,6 +205,13 @@ let
       seedStageScript = pkgs.writeShellScript "aoide-seed-stage" ''
         set -euo pipefail
         mkdir -p "${config.aoide.root}/song/stage" "${config.aoide.root}/song/declared"
+        # The song the stage was carrying BEFORE this activation — the same
+        # `"song"` breadcrumb `rice stage`/`rice mode` resolve the current rice
+        # from (`commands/mode.rs::current_staged_song`, CONTRACTS.md §4). Read
+        # BEFORE the livery write below replaces it; empty when there is no
+        # stage file yet, which counts as a change (nothing to keep).
+        prev_song=$(${pkgs.jq}/bin/jq -r '.song // ""' \
+          "${config.aoide.root}/song/stage/livery.json" 2>/dev/null || true)
         tmp=$(mktemp "${config.aoide.root}/song/stage/.livery.json.XXXXXX")
         ${pkgs.jq}/bin/jq -S '. + {song: $song}' --arg song "${config.aoide.song}" \
           "${stageLivery}" > "$tmp"
@@ -215,6 +222,22 @@ let
         cp "$tmp" "$declared"
         mv -f "$tmp" "${config.aoide.root}/song/stage/livery.json"
         mv -f "$declared" "${config.aoide.root}/song/declared/livery.json"
+        # The wallpaper (CONTRACTS.md §4). A song's cover — and the user's pick
+        # (`lyra cover set`, `"pick": true`) standing on top of it — belongs to
+        # the song it was staged under, and this script is the one place a
+        # REBUILD changes which song `stage/livery.json` names. So the same rule
+        # `rice stage` applies (`commands/rice.rs`'s cover half, one seam in
+        # `cover::stage_for_song`) applies here: the SAME song keeps a standing
+        # pick untouched (the ruling — a rebuild must not silently revert the
+        # wallpaper the user chose), and a DIFFERENT song drops it, along with
+        # the previous song's cover.json, which would otherwise stand over the
+        # new song as its wallpaper forever. Nothing is written for the new song
+        # here: with `cover.json` gone the layer reads the baked
+        # `AOIDE_WALLPAPER` (the same default a never-staged host shows), and
+        # the next `rice stage <song>` stages that song's own derived cover.
+        if [ "$prev_song" != "${config.aoide.song}" ]; then
+          rm -f "${config.aoide.root}/song/stage/cover.json"
+        fi
         # The declared song's terminal opacity, as a one-line kitty fragment
         # (CONTRACTS.md §4). The kitty dendrite includes this BEFORE the staged
         # colours, and kitty's last-include-wins keeps a live stage authoritative
@@ -583,7 +606,12 @@ let
                 # does the actual write. Same "switch = truth resets the sketch"
                 # discipline as `aoideDeployQml`'s rsync above: this OVERWRITES whatever
                 # a live `rice preview`/`cover set` staged, which is intended — the next
-                # `rice preview` can re-sketch over it again live.
+                # `rice preview` can re-sketch over it again live. The ONE part of the
+                # stage that is NOT reset here is a standing wallpaper pick
+                # (`stage/cover.json`'s `"pick": true`, CONTRACTS.md §4): the script
+                # drops `cover.json` only when the song it seeds differs from the one
+                # the stage was already carrying, so a rebuild of the SAME song leaves
+                # the wallpaper the user chose exactly where it was (see the script).
                 home.activation.aoideSeedStage = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
                   run ${seedStageScript}
                 '';
