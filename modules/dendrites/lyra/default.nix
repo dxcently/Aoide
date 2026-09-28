@@ -627,12 +627,6 @@ let
                     ''
                       run env XDG_RUNTIME_DIR=/run/user/$(${pkgs.coreutils}/bin/id -u) \
                         ${pkgs.systemd}/bin/systemctl --user try-restart aoide-quickshell.service || true
-                      ${lib.optionalString (config.aoide.wallpaper.provider == "skwd-wall") ''
-                        # Belt for the external provider: its unit is only
-                        # re-asserted by its own start, and systemd does not restart
-                        # a unit whose file merely changed on this switch.
-                        run ${pkgs.aoide.rice}/bin/lyra cover sync || true
-                      ''}
                     '';
 
                 # ── Confirm the restart above actually landed ──────────────────────────

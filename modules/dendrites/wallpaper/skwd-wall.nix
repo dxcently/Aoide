@@ -154,17 +154,18 @@ let
                   "SKWD_WALL_V2_CACHE=${cacheDir}"
                   "AOIDE_ROOT=${config.aoide.root}"
                   "AOIDE_SKWD_WALL_STANDIN=${standinPng}"
-                  # `lyra` for `ExecStartPost` and for the post-processing hook the
-                  # daemon spawns, plus the renderer the daemon launches by name.
-                  # Home-manager's systemd module has no `path` option (only
-                  # Unit/Service/Install sections), so PATH is an Environment
-                  # entry — the same shape `aoide-quickshell-healthcheck` uses.
+                  # PATH replaces the manager's: every bare name the daemon execs
+                  # (`sh`/`setsid`, `ffmpeg`, `file`, `lyra`, the renderer).
                   "PATH=${
                     lib.makeBinPath [
                       pkgs.aoide.rice
                       skwd.skwd-deck
                       skwd.skwd-paper
+                      pkgs.bash
                       pkgs.coreutils
+                      pkgs.file
+                      pkgs.ffmpeg
+                      pkgs.util-linux
                     ]
                   }"
                 ];
@@ -173,6 +174,21 @@ let
               };
               Install.WantedBy = [ "graphical-session.target" ];
             };
+
+            # ── Re-assert the engine after an activation ─────────────────────────
+            # The sync lives in the unit's own `ExecStartPost`, so this lane does
+            # not have to know how to build its environment — it only asks for a
+            # restart. It has to ask: systemd does not restart a unit whose file
+            # merely changed on this switch, and the unit is `PartOf` the session
+            # target, so a running engine would otherwise keep the previous
+            # activation's state. `try-restart` no-ops on a stopped unit (a
+            # headless/session-less activation starts nothing and fails nothing),
+            # and the `XDG_RUNTIME_DIR` is the same explicit one `aoideRestartRice`
+            # passes.
+            home.activation.aoideResyncSkwdWall = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
+              run env XDG_RUNTIME_DIR=/run/user/$(${pkgs.coreutils}/bin/id -u) \
+                ${pkgs.systemd}/bin/systemctl --user try-restart skwd-walld.service || true
+            '';
           };
       };
     };
