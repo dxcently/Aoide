@@ -585,11 +585,10 @@ let
                 # into the stage file on every activation — `seedStageScript` (above)
                 # does the actual write. Same "switch = truth resets the sketch"
                 # discipline as `aoideDeployQml`'s rsync above: this OVERWRITES whatever
-                # a live `rice preview`/`cover set` staged, which is intended — the next
-                # `rice preview` can re-sketch over it again live. The one part of the
-                # stage NOT reset here is a wallpaper pick (`stage/cover.json`,
-                # CONTRACTS.md §4): the script drops it only when the song it seeds
-                # differs from the one the stage was carrying.
+                # a live `rice preview` staged, which is intended — the next
+                # `rice preview` can re-sketch over it again live. It reseeds
+                # `song/stage/livery.json` ONLY: `song/stage/cover.json` is left alone
+                # (CONTRACTS.md §4).
                 home.activation.aoideSeedStage = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
                   run ${seedStageScript}
                 '';

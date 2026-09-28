@@ -1642,6 +1642,7 @@ Writers, and the exact shape each leaves:
 | `lyra rice stage <song>` | the song's derivable cover (`song/covers/<song>.{webp,png,jpg,jpeg}`, first match in that order) as `{"path": …, "song": …}`; with no derivable cover the file is REMOVED — a cover staged for another song must never stand over this one. A pick already stamped for THIS song is left untouched (reported as `coverStage: "pick-kept"`) |
 | `lyra cover set <path\|name>` | `{"path": …, "pick": true, "song": …}` for the song staged at write time — the `song` field omitted only when nothing is staged, which writes the legacy shape |
 | `lyra cover set --clear` | the staged song's own default, exactly as a re-stage of it writes it (its derivable cover, or the file removed). Never keeps a pick; the envelope's `droppedPick` and `coverStage` come from the marker read before the write |
+| `lyra rice mode declarative` | NOTHING — a lock is not a song switch. Its re-pin writes `livery.json` alone, and a pick stamped for another song is hidden by the read-side rule rather than dropped |
 | `lyra rice back <take>` | the target take's cover value VERBATIM — a take minted while a pick stood restores it as a pick, `song` and all; a take with no cover removes whatever stands |
 | `lyra rice draft save <name>` | a verbatim copy into `song/songbook/<song>/drafts/<name>/cover.json` (§4's drafts entry; never a routing target) |
 | the lyra lane's `home.activation.aoideSeedStage` | NOTHING. It reseeds `stage/livery.json` and never touches `cover.json`; the read-side rule above is what keeps a pick off another song |
@@ -1650,6 +1651,9 @@ Writers, and the exact shape each leaves:
 `rice stage` and the mode re-pins — keeps a standing pick iff
 `pick.song == <song being staged>`, and otherwise writes that song's own
 default through `stage_song_default` (its derivable cover, else no file).
+`rice mode declarative` passes `stage_cover: false` and skips it whole: a lock
+keeps the cover file exactly as it stands, and a pick it hides read-side comes
+back when its own song is staged again.
 
 ### `song/declared/livery.json` — **v0**
 

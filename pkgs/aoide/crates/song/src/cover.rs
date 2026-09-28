@@ -110,11 +110,11 @@ pub fn stage_default(path: &Path, song: &str) -> std::io::Result<PathBuf> {
     write_cover(serde_json::json!({ "path": path.to_string_lossy(), SONG_FIELD: song }))
 }
 
-/// Remove `stage/cover.json`. `Ok(false)` when there was nothing there.
-pub fn clear_staged() -> std::io::Result<bool> {
+/// Remove `stage/cover.json`.
+pub fn clear_staged() -> std::io::Result<CoverWrite> {
     match std::fs::remove_file(staged_cover_json()) {
-        Ok(()) => Ok(true),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Ok(()) => Ok(CoverWrite::Removed),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(CoverWrite::Absent),
         Err(e) => Err(e),
     }
 }
@@ -156,13 +156,7 @@ pub fn stage_song_default(song: &str) -> std::io::Result<CoverWrite> {
             stage_default(&path, song)?;
             Ok(CoverWrite::Written(path))
         }
-        None => clear_staged().map(|removed| {
-            if removed {
-                CoverWrite::Removed
-            } else {
-                CoverWrite::Absent
-            }
-        }),
+        None => clear_staged(),
     }
 }
 

@@ -258,16 +258,20 @@ lyra rice mode declarative [<name>] [--json]
   `song/stage/livery.json`'s own `"song"` field only when no such twin exists
   (CONTRACTS.md §4).
 - **Writes:** tears down any Draft-mode routing symlink; when a song
-  resolves, re-pins `song/stage/livery.json` (plus cover/widget/registry
-  sync, same as `rice stage`) from that song's COMMITTED
+  resolves, re-pins `song/stage/livery.json` (plus widget/registry sync,
+  same as `rice stage`) from that song's COMMITTED
   `song/songbook/<name>/livery.json` — or, for the song the declared twin
   names, from the twin, venue recolour included; then writes
   `song/stage/mode.json`
   (`mode: "declarative"`, `draft` cleared; `stagingSong` carried forward
-  unchanged).
+  unchanged). `song/stage/cover.json` is NOT touched — a lock is not a song
+  switch, so a pick stamped for another song is hidden read-side rather than
+  dropped (CONTRACTS.md §4).
 - **Output:** data `{mode: "declarative", song}`.
 - **Notes:** locks staging — afterwards `rice stage` and `cover set` refuse
-  with `declarative-mode-locked`. The no-name form re-pins the declared song
+  with `declarative-mode-locked`. A lock keeps the staged cover: a wallpaper
+  pick survives locking and unlocking, and is only hidden while its song is
+  not the staged one. The no-name form re-pins the declared song
   from its own notes rather than freezing the stage: unsaved live edits are
   discarded
   (`rice draft save` first to keep them). A failed re-pin does not flip the

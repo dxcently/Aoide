@@ -386,6 +386,17 @@ fn notes_source(name: &str) -> PathBuf {
 /// with zero symlink-awareness needed here, which is the entire mechanism.
 ///
 pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
+    handle_rice_stage_inner(inv, true)
+}
+
+/// `rice mode declarative`'s re-pin: everything `rice stage` does except the
+/// cover half. A lock is not a song switch, and the read-side rule already
+/// hides a cover stamped for another song (CONTRACTS.md §4).
+pub(crate) fn handle_rice_stage_without_cover(inv: &Invocation) -> Outcome {
+    handle_rice_stage_inner(inv, false)
+}
+
+fn handle_rice_stage_inner(inv: &Invocation, stage_cover: bool) -> Outcome {
     let name = match inv.args.first() {
         Some(n) => n.clone(),
         None => {
@@ -503,34 +514,39 @@ pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
     // §4). The song is stamped into whatever is written, which is what lets a
     // pick survive a re-stage of its own song and be replaced by any other.
     let cover_dst = crate::cover::staged_cover_json();
-    let cover_stage = match crate::cover::stage_for_song(&name) {
-        Ok(staged) => staged,
-        Err(e) => {
-            return Outcome::error("rice.stage", format!("failed to stage cover.json: {e}"))
-                .with_data(json!({ "reason": "stage-write-failed", "target": cover_dst.to_string_lossy() }));
-        }
+    let (cover_note, cover_stage_word) = if stage_cover {
+        let cover_stage = match crate::cover::stage_for_song(&name) {
+            Ok(staged) => staged,
+            Err(e) => {
+                return Outcome::error("rice.stage", format!("failed to stage cover.json: {e}"))
+                    .with_data(json!({ "reason": "stage-write-failed", "target": cover_dst.to_string_lossy() }));
+            }
+        };
+        let note = match &cover_stage {
+            crate::cover::CoverStage::PickKept => {
+                format!("kept the wallpaper pick staged for `{name}`")
+            }
+            crate::cover::CoverStage::Wrote(crate::cover::CoverWrite::Written(path)) => {
+                changed.push(cover_dst.to_string_lossy().into_owned());
+                format!("staged cover {}", path.display())
+            }
+            crate::cover::CoverStage::Wrote(crate::cover::CoverWrite::Removed) => {
+                changed.push(cover_dst.to_string_lossy().into_owned());
+                format!("no derivable cover for `{name}`; cleared the staged cover")
+            }
+            crate::cover::CoverStage::Wrote(crate::cover::CoverWrite::Absent) => {
+                format!("no derivable cover for `{name}`; no cover staged")
+            }
+        };
+        let word = match &cover_stage {
+            crate::cover::CoverStage::PickKept => "pick-kept",
+            crate::cover::CoverStage::Wrote(write) => write.as_str(),
+        };
+        (note, word)
+    } else {
+        ("cover.json left alone".to_string(), "left-alone")
     };
     let cover = crate::cover::staged_path();
-    let cover_note = match &cover_stage {
-        crate::cover::CoverStage::PickKept => {
-            format!("kept the wallpaper pick staged for `{name}`")
-        }
-        crate::cover::CoverStage::Wrote(crate::cover::CoverWrite::Written(path)) => {
-            changed.push(cover_dst.to_string_lossy().into_owned());
-            format!("staged cover {}", path.display())
-        }
-        crate::cover::CoverStage::Wrote(crate::cover::CoverWrite::Removed) => {
-            changed.push(cover_dst.to_string_lossy().into_owned());
-            format!("no derivable cover for `{name}`; cleared a cover staged for another song")
-        }
-        crate::cover::CoverStage::Wrote(crate::cover::CoverWrite::Absent) => {
-            format!("no derivable cover for `{name}`; no cover staged")
-        }
-    };
-    let cover_stage_word = match &cover_stage {
-        crate::cover::CoverStage::PickKept => "pick-kept",
-        crate::cover::CoverStage::Wrote(write) => write.as_str(),
-    };
 
     // Captured BEFORE the widget sync below so the outcome message's "N
     // stage file(s) live for hot-reload" clause keeps meaning "stage-dir

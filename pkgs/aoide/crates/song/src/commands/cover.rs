@@ -158,18 +158,13 @@ fn handle_cover_clear(inv: &Invocation) -> Outcome {
         .with_data(json!({ "reason": "clear-takes-no-path" }));
     }
 
-    let dropped_pick = crate::cover::staged_is_pick();
-    let cover_dst = crate::cover::staged_cover_json();
     let song = super::mode::current_staged_song();
+    let dropped_pick =
+        crate::cover::staged_is_pick() && crate::cover::staged_song() == song;
+    let cover_dst = crate::cover::staged_cover_json();
     let staged = match &song {
         Some(song) => crate::cover::stage_song_default(song),
-        None => crate::cover::clear_staged().map(|removed| {
-            if removed {
-                crate::cover::CoverWrite::Removed
-            } else {
-                crate::cover::CoverWrite::Absent
-            }
-        }),
+        None => crate::cover::clear_staged(),
     };
     let staged = match staged {
         Ok(staged) => staged,
@@ -206,13 +201,15 @@ fn handle_cover_clear(inv: &Invocation) -> Outcome {
                 None => "no song is staged".to_string(),
             };
             let note = if dropped_pick {
-                "pick dropped — stage/cover.json removed"
+                "pick dropped"
+            } else if removed {
+                "no pick for this song to drop"
             } else {
-                "no pick staged — nothing to drop"
+                "no pick staged"
             };
             let mut out = Outcome::ok(
                 "cover.set",
-                format!("{note}; {whose}, so the song's own default (the baked/palette fallback, \
+                format!("{note} — {whose}; the song's own default (the baked/palette fallback, \
                          and its own live board) shows again"),
             )
             .with_data(json!({
