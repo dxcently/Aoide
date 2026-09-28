@@ -257,7 +257,7 @@ The terminals and the compositor's glass follow the stage too, from the
 same staged notes and under the same gate. `rice stage` writes
 `$AOIDE_ROOT/song/stage/terminal-colors.conf` — the staged song's base16 in
 kitty's own colour syntax (the tinted-kitty template Stylix bakes, key for
-key; a song with no base16 tier gets the scheme the Stylix facet
+key; a song with no base16 tier gets the scheme the stylix lane
 synthesises from its palette, so every slot is written either way and no
 slot of an earlier song survives), through the livery engine's `kitty`
 emitter, plus the song's `geometry.terminalOpacity` as kitty's

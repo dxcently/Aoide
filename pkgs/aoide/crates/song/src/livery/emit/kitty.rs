@@ -15,8 +15,8 @@
 //!   15 base07; and the extended 16–21: base09 base0F base01 base02 base04
 //!   base06.
 //!
-//! A note with no base16 tier gets the scheme the Stylix facet synthesises
-//! for the baked side (`modules/facets/stylix/default.nix`,
+//! A note with no base16 tier gets the scheme the stylix lane synthesises
+//! for the baked side (`modules/dendrites/stylix.nix`,
 //! `synthesisedScheme` — [`synthesised_base16`] is its slot-for-slot twin),
 //! so EVERY slot is written either way. The file is complete on its own: a
 //! push never has to reset first, and no slot of an earlier song survives a
@@ -89,10 +89,10 @@ const BASE16_MAP: &[(&str, &str)] = &[
     ("color21", "base06"),
 ];
 
-/// base16 slot → (group, field) for a note with no base16 tier — the Stylix
-/// facet's `synthesisedScheme`, slot for slot. `"palette"` reads the anchor
+/// base16 slot → (group, field) for a note with no base16 tier — the stylix
+/// lane's `synthesisedScheme`, slot for slot. `"palette"` reads the anchor
 /// itself; the component groups arrive with the resolver's null→palette
-/// fallback already applied, exactly as the facet's `resolved` set applies
+/// fallback already applied, exactly as that lane's `resolved` set applies
 /// it.
 const SYNTHESISED: &[(&str, (&str, &str))] = &[
     ("base00", ("palette", "bg")),
@@ -216,7 +216,7 @@ mod tests {
     }
 
     #[test]
-    fn a_note_without_base16_writes_every_slot_from_the_facets_synthesised_scheme() {
+    fn a_note_without_base16_writes_every_slot_from_the_lanes_synthesised_scheme() {
         let r = resolved("valid.json");
         assert!(r.base16.is_none());
         let out = emit_kitty(&r);

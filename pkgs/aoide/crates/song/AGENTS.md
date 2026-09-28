@@ -110,7 +110,7 @@
   written: the file is an `include` in kitty.conf, so a value carrying a
   newline would be a config directive. **The file carries every slot,
   base16 note or not** (`livery::emit::kitty::synthesised_base16`, the
-  Stylix facet's `synthesisedScheme` twin — change both together). The push
+  Stylix lane's `synthesisedScheme` twin — change both together). The push
   relies on it: `set-colors --reset` restores kitty's STARTUP colours, which
   already include whatever staged file was on disk then, so a partial file
   would leave an earlier song's slots behind and a reset could not clear
@@ -123,12 +123,17 @@
   same predicate the hot path uses to fall back.
 - **A song with no `blurEnabled` opinion restores the baked hyprglass
   switches** (`live::HYPRGLASS_BAKED`, both on), so every
-  `geometry_keywords` batch carries the two hyprglass keywords. Keep the
-  constant equal to what the compositor facet bakes. `decoration:blur:*`
-  keeps the plain no-opinion rule (no keyword). **A test build never runs
-  `hyprctl`** (`cfg!(test)` in `live::apply_live`, after the
-  `HYPRLAND_INSTANCE_SIGNATURE` check): with a batch in every stage, a
-  handler test run from a Hyprland terminal would otherwise flip the
+  `geometry_keywords` call carries the two hyprglass keywords — which
+  `live::apply_live` partitions out and sends as their OWN second
+  `hyprctl --batch`, so a host without the plugin loses its glass batch
+  alone and the borders/gaps/blur batch is never entangled with it. Keep the
+  constant equal to what the compositor lane bakes. `decoration:blur:*`
+  keeps the plain no-opinion rule (no keyword). **This crate's own unit
+  tests never run `hyprctl`** (`cfg!(test)` in `live::apply_live`, after the
+  `HYPRLAND_INSTANCE_SIGNATURE` check): `cfg!` is evaluated when *this crate*
+  is compiled, so a `lyra`/CLI integration test, or anything else linking
+  this library, still reaches the compositor — and with a batch in every
+  stage, such a handler test run from a Hyprland terminal would flip the
   operator's live glass and borders.
 - **`song/declared/livery.json` (the declared twin, CONTRACTS.md §4) is
   READ-ONLY for this crate — only the nix side writes it.** The lyra

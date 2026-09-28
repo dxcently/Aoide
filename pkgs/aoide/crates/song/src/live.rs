@@ -25,7 +25,7 @@ use crate::livery::schema;
 use serde_json::Value;
 
 /// The baked hyprglass switches, `(enabled, layers:enabled)`: what the
-/// compositor facet's `plugin:hyprglass` block leaves in `hyprland.conf`
+/// compositor lane's `plugin:hyprglass` block leaves in `hyprland.conf`
 /// (`enabled` at the plugin's own default 1, `layers { enabled = 1 }`). A
 /// staged song with no `geometry.blurEnabled` opinion restores exactly this.
 /// Change it together with that block.
@@ -95,15 +95,17 @@ pub fn geometry_keywords(notes: &Value) -> Vec<String> {
     // enable keys are read per frame (static config pointers), so a keyword
     // turns the glass off live without unloading the plugin: `enabled` is the
     // global window-glass switch, `layers:enabled` the layer-surface one the
-    // compositor facet turns on for the aoide-* namespaces.
+    // compositor lane turns on for the aoide-* namespaces.
     //
     // Unlike the geometry keywords above, these are ALWAYS emitted: a song
     // with no `blurEnabled` opinion restores the baked default
     // ([`HYPRGLASS_BAKED`]) rather than keeping whatever glass the previously
     // staged song left behind (house rule 10: a stage hot-loads the song as
     // declared, and a song that says nothing about glass is declared with the
-    // baked glass). Last in the batch, so on a host without the plugin loaded
-    // their refusal comes after every core keyword has already applied.
+    // baked glass). [`apply_live`] partitions them out and sends them as
+    // their own second `hyprctl --batch`, so a host without the plugin loaded
+    // loses its glass batch alone — the borders, gaps and blur keywords are
+    // never entangled with the plugin's refusal.
     let blur = geo.and_then(|g| g.get("blurEnabled")).and_then(Value::as_bool);
     let (window_glass, layer_glass) = match blur {
         Some(b) => (b, b),
@@ -146,6 +148,12 @@ pub fn batch_command(keywords: &[String]) -> String {
 /// Guard: only runs `hyprctl` when `$HYPRLAND_INSTANCE_SIGNATURE` is set
 /// (off-Hyprland — headless, VM, or the common test path — is a silent
 /// no-op) and there is at least one keyword to apply.
+///
+/// TWO batches, deliberately: the `plugin:hyprglass:*` keywords go in their
+/// own `hyprctl --batch` after the core one, so a host that never loaded the
+/// plugin (a compositor without it, or a non-nix host) cannot fail the batch
+/// the borders, gaps and blur share — and its refusal cannot be read as a
+/// core-keyword failure. Off-Hyprland, both are skipped together, as before.
 pub fn apply_live(keywords: &[String]) -> &'static str {
     if keywords.is_empty() {
         return "skipped (no geometry/border keywords resolved)";
@@ -156,20 +164,56 @@ pub fn apply_live(keywords: &[String]) -> &'static str {
     if !on_hyprland {
         return "skipped (HYPRLAND_INSTANCE_SIGNATURE unset)";
     }
-    // A test build never reaches the compositor: every batch carries the
-    // hyprglass switches, and a handler test run from a Hyprland terminal
-    // would otherwise flip the operator's live glass and borders.
+    // `cfg!(test)` is evaluated when THIS CRATE is compiled, so it protects
+    // this crate's own unit tests and nothing else: a `lyra`/CLI integration
+    // test, or any other crate linking this library, still reaches the
+    // compositor when the operator's `HYPRLAND_INSTANCE_SIGNATURE` is set —
+    // and every batch now carries the hyprglass switches, so such a run would
+    // flip the live glass and borders. Nothing in the tree does that today.
     if cfg!(test) {
-        return "skipped (test build: no live hyprctl)";
+        return "skipped (this crate's own test build: no live hyprctl)";
     }
+
+    let is_glass = |k: &String| k.starts_with("plugin:hyprglass:");
+    let glass: Vec<String> = keywords.iter().filter(|k| is_glass(k)).cloned().collect();
+    let core: Vec<String> = keywords.iter().filter(|k| !is_glass(k)).cloned().collect();
+
+    let core = if core.is_empty() { Batch::Applied } else { run_batch(&core) };
+    let glass = if glass.is_empty() { Batch::Applied } else { run_batch(&glass) };
+    match (core, glass) {
+        (Batch::Applied, Batch::Applied) => "applied",
+        (Batch::Applied, _) => {
+            "applied; best-effort: the hyprglass batch failed (plugin not loaded?) \
+             — stage file already updated"
+        }
+        (Batch::Failed, _) => "best-effort: hyprctl reported an error (stage file already updated)",
+        (Batch::Unavailable, _) => {
+            "best-effort: hyprctl unavailable (stage file already updated)"
+        }
+    }
+}
+
+/// How one `hyprctl --batch` call went.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Batch {
+    Applied,
+    /// It ran and exited non-zero (an unknown keyword is one way).
+    Failed,
+    /// No `hyprctl` on `PATH`.
+    Unavailable,
+}
+
+/// Run ONE `hyprctl --batch` payload. Never a `Result`: the caller only
+/// reports which way it went.
+fn run_batch(keywords: &[String]) -> Batch {
     match std::process::Command::new("hyprctl")
         .arg("--batch")
         .arg(batch_command(keywords))
         .output()
     {
-        Ok(out) if out.status.success() => "applied",
-        Ok(_) => "best-effort: hyprctl reported an error (stage file already updated)",
-        Err(_) => "best-effort: hyprctl unavailable (stage file already updated)",
+        Ok(out) if out.status.success() => Batch::Applied,
+        Ok(_) => Batch::Failed,
+        Err(_) => Batch::Unavailable,
     }
 }
 
@@ -216,9 +260,13 @@ pub fn terminal_opacity(notes: &Value) -> f64 {
 /// Render the staged terminal file one notes document implies: the livery
 /// engine's `kitty` emitter (every colour slot), then one
 /// `background_opacity` line from [`terminal_opacity`] — always present, so
-/// the file alone decides both for every new window. `None` when the notes
-/// don't resolve (a torn or reference-cyclic notes file) — the caller leaves
-/// the previous file in place rather than writing a guess.
+/// the file alone decides the colours and the opacity a NEW kitty INSTANCE
+/// opens with (`kitty @ set-background-opacity` moves the runtime value of
+/// one already running; kitty exposes no control call for the configured one,
+/// so a new OS window opened inside a pre-stage instance keeps that runtime
+/// value). `None` when the notes don't resolve (a torn or reference-cyclic
+/// notes file) — the caller leaves the previous file in place rather than
+/// writing a guess.
 pub fn terminal_colors(notes: &Value) -> Option<String> {
     let r = crate::livery::resolve(notes).ok()?;
     let mut out = crate::livery::emit::kitty::emit_kitty(&r);
@@ -502,7 +550,7 @@ mod tests {
             // Hyprland's own blur keeps the plain no-opinion rule.
             assert!(kw.iter().all(|k| !k.contains("decoration:blur")), "{kw:?}");
         }
-        assert_eq!(HYPRGLASS_BAKED, (true, true), "the compositor facet bakes both on");
+        assert_eq!(HYPRGLASS_BAKED, (true, true), "the compositor lane bakes both on");
     }
 
     #[test]

@@ -210,7 +210,7 @@ the live targets can never disagree:
    an unknown placeholder is a structured error, never a panic.
 5. **`kitty`** → `song/stage/terminal-colors.conf`, kitty's own colour syntax:
    the tinted-kitty base16 template Stylix bakes, key for key. A note with no
-   base16 tier gets the scheme the Stylix facet synthesises from its palette,
+   base16 tier gets the scheme the stylix lane synthesises from its palette,
    so every slot is written either way (CONTRACTS.md §4).
 
 ## The livery schema v0
