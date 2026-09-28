@@ -126,6 +126,7 @@ mod tests {
 
         let mut expected: Vec<&str> = vec![
             "cover.set",
+            "cover.sync",
             "element.seed",
             "guide",
             "herald.push",

@@ -215,6 +215,13 @@ let
         cp "$tmp" "$declared"
         mv -f "$tmp" "${config.aoide.root}/song/stage/livery.json"
         mv -f "$declared" "${config.aoide.root}/song/declared/livery.json"
+        # The active wallpaper setter's name — ONE word the CLI and the QML both
+        # read (CONTRACTS.md §4), published here because this is the seed that
+        # hands the runtime its facts and because choosing a provider is a
+        # rebuild: the file follows the switch.
+        provider=$(mktemp "${config.aoide.root}/song/stage/.wallpaper-provider.XXXXXX")
+        printf '%s\n' ${lib.escapeShellArg config.aoide.wallpaper.provider} > "$provider"
+        mv -f "$provider" "${config.aoide.root}/song/stage/wallpaper-provider"
         # No cover.json handling here: a cover carries the song it was staged
         # for, and the layer ignores one that names a song other than the
         # staged one (CONTRACTS.md §4) — so reseeding the staged song is enough.
@@ -589,7 +596,7 @@ let
                 # `rice preview` can re-sketch over it again live. It reseeds
                 # `song/stage/livery.json` ONLY: `song/stage/cover.json` is left alone
                 # (CONTRACTS.md §4).
-                home.activation.aoideSeedStage = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+                home.activation.aoideSeedStage = lib.hm.dag.entryBetween [ "reloadSystemd" ] [ "writeBoundary" ] ''
                   run ${seedStageScript}
                 '';
 

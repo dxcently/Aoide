@@ -15,10 +15,12 @@
 #
 # The provider choice is the aggregation's, so a host says which compositor it
 # runs in one place (`aggregation.aoideos.compositor.provider = "…"`) rather
-# than reaching for a separate `dendrites.compositor.provider` line. mkDefault:
-# a host naming a provider still wins.
+# than reaching for a separate `dendrites.compositor.provider` line — and the
+# same for the WALLPAPER SETTER it paints picks with
+# (`aggregation.aoideos.wallpaper.provider = "skwd-wall"`), whose default here
+# is the shell's own layer. mkDefault: a host naming a provider still wins.
 {
-  description = "The AoideOS desktop: compositor, greeter, theme, shell, and the committed songs.";
+  description = "The AoideOS desktop: compositor, greeter, theme, shell, wallpaper setter, and the committed songs.";
 
   system = {
     members = [
@@ -28,8 +30,12 @@
       "quickshell"
       "lyra"
       "stylix"
+      "wallpaper"
     ];
 
-    providers.compositor = "hyprland";
+    providers = {
+      compositor = "hyprland";
+      wallpaper = "quickshell";
+    };
   };
 }

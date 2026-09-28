@@ -621,6 +621,7 @@ fn handle_rice_stage_inner(inv: &Invocation, stage_cover: bool) -> Outcome {
         "livery": notes_dst.to_string_lossy(),
         "cover": cover,
         "coverStage": cover_stage_word,
+        "wallpaper": crate::wallpaper_provider::sync(),
         "hyprctl": hyprctl_status,
         "terminal": terminal_data,
         "widgets": widget_sync.note,

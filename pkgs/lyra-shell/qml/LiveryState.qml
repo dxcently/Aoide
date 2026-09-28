@@ -284,4 +284,24 @@ QtObject {
         }
         Component.onCompleted: modeFile.reload()
     }
+
+    // ── The wallpaper provider — hot-reloaded from stage/wallpaper-provider ──
+    // ONE word naming who paints a song's wallpaper (CONTRACTS.md §4); the CLI
+    // reads the same file (`aoide-song`'s `wallpaper_provider::provider`).
+    // Absent/unreadable — a host that never activated the lane — reads as the
+    // shell's own layer.
+    readonly property string providerPath:
+        (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/song/stage/wallpaper-provider"
+    property string providerRaw: "quickshell"
+    readonly property string wallpaperProvider:
+        providerRaw.trim().length > 0 ? providerRaw.trim() : "quickshell"
+
+    property FileView providerFile: FileView {
+        id: providerFile
+        path: root.providerPath
+        watchChanges: true
+        onFileChanged: providerFile.reload()
+        onTextChanged: root.providerRaw = "" + providerFile.text()
+        Component.onCompleted: providerFile.reload()
+    }
 }

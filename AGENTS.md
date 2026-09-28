@@ -63,7 +63,7 @@ and the staging/declarative/draft modes:
    reach you as a command. Adapters wrap it as data.
 5. **Paint dendrites read only the dress, the structure, the surfaces, and
    identity.** A paint dendrite — `compositor` and its providers, `greeter`,
-   `stylix`, `quickshell`, `lyra` — reads only `aoide.livery` (the dress:
+   `stylix`, `quickshell`, `lyra`, `wallpaper` and its providers — reads only `aoide.livery` (the dress:
    palette · base16 · component tiers · geometry · fonts · cover),
    `aoide.arrangement` (the structure: which widget/surface TYPES a song
    brings into existence), `aoide.surfaces` (the render-surface ownership
@@ -75,7 +75,8 @@ and the staging/declarative/draft modes:
    `aoide.<name>.*`. The list is enumerated and closed, never "any `aoide.*`";
    a new namespace needs the same explicit amendment each of these got. No
    module reads another module: cross-dendrite facts (`aoide.{quickshell,lyra,
-   stylix,compositor,greeter}.enable`, `aoide.quickshell.config`) are declared
+   stylix,compositor,greeter}.enable`, `aoide.quickshell.config`,
+   `aoide.wallpaper.provider`) are declared
    once in `modules/nucleus` and set by the lane that owns them;
    `aoide.sessionTarget` is the same seam declared in the core module
    (`pkgs/aoide/module/options.nix`) and set by the lane that paints a

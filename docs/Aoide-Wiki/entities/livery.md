@@ -41,6 +41,17 @@ Stylix (plus fonts, cursor, wallpaper) and Stylix themes every nix-manageable
 target — GTK/Qt, terminal, editors, browser, boot. The engine keeps only the
 live side.
 
+The `wallpaper` note is the song's own DEFAULT cover, and the layer that draws
+it is the `wallpaper` capability's business rather than this engine's: a host
+chooses a PROVIDER (`quickshell`, the shell's own layer, by default; an external
+engine's provider otherwise), and the choice reaches the runtime as the word in
+`song/stage/wallpaper-provider`. The engine's own part is the pick in
+`stage/cover.json` (CONTRACTS.md §4) — the user's choice, which carries the song
+it was made for and is painted by whichever provider the host named; an external
+one paints it and the shell's layer stands down, the shell's own layer paints it
+otherwise. The engine never derives the provider a second way: the stage word is
+the answer.
+
 Because both fan-outs derive from the same livery values, staged state and
 adopted state cannot diverge. This is the "zero drift" guarantee. Beyond
 `rice stage`/`cover set` writing `stage/livery.json` live (while `rice mode

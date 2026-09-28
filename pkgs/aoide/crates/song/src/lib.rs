@@ -21,6 +21,7 @@ pub mod live;
 pub mod livery;
 pub mod lint;
 pub mod reap;
+pub mod wallpaper_provider;
 pub mod widgets;
 
 // Every env-touching test in this crate now shares ONE lock —

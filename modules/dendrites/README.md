@@ -9,9 +9,11 @@ pi-coding-agent, OpenAI Codex + ChatGPT), local model-serving tooling
 (inference: Ollama + llama.cpp), system services (dunst, networkmanager,
 audio), and **the paint lanes** — what makes a machine paint at all:
 `compositor` (with its `hyprland` provider), `greeter`, `stylix`, `quickshell`
-(the shell runtime: the package and the one `aoide-quickshell` service) and
-`lyra` (the Quickshell surface, its shellbridge, and the song-gated deploy
-half). A paint lane reads only what root `AGENTS.md` house rule 5 lists; its
+(the shell runtime: the package and the one `aoide-quickshell` service), `lyra`
+(the Quickshell surface, its shellbridge, and the song-gated deploy half) and
+`wallpaper` (the capability that owns who paints a song's wallpaper, with the
+shell's own layer and the external engine as its two providers). A paint lane
+reads only what root `AGENTS.md` house rule 5 lists; its
 `body` is guarded on a FACT that nucleus declares rather than on an option it
 declares itself, so a consumer can ask "is there a shell here?" without reading
 the lane that made one.
@@ -71,6 +73,41 @@ no rice binary:
 The service is gated on the config, never on `aoide.song` — a shell that paints
 a host's own config has no song and starts exactly the same way. What is
 song-gated is `lyra`'s half: deploy, seed, restart.
+
+## The wallpaper capability (`wallpaper/`) and the seam with `lyra`
+
+Who paints a song's wallpaper is a HOST choice, the way the compositor is — a
+provider registry, not a song's field:
+
+```
+wallpaper/
+├── default.nix     { providers.quickshell = ./quickshell.nix;
+│                     providers.skwd-wall  = ./skwd-wall.nix; }   ← the registry
+├── quickshell.nix  the shell's own layer: the default. It configures NOTHING —
+│                   the layer is `lyra`'s — it NAMES the arrangement.
+└── skwd-wall.nix   the external engine: its three packages, the `skwd-walld`
+                    user service, and the config merge that keeps the engine's
+                    own theming off and its library inside `aoide.root`.
+```
+
+Both providers set the fact `aoide.wallpaper.provider` to their own name, so
+exactly one answer exists on a host; `lyra` publishes that one word as
+`song/stage/wallpaper-provider`, and both readers — the CLI
+(`aoide-song`'s `wallpaper_provider`) and `LiveryState.qml` — read the same file.
+Absent means the shell's own layer.
+
+They never name each other either. The bridge is the CLI both sides already
+have: `lyra cover sync` (CONTRACTS.md §4) makes the external provider agree with
+the stage files — the staged pick while one applies, the step-aside image when
+none does — and it is what the engine's lane runs after every daemon start and
+what every pick write runs. Because "applies" is decided per STAGED SONG, a
+song switch steps the engine aside with no extra call: the pick simply stops
+applying, and the shell's board is back.
+
+Nothing here is declared in `aoide.surfaces`: `wallpaper.owner` stays
+`quickshell`, because the shell's surface stays mapped (transparent) while an
+external provider has a pick on screen; the provider's own paper surface is the
+compositor's, not an `aoide-<slot>`.
 
 ## Named seams (what it exposes)
 

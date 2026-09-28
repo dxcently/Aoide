@@ -19,8 +19,12 @@ module builds against what nucleus declares.
   is installed), `aoide.stylix.enable`, `aoide.compositor.enable`,
   `aoide.greeter.enable`, each defaulting `false`, plus
   `aoide.quickshell.config : nullOr str` — the directory a shell runs
-  (`null` is the bare case: package installed, no shell service). The lane
-  that owns a fact sets it `mkDefault true`; every reader — a nucleus file or
+  (`null` is the bare case: package installed, no shell service) — and
+  `aoide.wallpaper.provider` (default `"quickshell"`), the one fact that names
+  an ALTERNATIVE rather than a capability: which provider of the `wallpaper`
+  registry paints a song's wallpaper here. The lane
+  that owns a fact sets it `mkDefault true` (or, for the provider name,
+  `mkDefault "<its own name>"`); every reader — a nucleus file or
   another lane — reads the FACT and never the owning lane's own option. The
   CORE half (`enable`, `root`, `checkout`, `auditLog`, `terminal`, `user`,
   `sessionTarget`) arrives by import from `pkgs/aoide/module/options.nix` — the

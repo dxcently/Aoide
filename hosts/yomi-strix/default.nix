@@ -24,6 +24,13 @@
   dendrites.qbittorrent.enable = true;
   dendrites.inference.enable = true;
 
+  # ── Who paints a wallpaper pick ────────────────────────────────────────────
+  # The compositor line's twin: the aggregation ships the shell's own layer as
+  # the setter, and this host names the external engine instead. The engine's
+  # lane is what makes that real (packages, daemon, config), and the runtime
+  # reads the resulting fact to decide whose picks the stage file records.
+  aggregation.aoideos.wallpaper.provider = "skwd-wall";
+
   # ── Songs ──────────────────────────────────────────────────────────────────
   # `declared` is the song this host PERFORMS — it becomes the fact
   # `aoide.song`, which every `rice.nix` self-gates on. `available` is what it

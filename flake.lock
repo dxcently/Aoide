@@ -696,6 +696,27 @@
         "type": "github"
       }
     },
+    "release": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1790560696,
+        "narHash": "sha256-husp5vZlke3aLA2S1XybAd+DLaOjJkvjDnu+5gCxuks=",
+        "owner": "liixini",
+        "repo": "skwd-wall",
+        "rev": "6720414925f36e6908e63d591d2b9ad641016860",
+        "type": "github"
+      },
+      "original": {
+        "owner": "liixini",
+        "ref": "nix",
+        "repo": "skwd-wall",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "aoide": "aoide",
@@ -704,7 +725,27 @@
         "nixpkgs": "nixpkgs_2",
         "nvf": "nvf",
         "quickshell": "quickshell",
+        "skwd-wall": "skwd-wall",
         "stylix": "stylix"
+      }
+    },
+    "skwd-wall": {
+      "inputs": {
+        "release": "release"
+      },
+      "locked": {
+        "lastModified": 1790547347,
+        "narHash": "sha256-kiiP4nkAABILqxcuMW07OsMavdu1sHPw5Y7GMGHWvsE=",
+        "owner": "liixini",
+        "repo": "skwd-wall",
+        "rev": "ed4246a13f3e31c340f9e4de00f4664d5e844c7a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "liixini",
+        "ref": "v2",
+        "repo": "skwd-wall",
+        "type": "github"
       }
     },
     "stylix": {

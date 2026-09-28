@@ -70,7 +70,9 @@ that can be deleted.
 A lane cannot be read (first rule above), so the one question every layer has to
 ask — *is there a shell / a session on this host?* — is answered by a FACT that
 nucleus declares once, in `modules/nucleus/options.nix`. Each `enable` fact
-defaults `false`; `aoide.quickshell.config` defaults `null`:
+defaults `false`; `aoide.quickshell.config` defaults `null`, and
+`aoide.wallpaper.provider` names the active alternative by defaulting to the
+shell's own layer:
 
 | Fact | What it means | Set by |
 |---|---|---|
@@ -80,6 +82,7 @@ defaults `false`; `aoide.quickshell.config` defaults `null`:
 | `aoide.stylix.enable` | the theme is baked at build time, painted by nix | the stylix lane (`dendrites/stylix.nix`) |
 | `aoide.compositor.enable` | a Wayland compositor is started here | the compositor lane (`dendrites/compositor`) |
 | `aoide.greeter.enable` | a display-manager greeter comes up on this host's tty | the greeter lane (`dendrites/greeter.nix`) |
+| `aoide.wallpaper.provider` (`str`, `"quickshell"`) | WHICH provider paints a song's wallpaper here — the one fact that names an alternative rather than a capability | the chosen provider of the `wallpaper` registry (`dendrites/wallpaper/*`), each to its own name |
 
 The lane that owns a fact sets it `mkDefault true` while it is on, so a host
 that flips it back off still wins. Every reader then reads the FACT — never the
@@ -1615,7 +1618,18 @@ writer hot-swaps the wallpaper live, with no IPC call. Writes are atomic
 **`song` — additive in v0 — is the song staged when the file was written, and
 every writer stamps it.** **`pick` — also additive in v0 — is `true` only for
 the USER's own choice** (`lyra cover set`); absent, the file is the song's own
-default.
+default. **`kind` — additive in v0 — is WHAT the pick is: `"static"`,
+`"video"`, or `"we"`** (a Wallpaper Engine scene), spelled as the engine spells
+them. Absent reads as `"static"`, which is every file written before the field
+existed. **`weId` — additive in v0 — is a scene's identity**, the workshop id,
+in place of `path`: a scene has no file to render, so `path` is absent for one
+(`staged_identity`: the path for a still or a video, the id for a scene). The
+kind follows the file's extension for a path (`paper-control`'s own
+`VIDEO_EXTS` rule — `mp4`/`mkv`/`webm`/`mov`/`avi`/`m4v`/`flv`/`wmv`/`h264`/
+`ivf`, case-insensitive; an animated `.gif` is a video upstream and a still
+here, since this crate does not decode the file), and is the engine's own
+`%type%` when the engine reports the pick. A pick is a pick with EITHER identity;
+the marker alone, with neither, is nothing (`staged_is_pick`).
 
 **The rule is one rule, and it is read-side: a cover applies only while its
 `song` equals the song staged right now** (`stage/livery.json`'s own `song`
@@ -1640,7 +1654,9 @@ Writers, and the exact shape each leaves:
 | Writer | Effect on `stage/cover.json` |
 | --- | --- |
 | `lyra rice stage <song>` | the song's derivable cover (`song/covers/<song>.{webp,png,jpg,jpeg}`, first match in that order) as `{"path": …, "song": …}`; with no derivable cover the file is REMOVED — a cover staged for another song must never stand over this one. A pick already stamped for THIS song is left untouched (reported as `coverStage: "pick-kept"`) |
-| `lyra cover set <path\|name>` | `{"path": …, "pick": true, "song": …}` for the song staged at write time — the `song` field omitted only when nothing is staged, which writes the legacy shape |
+| `lyra cover set <path\|name>` | `{"path": …, "kind": …, "pick": true, "song": …}` for the song staged at write time — the `song` field omitted only when nothing is staged, which writes the legacy shape |
+| `lyra cover set we:<id>` | `{"kind": "we", "weId": …, "pick": true, "song": …}` — a scene, whose identity is the workshop id and which has no `path` at all. `we:` with an empty id is not a scene token (the argument is then resolved as a file, and fails like any other missing file) |
+| `lyra cover set --from-skwd --kind <static\|video\|we> <path\|id>` | the provider's own report, RECORDED: the shape above with `kind` as the provider named it. Applies NOTHING back, and is a no-op with no write (exit 0, `recorded: false`) when the host's provider is not `skwd-wall` (the word in `song/stage/wallpaper-provider` below), when the identity is this host's step-aside image (`AOIDE_SKWD_WALL_STANDIN`), or when the staged pick already names that same `(kind, identity)` for that song. The ONLY writer exempt from the `declarative` lock: a provider's picker is not a stage writer, and refusing the record would leave this file describing something the screen is not showing |
 | `lyra cover set --clear` | the staged song's own default, exactly as a re-stage of it writes it (its derivable cover, or the file removed). Never keeps a pick; the envelope's `droppedPick` and `coverStage` come from the marker read before the write |
 | `lyra rice mode declarative` | NOTHING — a lock is not a song switch. Its re-pin writes `livery.json` alone, and a pick stamped for another song is hidden by the read-side rule rather than dropped |
 | `lyra rice back <take>` | the target take's cover value VERBATIM — a take minted while a pick stood restores it as a pick, `song` and all; a take with no cover removes whatever stands |
@@ -1653,7 +1669,46 @@ Writers, and the exact shape each leaves:
 default through `stage_song_default` (its derivable cover, else no file).
 `rice mode declarative` passes `stage_cover: false` and skips it whole: a lock
 keeps the cover file exactly as it stands, and a pick it hides read-side comes
-back when its own song is staged again.
+back when its own song is staged again. The lock's own entrypoint refusal
+(`commands/cover.rs`) exempts `--from-skwd` — the record door writes what an
+external provider is ALREADY showing, so the file describes the screen instead
+of drifting from it; a plain `cover set` and `--clear` are refused there as
+they always were.
+
+### `song/stage/wallpaper-provider` — **v0**
+
+One word: the name of the provider that paints a song's wallpaper on this host.
+It is the fact `aoide.wallpaper.provider` (nucleus, §0's enable-facts table)
+written into the runtime root by the `lyra` lane's activation seed, beside the
+staged livery that seed already publishes. `quickshell` — the shell's own
+`aoide-wallpaper` layer — is the default and the answer when the file is absent
+(a host that never activated the lane); any other word is a provider of the
+`wallpaper` registry (`dendrites/wallpaper/`) that paints picks itself.
+
+Two readers take it, and it is one question asked twice: `LiveryState.qml`
+(`wallpaperProvider`) and `aoide-song`'s `wallpaper_provider::provider()`. Neither
+derives it a second way — the file IS the answer — so choosing a different
+provider (a rebuild) moves the CLI and the QML together, and neither can be
+right while the other is stale.
+
+**`lyra cover sync`** is the bridge, and the only write Aoide makes to an
+external provider: the provider is given the staged pick while one applies
+(`skwd-helm apply <path|we:<id>> -o '*'` — always every output, since a
+per-output apply is the one shape the provider's own no-op guard does not
+cover), and is told to show nothing when none does — its own `clear` verb where
+the release has one, the transparent step-aside image otherwise. That is what
+makes a song switch step
+aside with no extra call: the pick stops applying, so the provider stops showing
+it. The shell's own layer is given nothing — it watches `stage/cover.json`
+itself. A pick RECORDED while the lock was on is re-applied by the next sync
+exactly like one the user made: the lock governs who WRITES `stage/cover.json`,
+never what a provider paints. It runs after every write that changes what should show: `cover set`
+(plain), `cover set --clear`, `rice stage` (and therefore `rice mode
+stage`/`declarative`, which route through it) and `rice back`; never from
+`--from-skwd`, which only records. It is best-effort and never fatal, the same
+tier as the staged geometry's `hyprctl` call — and it is what the external
+provider's own unit runs in `ExecStartPost`, so a restarted provider re-asserts
+the staged state without a rebuild.
 
 ### `song/declared/livery.json` — **v0**
 
@@ -1717,7 +1772,10 @@ staging writes; never an error.
 - **`staging`** — hot-load unlocked: `rice stage`/`cover set` write live, as
   plain real files.
 - **`declarative`** — nix/home-manager is the only writer; staging writers
-  refuse.
+  refuse. One exemption, and it is not a drift: `cover set --from-skwd`
+  records what an external wallpaper provider is already showing
+  (CONTRACTS.md §4's cover.json entry), because the file must describe the
+  screen.
 - **`draft`** — `stage/livery.json` is a SYMLINK routed into
   `song/songbook/<song>/drafts/<name>/livery.json` via `rice mode draft
   <name>`. `rice stage`/`cover set` still write normally — neither is

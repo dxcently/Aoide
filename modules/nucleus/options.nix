@@ -776,6 +776,34 @@ in
       '';
     };
 
+    # ── Who paints a song's wallpaper — the capability's fact ──────────────
+    # Not an `enable`: this capability ALWAYS has an answer (the shell's own
+    # layer is the default), and a host picks between alternatives exactly the
+    # way it picks its compositor (`aggregation.aoideos.wallpaper.provider`).
+    # The name is therefore the fact, and it stays a plain string on purpose:
+    # the alternatives live in the registry
+    # (`modules/dendrites/wallpaper/default.nix`) where adding one is one file
+    # plus one line, and an enum here would be a second list to amend.
+    wallpaper.provider = mkOption {
+      type = types.str;
+      default = "quickshell";
+      description = ''
+        Which provider paints a song's wallpaper on this host, by the name the
+        host selected in the `wallpaper` capability's registry: `"quickshell"`
+        (the default — the shell's own `aoide-wallpaper` layer draws the song's
+        default AND the user's picks) or `"skwd-wall"` (the external engine
+        paints picks on its own surface while the shell's layer stays mapped
+        and paints nothing).
+
+        Set `mkDefault` by the provider file the host chose, so the answer is
+        the selection's own; a host may override it to stand a provider's
+        config down without deselecting it. The runtime reads it — lyra hands
+        it to the CLI and the QML as `song/stage/wallpaper-provider`
+        (CONTRACTS.md §4), and anything else that must know who paints reads
+        the same file.
+      '';
+    };
+
     # ── Agent control plane ────────────────────────────────────────────────
     mcp.enable = mkOption {
       type = types.bool;

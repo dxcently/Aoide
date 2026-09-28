@@ -57,6 +57,10 @@
     starship = ./dendrites/starship.nix;
     stylix = ./dendrites/stylix.nix;
     vision = ./dendrites/vision.nix;
+    # The wallpaper capability: a provider registry, not a lane record. Its
+    # providers are the alternatives a host chooses between the way it chooses
+    # a compositor — the shell's own layer, or an external engine.
+    wallpaper = ./dendrites/wallpaper;
     yazi = ./dendrites/yazi.nix;
   };
 
