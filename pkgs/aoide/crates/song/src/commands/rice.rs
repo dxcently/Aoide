@@ -385,22 +385,7 @@ fn notes_source(name: &str) -> PathBuf {
 /// `Draft` mode), this function's write lands straight in the draft file
 /// with zero symlink-awareness needed here, which is the entire mechanism.
 ///
-/// The wrapper for callers that have not touched `stage/livery.json`; a caller
-/// that has (the `rice mode` handlers tear a Draft routing symlink down first)
-/// calls [`handle_rice_stage_with_prev`] with the song it captured.
 pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
-    let prev_song = super::mode::current_staged_song();
-    handle_rice_stage_with_prev(inv, prev_song.as_deref())
-}
-
-/// [`handle_rice_stage`] with the previous song supplied by the caller.
-///
-/// A caller that has already disturbed `stage/livery.json` (the `rice mode`
-/// handlers tear a Draft-mode routing symlink down first) captures the song the
-/// stage carried and hands it in; `prev_song` is only consulted by the cover
-/// half, where the same song keeps a standing pick and a different one resets
-/// to its own default (CONTRACTS.md §4).
-pub(crate) fn handle_rice_stage_with_prev(inv: &Invocation, prev_song: Option<&str>) -> Outcome {
     let name = match inv.args.first() {
         Some(n) => n.clone(),
         None => {
@@ -514,12 +499,11 @@ pub(crate) fn handle_rice_stage_with_prev(inv: &Invocation, prev_song: Option<&s
     let (terminal_changed, terminal_data) = stage_terminal_colors(terminal_conf.as_deref());
     changed.extend(terminal_changed);
 
-    // Cover: the song's own default, or a standing user pick (CONTRACTS.md §4).
-    // `prev_song` is the caller's capture, never read here — a caller that
-    // tears a Draft routing symlink down before staging has already made the
-    // stage file unreadable.
-    let cover_dst = crate::cover::cover_dst();
-    let cover_stage = match crate::cover::stage_for_song(&name, prev_song) {
+    // Cover: the song's own default, or the user's pick for it (CONTRACTS.md
+    // §4). The song is stamped into whatever is written, which is what lets a
+    // pick survive a re-stage of its own song and be replaced by any other.
+    let cover_dst = crate::cover::staged_cover_json();
+    let cover_stage = match crate::cover::stage_for_song(&name) {
         Ok(staged) => staged,
         Err(e) => {
             return Outcome::error("rice.stage", format!("failed to stage cover.json: {e}"))
@@ -527,29 +511,25 @@ pub(crate) fn handle_rice_stage_with_prev(inv: &Invocation, prev_song: Option<&s
         }
     };
     let cover = crate::cover::staged_path();
-    let (cover_note, cover_stage_word) = match &cover_stage {
-        crate::cover::CoverStage::PickKept => (
-            format!("kept the staged wallpaper pick for `{name}` (the same song)"),
-            "pick-kept",
-        ),
-        crate::cover::CoverStage::Default(path) => {
+    let cover_note = match &cover_stage {
+        crate::cover::CoverStage::PickKept => {
+            format!("kept the wallpaper pick staged for `{name}`")
+        }
+        crate::cover::CoverStage::Wrote(crate::cover::CoverWrite::Written(path)) => {
             changed.push(cover_dst.to_string_lossy().into_owned());
-            (format!("staged cover {}", path.display()), "default")
+            format!("staged cover {}", path.display())
         }
-        crate::cover::CoverStage::Cleared(removed) => {
-            if *removed {
-                changed.push(cover_dst.to_string_lossy().into_owned());
-                (
-                    format!("no derivable cover for `{name}`; cleared the previous song's cover"),
-                    "cleared",
-                )
-            } else {
-                (
-                    format!("no derivable cover for `{name}`; no cover staged"),
-                    "none",
-                )
-            }
+        crate::cover::CoverStage::Wrote(crate::cover::CoverWrite::Removed) => {
+            changed.push(cover_dst.to_string_lossy().into_owned());
+            format!("no derivable cover for `{name}`; cleared a cover staged for another song")
         }
+        crate::cover::CoverStage::Wrote(crate::cover::CoverWrite::Absent) => {
+            format!("no derivable cover for `{name}`; no cover staged")
+        }
+    };
+    let cover_stage_word = match &cover_stage {
+        crate::cover::CoverStage::PickKept => "pick-kept",
+        crate::cover::CoverStage::Wrote(write) => write.as_str(),
     };
 
     // Captured BEFORE the widget sync below so the outcome message's "N
@@ -1155,10 +1135,8 @@ mod tests {
         assert_eq!(first.status, Status::Ok);
         assert_eq!(first.data.as_ref().unwrap()["coverStage"], "default");
 
-        // The user picks a wallpaper while `dusk` is what is staged… (the same
-        // write `cover set` performs — see `commands/cover.rs`'s own tests for
-        // the command surface itself).
-        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png")).unwrap();
+        // The user picks a wallpaper while `dusk` is what is staged.
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("dusk")).unwrap();
         assert!(crate::cover::staged_is_pick());
 
         // …and re-staging the SAME song leaves that pick exactly where it was,
@@ -1197,7 +1175,7 @@ mod tests {
 
         let staged = handle_rice_stage(&inv(&["rice", "stage"], &["dusk"]));
         assert_eq!(staged.status, Status::Ok);
-        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png")).unwrap();
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("dusk")).unwrap();
         assert!(crate::cover::staged_is_pick());
 
         // Switching to a song with NO derivable cover drops the pick AND the

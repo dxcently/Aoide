@@ -77,9 +77,10 @@ fn handle_cover_set_entry(inv: &Invocation) -> Outcome {
 /// `cover set <path>` — the live wallpaper write path.
 ///
 /// Resolves `<path>` (absolute, or a bare name under `song/covers/`) and stages
-/// it as a pick (CONTRACTS.md §4): what the user chose shows, the song's own
-/// board does not draw over it, and re-staging the same song leaves it alone.
-/// Nothing is committed; the baked `AOIDE_WALLPAPER` remains the boot fallback.
+/// it as a pick for the song staged right now (CONTRACTS.md §4): what the user
+/// chose shows, the song's own board does not draw over it, and re-staging that
+/// song leaves it alone. Nothing is committed; the baked `AOIDE_WALLPAPER`
+/// remains the boot fallback.
 fn handle_cover_set(inv: &Invocation) -> Outcome {
     if inv.flag_present("clear") {
         return handle_cover_clear(inv);
@@ -110,37 +111,46 @@ fn handle_cover_set(inv: &Invocation) -> Outcome {
         }));
     }
 
-    let cover_dst = match crate::cover::stage_pick(&resolved) {
+    let song = super::mode::current_staged_song();
+    let cover_dst = match crate::cover::stage_pick(&resolved, song.as_deref()) {
         Ok(dst) => dst,
         Err(e) => {
             return Outcome::error("cover.set", format!("failed to stage cover.json: {e}"))
                 .with_data(json!({
                     "reason": "stage-write-failed",
-                    "target": crate::cover::cover_dst().to_string_lossy(),
+                    "target": crate::cover::staged_cover_json().to_string_lossy(),
                 }));
         }
     };
 
     Outcome::ok(
         "cover.set",
-        format!("wallpaper set to {} — stage/cover.json live for hot-swap", resolved.display()),
+        match &song {
+            Some(song) => format!(
+                "wallpaper set to {} for `{song}` — stage/cover.json live for hot-swap",
+                resolved.display()
+            ),
+            None => format!(
+                "wallpaper set to {} — stage/cover.json live for hot-swap",
+                resolved.display()
+            ),
+        },
     )
     .changed(vec![cover_dst.to_string_lossy().into_owned()])
     .with_data(json!({
         "cover": resolved.to_string_lossy(),
         "coverJson": cover_dst.to_string_lossy(),
         "pick": true,
+        "song": song,
         "seam": "AoideWallpaper.qml FileView-watches stage/cover.json and hot-swaps live",
     }))
 }
 
-/// `cover set --clear` — drop the pick and give the active song back its own
-/// default. The song comes from the staged livery's own `song` field; with
-/// nothing staged there is no default to derive, so the clear is a removal.
-/// `stage_for_song` with no `prev_song` can never answer `PickKept`.
+/// `cover set --clear` — drop the pick and give the staged song back its own
+/// default. With no song staged there is no default to derive, so the clear is
+/// a removal.
 fn handle_cover_clear(inv: &Invocation) -> Outcome {
-    let cover_dst = crate::cover::cover_dst();
-    if inv.args.first().is_some() {
+    if !inv.args.is_empty() {
         return Outcome::usage(
             "cover.set",
             "usage: aoide cover set <path|name> [--json] · aoide cover set --clear [--json]",
@@ -148,13 +158,32 @@ fn handle_cover_clear(inv: &Invocation) -> Outcome {
         .with_data(json!({ "reason": "clear-takes-no-path" }));
     }
 
+    let dropped_pick = crate::cover::staged_is_pick();
+    let cover_dst = crate::cover::staged_cover_json();
     let song = super::mode::current_staged_song();
     let staged = match &song {
-        Some(name) => crate::cover::stage_for_song(name, None),
-        None => crate::cover::clear_staged().map(crate::cover::CoverStage::Cleared),
+        Some(song) => crate::cover::stage_song_default(song),
+        None => crate::cover::clear_staged().map(|removed| {
+            if removed {
+                crate::cover::CoverWrite::Removed
+            } else {
+                crate::cover::CoverWrite::Absent
+            }
+        }),
     };
+    let staged = match staged {
+        Ok(staged) => staged,
+        Err(e) => {
+            return Outcome::error("cover.set", format!("failed to clear cover.json: {e}"))
+                .with_data(json!({
+                    "reason": "clear-failed",
+                    "target": cover_dst.to_string_lossy(),
+                }));
+        }
+    };
+    let stage_word = staged.as_str();
     match staged {
-        Ok(crate::cover::CoverStage::Default(path)) => Outcome::ok(
+        crate::cover::CoverWrite::Written(path) => Outcome::ok(
             "cover.set",
             format!(
                 "pick dropped — {} is back to its own cover {}",
@@ -165,16 +194,18 @@ fn handle_cover_clear(inv: &Invocation) -> Outcome {
         .changed(vec![cover_dst.to_string_lossy().into_owned()])
         .with_data(json!({
             "cleared": false,
+            "droppedPick": dropped_pick,
             "cover": path.to_string_lossy(),
             "coverJson": cover_dst.to_string_lossy(),
-            "coverStage": "default",
+            "coverStage": stage_word,
         })),
-        Ok(crate::cover::CoverStage::Cleared(removed)) => {
+        write => {
+            let removed = matches!(write, crate::cover::CoverWrite::Removed);
             let whose = match &song {
-                Some(name) => format!("`{name}` has no derivable cover"),
+                Some(song) => format!("`{song}` has no derivable cover"),
                 None => "no song is staged".to_string(),
             };
-            let note = if removed {
+            let note = if dropped_pick {
                 "pick dropped — stage/cover.json removed"
             } else {
                 "no pick staged — nothing to drop"
@@ -186,25 +217,16 @@ fn handle_cover_clear(inv: &Invocation) -> Outcome {
             )
             .with_data(json!({
                 "cleared": removed,
+                "droppedPick": dropped_pick,
                 "cover": Value::Null,
                 "coverJson": cover_dst.to_string_lossy(),
-                "coverStage": "cleared",
+                "coverStage": stage_word,
             }));
             if removed {
                 out = out.changed(vec![cover_dst.to_string_lossy().into_owned()]);
             }
             out
         }
-        Ok(crate::cover::CoverStage::PickKept) => Outcome::error(
-            "cover.set",
-            "internal: a clear must never keep a pick",
-        )
-        .with_data(json!({ "reason": "clear-kept-pick" })),
-        Err(e) => Outcome::error("cover.set", format!("failed to clear cover.json: {e}"))
-            .with_data(json!({
-                "reason": "clear-failed",
-                "target": cover_dst.to_string_lossy(),
-            })),
     }
 }
 
@@ -317,7 +339,7 @@ mod tests {
             r#"{"schemaVersion":"0","song":"dusk"}"#,
         )
         .unwrap();
-        crate::cover::stage_default(&covers.join("dusk.png")).unwrap();
+        crate::cover::stage_default(&covers.join("dusk.png"), "dusk").unwrap();
         assert!(!crate::cover::staged_is_pick());
 
         // The user picks something else…
@@ -355,7 +377,8 @@ mod tests {
             r#"{"schemaVersion":"0","song":"moonlight"}"#,
         )
         .unwrap();
-        crate::cover::stage_pick(std::path::Path::new("/tmp/old-choice.png")).unwrap();
+        crate::cover::stage_pick(std::path::Path::new("/tmp/old-choice.png"), Some("moonlight"))
+            .unwrap();
 
         let cleared = handle_cover_set(&clear_inv(&[]));
         assert_eq!(cleared.status, Status::Ok);
@@ -384,7 +407,7 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
-        crate::cover::stage_pick(std::path::Path::new("/tmp/old-choice.png")).unwrap();
+        crate::cover::stage_pick(std::path::Path::new("/tmp/old-choice.png"), None).unwrap();
         let out = handle_cover_set(&clear_inv(&[]));
         assert_eq!(out.status, Status::Ok);
         assert_eq!(out.data.unwrap()["cleared"], true);
@@ -411,7 +434,7 @@ mod tests {
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
-        crate::cover::stage_pick(std::path::Path::new("/tmp/old-choice.png")).unwrap();
+        crate::cover::stage_pick(std::path::Path::new("/tmp/old-choice.png"), None).unwrap();
 
         let out = handle_cover_set_entry(&clear_inv(&[]));
         assert_eq!(out.status, Status::Error);

@@ -29,12 +29,12 @@ a config file). Paint-side — ships in `lyra`, not core.
   `rice stage`, the `rice mode` re-pins, `rice back` and `lyra reload`'s
   draft sync.
 - `compose` — the pure `rice compose` scaffolding/rendering engine.
-- `cover` — cover-art derivation + resolution, and the one seam deciding what
-  `stage/cover.json` holds: a user PICK or the song's own default
-  (`stage_for_song`, `stage_pick`, `stage_default`, `clear_staged`;
-  CONTRACTS.md §4's cover.json entry). `rice stage` and `cover set`/`--clear`
-  all route through it, so the "same song keeps the pick, a switch resets to
-  the new song's default" rule has exactly one implementation.
+- `cover` — cover-art derivation + resolution, and `stage/cover.json`'s
+  writers, which stamp the staged song into every file they write
+  (`stage_for_song`, `stage_song_default`, `stage_pick`, `staged_song`;
+  CONTRACTS.md §4's cover.json entry). The rule that a cover applies only
+  while its `song` matches the staged song is read-side — one rule, in
+  `AoideWallpaper.qml`.
 - `elements` — the element descriptor + render pipeline
   (docs/architecture/ELEMENTS.md): parses/validates a song's
   `elements/<name>/element.json` (v0 — name shape, directory-name match,

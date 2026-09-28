@@ -312,7 +312,8 @@ elsewhere). So a shell crash takes the wallpaper *and* the bar/dock/gadgets with
 it in one stroke — they are one process, not four. The wallpaper's own
 source-of-truth is the live-watched `stage/cover.json` (written by `lyra rice
 stage` when the song's cover derives or, for a direct hot-swap, `lyra cover set
-<path-or-name>`; its `"pick": true` marks the user's own choice, which the
+<path-or-name>`; it carries the song it was staged for, so a cover for another
+song is ignored, and its `"pick": true` marks the user's own choice, which the
 shell refuses to draw the song's live board over), falling back to the baked `AOIDE_WALLPAPER` env store path so the
 background survives reboots/rebuilds even though `stage/` is ephemeral. Swap is a
 hard cut — no crossfade.

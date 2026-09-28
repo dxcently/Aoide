@@ -15,6 +15,10 @@ pub const COVER_EXTS: &[&str] = &["webp", "png", "jpg", "jpeg"];
 /// own default.
 pub const PICK_FIELD: &str = "pick";
 
+/// The song a cover was staged for. Every writer stamps it; a file without it
+/// is legacy and applies to whichever song is staged.
+pub const SONG_FIELD: &str = "song";
+
 /// Derive a physical cover-art file for a song, or `None` when none exists.
 ///
 /// v0 notes carry no runtime cover field (the schema is palette-closed; the
@@ -49,88 +53,133 @@ pub fn resolve_cover_arg(arg: &str) -> PathBuf {
     }
 }
 
-// ── The stage seam: a song default, a user pick, or neither ──────────────────
+// ── The stage seam: the song's own cover, or the user's pick for it ──────────
 
-/// `<stage>/cover.json` — the one wallpaper seam this module's writers share.
-pub fn cover_dst() -> PathBuf {
+/// `<stage>/cover.json`.
+pub fn staged_cover_json() -> PathBuf {
     aoide_storage::fs::stage_dir().join("cover.json")
+}
+
+fn read_staged() -> Option<serde_json::Value> {
+    let raw = std::fs::read_to_string(staged_cover_json()).ok()?;
+    serde_json::from_str(&raw).ok()
 }
 
 /// The cover path `stage/cover.json` names, or `None` when the file is absent,
 /// unreadable, or carries no non-empty `path`.
 pub fn staged_path() -> Option<String> {
-    let raw = std::fs::read_to_string(cover_dst()).ok()?;
-    let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    let path = parsed.get("path")?.as_str()?;
-    (!path.is_empty()).then(|| path.to_string())
+    let path = read_staged()?.get("path")?.as_str()?.to_string();
+    (!path.is_empty()).then_some(path)
 }
 
-/// Does the staged `cover.json` hold a user pick? Every other answer — a
-/// missing file, a torn one, an absent field, an explicit `false` — is the
-/// song's own default, which is what the file was before the field existed.
+/// The song the staged cover was written for. `None` is a legacy file, written
+/// before writers stamped it — it applies to whichever song is staged.
+pub fn staged_song() -> Option<String> {
+    read_staged()?
+        .get(SONG_FIELD)?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// Is the staged cover the user's pick? Requires the marker AND a path to
+/// render — the same pair the shell's own gate requires.
 pub fn staged_is_pick() -> bool {
-    let Ok(raw) = std::fs::read_to_string(cover_dst()) else {
+    let Some(doc) = read_staged() else {
         return false;
     };
-    match serde_json::from_str::<serde_json::Value>(&raw) {
-        Ok(parsed) => parsed
-            .get(PICK_FIELD)
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false),
-        Err(_) => false,
-    }
+    doc.get(PICK_FIELD).and_then(|v| v.as_bool()).unwrap_or(false)
+        && doc
+            .get("path")
+            .and_then(|v| v.as_str())
+            .is_some_and(|path| !path.is_empty())
 }
 
-/// Stage a user pick — what `cover set` writes.
-pub fn stage_pick(path: &Path) -> std::io::Result<PathBuf> {
-    write_cover(serde_json::json!({ "path": path.to_string_lossy(), PICK_FIELD: true }))
+/// Stage a pick — what `cover set` writes. `song` is the song staged at write
+/// time; `None` (nothing staged) writes the legacy shape, which applies to
+/// whichever song loads.
+pub fn stage_pick(path: &Path, song: Option<&str>) -> std::io::Result<PathBuf> {
+    let path = path.to_string_lossy();
+    write_cover(match song {
+        Some(song) => serde_json::json!({ "path": path, PICK_FIELD: true, SONG_FIELD: song }),
+        None => serde_json::json!({ "path": path, PICK_FIELD: true }),
+    })
 }
 
-/// Stage a song default — what `rice stage` writes, never marked as a pick.
-pub fn stage_default(path: &Path) -> std::io::Result<PathBuf> {
-    write_cover(serde_json::json!({ "path": path.to_string_lossy() }))
+/// Stage `song`'s own cover as a default — what `rice stage` writes.
+pub fn stage_default(path: &Path, song: &str) -> std::io::Result<PathBuf> {
+    write_cover(serde_json::json!({ "path": path.to_string_lossy(), SONG_FIELD: song }))
 }
 
 /// Remove `stage/cover.json`. `Ok(false)` when there was nothing there.
 pub fn clear_staged() -> std::io::Result<bool> {
-    match std::fs::remove_file(cover_dst()) {
+    match std::fs::remove_file(staged_cover_json()) {
         Ok(()) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(e) => Err(e),
     }
 }
 
-/// What [`stage_for_song`] did to `stage/cover.json`.
-pub enum CoverStage {
-    /// The same song, with a pick standing: left byte-identical.
-    PickKept,
-    /// The song's own derivable cover, written as a default.
-    Default(PathBuf),
-    /// No derivable cover: a stale `cover.json` was removed (`true`), or was
-    /// not there to begin with.
-    Cleared(bool),
+/// What a default write did to `stage/cover.json`.
+pub enum CoverWrite {
+    /// The song's own cover, written as a default.
+    Written(PathBuf),
+    /// A `cover.json` that no longer belonged to this song was removed.
+    Removed,
+    /// Nothing derivable, and nothing there to remove.
+    Absent,
 }
 
-/// `rice stage <name>`'s cover half (CONTRACTS.md §4): a re-staged song keeps a
-/// standing pick, a switched-to song gets its own default. `prev_song` is the
-/// song the stage carried before the caller's livery write — a caller that has
-/// already disturbed the stage passes its own capture, so anything but
-/// `Some(name)` (a different song, nothing staged) is a switch.
-pub fn stage_for_song(name: &str, prev_song: Option<&str>) -> std::io::Result<CoverStage> {
-    if prev_song == Some(name) && staged_is_pick() {
+impl CoverWrite {
+    /// The word the command envelopes report as `coverStage`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CoverWrite::Written(_) => "default",
+            CoverWrite::Removed => "cleared",
+            CoverWrite::Absent => "none",
+        }
+    }
+}
+
+/// [`stage_for_song`]'s answer.
+pub enum CoverStage {
+    /// A pick for THIS song was standing: left byte-identical.
+    PickKept,
+    /// The song's own default was (re)established.
+    Wrote(CoverWrite),
+}
+
+/// `song`'s own default: its derivable cover, else no `cover.json` at all.
+/// Keeps no pick — a caller that wants one preserved asks [`stage_for_song`].
+pub fn stage_song_default(song: &str) -> std::io::Result<CoverWrite> {
+    match derive_cover(song) {
+        Some(path) => {
+            stage_default(&path, song)?;
+            Ok(CoverWrite::Written(path))
+        }
+        None => clear_staged().map(|removed| {
+            if removed {
+                CoverWrite::Removed
+            } else {
+                CoverWrite::Absent
+            }
+        }),
+    }
+}
+
+/// `rice stage <song>`'s cover half (CONTRACTS.md §4). A cover carries its
+/// song: a pick the user made for THIS song is what shows, so re-staging that
+/// song — a bare `rice stage`, a `rice mode` re-pin, a rebuild — leaves it
+/// alone. Any other cover standing (another song's pick or default, nothing at
+/// all) is replaced by this song's own default.
+pub fn stage_for_song(song: &str) -> std::io::Result<CoverStage> {
+    if staged_is_pick() && staged_song().as_deref() == Some(song) {
         return Ok(CoverStage::PickKept);
     }
-    match derive_cover(name) {
-        Some(path) => {
-            stage_default(&path)?;
-            Ok(CoverStage::Default(path))
-        }
-        None => clear_staged().map(CoverStage::Cleared),
-    }
+    stage_song_default(song).map(CoverStage::Wrote)
 }
 
 fn write_cover(value: serde_json::Value) -> std::io::Result<PathBuf> {
-    let dst = cover_dst();
+    let dst = staged_cover_json();
     let body = serde_json::to_string_pretty(&value).unwrap_or_default() + "\n";
     aoide_storage::fs::atomic_write(&dst, &body)?;
     Ok(dst)
@@ -197,21 +246,36 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
-        stage_pick(Path::new("/tmp/user-choice.png")).unwrap();
-        assert!(staged_is_pick(), "cover set stages a PICK");
+        stage_pick(Path::new("/tmp/user-choice.png"), Some("dusk")).unwrap();
+        assert!(staged_is_pick());
         assert_eq!(staged_path().as_deref(), Some("/tmp/user-choice.png"));
+        assert_eq!(staged_song().as_deref(), Some("dusk"));
 
-        stage_default(Path::new("/tmp/song-default.png")).unwrap();
+        stage_default(Path::new("/tmp/song-default.png"), "dusk").unwrap();
         assert!(!staged_is_pick(), "a song default carries no pick field");
         assert_eq!(staged_path().as_deref(), Some("/tmp/song-default.png"));
+        assert_eq!(staged_song().as_deref(), Some("dusk"));
+
+        // A pick with no song to attribute it to (nothing was staged) keeps
+        // the whole path requirement: the marker needs a path to mean anything.
+        stage_pick(Path::new("/tmp/user-choice.png"), None).unwrap();
+        assert!(staged_is_pick());
+        assert_eq!(staged_song(), None);
+        std::fs::write(
+            staged_cover_json(),
+            "{\"path\":\"\",\"pick\":true,\"song\":\"dusk\"}\n",
+        )
+        .unwrap();
+        assert!(!staged_is_pick(), "the marker alone is not a pick");
 
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Back-compat: a v0 file (`{"path": …}`, no field) reads as the song's
-    /// own default — which is what it was when it was written.
+    /// Back-compat: a file with no `song` field is legacy and applies to
+    /// whichever song is staged — but a legacy PICK is not kept by a re-stage,
+    /// because keeping one requires knowing which song it was made for.
     #[test]
-    fn a_v0_cover_json_without_the_field_is_not_a_pick() {
+    fn a_legacy_cover_json_without_the_song_field_is_never_kept() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
         let root = unique_tmp("cover-v0-field");
@@ -219,21 +283,34 @@ mod tests {
         std::fs::create_dir_all(&stage).unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
-        std::fs::write(cover_dst(), "{\"path\":\"/tmp/old.png\"}\n").unwrap();
+        std::fs::write(staged_cover_json(), "{\"path\":\"/tmp/old.png\"}\n").unwrap();
         assert!(!staged_is_pick());
         assert_eq!(staged_path().as_deref(), Some("/tmp/old.png"));
+        assert_eq!(staged_song(), None);
 
         // …and an explicit `false` (or garbage) is not a pick either.
-        std::fs::write(cover_dst(), "{\"path\":\"/tmp/old.png\",\"pick\":false}").unwrap();
+        std::fs::write(staged_cover_json(), "{\"path\":\"/tmp/old.png\",\"pick\":false}").unwrap();
         assert!(!staged_is_pick());
-        std::fs::write(cover_dst(), "{not json").unwrap();
+        std::fs::write(staged_cover_json(), "{not json").unwrap();
         assert!(!staged_is_pick(), "a torn file is never a pick");
+        assert_eq!(staged_song(), None);
+
+        std::fs::write(
+            staged_cover_json(),
+            "{\"path\":\"/tmp/old.png\",\"pick\":true}\n",
+        )
+        .unwrap();
+        assert!(staged_is_pick());
+        assert!(matches!(
+            stage_for_song("dusk").unwrap(),
+            CoverStage::Wrote(CoverWrite::Removed)
+        ));
 
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The ruling, in one test: re-staging the SAME song keeps the pick;
-    /// staging a DIFFERENT song drops it and writes that song's own default.
+    /// The ruling, in one test: re-staging the pick's OWN song keeps it; any
+    /// other song replaces it with that song's own default.
     #[test]
     fn restaging_the_same_song_keeps_a_pick_and_a_song_switch_drops_it() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -246,44 +323,36 @@ mod tests {
         std::fs::write(covers.join("dusk.png"), b"\x89PNG stub").unwrap();
         std::env::set_var("AOIDE_STAGE_DIR", &stage);
 
-        stage_pick(Path::new("/tmp/user-choice.png")).unwrap();
-        let kept = stage_for_song("cadenza", Some("cadenza")).unwrap();
-        assert!(matches!(kept, CoverStage::PickKept));
-        assert!(staged_is_pick(), "same song → the pick is untouched");
+        stage_pick(Path::new("/tmp/user-choice.png"), Some("cadenza")).unwrap();
+        assert!(matches!(stage_for_song("cadenza").unwrap(), CoverStage::PickKept));
+        assert!(staged_is_pick(), "the pick's own song is staged");
         assert_eq!(staged_path().as_deref(), Some("/tmp/user-choice.png"));
 
-        // A different song: the pick is dropped and dusk's own cover staged
-        // as a DEFAULT — never as a pick.
-        let switched = stage_for_song("dusk", Some("cadenza")).unwrap();
-        match switched {
-            CoverStage::Default(path) => assert!(path.ends_with("covers/dusk.png")),
-            _ => panic!("a song switch stages the new song's own default"),
+        // A different song takes its own cover, as a default.
+        match stage_for_song("dusk").unwrap() {
+            CoverStage::Wrote(CoverWrite::Written(path)) => {
+                assert!(path.ends_with("covers/dusk.png"), "{path:?}");
+            }
+            _ => panic!("a switch stages the new song's own default"),
         }
         assert!(!staged_is_pick(), "the new song's default is not a pick");
+        assert_eq!(staged_song().as_deref(), Some("dusk"));
         assert!(staged_path().unwrap().ends_with("covers/dusk.png"));
 
-        // And a song WITH no derivable cover on a switch clears the old
-        // cover rather than leaving the previous song's wallpaper standing
-        // (the leak this rule exists to close).
-        stage_pick(Path::new("/tmp/user-choice.png")).unwrap();
-        let cleared = stage_for_song("nocturne", Some("dusk")).unwrap();
-        assert!(matches!(cleared, CoverStage::Cleared(true)));
-        assert!(!cover_dst().exists(), "no derivable cover → no cover.json");
+        // A song with nothing derivable leaves no cover at all, so the
+        // previous song's wallpaper cannot stand over it.
+        stage_pick(Path::new("/tmp/user-choice.png"), Some("cadenza")).unwrap();
+        assert!(matches!(
+            stage_for_song("nocturne").unwrap(),
+            CoverStage::Wrote(CoverWrite::Removed)
+        ));
+        assert!(!staged_cover_json().exists());
         assert_eq!(staged_path(), None);
 
-        // An unknown previous song (a cold stage, a hand-written file) is a
-        // switch too — a pick can only survive when we KNOW the song matches.
-        stage_pick(Path::new("/tmp/user-choice.png")).unwrap();
+        // Nothing staged and nothing derivable: idempotent, not an error.
         assert!(matches!(
-            stage_for_song("nocturne", None).unwrap(),
-            CoverStage::Cleared(true)
-        ));
-        assert!(!cover_dst().exists());
-
-        // Clearing when nothing is staged is idempotent, not an error.
-        assert!(matches!(
-            stage_for_song("nocturne", Some("dusk")).unwrap(),
-            CoverStage::Cleared(false)
+            stage_for_song("nocturne").unwrap(),
+            CoverStage::Wrote(CoverWrite::Absent)
         ));
 
         let _ = std::fs::remove_dir_all(&root);

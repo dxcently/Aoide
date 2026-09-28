@@ -41,9 +41,10 @@ exists, and what `lyra cover set` stages.
 
 The slot has NO baseline floor (`slots.md`): the board draws only for the song
 that authors it, and only while that song's own cover is what is staged. A
-`lyra cover set` pick (`stage/cover.json`'s `"pick": true`, CONTRACTS.md §4)
-is what shows, full stop — the shell destroys the board rather than hiding it,
-so no repaint runs under the chosen image.
+`lyra cover set` pick is what shows, full stop — the shell destroys the board
+rather than hiding it, so no repaint runs under the chosen image (a cover also
+carries the song it was staged for, and one naming another song is ignored,
+CONTRACTS.md §4).
 
 Same board, same seed, same size — the two cannot disagree: the widget
 generates from `CoverPcb`'s own generator at the output's exact size, which is

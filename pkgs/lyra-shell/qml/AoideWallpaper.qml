@@ -37,14 +37,21 @@ Item {
     // live stage/cover.json is runtime state nothing re-seeds from the song).
     readonly property string bakedWallpaper: Quickshell.env("AOIDE_WALLPAPER") || ""
 
-    // The live stage cover (rice preview/adopt or a manual write) OVERRIDES the
-    // baked default; falls back to the baked path when the stage is absent/empty.
-    property string wallpaperPath: bakedWallpaper
+    // The live staged cover (rice preview/adopt or a manual write). A cover
+    // carries the song it was staged for: one naming another song is ignored,
+    // and the layer falls back to the baked default below.
+    property string stagedCoverPath: ""
+    property string stagedCoverSong: ""
+    property bool stagedCoverPick: false
+    readonly property bool stagedCoverApplies:
+        root.stagedCoverSong.length === 0 || root.stagedCoverSong === root.livery.songName
 
-    // Is the staged cover the user's pick rather than the song's own default?
-    // One named place to ask, since the board gate below and any later
-    // consumer (an external wallpaper engine) both depend on it.
-    property bool pickStaged: false
+    // Is the user's own pick what shows right now?
+    readonly property bool pickStaged:
+        root.stagedCoverPick && root.stagedCoverApplies && root.stagedCoverPath.length > 0
+
+    readonly property string wallpaperPath:
+        root.stagedCoverApplies && root.stagedCoverPath.length > 0 ? root.stagedCoverPath : root.bakedWallpaper
 
     readonly property string coverJsonPath:
         (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/song/stage/cover.json"
@@ -56,11 +63,13 @@ Item {
         onTextChanged: {
             try {
                 var d = JSON.parse(coverFile.text())
-                root.wallpaperPath = (d && d.path) ? ("" + d.path) : root.bakedWallpaper
-                root.pickStaged = !!(d && d.pick === true && d.path)
+                root.stagedCoverPath = (d && d.path) ? ("" + d.path) : ""
+                root.stagedCoverSong = (d && d.song) ? ("" + d.song) : ""
+                root.stagedCoverPick = !!(d && d.pick === true)
             } catch (e) {
-                root.wallpaperPath = root.bakedWallpaper /* absent/garbage → baked song wallpaper */
-                root.pickStaged = false
+                root.stagedCoverPath = ""
+                root.stagedCoverSong = ""
+                root.stagedCoverPick = false
             }
         }
         onFileChanged: coverFile.reload()
@@ -89,12 +98,9 @@ Item {
     // live, on this surface — cadenza's circuit board moves its light on the
     // copper here.
     //
-    // Two gates, and this slot has NO baseline floor: `has` resolves the active
-    // song's own manifest entry only, because sonata ships no body for this
-    // slot (a baseline twin here painted a second, full-bleed copy of the cover
-    // over the image). A pick is what shows, full stop — no hidden repaint
-    // under a chosen image, so the gate is a Loader's `active` and the board,
-    // with its timer, is destroyed rather than hidden.
+    // This slot has NO baseline floor: `has` resolves the active song's own
+    // manifest entry, and sonata ships no body for it. Loader, not visible: a
+    // pick destroys the board so its timer stops.
     readonly property bool boardActive:
         !root.pickStaged && root.stagingEngine.has(root.livery.songName, "wallpaper")
 
@@ -106,8 +112,7 @@ Item {
         sourceComponent: boardComponent
     }
 
-    // Full-bleed by definition — the slot anchors to this item rather than
-    // reporting an implicit size, so it needs no `extraProps`.
+    // The slot is full-bleed: it anchors to this item, so it reports no size.
     Component {
         id: boardComponent
         WidgetSlot {

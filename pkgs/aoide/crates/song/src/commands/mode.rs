@@ -27,14 +27,13 @@
 //!   draft-awareness and never auto-prefer or auto-detect one — reaching a
 //!   draft at all only ever happens through `rice mode draft <name>`.
 //!
-//! `stage`/`declarative` both reuse [`super::rice::handle_rice_stage_with_prev`]
+//! `stage`/`declarative` both reuse [`super::rice::handle_rice_stage`]
 //! directly (guard-free, `pub(crate)`) when a song name is given — the SAME
 //! side effects a bare `rice stage <name>` has — so `declarative <name>` can
 //! re-pin `stage/livery.json` to that song's declared notes and lock it in
 //! one step, even from the default (unmarked) declarative state, without
 //! tripping its own guard (the marker isn't flipped until AFTER the write
-//! succeeds). They pass it the song the stage carried, captured before their
-//! own [`teardown_draft_symlink`].
+//! succeeds).
 //!
 //! `rice mode stage` never leaves a bare flag-flip: with no name it resolves
 //! "the current rice" off the existing `stage/livery.json`'s own `"song"`
@@ -54,11 +53,8 @@
 //! plain declared content, so that write lands in a real file rather than
 //! transparently through into whatever draft the symlink still pointed at.
 //! Neither leaves a dangling symlink behind when transitioning out of
-//! `Draft`. Each therefore captures "the song currently staged"
-//! ([`current_staged_song`], read THROUGH that symlink while it still exists)
-//! before the teardown, because after it there is no stage file left to read
-//! and the wallpaper half of the re-stage would take a pick made for this very
-//! song for a pick made for another one, and drop it (CONTRACTS.md §4).
+//! `Draft`. Neither leaves a dangling symlink behind when transitioning out
+//! of `Draft`.
 
 use aoide_protocol::Invocation;
 use aoide_protocol::output::{Outcome, Status};
@@ -227,11 +223,6 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
         .or_else(|| existing.staging_song.clone())
         .or_else(current_staged_song);
 
-    // Before the teardown below: afterwards the symlink that IS
-    // stage/livery.json is gone, so the staged song is unreadable and a pick
-    // made for the song being re-staged would be dropped.
-    let prev_song = current_staged_song();
-
     if let Err(e) = teardown_draft_symlink() {
         return Outcome::error("rice.mode.stage", format!("failed to clear draft routing: {e}"))
             .with_data(json!({ "reason": "symlink-teardown-failed" }));
@@ -268,8 +259,7 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
             flags: inv.flags.clone(),
             door: inv.door,
         };
-        let mut staged =
-            super::rice::handle_rice_stage_with_prev(&stage_inv, prev_song.as_deref());
+        let mut staged = super::rice::handle_rice_stage(&stage_inv);
         if staged.status != Status::Ok {
             staged.command = "rice.mode.stage".to_string();
             return staged;
@@ -364,9 +354,6 @@ fn handle_mode_declarative(inv: &Invocation) -> Outcome {
         .or_else(super::rice::declared_song)
         .or_else(current_staged_song);
 
-    // Same capture, same reason as `handle_mode_stage` above.
-    let prev_song = current_staged_song();
-
     if let Err(e) = teardown_draft_symlink() {
         return Outcome::error("rice.mode.declarative", format!("failed to clear draft routing: {e}"))
             .with_data(json!({ "reason": "symlink-teardown-failed" }));
@@ -380,8 +367,7 @@ fn handle_mode_declarative(inv: &Invocation) -> Outcome {
             flags: inv.flags.clone(),
             door: inv.door,
         };
-        let mut staged =
-            super::rice::handle_rice_stage_with_prev(&stage_inv, prev_song.as_deref());
+        let mut staged = super::rice::handle_rice_stage(&stage_inv);
         if staged.status != Status::Ok {
             staged.command = "rice.mode.declarative".to_string();
             return staged;
@@ -998,11 +984,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    // ── A wallpaper pick across a mode change (the M1 regression) ────────────
-    //
-    // `rice mode stage`/`declarative` tear the Draft routing symlink down
-    // before re-staging, so "which song was staged" must be captured first or
-    // the cover half sees no stage file and calls it a switch.
+    // ── A wallpaper pick across a mode change and a rebuild ──────────────────
 
     /// `<root>/{stage,songbook/<song>/livery.json}` for each named song, with
     /// `AOIDE_STAGE_DIR` pointed at the stage and the songbook gate fixtured.
@@ -1021,6 +1003,47 @@ mod tests {
         (root, stage)
     }
 
+    /// The rebuild case: the activation seed rewrites the staged `song` to the
+    /// declared one and leaves `cover.json` alone, so a pick must survive being
+    /// reseeded away and back — and must not show over a different song.
+    #[test]
+    fn a_pick_survives_a_reseed_to_the_declared_song_and_goes_for_another() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let (root, stage) = pick_tmp("mode-reseed-pick", &["cadenza", "sonata"]);
+
+        handle_mode_stage(&inv(&["rice", "mode", "stage"], &["cadenza"]));
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("cadenza"))
+            .unwrap();
+        let staged_pick = std::fs::read_to_string(stage.join("cover.json")).unwrap();
+
+        let mut reseeded: Value = serde_json::from_str(
+            &std::fs::read_to_string(stage.join("livery.json")).unwrap(),
+        )
+        .unwrap();
+        reseeded["song"] = json!("sonata");
+        std::fs::write(stage.join("livery.json"), serde_json::to_string(&reseeded).unwrap())
+            .unwrap();
+
+        let out = handle_mode_stage(&inv(&["rice", "mode", "stage"], &[]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert_eq!(current_staged_song().as_deref(), Some("cadenza"));
+        assert!(crate::cover::staged_is_pick(), "the pick's own song is back");
+        assert_eq!(
+            std::fs::read_to_string(stage.join("cover.json")).unwrap(),
+            staged_pick
+        );
+
+        let switched = handle_mode_stage(&inv(&["rice", "mode", "stage"], &["sonata"]));
+        assert_eq!(switched.status, Status::Ok, "{:?}", switched.data);
+        assert!(
+            !stage.join("cover.json").exists(),
+            "a pick for cadenza is not shown over sonata"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Stage `cadenza`, pick a wallpaper, fork a Draft, then leave Draft mode
     /// with a bare `rice mode stage` (what the RICE toggle sends).
     #[test]
@@ -1031,7 +1054,7 @@ mod tests {
 
         handle_mode_stage(&inv(&["rice", "mode", "stage"], &["cadenza"]));
         assert_eq!(current_staged_song().as_deref(), Some("cadenza"));
-        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png")).unwrap();
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("cadenza")).unwrap();
         let staged_pick = std::fs::read_to_string(stage.join("cover.json")).unwrap();
         assert!(crate::cover::staged_is_pick());
 
@@ -1074,7 +1097,7 @@ mod tests {
         let (root, stage) = pick_tmp("mode-draft-pick-declarative", &["cadenza"]);
 
         handle_mode_stage(&inv(&["rice", "mode", "stage"], &["cadenza"]));
-        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png")).unwrap();
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("cadenza")).unwrap();
         let staged_pick = std::fs::read_to_string(stage.join("cover.json")).unwrap();
 
         let drafted = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
@@ -1104,7 +1127,7 @@ mod tests {
         let (root, stage) = pick_tmp("mode-draft-pick-switch", &["cadenza", "etude"]);
 
         handle_mode_stage(&inv(&["rice", "mode", "stage"], &["cadenza"]));
-        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png")).unwrap();
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("cadenza")).unwrap();
         let drafted = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
         assert_eq!(drafted.status, Status::Ok, "{:?}", drafted.data);
 

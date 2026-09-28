@@ -205,11 +205,6 @@ let
       seedStageScript = pkgs.writeShellScript "aoide-seed-stage" ''
         set -euo pipefail
         mkdir -p "${config.aoide.root}/song/stage" "${config.aoide.root}/song/declared"
-        # The song the stage was carrying before this activation — the same
-        # `song` field `rice stage`/`rice mode` resolve the current rice from
-        # (CONTRACTS.md §4). Read BEFORE the write below replaces it.
-        prev_song=$(${pkgs.jq}/bin/jq -r '.song // ""' \
-          "${config.aoide.root}/song/stage/livery.json" 2>/dev/null || true)
         tmp=$(mktemp "${config.aoide.root}/song/stage/.livery.json.XXXXXX")
         ${pkgs.jq}/bin/jq -S '. + {song: $song}' --arg song "${config.aoide.song}" \
           "${stageLivery}" > "$tmp"
@@ -220,15 +215,9 @@ let
         cp "$tmp" "$declared"
         mv -f "$tmp" "${config.aoide.root}/song/stage/livery.json"
         mv -f "$declared" "${config.aoide.root}/song/declared/livery.json"
-        # The wallpaper (CONTRACTS.md §4). Same rule `rice stage` applies: the
-        # song this activation seeds keeps a pick the user made for it, a
-        # different song drops it — along with the previous song's cover.json,
-        # which would otherwise stand over the new song forever. Nothing is
-        # written for the new song: with cover.json gone the layer reads the
-        # baked AOIDE_WALLPAPER.
-        if [ "$prev_song" != "${config.aoide.song}" ]; then
-          rm -f "${config.aoide.root}/song/stage/cover.json"
-        fi
+        # No cover.json handling here: a cover carries the song it was staged
+        # for, and the layer ignores one that names a song other than the
+        # staged one (CONTRACTS.md §4) — so reseeding the staged song is enough.
         # The declared song's terminal opacity, as a one-line kitty fragment
         # (CONTRACTS.md §4). The kitty dendrite includes this BEFORE the staged
         # colours, and kitty's last-include-wins keeps a live stage authoritative

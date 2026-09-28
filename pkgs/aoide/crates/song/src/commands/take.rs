@@ -2608,14 +2608,15 @@ mod tests {
 
         // Take 1: the song's own default cover, no pick.
         write_livery(&stage, "#111111");
-        crate::cover::stage_default(std::path::Path::new("/tmp/song-cover.png")).unwrap();
+        crate::cover::stage_default(std::path::Path::new("/tmp/song-cover.png"), "sonata")
+            .unwrap();
         let take1 = snapshot("rice.take", "stage").unwrap();
         assert!(take1.cover.is_some());
         assert!(!crate::cover::staged_is_pick());
 
-        // Take 2: the user's pick — the same `{"path": …, "pick": true}` write
-        // `cover set` performs.
-        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png")).unwrap();
+        // Take 2: the user's pick for the staged song.
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("sonata"))
+            .unwrap();
         let take2 = snapshot("rice.take", "stage").unwrap();
         assert!(take2.cover.is_some());
 

@@ -72,16 +72,15 @@
   ones allowed to pull in `aoide-storage` (Phase 5b); don't push a storage
   dependency down into `livery`/`live` without re-deriving why that
   boundary existed.
-- **`cover::stage_for_song` is the ONE implementation of the pick rule —
-  don't re-implement it at a call site.** A user's wallpaper pick
-  (`stage/cover.json`'s additive `"pick": true`, CONTRACTS.md §4) is what
-  shows and SURVIVES re-staging the same song; a DIFFERENT song resets to
-  that song's own derivable cover, and to NO cover when it has none. The
-  "previous song" is always `commands/mode.rs`'s `current_staged_song` (the
-  staged livery's own `"song"` breadcrumb) — never a new field, a new marker
-  file, or a second read of the stage. `rice stage`, `cover set --clear` and
-  the lane's activation seed all state this rule once, in one of those two
-  languages (Rust or the seed's shell).
+- **A cover carries its song — don't add a rule that reads "the previous
+  song".** Every writer of `stage/cover.json` stamps the staged song into it
+  (`cover::stage_pick`/`stage_default`), and the ONE rule is read-side: a
+  cover applies while its `song` equals the song staged now, and is ignored
+  otherwise (`AoideWallpaper.qml`; CONTRACTS.md §4). `cover::stage_for_song`
+  keeps a standing pick iff `pick.song == <song being staged>` and otherwise
+  writes that song's own default, so `rice stage`, the `rice mode` re-pins,
+  `cover set --clear` and the lane's activation seed never need to know what
+  was staged a moment ago — the seed touches `cover.json` not at all.
 - **Staging/draft/declarative-mode gating lives in `commands`, not here.**
   `rice stage`/`cover set` refuse outside an unlocked mode — that gate is a
   `commands` concern layered over these pure/near-pure engine modules.
