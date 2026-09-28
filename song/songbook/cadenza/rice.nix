@@ -12,7 +12,12 @@
 # and aoide.arrangement. All values are literal nix (no song/ runtime reads).
 # The key is DARK. Stylix polarity is not yet a livery field (mkDefault "light"
 # in the stylix module); intent.md §5 carries the proposed `livery.polarity`.
-{ lib, config, ... }:
+{
+  lib,
+  config,
+  pkgs,
+  ...
+}:
 {
   config = lib.mkIf (config.aoide.song == "cadenza") {
 
@@ -81,6 +86,19 @@
       blurEnabled = false;
       blurSize = null;
       blurPasses = null;
+    };
+
+    # ── Font tier ────────────────────────────────────────────────────────────
+    # The terminal's face is part of the key. A console sets in a fixed-pitch
+    # machine face, not a humanist serif: ShureTechMono (Share Tech Mono,
+    # nerd-patched) is squared-off, single-weight and flat — a CRT read, and it
+    # carries the box-drawing and block coverage the termui grammar leans on
+    # (U+2500/2502/250C/2510, U+2588, U+2591 — checked against the installed
+    # face). Widgets keep JetBrainsMono (widgets/Kit.js, intent §2 "one face"):
+    # that is the pane's cell, this is the terminal an agent lands in.
+    aoide.livery.fonts.monospace = {
+      name = "ShureTechMono Nerd Font Mono";
+      package = pkgs.nerd-fonts.shure-tech-mono;
     };
 
     # ── Cover-art note ───────────────────────────────────────────────────────

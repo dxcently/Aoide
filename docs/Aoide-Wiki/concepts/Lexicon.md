@@ -78,7 +78,7 @@ Terms naming the connective tissue rather than either half:
 
 A **livery** is the single set of house colours a whole retinue wears in unison — a servant, a ship, a herald read at a glance as one household's. The industry term for this layer is *design tokens* (W3C design-tokens format, `CONTRACTS.md` §1), but a token names a single value; the engine dresses *every* surface in one song's identity, which a token alone doesn't capture. One word covers both the values and the act of stamping them.
 
-The seam sits on neither of the two existing axes — the Greek axis (who acts) or the music axis (what is made and performed) — a seam-level name of its own. `aoide.arrangement` sits at the same seam, livery's structural sibling: livery is the song's DRESS (palette · base16 · component tiers · geometry · cover), arrangement is its STRUCTURE — which widget/surface TYPES a song brings into existence (`modules/nucleus/options.nix`), stored in the same `livery.json` and read under the same closed paint-read whitelist (`AGENTS.md` house rule 5).
+The seam sits on neither of the two existing axes — the Greek axis (who acts) or the music axis (what is made and performed) — a seam-level name of its own. `aoide.arrangement` sits at the same seam, livery's structural sibling: livery is the song's DRESS (palette · base16 · component tiers · geometry · fonts · cover), arrangement is its STRUCTURE — which widget/surface TYPES a song brings into existence (`modules/nucleus/options.nix`), stored in the same `livery.json` and read under the same closed paint-read whitelist (`AGENTS.md` house rule 5).
 
 ## How it all flows
 

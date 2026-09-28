@@ -109,6 +109,21 @@ let
         base0F = stripHash p.urgent; # brown
       };
 
+      # ── the song's face (CONTRACTS.md §1, font tier) ────────────────────────
+      # Additive-optional: the song's `aoide.livery.fonts.monospace` when it
+      # carries one, else this lane's own default. Read straight off the option,
+      # not through `resolve` — the venue recolour is a colour pass, and a face
+      # is not a colour. The role shape is Stylix's own ({ package, name }), so
+      # the value passes through untouched.
+      monospace =
+        if config.aoide.livery.fonts.monospace != null then
+          config.aoide.livery.fonts.monospace
+        else
+          {
+            package = pkgs.libertine;
+            name = "Linux Libertine Mono O";
+          };
+
       # Deterministic solid-colour fallback wallpaper: a PNG from palette.bg. This
       # is the cover this lane bakes when the song carries no `notes.wallpaper` —
       # it keeps the baked path buildable without shipping a binary asset and with
@@ -237,18 +252,17 @@ let
               size = 40;
             };
 
-            # Fonts: v0 notes carry no font field yet — sane default, host/rice
-            # overridable. Linux Libertine is Aoide's primary face — a humanist
-            # serif; the mono role takes "Linux Libertine Mono O", sansSerif its
-            # companion "Linux Biolinum O", serif the base "Linux Libertine O".
-            # NOT a nerd font — icon glyphs and musical notation fall back to the
-            # glyph-coverage set (symbola/noto) the fonts dendrite installs.
-            # `emoji` is left at its own default (noto-fonts-color-emoji).
+            # Fonts: the song's face tier (`aoide.livery.fonts`) when it carries
+            # one, else this lane's default. `monospace` is the tier's only
+            # role today — the terminal, where agents live. The remaining roles
+            # stay Linux Libertine: Aoide's primary face is a humanist serif,
+            # with sansSerif its companion "Linux Biolinum O" and serif the base
+            # "Linux Libertine O". NOT a nerd font — icon glyphs and musical
+            # notation fall back to the glyph-coverage set (symbola/noto) the
+            # fonts dendrite installs. `emoji` is left at its own default
+            # (noto-fonts-color-emoji).
             fonts = lib.mkDefault {
-              monospace = {
-                package = pkgs.libertine;
-                name = "Linux Libertine Mono O";
-              };
+              inherit monospace;
               sansSerif = {
                 package = pkgs.libertine;
                 name = "Linux Biolinum O";

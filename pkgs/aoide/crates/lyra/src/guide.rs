@@ -46,7 +46,7 @@ House rules — the repo's root `AGENTS.md`, with rules 1, 5 and 7 in full:
   5. Paint dendrites read only the dress, the structure, the surfaces, and
      identity. A paint dendrite — `compositor` and its providers, `greeter`,
      `stylix`, `quickshell`, `lyra` — reads only `aoide.livery` (the dress:
-     palette · base16 · component tiers · geometry · cover),
+     palette · base16 · component tiers · geometry · fonts · cover),
      `aoide.arrangement` (the structure: which widget/surface TYPES a song
      brings into existence), `aoide.surfaces` (the render-surface ownership
      registry: a dendrite declares the surfaces it owns; `stylix` reads it to

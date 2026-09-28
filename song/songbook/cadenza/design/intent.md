@@ -56,9 +56,16 @@ Conductor Channel).
 ## 2. Grammar — the drawing vocabulary
 
 ### Faces and the grid
-- One face: **JetBrainsMono Nerd Font Mono** (installed; box drawing and
-  block elements and braille U+2800–28FF all native, no fallback).
-  No proportional text anywhere.
+- One face for paint: **JetBrainsMono Nerd Font Mono** (installed; box
+  drawing and block elements and braille U+2800–28FF all native, no
+  fallback). No proportional text anywhere.
+- One face for the terminal: **ShureTechMono Nerd Font Mono**, set as
+  `aoide.livery.fonts.monospace` — squared-off, single-weight, a console
+  rather than the desktop's humanist serif. A pane is the song's cell, the
+  terminal is where an agent lands; both are fixed-pitch machine faces.
+  Coverage checked against the installed face: box drawing and rules
+  (U+2500, U+2502, U+250C, U+2510) and block/shade (U+2588, U+2591). This
+  tier is baked — a face change lands on a rebuild, never on `rice stage`.
 - Every pane lays out on a character cell measured once from `FontMetrics`
   (never hard-coded); pane sizes are whole cells, so a rule always closes.
 - Three type tiers: **title** (bold, accent, UPPERCASE in the rule),
@@ -619,3 +626,9 @@ reads a fixture path.
   lit amber, and Enter fire it (§3.5). The RICE cell turns a dim `…` on the
   click and swallows further clicks until the mode changes or 10s pass, so
   a double click can no longer send two toggles (§3.1).
+- 2026-09-28 — khoa: the terminal should read hacker-y too, as part of the
+  key. Landed as the livery font tier (`aoide.livery.fonts.monospace`, a v0
+  additive tier, nucleus option + CONTRACTS §1 + the stylix lane's source of
+  truth), set here to ShureTechMono Nerd Font Mono; panes keep
+  JetBrainsMono. Baked only: stylix is the one reader, so the face lands on
+  the rebuild and staging cannot re-face a terminal (§2 Faces and the grid).

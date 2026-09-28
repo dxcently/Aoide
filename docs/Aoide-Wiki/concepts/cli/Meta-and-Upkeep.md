@@ -147,7 +147,7 @@ lyra onboard [--out <path>] [--yes] [--json]
 - **Reads:** the checkout root, found by walking up from the cwd for a
   directory holding both `flake.nix` and `pkgs/aoide`; outside a checkout the
   run fails exit 1, `reason: "no-checkout"`. The option set is derived live
-  with `nix eval <checkout>#aoideOptions` (161 options today), never from a
+  with `nix eval <checkout>#aoideOptions` (165 options today), never from a
   hand-list.
 - **Writes:** `./aoide.nix` (`--out <path>` overrides) — a nix module the
   user imports, listing every `aoide.*` module option commented out at its

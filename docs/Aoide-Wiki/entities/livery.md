@@ -71,6 +71,7 @@ reads were dropped when Phase 4 closed the transition window
 | Semantic tier | Open (v1 design-system work) | Names meanings, survives transposition |
 | Component tier | Open (v1 design-system work) | Maps semantics to specific surfaces |
 | Geometry tier | Settled, nix + CLI only | `aoide.livery.geometry` — see below |
+| Font tier | Settled, nix only | `aoide.livery.fonts` — see below |
 
 The open schema question is scoped to the semantic and component tiers only.
 The palette tier is closed.
@@ -100,6 +101,29 @@ staging outcome. It never runs `hyprctl reload` — every field it touches is
 live-settable via `keyword`, and a reload would re-read the baked
 `hyprland.conf` from disk, discarding whatever else the compositor is
 carrying live.
+
+## The font tier
+
+`aoide.livery.fonts` (`modules/nucleus/options.nix`) carries the face a song
+wears, keyed by [[Stylix]] font role: `fonts.monospace = { package, name } |
+null` — the terminal, where agents live, and the one role a song uses today.
+The role's shape is Stylix's own, so the lane passes the value through
+untranslated; `package` is a literal nix value, the `wallpaper` note's
+precedent. The remaining roles (`sansSerif`, `serif`, `emoji`, `sizes`) stay
+the lane's, and `null` means "the lane's own face" — Linux Libertine Mono O —
+so a song that sets no face bakes the theme it baked before.
+
+This tier is BAKED ONLY, the cover note's posture rather than geometry's: it
+has no `stage/livery.json` twin, no engine schema, and no `rice lint` rule,
+because nothing at runtime reads a face and a terminal cannot be re-faced
+mid-session. A face change lands on the user-gated rebuild, and staging
+another song does not re-face the terminal. A live face would be a new emitter
+(OSC 50 against the terminal), not a change to this tier.
+
+`cadenza` sets it to a CRT console face — its terminal is the key's own
+voice, not the desktop's default serif. Widget faces are the song's own
+business (`song/songbook/<song>/widgets/Kit.js`) and do not move with this
+tier.
 
 ## Prior art — the Node engine that was folded in
 

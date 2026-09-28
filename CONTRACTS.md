@@ -241,6 +241,27 @@ A literal nix path (copied to the store — never a `song/` runtime read). The
 the stylix lane bakes it as the base-context image; `null` bakes the solid-colour
 fallback derived from `palette.bg`.
 
+### Font tier (v0 additive — `fonts.<role>`)
+
+| Key               | Type                    | Default | Falls back to                                       |
+| ----------------- | ----------------------- | ------- | --------------------------------------------------- |
+| `fonts.monospace` | `nullOr {package,name}` | `null`  | the stylix lane's own face (Linux Libertine Mono O) |
+
+The face the song wears, per Stylix font role — `monospace` is the one role a
+song uses today: the terminal, where agents live. The role's shape IS Stylix's
+own (`{ package, name }`) because that lane is the tier's one consumer and
+passes the value through untranslated; `package` is a literal nix value (the
+`wallpaper` note's precedent), required, so a face nothing installs cannot
+silently fall back. The remaining roles (`sansSerif`, `serif`, `emoji`, and
+`sizes`) stay the lane's.
+
+**Baked only** — the `wallpaper` tier's posture, not geometry's: no
+`stage/livery.json` twin, no engine schema, no `rice lint` validation, because
+nothing at runtime reads a face and a terminal cannot be re-faced mid-session.
+A face change lands on the user-gated rebuild (§2), and staging another song
+does not re-face the terminal. Wanting a live face is wanting a new emitter
+(OSC 50 against the terminal), not a change to this tier.
+
 ### Override tier (v0 additive — venue recolour, `override.*`)
 
 `aoide.livery.override.{bg,fg,accent,urgent,hot}` (each `nullOr` hex, default

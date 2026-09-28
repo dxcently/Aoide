@@ -181,8 +181,9 @@ no behaviour, so an empty config evaluates. The surface:
   with `lib.mkIf (config.aoide.song == "<name>")`. See [[Song-Vocabulary#Replay — any song, any host]].
 - `aoide.livery` — the v0 livery schema: closed `palette.{bg,fg,accent,urgent}`
   (base16, permissive hex type) + optional component tiers `bar.*` / `notif.*` /
-  `window.*` (each `nullOr` hex, `null` → palette), plus an `override.*` venue
-  tier (host-set only, [[livery|resolved by `lib/livery.nix`]]).
+  `window.*` (each `nullOr` hex, `null` → palette), the additive-optional tiers
+  (`base16`, `geometry.*`, `fonts.monospace`, `wallpaper`), and an `override.*`
+  venue tier (host-set only, [[livery|resolved by `lib/livery.nix`]]).
 - `aoide.arrangement` — the v1 arrangement schema: which widget/surface types
   a song brings into existence. `aoide.livery`, `aoide.arrangement` and
   `aoide.surfaces` are the whole paint-lane read set, with the core scalars and

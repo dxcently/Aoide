@@ -106,6 +106,48 @@ let
     };
   };
 
+  # ── Font submodule (v0 optional tier: the face the song wears) ────────────
+  # Additive-optional, the geometry tier's posture: an absent tier means "the
+  # stylix lane's own default". The ROLE shape is Stylix's own — `{ package,
+  # name }` — because the stylix lane is the tier's one consumer and passes the
+  # value through, no translation.
+  #
+  # BAKED ONLY, the `wallpaper` tier's posture rather than geometry's: nothing
+  # at runtime reads a face, so there is no `stage/livery.json` twin and no
+  # engine schema — the stylix lane is the only reader, and the change lands on
+  # a rebuild. (Geometry rides the stage file because `hyprctl keyword` CAN set
+  # it live; a terminal cannot be re-faced mid-session.)
+  #
+  # A song names `package` as a literal nix value (the `wallpaper` note's
+  # precedent), not a string attribute name — Stylix needs the derivation to
+  # install the face, and a face nobody installed is a silent fallback.
+  fontRoleType = types.submodule {
+    options = {
+      name = mkOption {
+        type = types.str;
+        description = "Fontconfig family name, exactly as `fc-list` reports it (e.g. \"ShureTechMono Nerd Font Mono\").";
+      };
+      package = mkOption {
+        type = types.package;
+        description = "The package that installs the face. Required: naming a face nothing installs falls back silently.";
+      };
+    };
+  };
+
+  fontType = types.submodule {
+    options = {
+      monospace = mkOption {
+        type = types.nullOr fontRoleType;
+        default = null;
+        description = ''
+          The fixed-pitch face — the terminal, where agents live. Falls back to
+          the stylix lane's default ("Linux Libertine Mono O") when null. The
+          one role a song uses today; the remaining roles stay the lane's.
+        '';
+      };
+    };
+  };
+
   # ── Palette submodule (v0 closed tier: base16-derived) ────────────────────
   paletteType = types.submodule {
     options = {
@@ -494,6 +536,22 @@ in
               as the base16 tier. Hyprland-only in this pass; no QML consumer.
             '';
           };
+          fonts = mkOption {
+            type = fontType;
+            default = { };
+            description = ''
+              Font tier (v0 optional overrides): the face this song wears, per
+              Stylix font role — `monospace` today, the terminal an agent lands
+              in. Additive-optional: null means "the stylix lane's own default"
+              (Linux Libertine), so a song that sets no face bakes exactly the
+              theme it baked before.
+
+              BAKED ONLY — like `wallpaper`, and unlike `geometry`: this tier
+              has no `stage/livery.json` twin and no engine schema, because a
+              face cannot hot-swap. It lands on the user-gated rebuild, and a
+              staged song cannot re-face the terminal without one.
+            '';
+          };
           wallpaper = mkOption {
             type = types.nullOr types.path;
             default = null;
@@ -526,7 +584,7 @@ in
       description = ''
         The v1 arrangement schema — one of the three namespaces a paint lane may
         read. Where `aoide.livery` carries the song's DRESS (palette · base16
-        · component tiers · geometry · cover), arrangement carries its
+        · component tiers · geometry · fonts · cover), arrangement carries its
         STRUCTURE: which widget/surface TYPES the song brings into existence
         (`widgets`) and which painted surfaces it expects to stay mapped
         (`surfaces`). Dress and structure are different questions, so they
