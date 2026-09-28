@@ -215,6 +215,9 @@ let
         cp "$tmp" "$declared"
         mv -f "$tmp" "${config.aoide.root}/song/stage/livery.json"
         mv -f "$declared" "${config.aoide.root}/song/declared/livery.json"
+        # No cover.json handling here: a cover carries the song it was staged
+        # for, and the layer ignores one that names a song other than the
+        # staged one (CONTRACTS.md §4) — so reseeding the staged song is enough.
         # The declared song's terminal opacity, as a one-line kitty fragment
         # (CONTRACTS.md §4). The kitty dendrite includes this BEFORE the staged
         # colours, and kitty's last-include-wins keeps a live stage authoritative
@@ -582,8 +585,10 @@ let
                 # into the stage file on every activation — `seedStageScript` (above)
                 # does the actual write. Same "switch = truth resets the sketch"
                 # discipline as `aoideDeployQml`'s rsync above: this OVERWRITES whatever
-                # a live `rice preview`/`cover set` staged, which is intended — the next
-                # `rice preview` can re-sketch over it again live.
+                # a live `rice preview` staged, which is intended — the next
+                # `rice preview` can re-sketch over it again live. It reseeds
+                # `song/stage/livery.json` ONLY: `song/stage/cover.json` is left alone
+                # (CONTRACTS.md §4).
                 home.activation.aoideSeedStage = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
                   run ${seedStageScript}
                 '';

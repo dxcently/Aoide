@@ -6,7 +6,13 @@
 // hot-swaps the wallpaper live via FileView's watcher). Colors from livery
 // (solid palette fallback when no cover is staged or the image fails).
 //
-// stage/cover.json contract: { "path": "/abs/path/to/cover" }
+// stage/cover.json contract (CONTRACTS.md §4):
+//   { "path": "/abs/cover", "song": "dusk" }               the song's own default
+//   { "path": "/abs/cover", "song": "dusk", "pick": true }  the user's pick
+//
+// A cover carries the song it was staged for: one naming another song is
+// ignored (the baked/palette fallback shows instead), and a pick also stops
+// the song's own live `wallpaper` board being instantiated at all.
 
 import QtQuick
 import Quickshell
@@ -30,9 +36,21 @@ Item {
     // live stage/cover.json is runtime state nothing re-seeds from the song).
     readonly property string bakedWallpaper: Quickshell.env("AOIDE_WALLPAPER") || ""
 
-    // The live stage cover (rice preview/adopt or a manual write) OVERRIDES the
-    // baked default; falls back to the baked path when the stage is absent/empty.
-    property string wallpaperPath: bakedWallpaper
+    // The live staged cover (rice preview/adopt or a manual write). A cover
+    // carries the song it was staged for: one naming another song is ignored,
+    // and the layer falls back to the baked default below.
+    property string stagedCoverPath: ""
+    property string stagedCoverSong: ""
+    property bool stagedCoverPick: false
+    readonly property bool stagedCoverApplies:
+        root.stagedCoverSong.length === 0 || root.stagedCoverSong === root.livery.songName
+
+    // Is the user's own pick what shows right now?
+    readonly property bool pickStaged:
+        root.stagedCoverPick && root.stagedCoverApplies && root.stagedCoverPath.length > 0
+
+    readonly property string wallpaperPath:
+        root.stagedCoverApplies && root.stagedCoverPath.length > 0 ? root.stagedCoverPath : root.bakedWallpaper
 
     readonly property string coverJsonPath:
         (Quickshell.env("AOIDE_ROOT") || (Quickshell.env("HOME") + "/.aoide")) + "/song/stage/cover.json"
@@ -44,8 +62,14 @@ Item {
         onTextChanged: {
             try {
                 var d = JSON.parse(coverFile.text())
-                root.wallpaperPath = (d && d.path) ? ("" + d.path) : root.bakedWallpaper
-            } catch (e) { root.wallpaperPath = root.bakedWallpaper /* absent/garbage → baked song wallpaper */ }
+                root.stagedCoverPath = (d && d.path) ? ("" + d.path) : ""
+                root.stagedCoverSong = (d && d.song) ? ("" + d.song) : ""
+                root.stagedCoverPick = !!(d && d.pick === true)
+            } catch (e) {
+                root.stagedCoverPath = ""
+                root.stagedCoverSong = ""
+                root.stagedCoverPick = false
+            }
         }
         onFileChanged: coverFile.reload()
         Component.onCompleted: coverFile.reload()
@@ -69,21 +93,33 @@ Item {
     }
 
     // ── The song's own board, over that image ──────────────────────────────
-    // The `wallpaper` slot (slots.md, "Wired slots"): the active song may draw
-    // its own cover, live, on this surface — cadenza's circuit board moves its
-    // light on the copper here. Nothing is required of it: a song that authors
-    // no `widgets/wallpaper.qml` (and the baseline floor, which has none)
-    // resolves to nothing, and the cover image above stays what it was. The
-    // slot is full-bleed by definition — it anchors to this item rather than
-    // reporting an implicit size — so it needs no `extraProps`, and the widget
-    // reads `livery`/`bridge` like any other.
-    WidgetSlot {
+    // The `wallpaper` slot (slots.md): the active song may draw its own cover,
+    // live, on this surface — cadenza's circuit board moves its light on the
+    // copper here.
+    //
+    // This slot has NO baseline floor: `has` resolves the active song's own
+    // manifest entry, and sonata ships no body for it. Loader, not visible: a
+    // pick destroys the board so its timer stops.
+    readonly property bool boardActive:
+        !root.pickStaged && root.stagingEngine.has(root.livery.songName, "wallpaper")
+
+    Loader {
         id: songBoard
         anchors.fill: parent
         z: 1
-        livery: root.livery
-        bridge: root.bridge
-        stagingEngine: root.stagingEngine
-        slot: "wallpaper"
+        active: root.boardActive
+        sourceComponent: boardComponent
+    }
+
+    // The slot is full-bleed: it anchors to this item, so it reports no size.
+    Component {
+        id: boardComponent
+        WidgetSlot {
+            anchors.fill: parent
+            livery: root.livery
+            bridge: root.bridge
+            stagingEngine: root.stagingEngine
+            slot: "wallpaper"
+        }
     }
 }

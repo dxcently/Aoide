@@ -384,7 +384,19 @@ fn notes_source(name: &str) -> PathBuf {
 /// while `stage/livery.json` is routed into a draft (`rice mode draft`,
 /// `Draft` mode), this function's write lands straight in the draft file
 /// with zero symlink-awareness needed here, which is the entire mechanism.
+///
 pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
+    handle_rice_stage_inner(inv, true)
+}
+
+/// `rice mode declarative`'s re-pin: everything `rice stage` does except the
+/// cover half. A lock is not a song switch, and the read-side rule already
+/// hides a cover stamped for another song (CONTRACTS.md §4).
+pub(crate) fn handle_rice_stage_without_cover(inv: &Invocation) -> Outcome {
+    handle_rice_stage_inner(inv, false)
+}
+
+fn handle_rice_stage_inner(inv: &Invocation, stage_cover: bool) -> Outcome {
     let name = match inv.args.first() {
         Some(n) => n.clone(),
         None => {
@@ -498,26 +510,43 @@ pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
     let (terminal_changed, terminal_data) = stage_terminal_colors(terminal_conf.as_deref());
     changed.extend(terminal_changed);
 
-    // Cover: staged only when physically derivable; otherwise left untouched.
-    let cover = crate::cover::derive_cover(&name);
-    let cover_note = match &cover {
-        Some(path) => {
-            let cover_dst = stage.join("cover.json");
-            let body = serde_json::to_string_pretty(&json!({ "path": path.to_string_lossy() }))
-                .unwrap_or_default()
-                + "\n";
-            if let Err(e) = shellbridge::atomic_write(&cover_dst, &body) {
-                return Outcome::error(
-                    "rice.stage",
-                    format!("failed to stage cover.json: {e}"),
-                )
-                .with_data(json!({ "reason": "stage-write-failed", "target": cover_dst.to_string_lossy() }));
+    // Cover: the song's own default, or the user's pick for it (CONTRACTS.md
+    // §4). The song is stamped into whatever is written, which is what lets a
+    // pick survive a re-stage of its own song and be replaced by any other.
+    let cover_dst = crate::cover::staged_cover_json();
+    let (cover_note, cover_stage_word) = if stage_cover {
+        let cover_stage = match crate::cover::stage_for_song(&name) {
+            Ok(staged) => staged,
+            Err(e) => {
+                return Outcome::error("rice.stage", format!("failed to stage cover.json: {e}"))
+                    .with_data(json!({ "reason": "stage-write-failed", "target": cover_dst.to_string_lossy() }));
             }
-            changed.push(cover_dst.to_string_lossy().into_owned());
-            format!("staged cover {}", path.display())
-        }
-        None => "no derivable cover; cover.json left untouched".to_string(),
+        };
+        let note = match &cover_stage {
+            crate::cover::CoverStage::PickKept => {
+                format!("kept the wallpaper pick staged for `{name}`")
+            }
+            crate::cover::CoverStage::Wrote(crate::cover::CoverWrite::Written(path)) => {
+                changed.push(cover_dst.to_string_lossy().into_owned());
+                format!("staged cover {}", path.display())
+            }
+            crate::cover::CoverStage::Wrote(crate::cover::CoverWrite::Removed) => {
+                changed.push(cover_dst.to_string_lossy().into_owned());
+                format!("no derivable cover for `{name}`; cleared the staged cover")
+            }
+            crate::cover::CoverStage::Wrote(crate::cover::CoverWrite::Absent) => {
+                format!("no derivable cover for `{name}`; no cover staged")
+            }
+        };
+        let word = match &cover_stage {
+            crate::cover::CoverStage::PickKept => "pick-kept",
+            crate::cover::CoverStage::Wrote(write) => write.as_str(),
+        };
+        (note, word)
+    } else {
+        ("cover.json left alone".to_string(), "left-alone")
     };
+    let cover = crate::cover::staged_path();
 
     // Captured BEFORE the widget sync below so the outcome message's "N
     // stage file(s) live for hot-reload" clause keeps meaning "stage-dir
@@ -590,7 +619,8 @@ pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
     .with_data(json!({
         "name": name,
         "livery": notes_dst.to_string_lossy(),
-        "cover": cover.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        "cover": cover,
+        "coverStage": cover_stage_word,
         "hyprctl": hyprctl_status,
         "terminal": terminal_data,
         "widgets": widget_sync.note,
@@ -1057,10 +1087,11 @@ mod tests {
             .iter()
             .any(|c| c.ends_with("stage/terminal-colors.conf")));
         assert_eq!(out.data.as_ref().unwrap()["terminal"]["status"], "skipped");
-        // No cover exists for moonlight → cover.json is left untouched.
         assert!(!stage.join("cover.json").exists());
-        assert!(out.data.unwrap()["cover"].is_null());
-        assert!(out.message.contains("cover.json left untouched"));
+        let data = out.data.unwrap();
+        assert!(data["cover"].is_null());
+        assert_eq!(data["coverStage"], "none");
+        assert!(out.message.contains("no derivable cover for `moonlight`"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1083,9 +1114,102 @@ mod tests {
         assert_eq!(out.status, Status::Ok);
         let cover = std::fs::read_to_string(stage.join("cover.json")).unwrap();
         assert!(cover.contains("dusk.png"), "cover.json points at the derived file");
+        assert!(
+            !cover.contains("\"pick\""),
+            "a song's own cover is a DEFAULT, never marked as a pick: {cover}"
+        );
         assert!(out.changed.iter().any(|c| c.ends_with("cover.json")));
         let data = out.data.unwrap();
         assert!(data["cover"].as_str().unwrap().ends_with("covers/dusk.png"));
+        assert_eq!(data["coverStage"], "default");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The ruling (2026-09-28): a user's wallpaper pick is what shows, and
+    /// re-staging the SAME song must not quietly revert it to the song's
+    /// default. `rice mode stage` (the RICE toggle, a no-arg call that
+    /// re-stages the current rice) and a declarative re-seed both land here.
+    #[test]
+    fn restaging_the_same_song_keeps_a_pick() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("stage-same-song-pick");
+        let stage = root.join("stage");
+        let song = root.join("songbook").join("dusk");
+        let covers = root.join("covers");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::create_dir_all(&song).unwrap();
+        std::fs::create_dir_all(&covers).unwrap();
+        std::fs::write(song.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(covers.join("dusk.png"), b"\x89PNG stub").unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let first = handle_rice_stage(&inv(&["rice", "stage"], &["dusk"]));
+        assert_eq!(first.status, Status::Ok);
+        assert_eq!(first.data.as_ref().unwrap()["coverStage"], "default");
+
+        // The user picks a wallpaper while `dusk` is what is staged.
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("dusk")).unwrap();
+        assert!(crate::cover::staged_is_pick());
+
+        // …and re-staging the SAME song leaves that pick exactly where it was,
+        // even though `dusk` has a derivable cover of its own.
+        let again = handle_rice_stage(&inv(&["rice", "stage"], &["dusk"]));
+        assert_eq!(again.status, Status::Ok);
+        assert_eq!(again.data.as_ref().unwrap()["coverStage"], "pick-kept");
+        assert_eq!(
+            again.data.as_ref().unwrap()["cover"].as_str().unwrap(),
+            "/tmp/chosen.png"
+        );
+        assert!(!again.changed.iter().any(|c| c.ends_with("cover.json")), "the pick file is untouched");
+        assert!(crate::cover::staged_is_pick());
+        assert_eq!(crate::cover::staged_path().as_deref(), Some("/tmp/chosen.png"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// …and a song SWITCH resets to the new song's default: the pick is
+    /// dropped, and with it any cover the previous song left — the leak
+    /// `rice stage <song>` used to have whenever the new song derived none.
+    #[test]
+    fn a_song_switch_drops_a_pick_and_clears_a_cover_with_no_default() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("stage-song-switch-pick");
+        let stage = root.join("stage");
+        let songbook = root.join("songbook");
+        std::fs::create_dir_all(&stage).unwrap();
+        for name in ["dusk", "moonlight"] {
+            let dir = songbook.join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("livery.json"), VALID_NOTES).unwrap();
+        }
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let staged = handle_rice_stage(&inv(&["rice", "stage"], &["dusk"]));
+        assert_eq!(staged.status, Status::Ok);
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("dusk")).unwrap();
+        assert!(crate::cover::staged_is_pick());
+
+        // Switching to a song with NO derivable cover drops the pick AND the
+        // cover.json the previous song left behind.
+        let switched = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
+        assert_eq!(switched.status, Status::Ok);
+        assert_eq!(switched.data.as_ref().unwrap()["coverStage"], "cleared");
+        assert!(switched.data.as_ref().unwrap()["cover"].is_null());
+        assert!(switched.changed.iter().any(|c| c.ends_with("cover.json")));
+        assert!(
+            !stage.join("cover.json").exists(),
+            "the previous song's wallpaper must not leak onto the new song"
+        );
+
+        // Switching back is a switch too — the pick is NOT resurrected.
+        let back = handle_rice_stage(&inv(&["rice", "stage"], &["dusk"]));
+        assert_eq!(back.status, Status::Ok);
+        assert_eq!(back.data.as_ref().unwrap()["coverStage"], "none");
+        assert!(!stage.join("cover.json").exists());
+        assert!(!crate::cover::staged_is_pick());
+
         let _ = std::fs::remove_dir_all(&root);
     }
 

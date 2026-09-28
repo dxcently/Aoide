@@ -28,6 +28,7 @@
 //
 // COORDINATES. A polyline is FLAT — `[x0, y0, x1, y1, …]` — the board's own
 // shape. `flat()` adapts the bar lamp's `[{x, y}, …]`.
+.pragma library
 
 // ── the walker ──────────────────────────────────────────────────────────────
 

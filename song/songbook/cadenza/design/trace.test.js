@@ -1,10 +1,11 @@
 // design/trace.test.js — the pulse engine's own check. `node design/trace.test.js`.
 //
-// WHY A node SCRIPT IN A SONG. `widgets/Trace.js` and the board's generator are
-// both deliberately pure (no QML, no clock, no Math.random — see each header),
-// so the bytes that ship are the bytes this runs. Quickshell cannot be exercised
-// from a checkout without a compositor, so the maths is proved here and the
-// LOOK is proved on the canvas (`lyra preview wallpaper`, cover/README.md).
+// A manual check: no flake gate, CI job or timer runs it. `widgets/Trace.js` and
+// the board's generator are both deliberately pure (no QML, no clock, no
+// Math.random — see each header), so the bytes that ship are the bytes this
+// runs. Quickshell cannot be exercised from a checkout without a compositor, so
+// the maths is proved here and the LOOK is proved on the canvas
+// (`lyra preview wallpaper`, cover/README.md).
 //
 // What it holds:
 //   1. `at` — the walker the bar's lamp now reads — is identical to the inline

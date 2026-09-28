@@ -1594,6 +1594,67 @@ is not a keyword at all — it rides `song/stage/terminal-colors.conf` with the
 kitty dendrite's baked `0.86` when the song has none. Readers must tolerate
 both forms.
 
+### `song/stage/cover.json` — **v0**
+
+The live wallpaper: the image path, the song it was staged for, and whether
+the user picked it.
+
+```json
+{ "path": "/home/u/.aoide/song/covers/dusk.png", "song": "dusk", "pick": true }
+```
+
+`path` is what the wallpaper layer renders; absent or empty, the layer falls
+back to the baked `AOIDE_WALLPAPER` store path (a song whose `wallpaper` note
+is `null` bakes a deterministic solid from `palette.bg` — §1's cover-art
+tier), and the active song's own `wallpaper` board — if it authors one — may
+draw over either. The file is what `AoideWallpaper.qml` FileView-watches: any
+writer hot-swaps the wallpaper live, with no IPC call. Writes are atomic
+(write-temp-then-rename), and this file is NEVER symlink-routed — not even in
+`Draft` mode, where the routing symlink carries `livery.json` alone.
+
+**`song` — additive in v0 — is the song staged when the file was written, and
+every writer stamps it.** **`pick` — also additive in v0 — is `true` only for
+the USER's own choice** (`lyra cover set`); absent, the file is the song's own
+default.
+
+**The rule is one rule, and it is read-side: a cover applies only while its
+`song` equals the song staged right now** (`stage/livery.json`'s own `song`
+field, `commands/mode.rs`'s `current_staged_song`). A cover whose `song` names
+anything else is IGNORED: the layer falls back to the baked/palette default
+above, and the staged song's own board may draw. A cover with NO `song` field
+is legacy, written before writers stamped it, and applies as before. This is
+what carries a pick across a rebuild — the activation seed rewrites
+`stage/livery.json`'s `song` and leaves `cover.json` alone, so a pick for the
+song that gets staged again still applies, and one for a different song does
+not.
+
+`pick: true` additionally stops the wallpaper layer instantiating the song's
+`wallpaper` board at all — the pick is what shows, and the board, with its
+repaint timer, is DESTROYED rather than hidden (`pkgs/lyra-shell/qml/
+slots.md`, `AoideWallpaper.qml`). An unauthored `wallpaper` board has NO
+baseline floor: that slot draws for a song that authors its own
+`widgets/wallpaper.qml` and for nothing else (§5; slots.md's wired-slot row).
+
+Writers, and the exact shape each leaves:
+
+| Writer | Effect on `stage/cover.json` |
+| --- | --- |
+| `lyra rice stage <song>` | the song's derivable cover (`song/covers/<song>.{webp,png,jpg,jpeg}`, first match in that order) as `{"path": …, "song": …}`; with no derivable cover the file is REMOVED — a cover staged for another song must never stand over this one. A pick already stamped for THIS song is left untouched (reported as `coverStage: "pick-kept"`) |
+| `lyra cover set <path\|name>` | `{"path": …, "pick": true, "song": …}` for the song staged at write time — the `song` field omitted only when nothing is staged, which writes the legacy shape |
+| `lyra cover set --clear` | the staged song's own default, exactly as a re-stage of it writes it (its derivable cover, or the file removed). Never keeps a pick; the envelope's `droppedPick` and `coverStage` come from the marker read before the write |
+| `lyra rice mode declarative` | NOTHING — a lock is not a song switch. Its re-pin writes `livery.json` alone, and a pick stamped for another song is hidden by the read-side rule rather than dropped |
+| `lyra rice back <take>` | the target take's cover value VERBATIM — a take minted while a pick stood restores it as a pick, `song` and all; a take with no cover removes whatever stands |
+| `lyra rice draft save <name>` | a verbatim copy into `song/songbook/<song>/drafts/<name>/cover.json` (§4's drafts entry; never a routing target) |
+| the lyra lane's `home.activation.aoideSeedStage` | NOTHING. It reseeds `stage/livery.json` and never touches `cover.json`; the read-side rule above is what keeps a pick off another song |
+
+`stage_for_song` — the one implementation of the stage half, shared by
+`rice stage` and the mode re-pins — keeps a standing pick iff
+`pick.song == <song being staged>`, and otherwise writes that song's own
+default through `stage_song_default` (its derivable cover, else no file).
+`rice mode declarative` passes `stage_cover: false` and skips it whole: a lock
+keeps the cover file exactly as it stands, and a pick it hides read-side comes
+back when its own song is staged again.
+
 ### `song/declared/livery.json` — **v0**
 
 The DECLARED song's notes: the active song's committed `livery.json` with the

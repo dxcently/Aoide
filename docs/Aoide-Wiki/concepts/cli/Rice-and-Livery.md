@@ -83,9 +83,11 @@ lyra rice stage [<name>] [--json]
   `$AOIDE_SESSION_ID` (stamped on an auto-take), `$AOIDE_STAGE_DIR`.
 - **Writes:** `song/stage/livery.json` (atomic, symlink-transparent — in
   Draft mode the write lands in the routed draft file; the `"song"` field is
-  injected into the staged copy); `song/stage/cover.json` (`{"path": …}`,
-  only when a cover is derivable as `song/covers/<name>.{webp,png,jpg,jpeg}`
-  — otherwise left untouched); widget QML bodies synced from
+  injected into the staged copy); `song/stage/cover.json` — the song's own
+  derivable cover (`song/covers/<name>.{webp,png,jpg,jpeg}`) as
+  `{"path": …, "song": "<name>"}`, the file REMOVED when the song derives
+  none. A pick already stamped for this same song is left byte-identical
+  (CONTRACTS.md §4); widget QML bodies synced from
   `song/songbook/<name>/widgets/*.qml` into `run/qml/songs/<name>/`;
   `run/qml/songs/registry.json` rewritten for the song from the livery's
   `.widgets` key. In Staging mode with an explicit `<name>`, also updates
@@ -256,16 +258,20 @@ lyra rice mode declarative [<name>] [--json]
   `song/stage/livery.json`'s own `"song"` field only when no such twin exists
   (CONTRACTS.md §4).
 - **Writes:** tears down any Draft-mode routing symlink; when a song
-  resolves, re-pins `song/stage/livery.json` (plus cover/widget/registry
-  sync, same as `rice stage`) from that song's COMMITTED
+  resolves, re-pins `song/stage/livery.json` (plus widget/registry sync,
+  same as `rice stage`) from that song's COMMITTED
   `song/songbook/<name>/livery.json` — or, for the song the declared twin
   names, from the twin, venue recolour included; then writes
   `song/stage/mode.json`
   (`mode: "declarative"`, `draft` cleared; `stagingSong` carried forward
-  unchanged).
+  unchanged). `song/stage/cover.json` is NOT touched — a lock is not a song
+  switch, so a pick stamped for another song is hidden read-side rather than
+  dropped (CONTRACTS.md §4).
 - **Output:** data `{mode: "declarative", song}`.
 - **Notes:** locks staging — afterwards `rice stage` and `cover set` refuse
-  with `declarative-mode-locked`. The no-name form re-pins the declared song
+  with `declarative-mode-locked`. A lock keeps the staged cover: a wallpaper
+  pick survives locking and unlocking, and is only hidden while its song is
+  not the staged one. The no-name form re-pins the declared song
   from its own notes rather than freezing the stage: unsaved live edits are
   discarded
   (`rice draft save` first to keep them). A failed re-pin does not flip the
@@ -302,23 +308,37 @@ lyra rice mode draft <name> [--json]
 
 ```
 lyra cover set <path|name> [--json]
+lyra cover set --clear [--json]
 ```
 
 - **Reads:** `song/stage/mode.json` (entrypoint guard); stats the resolved
   cover file (absolute `<path>` literal; a bare name resolves against
-  `song/covers/`). In Draft mode, also reads the staged livery/cover for the
-  auto-take.
-- **Writes:** `song/stage/cover.json` — atomic, pretty `{"path": "<abs>"}` +
-  trailing newline. NOT symlink-routed in Draft mode (only `livery.json`
-  is). In Draft mode auto-mints a take (cause `"cover-set"`): `takes/NNNN.json`
-  + `takes/head.json` under the routed draft, non-fatal on failure.
-- **Output:** data `{cover, coverJson, seam}` (+ `take` when in Draft mode).
-  The Quickshell wallpaper surface (`AoideWallpaper.qml`) FileView-watches
-  `stage/cover.json` and hot-swaps live — no IPC call.
+  `song/covers/`); `song/stage/livery.json`'s own `"song"` field — the song
+  the pick is stamped for, and the song `--clear` derives a default for. In
+  Draft mode, also reads the staged livery/cover for the auto-take.
+- **Writes:** `song/stage/cover.json` — atomic, pretty
+  `{"path": "<abs>", "pick": true, "song": "<staged song>"}` + trailing
+  newline, the `song` field omitted only when nothing is staged
+  (CONTRACTS.md §4). NOT symlink-routed in Draft mode (only `livery.json`
+  is). `--clear` reverses it: the staged song gets its own default back — its
+  derivable cover, else `cover.json` removed (the baked/palette fallback,
+  plus the song's own live board). In Draft mode auto-mints a take (cause
+  `"cover-set"`): `takes/NNNN.json` + `takes/head.json` under the routed
+  draft, non-fatal on failure.
+- **Output:** data `{cover, coverJson, pick, song, seam}` (+ `take` when in
+  Draft mode); with `--clear`, `{cleared, droppedPick, cover, coverJson,
+  coverStage}`. The Quickshell wallpaper surface (`AoideWallpaper.qml`)
+  FileView-watches `stage/cover.json` and hot-swaps live — no IPC call — and
+  does not instantiate the song's live `wallpaper` board while a pick applies.
 - **Notes:** refuses while declarative-locked (`declarative-mode-locked`).
   A path naming no existing file is `cover-not-found`, exit 1 — never stages
-  a wallpaper that can't render. Nothing is committed; the baked
-  `AOIDE_WALLPAPER` remains the boot/rebuild fallback.
+  a wallpaper that can't render. `--clear` with a `<path>` is
+  `clear-takes-no-path`, exit 2 — the two spellings mean opposite things.
+  A cover applies only while its `song` matches the staged song; one naming
+  another song is ignored, which is why a pick survives re-staging its own
+  song (a bare `lyra rice stage`, the RICE toggle, a declarative re-seed, a
+  rebuild) and never shows over a different one. Nothing is committed; the
+  baked `AOIDE_WALLPAPER` remains the boot/rebuild fallback.
 
 ### lyra livery emit
 

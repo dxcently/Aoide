@@ -2592,6 +2592,47 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A take carries the cover VALUE as-is (CONTRACTS.md §4's `rice back`:
+    /// the identical `{"path": …}` seam, verbatim), so a take minted from a
+    /// user PICK must come back AS a pick — `"pick": true` and all, or a
+    /// restored wallpaper would stop being the user's choice and the song's
+    /// live board would start drawing over it. And a take minted with NO cover
+    /// must not leave one (of either kind) lying on the stage.
+    #[test]
+    fn back_round_trips_a_pick_as_a_pick() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let (root, _song, _draft, _draft_livery) = routed_draft_symlinked("back-cover-pick");
+        let stage = shellbridge::stage_dir();
+
+        write_livery(&stage, "#111111");
+        crate::cover::stage_default(std::path::Path::new("/tmp/song-cover.png"), "sonata")
+            .unwrap();
+        let take1 = snapshot("rice.take", "stage").unwrap();
+        assert!(take1.cover.is_some());
+        assert!(!crate::cover::staged_is_pick());
+
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("sonata"))
+            .unwrap();
+        let take2 = snapshot("rice.take", "stage").unwrap();
+        assert!(take2.cover.is_some());
+
+        let to_default = handle_rice_back(&inv_back(None, Some(1)));
+        assert_eq!(to_default.status, Status::Ok, "{:?}", to_default.data);
+        assert!(!crate::cover::staged_is_pick(), "the default take restored no pick");
+        assert_eq!(crate::cover::staged_path().as_deref(), Some("/tmp/song-cover.png"));
+
+        let to_pick = handle_rice_back(&inv_back(None, Some(2)));
+        assert_eq!(to_pick.status, Status::Ok, "{:?}", to_pick.data);
+        assert!(crate::cover::staged_is_pick(), "a restored pick is still a pick");
+        assert_eq!(crate::cover::staged_path().as_deref(), Some("/tmp/chosen.png"));
+        let raw = std::fs::read_to_string(stage.join("cover.json")).unwrap();
+        assert!(raw.contains("\"pick\": true"), "verbatim: {raw}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn back_refuses_when_the_routing_symlink_is_missing() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());

@@ -94,7 +94,7 @@ Item {
     // THE FEED — who is alive, who just moved
     // ════════════════════════════════════════════════════════════════════════
     property var rows: []
-    readonly property var states: Trace.live(rows)
+    readonly property var liveStates: Trace.live(rows)
     property var stamps: ({})
     property bool stampsReady: false
 
@@ -146,7 +146,7 @@ Item {
         for (var i = 0; i < ids.length && root.pulses.length < root.pulseCap; i++) {
             var ring = root.ringOf(ids[i])
             if (ring < 0 || root.index.near[ring].length === 0) continue
-            var st = root.states[ids[i]] || "working"
+            var st = root.liveStates[ids[i]] || "working"
             for (var k = 0; k < 2 && root.pulses.length < root.pulseCap; k++) {
                 var np = root.spawnAt(ring, st, true)
                 if (np) root.pulses = root.pulses.concat([np])
@@ -210,7 +210,7 @@ Item {
             var dt = (interval / 1000) * root.rate
             root.clock += dt
             if (root.index && root.board)
-                root.pulses = Trace.reconcile(root.pulses, root.states, {
+                root.pulses = Trace.reconcile(root.pulses, root.liveStates, {
                     rng: root.rngState, board: root.board, index: root.index,
                     hues: root.hues, opts: { cap: root.pulseCap, idleFloor: root.idleFloor }
                 })
@@ -240,7 +240,7 @@ Item {
         ctx.lineCap = "round"
 
         // 1. the claimed nodes: one ring per live session, breathing
-        var st = root.states
+        var st = root.liveStates
         var rw = bd.ring
         ctx.lineWidth = rw
         for (var id in st) {
