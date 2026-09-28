@@ -1071,9 +1071,6 @@ mod tests {
             .iter()
             .any(|c| c.ends_with("stage/terminal-colors.conf")));
         assert_eq!(out.data.as_ref().unwrap()["terminal"]["status"], "skipped");
-        // No cover exists for moonlight → nothing is staged, and the outcome
-        // says so (this used to read "cover.json left untouched", which is
-        // exactly the leak: a previous song's cover was left standing).
         assert!(!stage.join("cover.json").exists());
         let data = out.data.unwrap();
         assert!(data["cover"].is_null());

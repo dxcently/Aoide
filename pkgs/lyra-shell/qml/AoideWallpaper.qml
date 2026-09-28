@@ -7,13 +7,12 @@
 // (solid palette fallback when no cover is staged or the image fails).
 //
 // stage/cover.json contract (CONTRACTS.md §4):
-//   { "path": "/abs/path/to/cover" }              the song's own DEFAULT
-//   { "path": "/abs/path/to/cover", "pick": true }  the USER's pick
+//   { "path": "/abs/cover", "song": "dusk" }               the song's own default
+//   { "path": "/abs/cover", "song": "dusk", "pick": true }  the user's pick
 //
-// A song's wallpaper — its cover AND its own live `wallpaper` board — is only
-// its DEFAULT. A pick is what shows, full stop: while one stands the board is
-// not instantiated at all (below), and it survives re-staging the same song
-// (the Rust side's `cover::stage_for_song`).
+// A cover carries the song it was staged for: one naming another song is
+// ignored (the baked/palette fallback shows instead), and a pick also stops
+// the song's own live `wallpaper` board being instantiated at all.
 
 import QtQuick
 import Quickshell

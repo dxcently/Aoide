@@ -2606,7 +2606,6 @@ mod tests {
         let (root, _song, _draft, _draft_livery) = routed_draft_symlinked("back-cover-pick");
         let stage = shellbridge::stage_dir();
 
-        // Take 1: the song's own default cover, no pick.
         write_livery(&stage, "#111111");
         crate::cover::stage_default(std::path::Path::new("/tmp/song-cover.png"), "sonata")
             .unwrap();
@@ -2614,20 +2613,16 @@ mod tests {
         assert!(take1.cover.is_some());
         assert!(!crate::cover::staged_is_pick());
 
-        // Take 2: the user's pick for the staged song.
         crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png"), Some("sonata"))
             .unwrap();
         let take2 = snapshot("rice.take", "stage").unwrap();
         assert!(take2.cover.is_some());
 
-        // Revert to take 1 (the default) — no pick is left standing, and the
-        // cover comes back unmarked.
         let to_default = handle_rice_back(&inv_back(None, Some(1)));
         assert_eq!(to_default.status, Status::Ok, "{:?}", to_default.data);
         assert!(!crate::cover::staged_is_pick(), "the default take restored no pick");
         assert_eq!(crate::cover::staged_path().as_deref(), Some("/tmp/song-cover.png"));
 
-        // …and forward to take 2 again: the pick is back AS a pick.
         let to_pick = handle_rice_back(&inv_back(None, Some(2)));
         assert_eq!(to_pick.status, Status::Ok, "{:?}", to_pick.data);
         assert!(crate::cover::staged_is_pick(), "a restored pick is still a pick");
