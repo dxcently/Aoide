@@ -197,9 +197,12 @@ Multiple drafts coexist independently — saving `amber-dusk` alongside
 
 ## Staging vs Declarative Mode
 
-`rice stage` and `cover set` are the only two writers of `stage/livery.json`
-and `stage/cover.json` anywhere in the codebase (unaffected by which of
-`stage`/`declarative`/`draft` currently owns the routing — see below).
+`rice stage` and `cover set` are the only two COMMAND writers of
+`stage/livery.json` and `stage/cover.json` (the lane's own
+`home.activation.aoideSeedStage` reseeds `livery.json` on every activation, and
+drops `cover.json` only when the song it seeds differs from the one the stage
+was carrying; `rice back` restores a take's cover) — unaffected by which of
+`stage`/`declarative`/`draft` currently owns the routing, see below.
 `stage/mode.json` — a runtime stage-file under the root — records which of
 **three** modes currently owns those writes (`RiceMode`:
 `Staging | Declarative | Draft`):

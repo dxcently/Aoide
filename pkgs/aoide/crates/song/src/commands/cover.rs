@@ -2,16 +2,15 @@
 
 use aoide_protocol::Invocation;
 use aoide_protocol::output::Outcome;
-use aoide_protocol::registry::{arg, cmd, Registry};
-use aoide_storage::fs as shellbridge;
+use aoide_protocol::registry::{arg, cmd, flag, Registry};
 use serde_json::{json, Value};
 
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["cover", "set"],
-        summary: "Set the live wallpaper: stage stage/cover.json (hot-swap) from a cover path or a bare name in song/covers/. Refuses while `rice mode declarative` is locked.",
-        args: [arg!("path", "string", true, "Absolute cover path, or a bare filename resolved against song/covers/.")],
-        flags: [],
+        summary: "Set the live wallpaper: stage stage/cover.json (hot-swap) from a cover path or a bare name in song/covers/ — a PICK, which survives re-staging the same song. `--clear` drops it and returns to the active song's own default. Refuses while `rice mode declarative` is locked.",
+        args: [arg!("path", "string", false, "Absolute cover path, or a bare filename resolved against song/covers/. Omitted with `--clear`.")],
+        flags: [flag!("clear", "bool", "Drop the pick: return the active song to its own default (its derivable cover staged as a song default, else no stage/cover.json at all — the baked/palette fallback and the song's own live board).")],
         gated: false,
         implemented: true,
         handler: handle_cover_set_entry,
@@ -79,21 +78,34 @@ fn handle_cover_set_entry(inv: &Invocation) -> Outcome {
 ///
 /// This is the WRITE path the Quickshell wallpaper picker shells out to (QML has
 /// no file-write primitive). It resolves `<path>` to an absolute cover file, then
-/// atomic-writes `{ "path": "<abs>" }` to `<stage>/cover.json` — exactly the seam
-/// `rice stage` uses, which `AoideWallpaper.qml`'s FileView watches and
-/// hot-swaps live. Nothing is committed; the baked `AOIDE_WALLPAPER` remains the
-/// boot/rebuild fallback.
+/// atomic-writes `{ "path": "<abs>", "pick": true }` to `<stage>/cover.json` —
+/// the seam `rice stage` uses too, which `AoideWallpaper.qml`'s FileView watches
+/// and hot-swaps live. The `pick` field is what tells a reader this is the
+/// USER's choice and not the song's own cover (CONTRACTS.md §4): a pick stands
+/// over the song's board, and survives re-staging the same song. Nothing is
+/// committed; the baked `AOIDE_WALLPAPER` remains the boot/rebuild fallback.
 ///
 /// Resolution: an absolute `<path>` is taken literally; a bare filename resolves
 /// against the shared cover library `song/covers/`. A path that names no existing
 /// file is a clear error (exit 1) — we never stage a wallpaper that can't render.
+///
+/// `--clear` is the pick's inverse: drop the user's choice and return the active
+/// song to its OWN default — which is not simply "remove the file", since a song
+/// with a derivable cover must get that cover back. It reads the active song off
+/// `stage/livery.json`'s own `"song"` field (`commands/mode.rs`'s
+/// `current_staged_song`, the one source of truth for "the current rice") and
+/// runs the same `cover::stage_for_song` rule `rice stage` runs with no previous
+/// song — which can never answer "kept", so a pick never survives a clear.
 fn handle_cover_set(inv: &Invocation) -> Outcome {
+    if inv.flag_present("clear") {
+        return handle_cover_clear(inv);
+    }
     let arg = match inv.args.first() {
         Some(a) => a.clone(),
         None => {
             return Outcome::usage(
                 "cover.set",
-                "usage: aoide cover set <path|name> [--json]",
+                "usage: aoide cover set <path|name> [--json] · aoide cover set --clear [--json]",
             )
             .with_data(json!({ "reason": "missing-path" }));
         }
@@ -115,19 +127,18 @@ fn handle_cover_set(inv: &Invocation) -> Outcome {
     }
 
     // Stage cover.json exactly like `rice stage`: pretty `{ "path": … }`
-    // with a trailing newline, atomic write into the stage dir.
-    let stage = shellbridge::stage_dir();
-    let cover_dst = stage.join("cover.json");
-    let body = serde_json::to_string_pretty(&json!({ "path": resolved.to_string_lossy() }))
-        .unwrap_or_default()
-        + "\n";
-    if let Err(e) = shellbridge::atomic_write(&cover_dst, &body) {
-        return Outcome::error("cover.set", format!("failed to stage cover.json: {e}"))
-            .with_data(json!({
-                "reason": "stage-write-failed",
-                "target": cover_dst.to_string_lossy(),
-            }));
-    }
+    // with a trailing newline, atomic write into the stage dir — plus the
+    // `pick` marker only the user's own choice carries (`cover::stage_pick`).
+    let cover_dst = match crate::cover::stage_pick(&resolved) {
+        Ok(dst) => dst,
+        Err(e) => {
+            return Outcome::error("cover.set", format!("failed to stage cover.json: {e}"))
+                .with_data(json!({
+                    "reason": "stage-write-failed",
+                    "target": crate::cover::cover_dst().to_string_lossy(),
+                }));
+        }
+    };
 
     Outcome::ok(
         "cover.set",
@@ -137,8 +148,87 @@ fn handle_cover_set(inv: &Invocation) -> Outcome {
     .with_data(json!({
         "cover": resolved.to_string_lossy(),
         "coverJson": cover_dst.to_string_lossy(),
+        "pick": true,
         "seam": "AoideWallpaper.qml FileView-watches stage/cover.json and hot-swaps live",
     }))
+}
+
+/// `cover set --clear` — drop the pick, return the song to its own default.
+///
+/// The song is whatever `stage/livery.json` names right now; with no stage file
+/// at all (nothing has ever been staged) there is no default to derive, so the
+/// clear is just the removal. A path argument alongside `--clear` is refused
+/// rather than half-honoured: the two spellings mean opposite things.
+fn handle_cover_clear(inv: &Invocation) -> Outcome {
+    let cover_dst = crate::cover::cover_dst();
+    if inv.args.first().is_some() {
+        return Outcome::usage(
+            "cover.set",
+            "usage: aoide cover set <path|name> [--json] · aoide cover set --clear [--json]",
+        )
+        .with_data(json!({ "reason": "clear-takes-no-path" }));
+    }
+
+    let song = super::mode::current_staged_song();
+    let staged = match &song {
+        Some(name) => crate::cover::stage_for_song(name, None),
+        None => crate::cover::clear_staged().map(crate::cover::CoverStage::Cleared),
+    };
+    match staged {
+        Ok(crate::cover::CoverStage::Default(path)) => Outcome::ok(
+            "cover.set",
+            format!(
+                "pick dropped — {} is back to its own cover {}",
+                song.as_deref().unwrap_or("the song"),
+                path.display()
+            ),
+        )
+        .changed(vec![cover_dst.to_string_lossy().into_owned()])
+        .with_data(json!({
+            "cleared": false,
+            "cover": path.to_string_lossy(),
+            "coverJson": cover_dst.to_string_lossy(),
+            "coverStage": "default",
+        })),
+        Ok(crate::cover::CoverStage::Cleared(removed)) => {
+            let whose = match &song {
+                Some(name) => format!("`{name}` has no derivable cover"),
+                None => "no song is staged".to_string(),
+            };
+            let note = if removed {
+                "pick dropped — stage/cover.json removed"
+            } else {
+                "no pick staged — nothing to drop"
+            };
+            let mut out = Outcome::ok(
+                "cover.set",
+                format!("{note}; {whose}, so the song's own default (the baked/palette fallback, \
+                         and its own live board) shows again"),
+            )
+            .with_data(json!({
+                "cleared": removed,
+                "cover": Value::Null,
+                "coverJson": cover_dst.to_string_lossy(),
+                "coverStage": "cleared",
+            }));
+            if removed {
+                out = out.changed(vec![cover_dst.to_string_lossy().into_owned()]);
+            }
+            out
+        }
+        // `stage_for_song` can only answer this with a previous song, and a
+        // clear passes none — unreachable, but never silently wrong.
+        Ok(crate::cover::CoverStage::PickKept) => Outcome::error(
+            "cover.set",
+            "internal: a clear must never keep a pick",
+        )
+        .with_data(json!({ "reason": "clear-kept-pick" })),
+        Err(e) => Outcome::error("cover.set", format!("failed to clear cover.json: {e}"))
+            .with_data(json!({
+                "reason": "clear-failed",
+                "target": cover_dst.to_string_lossy(),
+            })),
+    }
 }
 
 // ── Tests (cover set) ────────────────────────────────────────────────────────
@@ -165,11 +255,14 @@ mod tests {
         let cover = std::fs::read_to_string(stage.join("cover.json")).unwrap();
         assert!(cover.contains("elsewhere.png"), "cover.json points at the file: {cover}");
         assert!(cover.ends_with("\n"), "trailing newline mirrors rice stage");
-        assert!(out.changed.iter().any(|c| c.ends_with("cover.json")));
-        assert_eq!(
-            out.data.unwrap()["cover"].as_str().unwrap(),
-            img.to_string_lossy()
+        assert!(
+            cover.contains("\"pick\": true"),
+            "`cover set` stages a PICK, not a song default: {cover}"
         );
+        assert!(out.changed.iter().any(|c| c.ends_with("cover.json")));
+        let data = out.data.unwrap();
+        assert_eq!(data["cover"].as_str().unwrap(), img.to_string_lossy());
+        assert_eq!(data["pick"], true);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -220,6 +313,141 @@ mod tests {
         let out = handle_cover_set(&inv(&["cover", "set"], &[]));
         assert_eq!(out.status, Status::Usage);
         assert_eq!(out.render(false).1, aoide_protocol::output::exit::USAGE);
+    }
+
+    // ── cover set --clear: drop the pick, back to the song's default ─────────
+
+    /// `cover set --clear` returns the ACTIVE song to its own default. With a
+    /// derivable cover that means the song's cover comes back (as a default,
+    /// never as a pick); with none it means no `cover.json` at all (the baked
+    /// /palette fallback, plus the song's own live board).
+    #[test]
+    fn clear_drops_the_pick_and_restores_the_songs_own_default() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("cover-clear");
+        let stage = root.join("stage");
+        let covers = root.join("covers");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::create_dir_all(&covers).unwrap();
+        std::fs::write(covers.join("dusk.png"), b"\x89PNG stub").unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        // What `rice stage dusk` leaves: the song, and dusk's own cover as a
+        // DEFAULT.
+        std::fs::write(
+            stage.join("livery.json"),
+            r#"{"schemaVersion":"0","song":"dusk"}"#,
+        )
+        .unwrap();
+        crate::cover::stage_default(&covers.join("dusk.png")).unwrap();
+        assert!(!crate::cover::staged_is_pick());
+
+        // The user picks something else…
+        let img = root.join("chosen.png");
+        std::fs::write(&img, b"\x89PNG stub").unwrap();
+        let set = handle_cover_set(&inv(&["cover", "set"], &[img.to_str().unwrap()]));
+        assert_eq!(set.status, Status::Ok);
+        assert!(crate::cover::staged_is_pick());
+
+        // …and clears it: dusk's own cover is back, unmarked.
+        let cleared = handle_cover_set(&clear_inv(&[]));
+        assert_eq!(cleared.status, Status::Ok, "{:?}", cleared.data);
+        let data = cleared.data.unwrap();
+        assert_eq!(data["coverStage"], "default");
+        assert_eq!(data["cleared"], false);
+        assert!(data["cover"].as_str().unwrap().ends_with("covers/dusk.png"));
+        assert!(!crate::cover::staged_is_pick(), "the restored cover is a default");
+        assert!(cleared.changed.iter().any(|c| c.ends_with("cover.json")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A song with NO derivable cover: the clear removes the file, and a second
+    /// clear is a quiet no-op rather than an error.
+    #[test]
+    fn clear_removes_the_file_when_the_song_derives_none_and_is_idempotent() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("cover-clear-none");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        std::fs::write(
+            stage.join("livery.json"),
+            r#"{"schemaVersion":"0","song":"moonlight"}"#,
+        )
+        .unwrap();
+        crate::cover::stage_pick(std::path::Path::new("/tmp/old-choice.png")).unwrap();
+
+        let cleared = handle_cover_set(&clear_inv(&[]));
+        assert_eq!(cleared.status, Status::Ok);
+        let data = cleared.data.unwrap();
+        assert_eq!(data["cleared"], true);
+        assert!(data["cover"].is_null());
+        assert!(!stage.join("cover.json").exists());
+        assert!(cleared.changed.iter().any(|c| c.ends_with("cover.json")));
+
+        // Nothing staged any more → a second clear says so, exit 0, no change.
+        let again = handle_cover_set(&clear_inv(&[]));
+        assert_eq!(again.status, Status::Ok);
+        assert_eq!(again.data.unwrap()["cleared"], false);
+        assert!(again.changed.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// With no stage file at all there is no song to derive a default for —
+    /// the clear is just the removal (the baked/palette fallback shows).
+    #[test]
+    fn clear_with_nothing_staged_only_removes() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("cover-clear-nosong");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        crate::cover::stage_pick(std::path::Path::new("/tmp/old-choice.png")).unwrap();
+        let out = handle_cover_set(&clear_inv(&[]));
+        assert_eq!(out.status, Status::Ok);
+        assert_eq!(out.data.unwrap()["cleared"], true);
+        assert!(!stage.join("cover.json").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `--clear` and a path are opposite intents — refused, never half-honoured.
+    #[test]
+    fn clear_with_a_path_is_usage_exit_2() {
+        let out = handle_cover_set(&clear_inv(&["sonata.webp"]));
+        assert_eq!(out.status, Status::Usage);
+        assert_eq!(out.render(false).1, aoide_protocol::output::exit::USAGE);
+        assert_eq!(out.data.unwrap()["reason"], "clear-takes-no-path");
+    }
+
+    /// The declarative lock covers the clear too: it is a stage write like any
+    /// other, and the entrypoint guard is where that policy lives.
+    #[test]
+    fn clear_entry_refuses_while_declarative_mode_is_locked() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("cover-clear-locked");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        crate::cover::stage_pick(std::path::Path::new("/tmp/old-choice.png")).unwrap();
+
+        let out = handle_cover_set_entry(&clear_inv(&[]));
+        assert_eq!(out.status, Status::Error);
+        assert_eq!(out.data.unwrap()["reason"], "declarative-mode-locked");
+        assert!(stage.join("cover.json").is_file(), "nothing cleared while locked");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `cover set --clear`, as the registry spells it.
+    fn clear_inv(args: &[&str]) -> Invocation {
+        let mut i = inv(&["cover", "set"], args);
+        i.flags.insert("clear".into(), "true".into());
+        i
     }
 
     // ── cover set: the declarative-mode write guard (khoa 2026-08-14) ────────

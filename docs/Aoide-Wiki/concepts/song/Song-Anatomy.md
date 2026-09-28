@@ -126,7 +126,7 @@ the runtime root (`$AOIDE_ROOT`, default `~/.aoide`):
 | File | Holds | Written by | Tree |
 |---|---|---|---|
 | `livery.json` | the fully-resolved livery values (colours concrete, no `null`) | [[livery]] `emit stage` / `lyra rice stage` | `song/stage/` |
-| `cover.json` | the live wallpaper seed (seeded from the song's baked `wallpaper`) | Quickshell wallpaper layer | `song/stage/` |
+| `cover.json` | the live wallpaper: `{"path": …}` (the song's own DEFAULT) plus `"pick": true` when it is the user's own choice | `lyra rice stage` (the song's derivable cover), `lyra cover set`/`cover set --clear`, `lyra rice back`, the lyra lane's activation seed | `song/stage/` |
 | `livery.json` | the DECLARED song's notes, venue `aoide.livery.override` applied, `"song"` naming it — the read-only twin the runtime writers re-derive that song from ([[livery]]) | the lyra lane's `home.activation.aoideSeedStage` | `song/declared/` |
 | `sessions.json` | the agent-session roster (`sessionId, agent, windowAddress, workspace, cwd, state, startedAt`, optional `parentSessionId`) | [[shellbridge]] + `aoide session` | `state/stage/` |
 | `hooks.json` | live Claude Code hook phases | shellbridge + `aoide session` | `state/stage/` |
@@ -134,8 +134,9 @@ the runtime root (`$AOIDE_ROOT`, default `~/.aoide`):
 | `graph.json` | the resolved project/session DAG | restaged automatically on every `aoide graph` mutation | `state/stage/` |
 
 Which files are present is runtime-dependent (e.g. `cover.json` appears once a
-wallpaper is staged; `AOIDE_WALLPAPER` on the Quickshell unit re-seeds it across
-rebuilds — the quickshell unit bakes the song's `wallpaper` note into its env, see
+wallpaper is staged — the song's own cover as its default, or the user's pick
+on top of it, CONTRACTS.md §4; `AOIDE_WALLPAPER` on the Quickshell unit is the
+baked fallback the layer reads when no cover is staged, see
 [[Quickshell]]). Both stage dirs resolve via the same `AOIDE_STAGE_DIR`
 absolute-path override, so relocating it relocates both trees at once; with
 no override each falls back to its own default under `$AOIDE_ROOT`
