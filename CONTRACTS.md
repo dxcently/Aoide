@@ -231,11 +231,11 @@ paragraph — in addition to baking the value at build time into
 Border *colours* (`window.border` / `window.borderInactive`, component tier
 above) already map to `col.active_border` / `col.inactive_border` and are
 unaffected by this tier. `blurEnabled` also switches hyprglass (the
-liquid-glass plugin the compositor facet loads) on a live stage: both of its
+liquid-glass plugin the compositor lane loads) on a live stage: both of its
 enable keys are read per frame, so a song with blur off turns the glass off
 without unloading the plugin, and a song with blur on turns it back on. A
 song with no `blurEnabled` opinion restores the baked default (both keys
-on — `aoide-song`'s `live::HYPRGLASS_BAKED`, the values the compositor facet
+on — `aoide-song`'s `live::HYPRGLASS_BAKED`, the values the compositor lane
 bakes), so the glass a blur-off song turned off does not outlive it.
 Hyprland's own `decoration:blur:enabled` keeps the ordinary no-opinion rule
 (no keyword sent). The baked `hyprland.conf` does not gate hyprglass on this
@@ -1526,12 +1526,17 @@ per-song flavor widgets (§5) — readers must tolerate both forms.
 
 **Additive in v0:** the staged file MAY also carry an optional top-level
 `geometry` block, mirroring §1's geometry tier (`gapsOut`/`gapsIn`/
-`borderSize`/`rounding`/`blurEnabled`/`blurSize`/`blurPasses`, each `nullOr`).
+`borderSize`/`rounding`/`blurEnabled`/`blurSize`/`blurPasses`/
+`terminalOpacity`, each `nullOr`).
 Absent means "this song carries no geometry opinion" (§1's additive-optional
 tier). `lyra rice stage` reads it (alongside `window.border`/
 `borderInactive`) to build its best-effort `hyprctl keyword` batch — a missing
-block, or a missing/null field within it, is skipped rather than defaulted;
-readers must tolerate both forms.
+block, or a missing/null field within it, sends no keyword for that field,
+with two exceptions §1 states: the hyprglass pair is always sent (a song with
+no `blurEnabled` opinion restores the baked default), and `terminalOpacity`
+is not a keyword at all — it rides `song/stage/terminal-colors.conf` with the
+kitty dendrite's baked `0.86` when the song has none. Readers must tolerate
+both forms.
 
 ### `song/declared/livery.json` — **v0**
 
@@ -1675,7 +1680,7 @@ the song re-pinned, so leaving staging restores the declared colours), `rice
 back` and `lyra reload`'s draft sync. It rides each caller's mode gate and
 adds none. The content is the `kitty` livery emitter's output
 (`livery::emit::kitty`): the tinted-kitty base16 template Stylix bakes,
-key for key. A note with no base16 tier gets the scheme the Stylix facet
+key for key. A note with no base16 tier gets the scheme the stylix lane
 synthesises from its palette and component tiers (`synthesisedScheme`;
 `livery::emit::kitty::synthesised_base16` is its twin), so the file always
 carries every slot and is complete on its own: a push needs no reset first,

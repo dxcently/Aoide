@@ -80,22 +80,33 @@ The palette tier is closed.
 
 `aoide.livery.geometry` (`modules/nucleus/options.nix`) carries the
 compositor's shape values: `gapsOut`, `gapsIn`, `borderSize`, `rounding`,
-`blurEnabled`, `blurSize`, `blurPasses` — every field `nullOr`, so a song
-that sets none of them yields the same `hyprland.conf` as one that omits the
-block entirely. The compositor lane (`modules/dendrites/compositor/hyprland/default.nix`)
+`blurEnabled`, `blurSize`, `blurPasses`, plus `terminalOpacity` — the one field
+whose fallback owner is the kitty dendrite rather than the compositor. Every
+field is `nullOr`, so a song that sets none of them yields the same
+`hyprland.conf` as one that omits the block entirely. The compositor lane
+(`modules/dendrites/compositor/hyprland/default.nix`)
 reads the tier directly and falls back field-by-field to its own opinionated
-defaults (`8`/`6`/`2`/`0`/`true`/`8`/`3`) for anything unset. This tier sits
-outside the engine's own schema — it is never validated by `livery lint`,
-only carried through `stage/livery.json` alongside the palette/component
-values for `aoide`'s own live-apply seam (below); the staged schema version
-stays `"0"`, the same additive-optional posture as the base16 block.
+defaults (`8`/`6`/`2`/`0`/`true`/`8`/`3`) for anything unset. The tier is
+carried through `stage/livery.json` alongside the palette/component values for
+`aoide`'s own live-apply seam (below); the staged schema version stays `"0"`,
+the same additive-optional posture as the base16 block. `livery lint` checks
+exactly one field of it — `terminalOpacity`, which must be a plain number in
+[0, 1] or `null`, since it is written into a kitty config line; the rest of the
+tier is outside the engine's schema and reaches Hyprland through
+`live::geometry_keywords`, which types each field itself.
 
 Staging applies geometry and the window-border colours to the running
 compositor directly: `lyra rice stage` builds one `hyprctl --batch`
 `keyword` list, in a fixed order (gaps → border size → border colours →
-rounding → blur), emitting a keyword only for a field that actually resolves
-— an unset geometry field is skipped, not defaulted, so the call never fights
-a host's baked config or a user's own live tweak. The call is a no-op off
+rounding → blur, then a second batch for the hyprglass pair), emitting a
+keyword only for a field that actually resolves — an unset geometry field
+sends no keyword, so the call never fights a host's baked config or a user's
+own live tweak. Two fields are the exception, both in §1: the hyprglass pair
+is always sent (a song with no `blurEnabled` opinion restores the baked
+default rather than leaving the previous song's glass in place), and
+`terminalOpacity`, not a Hyprland keyword at all, rides
+`song/stage/terminal-colors.conf` — the song's value, or the kitty dendrite's
+baked `0.86` when it has none (§4). The call is a no-op off
 Hyprland (guarded on `HYPRLAND_INSTANCE_SIGNATURE`) and never fails the
 staging outcome. It never runs `hyprctl reload` — every field it touches is
 live-settable via `keyword`, and a reload would re-read the baked
