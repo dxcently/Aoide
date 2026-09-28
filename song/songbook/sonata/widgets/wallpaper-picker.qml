@@ -34,14 +34,17 @@
 // `focuswindow`, so switching the wallpaper cannot write stage/cover.json from
 // here. Instead a pick shells out through the ONE CLI command built for this —
 // `lyra cover set <path>` (Quickshell.execDetached, the same exec idiom
-// ConductorGadget uses) — which atomic-writes stage/cover.json. `cover` left
+// ConductorGadget uses) — which atomic-writes stage/cover.json as a PICK
+// (`{"path": …, "pick": true}`, CONTRACTS.md §4). `cover` left
 // core's registry at P-A5 of the binary-split workstream and lives only in
 // `lyra` now (bare name resolves via PATH: modules/nucleus/packages.nix puts
 // lyra's own droppable output, pkgs.aoide.rice, on systemPackages whenever
 // aoide.lyra.enable is on — P-A8 — which defaults to true here since this
 // widget only exists under the quickshell shell).
-// wallpaper.qml
-// FileView-watches that file and hot-swaps the live wallpaper. No new socket,
+// AoideWallpaper.qml
+// FileView-watches that file and hot-swaps the live wallpaper — and, because
+// the write is marked a pick, stops drawing the active song's own `wallpaper`
+// board over it (that board is destroyed, not hidden). No new socket,
 // no QML file write.
 //
 // ── Enumerate covers ────────────────────────────────────────────────────────
