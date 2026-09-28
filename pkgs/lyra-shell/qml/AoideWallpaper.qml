@@ -41,11 +41,9 @@ Item {
     // baked default; falls back to the baked path when the stage is absent/empty.
     property string wallpaperPath: bakedWallpaper
 
-    // Is the staged cover the USER's pick rather than the song's own default?
-    // The ONE property a reader (or a later lane routing picks through an
-    // external engine) needs to ask: `pickStaged` is true only while
-    // stage/cover.json carries `"pick": true` AND a path to render. One small
-    // named place, so the board gate below never re-derives it.
+    // Is the staged cover the user's pick rather than the song's own default?
+    // One named place to ask, since the board gate below and any later
+    // consumer (an external wallpaper engine) both depend on it.
     property bool pickStaged: false
 
     readonly property string coverJsonPath:
@@ -87,23 +85,16 @@ Item {
     }
 
     // ── The song's own board, over that image ──────────────────────────────
-    // The `wallpaper` slot (slots.md, "Wired slots"): the active song may draw
-    // its own cover, live, on this surface — cadenza's circuit board moves its
-    // light on the copper here.
+    // The `wallpaper` slot (slots.md): the active song may draw its own cover,
+    // live, on this surface — cadenza's circuit board moves its light on the
+    // copper here.
     //
-    // TWO gates, and NOTHING is drawn when either fails:
-    //   · `stagingEngine.has(<active song>, "wallpaper")` — the song must
-    //     author its OWN `widgets/wallpaper.qml`. This slot has NO baseline
-    //     floor (slots.md): sonata ships no body for it, so `has` is exactly
-    //     "the active song authors a board", and no other song's body can
-    //     ever be resolved into this anchor as a floor. (Before this, sonata's
-    //     ported twin body resolved as the floor and painted a second copy of
-    //     the cover over this one.)
-    //   · `!pickStaged` — a user pick is what shows, full stop. No hidden
-    //     repaint under a chosen image; "I'd rather not have it rerender".
-    //
-    // The gate is a Loader's `active`, so a failing gate DESTROYS the board
-    // (and its Timer with it) rather than merely hiding it.
+    // Two gates, and this slot has NO baseline floor: `has` resolves the active
+    // song's own manifest entry only, because sonata ships no body for this
+    // slot (a baseline twin here painted a second, full-bleed copy of the cover
+    // over the image). A pick is what shows, full stop — no hidden repaint
+    // under a chosen image, so the gate is a Loader's `active` and the board,
+    // with its timer, is destroyed rather than hidden.
     readonly property bool boardActive:
         !root.pickStaged && root.stagingEngine.has(root.livery.songName, "wallpaper")
 
@@ -115,12 +106,8 @@ Item {
         sourceComponent: boardComponent
     }
 
-    // The slot is full-bleed by definition — it anchors to this item rather
-    // than reporting an implicit size — so it needs no `extraProps`, and the
-    // widget reads `livery`/`bridge` like any other. Deliberately NOT a
-    // declarative `Loader { source: … }` (WidgetSlot.qml's own header: a
-    // `required property` is resolved at OBJECT CREATION, so the properties
-    // are handed over through the component's own scope here).
+    // Full-bleed by definition — the slot anchors to this item rather than
+    // reporting an implicit size, so it needs no `extraProps`.
     Component {
         id: boardComponent
         WidgetSlot {

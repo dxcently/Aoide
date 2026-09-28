@@ -1626,7 +1626,9 @@ it is load-bearing twice over:
   about the wallpaper: a bare `lyra rice stage <song>`, the RICE toggle
   (`lyra rice mode stage`, which re-stages whatever is current),
   `lyra rice mode declarative`'s re-pin and the activation re-seed all leave
-  a standing pick byte-identical.
+  a standing pick byte-identical — including when that re-stage is a mode
+  change out of `Draft`, where the song the stage was carrying is captured
+  before the routing symlink is torn down (the stage file IS that symlink).
 
 An unauthored `wallpaper` board has NO baseline floor: that slot draws for a
 song that authors its own `widgets/wallpaper.qml` and for nothing else

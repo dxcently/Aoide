@@ -74,28 +74,12 @@ fn handle_cover_set_entry(inv: &Invocation) -> Outcome {
     out
 }
 
-/// `cover set <path>` — switch the live wallpaper by staging a new cover.
+/// `cover set <path>` — the live wallpaper write path.
 ///
-/// This is the WRITE path the Quickshell wallpaper picker shells out to (QML has
-/// no file-write primitive). It resolves `<path>` to an absolute cover file, then
-/// atomic-writes `{ "path": "<abs>", "pick": true }` to `<stage>/cover.json` —
-/// the seam `rice stage` uses too, which `AoideWallpaper.qml`'s FileView watches
-/// and hot-swaps live. The `pick` field is what tells a reader this is the
-/// USER's choice and not the song's own cover (CONTRACTS.md §4): a pick stands
-/// over the song's board, and survives re-staging the same song. Nothing is
-/// committed; the baked `AOIDE_WALLPAPER` remains the boot/rebuild fallback.
-///
-/// Resolution: an absolute `<path>` is taken literally; a bare filename resolves
-/// against the shared cover library `song/covers/`. A path that names no existing
-/// file is a clear error (exit 1) — we never stage a wallpaper that can't render.
-///
-/// `--clear` is the pick's inverse: drop the user's choice and return the active
-/// song to its OWN default — which is not simply "remove the file", since a song
-/// with a derivable cover must get that cover back. It reads the active song off
-/// `stage/livery.json`'s own `"song"` field (`commands/mode.rs`'s
-/// `current_staged_song`, the one source of truth for "the current rice") and
-/// runs the same `cover::stage_for_song` rule `rice stage` runs with no previous
-/// song — which can never answer "kept", so a pick never survives a clear.
+/// Resolves `<path>` (absolute, or a bare name under `song/covers/`) and stages
+/// it as a pick (CONTRACTS.md §4): what the user chose shows, the song's own
+/// board does not draw over it, and re-staging the same song leaves it alone.
+/// Nothing is committed; the baked `AOIDE_WALLPAPER` remains the boot fallback.
 fn handle_cover_set(inv: &Invocation) -> Outcome {
     if inv.flag_present("clear") {
         return handle_cover_clear(inv);
@@ -126,9 +110,6 @@ fn handle_cover_set(inv: &Invocation) -> Outcome {
         }));
     }
 
-    // Stage cover.json exactly like `rice stage`: pretty `{ "path": … }`
-    // with a trailing newline, atomic write into the stage dir — plus the
-    // `pick` marker only the user's own choice carries (`cover::stage_pick`).
     let cover_dst = match crate::cover::stage_pick(&resolved) {
         Ok(dst) => dst,
         Err(e) => {
@@ -153,12 +134,10 @@ fn handle_cover_set(inv: &Invocation) -> Outcome {
     }))
 }
 
-/// `cover set --clear` — drop the pick, return the song to its own default.
-///
-/// The song is whatever `stage/livery.json` names right now; with no stage file
-/// at all (nothing has ever been staged) there is no default to derive, so the
-/// clear is just the removal. A path argument alongside `--clear` is refused
-/// rather than half-honoured: the two spellings mean opposite things.
+/// `cover set --clear` — drop the pick and give the active song back its own
+/// default. The song comes from the staged livery's own `song` field; with
+/// nothing staged there is no default to derive, so the clear is a removal.
+/// `stage_for_song` with no `prev_song` can never answer `PickKept`.
 fn handle_cover_clear(inv: &Invocation) -> Outcome {
     let cover_dst = crate::cover::cover_dst();
     if inv.args.first().is_some() {
@@ -216,8 +195,6 @@ fn handle_cover_clear(inv: &Invocation) -> Outcome {
             }
             out
         }
-        // `stage_for_song` can only answer this with a previous song, and a
-        // clear passes none — unreachable, but never silently wrong.
         Ok(crate::cover::CoverStage::PickKept) => Outcome::error(
             "cover.set",
             "internal: a clear must never keep a pick",

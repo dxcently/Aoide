@@ -27,13 +27,14 @@
 //!   draft-awareness and never auto-prefer or auto-detect one — reaching a
 //!   draft at all only ever happens through `rice mode draft <name>`.
 //!
-//! `stage`/`declarative` both reuse [`super::rice::handle_rice_stage`]
+//! `stage`/`declarative` both reuse [`super::rice::handle_rice_stage_with_prev`]
 //! directly (guard-free, `pub(crate)`) when a song name is given — the SAME
 //! side effects a bare `rice stage <name>` has — so `declarative <name>` can
 //! re-pin `stage/livery.json` to that song's declared notes and lock it in
 //! one step, even from the default (unmarked) declarative state, without
 //! tripping its own guard (the marker isn't flipped until AFTER the write
-//! succeeds).
+//! succeeds). They pass it the song the stage carried, captured before their
+//! own [`teardown_draft_symlink`].
 //!
 //! `rice mode stage` never leaves a bare flag-flip: with no name it resolves
 //! "the current rice" off the existing `stage/livery.json`'s own `"song"`
@@ -53,7 +54,11 @@
 //! plain declared content, so that write lands in a real file rather than
 //! transparently through into whatever draft the symlink still pointed at.
 //! Neither leaves a dangling symlink behind when transitioning out of
-//! `Draft`.
+//! `Draft`. Each therefore captures "the song currently staged"
+//! ([`current_staged_song`], read THROUGH that symlink while it still exists)
+//! before the teardown, because after it there is no stage file left to read
+//! and the wallpaper half of the re-stage would take a pick made for this very
+//! song for a pick made for another one, and drop it (CONTRACTS.md §4).
 
 use aoide_protocol::Invocation;
 use aoide_protocol::output::{Outcome, Status};
@@ -222,6 +227,11 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
         .or_else(|| existing.staging_song.clone())
         .or_else(current_staged_song);
 
+    // Before the teardown below: afterwards the symlink that IS
+    // stage/livery.json is gone, so the staged song is unreadable and a pick
+    // made for the song being re-staged would be dropped.
+    let prev_song = current_staged_song();
+
     if let Err(e) = teardown_draft_symlink() {
         return Outcome::error("rice.mode.stage", format!("failed to clear draft routing: {e}"))
             .with_data(json!({ "reason": "symlink-teardown-failed" }));
@@ -258,7 +268,8 @@ fn handle_mode_stage(inv: &Invocation) -> Outcome {
             flags: inv.flags.clone(),
             door: inv.door,
         };
-        let mut staged = super::rice::handle_rice_stage(&stage_inv);
+        let mut staged =
+            super::rice::handle_rice_stage_with_prev(&stage_inv, prev_song.as_deref());
         if staged.status != Status::Ok {
             staged.command = "rice.mode.stage".to_string();
             return staged;
@@ -353,6 +364,9 @@ fn handle_mode_declarative(inv: &Invocation) -> Outcome {
         .or_else(super::rice::declared_song)
         .or_else(current_staged_song);
 
+    // Same capture, same reason as `handle_mode_stage` above.
+    let prev_song = current_staged_song();
+
     if let Err(e) = teardown_draft_symlink() {
         return Outcome::error("rice.mode.declarative", format!("failed to clear draft routing: {e}"))
             .with_data(json!({ "reason": "symlink-teardown-failed" }));
@@ -366,7 +380,8 @@ fn handle_mode_declarative(inv: &Invocation) -> Outcome {
             flags: inv.flags.clone(),
             door: inv.door,
         };
-        let mut staged = super::rice::handle_rice_stage(&stage_inv);
+        let mut staged =
+            super::rice::handle_rice_stage_with_prev(&stage_inv, prev_song.as_deref());
         if staged.status != Status::Ok {
             staged.command = "rice.mode.declarative".to_string();
             return staged;
@@ -541,6 +556,7 @@ fn handle_mode_draft(inv: &Invocation) -> Outcome {
 mod tests {
     use super::*;
     use aoide_test_support::*;
+    use std::path::PathBuf;
 
     #[test]
     fn current_staged_song_rejects_a_hand_edited_path_traversal_song_field() {
@@ -978,6 +994,128 @@ mod tests {
         assert_eq!(marker.mode, RiceMode::Staging);
         assert_eq!(marker.song, Some("etude".to_string()));
         assert_eq!(marker.staging_song, Some("etude".to_string()));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ── A wallpaper pick across a mode change (the M1 regression) ────────────
+    //
+    // `rice mode stage`/`declarative` tear the Draft routing symlink down
+    // before re-staging, so "which song was staged" must be captured first or
+    // the cover half sees no stage file and calls it a switch.
+
+    /// `<root>/{stage,songbook/<song>/livery.json}` for each named song, with
+    /// `AOIDE_STAGE_DIR` pointed at the stage and the songbook gate fixtured.
+    /// Callers own `remove_dir_all(&root)`.
+    fn pick_tmp(tag: &str, songs: &[&str]) -> (PathBuf, PathBuf) {
+        let root = unique_tmp(tag);
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        for song in songs {
+            let dir = root.join("songbook").join(song);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("livery.json"), VALID_NOTES).unwrap();
+        }
+        crate::commands::test_support::ensure_default_songbook_fixture();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        (root, stage)
+    }
+
+    /// Stage `cadenza`, pick a wallpaper, fork a Draft, then leave Draft mode
+    /// with a bare `rice mode stage` (what the RICE toggle sends).
+    #[test]
+    fn leaving_draft_mode_by_stage_keeps_a_pick_made_for_the_same_song() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let (root, stage) = pick_tmp("mode-draft-pick-stage", &["cadenza"]);
+
+        handle_mode_stage(&inv(&["rice", "mode", "stage"], &["cadenza"]));
+        assert_eq!(current_staged_song().as_deref(), Some("cadenza"));
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png")).unwrap();
+        let staged_pick = std::fs::read_to_string(stage.join("cover.json")).unwrap();
+        assert!(crate::cover::staged_is_pick());
+
+        // Into a draft, then out of it again with the same song.
+        let drafted = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
+        assert_eq!(drafted.status, Status::Ok, "{:?}", drafted.data);
+        assert_eq!(load_mode_marker().mode, RiceMode::Draft);
+        assert!(std::fs::symlink_metadata(stage.join("livery.json"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+
+        let out = handle_mode_stage(&inv(&["rice", "mode", "stage"], &[]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert_eq!(load_mode_marker().mode, RiceMode::Staging);
+        assert_eq!(current_staged_song().as_deref(), Some("cadenza"));
+        assert!(
+            crate::cover::staged_is_pick(),
+            "a pick for the re-staged song survives leaving Draft"
+        );
+        assert_eq!(
+            std::fs::read_to_string(stage.join("cover.json")).unwrap(),
+            staged_pick,
+            "byte-identical — nothing rewrote it"
+        );
+        assert!(
+            !out.changed.iter().any(|c| c.ends_with("cover.json")),
+            "no cover write on the picked path: {:?}",
+            out.changed
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The same regression through `rice mode declarative`.
+    #[test]
+    fn leaving_draft_mode_by_declarative_keeps_a_pick_made_for_the_same_song() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let (root, stage) = pick_tmp("mode-draft-pick-declarative", &["cadenza"]);
+
+        handle_mode_stage(&inv(&["rice", "mode", "stage"], &["cadenza"]));
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png")).unwrap();
+        let staged_pick = std::fs::read_to_string(stage.join("cover.json")).unwrap();
+
+        let drafted = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
+        assert_eq!(drafted.status, Status::Ok, "{:?}", drafted.data);
+
+        let out = handle_mode_declarative(&inv(&["rice", "mode", "declarative"], &[]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        let marker = load_mode_marker();
+        assert_eq!(marker.mode, RiceMode::Declarative);
+        assert_eq!(marker.song, Some("cadenza".to_string()));
+        assert!(crate::cover::staged_is_pick(), "the pick survives the re-pin");
+        assert_eq!(
+            std::fs::read_to_string(stage.join("cover.json")).unwrap(),
+            staged_pick
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// …and a mode change that re-stages a DIFFERENT song is a song switch, so
+    /// the pick is dropped (here: cleared outright, because the new song
+    /// derives no cover of its own).
+    #[test]
+    fn leaving_draft_mode_by_staging_a_different_song_drops_the_pick() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let (root, stage) = pick_tmp("mode-draft-pick-switch", &["cadenza", "etude"]);
+
+        handle_mode_stage(&inv(&["rice", "mode", "stage"], &["cadenza"]));
+        crate::cover::stage_pick(std::path::Path::new("/tmp/chosen.png")).unwrap();
+        let drafted = handle_mode_draft(&inv(&["rice", "mode", "draft"], &["neon-night"]));
+        assert_eq!(drafted.status, Status::Ok, "{:?}", drafted.data);
+
+        let out = handle_mode_stage(&inv(&["rice", "mode", "stage"], &["etude"]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert_eq!(current_staged_song().as_deref(), Some("etude"));
+        assert!(
+            !stage.join("cover.json").exists(),
+            "a song switch drops the pick — and with it the previous song's cover"
+        );
+        assert!(!crate::cover::staged_is_pick());
 
         let _ = std::fs::remove_dir_all(&root);
     }

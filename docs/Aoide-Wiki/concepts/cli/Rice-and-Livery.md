@@ -333,8 +333,10 @@ lyra cover set --clear [--json]
   a wallpaper that can't render. `--clear` with a `<path>` is
   `clear-takes-no-path`, exit 2 — the two spellings mean opposite things.
   A pick survives re-staging the SAME song (`lyra rice stage`, the RICE
-  toggle, a declarative re-seed); switching songs drops it. Nothing is
-  committed; the baked `AOIDE_WALLPAPER` remains the boot/rebuild fallback.
+  toggle, a declarative re-seed, and leaving `Draft` — the staged song is
+  captured before the routing symlink is torn down); switching songs drops it.
+  Nothing is committed; the baked `AOIDE_WALLPAPER` remains the boot/rebuild
+  fallback.
 
 ### lyra livery emit
 

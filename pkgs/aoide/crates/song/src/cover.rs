@@ -1,26 +1,18 @@
-//! Cover-art derivation + resolution — the shared logic `cover set` and
-//! `rice stage` both need to turn a name/arg into a physical cover file
-//! under the shared library `song/covers/` — plus the one seam that decides
-//! WHAT `stage/cover.json` holds: a song's own default or the user's pick
-//! (CONTRACTS.md §4).
-//!
-//! Moved out of `pkgs/aoide/src/commands/rice.rs` and
-//! `pkgs/aoide/src/commands/cover.rs` (Phase 5b restructure,
-//! docs/architecture/PACKAGE-LAYOUT.md). The resolution functions are pure
-//! aside from reading `aoide_storage::fs::song_dir()` (env-derived path
-//! resolution) and stat-ing candidate files; the stage writers below are the
-//! only side effects here, and they all go through
-//! `aoide_storage::fs::atomic_write` — no `Outcome`/`Invocation` ever
-//! reaches this module.
+//! Cover-art derivation + resolution for the shared library `song/covers/`,
+//! and the stage seam that decides what `stage/cover.json` holds: a user pick
+//! or the song's own default (CONTRACTS.md §4). Moved out of
+//! `pkgs/aoide/src/commands/{rice,cover}.rs` (Phase 5b restructure,
+//! docs/architecture/PACKAGE-LAYOUT.md). Reads env-derived paths and stats
+//! candidates; the stage writers are the only side effects.
 
 use std::path::{Path, PathBuf};
 
 /// Extensions we recognise as cover art, in preference order.
 pub const COVER_EXTS: &[&str] = &["webp", "png", "jpg", "jpeg"];
 
-/// The `stage/cover.json` field that marks a USER PICK (CONTRACTS.md §4).
-/// Absent — as in every file written before the field existed, and in every
-/// file `rice stage` writes — means "the song's own default".
+/// Marks `stage/cover.json` as the USER's pick. Absent — in every file written
+/// before the field existed, and in every `rice stage` write — means the song's
+/// own default.
 pub const PICK_FIELD: &str = "pick";
 
 /// Derive a physical cover-art file for a song, or `None` when none exists.
@@ -59,14 +51,13 @@ pub fn resolve_cover_arg(arg: &str) -> PathBuf {
 
 // ── The stage seam: a song default, a user pick, or neither ──────────────────
 
-/// `<stage>/cover.json` — the one wallpaper seam every writer and reader of
-/// this module shares (CONTRACTS.md §4).
+/// `<stage>/cover.json` — the one wallpaper seam this module's writers share.
 pub fn cover_dst() -> PathBuf {
     aoide_storage::fs::stage_dir().join("cover.json")
 }
 
-/// The cover path `stage/cover.json` currently names, or `None` when the file
-/// is absent, unreadable, or carries no non-empty `path`.
+/// The cover path `stage/cover.json` names, or `None` when the file is absent,
+/// unreadable, or carries no non-empty `path`.
 pub fn staged_path() -> Option<String> {
     let raw = std::fs::read_to_string(cover_dst()).ok()?;
     let parsed: serde_json::Value = serde_json::from_str(&raw).ok()?;
@@ -74,16 +65,12 @@ pub fn staged_path() -> Option<String> {
     (!path.is_empty()).then(|| path.to_string())
 }
 
-/// Does the staged `cover.json` hold a USER PICK — [`PICK_FIELD`] `true`?
-///
-/// A missing file, a file that will not parse, an absent field and an explicit
-/// `false` all answer `false`: the field is additive over v0, so every
-/// `cover.json` written before it existed reads as the song's own default,
-/// which is exactly what it was.
+/// Does the staged `cover.json` hold a user pick? Every other answer — a
+/// missing file, a torn one, an absent field, an explicit `false` — is the
+/// song's own default, which is what the file was before the field existed.
 pub fn staged_is_pick() -> bool {
-    let raw = match std::fs::read_to_string(cover_dst()) {
-        Ok(raw) => raw,
-        Err(_) => return false,
+    let Ok(raw) = std::fs::read_to_string(cover_dst()) else {
+        return false;
     };
     match serde_json::from_str::<serde_json::Value>(&raw) {
         Ok(parsed) => parsed
@@ -94,21 +81,17 @@ pub fn staged_is_pick() -> bool {
     }
 }
 
-/// Stage a USER PICK: `{ "path": …, "pick": true }` — what `cover set` writes.
+/// Stage a user pick — what `cover set` writes.
 pub fn stage_pick(path: &Path) -> std::io::Result<PathBuf> {
     write_cover(serde_json::json!({ "path": path.to_string_lossy(), PICK_FIELD: true }))
 }
 
-/// Stage a song DEFAULT: `{ "path": … }` with NO `pick` field — what
-/// `rice stage` writes, so a reader can never mistake the song's own cover for
-/// a pick the user made.
+/// Stage a song default — what `rice stage` writes, never marked as a pick.
 pub fn stage_default(path: &Path) -> std::io::Result<PathBuf> {
     write_cover(serde_json::json!({ "path": path.to_string_lossy() }))
 }
 
-/// Remove `stage/cover.json` — the inverse of both writers above, and the
-/// "this song has no cover of its own" answer. `Ok(false)` when there was
-/// nothing there (a removal is idempotent, not an error).
+/// Remove `stage/cover.json`. `Ok(false)` when there was nothing there.
 pub fn clear_staged() -> std::io::Result<bool> {
     match std::fs::remove_file(cover_dst()) {
         Ok(()) => Ok(true),
@@ -119,30 +102,20 @@ pub fn clear_staged() -> std::io::Result<bool> {
 
 /// What [`stage_for_song`] did to `stage/cover.json`.
 pub enum CoverStage {
-    /// The SAME song, with a pick standing: left byte-identical.
+    /// The same song, with a pick standing: left byte-identical.
     PickKept,
-    /// The song's own derivable cover, written as a DEFAULT (no `pick`).
+    /// The song's own derivable cover, written as a default.
     Default(PathBuf),
     /// No derivable cover: a stale `cover.json` was removed (`true`), or was
     /// not there to begin with.
     Cleared(bool),
 }
 
-/// The whole cover half of `rice stage <name>` (CONTRACTS.md §4).
-///
-/// A song's wallpaper — its derivable cover, and its own live `wallpaper`
-/// board, if it authors one — is only its DEFAULT. A user pick (`cover set`)
-/// is what shows while it stands, and it SURVIVES staging the same song again
-/// (a bare `rice mode stage`, the RICE toggle, a declarative re-seed), because
-/// re-staging is not a statement about the wallpaper. Staging a DIFFERENT song
-/// resets to that song's own default: the pick is dropped and, with it, any
-/// cover the previous song left — which is what used to leak a previous song's
-/// wallpaper onto the new one when the new song derived no cover of its own.
-///
-/// `prev_song` is the song `stage/livery.json` carried BEFORE this call's
-/// write — `commands/mode.rs`'s `current_staged_song`, the one source of truth
-/// for "the current rice". Anything other than `Some(name)` (a different song,
-/// or no stage file at all) is a song switch.
+/// `rice stage <name>`'s cover half (CONTRACTS.md §4): a re-staged song keeps a
+/// standing pick, a switched-to song gets its own default. `prev_song` is the
+/// song the stage carried before the caller's livery write — a caller that has
+/// already disturbed the stage passes its own capture, so anything but
+/// `Some(name)` (a different song, nothing staged) is a switch.
 pub fn stage_for_song(name: &str, prev_song: Option<&str>) -> std::io::Result<CoverStage> {
     if prev_song == Some(name) && staged_is_pick() {
         return Ok(CoverStage::PickKept);

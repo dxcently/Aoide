@@ -384,7 +384,23 @@ fn notes_source(name: &str) -> PathBuf {
 /// while `stage/livery.json` is routed into a draft (`rice mode draft`,
 /// `Draft` mode), this function's write lands straight in the draft file
 /// with zero symlink-awareness needed here, which is the entire mechanism.
+///
+/// The wrapper for callers that have not touched `stage/livery.json`; a caller
+/// that has (the `rice mode` handlers tear a Draft routing symlink down first)
+/// calls [`handle_rice_stage_with_prev`] with the song it captured.
 pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
+    let prev_song = super::mode::current_staged_song();
+    handle_rice_stage_with_prev(inv, prev_song.as_deref())
+}
+
+/// [`handle_rice_stage`] with the previous song supplied by the caller.
+///
+/// A caller that has already disturbed `stage/livery.json` (the `rice mode`
+/// handlers tear a Draft-mode routing symlink down first) captures the song the
+/// stage carried and hands it in; `prev_song` is only consulted by the cover
+/// half, where the same song keeps a standing pick and a different one resets
+/// to its own default (CONTRACTS.md §4).
+pub(crate) fn handle_rice_stage_with_prev(inv: &Invocation, prev_song: Option<&str>) -> Outcome {
     let name = match inv.args.first() {
         Some(n) => n.clone(),
         None => {
@@ -478,14 +494,6 @@ pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
     };
 
     let stage = shellbridge::stage_dir();
-    // The song `stage/livery.json` was carrying BEFORE the write below — the
-    // cover half further down needs to know whether this is the SAME song
-    // being re-staged (a user's wallpaper pick survives that, CONTRACTS.md §4)
-    // or a song SWITCH (the pick is dropped and the new song's own default
-    // takes its place). Read through `commands/mode.rs`'s
-    // `current_staged_song` — the one source of truth for "what is the current
-    // rice" (the stage file's own `"song"` breadcrumb) — never re-derived here.
-    let prev_song = super::mode::current_staged_song();
     let notes_dst = stage.join("livery.json");
     if let Err(e) = shellbridge::atomic_write(&notes_dst, &staged) {
         return Outcome::error("rice.stage", format!("failed to stage livery.json: {e}"))
@@ -506,17 +514,12 @@ pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
     let (terminal_changed, terminal_data) = stage_terminal_colors(terminal_conf.as_deref());
     changed.extend(terminal_changed);
 
-    // Cover: the song's own DEFAULT, or a standing user pick (CONTRACTS.md
-    // §4). A song's wallpaper is only its default — the user's pick (`cover
-    // set`) is what shows while it stands, and it SURVIVES re-staging the SAME
-    // song (a bare `rice mode stage`, the RICE toggle, a declarative re-seed);
-    // a DIFFERENT song resets to that song's own cover, dropping the pick
-    // along with whatever cover the previous song left — which is the leak
-    // this rule closes (`rice stage <song>` used to leave the previous song's
-    // cover.json standing whenever the new song derived no cover). One seam,
-    // shared with `cover set --clear`.
+    // Cover: the song's own default, or a standing user pick (CONTRACTS.md §4).
+    // `prev_song` is the caller's capture, never read here — a caller that
+    // tears a Draft routing symlink down before staging has already made the
+    // stage file unreadable.
     let cover_dst = crate::cover::cover_dst();
-    let cover_stage = match crate::cover::stage_for_song(&name, prev_song.as_deref()) {
+    let cover_stage = match crate::cover::stage_for_song(&name, prev_song) {
         Ok(staged) => staged,
         Err(e) => {
             return Outcome::error("rice.stage", format!("failed to stage cover.json: {e}"))
