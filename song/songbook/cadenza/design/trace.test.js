@@ -1,5 +1,11 @@
 // design/trace.test.js — the pulse engine's own check. `node design/trace.test.js`.
 //
+// A MANUAL check: nothing in the flake runs it — no `nix flake check` gate, no
+// CI job, no timer. It is run by hand when the engine changes (and by anyone
+// re-reading this file), which is exactly why it prints its own pass/fail count
+// and exits non-zero on a failure. The board's LOOK is a manual check too
+// (`lyra preview`, cover/README.md).
+//
 // WHY A node SCRIPT IN A SONG. `widgets/Trace.js` and the board's generator are
 // both deliberately pure (no QML, no clock, no Math.random — see each header),
 // so the bytes that ship are the bytes this runs. Quickshell cannot be exercised

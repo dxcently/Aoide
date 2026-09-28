@@ -39,6 +39,12 @@ it — `CoverPcb` for the copper, one transparent Canvas over it for the light
 what a live shell draws; the PNG above is what draws where no such slot
 exists, and what `lyra cover set` stages.
 
+The slot has NO baseline floor (`slots.md`): the board draws only for the song
+that authors it, and only while that song's own cover is what is staged. A
+`lyra cover set` pick (`stage/cover.json`'s `"pick": true`, CONTRACTS.md §4)
+is what shows, full stop — the shell destroys the board rather than hiding it,
+so no repaint runs under the chosen image.
+
 Same board, same seed, same size — the two cannot disagree: the widget
 generates from `CoverPcb`'s own generator at the output's exact size, which is
 what each PNG was shot from.
@@ -58,4 +64,5 @@ lyra preview shot --root "$R" --what widget --out /tmp/board.png
 Knobs (rate/interval/pulseCap/idleFloor/seed) come from
 `$R/wallpaper-preview.json` — WallpaperPreview.qml's header lists them. The
 engine's maths is checked without a compositor at all:
-`node song/songbook/cadenza/design/trace.test.js`.
+`node song/songbook/cadenza/design/trace.test.js` — a MANUAL check (nothing in
+the flake runs it; the preview above is the manual LOOK).
