@@ -28,3 +28,34 @@ passes the same props to every widget, so these warnings are expected.
 
 Stage live with `lyra cover set <abs path>`. Declaring the cover into
 `aoide.livery.wallpaper` for the rebuild is the User's call.
+
+## The live board — `widgets/wallpaper.qml`
+
+The PNG is the still shot. The board itself is also drawn LIVE: the lane
+anchors a song-owned `wallpaper` slot inside the per-screen Background
+surface (`pkgs/lyra-shell/qml/slots.md`), and `widgets/wallpaper.qml` fills
+it — `CoverPcb` for the copper, one transparent Canvas over it for the light
+(`widgets/Trace.js` is the engine; intent §3.9 is the grammar). This widget is
+what a live shell draws; the PNG above is what draws where no such slot
+exists, and what `lyra cover set` stages.
+
+Same board, same seed, same size — the two cannot disagree: the widget
+generates from `CoverPcb`'s own generator at the output's exact size, which is
+what each PNG was shot from.
+
+Look at it on the canvas (a fixture set drives the agents, so no live machine
+is needed):
+
+```sh
+export AOIDE_FLAKE_ROOT=<checkout>
+R=$XDG_RUNTIME_DIR/cadenza-wall
+lyra preview "$AOIDE_FLAKE_ROOT/song/songbook/cadenza/widgets/WallpaperPreview.qml" \
+    --song cadenza --fixture "$AOIDE_FLAKE_ROOT/song/songbook/cadenza/design/fixtures/board" --root "$R"
+lyra preview set --root "$R" --viewport 1920x1080 --width 1920 --height 1080 --anchor tl --margin 0
+lyra preview shot --root "$R" --what widget --out /tmp/board.png
+```
+
+Knobs (rate/interval/pulseCap/idleFloor/seed) come from
+`$R/wallpaper-preview.json` — WallpaperPreview.qml's header lists them. The
+engine's maths is checked without a compositor at all:
+`node song/songbook/cadenza/design/trace.test.js`.

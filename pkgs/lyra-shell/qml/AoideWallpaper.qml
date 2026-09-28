@@ -16,6 +16,12 @@ Item {
     id: root
 
     required property var livery
+    // What the song's `wallpaper` slot anchor below needs (slots.md, "Wired
+    // slots"): the staging engine resolves the active song's board, and the
+    // bridge is what every widget is handed — a board that reads the machine
+    // (sessions/hooks) reads it through the same door as any other surface.
+    required property var bridge
+    required property var stagingEngine
 
     // ── Cover path ─────────────────────────────────────────────────────────
     // The BAKED song wallpaper — the lyra lane exports its immutable
@@ -60,5 +66,24 @@ Item {
         smooth: true
         asynchronous: true
         visible: status === Image.Ready
+    }
+
+    // ── The song's own board, over that image ──────────────────────────────
+    // The `wallpaper` slot (slots.md, "Wired slots"): the active song may draw
+    // its own cover, live, on this surface — cadenza's circuit board moves its
+    // light on the copper here. Nothing is required of it: a song that authors
+    // no `widgets/wallpaper.qml` (and the baseline floor, which has none)
+    // resolves to nothing, and the cover image above stays what it was. The
+    // slot is full-bleed by definition — it anchors to this item rather than
+    // reporting an implicit size — so it needs no `extraProps`, and the widget
+    // reads `livery`/`bridge` like any other.
+    WidgetSlot {
+        id: songBoard
+        anchors.fill: parent
+        z: 1
+        livery: root.livery
+        bridge: root.bridge
+        stagingEngine: root.stagingEngine
+        slot: "wallpaper"
     }
 }

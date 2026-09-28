@@ -151,6 +151,11 @@ ShellRoot {
                 anchors.fill: parent
                 // Root-qualified on purpose — see shellRoot.liveryRef above.
                 livery: shellRoot.liveryRef
+                // The `wallpaper` slot's own needs (slots.md): the active song's
+                // board is resolved through the staging engine, and a board that
+                // reads the machine gets the same bridge every other widget does.
+                bridge: shellRoot.bridgeRef
+                stagingEngine: shellRoot.stagingRef
             }
         }
     }

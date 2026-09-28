@@ -52,7 +52,10 @@ startup) — unchanged limitation.
 Every widget QML file, whatever slot it fills, must follow this shape:
 
 - **Root is an `Item`.** (`WidgetSlot` sizes itself off the loaded item's
-  `implicitWidth`/`implicitHeight`, so a non-`Item` root breaks layout.)
+  `implicitWidth`/`implicitHeight`, so a non-`Item` root breaks layout. The
+  one exception is a FULL-BLEED slot — `wallpaper`, which its host anchors to
+  the surface and which therefore reports no footprint of its own; see the
+  wired-slot row.)
 - **Declares `required property var livery`** — the active song's
   `LiveryState`, injected by every anchor unconditionally.
 - **Declares `required property var bridge`** — the `ShellBridge`, injected
@@ -89,6 +92,7 @@ anchor, viewport, fixture (`docs/Aoide-Wiki/concepts/desktop/Widget-Preview.md`)
 | `powermenu` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "powermenu" }`; the bar's clef calls `.item.toggle()` | none | none — sonata's `widgets/powermenu.qml` is the floor |
 | `launcher` | `SurfaceSlot` | `shell.qml` (lane) — `SurfaceSlot { slot: "launcher" }` | `clipboard` (the `AoideClipboard` instance), `ledger` (`GrimoireLedger` — stays in the lane, a data seam not chrome) | none — sonata's `widgets/launcher.qml` is the floor |
 | `bar` | `WidgetSlot` | `shell.qml` (lane) — the bar's `PanelWindow` content, `WidgetSlot { slot: "bar" }` | `shared` (session-state QtObject), `powermenu` (the powermenu slot's live `.item`), `dock` (the dock slot's live `.item`), `stagingEngine` (so the bar's own embedded calendar `WidgetSlot` can resolve) | none — sonata's `widgets/bar.qml` is the floor |
+| `wallpaper` | `WidgetSlot` | `AoideWallpaper.qml` (lane) — inside the per-screen Background layer surface, over the staged cover image | none | none — an unauthored `wallpaper` slot renders nothing and the cover image stands; cadenza's `widgets/wallpaper.qml` is the live board |
 
 ### Window-owning slot namespaces (`SurfaceSlot` contract)
 

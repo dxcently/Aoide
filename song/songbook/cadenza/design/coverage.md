@@ -26,7 +26,7 @@ widget bodies for what each one reaches. Status: `design` → `preview` →
 
 | slot | why no cadenza body now |
 |---|---|
-| `wallpaper` | shell.qml still hosts the shell's own wallpaper; the slot anchor lands with a later phase. Cadenza answers with a COVER, not a slot: the generated circuit board (`cover/pcb-<w>x<h>.png`, intent §3.9), staged with `lyra cover set`; the shell's wallpaper draws it. |
+| `wallpaper` | **answered** — cadenza's `widgets/wallpaper.qml` is the board drawn live (the lane anchors the slot inside the per-screen Background surface, `slots.md`): copper from `CoverPcb`, the light over it (intent §3.9). The still PNG (`cover/pcb-<w>x<h>.png`, staged with `lyra cover set`) stays as what draws when no widget is there. |
 | `wallpaper-picker` | no `SurfaceSlot` wired; the shell's `AoideWallpaperPicker` (SUPER+W) draws. Revisit when anchored. |
 
 ## Shell-owned, not dressable by a song today
@@ -44,7 +44,7 @@ recolours them; their shapes are out of the song's reach.
 | lamps | `activeAt` on `workspaces[]` / `ties[]` | S3 — **built** | core's `activeAt`; else derived: `hooks.json` `updatedAt` advancing |
 | working pulse | `hooks.json` phase `working` + session → jack (`workspaces[].sessions`) | S3 for the join | built on `hooks.json`; the jack join is derived (window → toplevel) until S3 |
 | send lamps | `graph.json` `sends: [{from, to, at}]` (the conductor's recent sends, newest last) | a core ask; no slice named in core-seams yet | nothing: absent `sends` runs no lamp (the switchboard fixture carries a ring) |
-| live cover (agents lit on the board) | a song-owned `wallpaper` slot anchor in the shell | not scheduled — a core ask | the static cover; no agent map |
+| live cover (agents lit on the board) | a song-owned `wallpaper` slot anchor in the shell | **built** — `widgets/wallpaper.qml` + `widgets/Trace.js` | the board's light: one ring per live session in its state colour, pulses scaled by working/awaiting, a burst on a `hooks.json` advance |
 | jack insight + SYS per-jack numbers | `state/usage/now.json` (`by: "workspace"`) | S5 tokens/cost, S6 CPU/mem, S7 history | jack pane: honest empty (§3.4); SYS per-jack: hidden (`hasJackUsage`) |
 | board feed + OVERVIEW mail | `aoide project board` via a shellbridge read op | S8–S10 | hidden (`hasBoardFeed`, `hasMailRead`); a project tab is its agents + terminals |
 | composer → agent | `{cmd:"boardpost", to:{session}}` | S11 | hidden (`hasBoardPost`) |

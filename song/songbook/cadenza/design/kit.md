@@ -7,6 +7,7 @@ instruments. It lives in `widgets/` next to the slots that use it:
 | file | kind | job |
 |---|---|---|
 | `Kit.js` | JS library | colour roles, the cell, the icon set, glyph builders, helper URLs |
+| `Trace.js` | JS library | the pulse engine: the polyline walker, the scheduler, the step, the budget (§6) |
 | `Pane.qml` | helper | the termui pane: hairline rules, title and stat in the top rule, inner glow, reveal/close |
 | `Block.qml` | helper | the borderless block: one message that is not a pane |
 | `GlowText.qml` | helper | text with glow tier 0 (outline) or tier 0+1 (baked bloom) |
@@ -346,3 +347,34 @@ feature request, not a song change.
   rows), never amber. This is a design
   call for the list surfaces to settle.
 - **Glow numbers** are in `intent.md` §2 "Glow — the budget".
+
+## 6. Trace.js — the pulse engine
+
+The second shared library, and the only place cadenza knows how to move
+light. It is `.pragma library` **pure JS**: no QML import, no clock, no
+`Math.random` — every function is a function of its arguments, so the bytes
+that ship are the bytes `node design/trace.test.js` runs.
+
+```js
+import "Trace.js" as Trace
+```
+
+| call | what it is |
+|---|---|
+| `Trace.at(pts, d)` | the point `d` px along a FLAT polyline `[x0,y0,x1,y1,…]`, clamped, returning `{x,y,horiz,x0,x1,y0,y1}` |
+| `Trace.flat([{x,y},…])` | the adapter for a point list (the bar's lamps build those) |
+| `Trace.length(pts)` | the polyline's Manhattan length (the bar's own wire metric) |
+| `Trace.rng(seed)` · `rr` · `ri` · `pickIdx` | mulberry32 and its draws |
+| `Trace.hash(str)` | a stable 32-bit hash — an agent's node, from its `sessionId` |
+| `Trace.index(board, tol)` | the board's little graph: which ring each track end lands on, and which tracks end on a ring |
+| `Trace.sessions(text)` · `live(rows)` · `stamps(text)` · `advanced(prev,next,first)` | the feed: who is alive, and who just moved |
+| `Trace.want(states, opts)` | the pulse budget: idle floor + 2 per working + 1 per awaiting, capped |
+| `Trace.spawn(rng, spec)` · `dwell(...)` | one pulse RECORD — never a QML object |
+| `Trace.reconcile(list, states, ctx)` | the scheduler: keep the board's light at the level the machine earns |
+| `Trace.advance(list, dt)` | the step: position, legs, blooms, alpha. Total — no NaN, no escape |
+| `Trace.ease(u)` · `dist(p)` · `tail(p, back)` · `head(p)` | presentation, so the painter holds no maths |
+
+Two consumers, one implementation: the bar's lamp dash walks with
+`Trace.at` (its inline copy is gone), and `wallpaper.qml` runs the whole
+engine under the board. A new look is a new NUMBER in a record — legs,
+speed, trail, ease — never a new branch in the painter.

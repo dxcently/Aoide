@@ -122,6 +122,7 @@ import Quickshell.Networking
 // the shell's WidgetSlot, for the embedded calendar (sonata's bar does the same)
 import "../.."
 import "Kit.js" as Kit
+import "Trace.js" as Trace
 
 Item {
     id: root
@@ -936,29 +937,11 @@ Item {
                 property var pts: []
                 property int dur: 600
                 property real t: 0
-                readonly property var segs: {
-                    var out = [], total = 0
-                    for (var i = 1; i < pts.length; i++) {
-                        var len = Math.abs(pts[i].x - pts[i - 1].x) + Math.abs(pts[i].y - pts[i - 1].y)
-                        out.push({ a: pts[i - 1], b: pts[i], s: total, len: len })
-                        total += len
-                    }
-                    return { list: out, total: total }
-                }
-                readonly property var at: {
-                    var S = segs.list, d = t * segs.total
-                    for (var i = 0; i < S.length; i++) {
-                        var g = S[i]
-                        if (d <= g.s + g.len || i === S.length - 1) {
-                            var u = g.len > 0 ? Math.min(1, Math.max(0, (d - g.s) / g.len)) : 0
-                            return { x: g.a.x + (g.b.x - g.a.x) * u, y: g.a.y + (g.b.y - g.a.y) * u,
-                                     horiz: g.a.y === g.b.y,
-                                     x0: Math.min(g.a.x, g.b.x), x1: Math.max(g.a.x, g.b.x),
-                                     y0: Math.min(g.a.y, g.b.y), y1: Math.max(g.a.y, g.b.y) }
-                        }
-                    }
-                    return { x: 0, y: 0, horiz: true, x0: 0, x1: 0, y0: 0, y1: 0 }
-                }
+                // the walker itself lives in Trace.js (one implementation for
+                // the bar's lamps and the cover's pulses) — `flat` adapts this
+                // lamp's `[{x, y}, …]` to the flat polylines the engine reads.
+                readonly property var flatPts: Trace.flat(pts)
+                readonly property var at: Trace.at(flatPts, t * Trace.length(flatPts))
                 width: at.horiz ? 12 : root.wireW
                 height: at.horiz ? root.wireW : 6
                 // centred on the head, held inside the segment so it never overhangs a wire end

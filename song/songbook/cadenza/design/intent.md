@@ -165,14 +165,21 @@ row draws its text in `match`, never `dim`. `borderInactive` (`#2e5a3a`) is
 a window border, not text, and stays darker.
 
 ### Motion
-- At rest, nothing animates. No blinking cursor unless a field has focus.
-  No scanline roll, no flicker, no idle shimmer.
+- At rest nothing in the UI animates. No blinking cursor unless a field has
+  focus. No scanline roll, no flicker, no idle shimmer. The one surface that
+  is never fully still is the cover: the board keeps a floor of light with
+  nothing running (§3.9 — a tube that reads dead is the one thing this key
+  does not do).
 - **Lamp:** when a jack's or a tie's activity advances between two reads
   (`activeAt`, or `hooks.json` `updatedAt` until core publishes it), a
   12px amber dash runs the tie line (or drops from the
   trunk into the jack) in 600ms linear, then the line goes dark. One
   `NumberAnimation` on one `Rectangle`; at most one lamp in flight per line,
-  later advances coalesce into it.
+  later advances coalesce into it. The walker under that dash is `Trace.at`
+  (`widgets/Trace.js`) — the same one the cover's pulses run on.
+- **Board light:** the cover's own motion — slow scans of light that arrive
+  at a pad, bounce back or die, and pads that breathe in their agent's state
+  colour. One engine, three looks, all of it data: §3.9.
 - **Reveal:** a pane draws its rule clockwise in 160ms then fills (the CRT
   "paint"); closes in 120ms. Within sonata's documented bands.
 - **Board lines** appear whole — no typewriter effect.
@@ -533,20 +540,42 @@ The wallpaper is a still image of a circuit board under the tube.
   never a slot) renders it from the livery with a fixed seed, and the
   preview canvas shoots it at each monitor's size into
   `cover/pcb-<w>x<h>.png`. Regenerating after a palette change is one shot.
-- Static today. Nothing moves on the wallpaper; the moving parts are the
-  lamps.
 - Live: `lyra cover set <abs path>` (a hot swap). Declaring it into
   `aoide.livery.wallpaper` for the rebuild is the User's to admit.
-- **The live board (waits on a core wallpaper slot).** The agent map
-  belongs on the cover, not the bar. Once the lane anchors a song-owned
-  `wallpaper` slot, cadenza's `wallpaper.qml` draws `CoverPcb` live with a
-  fresh seed at every shell start, and each live agent takes one pad near
-  the edge: its ring lit in its state colour, a spawned child's pad joined
-  to its parent's by a track. When a child's `hooks.json` `updatedAt`
-  advances, a lamp runs that track from child to parent; a root's own
-  activity flashes its pad. At most 6 lamps at once, coalescing. Nothing
-  moves when no agent is active. Until the slot lands there is no agent
-  map; the board's AGENTS pane is the list (coverage.md).
+
+**The live board — `widgets/wallpaper.qml`.** The cover is the song's
+`wallpaper` slot body (the lane anchors it inside the per-screen Background
+surface, `slots.md`), so the board is drawn, not just photographed: the
+copper by `CoverPcb`, and over it the light. The still PNG stays what it is —
+the fallback under the widget, and the shot the canvas keeps for a venue whose
+shell has no such slot.
+
+- **One engine, not an animation per effect.** `widgets/Trace.js` holds the
+  whole mechanism: the polyline walker (`at`), the scheduler (`reconcile`),
+  the step (`advance`), the budget (`want`), and the agent→node map (a hash
+  of `sessionId`, so an agent keeps its pad). It is pure JS, and
+  `design/trace.test.js` runs those exact bytes under `node` — it is also
+  where the bar's own lamp walks from now on, so there is one
+  implementation of "where is the light now", not two.
+- **The light.** A pulse is a RECORD (`{ track, u, dir, leg, legs, speed,
+  trail, hue }`), never a QML object: one transparent Canvas over the copper
+  repaints every pulse, every node and every bloom in a single pass on one
+  clock. The looks are data — a scan that arrives and dies (`legs = 1`), a
+  slide that bounces back and forth (`legs > 1`, velocity eased at both ends,
+  alpha lost a step per leg), a node that just breathes (`legs = 0`). Speed,
+  tail length, direction and legs are drawn per pulse, so nothing moves in
+  unison.
+- **The machine drives it.** Every live session claims ONE ring, lit in its
+  state's colour (`kit.lampColor`) and breathing — more processes, more lit
+  nodes. The pulse budget is `Trace.want`: a floor of two slow dim pulses
+  with nothing running (a tube never goes fully dark), then two per working
+  agent and one per awaiting, capped at fourteen. An agent whose `hooks.json`
+  `updatedAt` advances earns a burst on its own node, brighter and faster.
+- **Colour.** working = `title`, awaiting = `urgent`, idle = `dim`. Amber
+  (`hot`) is deliberately unused here: §2 gives it to the ONE live element,
+  and the board carries many lights by design.
+- The cover's light obeys §2's glow budget and its rule that text never
+  animates: nothing here is text, nothing here is a window.
 
 ## 4. Preview fixtures
 
@@ -632,3 +661,12 @@ reads a fixture path.
   truth), set here to ShureTechMono Nerd Font Mono; panes keep
   JetBrainsMono. Baked only: stylix is the one reader, so the face lands on
   the rebuild and staging cannot re-face a terminal (§2 Faces and the grid).
+- 2026-09-28 — khoa: the circuit background should MOVE — scans of light
+  arriving at a node, sliding back and forth, driven by what the machine is
+  doing, varied rather than everything at once, alive even with nothing
+  running. Landed as the live board: the lane anchors the `wallpaper` slot
+  inside its existing Background surface, `widgets/wallpaper.qml` draws the
+  copper plus the light, `widgets/Trace.js` is the one engine (budget from
+  `sessions.json`, bursts from `hooks.json`, one hash-picked node per
+  session), the bar's lamp walks the same code, and
+  `design/trace.test.js` runs it under `node` (§2 Motion, §3.9).
