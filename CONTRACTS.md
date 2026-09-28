@@ -1656,7 +1656,7 @@ Writers, and the exact shape each leaves:
 | `lyra rice stage <song>` | the song's derivable cover (`song/covers/<song>.{webp,png,jpg,jpeg}`, first match in that order) as `{"path": …, "song": …}`; with no derivable cover the file is REMOVED — a cover staged for another song must never stand over this one. A pick already stamped for THIS song is left untouched (reported as `coverStage: "pick-kept"`) |
 | `lyra cover set <path\|name>` | `{"path": …, "kind": …, "pick": true, "song": …}` for the song staged at write time — the `song` field omitted only when nothing is staged, which writes the legacy shape |
 | `lyra cover set we:<id>` | `{"kind": "we", "weId": …, "pick": true, "song": …}` — a scene, whose identity is the workshop id and which has no `path` at all. `we:` with an empty id is not a scene token (the argument is then resolved as a file, and fails like any other missing file) |
-| `lyra cover set --from-skwd --kind <static\|video\|we> <path\|id>` | the provider's own report, RECORDED: the shape above with `kind` as the provider named it. Applies NOTHING back, and is a no-op with no write (exit 0, `recorded: false`) when the host's provider is not `skwd-wall` (the word in `song/stage/wallpaper-provider` below), when the identity is this host's step-aside image (`AOIDE_SKWD_WALL_STANDIN`), or when the staged pick already names that same `(kind, identity)` for that song |
+| `lyra cover set --from-skwd --kind <static\|video\|we> <path\|id>` | the provider's own report, RECORDED: the shape above with `kind` as the provider named it. Applies NOTHING back, and is a no-op with no write (exit 0, `recorded: false`) when the host's provider is not `skwd-wall` (the word in `song/stage/wallpaper-provider` below), when the identity is this host's step-aside image (`AOIDE_SKWD_WALL_STANDIN`), or when the staged pick already names that same `(kind, identity)` for that song. The ONLY writer exempt from the `declarative` lock: a provider's picker is not a stage writer, and refusing the record would leave this file describing something the screen is not showing |
 | `lyra cover set --clear` | the staged song's own default, exactly as a re-stage of it writes it (its derivable cover, or the file removed). Never keeps a pick; the envelope's `droppedPick` and `coverStage` come from the marker read before the write |
 | `lyra rice mode declarative` | NOTHING — a lock is not a song switch. Its re-pin writes `livery.json` alone, and a pick stamped for another song is hidden by the read-side rule rather than dropped |
 | `lyra rice back <take>` | the target take's cover value VERBATIM — a take minted while a pick stood restores it as a pick, `song` and all; a take with no cover removes whatever stands |
@@ -1669,7 +1669,11 @@ Writers, and the exact shape each leaves:
 default through `stage_song_default` (its derivable cover, else no file).
 `rice mode declarative` passes `stage_cover: false` and skips it whole: a lock
 keeps the cover file exactly as it stands, and a pick it hides read-side comes
-back when its own song is staged again.
+back when its own song is staged again. The lock's own entrypoint refusal
+(`commands/cover.rs`) exempts `--from-skwd` — the record door writes what an
+external provider is ALREADY showing, so the file describes the screen instead
+of drifting from it; a plain `cover set` and `--clear` are refused there as
+they always were.
 
 ### `song/stage/wallpaper-provider` — **v0**
 
@@ -1766,7 +1770,10 @@ staging writes; never an error.
 - **`staging`** — hot-load unlocked: `rice stage`/`cover set` write live, as
   plain real files.
 - **`declarative`** — nix/home-manager is the only writer; staging writers
-  refuse.
+  refuse. One exemption, and it is not a drift: `cover set --from-skwd`
+  records what an external wallpaper provider is already showing
+  (CONTRACTS.md §4's cover.json entry), because the file must describe the
+  screen.
 - **`draft`** — `stage/livery.json` is a SYMLINK routed into
   `song/songbook/<song>/drafts/<name>/livery.json` via `rice mode draft
   <name>`. `rice stage`/`cover set` still write normally — neither is

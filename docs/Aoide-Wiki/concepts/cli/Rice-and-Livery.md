@@ -269,7 +269,9 @@ lyra rice mode declarative [<name>] [--json]
   dropped (CONTRACTS.md §4).
 - **Output:** data `{mode: "declarative", song}`.
 - **Notes:** locks staging — afterwards `rice stage` and `cover set` refuse
-  with `declarative-mode-locked`. A lock keeps the staged cover: a wallpaper
+  with `declarative-mode-locked`, with ONE exemption: `cover set --from-skwd`
+  records what an external wallpaper provider is already showing (see that
+  command's entry). A lock keeps the staged cover: a wallpaper
   pick survives locking and unlocking, and is only hidden while its song is
   not the staged one. The no-name form re-pins the declared song
   from its own notes rather than freezing the stage: unsaved live edits are
@@ -340,7 +342,11 @@ lyra cover set --from-skwd --kind <static|video|we> <path|id> [--json]
   (`AoideWallpaper.qml`) FileView-watches `stage/cover.json` and hot-swaps live
   — no IPC call — and both the song's live `wallpaper` board and the layer's
   own image stand down while a pick applies.
-- **Notes:** refuses while declarative-locked (`declarative-mode-locked`).
+- **Notes:** refuses while declarative-locked (`declarative-mode-locked`) —
+  except `--from-skwd`, which is EXEMPT: it records what an external wallpaper
+  provider is already showing, so the stage file describes the screen rather
+  than drifting from it (CONTRACTS.md §4). A plain set and `--clear` stay
+  refused.
   A path naming no existing file is `cover-not-found`, exit 1 — never stages
   a wallpaper that can't render. `--clear` with a `<path>` is
   `clear-takes-no-path`, exit 2 — the two spellings mean opposite things.

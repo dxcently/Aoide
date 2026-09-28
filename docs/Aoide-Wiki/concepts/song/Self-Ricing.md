@@ -227,7 +227,10 @@ and every pick write calls it.
   always as a plain real file.
 - **`declarative`** — nix/home-manager is the only writer; `rice stage`/
   `cover set` refuse outright with a `declarative-mode-locked` error naming
-  `rice mode stage` as the way to unlock. An absent `stage/mode.json` reads
+  `rice mode stage` as the way to unlock — except `cover set --from-skwd`,
+  which still records what an external wallpaper provider is already showing
+  (the stage file must describe the screen, CONTRACTS.md §4). An absent
+  `stage/mode.json` reads
   as `declarative` — the safe default, since nothing has ever unlocked
   staging writes.
 - **`draft`** — `stage/livery.json` is a SYMLINK routed into a saved

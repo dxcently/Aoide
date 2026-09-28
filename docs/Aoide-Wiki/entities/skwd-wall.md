@@ -53,7 +53,9 @@ key is the one thing that decides which of the two is in front of the other.
   the engine now shows and applies nothing back — that asymmetry is what makes
   the round trip terminate (the engine is source-blind: it cannot tell an Aoide
   apply from the user's own pick, so a hook that re-applied would loop
-  unbounded).
+  unbounded). This door is also the ONE writer exempt from the `declarative`
+  lock: a pick made in the engine's own picker is recorded while nix owns the
+  declared state, because what shows IS the pick (CONTRACTS.md §4).
 
 The shell's own layer stands down while the engine has a pick on screen: the
 `wallpaper` surface stays mapped and transparent, and `AoideWallpaper.qml`

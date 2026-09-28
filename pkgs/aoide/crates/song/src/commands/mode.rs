@@ -14,7 +14,10 @@
 //!   those two entrypoints is sufficient to guarantee nothing drifts while
 //!   locked; no background reconciler process exists (`aoided` is still a
 //!   one-shot skeleton, `crates/server/src/daemon.rs`) and none is needed
-//!   for that guarantee to hold.
+//!   for that guarantee to hold. ONE exemption, and it is not a drift:
+//!   `cover set --from-skwd` records what an external wallpaper provider is
+//!   already showing, and refusing it would leave the stage file describing
+//!   something the screen is not (CONTRACTS.md §4).
 //! - **`staging`** — `rice stage`/`cover set` write live, always meaning
 //!   plain declared content.
 //! - **`draft`** — `stage/livery.json` is a SYMLINK into a saved

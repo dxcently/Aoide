@@ -96,7 +96,9 @@
   from the user's own pick (an unbounded loop, measured).
 - **Staging/draft/declarative-mode gating lives in `commands`, not here.**
   `rice stage`/`cover set` refuse outside an unlocked mode — that gate is a
-  `commands` concern layered over these pure/near-pure engine modules.
+  `commands` concern layered over these pure/near-pure engine modules. The
+  record door (`--from-skwd`) is the one exemption: it writes down what an
+  external provider is already showing.
 - **`commands::rice::handle_rice_stage` is Staging's write path, NEVER
   Draft's — don't call it from a Draft-mode code path.** It reads the
   COMMITTED songbook (or the declared twin, see the bullet below) and writes

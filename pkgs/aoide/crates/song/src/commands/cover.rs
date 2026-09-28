@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["cover", "set"],
-        summary: "Set the live wallpaper: stage stage/cover.json (hot-swap) from a cover path or a bare name in song/covers/ — a PICK, which survives re-staging the same song. `--clear` drops it and returns to the active song's own default. Refuses while `rice mode declarative` is locked.",
+        summary: "Set the live wallpaper: stage stage/cover.json (hot-swap) from a cover path or a bare name in song/covers/ — a PICK, which survives re-staging the same song. `--clear` drops it and returns to the active song's own default. Refuses while `rice mode declarative` is locked, except for `--from-skwd`, which records what an external provider is already showing.",
         args: [arg!("path", "string", false, "Absolute cover path, a bare filename resolved against song/covers/, or a `we:<id>` Wallpaper Engine scene token. Omitted with `--clear`.")],
         flags: [
             flag!("clear", "bool", "Drop the pick: return the active song to its own default (its derivable cover staged as a song default, else no stage/cover.json at all — the baked/palette fallback and the song's own live board)."),
@@ -46,11 +46,19 @@ fn handle_cover_sync(_inv: &Invocation) -> Outcome {
 
 /// `cover set` registry entrypoint — refuses while `rice mode declarative`
 /// is locked, same guard as `rice stage`'s own entrypoint
-/// (`commands/rice.rs::handle_rice_stage_entry`, khoa 2026-08-14). The pure
+/// (`commands/rice.rs::handle_rice_stage_entry`, khoa 2026-08-14), with the
+/// RECORD door exempt (CONTRACTS.md §4). The pure
 /// write logic stays in [`handle_cover_set`] guard-free.
 fn handle_cover_set_entry(inv: &Invocation) -> Outcome {
     let mode_marker = aoide_storage::mode::load_mode_marker();
-    if mode_marker.mode == aoide_storage::mode::RiceMode::Declarative {
+    // EXEMPT: `--from-skwd` RECORDS what an external provider is already
+    // showing. The lock exists so nix stays the only writer of the DECLARED
+    // state; refusing the record would leave `stage/cover.json` describing
+    // something the screen is not showing (CONTRACTS.md §4). Every other
+    // spelling of this command — a plain `cover set`, `--clear` — stays refused.
+    if !inv.flag_present("from-skwd")
+        && mode_marker.mode == aoide_storage::mode::RiceMode::Declarative
+    {
         return Outcome::error(
             "cover.set",
             "declarative mode is locked — run `aoide rice mode stage` to unlock hot-loading first",
@@ -701,6 +709,56 @@ mod tests {
     }
 
     // ── cover set: the declarative-mode write guard (khoa 2026-08-14) ────────
+
+    /// The record door is EXEMPT from the declarative lock (CONTRACTS.md §4):
+    /// what an external provider is already showing gets recorded even while nix
+    /// owns the declared state — refusing would leave `stage/cover.json`
+    /// describing something the screen is not showing. Every other spelling of
+    /// this command stays refused.
+    #[test]
+    fn from_skwd_is_exempt_from_the_declarative_lock() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SKWD_WALL_STANDIN"]);
+        let root = unique_tmp("cover-from-skwd-locked");
+        let stage = root.join("stage");
+        stage_livery(&stage, Some("skwd-wall"));
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::env::remove_var("AOIDE_SKWD_WALL_STANDIN");
+
+        // No marker file at all reads as `declarative` — the locked default.
+        assert_eq!(
+            aoide_storage::mode::load_mode_marker().mode,
+            aoide_storage::mode::RiceMode::Declarative
+        );
+
+        let recorded = handle_cover_set_entry(&set_inv(
+            &["/tmp/library/clip.mp4"],
+            &[("from-skwd", "true"), ("kind", "video")],
+        ));
+        assert_eq!(recorded.status, Status::Ok, "{:?}", recorded.data);
+        let data = recorded.data.unwrap();
+        assert_eq!(data["recorded"], true);
+        assert_eq!(data["provider"], "skwd-wall");
+        let cover = std::fs::read_to_string(stage.join("cover.json")).unwrap();
+        assert!(cover.contains("\"kind\": \"video\""), "{cover}");
+
+        // The lock still holds for the pick-maker: a plain set, and a clear.
+        let img = root.join("elsewhere.png");
+        std::fs::write(&img, b"\x89PNG stub").unwrap();
+        let plain = handle_cover_set_entry(&inv(&["cover", "set"], &[img.to_str().unwrap()]));
+        assert_eq!(plain.status, Status::Error);
+        assert_eq!(plain.data.unwrap()["reason"], "declarative-mode-locked");
+
+        let cleared = handle_cover_set_entry(&clear_inv(&[]));
+        assert_eq!(cleared.status, Status::Error);
+        assert_eq!(cleared.data.unwrap()["reason"], "declarative-mode-locked");
+        assert_eq!(
+            std::fs::read_to_string(stage.join("cover.json")).unwrap(),
+            cover,
+            "the refusal left the recorded pick exactly as it stood"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn cover_set_entry_refuses_while_declarative_mode_is_locked() {
