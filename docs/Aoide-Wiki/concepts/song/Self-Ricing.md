@@ -275,7 +275,9 @@ re-pin, so leaving staging restores the declared colours the same live way;
 side, `geometry.blurEnabled` switches hyprglass along with Hyprland's
 blur: `plugin:hyprglass:enabled` and `plugin:hyprglass:layers:enabled` are
 live keywords, so a song with blur off (cadenza) turns the glass off without
-unloading the plugin, and a song with blur on turns it back on. A song with
+unloading the plugin, and a song with blur on turns it back on. The BAKE takes
+the same two keys from the same field, so the compositor lane's
+`hyprland.conf` reads glassless for cadenza too — booted and staged agree. A song with
 no `blurEnabled` opinion restores the baked default (both on,
 `live::HYPRGLASS_BAKED`), so a no-opinion song staged after cadenza gets its
 glass back.

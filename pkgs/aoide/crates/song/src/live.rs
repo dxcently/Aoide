@@ -25,10 +25,11 @@ use crate::livery::schema;
 use serde_json::Value;
 
 /// The baked hyprglass switches, `(enabled, layers:enabled)`: what the
-/// compositor lane's `plugin:hyprglass` block leaves in `hyprland.conf`
-/// (`enabled` at the plugin's own default 1, `layers { enabled = 1 }`). A
-/// staged song with no `geometry.blurEnabled` opinion restores exactly this.
-/// Change it together with that block.
+/// compositor lane's `plugin:hyprglass` block leaves in `hyprland.conf` for a
+/// song with NO `geometry.blurEnabled` opinion — the block takes both keys
+/// from that field, so an opinionated song's bake is glass off/on with it, the
+/// same two values this crate stages. A staged song with no opinion restores
+/// exactly this. Change it together with that block.
 pub const HYPRGLASS_BAKED: (bool, bool) = (true, true);
 
 /// Build the `hyprctl keyword …` list for one staged notes document, in the
@@ -95,7 +96,9 @@ pub fn geometry_keywords(notes: &Value) -> Vec<String> {
     // enable keys are read per frame (static config pointers), so a keyword
     // turns the glass off live without unloading the plugin: `enabled` is the
     // global window-glass switch, `layers:enabled` the layer-surface one the
-    // compositor lane turns on for the aoide-* namespaces.
+    // compositor lane resolves for the aoide-* namespaces — the BAKE takes
+    // both from that same `blurEnabled`, so a staged song agrees with a
+    // desktop that booted straight into it.
     //
     // Unlike the geometry keywords above, these are ALWAYS emitted: a song
     // with no `blurEnabled` opinion restores the baked default

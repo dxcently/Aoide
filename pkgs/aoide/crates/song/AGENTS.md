@@ -138,7 +138,9 @@
   `live::apply_live` partitions out and sends as their OWN second
   `hyprctl --batch`, so a host without the plugin loses its glass batch
   alone and the borders/gaps/blur batch is never entangled with it. Keep the
-  constant equal to what the compositor lane bakes. `decoration:blur:*`
+  constant equal to what the compositor lane bakes for a song with NO
+  `blurEnabled` opinion — the lane's block takes both keys from that same
+  field, so the bake follows the song. `decoration:blur:*`
   keeps the plain no-opinion rule (no keyword). **This crate's own unit
   tests never run `hyprctl`** (`cfg!(test)` in `live::apply_live`, after the
   `HYPRLAND_INSTANCE_SIGNATURE` check): `cfg!` is evaluated when *this crate*

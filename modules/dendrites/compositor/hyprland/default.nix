@@ -196,6 +196,17 @@ let
         # refraction/fresnel the flat gradient can't fake. Same namespaces as
         # the layerrules; the wallpaper surface stays untouched.
         #
+        # THE SONG DECIDES, and the BAKE agrees with the STAGE: the two enable
+        # keys below are `geometry.blurEnabled` as resolved above, the same two
+        # keys `aoide-song`'s `live::apply_live` sends as keywords — so a song
+        # that turns blur off (cadenza) reads glassless whether the desktop
+        # booted into it or staged it, and a song with NO opinion gets the
+        # baked default (both on, `live::HYPRGLASS_BAKED`). `enabled` is the
+        # global window-glass switch, `layers.enabled` the layer-surface one;
+        # `manage_window_blur` is neither, so it stays 1 (a later blur-on
+        # needs no reload, and the plugin stays loaded exactly as live
+        # leaves it).
+        #
         # hyprglass targets LAYER surfaces by namespace (layers { namespaces = … }).
         # For WINDOWS it exposes only a single GLOBAL `manage_window_blur` toggle —
         # there is NO per-class/per-window targeting in v0.7.0 (verified against the
@@ -208,12 +219,13 @@ let
         # blur. The `light` preset override brightens the glass under sonata's light
         # polarity (a whiter frost, per the same directive).
         plugin:hyprglass {
+            enabled = ${if blurEnabled then "1" else "0"}
             manage_window_blur = 1
             light {
                 glass_opacity = 0.82
             }
             layers {
-                enabled = 1
+                enabled = ${if blurEnabled then "1" else "0"}
                 namespaces = aoide-dock, aoide-launcher, aoide-powermenu${
                   lib.optionalString (widgetGlassNamespaces != "") ", ${widgetGlassNamespaces}"
                 }

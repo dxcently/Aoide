@@ -104,7 +104,9 @@ keyword only for a field that actually resolves — an unset geometry field
 sends no keyword, so the call never fights a host's baked config or a user's
 own live tweak. Two fields are the exception, both in §1: the hyprglass pair
 is always sent (a song with no `blurEnabled` opinion restores the baked
-default rather than leaving the previous song's glass in place), and
+default rather than leaving the previous song's glass in place — and the bake
+takes the same two keys from the same field, so a booted desktop and a staged
+one agree), and
 `terminalOpacity`, not a Hyprland keyword at all, rides
 `song/stage/terminal-colors.conf` — the song's value, or the kitty dendrite's
 baked `0.86` when it has none (§4). The call is a no-op off

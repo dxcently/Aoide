@@ -263,15 +263,17 @@ paragraph — in addition to baking the value at build time into
 Border *colours* (`window.border` / `window.borderInactive`, component tier
 above) already map to `col.active_border` / `col.inactive_border` and are
 unaffected by this tier. `blurEnabled` also switches hyprglass (the
-liquid-glass plugin the compositor lane loads) on a live stage: both of its
-enable keys are read per frame, so a song with blur off turns the glass off
-without unloading the plugin, and a song with blur on turns it back on. A
-song with no `blurEnabled` opinion restores the baked default (both keys
+liquid-glass plugin the compositor lane loads), on BOTH fan-outs: the baked
+`hyprland.conf` takes the plugin block's two enable keys
+(`plugin:hyprglass:enabled` and `plugin:hyprglass:layers:enabled`) from this
+same field, and a live stage sends them as keywords. So a song with blur off
+reads glassless whether it booted or was staged, and one with blur on gets it
+back on either path. A
+song with no `blurEnabled` opinion gets the baked default (both keys
 on — `aoide-song`'s `live::HYPRGLASS_BAKED`, the values the compositor lane
 bakes), so the glass a blur-off song turned off does not outlive it.
 Hyprland's own `decoration:blur:enabled` keeps the ordinary no-opinion rule
-(no keyword sent). The baked `hyprland.conf` does not gate hyprglass on this
-key yet.
+(no keyword sent).
 
 `terminalOpacity` is the one geometry field that is not a Hyprland keyword:
 it is kitty's `background_opacity`, and it is live-side only. `rice stage`
