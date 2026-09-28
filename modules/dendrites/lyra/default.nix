@@ -115,6 +115,16 @@ let
         )
       );
 
+      # The active song's terminal opacity (`aoide.livery.geometry.terminalOpacity`,
+      # CONTRACTS.md §1): `null` is "no opinion" and leaves the kitty dendrite's
+      # baked value standing. The seed below publishes it as the one-line
+      # `song/declared/terminal-opacity.conf`, which kitty includes BEFORE the
+      # staged colours — so a host that has never staged a song still opens its
+      # terminal at the song's opacity. This lane carries the read because it is
+      # the lane that already reads the dress (root AGENTS.md rule 5); the kitty
+      # lane names only the file's path under `aoide.root`.
+      opacity = config.aoide.livery.geometry.terminalOpacity;
+
       # ── Songbook manifest + registry, typed (W3a/W3b), generated once (C4) ──
       # `manifest.json`/`registry.json` source from eval-time nix: a `_widgets/`
       # shelf when present (sonata today) is authoritative and runs through
@@ -205,6 +215,23 @@ let
         cp "$tmp" "$declared"
         mv -f "$tmp" "${config.aoide.root}/song/stage/livery.json"
         mv -f "$declared" "${config.aoide.root}/song/declared/livery.json"
+        # The declared song's terminal opacity, as a one-line kitty fragment
+        # (CONTRACTS.md §4). The kitty dendrite includes this BEFORE the staged
+        # colours, and kitty's last-include-wins keeps a live stage authoritative
+        # — so a host that has NEVER staged anything still opens its terminal at
+        # the song's own opacity instead of the baked default, while a stage
+        # still overrides it the moment one runs. `null` (no opinion) DELETES the
+        # file rather than writing a default: absent is what makes kitty fall
+        # through to the baked value, and a stale 0.7 from a previous song must
+        # not outlive it.
+        ${lib.optionalString (opacity == null) ''
+          rm -f "${config.aoide.root}/song/declared/terminal-opacity.conf"
+        ''}
+        ${lib.optionalString (opacity != null) ''
+          otmp=$(mktemp "${config.aoide.root}/song/declared/.terminal-opacity.conf.XXXXXX")
+          printf 'background_opacity %s\n' "$(printf '%g' ${toString opacity})" > "$otmp"
+          mv -f "$otmp" "${config.aoide.root}/song/declared/terminal-opacity.conf"
+        ''}
       '';
 
       # ── QML root — the full skeleton config installed into run/qml/ ────────────

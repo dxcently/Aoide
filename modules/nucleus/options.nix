@@ -107,7 +107,7 @@ let
       terminalOpacity = mkOption {
         type = types.nullOr (types.numbers.between 0 1);
         default = null;
-        description = "Terminal (kitty) background opacity, 0–1. Live-side only: `rice stage` writes it into the staged terminal file and pushes it to open kitty windows; the baked kitty.conf keeps the kitty dendrite's 0.86, which a song with null restores.";
+        description = "Terminal (kitty) background opacity, 0–1. Live-side only, in two files: the activation seed writes it into `song/declared/terminal-opacity.conf` (deleted when null), and `rice stage` writes it into the staged terminal file and pushes it to open kitty windows. The staged file is included second, so a stage wins; the baked kitty.conf keeps the kitty dendrite's 0.86 for a host whose song has no opinion.";
       };
     };
   };

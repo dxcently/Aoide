@@ -276,16 +276,30 @@ Hyprland's own `decoration:blur:enabled` keeps the ordinary no-opinion rule
 (no keyword sent).
 
 `terminalOpacity` is the one geometry field that is not a Hyprland keyword:
-it is kitty's `background_opacity`, and it is live-side only. `rice stage`
-writes it into `song/stage/terminal-colors.conf` (§4) — the song's value, or
-the fallback `0.86` when it has none, so one song's opacity never
-outlives it — and pushes it to every open kitty with `kitty @
-set-background-opacity --all`. The fallback is the kitty dendrite's baked
-`background_opacity`, mirrored by `aoide-song`'s
-`live::TERMINAL_OPACITY_BAKED`; nothing bakes a song's own value into
-kitty.conf (a dendrite reads no `aoide.livery`), so a new kitty takes it from
-the staged include. `livery lint` rejects anything but a plain number in
-[0, 1] or `null`.
+it is kitty's `background_opacity`, and it is live-side only. TWO files carry
+it, and kitty reads them in order — the DECLARED fragment first, the STAGE
+second:
+
+- `song/declared/terminal-opacity.conf` (§4) is one
+  `background_opacity <n>` line the activation seed writes from the song's own
+  value, and DELETES when the song has none. It is what a host that has never
+  staged anything opens its terminal at — without it, a fresh declarative boot
+  would keep the baked default while the glass beside it already followed the
+  song.
+- `song/stage/terminal-colors.conf` (§4) is the staged song's colours plus its
+  own `background_opacity` line — the song's value, or the fallback `0.86` when
+  it has none — written by `rice stage` and pushed to every open kitty with
+  `kitty @ set-background-opacity --all`.
+
+The kitty dendrite includes the declared file BEFORE the staged one
+(`modules/dendrites/kitty.nix`, both `mkAfter` after Stylix's baked
+base16 include): kitty takes the LAST value a repeated key sets, so a live
+stage stays authoritative while the declared truth covers the never-staged
+case. The fallback is the kitty dendrite's baked `background_opacity`,
+mirrored by `aoide-song`'s `live::TERMINAL_OPACITY_BAKED`; nothing bakes a
+song's own value into `kitty.conf` itself (that dendrite reads no
+`aoide.livery`), so a new kitty takes it from those two includes. `livery
+lint` rejects anything but a plain number in [0, 1] or `null`.
 
 ### Cover-art tier (v0 — the wallpaper note)
 
@@ -1609,6 +1623,29 @@ declarative`'s no-`<name>` form also resolves its song off this same field
 absent). Nothing else reads it, and nothing in the Rust crates writes it —
 `handle_rice_stage` only reads.
 
+### `song/declared/terminal-opacity.conf` — **v0**
+
+One line, `background_opacity <n>` (`n` in [0, 1]), in kitty's own config
+syntax — the DECLARED song's terminal opacity, and nothing else.
+
+Writer: `home.activation.aoideSeedStage`'s seed script
+(`modules/dendrites/lyra/default.nix`), the same run that publishes the two
+`livery.json` twins above and below. It writes the active song's
+`aoide.livery.geometry.terminalOpacity` (§1), and **deletes the file when that
+is `null`** — an absent file is what makes kitty fall through to the baked
+`background_opacity`, and a value left over from a previous song must not
+outlive it. Read-only for everyone else: no runtime writer touches it, and no
+Rust crate writes it.
+
+Reader: the kitty dendrite's `mkAfter` block
+(`modules/dendrites/kitty.nix`), which includes it BEFORE
+`song/stage/terminal-colors.conf` (§4) so a live stage — whose file carries its
+own opacity line — wins (kitty takes the last value a repeated key sets). That
+ordering is the whole contract: the declared file covers a host that has never
+staged anything, and a stage overrides it the moment one runs. Absent (no
+activation yet, or a song with no opinion) means the baked opacity stands;
+kitty logs a missing include and continues.
+
 ### `song/stage/mode.json` — **v0**
 
 Which of THREE modes the rice system is in — concepts/Self-Ricing's
@@ -1711,8 +1748,11 @@ The staged song's terminal look in kitty's own config syntax: one
 `<key> #rrggbb` line per colour, then exactly one `background_opacity <n>`
 line (`n` in [0, 1]), `#` comment lines, nothing else. The kitty dendrite
 (`modules/dendrites/kitty.nix`) `include`s it after Stylix's baked colour
-include, so every NEW kitty opens in the staged song; kitty skips the
-include with a log line while the file is absent, and the baked colours and
+include AND after `song/declared/terminal-opacity.conf` (§4, the declared
+song's own opacity line), so every NEW kitty opens in the staged song while a
+host that has never staged anything still opens at the song's declared
+opacity; kitty skips a missing
+include with a log line, and the baked colours and
 opacity stand.
 
 Writer: `aoide-song`'s `commands::rice::stage_terminal_colors`, the one

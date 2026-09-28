@@ -109,7 +109,11 @@ takes the same two keys from the same field, so a booted desktop and a staged
 one agree), and
 `terminalOpacity`, not a Hyprland keyword at all, rides
 `song/stage/terminal-colors.conf` — the song's value, or the kitty dendrite's
-baked `0.86` when it has none (§4). The call is a no-op off
+baked `0.86` when it has none (§4) — and the activation seed writes the
+DECLARED song's own line into `song/declared/terminal-opacity.conf`, which
+the kitty dendrite includes FIRST: a host that has never staged anything still
+opens its terminal at the song's opacity, and a live stage (included second,
+last-value-wins) overrides it. The call is a no-op off
 Hyprland (guarded on `HYPRLAND_INSTANCE_SIGNATURE`) and never fails the
 staging outcome. It never runs `hyprctl reload` — every field it touches is
 live-settable via `keyword`, and a reload would re-read the baked

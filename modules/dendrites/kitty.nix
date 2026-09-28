@@ -171,15 +171,31 @@ let
                   "ctrl+shift+U" = "none"; # for vim's page up
                 };
               })
-              # The staged song's terminal colours, for every NEW window: the
-              # file `rice stage` writes at the runtime root's contract path,
-              # included AFTER Stylix's baked base16 include (mkAfter) so the
-              # staged colours win. Outside the mkForce on purpose: a forced
-              # extraConfig would drop Stylix's include. kitty skips a missing
-              # include with one log line, so a host that has not staged a song
-              # since boot keeps the baked colours.
+              # The song's terminal look, for every NEW window — two includes,
+              # in this order:
+              #
+              #   1. `song/declared/terminal-opacity.conf` — one
+              #      `background_opacity` line the lyra lane's activation seed
+              #      publishes from the song's own `geometry.terminalOpacity`
+              #      (CONTRACTS.md §4): the declared truth, so a host that has
+              #      never staged anything still opens its terminal at the
+              #      song's opacity instead of the baked default.
+              #   2. `song/stage/terminal-colors.conf` — the colours and
+              #      opacity `rice stage` writes. SECOND, because kitty takes
+              #      the LAST value for a repeated key: a live stage stays
+              #      authoritative.
+              #
+              # Both are mkAfter (after Stylix's baked base16 include) and both
+              # sit outside the `mkForce` on purpose: a forced extraConfig would
+              # drop Stylix's include. kitty skips a missing include with one log
+              # line, so with neither file present the baked colours and opacity
+              # stand. This lane reads no `aoide.livery` (root AGENTS.md rule 5)
+              # — it names two paths under `aoide.root` and nothing else.
               {
-                extraConfig = lib.mkAfter "include ${config.aoide.root}/song/stage/terminal-colors.conf";
+                extraConfig = lib.mkAfter ''
+                  include ${config.aoide.root}/song/declared/terminal-opacity.conf
+                  include ${config.aoide.root}/song/stage/terminal-colors.conf
+                '';
               }
             ];
           };

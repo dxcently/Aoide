@@ -263,7 +263,11 @@ slot of an earlier song survives), through the livery engine's `kitty`
 emitter, plus the song's `geometry.terminalOpacity` as kitty's
 `background_opacity` (the kitty dendrite's baked 0.86 when the song has
 none). The kitty dendrite includes that file
-after Stylix's baked colours, so every NEW window opens in the staged song;
+after Stylix's baked colours and after `song/declared/terminal-opacity.conf` —
+the one-line declared fragment the activation seed writes from the same field,
+so a host that has never staged anything still opens its terminal at the
+song's opacity; the staged file is included LAST, so a live stage wins. So
+every NEW window opens in the staged song;
 for the windows already open, `rice stage` runs `kitty @ set-colors --all
 --configured <file>` and `kitty @ set-background-opacity --all <n>` over
 every kitty control socket (`$XDG_RUNTIME_DIR/kitty-<pid>`, the dendrite's
