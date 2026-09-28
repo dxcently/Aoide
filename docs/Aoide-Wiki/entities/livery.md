@@ -32,7 +32,7 @@ module. The coupling discipline is contractual, not polite.
 
 ```
 livery (single source)
-    ├── stage/livery.json  →  Quickshell + hyprctl + terminal OSC  (rehearsal / live)
+    ├── stage/livery.json  →  Quickshell + hyprctl + kitty socket  (rehearsal / live)
     └── rice.nix → Stylix   →  every nix-manageable app             (recording / adopted)
 ```
 
@@ -72,6 +72,7 @@ reads were dropped when Phase 4 closed the transition window
 | Component tier | Open (v1 design-system work) | Maps semantics to specific surfaces |
 | Geometry tier | Settled, nix + CLI only | `aoide.livery.geometry` — see below |
 | Font tier | Settled, nix only | `aoide.livery.fonts` — see below |
+| Polarity | Settled, baked only | `aoide.livery.polarity` (beside palette) — see below |
 
 The open schema question is scoped to the semantic and component tiers only.
 The palette tier is closed.
@@ -80,22 +81,39 @@ The palette tier is closed.
 
 `aoide.livery.geometry` (`modules/nucleus/options.nix`) carries the
 compositor's shape values: `gapsOut`, `gapsIn`, `borderSize`, `rounding`,
-`blurEnabled`, `blurSize`, `blurPasses` — every field `nullOr`, so a song
-that sets none of them yields the same `hyprland.conf` as one that omits the
-block entirely. The compositor lane (`modules/dendrites/compositor/hyprland/default.nix`)
+`blurEnabled`, `blurSize`, `blurPasses`, plus `terminalOpacity` — the one field
+whose fallback owner is the kitty dendrite rather than the compositor. Every
+field is `nullOr`, so a song that sets none of them yields the same
+`hyprland.conf` as one that omits the block entirely. The compositor lane
+(`modules/dendrites/compositor/hyprland/default.nix`)
 reads the tier directly and falls back field-by-field to its own opinionated
-defaults (`8`/`6`/`2`/`0`/`true`/`8`/`3`) for anything unset. This tier sits
-outside the engine's own schema — it is never validated by `livery lint`,
-only carried through `stage/livery.json` alongside the palette/component
-values for `aoide`'s own live-apply seam (below); the staged schema version
-stays `"0"`, the same additive-optional posture as the base16 block.
+defaults (`8`/`6`/`2`/`0`/`true`/`8`/`3`) for anything unset. The tier is
+carried through `stage/livery.json` alongside the palette/component values for
+`aoide`'s own live-apply seam (below); the staged schema version stays `"0"`,
+the same additive-optional posture as the base16 block. `livery lint` checks
+exactly one field of it — `terminalOpacity`, which must be a plain number in
+[0, 1] or `null`, since it is written into a kitty config line; the rest of the
+tier is outside the engine's schema and reaches Hyprland through
+`live::geometry_keywords`, which types each field itself.
 
 Staging applies geometry and the window-border colours to the running
 compositor directly: `lyra rice stage` builds one `hyprctl --batch`
 `keyword` list, in a fixed order (gaps → border size → border colours →
-rounding → blur), emitting a keyword only for a field that actually resolves
-— an unset geometry field is skipped, not defaulted, so the call never fights
-a host's baked config or a user's own live tweak. The call is a no-op off
+rounding → blur, then a second batch for the hyprglass pair), emitting a
+keyword only for a field that actually resolves — an unset geometry field
+sends no keyword, so the call never fights a host's baked config or a user's
+own live tweak. Two fields are the exception, both in §1: the hyprglass pair
+is always sent (a song with no `blurEnabled` opinion restores the baked
+default rather than leaving the previous song's glass in place — and the bake
+takes the same two keys from the same field, so a booted desktop and a staged
+one agree), and
+`terminalOpacity`, not a Hyprland keyword at all, rides
+`song/stage/terminal-colors.conf` — the song's value, or the kitty dendrite's
+baked `0.86` when it has none (§4) — and the activation seed writes the
+DECLARED song's own line into `song/declared/terminal-opacity.conf`, which
+the kitty dendrite includes FIRST: a host that has never staged anything still
+opens its terminal at the song's opacity, and a live stage (included second,
+last-value-wins) overrides it. The call is a no-op off
 Hyprland (guarded on `HYPRLAND_INSTANCE_SIGNATURE`) and never fails the
 staging outcome. It never runs `hyprctl reload` — every field it touches is
 live-settable via `keyword`, and a reload would re-read the baked
@@ -114,16 +132,43 @@ the lane's, and `null` means "the lane's own face" — Linux Libertine Mono O �
 so a song that sets no face bakes the theme it baked before.
 
 This tier is BAKED ONLY, the cover note's posture rather than geometry's: it
-has no `stage/livery.json` twin, no engine schema, and no `rice lint` rule,
-because nothing at runtime reads a face and a terminal cannot be re-faced
-mid-session. A face change lands on the user-gated rebuild, and staging
-another song does not re-face the terminal. A live face would be a new emitter
-(OSC 50 against the terminal), not a change to this tier.
+has no `stage/livery.json` twin and no engine schema entry, because nothing at
+runtime reads a face and a terminal cannot be re-faced mid-session — and no
+`rice lint` rule makes that so. The livery schema closes `palette`, `base16`,
+each component group and each widget record, but it never walks a document's
+top-level keys, so a stray `fonts` key in a song's `livery.json` passes lint
+and rides the activation seed into the stage file unread; the tier lives in
+`rice.nix` alone by convention. A face change lands on the user-gated rebuild,
+and staging another song does not re-face the terminal. A live face would be a
+new emitter (OSC 50 against the terminal), not a change to this tier.
 
 `cadenza` sets it to a CRT console face — its terminal is the key's own
 voice, not the desktop's default serif. Widget faces are the song's own
 business (`song/songbook/<song>/widgets/Kit.js`) and do not move with this
 tier.
+
+## Polarity — the register, beside the palette
+
+`aoide.livery.polarity` (`modules/nucleus/options.nix`) is one scalar beside
+`palette`: `"light"` or `"dark"` (option default `"light"`, so a song that says
+nothing keeps the ground it always had). A palette brings its polarity — the
+register its base16 ramp reads as — and the stylix lane hands it straight to
+`stylix.polarity`, which themes every Stylix-managed target from it
+([[Stylix]]). It is the one livery field outside the colour tiers that is a
+VALIDATED key: a document carrying it must spell one of the two, and `rice
+lint` refuses anything else by name — a misspelling, a number, a `{ $value }`
+note object — where the font tier's fields are a convention the lint does not
+enforce.
+
+It is BAKED, not staged. No emitter carries it: `livery resolve` and every
+`emit stage`/`hyprctl`/`osc`/`file`/`kitty` are byte-identical with and without
+it (the `livery_goldens` polarity fixture pins that), and `rice stage` applies
+nothing for it, because GTK/Qt and every Stylix target read the register when
+their theme is built. A polarity change lands on the user-gated rebuild, like a
+face change. A song nevertheless declares it in both halves —
+`aoide.livery.polarity` in `rice.nix` (the option the lane reads) and the same
+value in its `livery.json` beside `palette`, which the activation seed carries
+into `stage/livery.json` as data nothing reads today.
 
 ## Prior art — the Node engine that was folded in
 
@@ -137,7 +182,7 @@ no new crate, no Node toolchain. What moved, in place:
 - `resolve.rs` — the flat resolver: single-level `{group.key}` alias deref
   (cycle-guarded, replacing Style Dictionary's `exportPlatform`) + the
   component `null → palette` fallback.
-- `emit/{stage,hyprctl,osc,file}.rs` — four pure emitters behind one
+- `emit/{stage,hyprctl,osc,file,kitty}.rs` — five pure emitters behind one
   `Emitter` trait + registry; a new backend is one file + one registry line.
   `file` (arbitrary config-file template, `{{palette.bg}}` placeholders) is
   the generalization proof; `gtk`/`gsettings` host-mutating apply stays
@@ -161,13 +206,17 @@ CLI's `Invocation`/`Outcome` shell:
   (`bg/fg/accent/urgent`, unknown keys rejected) and the optional component
   tier (`bar.*` / `notif.*` / `window.*`, each field `nullOr` hex), accepting
   both bare hex strings and W3C `{ $value, $type }` token objects, and treating
-  `{group.name}` alias references as valid pending resolution. `lyra rice
+  `{group.name}` alias references as valid pending resolution. Beyond the
+  colour tiers it validates the two top-level fields that are not groups:
+  `polarity` — exactly `"light"` or `"dark"` when present, `null`/absent for
+  "no opinion" — and `geometry.terminalOpacity` (a plain number in [0, 1] or
+  null). `lyra rice
   lint` runs this engine natively — no binary locate, no shell-out.
 - **`lyra livery resolve [<song>|<path>]`** — print the fully-resolved,
   flattened livery set.
-- **`lyra livery emit <target> [<song>|<path>]`** — run one of the four
-  emitters (`stage` · `hyprctl` · `osc` · `file`); `--out PATH` writes
-  atomically, `--template` supplies the file backend's template.
+- **`lyra livery emit <target> [<song>|<path>]`** — run one of the five
+  emitters (`stage` · `hyprctl` · `osc` · `file` · `kitty`); `--out PATH`
+  writes atomically, `--template` supplies the file backend's template.
 
 No argument defaults to the staged livery. Exit codes align with the CLI
 convention: `0` ok · `2` usage · `1` error. [[Rice-and-Livery]] carries each
@@ -177,7 +226,7 @@ backs.
 
 ## The emitters
 
-All four consume the *same* fully-resolved livery set (from `resolve.rs`), so
+All five consume the *same* fully-resolved livery set (from `resolve.rs`), so
 the live targets can never disagree:
 
 1. **`stage`** → `song/stage/livery.json` for [[Quickshell]]. With `--out PATH` it
@@ -193,6 +242,10 @@ the live targets can never disagree:
 4. **`file`** → a caller-supplied template rendered through
    `{{group.key}}` placeholders (e.g. `{{palette.bg}}`, `{{window.border}}`);
    an unknown placeholder is a structured error, never a panic.
+5. **`kitty`** → `song/stage/terminal-colors.conf`, kitty's own colour syntax:
+   the tinted-kitty base16 template Stylix bakes, key for key. A note with no
+   base16 tier gets the scheme the stylix lane synthesises from its palette,
+   so every slot is written either way (CONTRACTS.md §4).
 
 ## The livery schema v0
 

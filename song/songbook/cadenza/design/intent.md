@@ -588,20 +588,25 @@ reads a fixture path.
 
 ## 5. Hazards and open questions
 
-- **Polarity (needs a core change).** The stylix module sets `polarity =
-  lib.mkDefault "light"` and reads no polarity from the song; a song may
-  only set `aoide.livery` (house rule 5). Proposed: an
-  `aoide.livery.polarity` field (nucleus option, CONTRACTS §1, livery
-  schema/lint), read by the stylix dendrite that phase 5 S5 creates in
-  place of the lane. cadenza then declares `"dark"`.
-- **Glass (needs a core change).** The compositor module loads hyprglass,
-  its config block and the `blur on` layer rules unconditionally;
-  `geometry.blurEnabled = false` only stops Hyprland's blur. Proposed, the
-  dxflake pattern: when phase 5 S5 splits the compositor into dendrites,
-  hyprglass becomes its own file gated on the song's livery (`blurEnabled`,
-  or a `glass` field). dxflake's own
-  `dendrites/compositor/hyprland/hyprglass.nix` also loads it whenever the
-  quickshell module is on, so it needs the same gate.
+- **Polarity (settled).** The key's register is the song's own:
+  `aoide.livery.polarity = "dark"` is declared beside the palette
+  (`rice.nix` and `livery.json`), validated by `rice lint` (exactly
+  `"light"`/`"dark"`; CONTRACTS.md §1), and read by the stylix dendrite as
+  `stylix.polarity`, so every Stylix-managed target reads the phosphor ramp as
+  the dark register it is instead of the lane's light default. Baked only —
+  no emitter carries it and staging applies nothing for it, so a polarity
+  change lands on the user-gated rebuild, never on a stage.
+- **Glass (settled).** The compositor lane loads hyprglass and its
+  `blur on` layer rules, and the SONG decides whether the glass is on:
+  `plugin:hyprglass`'s two enable keys (`enabled`, `layers.enabled`) and
+  Hyprland's own `decoration:blur:enabled` all come from
+  `geometry.blurEnabled`, baked into `hyprland.conf` and applied live by the
+  same value as keywords — so this key's `blurEnabled = false` reads glassless
+  whether the desktop booted into it or staged it, and a song with no opinion
+  keeps the lane's baked default (both on). The plugin stays LOADED either way
+  (live never unloads it); what the lane still fixes for every song is its own
+  set — the `light` preset override's glass opacity and the `aoide-*`
+  namespace list — which no song gates.
 - **Bar height** 28px vs sonata's 36; the lane reads it back, so it is the
   song's call.
 - **Unbuilt seams** — every "bridge not wired" above names its slice.
@@ -670,3 +675,11 @@ reads a fixture path.
   `sessions.json`, bursts from `hooks.json`, one hash-picked node per
   session), the bar's lamp walks the same code, and
   `design/trace.test.js` runs it under `node` (§2 Motion, §3.9).
+- 2026-09-28 — khoa: the key's register is the SONG's, and the glass follows
+  it. `aoide.livery.polarity = "dark"` is declared beside the palette (nucleus
+  option, CONTRACTS §1, `rice lint`, read by the stylix dendrite) and mirrored
+  in `livery.json`; baked only, so flipping it is a rebuild, not a stage. The
+  terminal reads at `geometry.terminalOpacity` 0.7 (kitty
+  `background_opacity`, staged) and the compositor's hyprglass block now takes
+  its two enable keys from `geometry.blurEnabled`, so a booted desktop and a
+  staged one wear the same glassless CRT (§5).

@@ -15,6 +15,7 @@
 
 use crate::livery::emit::file::FileTemplate;
 use crate::livery::emit::hyprctl::Hyprctl;
+use crate::livery::emit::kitty::Kitty;
 use crate::livery::emit::osc::Osc;
 use crate::livery::emit::stage::Stage;
 use crate::livery::resolve::Resolved;
@@ -22,6 +23,7 @@ use std::fmt;
 
 pub mod file;
 pub mod hyprctl;
+pub mod kitty;
 pub mod osc;
 pub mod stage;
 
@@ -69,15 +71,16 @@ pub struct EmitOpts<'a> {
 
 /// One emit backend. `Sync` so the static registry is `&'static dyn Emitter`.
 pub trait Emitter: Sync {
-    /// The CLI-facing target name: `"stage" | "hyprctl" | "osc" | "file"`.
+    /// The CLI-facing target name: `"stage" | "hyprctl" | "osc" | "file" | "kitty"`.
     fn target(&self) -> &'static str;
     /// Produce the output for one fully-resolved note set.
     fn emit(&self, r: &Resolved, o: &EmitOpts) -> Result<EmitOutput, EmitError>;
 }
 
-/// The full backend registry, in a fixed order (stage, hyprctl, osc, file).
+/// The full backend registry, in a fixed order (stage, hyprctl, osc, file,
+/// kitty) — append-only, like every registry in this workspace.
 pub fn registry() -> &'static [&'static dyn Emitter] {
-    &[&Stage, &Hyprctl, &Osc, &FileTemplate]
+    &[&Stage, &Hyprctl, &Osc, &FileTemplate, &Kitty]
 }
 
 /// Look one backend up by its target name.

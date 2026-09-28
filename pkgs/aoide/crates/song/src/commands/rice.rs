@@ -25,7 +25,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["rice", "stage"],
-        summary: "Hot-load a rice live — ALWAYS the declared committed content, ignoring any saved draft (stage/livery.json hot-reload + best-effort hyprctl geometry/border apply); nothing committed. No <name>: re-stages the currently active song's declared content, overriding whatever draft `rice mode stage` may have auto-loaded. Refuses while `rice mode declarative` is locked.",
+        summary: "Hot-load a rice live — ALWAYS the declared committed content, ignoring any saved draft (stage/livery.json hot-reload + best-effort hyprctl geometry/border/glass apply + stage/terminal-colors.conf pushed to open kitty windows); nothing committed. No <name>: re-stages the currently active song's declared content, overriding whatever draft `rice mode stage` may have auto-loaded. Refuses while `rice mode declarative` is locked.",
         args: [arg!("name", "string", false, "Rice/song name to stage; defaults to the currently active song's declared content.")],
         flags: [],
         gated: false,
@@ -446,6 +446,8 @@ pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
     // (geometry + border colours only — see hypr.rs for why an absent/null
     // geometry field is skipped rather than defaulted).
     let hypr_keywords = crate::live::geometry_keywords(&parsed);
+    // The terminal half, off the same parsed notes (see `stage_terminal_colors`).
+    let terminal_conf = crate::live::terminal_colors(&parsed);
 
     // Inject the song name into the staged notes: LiveryState.qml's
     // `songName` property reads this to resolve per-song flavor widgets
@@ -489,6 +491,12 @@ pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
     // is on top of it, never a precondition for it — a failed/absent hyprctl
     // never turns this preview into an error. No `hyprctl reload`: see hypr.rs.
     let hyprctl_status = crate::live::apply_live(&hypr_keywords);
+
+    // Terminals: the staged colour file every new kitty window includes, then
+    // a best-effort push to the open ones. Same tier as the hyprctl call —
+    // never fatal, reported in the envelope.
+    let (terminal_changed, terminal_data) = stage_terminal_colors(terminal_conf.as_deref());
+    changed.extend(terminal_changed);
 
     // Cover: staged only when physically derivable; otherwise left untouched.
     let cover = crate::cover::derive_cover(&name);
@@ -584,6 +592,7 @@ pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
         "livery": notes_dst.to_string_lossy(),
         "cover": cover.as_ref().map(|p| p.to_string_lossy().into_owned()),
         "hyprctl": hyprctl_status,
+        "terminal": terminal_data,
         "widgets": widget_sync.note,
         "slots": widget_sync.slots,
         "registry": registry_sync.note,
@@ -591,8 +600,53 @@ pub(crate) fn handle_rice_stage(inv: &Invocation) -> Outcome {
         "seam": "Quickshell hot-reloads stage/livery.json (palette + component tiers); \
                  geometry + border colours are ALSO applied \
                  live via best-effort, guarded `hyprctl --batch keyword …` (see hypr.rs) \
-                 — keyword-only, never `hyprctl reload`",
+                 — keyword-only, never `hyprctl reload`; terminal colours land in \
+                 stage/terminal-colors.conf (every new kitty window includes it) and \
+                 reach open kitty windows over kitty's control socket",
     }))
+}
+
+/// Write the staged terminal colour file
+/// (`<stage>/terminal-colors.conf`, [`crate::live::TERMINAL_COLORS_FILE`])
+/// and push it to every open kitty ([`crate::live::push_kitty_colors`]).
+/// `conf` is [`crate::live::terminal_colors`] of the notes just staged.
+///
+/// The one terminal writer every stage path shares — `handle_rice_stage`
+/// (so `rice stage`, `rice mode stage` and `rice mode declarative`'s
+/// re-pin, which is how leaving staging restores the DECLARED twin's
+/// colours the same live way), `rice back`'s take restore and `lyra
+/// reload`'s draft sync — so it rides whatever mode gate its caller
+/// already passed and adds none of its own. Best-effort: a failed write or
+/// an unresolvable notes document is reported, never fatal, because
+/// `stage/livery.json` is already written by the time this runs. Returns
+/// the paths it changed and the envelope's `terminal` data.
+pub(crate) fn stage_terminal_colors(conf: Option<&str>) -> (Vec<String>, Value) {
+    let Some(conf) = conf else {
+        return (
+            Vec::new(),
+            json!({ "status": "skipped", "message": "notes did not resolve; terminal colours left as they were" }),
+        );
+    };
+    let path = shellbridge::stage_dir().join(crate::live::TERMINAL_COLORS_FILE);
+    if let Err(e) = shellbridge::atomic_write(&path, conf) {
+        return (
+            Vec::new(),
+            json!({
+                "status": "write-failed",
+                "message": format!("failed to write {}: {e}", path.display()),
+            }),
+        );
+    }
+    // A test build never pushes: every handler test here stages into an
+    // isolated stage dir, but `$XDG_RUNTIME_DIR` is the real session's, and a
+    // test run from a terminal would recolour the operator's own kitty
+    // windows. The push itself is tested in `live.rs` against a stand-in.
+    #[cfg(not(test))]
+    let mut data = crate::live::push_kitty_colors(&path);
+    #[cfg(test)]
+    let mut data = json!({ "status": "skipped", "message": "test build: no push to live kitty" });
+    data["file"] = json!(path.to_string_lossy());
+    (vec![path.to_string_lossy().into_owned()], data)
 }
 
 /// Resolve `--from <song>`'s source `livery.json` for `rice compose`
@@ -986,13 +1040,23 @@ mod tests {
         assert_eq!(parsed["palette"]["bg"], "#0b1021");
         assert_eq!(
             out.changed.len(),
-            1,
-            "only livery.json is staged — no legacy mirror (Phase 4)"
+            2,
+            "livery.json and the terminal colour file — no legacy mirror (Phase 4)"
         );
         assert!(out
             .changed
             .iter()
             .any(|c| c.ends_with("stage/livery.json")));
+        // The terminal half: the staged colour file every new kitty window
+        // includes, rendered from the same notes (VALID_NOTES has no base16,
+        // so the synthesised scheme), and the push reported in the envelope.
+        let terminal = std::fs::read_to_string(stage.join("terminal-colors.conf")).unwrap();
+        assert!(terminal.lines().any(|l| l == "background #0b1021"), "{terminal}");
+        assert!(out
+            .changed
+            .iter()
+            .any(|c| c.ends_with("stage/terminal-colors.conf")));
+        assert_eq!(out.data.as_ref().unwrap()["terminal"]["status"], "skipped");
         // No cover exists for moonlight → cover.json is left untouched.
         assert!(!stage.join("cover.json").exists());
         assert!(out.data.unwrap()["cover"].is_null());
@@ -1419,7 +1483,7 @@ mod tests {
     }
 
     #[test]
-    fn stage_with_no_window_or_geometry_reports_an_empty_batch() {
+    fn stage_with_no_window_or_geometry_still_sends_the_baked_glass() {
         let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "HYPRLAND_INSTANCE_SIGNATURE"]);
         std::env::remove_var("HYPRLAND_INSTANCE_SIGNATURE");
@@ -1433,9 +1497,11 @@ mod tests {
 
         let out = handle_rice_stage(&inv(&["rice", "stage"], &["moonlight"]));
         assert_eq!(out.status, Status::Ok);
+        // No opinion is still a batch: the hyprglass switches go back to the
+        // baked default, so the only skip left is "not on Hyprland".
         assert_eq!(
             out.data.unwrap()["hyprctl"],
-            "skipped (no geometry/border keywords resolved)"
+            "skipped (HYPRLAND_INSTANCE_SIGNATURE unset)"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1704,11 +1770,13 @@ mod tests {
         // widgets/ dir → no per-song run/qml songs/moonlight/ dir.
         assert_eq!(
             out.changed.len(),
-            3,
-            "no widgets/ dir → no bodies synced, but manifest.json + registry.json still are: {:?}",
+            4,
+            "no widgets/ dir → no bodies synced, but manifest.json + registry.json still are \
+             (plus livery.json and the terminal colour file): {:?}",
             out.changed
         );
         assert!(out.changed.iter().any(|c| c.ends_with("stage/livery.json")));
+        assert!(out.changed.iter().any(|c| c.ends_with("stage/terminal-colors.conf")));
         assert!(out.changed.iter().any(|c| c.ends_with("run/qml/songs/manifest.json")));
         assert!(out.changed.iter().any(|c| c.ends_with("run/qml/songs/registry.json")));
         assert!(!run_qml.join("songs").join("moonlight").exists());
@@ -3117,6 +3185,8 @@ mod tests {
         assert!(rice_nix.contains("blurEnabled = false;"));
         assert!(rice_nix.contains("blurSize = 5;"));
         assert!(rice_nix.contains("blurPasses = 2;"));
+        // The fixed key set: a field the source leaves unset is still listed.
+        assert!(rice_nix.contains("terminalOpacity = null;"));
         assert!(rice_nix.contains("border = \"#82aaff\";"));
         assert!(rice_nix.contains("borderInactive = \"#0b1021\";"));
         assert!(rice_nix.contains("inherited from song \"sonata\""));

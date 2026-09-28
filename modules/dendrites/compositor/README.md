@@ -25,6 +25,9 @@ modules/dendrites/compositor/
   compositor-side livery (gaps/radius/borders/blur, the `aoide-*` layerrules,
   hyprglass, kitty opacity/rounding) at build time, and exposes the Hyprland IPC
   socket for shellbridge to consume. Guarded on the FACT `aoide.compositor.enable`.
+  The hyprglass block's two enable keys are the song's own
+  `geometry.blurEnabled`, so a blur-off song is glassless in the bake exactly as
+  it is after a stage.
 - **`hyprland/behaviour.nix` — the BEHAVIOUR.** Keybinds, input devices, tiling
   layout, misc quality-of-life, behavioural window rules — everything a re-rice
   must not disturb. Its options (`aoide.hyprland.enable`, `.monitors`,

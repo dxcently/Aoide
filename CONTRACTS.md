@@ -186,6 +186,38 @@ deliberately minimal:
 | `palette.accent` | hex `#rrggbb` | `#89b4fa` | base0D |
 | `palette.urgent` | hex `#rrggbb` | `#f38ba8` | base08 |
 
+### Polarity field (v0 — `polarity`, beside `palette`)
+
+A palette brings its polarity: the register its base16 ramp reads as. It is one
+top-level scalar beside `palette`, and the two values are exactly these — this
+is a VALIDATED key, unlike the baked-only font tier's convention (§1's font
+tier): a document that carries it must spell one of these two.
+
+| Key        | Type                 | Default   | Consumer                        |
+| ---------- | -------------------- | --------- | ------------------------------- |
+| `polarity` | `"light"`/`"dark"`   | `"light"` | the stylix lane → `stylix.polarity` |
+
+`rice lint` refuses anything else — a misspelling, a number, a `{ $value }`
+note object — by name; `null` (or the key absent, the ordinary case for a
+document written before the field existed) is "no opinion" and the option
+system's `"light"` stands. Unlike every colour tier, NO engine emitter carries
+it: `livery resolve` and `emit stage`/`hyprctl`/`osc`/`file`/`kitty` are
+byte-identical with and without it (`livery_goldens`' polarity fixture pins
+that), because it is not a colour a surface paints — it is the register the
+baked fan-out derives its colours from.
+
+**Baked only, the font tier's posture** — but carried, not dropped. A song
+declares it in BOTH halves: `aoide.livery.polarity` in `rice.nix` (what the
+stylix lane actually reads, through the option) and the same value in its
+`livery.json` beside `palette` (§4), which is the notes-document record of it
+and what `rice compose` copies for a scaffolded song. GTK/Qt and Stylix read
+the option at build time, so flipping it lands on the user-gated rebuild (§2):
+`rice stage` does not apply it and `lyra rice stage` makes no call for it. The
+committed `livery.json` reaches `song/stage/livery.json` through the activation
+seed like every other top-level key (§4), so a staged document may carry a
+`polarity` field — data nothing reads today, kept for a future live reader, and
+never a claim that staging applied it.
+
 ### Component tier (v0 overrides — `bar.*` / `notif.*` / `window.*`)
 
 Each field is `nullOr hex`; `null` means "fall back to the palette". Facets
@@ -223,13 +255,51 @@ paragraph — in addition to baking the value at build time into
 | `geometry.gapsIn`     | `nullOr int`  | `6`      | `general:gaps_in`       |
 | `geometry.borderSize` | `nullOr int`  | `2`      | `general:border_size`   |
 | `geometry.rounding`   | `nullOr int`  | `0`      | `decoration:rounding`   |
-| `geometry.blurEnabled`| `nullOr bool` | `true`   | `decoration:blur:enabled` |
+| `geometry.blurEnabled`| `nullOr bool` | `true`   | `decoration:blur:enabled`; live, also `plugin:hyprglass:enabled` + `plugin:hyprglass:layers:enabled` |
 | `geometry.blurSize`   | `nullOr int`  | `8`      | `decoration:blur:size`  |
 | `geometry.blurPasses` | `nullOr int`  | `3`      | `decoration:blur:passes`|
+| `geometry.terminalOpacity` | `nullOr number` in [0, 1] | `0.86` | none — kitty `background_opacity` (live only; see below) |
 
 Border *colours* (`window.border` / `window.borderInactive`, component tier
 above) already map to `col.active_border` / `col.inactive_border` and are
-unaffected by this tier.
+unaffected by this tier. `blurEnabled` also switches hyprglass (the
+liquid-glass plugin the compositor lane loads), on BOTH fan-outs: the baked
+`hyprland.conf` takes the plugin block's two enable keys
+(`plugin:hyprglass:enabled` and `plugin:hyprglass:layers:enabled`) from this
+same field, and a live stage sends them as keywords. So a song with blur off
+reads glassless whether it booted or was staged, and one with blur on gets it
+back on either path. A
+song with no `blurEnabled` opinion gets the baked default (both keys
+on — `aoide-song`'s `live::HYPRGLASS_BAKED`, the values the compositor lane
+bakes), so the glass a blur-off song turned off does not outlive it.
+Hyprland's own `decoration:blur:enabled` keeps the ordinary no-opinion rule
+(no keyword sent).
+
+`terminalOpacity` is the one geometry field that is not a Hyprland keyword:
+it is kitty's `background_opacity`, and it is live-side only. TWO files carry
+it, and kitty reads them in order — the DECLARED fragment first, the STAGE
+second:
+
+- `song/declared/terminal-opacity.conf` (§4) is one
+  `background_opacity <n>` line the activation seed writes from the song's own
+  value, and DELETES when the song has none. It is what a host that has never
+  staged anything opens its terminal at — without it, a fresh declarative boot
+  would keep the baked default while the glass beside it already followed the
+  song.
+- `song/stage/terminal-colors.conf` (§4) is the staged song's colours plus its
+  own `background_opacity` line — the song's value, or the fallback `0.86` when
+  it has none — written by `rice stage` and pushed to every open kitty with
+  `kitty @ set-background-opacity --all`.
+
+The kitty dendrite includes the declared file BEFORE the staged one
+(`modules/dendrites/kitty.nix`, both `mkAfter` after Stylix's baked
+base16 include): kitty takes the LAST value a repeated key sets, so a live
+stage stays authoritative while the declared truth covers the never-staged
+case. The fallback is the kitty dendrite's baked `background_opacity`,
+mirrored by `aoide-song`'s `live::TERMINAL_OPACITY_BAKED`; nothing bakes a
+song's own value into `kitty.conf` itself (that dendrite reads no
+`aoide.livery`), so a new kitty takes it from those two includes. `livery
+lint` rejects anything but a plain number in [0, 1] or `null`.
 
 ### Cover-art tier (v0 — the wallpaper note)
 
@@ -241,7 +311,7 @@ A literal nix path (copied to the store — never a `song/` runtime read). The
 the stylix lane bakes it as the base-context image; `null` bakes the solid-colour
 fallback derived from `palette.bg`.
 
-### Font tier (v0 additive — `fonts.<role>`)
+### Font tier (v0 optional overrides — `fonts.<role>`)
 
 | Key               | Type                    | Default | Falls back to                                       |
 | ----------------- | ----------------------- | ------- | --------------------------------------------------- |
@@ -256,11 +326,19 @@ silently fall back. The remaining roles (`sansSerif`, `serif`, `emoji`, and
 `sizes`) stay the lane's.
 
 **Baked only** — the `wallpaper` tier's posture, not geometry's: no
-`stage/livery.json` twin, no engine schema, no `rice lint` validation, because
-nothing at runtime reads a face and a terminal cannot be re-faced mid-session.
-A face change lands on the user-gated rebuild (§2), and staging another song
-does not re-face the terminal. Wanting a live face is wanting a new emitter
-(OSC 50 against the terminal), not a change to this tier.
+`stage/livery.json` twin and no engine schema entry, because nothing at runtime
+reads a face and a terminal cannot be re-faced mid-session. The tier lives in
+`rice.nix` alone: a song does not mirror it into `livery.json`, since the
+activation seed copies that document into `song/stage/livery.json` verbatim
+(§4) and nothing on the live side would read the copy. "No lint rule" is a
+CONVENTION, not an enforced one: the livery schema closes `palette`, `base16`,
+each component group and each widget record, but it never walks a document's
+top-level keys — as `geometry` and `wallpaper` show — so a stray `fonts` key
+in a song's `livery.json` passes `rice lint` and rides the seed into the stage
+file unread, rather than being rejected. A face change lands on the user-gated
+rebuild (§2), and staging another song does not re-face the terminal. Wanting a
+live face is wanting a new emitter (OSC 50 against the terminal), not a change
+to this tier.
 
 ### Override tier (v0 additive — venue recolour, `override.*`)
 
@@ -1495,13 +1573,26 @@ other way). `LiveryState.qml`'s `songName` property reads it to resolve
 per-song flavor widgets (§5) — readers must tolerate both forms.
 
 **Additive in v0:** the staged file MAY also carry an optional top-level
+`polarity` scalar (§1's polarity field) when the active song's committed
+`livery.json` carries one — the activation seed copies the document through
+`stagePatch`, so every top-level key the song wrote rides along. Baked-only
+data: nothing reads it on the live side, `rice stage` does not apply it, and a
+song that leaves it out (in `rice.nix` and `livery.json` alike) yields the
+option system's `"light"`.
+
+**Additive in v0:** the staged file MAY also carry an optional top-level
 `geometry` block, mirroring §1's geometry tier (`gapsOut`/`gapsIn`/
-`borderSize`/`rounding`/`blurEnabled`/`blurSize`/`blurPasses`, each `nullOr`).
+`borderSize`/`rounding`/`blurEnabled`/`blurSize`/`blurPasses`/
+`terminalOpacity`, each `nullOr`).
 Absent means "this song carries no geometry opinion" (§1's additive-optional
 tier). `lyra rice stage` reads it (alongside `window.border`/
 `borderInactive`) to build its best-effort `hyprctl keyword` batch — a missing
-block, or a missing/null field within it, is skipped rather than defaulted;
-readers must tolerate both forms.
+block, or a missing/null field within it, sends no keyword for that field,
+with two exceptions §1 states: the hyprglass pair is always sent (a song with
+no `blurEnabled` opinion restores the baked default), and `terminalOpacity`
+is not a keyword at all — it rides `song/stage/terminal-colors.conf` with the
+kitty dendrite's baked `0.86` when the song has none. Readers must tolerate
+both forms.
 
 ### `song/declared/livery.json` — **v0**
 
@@ -1531,6 +1622,29 @@ declarative`'s no-`<name>` form also resolves its song off this same field
 (falling back to `stage/livery.json`'s own `"song"` breadcrumb when the file is
 absent). Nothing else reads it, and nothing in the Rust crates writes it —
 `handle_rice_stage` only reads.
+
+### `song/declared/terminal-opacity.conf` — **v0**
+
+One line, `background_opacity <n>` (`n` in [0, 1]), in kitty's own config
+syntax — the DECLARED song's terminal opacity, and nothing else.
+
+Writer: `home.activation.aoideSeedStage`'s seed script
+(`modules/dendrites/lyra/default.nix`), the same run that publishes the two
+`livery.json` twins above and below. It writes the active song's
+`aoide.livery.geometry.terminalOpacity` (§1), and **deletes the file when that
+is `null`** — an absent file is what makes kitty fall through to the baked
+`background_opacity`, and a value left over from a previous song must not
+outlive it. Read-only for everyone else: no runtime writer touches it, and no
+Rust crate writes it.
+
+Reader: the kitty dendrite's `mkAfter` block
+(`modules/dendrites/kitty.nix`), which includes it BEFORE
+`song/stage/terminal-colors.conf` (§4) so a live stage — whose file carries its
+own opacity line — wins (kitty takes the last value a repeated key sets). That
+ordering is the whole contract: the declared file covers a host that has never
+staged anything, and a stage overrides it the moment one runs. Absent (no
+activation yet, or a song with no opinion) means the baked opacity stands;
+kitty logs a missing include and continues.
 
 ### `song/stage/mode.json` — **v0**
 
@@ -1627,6 +1741,46 @@ name is an error, not idempotent-silent, and dropping the CURRENTLY-ROUTED
 draft is refused (`draft-is-live`) rather than silently also tearing down
 the routing and falling back to `staging` — switch modes first
 (`rice mode stage`/`rice mode declarative`), then drop it.
+
+### `song/stage/terminal-colors.conf` — **v0**
+
+The staged song's terminal look in kitty's own config syntax: one
+`<key> #rrggbb` line per colour, then exactly one `background_opacity <n>`
+line (`n` in [0, 1]), `#` comment lines, nothing else. The kitty dendrite
+(`modules/dendrites/kitty.nix`) `include`s it after Stylix's baked colour
+include AND after `song/declared/terminal-opacity.conf` (§4, the declared
+song's own opacity line), so every NEW kitty opens in the staged song while a
+host that has never staged anything still opens at the song's declared
+opacity; kitty skips a missing
+include with a log line, and the baked colours and
+opacity stand.
+
+Writer: `aoide-song`'s `commands::rice::stage_terminal_colors`, the one
+writer every stage path shares — `rice stage`, `rice mode stage`, `rice mode
+declarative`'s re-pin (which renders it from the declared twin when that is
+the song re-pinned, so leaving staging restores the declared colours), `rice
+back` and `lyra reload`'s draft sync. It rides each caller's mode gate and
+adds none. The content is the `kitty` livery emitter's output
+(`livery::emit::kitty`): the tinted-kitty base16 template Stylix bakes,
+key for key. A note with no base16 tier gets the scheme the stylix lane
+synthesises from its palette and component tiers (`synthesisedScheme`;
+`livery::emit::kitty::synthesised_base16` is its twin), so the file always
+carries every slot and is complete on its own: a push needs no reset first,
+and no slot of an earlier song survives a palette-only stage. Every value
+is hex-linted before it is written; a non-hex value drops its line, never
+reaches the file. The opacity line is `geometry.terminalOpacity` (§1), or
+the kitty dendrite's baked `0.86` when the song has none
+(`live::TERMINAL_OPACITY_BAKED`), so it is always present.
+
+After each write the same file is pushed to every OPEN kitty through its
+control socket: `kitty @ --to unix:<sock> set-colors --all --configured
+<file>` for each `$XDG_RUNTIME_DIR/kitty-<pid>` unix socket (the dendrite's
+`listen_on`), then `kitty @ --to unix:<sock> set-background-opacity --all
+<n>` with the file's opacity. kitty refuses the opacity unless that instance
+started with `dynamic_background_opacity yes` (the dendrite sets it); a
+refusal is counted and fails nothing. Best-effort, bounded per call, never
+fatal; the outcome envelope's `terminal` object reports `{status, message,
+instances, windows, failed, opacity, opacity_refused, file}`.
 
 ### `state/stage/sessions.json` / `hooks.json` — **v0**
 
@@ -5057,7 +5211,15 @@ arrive as ARGUMENTS, injected at the two sites that evaluate a song:
 - **Signatures.** A `rice.nix` declares `{ lib, config, song, borrow, ... }:`;
   a shelf's `default.nix` declares `{ lib, song, borrow, ... }:`. Both keep
   `...`: a file that wants only one of the two names it (`{ borrow, ... }:`),
-  and a third argument later does not break every song at once.
+  and a third argument later does not break every song at once. A `rice.nix`
+  may ALSO take the module system's **`pkgs`**, needed when the tier it sets
+  names a package (`fonts.monospace.package`, §1's font tier) — `pkgs` is the
+  one argument a real `nixosSystem` supplies that a bare `evalModules` does not
+  (`lib/options.nix`'s header). Every site that EVALUATES a song's `rice.nix`
+  is the module system: the offline generator, the songbook manifest and the
+  runtime staging path read a song's files without evaluating them
+  (`lib/songbook.nix`), so taking `pkgs` does not narrow what a repo-less host
+  can do. A `_widgets/` shelf does not take it — `borrow` is its entry point.
 
 ### The songbook is versioned score, not runtime
 

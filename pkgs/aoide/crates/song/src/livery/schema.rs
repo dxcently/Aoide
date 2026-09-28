@@ -72,6 +72,19 @@ pub const COMPONENT_FALLBACK: [(&str, &[(&str, &str)]); 3] = [
     ("window", &[("border", "accent"), ("borderInactive", "bg")]),
 ];
 
+/// The polarity field's two values, and the only two it has (CONTRACTS.md §1):
+/// the register the base16 ramp reads as, which the stylix lane hands to
+/// Stylix. An OPTIONAL top-level scalar beside `palette` — a palette brings its
+/// polarity, but a notes document that predates the field (or a lane that does
+/// not care) stays valid, defaulting to `"light"` in the option system. Unlike
+/// the font tier's fields this is a VALIDATED key: when present it must be one
+/// of these two (or null, which reads as "no opinion").
+pub const POLARITY_VALUES: [&str; 2] = ["light", "dark"];
+
+/// What an absent (or null) polarity means, everywhere: the value
+/// `modules/nucleus/options.nix` defaults the option to.
+pub const POLARITY_DEFAULT: &str = "light";
+
 /// The v0 schema version, carried into every resolved/emitted document.
 pub const SCHEMA_VERSION: &str = "0";
 
@@ -124,6 +137,14 @@ fn object_get<'a>(v: &'a Value, key: &str) -> Option<&'a Value> {
         Value::Array(a) => key.parse::<usize>().ok().and_then(|i| a.get(i)),
         _ => None,
     }
+}
+
+/// `geometry.terminalOpacity` as a usable value: a plain JSON number, finite,
+/// in [0, 1]. `None` for anything else (null, a string, out of range) — the
+/// lint's rejection and `live::terminal_opacity`'s "no opinion" read the
+/// same predicate.
+pub fn terminal_opacity_value(v: &Value) -> Option<f64> {
+    v.as_f64().filter(|o| o.is_finite() && (0.0..=1.0).contains(o))
 }
 
 // ── The validator ────────────────────────────────────────────────────────────
@@ -255,6 +276,25 @@ pub fn validate(container: &Value) -> Validation {
         }
     }
 
+    // Polarity — an OPTIONAL top-level scalar beside `palette` (CONTRACTS.md
+    // §1). Present and non-null, it must be exactly `"light"` or `"dark"`;
+    // anything else (a number, a boolean, a misspelling, a note-style
+    // `{ $value }` object) is refused by name. Absent or null is "no opinion"
+    // — the option system's default `"light"`. No emitter carries it: it is
+    // the baked fan-out's register (the stylix lane reads the option, never
+    // this document), so it is validated here and stamped nowhere.
+    if let Some(v) = object_get(container, "polarity") {
+        if !v.is_null() {
+            match v.as_str() {
+                Some(s) if POLARITY_VALUES.contains(&s) => {}
+                _ => errors.push(format!(
+                    "polarity: expected \"light\" or \"dark\", got {}",
+                    serde_json::to_string(v).unwrap_or_else(|_| js_typeof(v).to_string())
+                )),
+            }
+        }
+    }
+
     // Base16 tier — optional, all-or-nothing, closed. Validated only when the
     // block is present; then every slot is required (a hex, never null) and no
     // key outside the sixteen is allowed. Mirrors the palette's closed handling.
@@ -295,6 +335,17 @@ pub fn validate(container: &Value) -> Validation {
             }
             let v = note_value(object_get(g, &field));
             check_color(v, &format!("{group}.{field}"), &mut errors, true);
+        }
+    }
+
+    // Geometry tier — only `terminalOpacity` is linted here: it is written
+    // into a kitty config line (`stage/terminal-colors.conf`), so it must be
+    // a plain number in [0, 1] or null (no opinion). The other geometry
+    // fields reach Hyprland through `live::geometry_keywords`, which types
+    // each one itself.
+    if let Some(v) = object_get(container, "geometry").and_then(|g| object_get(g, "terminalOpacity")) {
+        if !v.is_null() && terminal_opacity_value(v).is_none() {
+            errors.push(format!("geometry.terminalOpacity: expected a number in [0, 1] or null, got {v}"));
         }
     }
 
@@ -848,5 +899,72 @@ mod tests {
                 .iter()
                 .any(|e| e == "widgets.dockwidget.order: expected integer, got number"),
         );
+    }
+
+    // geometry.terminalOpacity — a plain number in [0, 1], or null (no
+    // opinion). It lands in a kitty config line, so anything else is refused
+    // at lint rather than dropped silently at stage.
+    #[test]
+    fn terminal_opacity_is_a_number_in_the_unit_interval_or_null() {
+        for ok in [serde_json::json!(0.7), serde_json::json!(0), serde_json::json!(1), Value::Null] {
+            let mut v = load("valid.json");
+            v["geometry"] = serde_json::json!({ "terminalOpacity": ok.clone() });
+            let r = validate(&v);
+            check(&format!("terminalOpacity {ok} is accepted: {:?}", r.errors), r.ok);
+        }
+        for bad in [serde_json::json!(1.5), serde_json::json!(-0.1), serde_json::json!("0.7"), serde_json::json!(true)] {
+            let mut v = load("valid.json");
+            v["geometry"] = serde_json::json!({ "terminalOpacity": bad.clone() });
+            let r = validate(&v);
+            check(&format!("terminalOpacity {bad} is rejected"), !r.ok);
+            check(
+                "the error names geometry.terminalOpacity",
+                r.errors.iter().any(|e| e.starts_with("geometry.terminalOpacity:")),
+            );
+        }
+    }
+
+    // polarity — an OPTIONAL top-level scalar beside `palette`, and the one
+    // field of it that is a VALIDATED key (unlike the baked-only font tier's):
+    // exactly `"light"` or `"dark"`, or null/absent for "no opinion". Anything
+    // else is refused by name, because a misspelling would otherwise reach the
+    // stylix lane as the default `"light"` on a dark key.
+    #[test]
+    fn polarity_is_light_dark_or_absent() {
+        for ok in [serde_json::json!("light"), serde_json::json!("dark"), Value::Null] {
+            let mut v = load("valid.json");
+            v["polarity"] = ok.clone();
+            let r = validate(&v);
+            check(&format!("polarity {ok} is accepted: {:?}", r.errors), r.ok);
+        }
+        // Absent entirely — the common case (no committed notes file carries
+        // one; the songs declare the field in `rice.nix`).
+        check("an absent polarity is accepted", validate(&load("valid.json")).ok);
+        for bad in [
+            serde_json::json!("Light"),
+            serde_json::json!("darkness"),
+            serde_json::json!(""),
+            serde_json::json!(1),
+            serde_json::json!(true),
+            serde_json::json!({ "$value": "dark" }),
+        ] {
+            let mut v = load("valid.json");
+            v["polarity"] = bad.clone();
+            let r = validate(&v);
+            check(&format!("polarity {bad} is rejected"), !r.ok);
+            check(
+                "the error names polarity",
+                r.errors.iter().any(|e| e.starts_with("polarity:")),
+            );
+        }
+    }
+
+    // The polarity fixture, through the same door the CLI's `rice lint` uses:
+    // it validates, and it is the document the golden contract pairs with
+    // `valid.json` to prove no emitter moves a byte for the field.
+    #[test]
+    fn the_polarity_fixture_validates() {
+        let r = validate(&load("valid-polarity.json"));
+        check(&format!("valid-polarity.json is accepted: {:?}", r.errors), r.ok);
     }
 }

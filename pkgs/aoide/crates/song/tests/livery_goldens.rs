@@ -12,6 +12,11 @@
 //! * `emit stage`   — SEMANTIC JSON equality (serde's key order legitimately
 //!   differs from `JSON.stringify`; QML reads by key, so shape is the
 //!   contract, bytes are not).
+//!
+//! A fourth fixture, `valid-polarity.json`, is NOT part of that parity set:
+//! it pins the NATIVE engine's own posture for a field the Node engine never
+//! had — §1's `polarity`, which lint validates and no backend emits — against
+//! `valid`'s goldens (`polarity_is_lint_only_and_moves_no_emitted_byte`).
 
 use aoide_song::livery::emit::hyprctl::render_lines;
 use aoide_song::livery::emit::{EmitOpts, EmitOutput, emitter};
@@ -147,10 +152,51 @@ fn file_backend_errors_on_an_unknown_placeholder() {
 }
 
 #[test]
-fn registry_lists_exactly_the_four_backends_in_order() {
+fn registry_lists_exactly_the_five_backends_in_order() {
     let targets: Vec<&str> = aoide_song::livery::emit::registry()
         .iter()
         .map(|e| e.target())
         .collect();
-    assert_eq!(targets, ["stage", "hyprctl", "osc", "file"]);
+    assert_eq!(targets, ["stage", "hyprctl", "osc", "file", "kitty"]);
+}
+
+/// The polarity field (CONTRACTS.md §1) is LINT-ONLY: a notes document may
+/// carry it, `livery lint` validates it (exactly `"light"` or `"dark"`), and
+/// NO backend emits it — it is the baked fan-out's register, which the stylix
+/// lane reads off the option, never off a stage file. So a polarity-carrying
+/// document must produce byte-for-byte what the same document without the
+/// field produces, and the goldens above need no new file for it.
+///
+/// `valid-polarity.json` is `valid.json` plus `"polarity": "dark"`; the field
+/// is asserted present, so the test fails loudly if the fixture ever loses it.
+#[test]
+fn polarity_is_lint_only_and_moves_no_emitted_byte() {
+    let with_polarity = fixture("valid-polarity");
+    assert_eq!(
+        with_polarity.get("polarity").and_then(Value::as_str),
+        Some("dark"),
+        "valid-polarity.json must carry the field this test is about"
+    );
+    let without = fixture("valid");
+
+    // The resolver's canonical output, byte for byte — including its
+    // `schemaVersion`+`palette`+… insertion order, which `valid.resolve.golden`
+    // pins, so the field is proved absent from the emitted shape.
+    assert_eq!(
+        format!("{}\n", to_json_string(&resolved("valid-polarity"))),
+        golden("valid.resolve"),
+        "polarity must not reach `livery resolve`"
+    );
+
+    for target in ["osc", "hyprctl", "stage"] {
+        let one = emitter(target)
+            .expect("backend registered")
+            .emit(&resolved("valid-polarity"), &EmitOpts::default())
+            .unwrap();
+        let two = emitter(target)
+            .expect("backend registered")
+            .emit(&resolve(&without).expect("fixture resolves"), &EmitOpts::default())
+            .unwrap();
+        assert_eq!(one, two, "{target}: polarity must not move an emitted byte");
+    }
 }

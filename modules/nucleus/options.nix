@@ -60,10 +60,11 @@ let
     borderInactive = "Unfocused window border colour. Falls back to palette.bg.";
   };
 
-  # ── Geometry submodule (v0 optional tier: gaps/border/rounding/blur) ──────
+  # ── Geometry submodule (v0 optional tier: gaps/border/rounding/blur/opacity)
   # Additive-optional under the existing v0 schema (same nullOr-with-fallback
   # shape as the component tier above): every field is optional and falls
-  # back to the compositor lane's opinionated default when unset. A livery
+  # back to the compositor lane's opinionated default when unset
+  # (`terminalOpacity`: the kitty dendrite's). A livery
   # file with no `geometry` block behaves exactly as before — the compositor
   # lane applies the fallback, not the option system.
   geometryType = types.submodule {
@@ -103,10 +104,15 @@ let
         default = null;
         description = "Blur pass count. Falls back to the compositor lane's default (3) when null.";
       };
+      terminalOpacity = mkOption {
+        type = types.nullOr (types.numbers.between 0 1);
+        default = null;
+        description = "Terminal (kitty) background opacity, 0–1. Live-side only, in two files: the activation seed writes it into `song/declared/terminal-opacity.conf` (deleted when null), and `rice stage` writes it into the staged terminal file and pushes it to open kitty windows. The staged file is included second, so a stage wins; the baked kitty.conf keeps the kitty dendrite's 0.86 for a host whose song has no opinion.";
+      };
     };
   };
 
-  # ── Font submodule (v0 optional tier: the face the song wears) ────────────
+  # ── Font submodule (v0 optional overrides: the face the song wears) ───────
   # Additive-optional, the geometry tier's posture: an absent tier means "the
   # stylix lane's own default". The ROLE shape is Stylix's own — `{ package,
   # name }` — because the stylix lane is the tier's one consumer and passes the
@@ -500,6 +506,29 @@ in
             default = { };
             description = "Palette tier (base16-derived): bg / fg / accent / urgent.";
           };
+          polarity = mkOption {
+            type = types.enum [
+              "light"
+              "dark"
+            ];
+            default = "light";
+            description = ''
+              The register the base16 ramp reads as — "light" or "dark". A song
+              declares it beside its palette (a palette brings its polarity),
+              and the stylix lane hands it to `stylix.polarity`, which themes
+              every Stylix-managed target from it. The default keeps every host
+              that names no polarity evaluating exactly as before.
+
+              BAKED ONLY, the font tier's posture: no emitter carries it and
+              `rice stage` does not apply it — GTK/Qt and Stylix read it at
+              build time, so flipping it is a user-gated rebuild, not a stage.
+              It is still carried in a song's `livery.json` beside `palette`
+              and validated by `rice lint` (exactly "light"|"dark", or absent
+              for "no opinion"), and it reaches `song/stage/livery.json` through
+              the activation seed like every other top-level key — where nothing
+              reads it today.
+            '';
+          };
           base16 = mkOption {
             type = types.nullOr base16Type;
             default = null;
@@ -540,16 +569,17 @@ in
             type = fontType;
             default = { };
             description = ''
-              Font tier (v0 optional overrides): the face this song wears, per
-              Stylix font role — `monospace` today, the terminal an agent lands
-              in. Additive-optional: null means "the stylix lane's own default"
-              (Linux Libertine), so a song that sets no face bakes exactly the
-              theme it baked before.
+              Font tier (v0 optional overrides, the geometry tier's posture):
+              the face this song wears, per Stylix font role — `monospace`
+              today, the terminal an agent lands in. Null means "the stylix
+              lane's own default" (Linux Libertine), so a song that sets no
+              face bakes exactly the theme it baked before.
 
               BAKED ONLY — like `wallpaper`, and unlike `geometry`: this tier
-              has no `stage/livery.json` twin and no engine schema, because a
-              face cannot hot-swap. It lands on the user-gated rebuild, and a
-              staged song cannot re-face the terminal without one.
+              has no `stage/livery.json` twin and no engine schema entry,
+              because a face cannot hot-swap. It lands on the user-gated
+              rebuild, and a staged song cannot re-face the terminal without
+              one.
             '';
           };
           wallpaper = mkOption {

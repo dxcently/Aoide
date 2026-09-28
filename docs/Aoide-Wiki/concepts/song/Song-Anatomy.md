@@ -73,7 +73,7 @@ holds:
 | Subfolder/file | Holds |
 |---|---|
 | `rice.nix` | pure nix: sets `aoide.livery.*` (palette + base16 + component tiers + geometry + fonts + wallpaper) and `aoide.arrangement.*` under the `aoide.song` guard. **No** host options, no lane toggles — so one score replays at any venue (`CONTRACTS.md §5`, [[Song-Vocabulary#Replay — any song, any host]]). The wallpaper note points at a file in the shared `song/covers/` library (`../../covers/<file>`), not a per-song `assets/` dir. |
-| `livery.json` | the song's resolved livery values — the [[livery]] schema: `palette`, `base16`, `bar`/`notif`/`window`, `geometry`. The baked-only tiers (`wallpaper`, `fonts`) live in `rice.nix` alone and have no twin here. |
+| `livery.json` | the song's resolved livery values — the [[livery]] schema: `palette`, `polarity`, `base16`, `bar`/`notif`/`window`, `geometry`. The baked-only tiers (`wallpaper`, `fonts`) live in `rice.nix` alone and have no twin here — a convention, not a gate: the schema never walks a document's top-level keys, so a stray copy would pass `rice lint` and ride the activation seed into the stage file unread. |
 | `palette/` | this song's transpose keys — the palette variants `rice transpose <song> <key>` swaps among |
 | `sounds/` | notification + system sounds (the chimes dimension) |
 | `icons/` | per-song icon overrides |

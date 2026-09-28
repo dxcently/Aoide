@@ -11,6 +11,8 @@
 use aoide_storage::fs::LYRA_SHELL_SRC;
 use serde_json::Value;
 
+use crate::livery::schema::{POLARITY_DEFAULT, POLARITY_VALUES};
+
 /// A valid `rice compose` song name: `^[a-z0-9][a-z0-9-]*$`. This one check
 /// also rejects path traversal (`..`, `/`) and case/underscore variance by
 /// construction — nothing outside `[a-z0-9-]` is accepted, and the first
@@ -61,6 +63,7 @@ pub fn nix_fixed_fields(obj: Option<&serde_json::Map<String, Value>>, keys: &[&s
 /// lists them.
 pub const GEOMETRY_KEYS: &[&str] = &[
     "gapsOut", "gapsIn", "borderSize", "rounding", "blurEnabled", "blurSize", "blurPasses",
+    "terminalOpacity",
 ];
 /// The window (border-colour) component tier's fixed key set.
 pub const WINDOW_KEYS: &[&str] = &["border", "borderInactive"];
@@ -82,6 +85,25 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
                 .collect::<String>()
         })
         .unwrap_or_default();
+
+    // The polarity field (CONTRACTS.md §1): a validated top-level scalar beside
+    // `palette` — "a palette brings its polarity". Copied from the source
+    // document when it carries one, and the option's own default otherwise, so
+    // a composed song declares its ground explicitly in the same key as its
+    // palette rather than inheriting whatever the default becomes later.
+    let declared = notes
+        .get("polarity")
+        .and_then(Value::as_str)
+        .filter(|s| POLARITY_VALUES.contains(s));
+    let polarity = declared.unwrap_or(POLARITY_DEFAULT);
+    let polarity_comment = if declared.is_some() {
+        format!("inherited from song \"{from}\"")
+    } else {
+        format!(
+            "\"{from}\" carries no polarity — the default ({POLARITY_DEFAULT}); \
+             set \"dark\" if the copied palette is a dark ground"
+        )
+    };
 
     let window_obj = notes.get("window").and_then(Value::as_object);
     let window_lines = nix_fixed_fields(window_obj, WINDOW_KEYS, "      ");
@@ -118,6 +140,11 @@ pub fn render_rice_nix(name: &str, from: &str, notes: &Value) -> String {
     s.push_str("\n    aoide.livery.palette = {\n");
     s.push_str(&palette_lines);
     s.push_str("    };\n");
+
+    s.push_str(&format!("\n    # polarity: light | dark — {polarity_comment}\n"));
+    s.push_str(&format!(
+        "    aoide.livery.polarity = \"{polarity}\";\n"
+    ));
 
     s.push_str(&format!("\n    # {window_comment}\n"));
     s.push_str("    aoide.livery.window = {\n");
