@@ -165,7 +165,7 @@ fn attempt(args: &[&str]) -> Helm {
 /// One step of the wait loop: is another attempt due? Only an UNREACHABLE
 /// provider is worth asking again — a refusal and a missing client are answers,
 /// and the timeout is the caller's.
-fn another_attempt(outcome: Helm, wait: bool, expired: bool) -> bool {
+fn retry_unreachable(outcome: Helm, wait: bool, expired: bool) -> bool {
     wait && !expired && outcome == Helm::Unreachable
 }
 
@@ -173,7 +173,7 @@ fn helm(args: &[&str], wait: bool) -> Helm {
     let deadline = Instant::now() + REACHABLE_WAIT;
     loop {
         let outcome = attempt(args);
-        if !another_attempt(outcome, wait, Instant::now() >= deadline) {
+        if !retry_unreachable(outcome, wait, Instant::now() >= deadline) {
             return outcome;
         }
         std::thread::sleep(REACHABLE_POLL);
@@ -210,14 +210,12 @@ fn step_aside(wait: bool) -> &'static str {
 /// Make the provider agree with the stage files. Returns a short status string
 /// for the caller's outcome envelope; NEVER a `Result` — a failed or absent
 /// provider must not fail a stage, a pick or a revert (the stage files are
-/// already the source of truth for the shell's half of the picture). ONE
-/// attempt: see the module doc for why the wait is `sync_waiting`'s.
+/// already the source of truth for the shell's half of the picture). ONE attempt.
 pub fn sync() -> &'static str {
     sync_with(false)
 }
 
-/// [`sync`], holding the reachable wait — what `lyra cover sync` runs, and so
-/// what a unit's `ExecStartPost` runs.
+/// [`sync`], holding the reachable wait.
 pub fn sync_waiting() -> &'static str {
     sync_with(true)
 }
@@ -320,15 +318,15 @@ mod tests {
             for wait in [false, true] {
                 for expired in [false, true] {
                     assert!(
-                        !another_attempt(outcome, wait, expired),
+                        !retry_unreachable(outcome, wait, expired),
                         "{outcome:?} wait={wait} expired={expired}"
                     );
                 }
             }
         }
-        assert!(another_attempt(Helm::Unreachable, true, false));
-        assert!(!another_attempt(Helm::Unreachable, false, false), "a writer makes one attempt");
-        assert!(!another_attempt(Helm::Unreachable, true, true), "the wait is bounded");
+        assert!(retry_unreachable(Helm::Unreachable, true, false));
+        assert!(!retry_unreachable(Helm::Unreachable, false, false), "a writer makes one attempt");
+        assert!(!retry_unreachable(Helm::Unreachable, true, true), "the wait is bounded");
     }
 
     #[test]
@@ -410,7 +408,7 @@ mod tests {
 
     /// Both doors are inert in this crate's own test build: they report the
     /// decision and run no client (`live::apply_live`'s gate). Which door WAITS,
-    /// and on what, is `another_attempt`'s truth table — the loop itself cannot
+    /// and on what, is `retry_unreachable`'s truth table — the loop itself cannot
     /// be observed here without running the client.
     #[test]
     fn both_doors_are_inert_in_this_crates_own_test_build() {

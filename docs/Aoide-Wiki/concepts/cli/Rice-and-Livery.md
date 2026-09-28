@@ -378,10 +378,14 @@ lyra cover sync [--json]
   (`applied the staged pick`, `stepped aside (cleared)`, `stepped aside
   (stand-in image)`, or that the shell's own layer paints and no call was made).
 - **Notes:** the repair door — for a dropped pick, for a provider that was
-  restarted, or for a hand-edited stage file. Every pick write calls the same
-  function, and the external provider's unit runs this command in
-  `ExecStartPost`, so a restarted provider re-asserts the staged state without a
-  rebuild.
+  restarted, or for a hand-edited stage file. It is the ONE door that WAITS: a
+  provider that has not answered yet (exit 3, or `skwd-helm` not on `PATH`) is
+  retried for up to ~5 s before the outcome is reported. Every other writer —
+  `cover set`, `cover set --clear`, `rice stage`, `rice back` — makes a single
+  attempt, so no interactive command stalls behind a provider that is down. The
+  unit's `ExecStartPost` runs this command, which is why the wait lives here:
+  that hook races the daemon's own socket, and a restarted provider re-asserts
+  the staged state without a rebuild.
 
 ### lyra livery emit
 

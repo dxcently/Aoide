@@ -176,15 +176,8 @@ let
             };
 
             # ── Re-assert the engine after an activation ─────────────────────────
-            # The sync lives in the unit's own `ExecStartPost`, so this lane does
-            # not have to know how to build its environment — it only asks for a
-            # restart. It has to ask: systemd does not restart a unit whose file
-            # merely changed on this switch, and the unit is `PartOf` the session
-            # target, so a running engine would otherwise keep the previous
-            # activation's state. `try-restart` no-ops on a stopped unit (a
-            # headless/session-less activation starts nothing and fails nothing),
-            # and the `XDG_RUNTIME_DIR` is the same explicit one `aoideRestartRice`
-            # passes.
+            # Only a START runs the unit's `ExecStartPost` sync, and systemd does
+            # not restart a unit whose file merely changed: ask for one restart.
             home.activation.aoideResyncSkwdWall = lib.hm.dag.entryAfter [ "reloadSystemd" ] ''
               run env XDG_RUNTIME_DIR=/run/user/$(${pkgs.coreutils}/bin/id -u) \
                 ${pkgs.systemd}/bin/systemctl --user try-restart skwd-walld.service || true

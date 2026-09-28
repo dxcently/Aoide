@@ -46,7 +46,10 @@ key is the one thing that decides which of the two is in front of the other.
   applies to the staged song, and steps aside otherwise: the provider's own
   `clear` verb where the installed release has one, and a 1x1 fully transparent
   PNG applied to every output otherwise (the step-aside image, since the release
-  Aoide first shipped against has no `clear`). It is what the
+  Aoide first shipped against has no `clear`). It is the one door that waits for
+  a provider which has not answered yet — up to ~5 s, because the unit's
+  `ExecStartPost` races the daemon's own socket — while `cover set`, `--clear`,
+  `rice stage` and `rice back` each make a single attempt. It is what the
   lane's unit runs in `ExecStartPost`, and what every pick write runs.
 - **Engine → Aoide.** The daemon's `postProcessing` hook runs exactly one
   command, `lyra cover set --from-skwd --kind %type% %path%`, which RECORDS what

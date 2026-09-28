@@ -43,4 +43,12 @@ modules/dendrites/wallpaper/
   files: whichever provider is active, the CLI reconciles the provider with
   `song/stage/cover.json` — the staged pick while one applies to the staged
   song, nothing (the step-aside image) otherwise. The engine lane calls it from
-  its unit's `ExecStartPost`, and every pick write calls it.
+  its unit's `ExecStartPost`, and every pick write calls it; it is the door that
+  waits for a provider still coming up (~5 s), where the pick writes each make a
+  single attempt.
+- **Re-asserted after every activation.** `home.activation.aoideResyncSkwdWall`
+  runs after `reloadSystemd` and `try-restart`s `skwd-walld.service`, so the
+  unit's own `ExecStartPost` syncs with the environment the unit was built for.
+  A running daemon is therefore bounced once per switch — accepted: the engine
+  re-applies the staged state on the way back up, and `try-restart` no-ops when
+  it is stopped, so a headless activation starts nothing.
