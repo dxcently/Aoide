@@ -1,17 +1,29 @@
 # aoide-song
 
 Aoide's ricing/design engine: the native livery engine (schema validation,
-`{group.key}` deref + component fallback, stage/hyprctl/osc/file emitters),
-`rice compose`'s scaffolding/rendering, cover-art derivation, the Hyprland
-geometry keyword live-apply, and the element render pipeline (non-QML rice
-targets — waybar, dunst, anything with a config file). Paint-side — ships
-in `lyra`, not core.
+`{group.key}` deref + component fallback, stage/hyprctl/osc/file/kitty
+emitters), `rice compose`'s scaffolding/rendering, cover-art derivation, the
+Hyprland geometry keyword live-apply, the staged terminal colours, and the
+element render pipeline (non-QML rice targets — waybar, dunst, anything with
+a config file). Paint-side — ships in `lyra`, not core.
 
 ## Named seams (what it exposes)
 
 - `livery` — the design-token engine: schema, resolve, emit.
 - `live` — computes + (best-effort) applies the Hyprland geometry/border
-  keyword list a staged notes document implies.
+  keyword list a staged notes document implies (`blurEnabled` also switches
+  hyprglass's two live enable keys; no opinion restores `HYPRGLASS_BAKED`),
+  renders the staged terminal colour
+  file (`terminal_colors`, through the `kitty` emitter) and pushes a written
+  one, with the song's `background_opacity` (`terminal_opacity`,
+  `TERMINAL_OPACITY_BAKED` when the song has none), to every open kitty over
+  its control socket (`push_kitty_colors`: `kitty @ set-colors --all
+  --configured` then `set-background-opacity --all` per
+  `$XDG_RUNTIME_DIR/kitty-<pid>`
+  socket, bounded, best-effort). `commands::rice::stage_terminal_colors` is
+  the one writer of `stage/terminal-colors.conf` (CONTRACTS.md §4), shared by
+  `rice stage`, the `rice mode` re-pins, `rice back` and `lyra reload`'s
+  draft sync.
 - `compose` — the pure `rice compose` scaffolding/rendering engine.
 - `cover` — cover-art derivation + resolution.
 - `elements` — the element descriptor + render pipeline

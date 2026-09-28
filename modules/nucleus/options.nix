@@ -60,10 +60,11 @@ let
     borderInactive = "Unfocused window border colour. Falls back to palette.bg.";
   };
 
-  # ── Geometry submodule (v0 optional tier: gaps/border/rounding/blur) ──────
+  # ── Geometry submodule (v0 optional tier: gaps/border/rounding/blur/opacity)
   # Additive-optional under the existing v0 schema (same nullOr-with-fallback
   # shape as the component tier above): every field is optional and falls
-  # back to the compositor lane's opinionated default when unset. A livery
+  # back to the compositor lane's opinionated default when unset
+  # (`terminalOpacity`: the kitty dendrite's). A livery
   # file with no `geometry` block behaves exactly as before — the compositor
   # lane applies the fallback, not the option system.
   geometryType = types.submodule {
@@ -102,6 +103,11 @@ let
         type = types.nullOr types.int;
         default = null;
         description = "Blur pass count. Falls back to the compositor lane's default (3) when null.";
+      };
+      terminalOpacity = mkOption {
+        type = types.nullOr (types.numbers.between 0 1);
+        default = null;
+        description = "Terminal (kitty) background opacity, 0–1. Live-side only: `rice stage` writes it into the staged terminal file and pushes it to open kitty windows; the baked kitty.conf keeps the kitty dendrite's 0.86, which a song with null restores.";
       };
     };
   };

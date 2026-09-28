@@ -126,6 +126,14 @@ fn object_get<'a>(v: &'a Value, key: &str) -> Option<&'a Value> {
     }
 }
 
+/// `geometry.terminalOpacity` as a usable value: a plain JSON number, finite,
+/// in [0, 1]. `None` for anything else (null, a string, out of range) — the
+/// lint's rejection and `live::terminal_opacity`'s "no opinion" read the
+/// same predicate.
+pub fn terminal_opacity_value(v: &Value) -> Option<f64> {
+    v.as_f64().filter(|o| o.is_finite() && (0.0..=1.0).contains(o))
+}
+
 // ── The validator ────────────────────────────────────────────────────────────
 
 /// `noteValue(node)` — accept a bare string or a W3C design-token object
@@ -295,6 +303,17 @@ pub fn validate(container: &Value) -> Validation {
             }
             let v = note_value(object_get(g, &field));
             check_color(v, &format!("{group}.{field}"), &mut errors, true);
+        }
+    }
+
+    // Geometry tier — only `terminalOpacity` is linted here: it is written
+    // into a kitty config line (`stage/terminal-colors.conf`), so it must be
+    // a plain number in [0, 1] or null (no opinion). The other geometry
+    // fields reach Hyprland through `live::geometry_keywords`, which types
+    // each one itself.
+    if let Some(v) = object_get(container, "geometry").and_then(|g| object_get(g, "terminalOpacity")) {
+        if !v.is_null() && terminal_opacity_value(v).is_none() {
+            errors.push(format!("geometry.terminalOpacity: expected a number in [0, 1] or null, got {v}"));
         }
     }
 
@@ -848,5 +867,28 @@ mod tests {
                 .iter()
                 .any(|e| e == "widgets.dockwidget.order: expected integer, got number"),
         );
+    }
+
+    // geometry.terminalOpacity — a plain number in [0, 1], or null (no
+    // opinion). It lands in a kitty config line, so anything else is refused
+    // at lint rather than dropped silently at stage.
+    #[test]
+    fn terminal_opacity_is_a_number_in_the_unit_interval_or_null() {
+        for ok in [serde_json::json!(0.7), serde_json::json!(0), serde_json::json!(1), Value::Null] {
+            let mut v = load("valid.json");
+            v["geometry"] = serde_json::json!({ "terminalOpacity": ok.clone() });
+            let r = validate(&v);
+            check(&format!("terminalOpacity {ok} is accepted: {:?}", r.errors), r.ok);
+        }
+        for bad in [serde_json::json!(1.5), serde_json::json!(-0.1), serde_json::json!("0.7"), serde_json::json!(true)] {
+            let mut v = load("valid.json");
+            v["geometry"] = serde_json::json!({ "terminalOpacity": bad.clone() });
+            let r = validate(&v);
+            check(&format!("terminalOpacity {bad} is rejected"), !r.ok);
+            check(
+                "the error names geometry.terminalOpacity",
+                r.errors.iter().any(|e| e.starts_with("geometry.terminalOpacity:")),
+            );
+        }
     }
 }

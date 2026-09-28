@@ -1,4 +1,4 @@
-//! Hyprland live-apply helpers — the compositor half of `rice stage`.
+//! Live-apply helpers — the compositor and terminal halves of `rice stage`.
 //!
 //! `handle_rice_stage` (dispatch.rs) already hot-reloads the palette by
 //! staging `stage/livery.json`; Quickshell's own FileView watches that file
@@ -13,13 +13,28 @@
 //! config is still the build-time source for the NEXT compositor start), so
 //! a reload would find nothing new to pick up and would needlessly reset
 //! every OTHER live-tweaked keyword a user has set out-of-band.
+//!
+//! The terminal half (below the compositor functions) renders the staged
+//! terminal file (every colour slot through the livery engine's `kitty`
+//! emitter, plus the song's `background_opacity`) and pushes a written one
+//! to every open kitty over its control socket. The
+//! write itself stays with the caller (`commands::rice::stage_terminal_colors`),
+//! like the stage file's: this module holds no storage dependency.
 
 use crate::livery::schema;
 use serde_json::Value;
 
+/// The baked hyprglass switches, `(enabled, layers:enabled)`: what the
+/// compositor facet's `plugin:hyprglass` block leaves in `hyprland.conf`
+/// (`enabled` at the plugin's own default 1, `layers { enabled = 1 }`). A
+/// staged song with no `geometry.blurEnabled` opinion restores exactly this.
+/// Change it together with that block.
+pub const HYPRGLASS_BAKED: (bool, bool) = (true, true);
+
 /// Build the `hyprctl keyword …` list for one staged notes document, in the
 /// fixed order CONTRACTS.md §1's geometry table lists them (gaps, border
-/// size, border colours, rounding, blur).
+/// size, border colours, rounding, blur), then the two hyprglass switches
+/// (always emitted; see [`HYPRGLASS_BAKED`]).
 ///
 /// Only emits a keyword for a field that actually resolves to a concrete
 /// value:
@@ -75,6 +90,28 @@ pub fn geometry_keywords(notes: &Value) -> Vec<String> {
     push_int(&mut out, geo, "blurSize", "decoration:blur:size");
     push_int(&mut out, geo, "blurPasses", "decoration:blur:passes");
 
+    // hyprglass follows the same switch: a song with blur off wants no glass
+    // either, and one with blur on gets it back. Both of the plugin's own
+    // enable keys are read per frame (static config pointers), so a keyword
+    // turns the glass off live without unloading the plugin: `enabled` is the
+    // global window-glass switch, `layers:enabled` the layer-surface one the
+    // compositor facet turns on for the aoide-* namespaces.
+    //
+    // Unlike the geometry keywords above, these are ALWAYS emitted: a song
+    // with no `blurEnabled` opinion restores the baked default
+    // ([`HYPRGLASS_BAKED`]) rather than keeping whatever glass the previously
+    // staged song left behind (house rule 10: a stage hot-loads the song as
+    // declared, and a song that says nothing about glass is declared with the
+    // baked glass). Last in the batch, so on a host without the plugin loaded
+    // their refusal comes after every core keyword has already applied.
+    let blur = geo.and_then(|g| g.get("blurEnabled")).and_then(Value::as_bool);
+    let (window_glass, layer_glass) = match blur {
+        Some(b) => (b, b),
+        None => HYPRGLASS_BAKED,
+    };
+    out.push(format!("keyword plugin:hyprglass:enabled {}", u8::from(window_glass)));
+    out.push(format!("keyword plugin:hyprglass:layers:enabled {}", u8::from(layer_glass)));
+
     out
 }
 
@@ -119,6 +156,12 @@ pub fn apply_live(keywords: &[String]) -> &'static str {
     if !on_hyprland {
         return "skipped (HYPRLAND_INSTANCE_SIGNATURE unset)";
     }
+    // A test build never reaches the compositor: every batch carries the
+    // hyprglass switches, and a handler test run from a Hyprland terminal
+    // would otherwise flip the operator's live glass and borders.
+    if cfg!(test) {
+        return "skipped (test build: no live hyprctl)";
+    }
     match std::process::Command::new("hyprctl")
         .arg("--batch")
         .arg(batch_command(keywords))
@@ -130,10 +173,272 @@ pub fn apply_live(keywords: &[String]) -> &'static str {
     }
 }
 
+
+// ── The terminal half ────────────────────────────────────────────────────
+//
+// kitty has no FileView: a colour file on disk reaches a NEW window through
+// the kitty dendrite's `include` of it, and an OPEN window only when kitty is
+// told. The telling goes through kitty's own control socket
+// (`kitty @ set-colors`), never a raw OSC write to a pty — an OSC write
+// interleaves with whatever the program in that pty is printing and gets
+// eaten. The sockets are found by the path pattern the kitty dendrite
+// configures (`listen_on unix:${XDG_RUNTIME_DIR}/kitty-{kitty_pid}`), a
+// plain directory listing — no process-table or /proc walk.
+
+/// The staged terminal colour file's name inside the stage dir — the runtime
+/// root's contract path `$AOIDE_ROOT/song/stage/terminal-colors.conf`, the
+/// file the kitty dendrite includes.
+pub const TERMINAL_COLORS_FILE: &str = "terminal-colors.conf";
+
+/// How long one `kitty @` call may take before it is abandoned. A socket
+/// whose kitty is wedged must not stall `rice stage`.
+const KITTY_CALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// kitty's `background_opacity` as the kitty dendrite bakes it
+/// (`modules/dendrites/kitty.nix`, `background_opacity = "0.86"`) — what a
+/// staged song with no `geometry.terminalOpacity` opinion restores. The
+/// dendrite is nix and this crate is cargo-only, so nothing can share one
+/// definition: the two are kept equal by hand, and each names the other.
+pub const TERMINAL_OPACITY_BAKED: f64 = 0.86;
+
+/// The staged song's terminal background opacity: `geometry.terminalOpacity`
+/// when it is a plain number in [0, 1], else [`TERMINAL_OPACITY_BAKED`] — no
+/// opinion (absent or null) restores the baked value, and a value lint would
+/// reject is treated as no opinion, never written.
+pub fn terminal_opacity(notes: &Value) -> f64 {
+    notes
+        .get("geometry")
+        .and_then(|g| g.get("terminalOpacity"))
+        .and_then(schema::terminal_opacity_value)
+        .unwrap_or(TERMINAL_OPACITY_BAKED)
+}
+
+/// Render the staged terminal file one notes document implies: the livery
+/// engine's `kitty` emitter (every colour slot), then one
+/// `background_opacity` line from [`terminal_opacity`] — always present, so
+/// the file alone decides both for every new window. `None` when the notes
+/// don't resolve (a torn or reference-cyclic notes file) — the caller leaves
+/// the previous file in place rather than writing a guess.
+pub fn terminal_colors(notes: &Value) -> Option<String> {
+    let r = crate::livery::resolve(notes).ok()?;
+    let mut out = crate::livery::emit::kitty::emit_kitty(&r);
+    out.push_str(&format!("background_opacity {}\n", terminal_opacity(notes)));
+    Some(out)
+}
+
+/// The `background_opacity` a written terminal file carries, as the token to
+/// hand kitty — re-checked against the same range lint uses, so a
+/// hand-edited file cannot put anything but a number on the argv.
+fn file_opacity(conf: &std::path::Path) -> Option<String> {
+    let body = std::fs::read_to_string(conf).ok()?;
+    body.lines()
+        .filter_map(|l| l.strip_prefix("background_opacity "))
+        .map(str::trim)
+        .find(|v| {
+            v.parse::<f64>()
+                .ok()
+                .is_some_and(|o| o.is_finite() && (0.0..=1.0).contains(&o))
+        })
+        .map(str::to_string)
+}
+
+/// Every kitty control socket under `runtime_dir`: entries named
+/// `kitty-<pid>` (digits only) that are unix sockets. Sorted, so the push
+/// order is stable. An unreadable directory is simply no sockets.
+pub fn kitty_sockets(runtime_dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    use std::os::unix::fs::FileTypeExt;
+    let Ok(entries) = std::fs::read_dir(runtime_dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<std::path::PathBuf> = entries
+        .filter_map(Result::ok)
+        .filter(|e| {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            name.strip_prefix("kitty-")
+                .is_some_and(|pid| !pid.is_empty() && pid.chars().all(|c| c.is_ascii_digit()))
+                && e.file_type().is_ok_and(|t| t.is_socket())
+        })
+        .map(|e| e.path())
+        .collect();
+    out.sort();
+    out
+}
+
+/// Run one `kitty @` call with a bounded wait, stdout captured on a reader
+/// thread (an `ls` of a busy instance can outgrow the pipe buffer, which
+/// would otherwise wedge the child until the deadline). `Err(NotFound)` when
+/// `kitty` itself is not on `PATH`; `Ok(None)` when it ran but failed or
+/// timed out; `Ok(Some(stdout))` on success.
+fn kitty_call(args: &[&std::ffi::OsStr]) -> std::io::Result<Option<Vec<u8>>> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("kitty")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let mut stdout = child.stdout.take();
+    let reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(s) = stdout.as_mut() {
+            let _ = s.read_to_end(&mut buf);
+        }
+        buf
+    });
+    let deadline = std::time::Instant::now() + KITTY_CALL_LIMIT;
+    let ok = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.success(),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break false;
+            }
+        }
+    };
+    let out = reader.join().unwrap_or_default();
+    Ok(ok.then_some(out))
+}
+
+/// Count the windows in a `kitty @ ls` document (OS windows → tabs →
+/// windows). `None` when it isn't that shape.
+fn count_windows(ls: &[u8]) -> Option<usize> {
+    let v: Value = serde_json::from_slice(ls).ok()?;
+    Some(
+        v.as_array()?
+            .iter()
+            .flat_map(|os| os.get("tabs").and_then(Value::as_array).into_iter().flatten())
+            .map(|tab| tab.get("windows").and_then(Value::as_array).map_or(0, Vec::len))
+            .sum(),
+    )
+}
+
+/// Guarded, best-effort push of a terminal file to every open kitty:
+/// `kitty @ --to unix:<sock> set-colors --all --configured <file>` per
+/// socket (`--configured` so a new window of that same instance opens in
+/// the staged colours too), then an `ls` of the recoloured instance to
+/// count its windows, then — when the file carries a `background_opacity`
+/// line — `set-background-opacity --all <v>` to that instance (kitty 0.49
+/// refuses it unless the instance started with `dynamic_background_opacity
+/// yes`; a refusal is counted in `opacity_refused` and fails nothing). Never
+/// a `Result` — the same tier as [`apply_live`]: the file on disk is already
+/// the truth for every new kitty, and this only brings the open ones along.
+///
+/// A quiet skip, not a failure, when there is nothing to push to: no
+/// `$XDG_RUNTIME_DIR`, no `kitty-<pid>` socket under it, or no `kitty` on
+/// `PATH`. The returned object is the outcome envelope's `terminal` data:
+/// `{status, message, instances, windows, failed, opacity, opacity_refused}`.
+pub fn push_kitty_colors(conf: &std::path::Path) -> Value {
+    let skip = |why: &str| {
+        serde_json::json!({
+            "status": "skipped", "message": why, "instances": 0, "windows": 0, "failed": 0,
+            "opacity": null, "opacity_refused": 0,
+        })
+    };
+    let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()) else {
+        return skip("XDG_RUNTIME_DIR unset");
+    };
+    let sockets = kitty_sockets(std::path::Path::new(&runtime_dir));
+    if sockets.is_empty() {
+        return skip("no kitty control socket open");
+    }
+
+    let opacity = file_opacity(conf);
+    let (mut instances, mut windows, mut failed) = (0usize, 0usize, 0usize);
+    let mut opacity_refused = 0usize;
+    for sock in &sockets {
+        let mut to = std::ffi::OsString::from("unix:");
+        to.push(sock.as_os_str());
+        let set = kitty_call(&[
+            "@".as_ref(),
+            "--to".as_ref(),
+            to.as_os_str(),
+            "set-colors".as_ref(),
+            "--all".as_ref(),
+            "--configured".as_ref(),
+            conf.as_os_str(),
+        ]);
+        match set {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return skip("kitty not on PATH");
+            }
+            Ok(Some(_)) => {
+                instances += 1;
+                let ls = kitty_call(&["@".as_ref(), "--to".as_ref(), to.as_os_str(), "ls".as_ref()]);
+                windows += ls.ok().flatten().and_then(|b| count_windows(&b)).unwrap_or(0);
+                // The file's opacity too, to every OS window of the instance.
+                // kitty refuses it unless that instance started with
+                // `dynamic_background_opacity yes` (one started before the
+                // dendrite set it): counted apart, the recolour still stands.
+                if let Some(o) = &opacity {
+                    let set = kitty_call(&[
+                        "@".as_ref(),
+                        "--to".as_ref(),
+                        to.as_os_str(),
+                        "set-background-opacity".as_ref(),
+                        "--all".as_ref(),
+                        o.as_ref(),
+                    ]);
+                    if !matches!(set, Ok(Some(_))) {
+                        opacity_refused += 1;
+                    }
+                }
+            }
+            // A stale socket (its kitty gone), a refusal, or a timeout.
+            _ => failed += 1,
+        }
+    }
+    let status = match (instances, failed) {
+        (0, _) => "failed",
+        (_, 0) => "applied",
+        _ => "partial",
+    };
+    serde_json::json!({
+        "status": status,
+        "message": format!(
+            "recoloured {windows} kitty window(s) across {instances} instance(s){}{}",
+            if failed > 0 { format!("; {failed} socket(s) did not answer") } else { String::new() },
+            if opacity_refused > 0 {
+                format!(
+                    "; {opacity_refused} instance(s) refused the opacity \
+                     (started without dynamic_background_opacity)"
+                )
+            } else {
+                String::new()
+            }
+        ),
+        "instances": instances,
+        "windows": windows,
+        "failed": failed,
+        "opacity": opacity.as_deref().and_then(|o| o.parse::<f64>().ok()),
+        "opacity_refused": opacity_refused,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The two hyprglass lines a song with no `blurEnabled` opinion gets:
+    /// the baked default, closing every batch.
+    fn baked_glass() -> Vec<String> {
+        let (w, l) = HYPRGLASS_BAKED;
+        vec![
+            format!("keyword plugin:hyprglass:enabled {}", u8::from(w)),
+            format!("keyword plugin:hyprglass:layers:enabled {}", u8::from(l)),
+        ]
+    }
+
+    fn with_baked_glass(mut v: Vec<String>) -> Vec<String> {
+        v.extend(baked_glass());
+        v
+    }
 
     #[test]
     fn full_geometry_and_window_produce_every_keyword_in_order() {
@@ -156,6 +461,8 @@ mod tests {
                 "keyword decoration:blur:enabled 1".to_string(),
                 "keyword decoration:blur:size 8".to_string(),
                 "keyword decoration:blur:passes 3".to_string(),
+                "keyword plugin:hyprglass:enabled 1".to_string(),
+                "keyword plugin:hyprglass:layers:enabled 1".to_string(),
             ]
         );
     }
@@ -165,8 +472,37 @@ mod tests {
         let notes = json!({ "geometry": { "blurEnabled": false } });
         assert_eq!(
             geometry_keywords(&notes),
-            vec!["keyword decoration:blur:enabled 0".to_string()]
+            vec![
+                "keyword decoration:blur:enabled 0".to_string(),
+                "keyword plugin:hyprglass:enabled 0".to_string(),
+                "keyword plugin:hyprglass:layers:enabled 0".to_string(),
+            ]
         );
+    }
+
+    #[test]
+    fn hyprglass_follows_blur_and_restores_the_baked_glass_without_an_opinion() {
+        // cadenza's shape: blur off, glass off, both live keywords.
+        let off = geometry_keywords(&json!({ "geometry": { "blurEnabled": false, "rounding": 0 } }));
+        assert!(off.contains(&"keyword plugin:hyprglass:enabled 0".to_string()));
+        assert!(off.contains(&"keyword plugin:hyprglass:layers:enabled 0".to_string()));
+        // A song that wants blur turns the glass back on.
+        let on = geometry_keywords(&json!({ "geometry": { "blurEnabled": true } }));
+        assert!(on.contains(&"keyword plugin:hyprglass:enabled 1".to_string()));
+        assert!(on.contains(&"keyword plugin:hyprglass:layers:enabled 1".to_string()));
+        // No opinion (null, missing field, no geometry block at all) restores
+        // the baked glass, so a blur-off song's glass never outlives it.
+        for notes in [
+            json!({ "geometry": { "blurEnabled": null } }),
+            json!({ "geometry": { "rounding": 4 } }),
+            json!({}),
+        ] {
+            let kw = geometry_keywords(&notes);
+            assert_eq!(kw[kw.len() - 2..].to_vec(), baked_glass(), "{notes}");
+            // Hyprland's own blur keeps the plain no-opinion rule.
+            assert!(kw.iter().all(|k| !k.contains("decoration:blur")), "{kw:?}");
+        }
+        assert_eq!(HYPRGLASS_BAKED, (true, true), "the compositor facet bakes both on");
     }
 
     #[test]
@@ -174,10 +510,10 @@ mod tests {
         let notes = json!({ "window": { "border": "#a07414", "borderInactive": "#3f867e" } });
         assert_eq!(
             geometry_keywords(&notes),
-            vec![
+            with_baked_glass(vec![
                 "keyword general:col.active_border rgb(a07414)".to_string(),
                 "keyword general:col.inactive_border rgb(3f867e)".to_string(),
-            ]
+            ])
         );
     }
 
@@ -190,7 +526,7 @@ mod tests {
         });
         assert_eq!(
             geometry_keywords(&notes),
-            vec!["keyword general:gaps_in 6".to_string()]
+            with_baked_glass(vec!["keyword general:gaps_in 6".to_string()])
         );
     }
 
@@ -204,8 +540,9 @@ mod tests {
         let notes = json!({
             "window": { "border": "0; dispatch exec touch /tmp/pwned" }
         });
-        assert!(
-            geometry_keywords(&notes).is_empty(),
+        assert_eq!(
+            geometry_keywords(&notes),
+            baked_glass(),
             "an injection-shaped border value must be skipped entirely"
         );
     }
@@ -217,15 +554,15 @@ mod tests {
         });
         assert_eq!(
             geometry_keywords(&notes),
-            vec!["keyword general:col.active_border rgb(89b4fa)".to_string()],
+            with_baked_glass(vec!["keyword general:col.active_border rgb(89b4fa)".to_string()]),
             "the valid sibling field still emits; only the malformed one is dropped"
         );
     }
 
     #[test]
-    fn no_geometry_and_no_window_yields_an_empty_batch() {
+    fn no_geometry_and_no_window_yields_only_the_baked_glass() {
         let notes = json!({ "palette": { "bg": "#1e1e2e" } });
-        assert!(geometry_keywords(&notes).is_empty());
+        assert_eq!(geometry_keywords(&notes), baked_glass());
     }
 
     #[test]
@@ -255,5 +592,157 @@ mod tests {
 
         let kw = vec!["keyword general:gaps_out 8".to_string()];
         assert_eq!(apply_live(&kw), "skipped (HYPRLAND_INSTANCE_SIGNATURE unset)");
+    }
+
+    // ── terminal half ────────────────────────────────────────────────────
+
+    /// A short scratch dir: a unix socket path must fit `sun_path` (108
+    /// bytes), which a deep `$TMPDIR` can overrun on its own.
+    fn short_tmp(tag: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .subsec_nanos();
+        let dir = std::path::PathBuf::from(format!("/tmp/ak-{tag}-{}-{nanos}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn terminal_colors_render_the_staged_base16_through_the_kitty_emitter() {
+        let raw = std::fs::read_to_string("tests/fixtures/valid-base16.json").unwrap();
+        let mut notes: Value = serde_json::from_str(&raw).unwrap();
+        // A staged notes document carries the injected `"song"` and a
+        // geometry block the resolver ignores.
+        notes["song"] = json!("cadenza");
+        notes["geometry"] = json!({ "blurEnabled": false });
+        let out = terminal_colors(&notes).expect("valid notes resolve");
+        assert!(out.lines().any(|l| l == "background #0a0a0d"), "{out}");
+        assert!(out.lines().any(|l| l == "color15 #ffffff"), "{out}");
+        // No terminalOpacity opinion: the baked opacity, always written.
+        assert_eq!(out.lines().last(), Some("background_opacity 0.86"), "{out}");
+    }
+
+    #[test]
+    fn terminal_opacity_is_the_songs_value_or_the_baked_default() {
+        let raw = std::fs::read_to_string("tests/fixtures/valid-base16.json").unwrap();
+        let mut notes: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(TERMINAL_OPACITY_BAKED, 0.86, "the kitty dendrite's background_opacity");
+        for (geometry, want) in [
+            (json!({ "terminalOpacity": 0.7 }), "0.7"),
+            (json!({ "terminalOpacity": 1 }), "1"),
+            (json!({ "terminalOpacity": 0 }), "0"),
+            (json!({ "terminalOpacity": null }), "0.86"),
+            (json!({}), "0.86"),
+            // Lint rejects these; the hot path treats them as no opinion.
+            (json!({ "terminalOpacity": 1.5 }), "0.86"),
+            (json!({ "terminalOpacity": "0.7\nshell /bin/evil" }), "0.86"),
+        ] {
+            notes["geometry"] = geometry.clone();
+            let out = terminal_colors(&notes).unwrap();
+            let lines: Vec<&str> =
+                out.lines().filter(|l| l.starts_with("background_opacity")).collect();
+            assert_eq!(lines, vec![format!("background_opacity {want}")], "{geometry}");
+            assert!(!out.contains("evil"));
+        }
+    }
+
+    #[test]
+    fn kitty_sockets_are_only_kitty_pid_named_unix_sockets() {
+        let dir = short_tmp("socks");
+        let _a = std::os::unix::net::UnixListener::bind(dir.join("kitty-123")).unwrap();
+        let _b = std::os::unix::net::UnixListener::bind(dir.join("kitty-abc")).unwrap();
+        let _c = std::os::unix::net::UnixListener::bind(dir.join("other-7")).unwrap();
+        std::fs::write(dir.join("kitty-456"), "not a socket").unwrap();
+        assert_eq!(kitty_sockets(&dir), vec![dir.join("kitty-123")]);
+        assert!(kitty_sockets(&dir.join("absent")).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn push_skips_quietly_without_a_runtime_dir_or_a_socket() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = aoide_test_support::EnvSaver::capture(&["XDG_RUNTIME_DIR"]);
+        let conf = std::path::Path::new("/nonexistent/terminal-colors.conf");
+
+        std::env::remove_var("XDG_RUNTIME_DIR");
+        assert_eq!(push_kitty_colors(conf)["status"], "skipped");
+
+        let dir = short_tmp("empty");
+        std::env::set_var("XDG_RUNTIME_DIR", &dir);
+        let out = push_kitty_colors(conf);
+        assert_eq!(out["status"], "skipped");
+        assert_eq!(out["message"], "no kitty control socket open");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn push_drives_set_colors_per_socket_and_counts_the_windows() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = aoide_test_support::EnvSaver::capture(&["XDG_RUNTIME_DIR", "PATH"]);
+        let dir = short_tmp("push");
+        let _l = std::os::unix::net::UnixListener::bind(dir.join("kitty-42")).unwrap();
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let log = dir.join("argv.log");
+        // A stand-in `kitty`: records its argv, answers `ls` with two OS-window
+        // tabs holding three windows between them.
+        let shim = bin.join("kitty");
+        std::fs::write(
+            &shim,
+            format!(
+                "#!/bin/sh\necho \"$*\" >> '{}'\ncase \"$*\" in *' ls') echo '[{{\"tabs\":[{{\"windows\":[{{}},{{}}]}},{{\"windows\":[{{}}]}}]}}]';; esac\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::env::set_var("XDG_RUNTIME_DIR", &dir);
+        std::env::set_var("PATH", &bin);
+
+        let conf = dir.join("terminal-colors.conf");
+        std::fs::write(&conf, "background #000000\nbackground_opacity 0.7\n").unwrap();
+        let out = push_kitty_colors(&conf);
+        assert_eq!(out["status"], "applied", "{out}");
+        assert_eq!(out["instances"], 1);
+        assert_eq!(out["windows"], 3);
+        assert_eq!(out["opacity"], 0.7);
+        assert_eq!(out["opacity_refused"], 0);
+        let argv = std::fs::read_to_string(&log).unwrap();
+        let sock = dir.join("kitty-42");
+        let lines: Vec<&str> = argv.lines().collect();
+        assert_eq!(
+            lines[0],
+            format!("@ --to unix:{} set-colors --all --configured {}", sock.display(), conf.display())
+        );
+        assert_eq!(lines[1], format!("@ --to unix:{} ls", sock.display()));
+        assert_eq!(
+            lines[2],
+            format!("@ --to unix:{} set-background-opacity --all 0.7", sock.display())
+        );
+
+        // An instance started without `dynamic_background_opacity` refuses
+        // the opacity: counted apart, and the recolour still reports applied.
+        std::fs::write(&shim, "#!/bin/sh\ncase \"$*\" in *set-background-opacity*) exit 1;; esac\n")
+            .unwrap();
+        let out = push_kitty_colors(&conf);
+        assert_eq!(out["status"], "applied", "{out}");
+        assert_eq!(out["opacity_refused"], 1);
+        assert!(out["message"].as_str().unwrap().contains("dynamic_background_opacity"));
+
+        // A file with no usable opacity line pushes the colours only.
+        std::fs::write(&conf, "background #000000\nbackground_opacity 7; rm -rf\n").unwrap();
+        let _ = std::fs::remove_file(&log);
+        std::fs::write(&shim, format!("#!/bin/sh\necho \"$*\" >> '{}'\n", log.display())).unwrap();
+        let out = push_kitty_colors(&conf);
+        assert_eq!(out["opacity"], Value::Null, "{out}");
+        let argv = std::fs::read_to_string(&log).unwrap();
+        assert!(!argv.contains("set-background-opacity"), "{argv}");
+
+        // No `kitty` on PATH at all: a quiet skip, never a failure.
+        std::env::set_var("PATH", dir.join("nowhere"));
+        assert_eq!(push_kitty_colors(&conf)["message"], "kitty not on PATH");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

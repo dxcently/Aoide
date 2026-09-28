@@ -27,7 +27,7 @@ The engraved thesis (after Goethe's *"Architektur ist erstarrte Musik"*) splits 
 
 - **The frozen half** — the nix layer. Immutable, evaluated. The **score**: determines everything, performs nothing.
 - **The performed half** — the running desktop. Live, hot-reloadable, ephemeral. The **performance**: what the score sounds like tonight, at this venue.
-- **The seam** — [[livery]]. Livery values are frozen into the crystal at build time *and* sounded live at runtime (`stage/livery.json`, hyprctl, OSC). Both fan-outs derive from the same `aoide.livery`, so the baked theme and the live preview cannot drift.
+- **The seam** — [[livery]]. Livery values are frozen into the crystal at build time *and* sounded live at runtime (`stage/livery.json`, hyprctl, the kitty control socket). Both fan-outs derive from the same `aoide.livery`, so the baked theme and the live preview cannot drift.
 
 Each half gets its own word family, so a sentence always names which side of the seam it stands on.
 

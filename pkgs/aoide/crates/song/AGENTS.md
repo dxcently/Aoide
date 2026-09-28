@@ -90,6 +90,46 @@
   caller needing the widget-sync/hyprctl-apply tail reuses THAT, or the bare
   `crate::live`/`crate::widgets` primitives directly, never
   `handle_rice_stage`.
+- **`commands::rice::stage_terminal_colors` is the ONE writer of
+  `stage/terminal-colors.conf`, and every path that rewrites the staged
+  livery calls it.** Today: `handle_rice_stage` (so `rice stage`, `rice mode
+  stage` and `rice mode declarative`'s re-pin), `rice back`'s restore and
+  `lyra reload`'s `sync_draft_in_place`. A new path that writes
+  `stage/livery.json` calls it too, off the same notes, or the terminals
+  keep the previous song. It adds no mode gate of its own and is never
+  fatal. Open windows are reached ONLY through kitty's control socket
+  (`live::push_kitty_colors`), never a raw OSC write into a pty — that
+  interleaves with the program's own output and gets eaten. Sockets are
+  found by the `kitty-<pid>` name the kitty dendrite's `listen_on` gives
+  them, a directory listing: no `/proc` or process-table discovery. **A test
+  build never pushes** (`#[cfg(test)]` in `stage_terminal_colors`): handler
+  tests run against the real `$XDG_RUNTIME_DIR`, and a push from one would
+  recolour the operator's own terminals. Test the push through
+  `live::push_kitty_colors` with a stand-in `kitty` on `PATH`, as `live.rs`
+  does. Every colour is hex-linted in the `kitty` emitter before it is
+  written: the file is an `include` in kitty.conf, so a value carrying a
+  newline would be a config directive. **The file carries every slot,
+  base16 note or not** (`livery::emit::kitty::synthesised_base16`, the
+  Stylix facet's `synthesisedScheme` twin — change both together). The push
+  relies on it: `set-colors --reset` restores kitty's STARTUP colours, which
+  already include whatever staged file was on disk then, so a partial file
+  would leave an earlier song's slots behind and a reset could not clear
+  them. The same holds for its one `background_opacity` line: always
+  written (`live::terminal_opacity`, `live::TERMINAL_OPACITY_BAKED` when the
+  song has none). Keep that constant equal to the kitty dendrite's
+  `background_opacity` (cargo cannot read nix; each names the other).
+  `geometry.terminalOpacity` is linted in `livery::schema` as a plain
+  number in [0, 1] or null, through `schema::terminal_opacity_value`, the
+  same predicate the hot path uses to fall back.
+- **A song with no `blurEnabled` opinion restores the baked hyprglass
+  switches** (`live::HYPRGLASS_BAKED`, both on), so every
+  `geometry_keywords` batch carries the two hyprglass keywords. Keep the
+  constant equal to what the compositor facet bakes. `decoration:blur:*`
+  keeps the plain no-opinion rule (no keyword). **A test build never runs
+  `hyprctl`** (`cfg!(test)` in `live::apply_live`, after the
+  `HYPRLAND_INSTANCE_SIGNATURE` check): with a batch in every stage, a
+  handler test run from a Hyprland terminal would otherwise flip the
+  operator's live glass and borders.
 - **`song/declared/livery.json` (the declared twin, CONTRACTS.md §4) is
   READ-ONLY for this crate — only the nix side writes it.** The lyra
   lane's activation seed (`home.activation.aoideSeedStage`) publishes it: the
@@ -207,7 +247,7 @@
 - **A new `rice`/`livery`/`cover`/`element` command** adds a `cmd!`/
   `register` entry in `commands/`, wired into `lyra`'s `commands::all()`
   only.
-- **A new emitter target** (stage/hyprctl/osc/file exist today) extends
+- **A new emitter target** (stage/hyprctl/osc/file/kitty exist today) extends
   `livery::emit`, keeping the schema-validate → resolve → emit pipeline
   shape.
 - **A new element-descriptor field** extends `elements::Descriptor`/
