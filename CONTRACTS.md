@@ -7655,9 +7655,17 @@ Past the open, the inner `ctx` must equal the recomputed outer one
 (`addressing-mismatch`), the inner envelope signature must verify
 (`unverified-origin`), and the full hop chain must walk from `msgid` to
 this node with entry 1 named by and signed under `origin.key`
-(`broken-chain`). A ciphertext that opens under no identity this node holds
+(`broken-chain`) — each hop's key read in the mesh THAT HOP signed, and the
+zone clause (MAIL.md §Wire step 3) answering `zone-violation` for a
+crossing no declared gate signed or a last hop that signed a zone this
+deposit is not made in. A ciphertext that opens under no identity this node holds
 is `open-failed`; one addressed to a retired key past its grace window is
-`key-retired`.
+`key-retired`. A container addressed to a node that is not this one is not
+this receiver's to open at all: it is a HOP, answered
+`{"status":"accepted","transit":{"next":…,"mesh":…,"held":…}}` after the
+container is filed as a `transit` entry and spooled toward `next` — no
+reader rung, nothing filed as correspondence, and NO ack, because the
+letter is not here.
 
 A container that passes all of it is handed to the SAME
 `aoide_storage::mail::deposit` an envelope is, so filing, `seen.jsonl` and

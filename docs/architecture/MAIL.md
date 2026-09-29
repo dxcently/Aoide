@@ -309,8 +309,13 @@ An entry is an envelope plus local facts:
   every migrated entry is unread once. Acks are receipts addressed back
   to the origin.
 - `type=transit` entries are letters the node is relaying (§Transit),
-  held sealed — the container and its routing metadata, never an opened
-  envelope; readers hide them unless asked.
+  held sealed — the container and its routing metadata (the hop that
+  deposited it, the `next` node it goes to, the mesh it rides there, and
+  whether that node is held for), never an opened envelope, never a
+  mailbox name, never a byte of the letter; readers hide them unless
+  asked. The line is the hub's own record and stays (append-only); the
+  hub's SPOOL entry toward `next` is what retires, and it retires when
+  that hop accepts the container.
 - `type=post` entries are opened board posts, filed once per node and
   carrying their board id (§Boards). A charter letter and a wrap are
   applied, not filed as correspondence: the charter to `state/mesh/`, the
@@ -436,13 +441,17 @@ door's audit name whitelist gains both names so they never log as bare
      envelope's `mesh`, and the grant is read in that mesh only: the
      caller's charter line, or its paired record's grant there;
   2. `msgid` recomputes from the envelope;
-  3. **zone check:** the receiver declares `envelope.mesh`, and the hop
-     from step 1 is declared in it. If `envelope.mesh ≠ header.originMesh`
-     the letter has crossed a gate, and the last `transit` element must be
-     a hop signature (§The envelope) over this `mesh` from the declared
-     gate between the two meshes — else `zone-violation`. A dual-member
-     node cannot re-label a letter into its other mesh: its hop signature
-     would name a node that is no gate;
+  3. **zone check:** the depositing hop's request names the mesh the letter
+     rides, and every hop's `transit` element is verified in the mesh THAT
+     HOP signed (`entry.mesh`) — a charter line for a charter mesh, a paired
+     record for a pair mesh. Two consecutive entries that name different
+     meshes are a gate crossing, and only the node the previous mesh
+     declares as its gate into the new one may sign it; the last element
+     must be signed in the mesh this deposit is made in — else
+     `zone-violation`. A dual-member node cannot re-label a letter into its
+     other mesh: its hop signature would name a node that is no gate. The
+     container's own hop-mutable `mesh` field is read by nobody on the
+     receiving side, so a flipped byte there crosses no gate;
   4. origin signature verifies against **the key on record for
      `header.from.node`** in `header.originMesh` — its charter line in a
      charter mesh, its paired record in a pair mesh (§Transit). One key is
@@ -457,7 +466,13 @@ door's audit name whitelist gains both names so they never log as bare
      for a re-offer, and answering with silence would leave the origin
      retrying against a letter that already landed;
   6. file (`letter` if `to.node` is self, else `transit`), ring the
-     doorbell, and if `to.node` is not self, re-spool (§Transit).
+     doorbell, and if `to.node` is not self, re-spool (§Transit). A
+     `transit` filing rings nothing and owes NO ack: the hub appends its own
+     hop signature naming the `next` node the route picks, spools the
+     container toward that node (held when the route says the node asks for
+     itself), and retires its own custody when that hop ACCEPTS it — waiting
+     for the destination's receipt would leave every hub holding a copy of
+     every letter it relayed, and a `poll` destination never answers at all.
   Receipts (acks) are envelopes deposited through the same method — one
   routing path for everything, so acks traverse hubs for free.
 - **`aoide/mailPoll`** `{ node }` → `{ envelopes[] }`. The caller asks
