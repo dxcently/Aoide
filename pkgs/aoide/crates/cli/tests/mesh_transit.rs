@@ -280,3 +280,148 @@ fn a_box_whose_hostname_spells_a_member_is_a_stranger_in_a_charter_mesh() {
     assert_eq!(at_home.status, Status::Ok, "{}", at_home.message);
     assert_eq!(at_home.data.as_ref().unwrap()["from"], "evo");
 }
+
+/// The sealed container's whole journey on the fixture: `osaka` spools a letter
+/// for `chiyo` toward its RELAY (the container stays addressed to `chiyo`),
+/// `sakaki` carries it on by appending its own chained hop signature and holds it
+/// for `chiyo`'s own poll, and `chiyo` opens a chain of two. Nothing leaves the
+/// process: the hop each box would take is the storage seam its door runs.
+#[test]
+fn osaka_to_chiyo_routes_via_sakaki_and_the_chain_of_two_verifies_at_chiyo() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("transit");
+    // `chiyo`'s age binding travels in its charter line, which is how its relay
+    // can seal to it without ever having paired.
+    let chiyo_binding = aoide_storage::charter::governing(HOME).unwrap().nodes["chiyo"].age.clone();
+
+    fx.enter("osaka");
+    // The route osaka reads: a letter for `chiyo` in `home` goes to its RELAY,
+    // because `chiyo` is a `poll` node and this box is not the relay it asks.
+    let set = routing::declarations().unwrap();
+    let route = routing::Letter { from: "osaka", to: "chiyo", mesh: HOME }.route(&set);
+    let hop = route.outcome.unwrap_or_else(|e| panic!("a route exists: {e}\n{}", route.trail.join("\n")));
+    assert_eq!(hop.next, "sakaki", "{}", route.trail.join("\n"));
+    assert!(!hop.held, "the relay itself is dialled");
+
+    let envelope = aoide_storage::mail::mint_outbound_letter_from(
+        "osaka",
+        "conductor",
+        "chiyo",
+        "conductor",
+        "a letter for chiyo",
+        HOME,
+    )
+    .unwrap();
+    // Sealed to the DESTINATION's binding off its charter line — the one age key
+    // a charter mesh carries for a node this box never paired with.
+    let container = aoide_storage::seal::seal_envelope(
+        &envelope,
+        &chiyo_binding,
+        HOME,
+        HOME,
+        "chiyo",
+        &hop.next,
+        &aoide_storage::time::now_iso_utc(),
+    )
+    .unwrap();
+    aoide_storage::outbox::write_entry(
+        &hop.next,
+        &aoide_storage::outbox::OutboxEntry::sealed(envelope.clone(), container.clone()),
+    )
+    .unwrap();
+
+    // The spool toward `sakaki` holds the sealed container, and that container
+    // is addressed to CHIYO: the hop and the destination are different facts.
+    let spooled = aoide_storage::outbox::list_entries("sakaki").unwrap();
+    assert_eq!(spooled.len(), 1, "spooled toward the hop the route picked");
+    assert_eq!(container.to.node, "chiyo");
+    assert_eq!(container.transit.len(), 1, "the origin's own entry, and nothing else yet");
+    assert_eq!(container.transit[0].next, "sakaki");
+
+    // `sakaki` receives a container that is not its own: a hop, never an open.
+    fx.enter("sakaki");
+    let hop = match aoide_storage::seal::deposit_container(&container, HOME).unwrap() {
+        aoide_storage::seal::ContainerOutcome::Hopped(hop) => hop,
+        other => panic!("a hub carries it on rather than opens it: {other:?}"),
+    };
+    assert_eq!(hop.next, "chiyo");
+    assert_eq!(hop.mesh, HOME, "no gate is crossed — `chiyo` is in the letter's own mesh");
+    assert!(hop.held, "`chiyo` polls, so its relay holds the letter for its own ask");
+    assert_eq!(hop.container.transit.len(), 2, "the hub's own chained hop signature");
+    aoide_storage::seal::file_transit_hop(&hop, "osaka").unwrap();
+    assert_eq!(aoide_storage::outbox::list_entries("chiyo").unwrap().len(), 1, "held toward `chiyo`");
+
+    // What the hub's own store holds: the sealed container and its routing, and
+    // neither a mailbox name nor a byte of the letter.
+    let transit = aoide_storage::mail::read_transit_unlocked().unwrap();
+    assert_eq!(transit.len(), 1, "one transit line at the hub");
+    assert_eq!(transit[0].next, "chiyo");
+    assert!(transit[0].held);
+    let logged = serde_json::to_string(&transit[0]).unwrap();
+    assert!(!logged.contains("conductor"), "no mailbox name at the hub: {logged}");
+    assert!(!logged.contains("a letter for chiyo"), "and no letter bytes: {logged}");
+
+    // `chiyo` opens it: two hops, the origin's and the relay's, ending here.
+    fx.enter("chiyo");
+    match aoide_storage::seal::deposit_container(&hop.container, HOME).unwrap() {
+        aoide_storage::seal::ContainerOutcome::Opened { envelope, .. } => {
+            assert_eq!(envelope.text, "a letter for chiyo");
+            assert_eq!(envelope.header.from.node, "osaka");
+        }
+        other => panic!("the destination opens a two-entry chain: {other:?}"),
+    }
+}
+
+/// A chain truncated by dropping the tail never reaches the destination: the last
+/// hop still in it hands the letter to `sakaki`, so `chiyo` refuses it
+/// (`broken-chain`) and owes no ack — the letter is on no mailbox, and the
+/// origin's own spool still reports it undelivered.
+#[test]
+fn a_chain_truncated_by_dropping_the_tail_yields_no_ack_and_leaves_the_letter_undelivered() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("truncated");
+    let chiyo_binding = aoide_storage::charter::governing(HOME).unwrap().nodes["chiyo"].age.clone();
+
+    fx.enter("osaka");
+    let envelope = aoide_storage::mail::mint_outbound_letter_from(
+        "osaka",
+        "conductor",
+        "chiyo",
+        "conductor",
+        "truncated on the way",
+        HOME,
+    )
+    .unwrap();
+    let container = aoide_storage::seal::seal_envelope(
+        &envelope,
+        &chiyo_binding,
+        HOME,
+        HOME,
+        "chiyo",
+        "sakaki",
+        &aoide_storage::time::now_iso_utc(),
+    )
+    .unwrap();
+    aoide_storage::outbox::write_entry("sakaki", &aoide_storage::outbox::OutboxEntry::sealed(envelope.clone(), container.clone())).unwrap();
+    let msgid = envelope.msgid.clone();
+
+    // The tail — the relay's own entry — never happens; the container the
+    // destination is offered is the origin's entry alone.
+    fx.enter("chiyo");
+    match aoide_storage::seal::deposit_container(&container, HOME).unwrap() {
+        aoide_storage::seal::ContainerOutcome::Refused { reason, .. } => {
+            assert_eq!(reason, aoide_storage::seal::BROKEN_CHAIN, "{reason}")
+        }
+        other => panic!("a chain that stops short is refused: {other:?}"),
+    }
+    assert!(
+        aoide_storage::mail::read_base().unwrap().is_empty(),
+        "nothing is filed on the destination, so nothing is acked"
+    );
+
+    fx.enter("osaka");
+    let still = aoide_storage::outbox::list_entries("sakaki").unwrap();
+    assert_eq!(still.len(), 1, "the origin's outbox still holds the letter");
+    assert_eq!(still[0].envelope.msgid, msgid);
+    assert!(!still[0].last_attempt_reached_the_peer(), "and reports it undelivered");
+}

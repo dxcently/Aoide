@@ -1071,32 +1071,49 @@ pub fn mint_ack(from_name: &str, to: Address, acked_msgid: &str) -> Result<Envel
     mint_ack_in_mesh(from_name, to, acked_msgid, &mesh)
 }
 
-/// Verify `envelope`'s origin signature against the ONE key `nodes.json`
-/// has on record for `header.from.node` (P-M2 spec item 3) — a DIFFERENT
-/// question from `a2a::verify_signed_request`'s "which verified node's key
-/// verifies this connection," and deliberately not reused for it: this
-/// tries EXACTLY the one key on record under the CLAIMED origin name, never
-/// every verified key, so a paired node signing as another paired node's
-/// name is refused rather than silently verifying and filing under the
-/// wrong identity. Collapses "no node named `from.node`," "that node has no
-/// recorded key," and "the key on record doesn't verify" into the SAME
-/// `false` — same non-oracle discipline `verify_signed_request`'s own doc
-/// states for its ladder ("never an existence oracle over the registry").
-/// In P-M2 the origin and the hop always coincide (only direct edges
-/// exist); this two-lookup shape is written now for P-M4's transit hops,
-/// where they will not.
+/// Verify `envelope`'s origin signature against the ONE key this box has on
+/// record for `header.from.node` — a DIFFERENT question from
+/// `a2a::verify_signed_request`'s "which verified node's key verifies this
+/// connection," and deliberately not reused for it: this tries EXACTLY the one
+/// key on record under the CLAIMED origin name, never every verified key, so a
+/// paired node signing as another paired node's name is refused rather than
+/// silently verifying and filing under the wrong identity. Collapses "no node
+/// named `from.node`," "that node has no recorded key," and "the key on record
+/// doesn't verify" into the SAME `false` — same non-oracle discipline
+/// `verify_signed_request`'s own doc states for its ladder ("never an existence
+/// oracle over the registry").
+///
+/// **The one key is the DECLARATION's for the mesh the letter names**
+/// (`header.origin_mesh`): a charter mesh's line for that name, which is the only
+/// place a node this box never paired with has a key at all — and the name the
+/// charter gave it, so a letter signed by a charter line's name verifies here and
+/// one signed by a nickname does not. Where that mesh has no declaration, the
+/// paired RECORD answers, exactly as it did before the declarations existed. Two
+/// lookups, one answer: the same split `seal::origin_key_in` makes for the outer
+/// signature, so the two halves of a container can never disagree about who
+/// signed it.
 pub fn verify_origin_signature(envelope: &Envelope) -> bool {
-    let nodes = crate::node_store::load_nodes();
-    let Some(node) = nodes.iter().find(|n| n.name == envelope.header.from.node) else {
-        return false;
-    };
-    let Some(pubkey_hex) = node.pubkey.as_deref() else {
+    let Some(pubkey_hex) = origin_key_in(&envelope.header.origin_mesh, &envelope.header.from.node) else {
         return false;
     };
     let mut sig_input = canonical_header_bytes(&envelope.header);
     sig_input.push(0u8);
     sig_input.extend_from_slice(envelope.text.as_bytes());
-    crate::wire_auth::verify_signature_hex(pubkey_hex, &sig_input, &envelope.sig)
+    crate::wire_auth::verify_signature_hex(&pubkey_hex, &sig_input, &envelope.sig)
+}
+
+/// The key `node` signs with in `mesh`: that mesh's declaration (a charter line
+/// or a paired record), and a paired record alone only where the mesh has no
+/// declaration at all — the pre-charter lane. [`crate::seal`]'s own
+/// `origin_key_in` is the outer-signature half of this same rule.
+fn origin_key_in(mesh: &str, node: &str) -> Option<String> {
+    if let Ok(declaration) = crate::routing::Declaration::load(mesh) {
+        return declaration.key_of(node).map(str::to_string);
+    }
+    crate::node_store::load_nodes()
+        .iter()
+        .find(|n| n.name == node)
+        .and_then(|n| n.pubkey.clone())
 }
 
 /// The outcome of [`deposit`]'s policy chain, once the caller has already
