@@ -1891,8 +1891,8 @@ fn deposit_charter(
     // otherwise turn an accepted charter letter into a permanent refusal by
     // flipping one unsigned byte — the same mail-delivery DoS the mail arm's
     // own mesh check was fixed for. It neither admits nor refuses a charter
-    // by itself; P-M4's transit is where a hop's `mesh` is checked, at the
-    // hop, against the zone clause.
+    // by itself; a HOP's `mesh` is checked at the hop, against the zone
+    // clause.
     if ctx.origin_mesh != accepted.charter.mesh {
         return Ok(refusal(
             ZONE_VIOLATION,

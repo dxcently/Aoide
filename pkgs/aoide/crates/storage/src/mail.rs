@@ -30,12 +30,11 @@
 //! and `msgid` (hex sha256 over `sig ‖ header ‖ 0x00 ‖ text` — no separator
 //! before `header`, one before `text`; see [`seal`]). Deliberately absent:
 //! the wire envelope's sibling `mesh`/`transit` fields — those are routing
-//! facts nothing here consults yet (P-M4's zone check, MAIL.md step 3,
-//! still skipped entirely rather than stubbed even now that a mesh CAN be
-//! declared, task #135), and `header.origin_mesh` (always `""` here) stands
-//! in for them wherever P-M1/P-M2 render a "mesh" column, since mesh and
-//! originMesh are defined to start equal and nothing before P-M4 can ever
-//! diverge them.
+//! facts nothing here consults yet: the zone check (MAIL.md step 3) belongs
+//! to the transit lane, which a PLAINTEXT envelope never rides, so it is
+//! skipped by shape rather than by omission (a sealed container takes it) —
+//! and `header.origin_mesh` (always `""` here) stands in for them wherever a
+//! "mesh" column is rendered.
 //!
 //! `self` resolves at mint time through [`crate::display::local_node_name`]
 //! (the ADDRESS form of this box's own name — see that function: an OS host
@@ -96,9 +95,8 @@
 //! ONE key `nodes.json` has on record under that exact name — never the
 //! connection path's try-every-verified-key ladder, or a paired node
 //! signing as another paired node's name would verify and file under the
-//! wrong identity. Origin and hop always coincide today (only direct edges
-//! exist); the split is written now for P-M4's transit hops, where they
-//! will not.
+//! wrong identity. Origin and hop coincide on the direct lane and are resolved
+//! separately, because a relayed container's last hop is not its origin.
 //!
 //! ## Commands
 //!
@@ -190,8 +188,8 @@ pub struct Header {
 }
 
 /// The signed, immutable unit that moves (MAIL.md "The envelope"). No
-/// `mesh`/`transit` fields — see this module's doc for why those wait for
-/// P-M4.
+/// `mesh`/`transit` fields — a plaintext envelope never rides a zone; see
+/// this module's doc.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Envelope {
     pub header: Header,
@@ -1130,8 +1128,8 @@ pub fn verify_origin_signature_in(envelope: &Envelope, set: &[crate::routing::Lo
 
 /// The outcome of [`deposit`]'s policy chain, once the caller has already
 /// cleared admission (verified + `message` — the door's job, before ever
-/// calling here; MAIL.md's zone check, step 3, is P-M4's and is skipped
-/// entirely, not stubbed).
+/// calling here). The zone check (MAIL.md step 3) belongs to the transit lane,
+/// which this plaintext lane never rides: skipped by shape, not stubbed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DepositOutcome {
     /// A fresh envelope, filed. `msgid` is its own, for the caller to ack
