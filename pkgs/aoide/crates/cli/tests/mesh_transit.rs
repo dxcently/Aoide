@@ -166,9 +166,16 @@ fn mail_route_prints_the_path_and_sends_nothing() {
     assert!(text.message.contains("step 2:"), "{}", text.message);
     assert!(text.message.contains("parks"), "{}", text.message);
 
+    // Nothing was sent. The directories are the real ones — `outbox::outbox_dir`
+    // and `mail::mail_dir` under the box this process is entered on — which is
+    // exactly where a `mail send` would have written its spool and its letter.
     let osaka = &fx.boxes["osaka"];
-    assert!(!osaka.join("state/outbox").exists(), "a route spools nothing");
-    assert!(!osaka.join("state/mail").exists(), "and files nothing");
+    let outbox = aoide_storage::outbox::outbox_dir();
+    let mailbase = aoide_storage::mail::mail_dir();
+    assert!(outbox.starts_with(osaka), "the outbox under test is osaka's: {}", outbox.display());
+    assert!(mailbase.starts_with(osaka), "and so is the mailbase: {}", mailbase.display());
+    assert!(!outbox.exists(), "a route spools nothing into {}", outbox.display());
+    assert!(!mailbase.exists(), "and files nothing into {}", mailbase.display());
 
     // At the gate: the mesh is rewritten, and a `poll` destination is held at
     // the relay that holds its letters. Neither report sends anything.
@@ -184,10 +191,60 @@ fn mail_route_prints_the_path_and_sends_nothing() {
     assert_eq!(data["next"], "chiyo");
     assert_eq!(data["held"], true, "held for `chiyo`'s own ask");
     assert_eq!(data["dial"], "poll");
-    assert!(!fx.boxes["sakaki"].join("state/outbox").exists(), "still nothing spooled");
+    assert!(!aoide_storage::outbox::outbox_dir().exists(), "still nothing spooled");
 
-    // A name no declaration carries, and a mesh asked for that cannot be read.
+    // A name no declaration carries, and a mesh asked for by a name that is not
+    // a mesh name: two refusals, each with its own word.
     let unknown = dispatch(&cli_invocation(&["mail", "route"], &["nobody/conductor"], &[]));
     assert_eq!(unknown.status, Status::Error, "{}", unknown.message);
     assert_eq!(unknown.data.as_ref().unwrap()["reason"], "unknown-node");
+    let malformed = dispatch(&cli_invocation(
+        &["mail", "route"],
+        &["chiyo/conductor"],
+        &[("mesh", "Home Mesh")],
+    ));
+    assert_eq!(malformed.status, Status::Usage, "{}", malformed.message);
+    assert_eq!(malformed.data.as_ref().unwrap()["reason"], "invalid-mesh");
+}
+
+/// This box's name in a mesh is the name its own identity key resolves to
+/// there, never the OS hostname: a box whose hostname is not its charter line's
+/// name routes as itself, and one whose key the mesh does not carry is not a
+/// member of it at all.
+#[test]
+fn mail_route_resolves_self_by_identity_key_not_by_hostname() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("self-name");
+    fx.enter("sakaki");
+    // The hostname this box would report for itself — a name no charter line
+    // carries.
+    std::env::set_var("AOIDE_A2A_NODE_NAME", "sakaki-box");
+
+    // Addressed to the box's own charter name, in the mesh that name is its
+    // line in: at the box itself, that is nothing to route.
+    let own = dispatch(&cli_invocation(
+        &["mail", "route"],
+        &["sakaki/conductor"],
+        &[("mesh", HOME), ("json", "true")],
+    ));
+    assert_eq!(own.status, Status::Ok, "{}", own.message);
+    let data = own.data.as_ref().unwrap();
+    assert_eq!(data["from"], "sakaki", "the charter line's name for this box's own key");
+    assert_eq!(data["next"], "sakaki");
+    let steps: Vec<&str> =
+        data["steps"].as_array().unwrap().iter().map(|s| s.as_str().unwrap()).collect();
+    assert!(steps.iter().any(|s| s.contains("is this box")), "{steps:?}");
+
+    // And a letter riding `home` toward a node of `away`: `sakaki` is the
+    // declared gate, so it rewrites the mesh. A hostname this box does not carry
+    // would have made it a stranger handing the letter to its own relay instead.
+    let bridged = dispatch(&cli_invocation(
+        &["mail", "route"],
+        &["evo/conductor"],
+        &[("mesh", HOME), ("json", "true")],
+    ));
+    assert_eq!(bridged.status, Status::Ok, "{}", bridged.message);
+    let data = bridged.data.as_ref().unwrap();
+    assert_eq!(data["next"], "evo");
+    assert_eq!(data["nextMesh"], AWAY, "this box is the gate: {}", data["steps"]);
 }

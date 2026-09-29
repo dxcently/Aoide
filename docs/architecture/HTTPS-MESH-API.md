@@ -94,12 +94,13 @@ into something a caller can act on: `ssh://…` through the parser `--via`
 already uses, `https://…` as an ordinary door or adapter URL, `poll` as no
 dial target at all — a node that asks, whose letters wait at its mesh's relay.
 An address that is none of the three is refused rather than guessed at, at
-`sign` time and again when the route reads it. The router asks it whether a
-hop can be reached *by declaration*; the drain asks it what to dial. **There
-is no version signal on the wire**, so a relay that cannot carry a container
-refuses it rather than announcing that it is old: the letter parks at its
-sender and waits for the relay to be brought up to date
-(`docs/architecture/MAIL.md` §Transit).
+`sign` time and again whenever a route reads it. The four steps read it to
+answer reachability, and `aoide mail route` prints it; the DRAIN does not read
+it yet, so what a drain dials is still the node RECORD it holds and not a
+charter line's address. **There is no version signal on the wire**, so a relay
+that cannot carry a container refuses it rather than announcing that it is
+old: the letter parks at its sender and waits for the relay to be brought up
+to date (`docs/architecture/MAIL.md` §Transit).
 
 ### Degenerate topologies
 

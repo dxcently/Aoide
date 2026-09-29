@@ -5153,13 +5153,37 @@ fn handle_mail_route(inv: &Invocation) -> Outcome {
         &aoide_storage::config::home_mesh(),
     ) {
         Ok(mesh) => mesh,
+        // Two failures with two honest words: a name that is not a mesh name at
+        // all, and a real ambiguity between meshes this node holds.
+        Err(e) if !asked.is_some_and(aoide_storage::node_store::valid_node_name) => {
+            return Outcome::usage(cmd, format!("--mesh: {e}"))
+                .with_data(json!({ "reason": "invalid-mesh", "mesh": asked }))
+        }
         Err(e) => {
             return Outcome::error(cmd, format!("--mesh: {e}"))
                 .with_data(json!({ "reason": "mesh-ambiguous", "node": node }))
         }
     };
 
-    let from = aoide_storage::display::local_node_name();
+    // This box's name IN THIS MESH: the declared name its own identity key
+    // resolves to, which for a charter mesh is the name on the charter line and
+    // not the hostname (`Declaration::name_of_key`; the nickname and the OS
+    // hostname are display facts and never inputs to policy). A box whose key
+    // this mesh does not carry resolves to no name at all, and is therefore not
+    // a member of it: the route is then read as a stranger's, which is what it
+    // is. Loading the identity may mint the key on a first touch, as every mail
+    // command may.
+    let own = aoide_storage::identity::load_or_mint().ok().map(|(k, _)| k.info().pubkey_hex);
+    let from = own
+        .as_deref()
+        .and_then(|key| {
+            set.iter()
+                .find(|loaded| loaded.mesh == mesh)
+                .and_then(|loaded| loaded.declaration.as_ref().ok())
+                .and_then(|declaration| declaration.name_of_key(key))
+        })
+        .map(str::to_string)
+        .unwrap_or_else(aoide_storage::display::local_node_name);
     let route = aoide_storage::routing::Letter { from: &from, to: node, mesh: &mesh }.route(&set);
     let steps = route.trail.clone();
     let addressed = if name.is_empty() { node.to_string() } else { format!("{node}/{name}") };

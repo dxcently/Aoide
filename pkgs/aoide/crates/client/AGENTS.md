@@ -825,10 +825,16 @@
   route may be inspected before a declaration changes. Do not "helpfully"
   drain the chosen hop, and do not resolve the mesh off a paired record's
   grants the way `mail send` does: a charter line is what declares a node, so
-  a destination that exists only there has a route and no record. A refusal is
+  a destination that exists only there has a route and no record. **This box's
+  own name for the route is resolved PER MESH — the declared name its own
+  identity key resolves to (`Declaration::name_of_key`) — and never the OS
+  hostname or the `nodes.json` nickname**, which are display facts: a box whose
+  hostname is not its charter line's name routes as itself, and one whose key
+  the mesh does not carry is not a member of that mesh at all. A refusal is
   an `Outcome::error` carrying the router's word in `data.reason`, with the
   trail beside it — never a bare reason string the caller has to parse
-  (MAIL.md "Status and the nodelist view").
+  (MAIL.md "Status and the nodelist view"); a `--mesh` that is not a mesh name
+  is `invalid-mesh` rather than the `mesh-ambiguous` that a real tie gives.
 - **`mail_export` is READ-ONLY on the mailbase and clamps everything that
   leaves a fence (register §30).** It reads `base.jsonl` once
   (`mail::read_base`), groups and renders, and writes notes under
