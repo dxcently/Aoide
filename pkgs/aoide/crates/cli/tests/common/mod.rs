@@ -83,16 +83,119 @@ pub struct Fixture {
 /// name): a door-level test needs a door, and `aoide mail serve`'s own round trip
 /// (`mail_adapter_round_trip.rs`) is the shape this follows.
 pub struct Doors {
-    children: Vec<std::process::Child>,
+    doors: Vec<Door>,
 }
 
 impl Drop for Doors {
     fn drop(&mut self) {
-        for child in &mut self.children {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
+        // Each `Door` kills its own child; this is only here so the vec is
+        // dropped as ONE thing (and so a future reader sees the lifetime).
+        self.doors.clear();
     }
+}
+
+/// A real door for an arbitrary box root: one `aoide a2a serve` child, on
+/// `port`, with that root's state — killed and reaped when this drops.
+///
+/// The child MUST be handed the same state directory the caller uses
+/// (`AOIDE_STATE_DIR` = the box root, which is what `enter` sets): a door that
+/// resolves its own `state/` looks at a different `nodes.json` than the test
+/// wrote, and every signed request then resolves nobody.
+pub struct Door {
+    child: std::process::Child,
+}
+
+impl Drop for Door {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Raise one door on `port` for `root`, and wait until it answers TCP.
+pub fn raise_door(root: &std::path::Path, name: &str, port: u16) -> Door {
+    let runtime = root.join("runtime");
+    std::fs::create_dir_all(&runtime).unwrap();
+    let child = std::process::Command::new(aoide_test_support::built_aoide_bin())
+        .args(["a2a", "serve", "--bind", "127.0.0.1", "--port", &port.to_string()])
+        .env("AOIDE_ROOT", root)
+        .env("AOIDE_STATE_DIR", root)
+        .env("AOIDE_STAGE_DIR", root)
+        .env("AOIDE_AUDIT_LOG", root.join("log"))
+        .env("AOIDE_A2A_NODE_NAME", name)
+        .env("XDG_RUNTIME_DIR", &runtime)
+        .env_remove("AOIDE_SESSION_ID")
+        .env_remove("AOIDE_CONFIG")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .expect("the built aoide binary runs");
+    let door = Door { child };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            return door;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the door for `{name}` never came up on port {port}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+}
+
+/// One JSON-RPC POST to a door, signed the way every node signs a request:
+/// the four headers over `wire_auth::canonical_string` (plus `X-Aoide-Mesh` when
+/// the request acts in one), over plain HTTP to the loopback port it answers on.
+/// The client's own dial cannot reach a `https://` address with no TLS in front
+/// of it (`dial_of` knows no `http://`), so a test that deposits AT A NAMED DOOR
+/// speaks the wire itself.
+pub fn door_post(
+    port: u16,
+    from: &str,
+    mesh: &str,
+    method: &str,
+    params: serde_json::Value,
+) -> serde_json::Value {
+    use std::io::{Read, Write};
+    let body = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }).to_string();
+    let ts = aoide_storage::time::now_iso_utc();
+    let nonce = aoide_storage::pairing::random_hex(16);
+    let canonical = aoide_storage::wire_auth::canonical_string(
+        "POST",
+        "/",
+        &ts,
+        &nonce,
+        body.as_bytes(),
+        (!mesh.is_empty()).then_some(mesh),
+    );
+    let signing = aoide_storage::identity::load_or_mint().unwrap().0;
+    let sig = aoide_storage::wire_auth::sign_hex(&signing, canonical.as_bytes());
+    let request = format!(
+        "POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{}: {}\r\n{}: {}\r\n{}: {}\r\n{}: {}\r\n{}Connection: close\r\n\r\n{}",
+        body.len(),
+        aoide_storage::wire_auth::HEADER_NODE,
+        from,
+        aoide_storage::wire_auth::HEADER_TIMESTAMP,
+        ts,
+        aoide_storage::wire_auth::HEADER_NONCE,
+        nonce,
+        aoide_storage::wire_auth::HEADER_SIGNATURE,
+        sig,
+        if mesh.is_empty() {
+            String::new()
+        } else {
+            format!("{}: {}\r\n", aoide_storage::wire_auth::HEADER_MESH, mesh)
+        },
+        body
+    );
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream.write_all(request.as_bytes()).unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    let (_, payload) = response.split_once("\r\n\r\n").unwrap_or(("", ""));
+    serde_json::from_str(payload).unwrap_or_else(|e| panic!("door answered junk: {e}\n{response}"))
 }
 
 impl Fixture {
@@ -103,45 +206,11 @@ impl Fixture {
 
     /// Raise a real door for each name, and wait until each answers TCP.
     pub fn doors(&self, names: &[&'static str]) -> Doors {
-        let mut children = Vec::new();
-        for name in names {
-            let root = self.boxes[name].clone();
-            let port = self.ports[name];
-            let runtime = root.join("runtime");
-            std::fs::create_dir_all(&runtime).unwrap();
-            let child = std::process::Command::new(aoide_test_support::built_aoide_bin())
-                .args(["a2a", "serve", "--bind", "127.0.0.1", "--port", &port.to_string()])
-                .env("AOIDE_ROOT", &root)
-                .env("AOIDE_STATE_DIR", &root)
-                .env("AOIDE_STAGE_DIR", &root)
-                .env("AOIDE_AUDIT_LOG", root.join("log"))
-                .env("AOIDE_A2A_NODE_NAME", name)
-                .env("XDG_RUNTIME_DIR", &runtime)
-                .env_remove("AOIDE_SESSION_ID")
-                .env_remove("AOIDE_CONFIG")
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::inherit())
-                .spawn()
-                .expect("the built aoide binary runs");
-            children.push(child);
-        }
-        let doors = Doors { children };
-        for name in names {
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
-            loop {
-                if std::net::TcpStream::connect(("127.0.0.1", self.ports[name])).is_ok() {
-                    break;
-                }
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "the door for `{name}` never came up on port {}",
-                    self.ports[name]
-                );
-                std::thread::sleep(std::time::Duration::from_millis(25));
-            }
-        }
-        doors
+        let doors: Vec<Door> = names
+            .iter()
+            .map(|name| raise_door(&self.boxes[*name], name, self.ports[*name]))
+            .collect();
+        Doors { doors }
     }
 }
 
@@ -308,7 +377,7 @@ fn hop_of(name: &str, port: u16) -> String {
 
 /// A free loopback port: bind `:0`, read it back, drop the listener. A tiny
 /// re-bind race is acceptable in a test.
-fn free_port() -> u16 {
+pub fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
 }
 

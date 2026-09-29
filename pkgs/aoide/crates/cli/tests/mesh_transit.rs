@@ -6,7 +6,7 @@
 
 mod common;
 
-use common::{fixture, env_lock, Fixture, AWAY, HOME, ONE_SIDED_GATE, TWO_KEYS};
+use common::{fixture, env_lock, door_post, AWAY, HOME, ONE_SIDED_GATE, TWO_KEYS};
 
 use aoide::dispatch::{dispatch, Invocation};
 use aoide_protocol::output::Status;
@@ -606,82 +606,13 @@ fn the_fixtures_boxes_answer_on_their_own_doors() {
     // And a request signed by hand reaches the same door, which is what a
     // deposit AT A NAMED DOOR needs (the client's dial cannot open a `https://`
     // declaration with no TLS in front of it).
-    let answer = door_post(&fx, "osaka", HOME, "aoide/mailPoll", serde_json::json!({ "node": "osaka" }));
+    let answer = door_post(fx.ports["sakaki"], "osaka", HOME, "aoide/mailPoll", serde_json::json!({ "node": "osaka" }));
     assert!(answer["result"].is_object(), "a hand-signed request verifies: {answer}");
     let relay_log = std::fs::read_to_string(fx.boxes["sakaki"].join("log")).unwrap_or_default();
     assert!(
         relay_log.contains("a2a.aoide/mailPoll"),
         "the relay's OWN door answered the poll: {relay_log}"
     );
-}
-
-/// One JSON-RPC POST to a door, signed the way every node signs a request:
-/// the four headers over `wire_auth::canonical_string` (plus `X-Aoide-Mesh` when
-/// the request acts in one), over plain HTTP to the loopback port the fixture's
-/// door answers on. The client's own dial cannot reach a `https://` address with
-/// no TLS in front of it (`dial_of` knows no `http://`), so a test that needs to
-/// deposit AT A NAMED DOOR (rather than poll from it) speaks the wire itself.
-fn door_post(
-    fx: &Fixture,
-    from: &str,
-    mesh: &str,
-    method: &str,
-    params: serde_json::Value,
-) -> serde_json::Value {
-    use std::io::{Read, Write};
-    let body = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }).to_string();
-    let ts = aoide_storage::time::now_iso_utc();
-    let nonce = aoide_storage::pairing::random_hex(16);
-    // The canonical string signs the HTTP shape — method, path, and the BODY —
-    // never the JSON-RPC method name inside the body.
-    let canonical = aoide_storage::wire_auth::canonical_string(
-        "POST",
-        "/",
-        &ts,
-        &nonce,
-        body.as_bytes(),
-        (!mesh.is_empty()).then_some(mesh),
-    );
-    let signing = fixture_box_key(fx, from);
-    let sig = aoide_storage::wire_auth::sign_hex(&signing, canonical.as_bytes());
-    assert!(
-        aoide_storage::wire_auth::verify_signature_hex(
-            &signing.info().pubkey_hex,
-            canonical.as_bytes(),
-            &sig
-        ),
-        "the signature verifies locally — a failure at the door is a wire difference"
-    );
-    let request = format!(
-        "POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{}: {}\r\n{}: {}\r\n{}: {}\r\n{}: {}\r\n{}Connection: close\r\n\r\n{}",
-        body.len(),
-        aoide_storage::wire_auth::HEADER_NODE,
-        from,
-        aoide_storage::wire_auth::HEADER_TIMESTAMP,
-        ts,
-        aoide_storage::wire_auth::HEADER_NONCE,
-        nonce,
-        aoide_storage::wire_auth::HEADER_SIGNATURE,
-        sig,
-        if mesh.is_empty() {
-            String::new()
-        } else {
-            format!("{}: {}\r\n", aoide_storage::wire_auth::HEADER_MESH, mesh)
-        },
-        body
-    );
-    let mut stream = std::net::TcpStream::connect(("127.0.0.1", fx.ports[from])).unwrap();
-    stream.write_all(request.as_bytes()).unwrap();
-    let mut response = String::new();
-    stream.read_to_string(&mut response).unwrap();
-    let (_, payload) = response.split_once("\r\n\r\n").unwrap_or(("", ""));
-    serde_json::from_str(payload).unwrap_or_else(|e| panic!("door answered junk: {e}\n{response}"))
-}
-
-/// A box's own identity keypair, as the process entered on that box reads it.
-fn fixture_box_key(fx: &Fixture, name: &str) -> aoide_storage::identity::Keypair {
-    let _ = (fx, name);
-    aoide_storage::identity::load_or_mint().unwrap().0
 }
 
 /// **The whole journey, driven by the boxes' own doors.** Every hop is a real
@@ -801,6 +732,247 @@ fn the_whole_journey_runs_through_the_boxes_own_doors() {
     );
     let origin_log = std::fs::read_to_string(fx.boxes["osaka"].join("log")).unwrap_or_default();
     assert!(origin_log.contains("a2a.aoide/mailPoll"), "the origin's door answered: {origin_log}");
+}
+
+/// **The symmetric gate rewrites `mesh`, and the entry it signs verifies in the
+/// NEW zone.** A container riding `alpha` for `other` (a node of `beta`, which
+/// `alpha` gates into through this box) is deposited AT the gate's own door: the
+/// four steps rewrite the letter's mesh and hand it to `other`, and the hop entry
+/// the gate appended is signed in `beta` under the gate's `beta` key — which is
+/// exactly what the next door's own walk recomputes. The spool is grepped for the
+/// rewritten container.
+#[test]
+fn the_gate_rewrites_the_mesh_and_its_hop_entry_verifies_at_the_next_door() {
+    let _lock = env_lock();
+    let (_env, root, port) = two_mesh_door("gate-rewrite", true);
+    fx_enter(&root, EVO);
+    let _door = common::raise_door(&root, EVO, port);
+
+    let container = two_mesh_container(&root, "other");
+    let answer = door_post(port, EVO, ALPHA, "aoide/mailDeposit", serde_json::json!({ "container": container }));
+    let result = &answer["result"];
+    assert_eq!(result["status"], "accepted", "{answer}");
+    assert_eq!(result["transit"]["next"], "other", "{answer}");
+    assert_eq!(result["transit"]["mesh"], BETA, "the gate rewrote the zone: {answer}");
+
+    // The container the gate spooled onward: its chain grew by one entry, signed
+    // in `beta`, and that signature verifies under the gate's `beta` key — which
+    // is exactly what the next door's own walk recomputes.
+    fx_enter(&root, EVO);
+    let spooled = aoide_storage::outbox::list_entries("other").unwrap();
+    assert_eq!(spooled.len(), 1, "spooled toward `other`");
+    let forwarded = spooled[0].container.clone().expect("sealed");
+    assert_eq!(forwarded.mesh, BETA, "and the container's own mesh is the new zone");
+    let last = forwarded.transit.last().unwrap().clone();
+    assert_eq!(last.node, EVO, "the gate's own entry");
+    assert_eq!(last.mesh, BETA, "signed in the zone it carries the letter into");
+    let (msgid, _) = aoide_storage::seal::chain_tail(&forwarded).unwrap();
+    let beta_key = aoide_storage::routing::declarations()
+        .unwrap()
+        .iter()
+        .find(|l| l.mesh == BETA)
+        .and_then(|l| l.declaration.as_ref().ok())
+        .and_then(|d| d.key_of(EVO))
+        .map(str::to_string)
+        .unwrap();
+    let body = aoide_storage::seal::hop_bytes(
+        &msgid,
+        &entry_prev(&forwarded, forwarded.transit.len() - 1),
+        &last.node,
+        &last.next,
+        &last.at,
+        &last.mesh,
+    );
+    assert!(
+        aoide_storage::wire_auth::verify_signature_hex(&beta_key, &body, &last.sig),
+        "the next door recomputes exactly this"
+    );
+}
+
+/// **A dual member that is not the gate does not bridge: `zone-violation`.** The
+/// same box, with the two meshes declaring no gate between them: a letter riding
+/// `alpha` for a node of `beta` cannot be carried, and the box says so with the
+/// wall's own word rather than reaching for the destination it happens to know.
+#[test]
+fn a_dual_member_that_is_not_the_gate_refuses_the_bridge_at_the_door() {
+    let _lock = env_lock();
+    let (_env, root, port) = two_mesh_door("no-gate", false);
+    fx_enter(&root, EVO);
+    let _door = common::raise_door(&root, EVO, port);
+
+    let container = two_mesh_container(&root, "other");
+    let answer = door_post(port, EVO, ALPHA, "aoide/mailDeposit", serde_json::json!({ "container": container }));
+    let result = &answer["result"];
+    assert_eq!(result["status"], "refused", "{answer}");
+    assert_eq!(result["reason"], aoide_storage::seal::ZONE_VIOLATION, "{answer}");
+    fx_enter(&root, EVO);
+    assert!(aoide_storage::mail::read_transit_unlocked().unwrap().is_empty(), "nothing is filed as a hop");
+    assert!(aoide_storage::outbox::list_entries("other").unwrap().is_empty(), "nothing is spooled onward");
+    let log = std::fs::read_to_string(root.join("log")).unwrap_or_default();
+    assert!(log.contains(aoide_storage::seal::ZONE_VIOLATION), "and the refusal is audited: {log}");
+}
+
+/// **A rewritten `mesh` without the gate's signature is refused.** The container
+/// reaches the door with its chain already claiming the crossing — an entry
+/// signed in `beta` by a node the letter's own mesh does not declare as its gate.
+/// The chain walk reads the crossing against the declaration SET, so the claim is
+/// the wall, and nothing is filed or spooled onward.
+#[test]
+fn a_rewritten_mesh_without_the_gates_signature_is_refused_at_the_door() {
+    let _lock = env_lock();
+    let (_env, root, port) = two_mesh_door("rewritten", false);
+    fx_enter(&root, EVO);
+    let _door = common::raise_door(&root, EVO, port);
+
+    // Hand-built: the origin's entry says `alpha`, and a second entry claims the
+    // letter arrived in `beta` — signed by this box, which `alpha` does not
+    // declare as its gate (the fixture declares none at all).
+    let kp = aoide_storage::identity::load_or_mint().unwrap().0;
+    let mut container = two_mesh_container(&root, "other");
+    let (msgid, prev) = aoide_storage::seal::chain_tail(&container).unwrap();
+    container.mesh = BETA.to_string();
+    let at = aoide_storage::time::now_iso_utc();
+    container.transit.push(aoide_storage::seal::TransitEntry {
+        node: EVO.to_string(),
+        next: "other".to_string(),
+        at: at.clone(),
+        mesh: BETA.to_string(),
+        sig: aoide_storage::wire_auth::sign_hex(
+            &kp,
+            &aoide_storage::seal::hop_bytes(&msgid, &prev, EVO, "other", &at, BETA),
+        ),
+    });
+
+    let answer = door_post(port, EVO, BETA, "aoide/mailDeposit", serde_json::json!({ "container": container }));
+    let result = &answer["result"];
+    assert_eq!(result["status"], "refused", "{answer}");
+    assert_eq!(result["reason"], aoide_storage::seal::ZONE_VIOLATION, "{answer}");
+    fx_enter(&root, EVO);
+    assert!(aoide_storage::mail::read_transit_unlocked().unwrap().is_empty());
+    assert!(aoide_storage::outbox::list_entries("other").unwrap().is_empty());
+    let log = std::fs::read_to_string(root.join("log")).unwrap_or_default();
+    assert!(log.contains(aoide_storage::seal::ZONE_VIOLATION), "audited: {log}");
+}
+
+/// The two meshes these door tests declare: `alpha` (this box's own) and `beta`
+/// (the one a crossing reaches), gated through this box in one fixture and
+/// ungated in the other.
+const ALPHA: &str = "alpha";
+const BETA: &str = "beta";
+/// This box's own name in the two fixtures: a pair mesh's declaration IS its
+/// records, so one verified record for this process's identity key under this
+/// name makes it the member the whole fixture is about.
+const EVO: &str = "evo";
+
+/// Enter a box root and name it — the fixture's own switch, for a root that is
+/// not one of the five-edge boxes.
+fn fx_enter(root: &std::path::Path, name: &str) {
+    std::env::set_var("AOIDE_ROOT", root);
+    std::env::set_var("AOIDE_STATE_DIR", root);
+    std::env::set_var("AOIDE_STAGE_DIR", root);
+    std::env::set_var("AOIDE_A2A_NODE_NAME", name);
+    std::env::remove_var("AOIDE_CONFIG");
+}
+
+/// One box, two pair meshes, and a free port for its door: `alpha` (the box's
+/// own mesh, which the letter rides) and `beta` (where the destination `other`
+/// is). `gated` declares the symmetric gate both ways; ungated declares none.
+fn two_mesh_door(
+    tag: &str,
+    gated: bool,
+) -> (aoide_test_support::EnvSaver, std::path::PathBuf, u16) {
+    let guard = aoide_test_support::EnvSaver::capture(&[
+        "AOIDE_ROOT",
+        "AOIDE_STATE_DIR",
+        "AOIDE_STAGE_DIR",
+        "AOIDE_A2A_NODE_NAME",
+        "AOIDE_CONFIG",
+    ]);
+    let root = aoide_test_support::unique_tmp(&format!("two-mesh-door-{tag}"));
+    std::fs::create_dir_all(&root).unwrap();
+    fx_enter(&root, EVO);
+    let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
+    let alpha_gate = if gated {
+        format!("[mesh.{ALPHA}.gates]\n{BETA} = \"{EVO}\"\n")
+    } else {
+        String::new()
+    };
+    let beta_gate = if gated {
+        format!("[mesh.{BETA}.gates]\n{ALPHA} = \"{EVO}\"\n")
+    } else {
+        String::new()
+    };
+    std::fs::write(
+        aoide_storage::config::source().path,
+        format!(
+            "[pairing]\nhomeMesh = \"{ALPHA}\"\n\n\
+             [mesh.{ALPHA}]\n\n[mesh.{ALPHA}.nodes]\n{EVO} = \"ssh://{EVO}\"\n\n{alpha_gate}\n\
+             [mesh.{BETA}]\n\n[mesh.{BETA}.nodes]\n{EVO} = \"ssh://{EVO}\"\nother = \"ssh://other\"\n\n{beta_gate}"
+        ),
+    )
+    .unwrap();
+    aoide_storage::config::load().unwrap();
+
+    let record = |node: &str, key: String, mesh: &str| aoide_storage::node_store::Node {
+        name: node.to_string(),
+        url: "ssh://self".to_string(),
+        autogate: false,
+        token_file: None,
+        bearer_secret: None,
+        hub: false,
+        pubkey: Some(key),
+        verified: true,
+        grants: aoide_storage::node_store::grants_in(mesh, &["message"]),
+        narrowed: aoide_storage::node_store::Grants::new(),
+        via: None,
+        added_at: "2026-09-07T00:00:00Z".to_string(),
+    };
+    // The same box in BOTH meshes — one identity key, one name, two lines — which
+    // is what makes it a DUAL member; and `other`, a node of `beta` alone.
+    aoide_storage::node_store::save_nodes(&[
+        record(EVO, kp.info().pubkey_hex.clone(), ALPHA),
+        record(EVO, kp.info().pubkey_hex, BETA),
+        record("other", "c3c3c3c3".repeat(8), BETA),
+    ])
+    .unwrap();
+    (guard, root, common::free_port())
+}
+
+/// A container the box at `root` mints for `to`: origin `evo`, riding `alpha`,
+/// handed to itself — the shape a relay deposits after carrying a letter.
+fn two_mesh_container(root: &std::path::Path, to: &str) -> aoide_storage::seal::Container {
+    fx_enter(root, EVO);
+    let binding = aoide_storage::seal::publish_binding().unwrap();
+    let envelope = aoide_storage::mail::mint_outbound_letter_from(
+        EVO,
+        "alice",
+        to,
+        "bob",
+        "a letter for another zone",
+        ALPHA,
+    )
+    .unwrap();
+    aoide_storage::seal::seal_envelope(
+        &envelope,
+        &binding,
+        ALPHA,
+        ALPHA,
+        to,
+        EVO,
+        &aoide_storage::time::now_iso_utc(),
+    )
+    .unwrap()
+}
+
+/// The `prev` the entry at `index` chains to: the running digest of the entries
+/// before it, recomputed the way the walk does.
+fn entry_prev(container: &aoide_storage::seal::Container, index: usize) -> [u8; 32] {
+    let (msgid, _) = aoide_storage::seal::chain_tail(container).unwrap();
+    let mut prev = msgid;
+    for entry in container.transit.iter().take(index) {
+        prev = aoide_storage::seal::sha256(&aoide_storage::seal::hop_entry_bytes(&msgid, &prev, entry).unwrap());
+    }
+    prev
 }
 
 /// A chain truncated by dropping the tail never reaches the destination: the last
