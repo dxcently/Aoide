@@ -111,12 +111,14 @@ pub fn declarations() -> Result<Vec<Loaded>, Refusal> {
 /// pair mesh's too, which is how a paired record left over from before a
 /// charter re-keyed a name is caught.
 ///
-/// Where a charter and a record disagree the charter is the authority for a
-/// name it lists, so the record is the copy that yields and the pair mesh is
-/// the one refused. Where the disagreement is between two declarations that
-/// are NOT subordinate to each other — two charters, or two pair meshes — no
-/// copy can be kept without the other routing behind it: BOTH are refused, and
-/// the mesh-name order they were read in decides nothing.
+/// Where the declarations a name's copies live in AGREE on its key, that key is
+/// the authority and only a copy that disagrees is refused — so a pair mesh
+/// whose paired record still holds the key from before a charter re-keyed the
+/// name is the copy that yields, and every charter that agrees keeps routing.
+/// Only where the CHARTERS disagree with each other is there nothing to yield
+/// to, and then no copy of that name can be kept: all of them are refused
+/// rather than one by mesh-name order, which would leave the others routing
+/// behind it.
 ///
 /// **A gate is symmetric or it is nothing.** Each gate a mesh declares must be
 /// answered, by the mesh it names, with the same node; a mesh cannot be its own
@@ -142,19 +144,27 @@ fn set_verdicts(loaded: &[Loaded]) -> BTreeMap<String, Refusal> {
         if keys.len() < 2 {
             continue;
         }
-        // The one mesh this name's other copies yield to, if there is one: a
-        // lone charter, which is the authority for a name it lists.
-        let charters: Vec<&str> = members
+        // The key the charters agree on is the authority: what they all list
+        // for a name is that name's key, and every copy that disagrees with it
+        // is the copy refused — a pair mesh's record included, which is the
+        // re-key case. Only where the CHARTERS disagree with EACH OTHER is
+        // there no authority to yield to, and then no copy at all can be kept.
+        let charter_keys: Vec<&str> = members
             .iter()
             .filter(|(_, _, charter)| *charter)
-            .map(|(mesh, _, _)| *mesh)
+            .map(|(_, key, _)| *key)
             .collect();
-        let authority = match charters.as_slice() {
+        let mut distinct: Vec<&str> = charter_keys.clone();
+        distinct.sort();
+        distinct.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        let authority = match distinct.as_slice() {
             [only] => Some(*only),
+            // No charter here at all (two pair meshes), or charters that
+            // disagree: nothing is subordinate to anything else.
             _ => None,
         };
         for (mesh, key, _) in members {
-            if Some(*mesh) == authority {
+            if authority.map(|only| only.eq_ignore_ascii_case(key)) == Some(true) {
                 continue;
             }
             // The other copy the refusal names, by declaration order (a
@@ -227,9 +237,11 @@ fn gate_verdict(
     })
 }
 
-/// One mesh's routing declaration. `load` is the only constructor: it decides
-/// the kind, reads that kind's single source, and answers every accessor below
-/// off what it read.
+/// One mesh's routing declaration. There is exactly one place a declaration is
+/// built: [`Declaration::load`], and the two readers it shares with
+/// [`declarations`] ([`Declaration::from_charter`]/[`Declaration::from_section`],
+/// which take the snapshot the caller already read) — never a caller assembling
+/// one out of a section or a charter file it read itself.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
     mesh: String,
@@ -400,8 +412,6 @@ impl Declaration {
 }
 
 /// The `[mesh.<name>]` section as a declaration, with the keys of the records
-/// it names read once.
-/// The `[mesh.<name>]` section as a declaration, with the keys of the records
 /// it names read out of the `state/nodes.json` snapshot the caller holds.
 fn pair_from(section: &config::Mesh, records: &[node_store::Node]) -> Pair {
     let keys = section
@@ -530,15 +540,18 @@ impl<'a> Letter<'a> {
             return Ok(hop);
         }
 
-        // Step 3: the destination is a node of a mesh this box ALSO holds, and
-        // the mesh the letter rides declares the node that carries transit into
-        // it. Only the declared gate may cross, and only the gate itself may
-        // rewrite `envelope.mesh` — a dual member's own knowledge of the
-        // destination is not a route.
+        // Step 3: the destination is not in the mesh the letter rides, but a
+        // node of another mesh this box holds, and the letter's mesh declares
+        // the node that carries transit into it. Only the declared gate may
+        // cross, and only the gate itself may rewrite `envelope.mesh` — a dual
+        // member's own knowledge of the destination is not a route.
         let mut walled: Option<&str> = None;
         for other in set.iter().filter(|l| l.mesh != mesh) {
             let Ok(theirs) = &other.declaration else { continue };
-            if !theirs.declares(self.to) {
+            // The precondition is MAIL.md's own: a destination the letter's
+            // mesh declares is this mesh's problem — a relay of it, or no
+            // route — and never a reason to carry the letter into another zone.
+            if declaration.declares(self.to) || !theirs.declares(self.to) {
                 continue;
             }
             let their_mesh = other.mesh.as_str();
@@ -608,11 +621,19 @@ impl<'a> Letter<'a> {
             )),
             None if declaration.declares(self.to) => Err(Refusal::new(
                 NO_ROUTE,
-                format!(
-                    "`{}` is a node of mesh `{mesh}` and no step of the route from `{}` produced a hop: \
-                     not the destination itself, not a relay of that mesh and not a gate into another",
-                    self.to, self.from
-                ),
+                if declaration.status_of(self.to) == Some(charter::STATUS_DOWN) {
+                    format!(
+                        "`{}` is declared `down` in mesh `{mesh}`: a `down` node is never a hop and never \
+                         a destination, and no relay is asked to hold its letters",
+                        self.to
+                    )
+                } else {
+                    format!(
+                        "`{}` is a node of mesh `{mesh}` and no step of the route from `{}` produced a hop: \
+                         not the destination itself, not a relay of that mesh and not a gate into another",
+                        self.to, self.from
+                    )
+                },
             )),
             None => Err(Refusal::new(
                 NO_ROUTE,
@@ -647,6 +668,19 @@ fn by_steps_one_and_two(
             return Some(hop);
         }
         Err(reason) => trail.push(format!("{direct}: {reason}")),
+    }
+    // A target declared `down` is never a hop and never a relay's problem:
+    // `down` refuses fast, and a letter for it stays where it is rather than
+    // being moved to a hub that cannot reach it either (MAIL.md §Delivery). A
+    // letter already queued for it is KEPT where it is — never evicted — and
+    // that is the drain's business, not this one's.
+    if declaration.declares(target) && declaration.status_of(target) == Some(charter::STATUS_DOWN) {
+        trail.push(format!(
+            "{direct}: `{target}` is declared `down` in mesh `{}` — no relay is asked to hold its \
+             letters",
+            declaration.mesh()
+        ));
+        return None;
     }
     for relay in declaration.relays() {
         match reach(declaration, from, relay) {
@@ -997,6 +1031,35 @@ mod tests {
         assert_eq!(refusal.reason, NO_DECLARATION, "{refusal}");
     }
 
+    /// Two charters that AGREE on a name are that name's authority: a stale
+    /// pair record disagreeing with them is the copy refused, and the charters
+    /// keep routing.
+    #[test]
+    fn an_agreeing_charter_is_not_refused_by_a_stale_pair_record() {
+        let (_guard, _env) = isolate();
+        let scratch = Scratch::new("agreeing");
+        let operator = scratch.dir("operator");
+        let sakaki_line = line_for(&scratch.dir("sakaki"), "sakaki");
+        sign_on(&operator, "home", &body(&[], &[], &[], &[sakaki_line.clone()]));
+        sign_on(&operator, "away", &body(&[], &[], &[], &[sakaki_line]));
+        let key = ok("home").key_of("sakaki").unwrap().to_string();
+
+        std::fs::write(
+            operator.join("config.toml"),
+            "[mesh.friends.nodes]\nsakaki = \"ssh://khoa@192.168.1.202\"\n",
+        )
+        .unwrap();
+        node_store::save_nodes(&[record("sakaki", &"cd".repeat(32))]).unwrap();
+
+        // The charters agree, so the key they carry is the authority.
+        assert_eq!(ok("home").key_of("sakaki"), Some(key.as_str()));
+        assert_eq!(ok("away").key_of("sakaki"), Some(key.as_str()));
+        // Only the record that disagrees with it is refused.
+        let refusal = refused("friends");
+        assert_eq!(refusal.reason, KEY_DIVERGENCE, "{refusal}");
+        assert!(refusal.detail.contains("sakaki"), "{refusal}");
+    }
+
     #[test]
     fn a_config_that_cannot_be_read_refuses_the_whole_set() {
         let (_guard, _env) = isolate();
@@ -1319,6 +1382,49 @@ mod tests {
                 .map(|(dir, name)| line_at(dir, name, &format!("ssh://{name}")))
                 .collect::<Vec<_>>(),
         )
+    }
+
+    #[test]
+    fn a_letter_to_a_down_destination_is_no_route_and_is_not_handed_to_a_relay() {
+        let (_guard, _env) = isolate();
+        let scratch = Scratch::new("down-dest");
+        let _operator = five_edges(&scratch);
+
+        // `yomi` is declared `down` in `home`, and `home` has a relay that can
+        // take the letter — which must not: `down` refuses fast, and a relay
+        // that holds a `down` node's letters is a letter moved toward a node
+        // the mesh declared unreachable.
+        let out = route("osaka", "yomi", "home");
+        assert_eq!(outcome_word(&out), Some(NO_ROUTE), "{}", trail(&out));
+        assert!(trail(&out).contains("declared `down`"), "{}", trail(&out));
+        assert!(!trail(&out).contains("takes it"), "no hop was picked: {}", trail(&out));
+    }
+
+    /// Step 3 is for a destination the letter's mesh does NOT declare. A node
+    /// this mesh declares is this mesh's own problem, however many other meshes
+    /// this box also knows it in.
+    #[test]
+    fn a_destination_in_the_letters_own_mesh_is_never_carried_across_a_gate() {
+        let (_guard, _env) = isolate();
+        let scratch = Scratch::new("own-mesh");
+        let operator = scratch.dir("operator");
+        let osaka = line_at(&scratch.dir("osaka"), "osaka", "ssh://osaka");
+        let sakaki = line_at(&scratch.dir("sakaki"), "sakaki", "ssh://sakaki");
+        // `both` sits in BOTH meshes — one key, one machine — and takes no
+        // inbound connection in `home`, whose only edge to it would be through
+        // the gate into `away`.
+        let both = line_at(&scratch.dir("both"), "both", charter::DEFAULT_ADDRESS);
+        let evo = line_at(&scratch.dir("evo"), "evo", "ssh://evo");
+        sign_on(
+            &operator,
+            "home",
+            &body(&[], &[], &[("away", "sakaki")], &[osaka, sakaki.clone(), both.clone()]),
+        );
+        sign_on(&operator, "away", &body(&[], &[], &[("home", "sakaki")], &[evo, sakaki, both]));
+
+        let out = route("osaka", "both", "home");
+        assert_eq!(outcome_word(&out), Some(NO_ROUTE), "{}", trail(&out));
+        assert!(!trail(&out).contains("step 3"), "no gate was consulted: {}", trail(&out));
     }
 
     #[test]

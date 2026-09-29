@@ -1022,9 +1022,10 @@
   gate the same file answers back, a mesh never gating into itself);
   `routing::declarations` checks the half that needs two declarations in hand
   (the same gate out of another file, one node name with two keys) and refuses
-  the mesh that is inconsistent, never the whole set — where no declaration is
-  subordinate to another (two charters, two pair meshes) it refuses BOTH, since
-  keeping one by name order leaves the other routing. The set is read from ONE
+  the mesh that is inconsistent, never the whole set — the key the charters
+  AGREE on is the authority, so a copy that disagrees with it yields, and every
+  copy is refused only where the charters disagree with each other. The set is
+  read from ONE
   snapshot of `config.toml` and `state/nodes.json` per call, and a config that
   will not load refuses the set with `config-unreadable`: it is not a name
   source, so its pair meshes cannot be listed at all. A second read of a declaration — a module

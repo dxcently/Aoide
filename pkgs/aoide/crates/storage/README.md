@@ -62,9 +62,10 @@ by decision — no embedded database yet
   never takes another mesh out of routing. The two invariants only a SET of
   declarations can see are then refused against the single mesh that is
   inconsistent: `key-divergence` (one node name never carries two identity
-  keys — charters are read first, a pair mesh yields to a charter that lists
-  the name, and where neither declaration is subordinate to the other BOTH are
-  refused rather than one kept by name order) and `one-sided-gate` (a gate is
+  keys — the key the CHARTERS agree on is the authority, so a pair mesh's
+  record that disagrees with it is the copy refused, and all copies are refused
+  only where the charters disagree with each other rather than one being kept
+  by name order) and `one-sided-gate` (a gate is
   answered by the mesh on the other side; a mesh is never its own answer). The
   whole set is read from ONE snapshot of `config.toml` and `state/nodes.json`,
   so two entries can never disagree with each other about what config says —

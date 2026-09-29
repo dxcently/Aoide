@@ -430,9 +430,12 @@ impl std::fmt::Display for Dial {
 }
 
 /// Turn a declared `address` into a dial target. Pure, and the ONE place an
-/// address stops being a declaration: the router asks it whether a hop can be
-/// reached, and the drain asks it what to dial. Fails closed — an address that
-/// is none of the three is refused, never guessed at.
+/// address stops being a declaration: the four steps ask it whether a hop can
+/// be reached, and `mail route` prints what it answers. The DRAIN does not read
+/// it yet — a drain still dials a node RECORD's `via`, so a charter node this
+/// box holds no record for is not dialled at all (`docs/architecture/
+/// HTTPS-MESH-API.md`, "Charters"). Fails closed — an address that is none of
+/// the three is refused, never guessed at.
 pub fn dial_of(address: &str) -> Result<Dial, String> {
     let address = address.trim();
     if address == DEFAULT_ADDRESS {
