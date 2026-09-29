@@ -1598,7 +1598,8 @@ fn a_mesh_row_reports_the_declared_status_role_and_key_source() {
     for name in ["osaka", "sakaki", "yomi", "chiyo"] {
         assert_eq!(node_row(home, name).key_source, "charter", "a charter line is the key source");
     }
-    // `away` is a pair-shaped mesh here: its keys are records.
+    // `away` is charter-shaped here too — the fixture hands every box both
+    // signed charters — so its keys are charter lines.
     let away = section(&report, AWAY);
     assert_eq!(away.kind, aoide_client::mesh::MeshKind::Charter, "away took a charter too");
 }

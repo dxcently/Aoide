@@ -168,8 +168,9 @@ pub struct NodeRow {
     pub status: String,
     /// `relay`, `gate` or `member`.
     pub role: String,
-    /// The other meshes this node is THIS mesh's declared gate into. Empty
-    /// unless `role` is `gate`.
+    /// The other meshes this node is THIS mesh's declared gate into. It stands
+    /// BESIDE `role` rather than instead of it: a node can be both the mesh's
+    /// relay and its gate.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub gates: Vec<String>,
     /// Where this node's identity key comes from: `charter` (a signed line) or
