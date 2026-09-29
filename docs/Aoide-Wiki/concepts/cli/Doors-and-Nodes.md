@@ -766,7 +766,7 @@ aoide mesh [--json]
   P-CHARTER subsection below repeats): `{"sections": [{"name", "source",
   "grant", "sameOperatorNote"?, "grants", "declared", "selfDeclared", "rows":
   [{"node", "class", …}], "kind", "charterVersion"?, "refusal"?, "nodes":
-  [{"name", "nickname"?, "status", "role", "gates"?, "keySource", "liveness"}]}],
+  [{"name", "nicknames"?, "warnings"?, "status", "role", "gates"?, "keySource", "liveness"}]}],
   "undeclared": [...], "charters": []}`. **Each section also lists its nodes**:
   the mesh's `kind` (`pair`/`charter`), the `charterVersion` in force for a
   charter mesh, the set's `refusal` word where this box refuses the mesh (which

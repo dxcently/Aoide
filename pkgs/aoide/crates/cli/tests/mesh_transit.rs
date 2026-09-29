@@ -1700,28 +1700,30 @@ fn a_charter_mesh_shows_the_charter_name_not_the_nickname() {
     let yomi_key = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
     fx.enter("osaka");
     let mut nodes = aoide_storage::node_store::load_nodes();
-    aoide_storage::node_store::upsert_paired_node(
-        &mut nodes,
-        "yuki",
-        "http://127.0.0.1:1/",
-        &yomi_key,
-        &aoide_storage::time::now_iso_utc(),
-        &["message".to_string()],
-        HOME,
-    );
+    for nickname in ["yuki", "taro"] {
+        aoide_storage::node_store::upsert_paired_node(
+            &mut nodes,
+            nickname,
+            "http://127.0.0.1:1/",
+            &yomi_key,
+            &aoide_storage::time::now_iso_utc(),
+            &["message".to_string()],
+            HOME,
+        );
+    }
     aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
     let report = mesh_report();
     let home = section(&report, HOME);
     assert!(home.nodes.iter().any(|r| r.name == "yomi"), "the line's name is the row: {home:?}");
     assert!(
-        !home.nodes.iter().any(|r| r.name == "yuki"),
+        !home.nodes.iter().any(|r| r.name == "yuki") && !home.nodes.iter().any(|r| r.name == "taro"),
         "a nickname is never a row of its own: {home:?}"
     );
     assert_eq!(
-        node_row(home, "yomi").nickname.as_deref(),
-        Some("yuki"),
-        "it rides along as display, keyed by the same identity"
+        node_row(home, "yomi").nicknames,
+        vec!["taro".to_string(), "yuki".to_string()],
+        "EVERY nickname holding that key rides along as display"
     );
 }
 

@@ -904,8 +904,8 @@ count.
   for a charter mesh), `refusal` (the word this box's declaration set refuses the
   mesh with — a refused mesh fails closed for ITSELF alone, so its `nodes` stay
   empty and the other meshes still report), and `nodes`: one row per declared
-  node of `{"name", "nickname"?, "status", "role", "gates"?, "keySource",
-  "liveness"}`. `name` is the name the DECLARATION gives the node (a charter
+  node of `{"name", "nicknames"?, "warnings"?, "status", "role", "gates"?,
+  "keySource", "liveness"}`. `name` is the name the DECLARATION gives the node (a charter
   LINE's name for a charter mesh; a `nodes.json` nickname only ever rides beside
   it), `status` is `active`/`hold`/`down` exactly as declared, `role` is
   `relay`/`gate`/`member` (`gates` names the meshes a gate carries transit into),

@@ -158,11 +158,17 @@ pub struct NodeRow {
     /// it — and the recorded name for a pair mesh, where the record IS the
     /// declaration.
     pub name: String,
-    /// The `nodes.json` nickname this node's key is ALSO recorded under, where
-    /// one exists and differs from `name`. Display, never an input: a mesh's
-    /// own answer about a node comes from its declaration.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nickname: Option<String>,
+    /// Every `nodes.json` nickname this node's key is ALSO recorded under, where
+    /// any exist. Display, never an input: a mesh's own answer about a node comes
+    /// from its declaration.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub nicknames: Vec<String>,
+    /// What an operator should know about this row but must not act on as if it
+    /// were a security fact — today, a nickname that is ANOTHER declared line's
+    /// name, which reads ambiguously and changes nothing about who the
+    /// declaration says the node is.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
     /// The declared status — `active` (declared with none), `hold` or `down` —
     /// exactly the words `[status]` uses.
     pub status: String,
@@ -489,34 +495,53 @@ fn node_rows(
     declaration: &aoide_storage::routing::Declaration,
     records: &[Node],
 ) -> Vec<NodeRow> {
-    let mut names: BTreeSet<String> = if declaration.is_charter() {
+    let names: BTreeSet<String> = if declaration.is_charter() {
         aoide_storage::charter::governing(mesh)
             .map(|charter| charter.nodes.keys().cloned().collect())
             .unwrap_or_default()
     } else {
-        section.map(|section| section.nodes.keys().cloned().collect()).unwrap_or_default()
+        // **The same set the ROUTE reads** (`routing`'s own pair-mesh keys): a
+        // VERIFIED record that carries a key, in a mesh that declares it or
+        // grants it `message`. A row here is a node this box can actually name
+        // and reach in this mesh, so an unverified record gets no row.
+        records
+            .iter()
+            .filter(|record| record.verified)
+            .filter(|record| record.pubkey.as_deref().is_some_and(|key| !key.is_empty()))
+            .filter(|record| {
+                section.map(|section| section.nodes.contains_key(&record.name)).unwrap_or(false)
+                    || record.grant(mesh).iter().any(|cap| cap == "message")
+            })
+            .map(|record| record.name.clone())
+            .collect()
     };
-    if !declaration.is_charter() {
-        for record in records {
-            if record.grant(mesh).iter().any(|cap| cap == "message") {
-                names.insert(record.name.clone());
-            }
-        }
-    }
+    let declared_names = names.clone();
     names
         .into_iter()
         .map(|name| {
             let key = declaration.key_of(&name);
-            let nickname = records
+            let mut nicknames: Vec<String> = records
                 .iter()
-                .find(|record| {
+                .filter(|record| {
                     record.name != name
                         && match (key, record.pubkey.as_deref()) {
                             (Some(key), Some(recorded)) => key.eq_ignore_ascii_case(recorded),
                             _ => false,
                         }
                 })
-                .map(|record| record.name.clone());
+                .map(|record| record.name.clone())
+                .collect();
+            nicknames.sort();
+            let warnings: Vec<String> = nicknames
+                .iter()
+                .filter(|nickname| declared_names.contains(*nickname))
+                .map(|nickname| {
+                    format!(
+                        "also recorded as `{nickname}`, which is another line of this mesh — the \
+                         declared name decides every lookup"
+                    )
+                })
+                .collect();
             let gates: Vec<String> = declaration
                 .gates()
                 .iter()
@@ -538,7 +563,7 @@ fn node_rows(
                 declaration.status_of(&name).map(str::to_string).unwrap_or_else(|| "active".to_string());
             let key_source = if declaration.is_charter() { "charter" } else { "record" }.to_string();
             let liveness = liveness_of(&name).to_string();
-            NodeRow { name, nickname, status, role: role.to_string(), gates, key_source, liveness }
+            NodeRow { name, nicknames, warnings, status, role: role.to_string(), gates, key_source, liveness }
         })
         .collect()
 }
@@ -719,8 +744,8 @@ fn render_report(report: &MeshReport, local_name: &str) -> String {
 /// also recorded under, and the four facts this box can state about it.
 fn render_node(node: &NodeRow) -> String {
     let mut line = node.name.clone();
-    if let Some(nickname) = &node.nickname {
-        line.push_str(&format!(" (recorded as `{nickname}`)"));
+    if !node.nicknames.is_empty() {
+        line.push_str(&format!(" (recorded as {})", node.nicknames.join(", ")));
     }
     line.push_str(&format!(
         "  {}/{}  key: {}  liveness: {}",
@@ -728,6 +753,9 @@ fn render_node(node: &NodeRow) -> String {
     ));
     if !node.gates.is_empty() {
         line.push_str(&format!("  gate into: {}", node.gates.join(",")));
+    }
+    for warning in &node.warnings {
+        line.push_str(&format!("  ! {warning}"));
     }
     line
 }
@@ -1377,8 +1405,9 @@ mod tests {
     fn liveness_of_row(name: &str) -> String {
         let meshes: BTreeMap<String, Mesh> =
             [("friends".to_string(), mesh(&[(name, "ssh://elsewhere")]))].into_iter().collect();
-        let nodes = vec![node(name, true, None)];
-        let report = report(&meshes, &nodes, "selfbox");
+        let mut record = node(name, true, None);
+        record.pubkey = Some("ab".repeat(32));
+        let report = report(&meshes, &[record], "selfbox");
         report.sections[0]
             .nodes
             .iter()
@@ -1437,6 +1466,71 @@ mod tests {
             let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap_or(0);
             aoide_storage::outbox::back_off("elsewhere", now_epoch, "could not reach the agent").unwrap();
             assert_eq!(liveness_of_row("elsewhere"), "unreachable", "a failure in progress answers first");
+        });
+    }
+
+    /// **A pair mesh's rows are the nodes ROUTING can name and reach there**, not
+    /// every declared key: an unverified record is no row, because the route
+    /// refuses it. Its drift is the `rows` view's business, one field over.
+    #[test]
+    fn a_pair_mesh_lists_only_the_records_routing_reads() {
+        with_config_root("rows-verified", |dir| {
+            std::fs::write(
+                dir.join("config.toml"),
+                "[mesh.friends.nodes]\nelsewhere = \"ssh://elsewhere\"\nghost = \"ssh://ghost\"\n",
+            )
+            .unwrap();
+            let meshes: BTreeMap<String, Mesh> = [(
+                "friends".to_string(),
+                mesh(&[("elsewhere", "ssh://elsewhere"), ("ghost", "ssh://ghost")]),
+            )]
+            .into_iter()
+            .collect();
+            let mut good = node("elsewhere", true, None);
+            good.pubkey = Some("ab".repeat(32));
+            let mut bad = node("ghost", false, None);
+            bad.pubkey = Some("cd".repeat(32));
+            aoide_storage::node_store::save_nodes(&[good.clone(), bad.clone()]).unwrap();
+
+            let report = report(&meshes, &[good, bad], "selfbox");
+            let names: Vec<&str> = report.sections[0].nodes.iter().map(|row| row.name.as_str()).collect();
+            assert_eq!(names, ["elsewhere"], "an unverified record is not a node routing reads");
+        });
+    }
+
+    /// **A nickname that is another declared line's name is flagged, not obeyed.**
+    /// The declaration's own name still decides every lookup; the warning exists
+    /// because the pair of names reads ambiguously.
+    #[test]
+    fn a_nickname_matching_another_line_is_flagged() {
+        with_config_root("rows-collision", |dir| {
+            std::fs::write(
+                dir.join("config.toml"),
+                "[mesh.friends.nodes]\nelsewhere = \"ssh://elsewhere\"\nyuki = \"ssh://yuki\"\n",
+            )
+            .unwrap();
+            let meshes: BTreeMap<String, Mesh> = [(
+                "friends".to_string(),
+                mesh(&[("elsewhere", "ssh://elsewhere"), ("yuki", "ssh://yuki")]),
+            )]
+            .into_iter()
+            .collect();
+            // One key under two names, both declared in this mesh.
+            let mut elsewhere = node("elsewhere", true, None);
+            elsewhere.pubkey = Some("ab".repeat(32));
+            let mut yuki = node("yuki", true, None);
+            yuki.pubkey = Some("ab".repeat(32));
+            aoide_storage::node_store::save_nodes(&[elsewhere.clone(), yuki.clone()]).unwrap();
+
+            let report = report(&meshes, &[elsewhere, yuki], "selfbox");
+            let row = report.sections[0]
+                .nodes
+                .iter()
+                .find(|row| row.name == "elsewhere")
+                .expect("elsewhere has a row");
+            assert_eq!(row.nicknames, vec!["yuki".to_string()], "{row:?}");
+            assert_eq!(row.warnings.len(), 1, "flagged once: {row:?}");
+            assert!(row.warnings[0].contains("yuki") && row.warnings[0].contains("another line"), "{row:?}");
         });
     }
 
