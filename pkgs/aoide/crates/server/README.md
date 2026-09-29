@@ -597,12 +597,14 @@ the inbound half of the two-door contract (the outbound half is
   node that spooled the letters. The answer is BOUNDED at
   `aoide_storage::outbox::POLL_BATCH_CAP` (50), oldest first: the poller
   acks what it files, so the next poll advances, and an unbounded batch
-  would be a body the client's own `MAX_RESPONSE_BYTES` refuses. `down` is
-  not part of this door's
-  admission yet: it is `[mesh.<name>.status]`, a declaration the door does
-  not read until P-M4 (MAIL.md §Status), so P-M3's reachable refusal is the
-  `message` half (`aoide node allow <node> message off`, the per-request
-  quarantine that already exists).
+  would be a body the client's own `MAX_RESPONSE_BYTES` refuses. **`down`
+  is the door's now**: the two mail methods read the declaration set once
+  per request and refuse a caller their mesh declares `down` with that word
+  as a RESULT (audited), beside the `message` half — the per-request
+  quarantine `aoide node allow <node> message off` (MAIL.md §Status). An
+  UNLOADABLE set refuses both methods with `config-invalid` and keeps
+  serving everything else: no zone checks means no mail, never mail with
+  the walls down.
 - **The mail adapter (`aoide mail serve`, H1) — a second LISTENER, and not a
   second door.** `serve_mail` binds `127.0.0.1` and nothing else (no bind
   option, no flag, no env var: the front that faces the mesh is a

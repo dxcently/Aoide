@@ -962,11 +962,14 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `poll_admitted` = `may_message` PLUS `params.node == the resolved
   caller's own name` — MAIL.md §Wire's "the caller's verified identity must
   BE `node`". A refusal reuses `-32010` (never a new code, never
-  `-32006`/`-32007`) in three shapes. **The `down` clause is NOT here yet**:
-  `down` lives in `[mesh.<name>.status]`, a declaration this door does not
-  read until P-M4 (`mail_poll`'s own doc says where the clause lands), so
-  don't invent a `down` lookup in the door to satisfy the spec line early —
-  `aoide node allow <node> message off` is the quarantine that exists.
+  `-32006`/`-32007`) in three shapes. **The `down` clause is the door's own
+  and lives BESIDE this predicate, never inside it**: both mail methods read
+  the declaration set once per request (`mail_declarations`), refuse an
+  unloadable one with `config-invalid` as a RESULT, and refuse a caller their
+  mesh declares `down` with that word (`down_caller_refusal`, audited) —
+  `down` is a statement about the NODE, so it must not be expressible through
+  the caller's grant. `aoide node allow <node> message off` remains the
+  per-request quarantine that lands on the `message` half.
   **`mail_poll` writes nothing at all.** Its whole body is
   `aoide_storage::outbox::poll_payloads` (the ONE place the offer rule lives:
   held always, `now` only when its own attempts have been failing) plus a

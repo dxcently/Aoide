@@ -1423,14 +1423,32 @@ impl std::fmt::Debug for ContainerOutcome {
 /// and the load happens only where a declaration is actually read: a `charter`
 /// letter is applied from its own payload and needs no set at all, so an
 /// unreadable config never blocks one.
+///
+/// **This entry point reads the set itself.** A caller that already holds one —
+/// the door, whose mail methods read the declarations once per request and
+/// refuse an unloadable set in front of this — calls [`deposit_container_over`]
+/// instead, so one deposit never loads them twice.
 pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<ContainerOutcome, String> {
+    let set = match crate::routing::declarations() {
+        Ok(set) => set,
+        Err(refusal) => {
+            return Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail })
+        }
+    };
+    deposit_container_over(container, request_mesh, &set)
+}
+
+/// [`deposit_container`] over a declaration set the caller already loaded: one
+/// deposit, one read, one set for the outer signature, the inner signature and
+/// the chain walk.
+pub fn deposit_container_over(
+    container: &Container,
+    request_mesh: &str,
+    set: &[crate::routing::Loaded],
+) -> Result<ContainerOutcome, String> {
     let refusal = |reason: &str, detail: String| ContainerOutcome::Refused {
         reason: reason.to_string(),
         detail,
-    };
-    let refusal_of = |r: &crate::charter::Refusal| ContainerOutcome::Refused {
-        reason: r.reason.clone(),
-        detail: r.detail.clone(),
     };
     // **The identity is read ONCE for this deposit**, before any branch, and what
     // it yields travels with the deposit: the hop's signature, the chain's
@@ -1475,17 +1493,10 @@ pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<Co
         return deposit_charter(container, &ctx, &ct, &sig, request_mesh, &own_key);
     }
 
-    // The declarations, read ONCE for this deposit — and only here, past the
-    // branch that does not need them. A set that will not load is the
-    // depositing hop's business, answered with the word that says why
-    // (`config-unreadable`, a charter that cannot be read) rather than an
-    // internal error: it is a refusal, and no key can be resolved from a
-    // declaration this box could not validate.
-    let set = match crate::routing::declarations() {
-        Ok(set) => set,
-        Err(refusal) => return Ok(refusal_of(&refusal)),
-    };
-
+    // The declarations ARRIVE from the caller: a set that will not load was
+    // refused there, with the word that says why, never an internal error — no
+    // key can be resolved from a declaration this box could not validate.
+    //
     // The outer origin signature, under the key `origin.key` names,
     // resolved through the declaration of the mesh the ORIGIN signed in
     // (`ctx.origin_mesh`) — a charter line for a charter mesh, a paired

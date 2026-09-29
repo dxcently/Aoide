@@ -144,6 +144,14 @@ static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
 /// drift on it.
 const SEALED_REQUIRED: &str = "sealed-required";
 
+/// The taught word the two mail methods refuse an UNLOADABLE declaration with
+/// (MAIL.md §Status: "no mail served with the declaration unloadable"). A
+/// broken zone table means no zone check can run, and no zone check means no
+/// mail — never "mail with the walls down". It is a refused RESULT, like
+/// [`SEALED_REQUIRED`], so a drain parks the entry rather than reading it as a
+/// dead link.
+const CONFIG_INVALID: &str = "config-invalid";
+
 /// The address the mail adapter binds, ever and only. There is deliberately no
 /// `--bind`, no `aoide.mail.adapter.bindAddress` and no env var beside this
 /// one: a TLS-terminating front (cloudflared, a VPS, a tailnet) is what faces
@@ -3334,6 +3342,64 @@ fn graph_summary(node_name: &str, self_url: &str) -> Result<Value, (i64, String)
 // carried the request here and the ORIGIN that minted it are two
 // independent lookups, coincident only because P-M2 has no relay yet).
 
+/// The declaration set the two MAIL methods read — **once per request, and only
+/// for them** (MAIL.md §Status). A broken zone table must refuse mail rather
+/// than serve it with the walls down, while every other method is answered
+/// exactly as before; and one read serves the whole request, so the set the
+/// caller's `down` is judged by is the set the deposit is filed under.
+///
+/// A set that will not load is a refused RESULT carrying [`CONFIG_INVALID`] —
+/// audited here, once, so this host's own log says why — never an internal
+/// error: it is this host's state, and a sender's drain must park its entry for
+/// it rather than read it as a dead link.
+fn mail_declarations(
+    ctx: &RequestCtx,
+    label: &str,
+) -> Result<Vec<aoide_storage::routing::Loaded>, Value> {
+    match aoide_storage::routing::declarations() {
+        Ok(set) => Ok(set),
+        Err(refusal) => {
+            let detail = format!("{CONFIG_INVALID}: {refusal}");
+            let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, label, "invalid", &detail);
+            Err(json!({ "status": "refused", "reason": CONFIG_INVALID, "detail": detail }))
+        }
+    }
+}
+
+/// The `down` gate at the door: a request whose own node the mesh declares
+/// `down` is refused before anything is filed or hopped — MAIL.md §Status's "a
+/// `down` origin's own door requests are refused, and no new letter is accepted
+/// from it", with the letters it queued before being kept, never confiscated.
+///
+/// The name is the declaration's own for the verifying key
+/// ([`declared_caller_name`]), never a `nodes.json` nickname, and the word is
+/// `charter::STATUS_DOWN` — the transit lane's own refused reason, which is what
+/// a sender's drain already classifies as a policy refusal (CONTRACTS.md §6).
+fn down_caller_refusal(
+    declarations: &[aoide_storage::routing::Loaded],
+    mesh: &str,
+    caller: SignedCaller<'_>,
+    label: &str,
+    audit_log: &Path,
+) -> Option<Value> {
+    let name = declared_caller_name(declarations, mesh, caller);
+    if aoide_storage::routing::status_of(declarations, mesh, &name)
+        != Some(aoide_storage::charter::STATUS_DOWN)
+    {
+        return None;
+    }
+    let detail = format!(
+        "mail refused: node `{name}` is declared `down` in mesh `{mesh}` — its own door requests are \
+         refused until the declaration changes; what it queued before is kept, never confiscated"
+    );
+    let _ = audit(audit_log, Door::A2a, EventClass::Audit, label, "unauthorized", &detail);
+    Some(json!({
+        "status": "refused",
+        "reason": aoide_storage::charter::STATUS_DOWN,
+        "detail": detail,
+    }))
+}
+
 /// The node-side half of the Message admission check — the caller's grant
 /// ([`grant_in_mesh`], in the mesh its request names) holds `"message"`.
 /// Mirrors [`may_spawn`] exactly, one capability over.
@@ -3477,12 +3543,16 @@ fn deposit_refusal(signed: Option<SignedCaller<'_>>, mesh: &str, audit_log: &Pat
 }
 
 /// `aoide/mailDeposit` (P-M2): `{envelope: <the sealed Envelope, exactly as
-/// aoide_storage::mail::Envelope serializes>}`. Admission first
-/// (signature-only, [`deposit_admitted`]), then the envelope's own content
-/// is [`aoide_storage::mail::deposit`]'s job — recompute `msgid`, verify
-/// the ORIGIN signature, dedup, file (spec item 4's short-circuiting
-/// order; the zone check MAIL.md's step 3 describes is P-M4's, skipped
-/// here, not stubbed).
+/// aoide_storage::mail::Envelope serializes>}`. The declarations are read FIRST
+/// (once per request, `config-invalid` on an unloadable set), then the caller's
+/// own `down` is refused, then admission (signature-only,
+/// [`deposit_admitted`]) — and the envelope's own content is
+/// [`aoide_storage::mail::deposit`]'s job: recompute `msgid`, verify the ORIGIN
+/// signature, dedup, file (spec item 4's short-circuiting order). The zone check
+/// MAIL.md's step 3 describes belongs to the TRANSIT lane, which a plaintext
+/// envelope never rides — it carries no mesh at all — so this arm skips it by
+/// shape, not by omission; a sealed container takes it in
+/// [`deposit_sealed`].
 ///
 /// **Self-audits under its own label, unconditionally** (spec item 11: a
 /// deposit never passes `cli/src/dispatch.rs`'s own audit, so this is the
@@ -3517,11 +3587,18 @@ fn deposit_refusal(signed: Option<SignedCaller<'_>>, mesh: &str, audit_log: &Pat
 /// forever, which the vocabulary (`letter`/`receipt` only) has no third
 /// shape to end.
 fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
+    // MAIL.md §Status: the declarations are read ONCE per request, for the mail
+    // methods only, and an unloadable set refuses here — before anything is
+    // parsed, filed or hopped. Every other method never reads them.
+    let declarations = match mail_declarations(ctx, "a2a.aoide/mailDeposit") {
+        Ok(set) => set,
+        Err(refused) => return Ok(refused),
+    };
     // P-SEAL: a sealed container takes the same admission and then the
     // container's own two halves; a plaintext envelope is the direct-lane
     // per-peer upgrade path, unchanged from P-M2.
     if params.get("container").map(|v| !v.is_null()).unwrap_or(false) {
-        return deposit_sealed(params, ctx);
+        return deposit_sealed(params, ctx, &declarations);
     }
     // H1: the mail ADAPTER never carries plaintext — "no relay, hub or HTTPS
     // hop ever carries plaintext" (HTTPS-MESH-API.md). A plaintext envelope
@@ -3551,6 +3628,16 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
         "a2a.aoide/mailDeposit",
         ctx.audit_log,
     )?;
+    // A `down` caller is refused before its grant is even read: `down` is a
+    // statement about the node, and the `node allow` fix the grant refusal
+    // teaches is not one a `down` node should be sent to run.
+    if let Some(caller) = ctx.signed_caller {
+        if let Some(refused) =
+            down_caller_refusal(&declarations, &mesh, caller, "a2a.aoide/mailDeposit", ctx.audit_log)
+        {
+            return Ok(refused);
+        }
+    }
     let grant = caller_grant(ctx.signed_caller);
     if !deposit_admitted(&grant) {
         let (code, msg) = deposit_refusal(ctx.signed_caller, &mesh, ctx.audit_log);
@@ -3570,11 +3657,9 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
     // (`addressing-mismatch`): the container lane is the one that carries a letter
     // onward, and it carries it sealed.
     let own_key = aoide_storage::identity::load_or_mint().ok().map(|(kp, _)| kp.info().pubkey_hex);
-    let declared = own_key.as_deref().and_then(|key| {
-        aoide_storage::routing::declarations()
-            .ok()
-            .and_then(|set| aoide_storage::routing::own_name_in(&set, &mesh, key))
-    });
+    let declared = own_key
+        .as_deref()
+        .and_then(|key| aoide_storage::routing::own_name_in(&declarations, &mesh, key));
     let names = [Some(aoide_storage::display::local_node_name()), declared];
     if !names.iter().flatten().any(|mine| mine == &envelope.header.to.node) {
         let detail = format!(
@@ -3656,17 +3741,6 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
 // is what makes a re-poll before the ack hand the same envelopes over again by
 // construction rather than by a bookmark.
 
-/// The poll arm's admission check. `resolved` is the caller via a verified
-/// per-request signature ([`deposit_admitted`]'s own narrowing — signature
-/// only, no Addr/Token rung to fall back to); `claimed` is `params.node`, the
-/// node whose outbox the caller is asking about. Both halves matter: MAIL.md
-/// §Wire's "the caller's verified identity must BE `node` (no polling on
-/// another's behalf)" is the `==`, and "hold `message`, and not be `down`" is
-/// [`node_may_message`] — which today is exactly `verified + message`, since
-/// `down` is a mesh-declaration fact this door does not read yet (P-M4 adds
-/// that clause to this same predicate; `aoide node allow <node> message off`
-/// is the per-request quarantine that IS expressible today, and it lands on
-/// the `message` half).
 /// The poll arm's admission check. `caller` is the caller via a verified
 /// per-request signature ([`deposit_admitted`]'s own narrowing — signature
 /// only, no Addr/Token rung to fall back to); `grant` is that caller's grant
@@ -3674,12 +3748,14 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
 /// `params.node`, the node whose outbox the caller is asking about. Both
 /// halves matter: MAIL.md §Wire's "the caller's verified identity must BE
 /// `node` (no polling on another's behalf)" is the `==`, and "hold
-/// `message`, and not be `down`" is [`may_message`] — which today is exactly
-/// "granted `message` in this mesh", since `down` is a mesh-declaration fact
-/// this door does not read yet (P-M4 adds that clause to this same
-/// predicate; `aoide node allow <node> message off --mesh <m>` is the
-/// per-request quarantine that IS expressible today, and it lands on the
-/// `message` half).
+/// `message`" is [`may_message`] — exactly "granted `message` in this mesh".
+///
+/// **"And not be `down`" is [`down_caller_refusal`]'s**, asked of the same
+/// per-request declaration set immediately after this predicate and before
+/// anything is retired or handed over: `down` is a statement about the node,
+/// so it is deliberately not expressible as a grant. `aoide node allow
+/// <node> message off --mesh <m>` remains the per-request quarantine that
+/// lands on the `message` half.
 fn poll_admitted(caller: Option<SignedCaller<'_>>, grant: &Grant, claimed: &str) -> bool {
     matches!(caller, Some(c) if may_message(grant) && c.name == claimed)
 }
@@ -3748,6 +3824,14 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
     if claimed.is_empty() {
         return Err((-32602, "invalid params: node is required".to_string()));
     }
+    // MAIL.md §Status: the declarations are read ONCE per request, for the two
+    // mail methods only, and an unloadable set refuses both — this one before
+    // anything is retired or handed over. Shape precedes it: a request with no
+    // `node` is malformed whatever this host's config says.
+    let declarations = match mail_declarations(ctx, "a2a.aoide/mailPoll") {
+        Ok(set) => set,
+        Err(refused) => return Ok(refused),
+    };
     // What the poller says it FILED out of its last poll, if it says anything:
     // the acknowledgement that ends this hub's custody of a container it handed
     // over (`outbox::retire_acknowledged` — a `transit` entry, and nothing else).
@@ -3770,6 +3854,15 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
         let (code, msg) = poll_refusal(ctx.signed_caller, &mesh, &claimed, ctx.audit_log);
         let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailPoll", "unauthorized", &msg);
         return Err((code, msg));
+    }
+    // A `down` poller is refused exactly as a `down` depositor is: its own door
+    // requests stop until the declaration changes (MAIL.md §Status).
+    if let Some(caller) = ctx.signed_caller {
+        if let Some(refused) =
+            down_caller_refusal(&declarations, &mesh, caller, "a2a.aoide/mailPoll", ctx.audit_log)
+        {
+            return Ok(refused);
+        }
     }
     let poller = ctx.signed_caller.map(|c| c.name.to_string()).unwrap_or_default();
 
@@ -3887,11 +3980,14 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
 /// name on the charter LINE and never the caller's `nodes.json` nickname or the
 /// name it wrote in its own header. Only where the mesh names no such key does
 /// the resolved record's name stand — a pair mesh's record IS its declaration, so
-/// there the two are the same answer anyway.
-fn declared_caller_name(mesh: &str, caller: SignedCaller<'_>) -> String {
-    aoide_storage::routing::declarations()
-        .ok()
-        .and_then(|set| aoide_storage::routing::declared_name(&set, mesh, caller.key))
+/// there the two are the same answer anyway. Read over the set the request
+/// already loaded, so one request resolves a name once.
+fn declared_caller_name(
+    set: &[aoide_storage::routing::Loaded],
+    mesh: &str,
+    caller: SignedCaller<'_>,
+) -> String {
+    aoide_storage::routing::declared_name(set, mesh, caller.key)
         .unwrap_or_else(|| caller.name.to_string())
 }
 
@@ -3901,7 +3997,16 @@ fn declared_caller_name(mesh: &str, caller: SignedCaller<'_>) -> String {
 /// names; an opened container is handed to the SAME `mail::deposit` the
 /// plaintext arm uses, so filing, the seen set and the receipt rule have one
 /// implementation and not two.
-fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
+///
+/// `declarations` is the ONE set this request read
+/// ([`mail_declarations`]), threaded through to
+/// [`aoide_storage::seal::deposit_container_over`]: the `down` gate, the name the
+/// caller is judged by and the deposit's own zone checks all read the same set.
+fn deposit_sealed(
+    params: &Value,
+    ctx: &RequestCtx,
+    declarations: &[aoide_storage::routing::Loaded],
+) -> Result<Value, (i64, String)> {
     let container: aoide_storage::seal::Container =
         match serde_json::from_value(params.get("container").cloned().unwrap_or(Value::Null)) {
             Ok(c) => c,
@@ -3910,7 +4015,7 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
 
     // P-CHARTER (review finding 4, and the design ruling it carries): the
     // mesh a letter rides is checked ONE layer down, inside
-    // `seal::deposit_container`, AFTER the origin signature and against
+    // `seal::deposit_container_over`, AFTER the origin signature and against
     // SIGNED values only (`ctx.origin_mesh` versus the mesh THIS request's
     // per-request signature covers). It is deliberately not checked here
     // against `container.mesh`: that field is hop-mutable by design, so a
@@ -3923,6 +4028,20 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
         "a2a.aoide/mailDeposit",
         ctx.audit_log,
     )?;
+    // A `down` caller is refused before its grant is read, exactly as on the
+    // plaintext arm: `down` is a statement about the node, and the container's
+    // own chain is never consulted for one.
+    if let Some(caller) = ctx.signed_caller {
+        if let Some(refused) = down_caller_refusal(
+            declarations,
+            &request_mesh,
+            caller,
+            "a2a.aoide/mailDeposit",
+            ctx.audit_log,
+        ) {
+            return Ok(refused);
+        }
+    }
 
     let grant = caller_grant(ctx.signed_caller);
     // **A charter letter's gate is not the grant** (P-CHARTER, review F3). Its
@@ -3948,7 +4067,7 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
         let caller = ctx
             .signed_caller
             .expect("deposit_admitted only returns true when a signed caller resolved");
-        declared_caller_name(&request_mesh, caller)
+        declared_caller_name(declarations, &request_mesh, caller)
     };
 
     // The chain's last hop is the node that deposited it — the caller this door
@@ -3966,7 +4085,7 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
         return Ok(json!({ "status": "refused", "reason": refusal.reason, "detail": refusal.detail }));
     }
 
-    let outcome = aoide_storage::seal::deposit_container(&container, &request_mesh)
+    let outcome = aoide_storage::seal::deposit_container_over(&container, &request_mesh, declarations)
         .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
 
     let (audit_status, audit_detail) = match &outcome {
@@ -15041,6 +15160,41 @@ mod tests {
     /// need is a NAME (`deposit_admitted` reads `allows`, and `hop_name` is
     /// the name), so the key here is a fixture literal — no deposit path reads
     /// it, and the stamp that does is `message/send`'s.
+    /// **An unloadable declaration set refuses BOTH mail methods, and only
+    /// them.** MAIL.md §Status: a broken zone table means no zone check can run,
+    /// and no zone check means no mail — never mail with the walls down. The
+    /// refusal is a RESULT carrying the closed word `config-invalid`, audited
+    /// once under the method's own label, so a sender's drain parks the entry
+    /// rather than reading a dead link.
+    #[test]
+    fn an_unloadable_declaration_refuses_both_mail_methods() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let root = aoide_test_support::unique_tmp("door-config-invalid");
+        charter_machine(&root, "receiver", "receiverbox");
+        // A `[status]` for a node the mesh does not have: the section is refused
+        // as a whole, which is what "a status for a line that is not there" is
+        // for — and the refusal is what `declarations()` fails closed on.
+        std::fs::write(root.join("receiver").join("config.toml"), "[mesh.home.status]\nnobody = \"down\"\n").unwrap();
+        let audit_log = root.join("receiver").join("log");
+        let ctx = mail_deposit_ctx(&audit_log, None);
+
+        let deposit = mail_deposit(&json!({}), &ctx).expect("a refusal is an answer here, never an error");
+        assert_eq!(deposit["status"], json!("refused"), "{deposit}");
+        assert_eq!(deposit["reason"], json!("config-invalid"), "the closed word: {deposit}");
+
+        let poll = mail_poll(&json!({ "node": "receiverbox" }), &ctx).expect("a refusal is an answer here, never an error");
+        assert_eq!(poll["status"], json!("refused"), "{poll}");
+        assert_eq!(poll["reason"], json!("config-invalid"), "{poll}");
+
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("config-invalid"), "the host's own log says why: {log}");
+        assert!(
+            log.contains("a2a.aoide/mailDeposit") && log.contains("a2a.aoide/mailPoll"),
+            "under the method's own label, so a flood is attributable: {log}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     fn mail_deposit_ctx<'a>(audit_log: &'a std::path::Path, name: Option<&'a str>) -> RequestCtx<'a> {
         RequestCtx {
             audit_log,
@@ -16427,11 +16581,12 @@ mod tests {
     /// empty envelope list, which would read as "nothing waiting for you."
     ///
     /// This is the reachable half of the spec's "non-`message` or `down`"
-    /// pair: `down` is `[mesh.<name>.status]`, a declaration this door does
-    /// not read until P-M4 (MAIL.md §Status), and `aoide node allow <node>
-    /// message off` is the per-request quarantine that IS expressible today —
-    /// it lands on this same `message` half. P-M4 adds its clause to
-    /// [`poll_admitted`].
+    /// pair. The `down` half is the door's own clause — a node the mesh
+    /// declares `down` is refused a RESULT carrying that word, from the same
+    /// per-request declaration set ([`down_caller_refusal`]), beside this
+    /// predicate and before anything is handed over — while `aoide node allow
+    /// <node> message off` remains the per-request quarantine that lands on
+    /// this same `message` half.
     #[test]
     fn a_non_message_poller_is_refused() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

@@ -8080,13 +8080,15 @@ the exact `aoide node allow <name> message on --mesh <m>` fix, which runs on
 the POLLED host), or no verified signature resolution at all (told to pair
 first).
 
-**`down` is not enforced here yet.** It is declared in
-`[mesh.<name>.status]`, a declaration the door does not read until P-M4
-(MAIL.md §Status); P-M3's reachable refusal is the `message` half, which
-`aoide node allow <node> message off` — the per-request quarantine that
-already exists — is expressed by. P-M4 adds the declaration read and the
-`down` clause to this same predicate; that is a scope line, not a stubbed
-branch.
+**`down` is enforced at this door, read from the declaration set the request
+itself loaded.** The two mail methods read `config.toml` and the charters in
+force once per request (`mail_declarations`) and refuse a caller their mesh
+declares `down` with that word as a RESULT — before anything is retired, filed
+or hopped, and audited — while a set that will not load refuses BOTH methods
+with `config-invalid` and leaves every other method untouched (the
+`aoide/mailDeposit` and `aoide/mailPoll` sections above; MAIL.md §Status).
+`aoide node allow <node> message off` is still the per-request quarantine that
+lands on the `message` half, which is the half a grant can express.
 
 A successful poll answers
 

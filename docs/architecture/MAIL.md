@@ -1205,13 +1205,14 @@ rebuild, and the rebuild is the User's gate):
   refuses, routes around, drops. Removing the node's charter line is the
   stronger form: revocation (HTTPS-MESH-API.md, "Charters").
 
-The door reads `config.toml` and the charters in force per request for
-the mail methods — **new at P-M4**; today the door never loads the
-declaration, only `nodes.json`, so this is a seam added, not one reused.
-A declaration that fails to load refuses both mail methods with
-`config-invalid` and keeps serving everything else: a broken zone table
-means no zone checks can run, and no zone checks means no mail, never
-"mail with the walls down".
+The door reads `config.toml` and the charters in force per request for the
+mail methods only, and ONE read serves the whole request: the set the
+caller's `down` is judged by is the set the deposit is filed under, and the
+name a status is read by is the declaration's own for the verifying key — a
+nickname never names a policy. A declaration that fails to load refuses both
+mail methods with `config-invalid` and keeps serving everything else: a
+broken zone table means no zone checks can run, and no zone checks means no
+mail, never "mail with the walls down".
 
 The nodelist view above answers "is this NODE reachable"; `data.delivery`
 (both `aoide mail send`'s own post-spool report and `aoide mail outbox`)
