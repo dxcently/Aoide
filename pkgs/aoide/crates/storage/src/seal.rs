@@ -1408,25 +1408,6 @@ impl std::fmt::Debug for ContainerOutcome {
     }
 }
 
-/// Verify a container as far as a receiver with no key can, and then, if
-/// self is the destination, open it and check it against the outer claims.
-///
-/// A hub never opens anything: this function is the destination branch, and
-/// the hop branch is a caller that spools the container onward without
-/// calling it. P-SEAL's only transport is the direct lane, so the hop
-/// branch is exercised in tests rather than in the field.
-/// Do two mesh names mean the same mesh? **An EMPTY name resolves to the home
-/// mesh on EITHER side** (`config::home_mesh`): a container minted before
-/// P-CHARTER carries `origin_mesh: ""` and an un-upgraded peer sends no
-/// `X-Aoide-Mesh`, and both mean "the home mesh", which is where the design
-/// says such a request is evaluated (HTTPS-MESH-API.md "Trust per mesh":
-/// "A request that names no mesh … is evaluated in the home mesh only"). A
-/// `""` container against a request signed for the home mesh is accepted
-/// (review N1: without this every letter minted by main was undepositable
-/// forever, and the taught fix named something the sender could not change).
-///
-/// **Who the container belongs to is not this comparison's business any more.**
-/// The mesh a deposit is made in is the one the depositing hop SIGNED for, and
 /// `aoide/mailDeposit`'s sealed half: verify the container and hand the inner
 /// envelope back for filing — or, when this box is not the destination, answer
 /// the hop that carries it on.
@@ -1445,7 +1426,7 @@ impl std::fmt::Debug for ContainerOutcome {
 pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<ContainerOutcome, String> {
     let refusal = |reason: &str, detail: String| ContainerOutcome::Refused {
         reason: reason.to_string(),
-        detail: detail,
+        detail,
     };
     let refusal_of = |r: &crate::charter::Refusal| ContainerOutcome::Refused {
         reason: r.reason.clone(),
@@ -1489,26 +1470,26 @@ pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<Co
         return deposit_charter(container, &ctx, &ct, &sig, request_mesh);
     }
 
-    // 3. The declarations, read ONCE for this deposit — and only here, past the
-    //    branch that does not need them. A set that will not load is the
-    //    depositing hop's business, answered with the word that says why
-    //    (`config-unreadable`, a charter that cannot be read) rather than an
-    //    internal error: it is a refusal, and no key can be resolved from a
-    //    declaration this box could not validate.
+    // The declarations, read ONCE for this deposit — and only here, past the
+    // branch that does not need them. A set that will not load is the
+    // depositing hop's business, answered with the word that says why
+    // (`config-unreadable`, a charter that cannot be read) rather than an
+    // internal error: it is a refusal, and no key can be resolved from a
+    // declaration this box could not validate.
     let set = match crate::routing::declarations() {
         Ok(set) => set,
         Err(refusal) => return Ok(refusal_of(&refusal)),
     };
 
-    // 3. The outer origin signature, under the key `origin.key` names,
-    //    resolved through the declaration of the mesh the ORIGIN signed in
-    //    (`ctx.origin_mesh`) — a charter line for a charter mesh, a paired
-    //    record for a pair mesh — and a paired record alone only where that
-    //    mesh has no declaration at all. One key is tried, the one that name
-    //    maps to; the connection-signature ladder that tries every verified
-    //    key must not be reused here, or a paired node signing as another
-    //    paired node would file under the wrong name.
-    let Some(recorded) = origin_key_in(&set, &ctx.origin_mesh, &ctx.origin_node) else {
+    // The outer origin signature, under the key `origin.key` names,
+    // resolved through the declaration of the mesh the ORIGIN signed in
+    // (`ctx.origin_mesh`) — a charter line for a charter mesh, a paired
+    // record for a pair mesh — and a paired record alone only where that
+    // mesh has no declaration at all. One key is tried, the one that name
+    // maps to; the connection-signature ladder that tries every verified
+    // key must not be reused here, or a paired node signing as another
+    // paired node would file under the wrong name.
+    let Some(recorded) = crate::routing::key_in(&set, &ctx.origin_mesh, &ctx.origin_node) else {
         return Ok(refusal(
             "unverified-origin",
             format!("`{}` has no key on record in mesh `{}`", ctx.origin_node, ctx.origin_mesh),
@@ -1687,13 +1668,6 @@ fn own_keypair_and_local_name() -> Result<(identity::Keypair, String), String> {
 
 /// The key `node` signs with in `mesh` — that mesh's declaration (a charter line
 /// or a paired record), and a paired record alone only where the mesh has NO
-/// The key the ORIGIN signs with, in the zone the origin signed: the declaration
-/// set's own answer for it (`routing::key_in` — a charter line, a verified
-/// record, and a mesh the set refuses answers nobody).
-fn origin_key_in(set: &[crate::routing::Loaded], mesh: &str, node: &str) -> Option<String> {
-    crate::routing::key_in(set, mesh, node)
-}
-
 /// One hop of transit: this box is not the destination, so it carries the
 /// container on rather than opening it (MAIL.md §Transit).
 ///
@@ -3254,13 +3228,6 @@ mod review_fix_tests {
         assert!(err.detail.contains("does not verify"), "{err}");
     }
 
-    /// **A one-sided gate never lets a crossing through.** `set_verdicts` refuses
-    /// the mesh that declares a gate the other side does not answer, and the hop
-    /// chain reads THAT answer rather than the file: a hop carrying a letter out
-    /// of a mesh whose declaration the set refuses has no declared gate, so the
-    /// crossing is the zone wall. Reading the file directly — outside the
-    /// validated set — is what would wave it through.
-    #[test]
     /// **A one-sided gate in a pair mesh refuses the whole set, before any walk.**
     /// `validate_pair_transit` catches it while the config loads, so
     /// `declarations()` refuses everything with `config-unreadable` — fail closed,
