@@ -5248,6 +5248,11 @@ fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path
         return PreDispatch::Keep;
     };
     let Some(mesh) = req.signed_mesh.as_deref() else { return PreDispatch::Keep };
+    // A name that is not a mesh name is never a path component: nothing below
+    // this line builds one from it.
+    if !aoide_storage::node_store::valid_node_name(mesh) {
+        return PreDispatch::Keep;
+    }
     let Some(node) = req.signed_node.as_deref() else { return PreDispatch::Keep };
     let (Some(timestamp), Some(nonce), Some(signature)) = (
         req.signed_timestamp.as_deref(),

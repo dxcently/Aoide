@@ -858,7 +858,7 @@ fn drain_spooled(mesh: &str, spooled: &[String]) -> Vec<serde_json::Value> {
             // **A `down` node is never dialled, and the entry stays.** Asked
             // before the record half below: `down` is a fact about the mesh's
             // declaration, and a node with no record is still `down`.
-            if crate::mail_wire::declared_down(mesh, node) {
+            if crate::mail_wire::never_dialled(mesh, node) {
                 return json!({
                     "node": node,
                     "drained": false,

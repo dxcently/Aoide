@@ -1529,6 +1529,33 @@ fn a_replayed_mail_request_is_refused_while_the_config_is_broken() {
     assert!(after["result"].is_null(), "the spent nonce is what stops it: {after}");
 }
 
+    /// **The named line is the ONLY line that can verify.** A caller whose key
+    /// holds a DIFFERENT line of the same charter — so the door could place it,
+    /// but not as the node it names — must read `-32007`, not `config-invalid`:
+    /// the D8 answer is owed to the node the request itself names, verified
+    /// against THAT node's key.
+    #[test]
+    fn a_caller_naming_another_line_over_a_broken_config_still_reads_32007() {
+        let _lock = env_lock();
+        let (_env, fx) = fixture("door-config-invalid-other-line");
+        let _doors = fx.doors(&["osaka"]);
+        break_osaka_config(&fx);
+
+        // Signed by `yomi`'s identity (the box this process is entered on), and
+        // naming `osaka` — a real line of the same charter, whose key is not this
+        // one.
+        fx.enter("yomi");
+        let other = door_post(
+            fx.ports["osaka"],
+            "osaka",
+            HOME,
+            "aoide/mailDeposit",
+            serde_json::json!({ "container": {} }),
+        );
+        assert_eq!(other["error"]["code"], serde_json::json!(-32007), "{other}");
+        assert!(other["result"].is_null(), "and nothing was dispatched: {other}");
+    }
+
 /// **A `down` node's queued letter is KEPT, and is drained once the declaration
 /// no longer says `down`.** `down` stops this box SENDING; it never confiscates
 /// what is already spooled, and it never leaves the entry looking dialled.
@@ -1723,7 +1750,7 @@ fn a_refused_or_unloadable_declaration_is_never_dialled() {
         link.is_none(),
         "and opens no link: link={link:?} entries={spooled:?} unreadable={} down={}",
         aoide_client::mail_wire::declaration_unreadable(HOME),
-        aoide_client::mail_wire::declared_down(HOME, "yomi")
+        aoide_client::mail_wire::never_dialled(HOME, "yomi")
     );
     assert_eq!(spooled.len(), 3, "and nothing was dropped");
 }

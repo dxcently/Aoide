@@ -800,7 +800,7 @@
   box holds no record for is dialled at the address the DECLARATION gives it
   (`dial_node` → `charter::dial_of`) or held if that address is `poll`.
   **A node the mesh declares `down` is never dialled either, and that is
-  `mail_wire::record_is_down`'s** — asked over the set, so no caller can
+  `mail_wire::record_never_dialled`'s** — asked over the set, so no caller can
   forget it: `drain_node` returns before the link lock, `poll_node` returns
   before the binding exchange, `pollable_nodes` leaves such a node out of a
   bare poll, and the two REPORTS (`charter::drain_spooled`,
