@@ -412,7 +412,7 @@ impl Declaration {
                 ),
             )
         })?;
-        Ok(Declaration { mesh: mesh.to_string(), kind: Kind::Pair(pair_from(section, records)) })
+        Ok(Declaration { mesh: mesh.to_string(), kind: Kind::Pair(pair_from(section, records, mesh)) })
     }
 
     /// The mesh this declaration is for.
@@ -535,8 +535,14 @@ impl Declaration {
 
 /// The `[mesh.<name>]` section as a declaration, with the keys of the records
 /// it names read out of the `state/nodes.json` snapshot the caller holds.
-fn pair_from(section: &config::Mesh, records: &[node_store::Node]) -> Pair {
-    let keys = section
+///
+/// **A pair mesh's keys are the verified records GRANTED in it**, whether or not
+/// the section also hands them a hop address: `mesh pair` writes a section whose
+/// grant is the whole statement (the direct edge needs no map entry), and a hop
+/// line is additive — an address. A verified record with no grant in this mesh is
+/// not a key of it (a pairing in another mesh says nothing about this one).
+fn pair_from(section: &config::Mesh, records: &[node_store::Node], mesh: &str) -> Pair {
+    let mut keys: BTreeMap<String, String> = section
         .nodes
         .keys()
         .filter_map(|node| {
@@ -547,6 +553,14 @@ fn pair_from(section: &config::Mesh, records: &[node_store::Node]) -> Pair {
             record.pubkey.clone().map(|key| (node.clone(), key))
         })
         .collect();
+    for record in records {
+        if !record.verified || !record.grant(mesh).iter().any(|cap| cap == "message") {
+            continue;
+        }
+        if let Some(key) = record.pubkey.clone().filter(|key| !key.is_empty()) {
+            keys.entry(record.name.clone()).or_insert(key);
+        }
+    }
     Pair {
         relays: section.relays.clone(),
         status: section.status.clone(),
@@ -850,7 +864,26 @@ fn reach(declaration: &Declaration, from: &str, node: &str) -> Result<Hop, Strin
         return Err(format!("`{node}` is this box — a letter already here is handed to nobody"));
     }
     let Some(address) = declaration.address_of(node) else {
-        return Err(format!("`{node}` is not a node of mesh `{}`", declaration.mesh()));
+        // No hop line for it — but it may still be a key of this mesh (a verified
+        // record GRANTED here, the shape `mesh pair` writes without an address).
+        // That node's edge is the DIRECT one: the record's own address answers,
+        // and `poll` holds it for its own ask.
+        if declaration.key_of(node).is_none() {
+            return Err(format!("`{node}` is not a node of mesh `{}`", declaration.mesh()));
+        }
+        let record = node_store::load_nodes().into_iter().find(|r| r.name == node);
+        let Some(record) = record else {
+            return Err(format!(
+                "`{node}` is trusted in mesh `{}` but this box holds no record of it, so it has no \
+                 address to be handed a letter at",
+                declaration.mesh()
+            ));
+        };
+        return Ok(Hop {
+            next: node.to_string(),
+            mesh: declaration.mesh().to_string(),
+            held: record.never_dialled(),
+        });
     };
     if declaration.key_of(node).is_none() {
         return Err(format!(
