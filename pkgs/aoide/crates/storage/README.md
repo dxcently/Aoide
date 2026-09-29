@@ -55,7 +55,12 @@ by decision — no embedded database yet
   order), `status_of`, `gates`, `address_of`, `key_of`, and `name_of_key` —
   a charter mesh answers a key with the name on its CHARTER LINE, and only a
   pair mesh reads a name out of `state/nodes.json`, where the record IS the
-  declaration. `declarations()` returns one entry PER MESH (a `Loaded`):
+  declaration. `status_of(set, mesh, node)` is the same question asked of a
+  set the caller already holds — the ONE predicate the door, the route, the
+  drain and the poll ask before reaching a node by name, and the one
+  `reach` answers `down` with before an address picks a transport, so a
+  `down` node is never a hop and never a destination whichever lane would
+  have answered it. `declarations()` returns one entry PER MESH (a `Loaded`):
   each mesh loads on its own, so one that cannot be read is refused with the
   word that says why — its own charter's word (`no-charter-in-force`,
   `charter-tampered`, `local-io`, or the operator's) or `no-declaration` — and

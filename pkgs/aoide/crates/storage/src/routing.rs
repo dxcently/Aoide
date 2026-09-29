@@ -191,6 +191,17 @@ pub fn declared_name(set: &[Loaded], mesh: &str, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The declared status of `node` in `mesh`, over a set the caller already
+/// loaded: `charter::STATUS_VALUES` or `None`. The ONE predicate the door, the
+/// drain, the poll and the report ask before reaching a node by name — `None`
+/// for a mesh the set does not hold, a mesh it refuses, a node it does not
+/// declare, and a node declared with no status, because all four are "not
+/// declared `down` HERE" and only the second is worth telling apart from the
+/// rest at the call site ([`declaration_of`] answers that one).
+pub fn status_of<'a>(set: &'a [Loaded], mesh: &str, node: &str) -> Option<&'a str> {
+    declaration_of(set, mesh)?.as_ref().ok()?.status_of(node)
+}
+
 /// This box's own name in `mesh` — what `from` is for the four steps, for the
 /// hop an entry is signed as, and for the door's audit stamp.
 ///
@@ -869,6 +880,15 @@ fn reach(declaration: &Declaration, from: &str, node: &str) -> Result<Hop, Strin
     if node == from {
         return Err(format!("`{node}` is this box — a letter already here is handed to nobody"));
     }
+    // **`down` is decided HERE, before the address picks a lane.** Every step
+    // reads its target through this one call, and a node may be a grant of the
+    // mesh with no address line at all (the shape `mesh pair` writes, answered
+    // off the paired record) — so a check living inside the address branch alone
+    // would hand a letter to a node the mesh declared unreachable (MAIL.md
+    // §Status).
+    if declaration.status_of(node) == Some(charter::STATUS_DOWN) {
+        return Err(format!("`{node}` is declared `down` in mesh `{}`", declaration.mesh()));
+    }
     let Some(address) = declaration.address_of(node) else {
         // No hop line for it — but it may still be a key of this mesh (a verified
         // record GRANTED here, the shape `mesh pair` writes without an address).
@@ -896,9 +916,6 @@ fn reach(declaration: &Declaration, from: &str, node: &str) -> Result<Hop, Strin
             "`{node}` carries no identity key in mesh `{}`, so this box does not trust it there",
             declaration.mesh()
         ));
-    }
-    if declaration.status_of(node) == Some(charter::STATUS_DOWN) {
-        return Err(format!("`{node}` is declared `down` in mesh `{}`", declaration.mesh()));
     }
     let dial = charter::dial_of(address).map_err(|e| {
         format!("`{node}`'s address in mesh `{}` is not a transport: {e}", declaration.mesh())
@@ -1581,6 +1598,37 @@ mod tests {
         // that holds a `down` node's letters is a letter moved toward a node
         // the mesh declared unreachable.
         let out = route("osaka", "yomi", "home");
+        assert_eq!(outcome_word(&out), Some(NO_ROUTE), "{}", trail(&out));
+        assert!(trail(&out).contains("declared `down`"), "{}", trail(&out));
+        assert!(!trail(&out).contains("takes it"), "no hop was picked: {}", trail(&out));
+    }
+
+    /// **A `down` destination in a PAIR mesh is `no-route`, and is never handed
+    /// to the mesh's relay.** `mesh pair` writes an address per node and a
+    /// `[status]` line for the ones the operator quarantines; the relay here can
+    /// take the letter and must not, and the destination itself must not be
+    /// picked — `down` refuses fast, wherever the declaration lives.
+    #[test]
+    fn a_down_destination_in_a_pair_mesh_is_no_route_and_is_not_handed_to_a_relay() {
+        let (_guard, _env) = isolate();
+        let scratch = Scratch::new("pair-down");
+        let root = scratch.dir("osaka");
+        machine(&root, "osaka");
+        std::fs::write(
+            root.join("config.toml"),
+            "[mesh.home]\nrelays = [\"relay\"]\n\
+             [mesh.home.nodes]\nrelay = \"ssh://relay\"\nevo = \"ssh://evo\"\n\
+             [mesh.home.status]\nevo = \"down\"\n",
+        )
+        .unwrap();
+        node_store::save_nodes(&[record("relay", &"ab".repeat(32)), record("evo", &"cd".repeat(32))]).unwrap();
+
+        let set = set();
+        assert_eq!(status_of(&set, "home", "evo"), Some("down"), "the one predicate, by name");
+        assert_eq!(status_of(&set, "home", "relay"), None, "no status is not `down`");
+        assert_eq!(status_of(&set, "nowhere", "evo"), None, "a mesh the set does not hold names nothing");
+
+        let out = route("relay", "evo", "home");
         assert_eq!(outcome_word(&out), Some(NO_ROUTE), "{}", trail(&out));
         assert!(trail(&out).contains("declared `down`"), "{}", trail(&out));
         assert!(!trail(&out).contains("takes it"), "no hop was picked: {}", trail(&out));
