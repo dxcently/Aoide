@@ -933,6 +933,23 @@ pub fn mint_outbound_letter_in_mesh(
     mint_kind(ENTRY_TYPE_LETTER, from_name, to_node, to_name, text, mesh)
 }
 
+/// [`mint_outbound_letter_in_mesh`] with the SENDER's node name stated explicitly
+/// — the name the letter is signed as, which for a charter mesh is the name the
+/// charter gives this box's identity key and not its OS hostname
+/// (`routing::own_name_in`). `from.node` is inside the signed header, so the
+/// receiver's origin check and every hop's entry-1 check read it: a box whose
+/// hostname is not its charter line's name must be able to say so here.
+pub fn mint_outbound_letter_from(
+    from_node: &str,
+    from_name: &str,
+    to_node: &str,
+    to_name: &str,
+    text: &str,
+    mesh: &str,
+) -> Result<Envelope, String> {
+    mint_kind_from(ENTRY_TYPE_LETTER, from_node, from_name, to_node, to_name, text, mesh)
+}
+
 /// Mint the local envelope a `charter` letter spools under (P-CHARTER).
 ///
 /// The envelope is **bookkeeping only**: a charter container's payload is the
@@ -961,13 +978,27 @@ fn mint_kind(
     text: &str,
     mesh: &str,
 ) -> Result<Envelope, String> {
+    mint_kind_from(kind, &display::local_node_name(), from_name, to_node, to_name, text, mesh)
+}
+
+/// [`mint_kind`] with `from.node` stated: the one body both entry points share,
+/// so the two can never disagree about what a mint signs.
+fn mint_kind_from(
+    kind: &str,
+    from_node: &str,
+    from_name: &str,
+    to_node: &str,
+    to_name: &str,
+    text: &str,
+    mesh: &str,
+) -> Result<Envelope, String> {
     if !crate::node_store::valid_node_name(to_name) {
         return Err("invalid mailbox name: must match ^[a-z0-9][a-z0-9-]*$".to_string());
     }
     let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
     let header = Header {
         version: ENVELOPE_VERSION.to_string(),
-        from: Address { node: display::local_node_name(), name: from_name.to_string() },
+        from: Address { node: from_node.to_string(), name: from_name.to_string() },
         to: Address { node: to_node.to_string(), name: to_name.to_string() },
         kind: kind.to_string(),
         minted_at: now_iso_utc(),

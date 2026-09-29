@@ -442,13 +442,121 @@ pub fn route_for(
             format!("no line on mesh `{mesh}` carries this box's identity key"),
         ));
     };
-    aoide_storage::routing::Letter { from: &from, to: dest, mesh }.route(&set).outcome
+    let route = aoide_storage::routing::Letter { from: &from, to: dest, mesh }.route(&set);
+    match route.outcome {
+        // A mesh this box holds no declaration of is not a dead end: the
+        // destination's own record is the whole edge, which is the lane every
+        // box had before the four steps existed (see [`direct_edge`]).
+        Err(refusal) if refusal.reason == aoide_storage::routing::NO_DECLARATION => direct_edge(dest, mesh),
+        outcome => outcome,
+    }
+}
+
+/// The direct edge: the destination ITSELF as the hop, for a mesh this box holds
+/// no declaration of at all. That is the lane every box had before the four steps
+/// existed (a paired record and nothing else), and refusing it here would make
+/// the declarations' absence a send-time outage for every pre-P-M4 pair. The
+/// facts are the record's own — a stored key, and an address that is not `poll`
+/// (which is HELD, never dialled) — so this is step 1 with the record as the
+/// declaration, not a second routing rule: `no-route` where the record cannot
+/// take the letter either.
+fn direct_edge(dest: &str, mesh: &str) -> Result<aoide_storage::routing::Hop, aoide_storage::charter::Refusal> {
+    use aoide_storage::charter::Refusal;
+    let record = aoide_storage::node_store::load_nodes().into_iter().find(|n| n.name == dest);
+    let Some(record) = record else {
+        return Err(Refusal::new(
+            aoide_storage::routing::NO_ROUTE,
+            format!("`{dest}` is no record this box holds, and no declaration here names it"),
+        ));
+    };
+    if !record.verified {
+        return Err(Refusal::new(
+            aoide_storage::routing::NO_ROUTE,
+            format!("`{dest}` is not a verified record: pair first (`aoide pair`), or declare it in a mesh"),
+        ));
+    }
+    Ok(aoide_storage::routing::Hop {
+        next: dest.to_string(),
+        mesh: mesh.to_string(),
+        held: record.never_dialled(),
+    })
 }
 
 /// The word a caller reads when this box is not a member of the mesh it was
 /// asked to send in: the same answer `mail route` gives, so the command and the
 /// lane never disagree about whether the letter has a sender.
 pub const NOT_A_MEMBER: &str = "not-a-member";
+
+/// This box's own name in `mesh`, or `None` where the mesh names it not at all
+/// (`routing::own_name_in`): a charter mesh that does not carry this box's
+/// identity key has no sender.
+pub fn own_name(mesh: &str) -> Option<String> {
+    let set = aoide_storage::routing::declarations().ok()?;
+    let own = aoide_storage::identity::load_or_mint().ok()?.0.info().pubkey_hex;
+    aoide_storage::routing::own_name_in(&set, mesh, &own)
+}
+
+/// The mesh a send to `node` acts in where this box holds NO RECORD of it: the
+/// declarations that both name the destination and carry this box's own identity
+/// key, resolved by `--mesh`/home exactly as a record's grants are
+/// (`node_store::resolve_mesh_any`). Reported as `(message, data)`, the shape the
+/// command's own refusal prints.
+pub fn send_mesh(node: &str, asked: Option<&str>) -> Result<String, SendMeshError> {
+    let set = match aoide_storage::routing::declarations() {
+        Ok(set) => set,
+        Err(refusal) => {
+            return Err(SendMeshError::new(
+                format!("no route: {} — {}", refusal.reason, refusal.detail),
+                json!({ "reason": refusal.reason, "detail": refusal.detail, "node": node }),
+            ))
+        }
+    };
+    let own = match aoide_storage::identity::load_or_mint() {
+        Ok((kp, _)) => kp.info().pubkey_hex,
+        Err(e) => {
+            return Err(SendMeshError::new(
+                format!("this box's identity key cannot be read: {e}"),
+                json!({ "reason": "no-identity", "node": node }),
+            ))
+        }
+    };
+    let named: std::collections::BTreeSet<String> = set
+        .iter()
+        .filter(|loaded| loaded.declaration.as_ref().map(|d| d.declares(node)).unwrap_or(false))
+        .filter(|loaded| aoide_storage::routing::own_name_in(&set, &loaded.mesh, &own).is_some())
+        .map(|loaded| loaded.mesh.clone())
+        .collect();
+    if named.is_empty() && asked.is_none() {
+        return Err(SendMeshError::new(
+            format!(
+                "no mesh declares `{node}` at this node: it is no paired record, and no declaration here \
+                 names it in a mesh this box is a member of"
+            ),
+            json!({ "reason": "unknown-node", "name": node }),
+        ));
+    }
+    aoide_storage::node_store::resolve_mesh_any(asked, &named, &aoide_storage::config::home_mesh())
+        .map_err(|e| {
+            if asked.is_some_and(|m| !aoide_storage::node_store::valid_node_name(m)) {
+                SendMeshError::new(format!("--mesh: {e}"), json!({ "reason": "invalid-mesh", "mesh": asked }))
+            } else {
+                SendMeshError::new(format!("--mesh: {e}"), json!({ "reason": "mesh-ambiguous", "node": node }))
+            }
+        })
+}
+
+/// [`send_mesh`]'s refusal: the message the command prints and the `data` it
+/// carries, so the word and the sentence never drift apart.
+pub struct SendMeshError {
+    pub message: String,
+    pub data: serde_json::Value,
+}
+
+impl SendMeshError {
+    fn new(message: String, data: serde_json::Value) -> SendMeshError {
+        SendMeshError { message, data }
+    }
+}
 
 /// The record a drain DIALS for `node_name`: its own record where this box holds
 /// one, else the hop's declared ADDRESS turned into a dial target

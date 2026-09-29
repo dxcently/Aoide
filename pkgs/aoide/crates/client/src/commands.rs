@@ -5011,27 +5011,77 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
     // refuses, naming them). `origin_mesh` is signed into the header, so a
     // letter minted unnamed could never be deposited to a peer trusted only
     // outside the home mesh.
+    //
+    // A destination this box holds NO RECORD of is a charter node: the meshes
+    // that both DECLARE it and carry this box's own identity key are the ones a
+    // send can act in (`mail route`'s own resolution), so a charter node this box
+    // never paired with has a route and no record.
     let record = aoide_storage::node_store::load_nodes().into_iter().find(|p| p.name == node);
-    let mesh = match record.as_ref().map(|p| request_mesh(p, inv.flags.get("mesh").map(String::as_str), "message")) {
-        Some(Ok(mesh)) => mesh,
-        Some(Err(e)) => return Outcome::error(cmd, format!("--mesh: {e}")).with_data(json!({ "reason": "mesh-ambiguous", "node": node })),
-        None => return Outcome::error(cmd, format!("no node named `{node}`")).with_data(json!({ "reason": "unknown-node", "name": node })),
+    let asked = inv.flags.get("mesh").map(String::as_str).filter(|m| !m.trim().is_empty());
+    let mesh = match &record {
+        Some(p) => match request_mesh(p, asked, "message") {
+            Ok(mesh) => mesh,
+            Err(e) => {
+                return Outcome::error(cmd, format!("--mesh: {e}"))
+                    .with_data(json!({ "reason": "mesh-ambiguous", "node": node }))
+            }
+        },
+        None => match crate::mail_wire::send_mesh(node, asked) {
+            Ok(mesh) => mesh,
+            Err(e) => return Outcome::error(cmd, e.message).with_data(e.data),
+        },
     };
 
-    let envelope = match aoide_storage::mail::mint_outbound_letter_in_mesh(&from, node, name, &text, &mesh) {
-        Ok(e) => e,
-        Err(e) => return Outcome::error(cmd, format!("state/mail: {e}")),
+    // The name this letter is signed as: this box's declared name in that mesh
+    // (`mail_wire::route_for`'s own resolution). A charter mesh that does not
+    // carry this box's key has no sender, so there is nothing to send as.
+    let Some(from_node) = crate::mail_wire::own_name(&mesh) else {
+        return Outcome::error(
+            cmd,
+            format!("this box is not a member of mesh `{mesh}`: no line on its declaration carries its identity key"),
+        )
+        .with_data(json!({ "reason": crate::mail_wire::NOT_A_MEMBER, "mesh": mesh, "to": node }));
     };
+
+    // The route, read BEFORE anything is minted or spooled: a letter with no
+    // route is the sender's own answer (`no-route`, `zone-violation`, or the
+    // letter's mesh's word), and nothing is written for it.
+    let hop = match crate::mail_wire::route_for(node, &mesh) {
+        Ok(hop) => hop,
+        Err(refusal) => {
+            return Outcome::error(
+                cmd,
+                format!("no route to {node}/{name} in mesh `{mesh}`: {} — {}", refusal.reason, refusal.detail),
+            )
+            .with_data(json!({
+                "reason": refusal.reason,
+                "detail": refusal.detail,
+                "to": node,
+                "mesh": mesh,
+            }))
+        }
+    };
+
+    let envelope =
+        match aoide_storage::mail::mint_outbound_letter_from(&from_node, &from, node, name, &text, &mesh) {
+            Ok(e) => e,
+            Err(e) => return Outcome::error(cmd, format!("state/mail: {e}")),
+        };
     let msgid = envelope.msgid.clone();
-    // P-SEAL: the entry is built at MINT — sealed to the destination's
+    // P-SEAL + P-M4: the entry is built at MINT — sealed to the destination's
     // binding when one is held, plaintext when none is, parked when the one
-    // held is not usable now (`mail_wire::spool_entry`).
-    let entry = match crate::mail_wire::spool_entry(node, node, &mesh, envelope.clone(), hold) {
+    // held is not usable now (`mail_wire::spool_entry`) — and it is spooled
+    // toward the node the ROUTE picked, which is the destination itself on a
+    // direct edge and a relay otherwise. `hop.held` (a `poll` node, or one
+    // declared `hold`) holds the flavor regardless of what the caller asked.
+    let next = hop.next.clone();
+    let hold = hold || hop.held;
+    let entry = match crate::mail_wire::spool_entry(node, &next, &mesh, envelope.clone(), hold) {
         Ok(entry) => entry,
         Err(e) => return Outcome::error(cmd, format!("state/outbox: {e}")),
     };
     let sealed = entry.is_sealed();
-    if let Err(e) = aoide_storage::outbox::write_entry(node, &entry) {
+    if let Err(e) = aoide_storage::outbox::write_entry(&next, &entry) {
         return Outcome::error(cmd, format!("state/outbox: {e}"));
     }
     // Best-effort — this command already reported the WRITE above and
@@ -5040,13 +5090,15 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
     // `data.delivery` below (and a later `mail outbox`) shows what
     // happened, and the daemon's own periodic drain (or the next `mail
     // send`/deposit from this node) tries again.
-    let delivery = match crate::mail_wire::drain_node(node) {
-        Ok(()) => post_send_delivery(node, &msgid),
+    let delivery = match crate::mail_wire::drain_node(&next) {
+        Ok(()) => post_send_delivery(&next, &msgid),
         Err(e) => delivery_shape("failed", Some(e), Some("local"), None, false),
     };
     let mut data = serde_json::to_value(&envelope).unwrap_or_default();
     if let Some(obj) = data.as_object_mut() {
         obj.insert("delivery".to_string(), delivery);
+        obj.insert("next".to_string(), json!(next));
+        obj.insert("nextMesh".to_string(), json!(hop.mesh));
     }
 
     // L11 (the branch review): three states, not two. `!is_sealed()` was
@@ -5066,14 +5118,14 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
         cmd,
         if hold {
             format!(
-                "held for {node}/{name} (msgid {msgid}, {disposition}) — a drain never dials it; it leaves when {node} polls"
+                "held for {node}/{name} (msgid {msgid}, {disposition}) — a drain never dials it; it leaves when {next} polls"
             )
         } else {
             format!("spooled to {node}/{name} (msgid {msgid}, {disposition})")
         },
     )
     .changed(vec![format!(
-        "state/outbox/{node}/: +1 {} entry",
+        "state/outbox/{next}/: +1 {} entry",
         if hold { "hold" } else { "now" }
     )])
     .with_data(data)
