@@ -134,13 +134,19 @@ pub const ENTRY_TYPE_RECEIPT: &str = "receipt";
 /// filing it as correspondence would file a letter whose only content is a
 /// claim about itself.
 pub const REFUSAL_NOT_CORRESPONDENCE: &str = "not-correspondence";
-/// `Header.kind`'s value for a `charter` letter (P-CHARTER) — a signed charter
-/// travelling as mail. Unlike a letter and a receipt this kind is never FILED:
-/// the enclosed charter is applied to `state/mesh/`, and the letter's local
+/// `Header.kind`/`Entry.kind`'s value for a `charter` letter (P-CHARTER) — a signed
+/// charter travelling as mail. Unlike a letter and a receipt this kind is never
+/// FILED: the enclosed charter is applied to `state/mesh/`, and the letter's local
 /// envelope exists only as the outbox's bookkeeping key. Which is also why
 /// [`arms`] is false for it and why the drain retires it on a delivered
 /// deposit instead of waiting for an ack — there is no mailbox to ack from.
 pub const ENTRY_TYPE_CHARTER: &str = "charter";
+/// `Entry.kind`'s value for a SEALED CONTAINER this node is relaying
+/// (MAIL.md §Transit): a letter in transit, held as the container and its
+/// routing metadata — never an opened envelope, never a mailbox name, and never
+/// letter bytes. A hub neither opens it nor files it as correspondence, so this
+/// kind is `false` for [`arms`] like a receipt, and readers hide it.
+pub const ENTRY_TYPE_TRANSIT: &str = "transit";
 
 /// Which entry kinds ARM a reader's doorbell. A `receipt` (a delivery
 /// record, or a deposit ack filed under the origin's name) never does, and
@@ -210,6 +216,34 @@ pub struct Entry {
     /// other hop yet.
     pub via: String,
     pub envelope: Envelope,
+}
+
+/// One `base.jsonl` line holding a SEALED CONTAINER this node is relaying
+/// (MAIL.md §Transit): the container and the routing metadata, never an opened
+/// envelope. No mailbox name reaches this disk — a hub cannot open the
+/// container, so it has no names to write, and `to.name` lives only inside `ct`.
+///
+/// Written by [`file_transit`], one line per hop, keyed by the container's
+/// `msgid` and local `seq` like every other entry, so `next_seq` counts it and
+/// the append-only/truncate-a-torn-tail discipline is the same one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransitEntry {
+    pub seq: u64,
+    pub received_at: String,
+    /// Always [`ENTRY_TYPE_TRANSIT`] — the discriminator the untagged read of
+    /// this file turns on, and the reason a `transit` line and a correspondence
+    /// line can share one store.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// The hop that deposited it here.
+    pub via: String,
+    pub container: crate::seal::Container,
+    /// The node this hop hands it to next, and the zone it rides there.
+    pub next: String,
+    pub mesh: String,
+    /// The far end never dials it: `next` polls, or is declared `hold`.
+    pub held: bool,
 }
 
 /// One reader's high-water mark, like an NNTP `.newsrc` line (MAIL.md
@@ -583,14 +617,94 @@ fn migrate_cursors_if_needed() -> Result<(), String> {
 /// write path does that). **Raw — assumes the caller already holds the
 /// lock**, same contract every other function in this "unlocked" family
 /// shares.
-fn read_entries_unlocked() -> Result<Vec<Entry>, String> {
+///
+/// Both line shapes come back: a correspondence [`Entry`] and a [`TransitEntry`]
+/// are disjoint (one has an envelope, the other a container), so one untagged
+/// read covers the store and `next_seq` counts every line — a `transit` line the
+/// seq walk skipped would hand the next writer a number already in use.
+fn read_lines_unlocked() -> Result<Vec<BaseLine>, String> {
     let path = base_path();
     let raw = match std::fs::read_to_string(&path) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
-    Ok(raw.lines().filter_map(|l| serde_json::from_str::<Entry>(l).ok()).collect())
+    Ok(raw.lines().filter_map(|l| serde_json::from_str::<BaseLine>(l).ok()).collect())
+}
+
+/// One `base.jsonl` line, as the store holds it.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum BaseLine {
+    Entry(Box<Entry>),
+    Transit(Box<TransitEntry>),
+}
+
+/// Every CORRESPONDENCE entry — the readers' own view. A relayed container is
+/// hidden from them (MAIL.md §Store: "readers hide them unless asked"): it is
+/// addressed to a mailbox on another machine, so no local reader has anything to
+/// read, and a hub that showed one would be showing a letter it cannot open.
+/// Raw — assumes the caller already holds the lock.
+fn read_entries_unlocked() -> Result<Vec<Entry>, String> {
+    Ok(read_lines_unlocked()?
+        .into_iter()
+        .filter_map(|line| match line {
+            BaseLine::Entry(entry) => Some(*entry),
+            BaseLine::Transit(_) => None,
+        })
+        .collect())
+}
+
+/// Every TRANSIT entry this node holds — the hub's own view of what it is
+/// carrying (its routing metadata and the sealed container). Raw — assumes the
+/// caller holds the lock.
+pub fn read_transit_unlocked() -> Result<Vec<TransitEntry>, String> {
+    Ok(read_lines_unlocked()?
+        .into_iter()
+        .filter_map(|line| match line {
+            BaseLine::Transit(entry) => Some(*entry),
+            BaseLine::Entry(_) => None,
+        })
+        .collect())
+}
+
+/// Append one SEALED CONTAINER to `base.jsonl` as a `transit` entry: this node
+/// is relaying it (MAIL.md §Transit). The container goes in verbatim — it is
+/// what a retry resends and what the spool toward `next` holds — beside the
+/// routing metadata a hop needs (`next`, `mesh`, `held`, and the hop that
+/// deposited it).
+///
+/// Deliberately NOT a `seen.jsonl` write: `seen` is the FILING record
+/// (`mail::deposit`'s own dedup memory for correspondence), while a container's
+/// dedup memory is `containers.jsonl`, written by the caller once this line has
+/// landed. So there is no write-order pair here — this one append is the whole
+/// step.
+pub fn file_transit(
+    container: &crate::seal::Container,
+    next: &str,
+    mesh: &str,
+    held: bool,
+    via: &str,
+) -> Result<TransitEntry, String> {
+    let next = next.to_string();
+    let mesh = mesh.to_string();
+    let via = via.to_string();
+    let container = container.clone();
+    with_lock(move || {
+        let seq = next_seq()?;
+        let entry = TransitEntry {
+            seq,
+            received_at: now_iso_utc(),
+            kind: ENTRY_TYPE_TRANSIT.to_string(),
+            via,
+            container,
+            next,
+            mesh,
+            held,
+        };
+        append_base_line(&entry)?;
+        Ok(entry)
+    })
 }
 
 /// Tolerant whole-file read of `seen.jsonl`'s `msgid` column into a set —
@@ -608,12 +722,20 @@ fn read_seen_msgids_unlocked() -> Result<HashSet<String>, String> {
     Ok(raw.lines().filter_map(|l| serde_json::from_str::<SeenEntry>(l).ok()).map(|s| s.msgid).collect())
 }
 
-/// `last line's seq + 1`, read under the lock (MAIL.md "Store"). Raw —
-/// assumes the caller already holds the lock and has already truncated any
-/// torn tail (every caller here is [`file_entry`]/[`migrate_if_needed`],
-/// both reached only through [`with_lock`]).
+/// `last line's seq + 1`, read under the lock (MAIL.md "Store"). Counts BOTH
+/// line shapes — a `transit` line holds a sequence number like any other, and a
+/// writer that reused one would collide with it. Raw — assumes the caller
+/// already holds the lock and has already truncated any torn tail (every caller
+/// here is [`file_entry`]/[`file_transit`]/[`migrate_if_needed`], all reached
+/// only through [`with_lock`]).
 fn next_seq() -> Result<u64, String> {
-    Ok(read_entries_unlocked()?.last().map(|e| e.seq + 1).unwrap_or(1))
+    Ok(read_lines_unlocked()?
+        .last()
+        .map(|line| match line {
+            BaseLine::Entry(entry) => entry.seq + 1,
+            BaseLine::Transit(entry) => entry.seq + 1,
+        })
+        .unwrap_or(1))
 }
 
 /// Truncate `base.jsonl` back to its last complete (`\n`-terminated) line —
@@ -641,8 +763,10 @@ fn truncate_torn_tail(path: &std::path::Path) -> Result<(), String> {
 }
 
 /// Append one line to `base.jsonl`: truncate any torn tail, append,
-/// `fsync`. Raw — assumes the caller already holds the lock.
-fn append_base_line(entry: &Entry) -> Result<(), String> {
+/// `fsync`. Raw — assumes the caller already holds the lock. One shape for both
+/// line kinds (`mail::Entry`, `mail::TransitEntry`), so the two never drift on
+/// how a line is written.
+fn append_base_line<T: Serialize>(entry: &T) -> Result<(), String> {
     let path = base_path();
     truncate_torn_tail(&path)?;
     let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;

@@ -225,6 +225,38 @@ impl OutboxEntry {
         Self { flavor: FLAVOR_HOLD.to_string(), ..Self::sealed(envelope, container) }
     }
 
+    /// A spooled **transit** container: this box is relaying a letter it cannot
+    /// open, so there is no envelope to redact — the bookkeeping shape is built
+    /// from the container's own outer claims (P-M5's `mail outbox` reads
+    /// `msgid`, `from.node`, `to.node` and `type`), and `text` and both mailbox
+    /// names stay empty. What the letter says is inside `ct` and nowhere else on
+    /// this disk.
+    pub fn transit(container: crate::seal::Container) -> Self {
+        Self::transit_bookkeeping(container, FLAVOR_NOW)
+    }
+
+    /// [`Self::transit`], held: the `next` hop is a `poll` node or is declared
+    /// `hold`, so it leaves only through that node's own ask.
+    pub fn transit_held(container: crate::seal::Container) -> Self {
+        Self::transit_bookkeeping(container, FLAVOR_HOLD)
+    }
+
+    fn transit_bookkeeping(container: crate::seal::Container, flavor: &str) -> Self {
+        let header = crate::mail::Header {
+            version: crate::mail::ENVELOPE_VERSION.to_string(),
+            from: crate::mail::Address { node: container.origin.node.clone(), name: String::new() },
+            to: crate::mail::Address { node: container.to.node.clone(), name: String::new() },
+            kind: crate::mail::ENTRY_TYPE_TRANSIT.to_string(),
+            // The container carries no mint time of its own; the spool needs one
+            // to sort oldest-first, and the moment this hop took custody is the
+            // honest one. `mail outbox` renders it.
+            minted_at: crate::time::now_iso_utc(),
+            origin_mesh: container.origin_mesh.clone(),
+        };
+        let envelope = Envelope { header, text: String::new(), sig: String::new(), msgid: container.msgid.clone() };
+        Self { envelope, container: Some(container), flavor: flavor.to_string(), tries: 0, last_try_at: String::new(), last_outcome: String::new(), refused: false }
+    }
+
     /// What this entry hands the far end on a deposit: the container when
     /// there is one, the plaintext envelope otherwise.
     pub fn is_sealed(&self) -> bool {
@@ -353,6 +385,7 @@ pub fn reseal_entry(node: &str, entry: &OutboxEntry, now: &str) -> Result<Reseal
         &binding,
         &entry.envelope.header.origin_mesh,
         &entry.envelope.header.origin_mesh,
+        node,
         node,
         now,
     )?;
@@ -800,27 +833,36 @@ fn clear_marker_pointing_to_msgid(node: &str, msgid: &str) {
 /// names a `msgid` that node's spool doesn't hold (wrong text, an
 /// already-retired entry, or a stale replay).
 ///
-/// The two checks fall out of ONE path lookup rather than needing to be
-/// stated separately: an outbox entry is always spooled under the exact
-/// node its own `envelope.header.to.node` names ([`write_entry`]'s only
-/// caller convention), so indexing by `ack.header.from.node` — the
-/// receipt's ORIGIN, already proven genuine by [`crate::mail::deposit`]'s
-/// own origin-signature check before this function is ever reached, never
-/// re-verified here — IS "verified signer is entry's `to.node`"; and
-/// [`entry_path`] keying the file by `msgid` makes `ack.text` naming the
-/// wrong one a plain miss, never a partial match. A forged ack (wrong
-/// signer) never gets this far — [`crate::mail::deposit`] would have
-/// already refused it as `unverified-origin`.
+/// **The entry is found by `msgid` across the spool, and the `to.node` check is
+/// what makes that safe.** Under transit a letter's entry lives under the HOP it
+/// was handed to, not under its destination — the destination's spool was never
+/// this box's to write — so "the spool directory named by `ack.header.from.node`"
+/// is no longer where its entry is. What still identifies the entry is what spec
+/// item 7 says: a receipt from `X` naming `msgid` M retires an entry whose own
+/// `to.node` is `X`. So the lookup is the file named M in any node's spool, kept
+/// only when that entry's `envelope.header.to.node` is the ack's signer — no
+/// looser than before, and blind to where a hop put it. The ack's signer is
+/// already proven genuine by [`crate::mail::deposit`]'s own origin-signature
+/// check before this function is reached, never re-verified here.
 pub fn retire_by_ack(ack: &Envelope) -> Result<Option<String>, String> {
     if ack.header.kind != crate::mail::ENTRY_TYPE_RECEIPT {
         return Ok(None);
     }
     let acked_msgid = ack.text.clone();
-    if remove_entry(&ack.header.from.node, &acked_msgid)? {
-        Ok(Some(acked_msgid))
-    } else {
-        Ok(None)
+    let from = ack.header.from.node.clone();
+    for node in nodes_with_outbox()? {
+        if !entry_path(&node, &acked_msgid).exists() {
+            continue;
+        }
+        let to_node = list_entries(&node)?
+            .into_iter()
+            .find(|entry| entry.envelope.msgid == acked_msgid)
+            .map(|entry| entry.envelope.header.to.node);
+        if to_node.as_deref() == Some(from.as_str()) && remove_entry(&node, &acked_msgid)? {
+            return Ok(Some(acked_msgid));
+        }
     }
+    Ok(None)
 }
 
 /// This link's current backoff state, if any (`None` = not held off).
@@ -1589,6 +1631,7 @@ mod sealed_spool_tests {
             &binding,
             &envelope.header.origin_mesh,
             &envelope.header.origin_mesh,
+            &me,
             &me,
             &crate::time::now_iso_utc(),
         )

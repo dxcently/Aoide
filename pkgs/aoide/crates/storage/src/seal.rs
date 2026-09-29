@@ -52,6 +52,7 @@
 //! reaching the raw bytes would mean either a second direct cryptography
 //! dependency or a hand-rolled bech32 decoder — both refused.
 
+use crate::charter::Refusal;
 use crate::fs;
 use crate::identity;
 use crate::mail;
@@ -901,6 +902,11 @@ pub const ADDRESSING_MISMATCH: &str = "addressing-mismatch";
 pub const ZONE_VIOLATION: &str = "zone-violation";
 /// Refusal: the hop chain does not walk from `msgid` to self.
 pub const BROKEN_CHAIN: &str = "broken-chain";
+/// Refusal: the chain already names THIS box, so the letter has been here
+/// already — a loop, dropped once rather than forwarded into a bounce. Distinct
+/// from the dedup gate's `duplicate`: a loop can come back before anything was
+/// ever filed, and a hub must not carry a letter it carried once already.
+pub const CHAIN_LOOP: &str = "loop";
 /// Refusal: a container for a suite this build does not implement.
 pub const UNSUPPORTED_SUITE: &str = "unsupported-suite";
 /// Refusal: a container whose frame version this build does not know. Its own
@@ -989,16 +995,19 @@ fn hop_entry_bytes(
 /// written here, so a caller that fails to spool the result has lost
 /// nothing but the work.
 ///
-/// The origin becomes the first hop: entry 1 names the origin itself and
-/// the node it hands the letter to, signed under the origin's own identity
-/// key, so the record of who handed the letter to whom starts at the
-/// machine that wrote it and a relay cannot erase it.
+/// `to_node` is the DESTINATION the container is addressed to (and what it is
+/// sealed to); `next` is the node this box hands it to FIRST — the route's own
+/// answer, which for a direct edge is the destination itself. The origin
+/// becomes the first hop: entry 1 names the origin itself and `next`, signed
+/// under the origin's own identity key, so the record of who handed the letter
+/// to whom starts at the machine that wrote it and a relay cannot erase it.
 pub fn seal_envelope(
     envelope: &mail::Envelope,
     binding: &Binding,
     origin_mesh: &str,
     mesh: &str,
     to_node: &str,
+    next: &str,
     at: &str,
 ) -> Result<Container, String> {
     let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
@@ -1048,10 +1057,10 @@ pub fn seal_envelope(
     container.sig = wire_auth::sign_hex(&kp, &outer_bytes(&ctx, &ct));
     container.transit.push(TransitEntry {
         node: ctx.origin_node.clone(),
-        next: to_node.to_string(),
+        next: next.to_string(),
         at: at.to_string(),
         mesh: mesh.to_string(),
-        sig: wire_auth::sign_hex(&kp, &hop_bytes(&msgid, &msgid, &ctx.origin_node, to_node, at, mesh)),
+        sig: wire_auth::sign_hex(&kp, &hop_bytes(&msgid, &msgid, &ctx.origin_node, next, at, mesh)),
     });
     Ok(container)
 }
@@ -1332,7 +1341,32 @@ pub enum ContainerOutcome {
         digest: String,
     },
     Duplicate { filed_letter: bool },
+    /// This box is not the destination: the container is a letter in transit and
+    /// this hop carries it on (MAIL.md §Transit). `container` is what it hands
+    /// on — the same bytes with this box's own chained hop signature appended,
+    /// and `mesh` rewritten only where this box IS the declared gate. Nothing is
+    /// filed as correspondence, no reader is rung and NO ACK is owed: a hub that
+    /// acked would tell the origin a letter arrived that never did.
+    /// [`file_transit_hop`] is what puts `container` on this box's own disk
+    /// (a `transit` entry) and in the spool toward `next`, and `digest` is the
+    /// dedup digest to record once that write has landed.
+    Hopped(Box<TransitHop>),
     Refused { reason: String, detail: String },
+}
+
+/// One hop's step: the container as it leaves this box, and where it goes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TransitHop {
+    /// The container with this hop's entry appended (and `mesh` rewritten where
+    /// this box is the gate the letter's own mesh declares).
+    pub container: Box<Container>,
+    pub next: String,
+    /// The zone the letter rides when it arrives at `next`.
+    pub mesh: String,
+    /// The far end never dials it: `next` is a `poll` node, or is declared
+    /// `hold`. Its own ask is what moves the letter.
+    pub held: bool,
+    pub digest: String,
 }
 
 impl std::fmt::Debug for ContainerOutcome {
@@ -1349,6 +1383,13 @@ impl std::fmt::Debug for ContainerOutcome {
             ContainerOutcome::Duplicate { filed_letter } => f
                 .debug_struct("Duplicate")
                 .field("filed_letter", filed_letter)
+                .finish(),
+            ContainerOutcome::Hopped(hop) => f
+                .debug_struct("Hopped")
+                .field("msgid", &hop.container.msgid)
+                .field("next", &hop.next)
+                .field("mesh", &hop.mesh)
+                .field("held", &hop.held)
                 .finish(),
             ContainerOutcome::Applied { mesh, version, rekeyed, .. } => f
                 .debug_struct("Applied")
@@ -1377,27 +1418,29 @@ impl std::fmt::Debug for ContainerOutcome {
 /// P-CHARTER carries `origin_mesh: ""` and an un-upgraded peer sends no
 /// `X-Aoide-Mesh`, and both mean "the home mesh", which is where the design
 /// says such a request is evaluated (HTTPS-MESH-API.md "Trust per mesh":
-/// "A request that names no mesh … is evaluated in the home mesh only"). So a
-/// `""` container against a request signed for the home mesh is ACCEPTED
+/// "A request that names no mesh … is evaluated in the home mesh only"). A
+/// `""` container against a request signed for the home mesh is accepted
 /// (review N1: without this every letter minted by main was undepositable
-/// forever, and the taught fix named something the sender could not change),
-/// and a `""` container against a request signed for `away` is refused, as a
-/// named container against `away` would be. Pure.
-fn mesh_matches(container_mesh: &str, request_mesh: &str) -> bool {
-    let named = |m: &str| {
-        let t = m.trim();
-        if t.is_empty() { crate::config::home_mesh() } else { t.to_ascii_lowercase() }
-    };
-    named(container_mesh) == named(request_mesh)
-}
-
+/// forever, and the taught fix named something the sender could not change).
+///
+/// **Who the container belongs to is not this comparison's business any more.**
+/// The mesh a deposit is made in is the one the depositing hop SIGNED for, and
+/// what proves the letter may ride it is the hop chain ([`walk_chain_with`]'s
+/// zone clause): the last hop signed that zone, and every crossing was signed by
+/// the mesh's declared gate. `container.mesh` is hop-mutable and read by nobody
+/// here.
 /// `aoide/mailDeposit`'s sealed half (P-SEAL): verify the container and hand
-/// the inner envelope back for filing.
+/// the inner envelope back for filing — or, when this box is not the
+/// destination, return the hop that carries it on. Every read it makes is a
+/// per-request one: the declarations, the origin's key and this box's own name
+/// all come from what is on disk NOW, so a declaration change takes effect on
+/// the next deposit with no reload.
 pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<ContainerOutcome, String> {
     let refusal = |reason: &str, detail: String| ContainerOutcome::Refused {
         reason: reason.to_string(),
         detail,
     };
+    let set = crate::routing::declarations().map_err(|r| format!("{}: {}", r.reason, r.detail))?;
 
     // 2. Recompute ctx from the outer fields, never from the wire.
     if container.v != CONTAINER_VERSION {
@@ -1433,56 +1476,34 @@ pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<Co
     // charter container names no board, and `check_purpose_board` above has
     // already refused one that does.
     if container.purpose == PURPOSE_CHARTER {
-        return deposit_charter(container, &ctx, &ct, &sig);
+        return deposit_charter(container, &ctx, &ct, &sig, request_mesh);
     }
 
     // 3. The outer origin signature, under the key `origin.key` names,
-    //    resolved through the paired record (a charter mesh is P-CHARTER's).
-    let nodes = node_store::load_nodes();
-    let Some(origin) = nodes.iter().find(|n| n.name == ctx.origin_node) else {
-        return Ok(refusal("unverified-origin", format!("no node named `{}`", ctx.origin_node)));
+    //    resolved through the declaration of the mesh the ORIGIN signed in
+    //    (`ctx.origin_mesh`) — a charter line for a charter mesh, a paired
+    //    record for a pair mesh — and a paired record alone only where that
+    //    mesh has no declaration at all. One key is tried, the one that name
+    //    maps to; the connection-signature ladder that tries every verified
+    //    key must not be reused here, or a paired node signing as another
+    //    paired node would file under the wrong name.
+    let Some(recorded) = origin_key_in(&ctx.origin_mesh, &ctx.origin_node) else {
+        return Ok(refusal(
+            "unverified-origin",
+            format!("`{}` has no key on record in mesh `{}`", ctx.origin_node, ctx.origin_mesh),
+        ));
     };
-    let Some(recorded) = origin.pubkey.as_deref() else {
-        return Ok(refusal("unverified-origin", format!("`{}` has no key on record", ctx.origin_node)));
-    };
-    if hex_decode(recorded).as_deref() != Some(ctx.origin_key.as_slice()) {
+    if hex_decode(&recorded).as_deref() != Some(ctx.origin_key.as_slice()) {
         return Ok(refusal(
             "unverified-origin",
             format!("`{}` signs as a key this node does not have on record", ctx.origin_node),
         ));
     }
-    if !wire_auth::verify_signature_hex(recorded, &outer_bytes(&ctx, &ct), &container.sig) {
+    if !wire_auth::verify_signature_hex(&recorded, &outer_bytes(&ctx, &ct), &container.sig) {
         return Ok(refusal("unverified-origin", "the outer signature does not verify".to_string()));
     }
 
-    // 4. The mesh the letter is carried in, checked AFTER the origin
-    //    signature and against SIGNED values only (review finding 4, and the
-    //    design ruling it carries): `ctx.origin_mesh` is signed by the
-    //    origin, and `request_mesh` is the mesh the caller's own per-request
-    //    signature covers — the two must agree, because on the direct lane
-    //    the carrier IS the origin. `container.mesh` is deliberately NOT an
-    //    input: it is hop-mutable by design (HTTPS-MESH-API.md "Container":
-    //    `originMesh` is immutable inside `ctx`, `mesh` is hop-mutable
-    //    outside it), so consulting it here would let any spooling relay or
-    //    TLS edge turn an accepted deposit into a permanent refusal by
-    //    flipping one unsigned byte — and would give the sender a field to
-    //    lie in. P-M4's transit is where a hop's `mesh` is checked, at the
-    //    hop, against the zone clause.
-    //
-    //    This is the same refusal shape the door returns, one layer down:
-    //    the letter rides ONE mesh and its grant is read there.
-    if !mesh_matches(&ctx.origin_mesh, request_mesh) {
-        return Ok(refusal(
-            "mesh-mismatch",
-            format!(
-                "the container was minted in mesh `{}` but this request is signed for mesh `{request_mesh}` \
-                 — a letter rides one mesh, and its grant is read there",
-                ctx.origin_mesh
-            ),
-        ));
-    }
-
-    // 5. Dedup, before anything is opened.
+    // 4. Dedup, before anything is opened.
     let digest = hex_encode(&sha256(&dedup_bytes(&ctx, &ct, &sig)));
     match check_seen(container, &digest)? {
         Seen::Collision => {
@@ -1503,17 +1524,27 @@ pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<Co
         }
     }
 
-    // Destination branch: self is `to.node`. The ADDRESS form of this box's own
-    // name (`display::local_node_name`): whoever minted the container wrote the
-    // sender-side node name, which is that form on every host.
-    if container.to.node != crate::display::local_node_name() {
-        // Not ours to open. A hub reaching here has spooled it onward
-        // without ever calling this; a direct-lane receiver that is not the
-        // destination has nothing to do with it either.
-        return Ok(refusal(
-            ADDRESSING_MISMATCH,
-            format!("container is addressed to `{}`, not this node", container.to.node),
-        ));
+    // 5. Whose letter is this? This box's own names in that zone are the charter
+    //    line's name for its identity key (`routing::own_name_in` — the policy
+    //    name, D5) and the address form the origin wrote into `to.node`.
+    let (own_key, local) = own_key_and_local_name()?;
+    let declared = crate::routing::own_name_in(&set, request_mesh, &own_key);
+    if container.to.node != local && declared.as_deref() != Some(container.to.node.as_str()) {
+        // A letter in transit: nothing on this branch opens it, so the chain is
+        // checked here, without a key — every hop's own signature, every
+        // crossing by a declared gate, and the last hop signed in the zone the
+        // depositing hop is speaking in.
+        if let Err(refusal) = walk_chain(container, &ctx, request_mesh) {
+            return Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail });
+        }
+        return match hop_here(
+            container, &ctx, request_mesh, &own_key, declared.as_deref().unwrap_or(&local), digest,
+        )? {
+            HopStep::Hop(hop) => Ok(ContainerOutcome::Hopped(Box::new(hop))),
+            HopStep::Refused(refusal) => {
+                Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail })
+            }
+        };
     }
 
     // 1. Open.
@@ -1603,11 +1634,115 @@ pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<Co
     if !mail::verify_origin_signature(&envelope) {
         return Ok(refusal("unverified-origin", "the inner envelope signature does not verify".to_string()));
     }
-    // 7. Walk the chain.
-    if let Err(e) = walk_chain(container, &ctx, &nodes) {
-        return Ok(refusal(BROKEN_CHAIN, e));
+    // 7. Walk the chain, in the zone the depositing hop signed for.
+    if let Err(refusal) = walk_chain(container, &ctx, request_mesh) {
+        return Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail });
     }
     Ok(ContainerOutcome::Opened { envelope: Box::new(envelope), digest })
+}
+
+/// This box's identity key (bare hex) and the address form of its own name
+/// (`display::local_node_name`, which is what every mint writes into `to.node`).
+/// Minting on a first touch is the ordinary path here, exactly as it is at mint
+/// and at every sealing read.
+fn own_key_and_local_name() -> Result<(String, String), String> {
+    let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
+    Ok((kp.info().pubkey_hex, crate::display::local_node_name()))
+}
+
+/// The key `node` signs with in `mesh` — that mesh's declaration (a charter line
+/// or a paired record), and a paired record alone only where the mesh has NO
+/// declaration at all, which is the pre-charter lane.
+fn origin_key_in(mesh: &str, node: &str) -> Option<String> {
+    if let Ok(declaration) = crate::routing::Declaration::load(mesh) {
+        return declaration.key_of(node).map(str::to_string);
+    }
+    node_store::load_nodes()
+        .iter()
+        .find(|n| n.name == node)
+        .and_then(|n| n.pubkey.clone())
+}
+
+/// One hop of transit: this box is not the destination, so it carries the
+/// container on rather than opening it (MAIL.md §Transit).
+///
+/// A letter the chain already names THIS box dies here: a hop that hands a
+/// letter back to a machine that already carried it is a loop, and the second
+/// guard (`msgid` seen, at the dedup gate above) is not enough on its own —
+/// a loop can come back before anything was ever filed.
+///
+/// The route is the four steps over the declarations in force, read as THIS
+/// box's own declared name in the zone the depositing hop signed for. Only the
+/// route's answer decides where the letter goes, and only a route that names
+/// this box as the gate rewrites `mesh` — which is exactly what `Hop.mesh` is.
+fn hop_here(
+    container: &Container,
+    ctx: &Ctx,
+    mesh: &str,
+    own_key: &str,
+    own_name: &str,
+    digest: String,
+) -> Result<HopStep, String> {
+    if container.transit.iter().any(|entry| entry.node == own_name) {
+        return Ok(HopStep::Refused(Refusal::new(
+            CHAIN_LOOP,
+            format!("the chain already names `{own_name}`, which carried it once already"),
+        )));
+    }
+    let set = crate::routing::declarations().map_err(|r| format!("{}: {}", r.reason, r.detail))?;
+    let route = crate::routing::Letter { from: own_name, to: &container.to.node, mesh }.route(&set);
+    let hop = match route.outcome {
+        Ok(hop) => hop,
+        Err(refusal) => return Ok(HopStep::Refused(refusal)),
+    };
+    let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
+    if !kp.info().pubkey_hex.eq_ignore_ascii_case(own_key) {
+        return Err("this box's identity key changed under the deposit".to_string());
+    }
+    let prev = chain_prev(container, ctx)?;
+    let at = now_iso_utc();
+    let mut forwarded = container.clone();
+    forwarded.mesh = hop.mesh.clone();
+    forwarded.transit.push(TransitEntry {
+        node: own_name.to_string(),
+        next: hop.next.clone(),
+        at: at.clone(),
+        mesh: hop.mesh.clone(),
+        sig: wire_auth::sign_hex(&kp, &hop_bytes(&ctx.msgid, &prev, own_name, &hop.next, &at, &hop.mesh)),
+    });
+    Ok(HopStep::Hop(TransitHop {
+        container: Box::new(forwarded),
+        next: hop.next,
+        mesh: hop.mesh,
+        held: hop.held,
+        digest,
+    }))
+}
+
+/// [`hop_here`]'s two answers: the hop it made, or the word the depositing hop
+/// is owed. An internal failure is still the `Err`, so a refusal never loses its
+/// reason to a stringly-typed error.
+enum HopStep {
+    Hop(TransitHop),
+    Refused(Refusal),
+}
+
+/// Put one hop's container on THIS box's own disk, in the two places a hub keeps
+/// it: the mailbase's `transit` entry (the container and its routing metadata,
+/// never an opened envelope) and the spool toward `next`, where it waits for the
+/// drain or for `next`'s own poll. Only then is the container recorded as
+/// admitted — the same filed-then-recorded rule `Opened` follows, so a refusal
+/// or a crash before the write re-runs instead of answering `duplicate` for a
+/// letter that is on no disk.
+pub fn file_transit_hop(hop: &TransitHop, via: &str) -> Result<(), String> {
+    mail::file_transit(&hop.container, &hop.next, &hop.mesh, hop.held, via)?;
+    let entry = if hop.held {
+        crate::outbox::OutboxEntry::transit_held((*hop.container).clone())
+    } else {
+        crate::outbox::OutboxEntry::transit((*hop.container).clone())
+    };
+    crate::outbox::write_entry(&hop.next, &entry)?;
+    record_admitted(&hop.container, &hop.digest)
 }
 
 /// The `charter` letter's branch (P-CHARTER). Every step it shares with the
@@ -1631,6 +1766,7 @@ fn deposit_charter(
     ctx: &Ctx,
     ct: &[u8],
     sig: &[u8],
+    request_mesh: &str,
 ) -> Result<ContainerOutcome, String> {
     let refusal = |reason: &str, detail: String| ContainerOutcome::Refused {
         reason: reason.to_string(),
@@ -1751,16 +1887,21 @@ fn deposit_charter(
     }
 
     // The chain, with hop keys resolved the same way the origin was: the
-    // accepted charter first, `nodes.json` second. A charter node this box
-    // never paired with is a legitimate hop once the charter names it.
+    // accepted charter first — for the mesh it names and no other — then a
+    // paired record where that mesh has no declaration of its own. A charter
+    // node this box never paired with is a legitimate hop once the charter
+    // names it.
     let nodes = node_store::load_nodes();
-    if let Err(e) = walk_chain_with(container, ctx, |name| {
+    if let Err(refusal) = walk_chain_with(container, ctx, request_mesh, |mesh, name| {
+        if crate::routing::Declaration::load(mesh).is_err() {
+            return nodes.iter().find(|n| n.name == name).and_then(|n| n.pubkey.clone());
+        }
         accepted
             .charter
             .node_key(name)
             .or_else(|| nodes.iter().find(|n| n.name == name).and_then(|n| n.pubkey.clone()))
     }) {
-        return Ok(refusal(BROKEN_CHAIN, e));
+        return Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail });
     }
 
     Ok(ContainerOutcome::Applied {
@@ -1771,64 +1912,174 @@ fn deposit_charter(
     })
 }
 
-/// Walk the hop chain from `msgid` to self. Entry 1 must name the origin
-/// and verify under `origin.key` — that is what makes the origin
-/// unerasable, and what refuses a relay that dropped entry 1 and
-/// re-appended itself.
-pub fn walk_chain(
-    container: &Container,
-    ctx: &Ctx,
-    nodes: &[node_store::Node],
-) -> Result<(), String> {
-    walk_chain_with(container, ctx, |name| {
-        nodes.iter().find(|n| n.name == name).and_then(|n| n.pubkey.clone())
-    })
+/// Walk the hop chain from `msgid` to self, in the mesh `mesh` the depositing
+/// hop signed for. Entry 1 must name the origin and verify under `origin.key` —
+/// that is what makes the origin unerasable, and what refuses a relay that
+/// dropped entry 1 and re-appended itself.
+///
+/// **Every hop's key is read in the mesh that hop SIGNED** (its entry's `mesh`):
+/// a charter line for a charter mesh, a paired record for a pair mesh, and never
+/// `nodes.json` for a mesh a charter governs. That is the same name source the
+/// route picks with, so a hop cannot sign in one zone and be trusted in another.
+pub fn walk_chain(container: &Container, ctx: &Ctx, mesh: &str) -> Result<(), Refusal> {
+    walk_chain_with(container, ctx, mesh, hop_key_in)
+}
+
+/// The identity key `node` hops with in `mesh` — the declaration of THAT mesh
+/// first (charter line or paired record, `crate::routing::Declaration`), and a
+/// paired record only where the mesh has no declaration at all, which is the
+/// pre-charter lane.
+fn hop_key_in(mesh: &str, node: &str) -> Option<String> {
+    if let Ok(declaration) = crate::routing::Declaration::load(mesh) {
+        return declaration.key_of(node).map(str::to_string);
+    }
+    node_store::load_nodes()
+        .iter()
+        .find(|n| n.name == node)
+        .and_then(|n| n.pubkey.clone())
+}
+
+/// The node `from` declares as the carrier INTO `to` — the only crossing a hop
+/// may sign (MAIL.md §Transit, "a gate is symmetric or it is nothing", so one
+/// side of the pair answers this).
+fn gate_into(from: &str, to: &str) -> Option<String> {
+    crate::routing::Declaration::load(from).ok().and_then(|d| d.gates().get(to).cloned())
+}
+
+/// The one zone-name resolution: an EMPTY name is the home mesh on either side
+/// (`crate::config::home_mesh`), because a container minted before the mesh was
+/// carried names none.
+fn zone_name(mesh: &str) -> String {
+    let t = mesh.trim();
+    if t.is_empty() {
+        crate::config::home_mesh()
+    } else {
+        t.to_ascii_lowercase()
+    }
+}
+
+/// The `prev` a NEXT hop's entry chains to: the running digest of every entry
+/// already in the chain, recomputed and never read from the wire. The one place
+/// the append ([`deposit_container`]'s hop branch) and the walk agree on what
+/// `prev` is.
+fn chain_prev(container: &Container, ctx: &Ctx) -> Result<[u8; 32], String> {
+    let mut prev = ctx.msgid;
+    for entry in &container.transit {
+        prev = sha256(&hop_entry_bytes(&ctx.msgid, &prev, entry)?);
+    }
+    Ok(prev)
 }
 
 /// [`walk_chain`] with the hop-key lookup supplied by the caller: a mail
-/// container resolves every hop through `nodes.json`, a `charter` container
-/// through the charter it just applied first. One walk, one rule.
+/// container resolves every hop through the declaration of the mesh that hop
+/// signed, a `charter` container through the charter it just applied first.
+/// One walk, one rule.
+///
+/// **The zone clause is here because this is where the chain is** (MAIL.md
+/// §Wire, step 3). A hop whose entry names a different mesh from the entry
+/// before it has carried the letter across a zone, and only the node the
+/// previous mesh declares as its gate into the new one may sign that crossing.
+/// The last entry must then be signed in `mesh` — the zone the depositing hop
+/// signed for, and the mesh the four steps continue from. Nothing reads
+/// `container.mesh` here, which is what makes that hop-mutable field inert: a
+/// flipped byte changes no hop's signature and so crosses no gate.
 pub fn walk_chain_with(
     container: &Container,
     ctx: &Ctx,
-    key_for: impl Fn(&str) -> Option<String>,
-) -> Result<(), String> {
+    mesh: &str,
+    key_for: impl Fn(&str, &str) -> Option<String>,
+) -> Result<(), Refusal> {
+    let broken = |detail: String| Refusal::new(BROKEN_CHAIN, detail);
+    let crossing = |detail: String| Refusal::new(ZONE_VIOLATION, detail);
     let msgid = ctx.msgid;
     let mut prev = msgid;
     let mut expected_next: Option<String> = None;
+    let mut zone = zone_name(&ctx.origin_mesh);
     for (index, entry) in container.transit.iter().enumerate() {
         if let Some(expected) = &expected_next {
             if &entry.node != expected {
-                return Err(format!("entry {} is by `{}`, not the `{expected}` the entry before it named", index + 1, entry.node));
+                return Err(broken(format!(
+                    "entry {} is by `{}`, not the `{expected}` the entry before it named",
+                    index + 1,
+                    entry.node
+                )));
             }
         }
         let key = if index == 0 {
             if entry.node != ctx.origin_node {
-                return Err(format!(
+                return Err(broken(format!(
                     "entry 1 is by `{}`, not the origin `{}`",
                     entry.node, ctx.origin_node
-                ));
+                )));
+            }
+            // The origin mints in ONE zone and signs it into its own entry, so
+            // the first crossing there is to compare against is the origin's.
+            if zone_name(&entry.mesh) != zone {
+                return Err(crossing(format!(
+                    "entry 1 is signed in zone `{}`, and the origin signed `{}`",
+                    entry.mesh, ctx.origin_mesh
+                )));
             }
             container.origin.key.clone()
         } else {
-            match key_for(&entry.node) {
+            let signed_in = zone_name(&entry.mesh);
+            if signed_in != zone {
+                match gate_into(&zone, &signed_in) {
+                    Some(gate) if gate == entry.node => {}
+                    Some(gate) => {
+                        return Err(crossing(format!(
+                            "hop `{}` carries the letter out of zone `{zone}` into `{signed_in}`, and \
+                             `{zone}` declares `{gate}` as its gate there",
+                            entry.node
+                        )))
+                    }
+                    None => {
+                        return Err(crossing(format!(
+                            "hop `{}` carries the letter out of zone `{zone}` into `{signed_in}`, and \
+                             `{zone}` declares no gate into it",
+                            entry.node
+                        )))
+                    }
+                }
+                zone = signed_in;
+            }
+            match key_for(&entry.mesh, &entry.node) {
                 Some(key) => key,
-                None => return Err(format!("no key on record for hop `{}`", entry.node)),
+                None => {
+                    return Err(broken(format!(
+                        "no key on record for hop `{}` in zone `{}`",
+                        entry.node, entry.mesh
+                    )))
+                }
             }
         };
         let body = hop_bytes(&msgid, &prev, &entry.node, &entry.next, &entry.at, &entry.mesh);
         if !wire_auth::verify_signature_hex(&key, &body, &entry.sig) {
-            return Err(format!("hop `{}` does not verify this entry", entry.node));
+            return Err(broken(format!("hop `{}` does not verify this entry", entry.node)));
         }
-        prev = sha256(&hop_entry_bytes(&msgid, &prev, entry)?);
+        prev = sha256(&hop_entry_bytes(&msgid, &prev, entry).map_err(broken)?);
         expected_next = Some(entry.next.clone());
     }
     match expected_next {
         // Address form — see the destination branch above.
-        Some(last) if last == crate::display::local_node_name() => Ok(()),
-        Some(last) => Err(format!("the last hop hands the letter to `{last}`, not this node")),
-        None => Err("the hop chain is empty".to_string()),
+        Some(last) if last == crate::display::local_node_name() => {}
+        Some(last) => {
+            return Err(broken(format!("the last hop hands the letter to `{last}`, not this node")))
+        }
+        None => return Err(broken("the hop chain is empty".to_string())),
     }
+    // The last hop signed the zone this deposit is made in, or the letter claims
+    // a zone no hop ever carried it into.
+    if let Some(last) = container.transit.last() {
+        if zone_name(&last.mesh) != zone_name(mesh) {
+            return Err(crossing(format!(
+                "the last hop signed zone `{}` and this deposit is made in `{mesh}` — a zone a letter \
+                 rides is one a hop carried it into",
+                last.mesh
+            )));
+        }
+    }
+    Ok(())
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
@@ -2172,6 +2423,7 @@ mod container_tests {
             &envelope.header.origin_mesh,
             &envelope.header.origin_mesh,
             &me,
+            &me,
             &now_iso_utc(),
         )
         .unwrap();
@@ -2184,6 +2436,7 @@ mod container_tests {
             ContainerOutcome::Opened { .. } => "opened".to_string(),
             ContainerOutcome::Duplicate { .. } => "duplicate".to_string(),
             ContainerOutcome::Applied { .. } => "applied".to_string(),
+            ContainerOutcome::Hopped(hop) => format!("hopped:{}", hop.next),
         }
     }
 
@@ -2251,7 +2504,7 @@ mod container_tests {
         );
 
         let container =
-            seal_envelope(&envelope, &binding, &envelope.header.origin_mesh, &envelope.header.origin_mesh, &me, &now_iso_utc()).unwrap();
+            seal_envelope(&envelope, &binding, &envelope.header.origin_mesh, &envelope.header.origin_mesh, &me, &me, &now_iso_utc()).unwrap();
         assert_eq!(container.mesh, "away", "and the container rides it too");
         assert!(
             matches!(super::deposit_container(&container, "away").unwrap(), ContainerOutcome::Opened { .. }),
@@ -2259,8 +2512,9 @@ mod container_tests {
         );
         assert_eq!(
             reason(&super::deposit_container(&container, "home").unwrap()),
-            "mesh-mismatch",
-            "and only there: a request naming another mesh is refused, so the grant cannot be borrowed across meshes"
+            ZONE_VIOLATION,
+            "and only there: a request naming another zone is refused — the last hop signed `away`, and \
+             this deposit is made in `home`, so no hop carried the letter into the zone it is offered in"
         );
     }
 
@@ -2299,7 +2553,7 @@ mod container_tests {
         // `originMesh` is `""` (no mesh was named anywhere yet).
         let envelope = mail::mint_outbound_letter_in_mesh("alice", &me, "bob", "pre-charter letter", "").unwrap();
         assert_eq!(envelope.header.origin_mesh, "");
-        let container = seal_envelope(&envelope, &binding, "", "", &me, &now_iso_utc()).unwrap();
+        let container = seal_envelope(&envelope, &binding, "", "", &me, &me, &now_iso_utc()).unwrap();
         assert_eq!(container.origin_mesh, "");
 
         let opened = |c: &Container, mesh: &str| matches!(
@@ -2309,8 +2563,9 @@ mod container_tests {
         assert!(opened(&container, "home"), "a pre-charter container must deposit against a home-mesh request");
         assert_eq!(
             reason(&super::deposit_container(&container, "away").unwrap()),
-            "mesh-mismatch",
-            "…and only there: a request signed for another mesh refuses it"
+            ZONE_VIOLATION,
+            "…and only there: a request signing for another zone than the one the origin's own entry \
+             names is the zone wall, not a borrowed grant"
         );
 
         // N6: flip the UNSIGNED hop field — the deposit is unaffected, because
@@ -2696,7 +2951,7 @@ mod container_tests {
         let gen1_binding = publish_binding().unwrap();
         let me = crate::display::local_node_name();
         let second_letter = mail::mint_outbound_letter("alice", &me, "bob", "second body").unwrap();
-        let to_gen1 = seal_envelope(&second_letter, &gen1_binding, &second_letter.header.origin_mesh, &second_letter.header.origin_mesh, &me, &now_iso_utc()).unwrap();
+        let to_gen1 = seal_envelope(&second_letter, &gen1_binding, &second_letter.header.origin_mesh, &second_letter.header.origin_mesh, &me, &me, &now_iso_utc()).unwrap();
         assert_eq!(to_gen1.to.age, container.to.age);
         let _ = rotate_age_key().unwrap();
 
@@ -2707,7 +2962,7 @@ mod container_tests {
         // key is `key-retired` rather than a bare open failure — the one
         // case an operator can act on.
         let third_letter = mail::mint_outbound_letter("alice", &me, "bob", "third body").unwrap();
-        let to_retired = seal_envelope(&third_letter, &gen1_binding, &third_letter.header.origin_mesh, &third_letter.header.origin_mesh, &me, &now_iso_utc()).unwrap();
+        let to_retired = seal_envelope(&third_letter, &gen1_binding, &third_letter.header.origin_mesh, &third_letter.header.origin_mesh, &me, &me, &now_iso_utc()).unwrap();
         let closed = crate::time::shift_iso_utc(&now_iso_utc(), -60);
         std::fs::write(retired_until_path(1), format!("{closed}\n")).unwrap();
         assert_eq!(reason(&deposit_container(&to_retired).unwrap()), OPEN_KEY_RETIRED);
@@ -2720,7 +2975,7 @@ mod container_tests {
         // tombstone keeps the address, so the origin's retry loop still
         // learns `key-retired` — which is the whole point of keeping it.
         let fifth_letter = mail::mint_outbound_letter("alice", &me, "bob", "fifth body").unwrap();
-        let fifth = seal_envelope(&fifth_letter, &gen1_binding, &fifth_letter.header.origin_mesh, &fifth_letter.header.origin_mesh, &me, &now_iso_utc()).unwrap();
+        let fifth = seal_envelope(&fifth_letter, &gen1_binding, &fifth_letter.header.origin_mesh, &fifth_letter.header.origin_mesh, &me, &me, &now_iso_utc()).unwrap();
         assert_eq!(
             reason(&deposit_container(&fifth).unwrap()),
             OPEN_KEY_RETIRED,
@@ -2913,33 +3168,31 @@ mod review_fix_tests {
             board: None,
             epoch: None,
         };
-        let nodes = node_store::load_nodes();
-
         // The whole chain walks.
-        if let Err(e) = walk_chain(&container(vec![entry1.clone(), entry2.clone()]), &ctx, &nodes) {
+        if let Err(e) = walk_chain(&container(vec![entry1.clone(), entry2.clone()]), &ctx, mesh) {
             panic!("origin -> relay -> self must walk: {e}");
         }
 
         // Interior truncation: drop entry 1 and keep entry 2. Its `prev` was
         // computed over entry 1's frame, and `prev` is recomputed, so the
         // link breaks — the cut-and-reappend the chain exists to refuse.
-        let err = walk_chain(&container(vec![entry2.clone()]), &ctx, &nodes).unwrap_err();
-        assert!(err.contains("not the origin"), "{err}");
+        let err = walk_chain(&container(vec![entry2.clone()]), &ctx, mesh).unwrap_err();
+        assert!(err.detail.contains("not the origin"), "{err}");
 
         // Reordering breaks the `next` link: entry 2 was rewritten to hand
         // the letter to `self`, so entry 3 cannot be relay's.
         let mut reordered = entry2.clone();
         reordered.next = me.clone();
-        let err = walk_chain(&container(vec![entry1.clone(), reordered, entry2.clone()]), &ctx, &nodes)
+        let err = walk_chain(&container(vec![entry1.clone(), reordered, entry2.clone()]), &ctx, mesh)
             .unwrap_err();
-        assert!(err.contains("entry 3 is by `relay`"), "{err}");
+        assert!(err.detail.contains("entry 3 is by `relay`"), "{err}");
 
         // A relay's own key is what verifies entry 2: sign it with the wrong
         // one and the interior hop fails.
         let mut forged = entry2.clone();
         forged.sig = wire_auth::sign_hex(&origin_kp, &hop_bytes(&msgid, &prev2, "relay", &me, &at, mesh));
-        let err = walk_chain(&container(vec![entry1, forged]), &ctx, &nodes).unwrap_err();
-        assert!(err.contains("does not verify"), "{err}");
+        let err = walk_chain(&container(vec![entry1, forged]), &ctx, mesh).unwrap_err();
+        assert!(err.detail.contains("does not verify"), "{err}");
     }
 
     /// L7: "Already-filed letters survive loss of the age key" — structurally
@@ -2963,6 +3216,7 @@ mod review_fix_tests {
             &binding,
             &envelope.header.origin_mesh,
             &envelope.header.origin_mesh,
+            &me,
             &me,
             &now_iso_utc(),
         )

@@ -3823,6 +3823,20 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
     Ok(answer)
 }
 
+/// The name this door uses for a caller — in policy, in routing and in the audit
+/// stamp: the declaration's own name for the verifying key
+/// (`aoide_storage::routing::declared_name`), which for a CHARTER mesh is the
+/// name on the charter LINE and never the caller's `nodes.json` nickname or the
+/// name it wrote in its own header. Only where the mesh names no such key does
+/// the resolved record's name stand — a pair mesh's record IS its declaration, so
+/// there the two are the same answer anyway.
+fn declared_caller_name(mesh: &str, caller: SignedCaller<'_>) -> String {
+    aoide_storage::routing::declarations()
+        .ok()
+        .and_then(|set| aoide_storage::routing::declared_name(&set, mesh, caller.key))
+        .unwrap_or_else(|| caller.name.to_string())
+}
+
 /// The sealed half of `aoide/mailDeposit` (P-SEAL): the same admission the
 /// plaintext arm runs, then `seal::deposit_container`'s shared steps and
 /// destination branch. A refusal carries the taught word CONTRACTS.md §6
@@ -3872,11 +3886,12 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
         let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "unauthorized", &msg);
         return Err((code, msg));
     }
-    let hop_name = ctx
-        .signed_caller
-        .map(|c| c.name)
-        .expect("deposit_admitted only returns true when a signed caller resolved")
-        .to_string();
+    let hop_name = {
+        let caller = ctx
+            .signed_caller
+            .expect("deposit_admitted only returns true when a signed caller resolved");
+        declared_caller_name(&request_mesh, caller)
+    };
 
     let outcome = aoide_storage::seal::deposit_container(&container, &request_mesh)
         .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
@@ -3913,12 +3928,47 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
         aoide_storage::seal::ContainerOutcome::Refused { reason, detail } => {
             ("invalid", format!("sealed msgid {} via {hop_name}: {reason}: {detail}", container.msgid))
         }
+        // A hop: this box is not the destination, so the letter is carried on
+        // rather than opened. `hop_name` is the name the hop SIGNS with (the
+        // charter line's), so the audit line and the chain agree on who carried
+        // it.
+        aoide_storage::seal::ContainerOutcome::Hopped(hop) => (
+            "ok",
+            format!(
+                "sealed transit msgid {} via {hop_name}: next `{}` in mesh `{}`{}",
+                hop.container.msgid,
+                hop.next,
+                hop.mesh,
+                if hop.held { ", HELD for its own poll" } else { "" }
+            ),
+        ),
     };
     let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", audit_status, &audit_detail);
 
     match outcome {
         aoide_storage::seal::ContainerOutcome::Refused { reason, detail } => {
             Ok(json!({ "status": "refused", "reason": reason, "detail": detail }))
+        }
+        // A hop: nothing is filed as correspondence, no reader is rung and NO
+        // ACK is minted — the letter is not here, it is on its way, and only the
+        // destination's own receipt may tell an origin otherwise. The container
+        // is filed as `transit` and spooled toward `next`; the answer is the
+        // hop taking custody, which is exactly what `accepted` means to a drain
+        // (the entry stays spooled until a real receipt retires it).
+        aoide_storage::seal::ContainerOutcome::Hopped(hop) => {
+            aoide_storage::seal::file_transit_hop(&hop, &hop_name)
+                .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
+            if !hop.held {
+                // Best-effort, exactly like the destination's own post-filing
+                // drain. The container is on this box's disk now, so a dial that
+                // fails costs a later pass (the daemon's sweep) and nothing else.
+                let _ = aoide_conduct::mail_bridge::drain_node(&hop.next);
+            }
+            Ok(json!({
+                "status": "accepted",
+                "msgid": hop.container.msgid,
+                "transit": { "next": hop.next, "mesh": hop.mesh, "held": hop.held },
+            }))
         }
         aoide_storage::seal::ContainerOutcome::Duplicate { filed_letter } => {
             // Nothing is opened here — that is the point of deciding dedup

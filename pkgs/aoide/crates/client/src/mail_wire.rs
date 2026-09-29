@@ -342,6 +342,7 @@ pub fn spool_entry(
                 &envelope.header.origin_mesh,
                 &envelope.header.origin_mesh,
                 node_name,
+                node_name,
                 &now,
             )?;
             Ok(if hold {
@@ -547,6 +548,21 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
                         }
                     ),
                 );
+            }
+            // A container whose chain does not end at this box: this hand-over
+            // is one hop of it, and the step is the door's own
+            // (`deposit_sealed`'s `Hopped` arm) — a relay that polls another
+            // relay forwards rather than dropping. A failed write is audited by
+            // `file_transit_hop`'s own caller in the door; here the container is
+            // left spooled where it was, un-opened.
+            aoide_storage::seal::ContainerOutcome::Hopped(hop) => {
+                if let Err(e) = aoide_storage::seal::file_transit_hop(&hop, node_name) {
+                    refused.push(format!("{}: transit: {e}", hop.container.msgid));
+                    continue;
+                }
+                if !hop.held {
+                    let _ = drain_node(&hop.next);
+                }
             }
             aoide_storage::seal::ContainerOutcome::Refused { reason, detail } => {
                 // L9 (the branch review): a polled container that refuses used
@@ -1910,7 +1926,7 @@ mod tests {
 
         // 4. Already sealed: never re-sealed (a second seal would mint a
         // different `ct` and break the byte-identical retry).
-        let container = aoide_storage::seal::seal_envelope(&envelope, &live, "", "", "liveb", &now).unwrap();
+        let container = aoide_storage::seal::seal_envelope(&envelope, &live, "", "", "liveb", "liveb", &now).unwrap();
         let sealed = OutboxEntry::sealed(envelope, container);
         assert!(matches!(
             aoide_storage::outbox::reseal_entry("liveb", &sealed, &now).unwrap(),
@@ -2005,7 +2021,7 @@ mod tests {
         let msgid = envelope.msgid.clone();
         aoide_storage::outbox::write_entry("liveb", &OutboxEntry::sealed_held(envelope.clone(), {
             let live = aoide_storage::seal::publish_binding().unwrap();
-            aoide_storage::seal::seal_envelope(&envelope, &live, "", "", "liveb", &now).unwrap()
+            aoide_storage::seal::seal_envelope(&envelope, &live, "", "", "liveb", "liveb", &now).unwrap()
         }))
         .unwrap();
 
