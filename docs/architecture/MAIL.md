@@ -597,7 +597,9 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
 - `link.json` is `.hld`: exponential backoff per link on failure,
   cleared on success. Per-entry `tries`/`lastOutcome` live in the entry.
   A `refused` outcome parks that entry (drains skip it) and records the
-  reason. Parked is not condemned: the refusing grant is the RECEIVING
+  reason — **except `down` and `config-invalid`, which are LINK states and
+  never park anything** (§Status): the entry stays live and the link's own
+  back-off brings it back. Parked is not condemned: the refusing grant is the RECEIVING
   node's record of the sender, so once that host runs `aoide node allow
   <sender> message on` (or the operator adds `message` to the sender's
   charter line), the sender runs `aoide mail outbox retry <msgid>` (or
@@ -712,6 +714,9 @@ declaration order, never a mandatory chain. A routing change is a
 declaration change, so `aoide mail route` is the dry run before one.
 
 **A letter whose chosen relay refuses parks, it does not reroute.**
+(A refusal about the LINK rather than the letter — `down`, `config-invalid` —
+does not park: the sender keeps it live and retries on the link's own
+back-off, §Status.)
 Nothing on the wire names a peer's version, so an older relay is
 refused rather than recognised, and the origin's entry records
 `refused` and stops retrying (`aoide mail outbox retry --refused` is
@@ -1185,7 +1190,12 @@ destination — `no-route`), and in the drain (never dialled, and a letter
 already queued for it is KEPT, never dropped — no eviction is the
 flood-control rule, decision 14). A `down` origin's own door requests are
 refused and no new letter is accepted from it; what it queued before is
-not confiscated. `hold` is ergonomics, not a security
+not confiscated. **A `down` (or `config-invalid`) refusal is a state of the
+LINK, never a verdict on the letter**: the sender keeps its entry live and
+retries on the link's own back-off, so it flows by itself once the node is no
+longer `down` or the declaration loads again — `aoide mail outbox retry
+--refused` is for the words that ARE verdicts (`zone-violation`,
+`broken-chain`, …). `hold` is ergonomics, not a security
 control: it only changes which side initiates.
 
 Two speeds of quarantine, because `down` lives in the declaration and
@@ -1224,7 +1234,10 @@ authoritative first:
 - `refused` — the entry's own `refused` flag is set (a policy refusal
   the far end sent back, never a transport failure — "Outbox" above).
   Automatic retries have already stopped for this ONE entry, and no
-  link state changes that.
+  link state changes that. A `down` or `config-invalid` refusal is NOT
+  this: it is a state of the LINK, so the entry stays `retrying` on its
+  own back-off until the peer's declaration loads again or stops calling
+  the node `down`.
 - `delivered` — a real, destination-signed ack already sits in this
   box's own mailbase for this exact `msgid` (the ack mechanics: "Wire"
   and "Delivery and the doorbell" above). Never inferred from the

@@ -815,7 +815,15 @@
   KEPT — `down` stops sending, it never confiscates — so the pass after the
   declaration changes dials them, unchanged. A new
   "may I dial this node" test belongs in `hop_is_never_dialled`, never at a
-  call site. A poll's answer is bounded at
+  call site.
+  **A refusal that says something about the LINK is not a verdict on the
+  letter** (user ruling D7): `mail_wire::classify_deposit_response` sends the
+  far end's `down` and `config-invalid` words down the same arm a transport
+  failure takes — the entry stays live (`refused` untouched, never needing
+  `retry --refused`), `tries`/`lastOutcome` record the far end's own words, the
+  LINK backs off, and the next pass retries — while every other word parks the
+  entry as before. Do not widen that set without a ruling: the words that park
+  are the ones that will never become true. A poll's answer is bounded at
   `aoide_storage::outbox::POLL_BATCH_CAP` (50) and must stay bounded: the
   poller's own `MAX_RESPONSE_BYTES` is what an unbounded batch walks into.
   A poll may ask this same crate to drain a node whose `.bsy`

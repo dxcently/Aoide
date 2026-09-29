@@ -221,6 +221,20 @@ fn classify_deposit_response(result: &Value) -> DepositAttempt {
                 Some(d) => format!("{reason}: {d}"),
                 None => reason.to_string(),
             };
+            // **A LINK state is not a verdict on the letter** (user ruling D7).
+            // `down` and `config-invalid` say something about the far end's own
+            // state — a node its mesh quarantined, a declaration set that will not
+            // load — and the sender's answer is the one it gives a link that
+            // cannot carry mail right now: the entry stays LIVE (never parked,
+            // never needing `retry --refused`) and the ordinary back-off carries
+            // it back, so it flows by itself once the peer is fixed or no longer
+            // `down`. Every other word (`zone-violation`, `broken-chain`,
+            // `bad-msgid`, …) is a verdict on THIS letter and still parks it.
+            if reason == aoide_storage::charter::STATUS_DOWN
+                || reason == aoide_storage::charter::CONFIG_INVALID
+            {
+                return DepositAttempt::TransportFailed(msg);
+            }
             DepositAttempt::Refused(msg)
         }
     }
@@ -1515,6 +1529,137 @@ mod tests {
 
     fn root(tag: &str) -> (aoide_test_support::EnvSaver, std::path::PathBuf) {
         aoide_test_support::isolated_mail_root(tag)
+    }
+
+    /// **Only a refusal that is a verdict on the LETTER parks it.** A word about
+    /// the link (`down`, `config-invalid`) leaves the entry live — user ruling D7
+    /// — while every other word (`zone-violation`, `broken-chain`, `bad-msgid`,
+    /// `not-correspondence`, …) parks it, because that one will never be true.
+    /// The classifier is pure, so the whole vocabulary is provable here without a
+    /// door.
+    #[test]
+    fn only_a_verdict_on_the_letter_parks_it() {
+        let word = |reason: &str| {
+            classify_deposit_response(&serde_json::json!({
+                "status": "refused",
+                "reason": reason,
+                "detail": "d",
+            }))
+        };
+        assert!(
+            matches!(word("zone-violation"), DepositAttempt::Refused(_)),
+            "a verdict parks it"
+        );
+        assert!(matches!(word("broken-chain"), DepositAttempt::Refused(_)));
+        assert!(matches!(word("bad-msgid"), DepositAttempt::Refused(_)));
+        assert!(
+            matches!(word("down"), DepositAttempt::TransportFailed(_)),
+            "a link state does not: the entry stays live and retries"
+        );
+        assert!(matches!(word("config-invalid"), DepositAttempt::TransportFailed(_)));
+        assert!(matches!(
+            classify_deposit_response(&serde_json::json!({ "status": "accepted" })),
+            DepositAttempt::Delivered { .. }
+        ));
+    }
+
+    /// **A `down` refusal is a LINK state, and the next pass delivers once the
+    /// peer is no longer `down`** (user ruling D7): the entry is never parked,
+    /// never needs `retry --refused`, and the link's own back-off is what brings
+    /// it back.
+    #[test]
+    fn a_down_refusal_backs_off_and_delivers_once_the_peer_is_up() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("link-state-down");
+
+        let (listener, port, _seen) = recording_door(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"down","detail":"node `elsewhere` is declared `down`"}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
+        );
+        let mut node = unpaired_node("elsewhere");
+        node.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "waiting").unwrap();
+        aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(envelope)).unwrap();
+
+        drain_node("elsewhere").unwrap();
+        let held = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert_eq!(held.len(), 1, "the letter is neither parked nor gone: {held:?}");
+        assert!(!held[0].refused, "a `down` refusal is not a verdict on the letter: {held:?}");
+        assert_eq!(held[0].tries, 1, "and it WAS attempted: {held:?}");
+        assert!(held[0].last_outcome.contains("down"), "the far end's own word is kept: {held:?}");
+        assert!(
+            aoide_storage::outbox::read_link_state("elsewhere").unwrap().is_some(),
+            "the LINK is what backs off"
+        );
+
+        // The peer stops being `down`. The back-off's own wait is not what this
+        // pins, so clear it to reach that next pass, and point the record at a
+        // door that accepts.
+        drop(listener);
+        aoide_storage::outbox::clear_link_state("elsewhere").unwrap();
+        let (acceptor, port, _seen) = recording_door(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted","msgid":"00"}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
+        );
+        let mut node = unpaired_node("elsewhere");
+        node.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        drain_node("elsewhere").unwrap();
+        let after = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert_eq!(after.len(), 1, "a letter waits for its ack, so it is still spooled: {after:?}");
+        assert!(!after[0].refused, "and it is still not parked: {after:?}");
+        assert_eq!(after[0].last_outcome, "accepted", "the far end's own answer is recorded: {after:?}");
+        assert!(
+            aoide_storage::outbox::read_link_state("elsewhere").unwrap().is_none(),
+            "a successful deposit clears the link"
+        );
+
+        drop(acceptor);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The same for `config-invalid`: the host's own broken declaration is the
+    /// far end's state, not this letter's problem.
+    #[test]
+    fn a_config_invalid_refusal_backs_off_and_delivers_once_the_config_loads() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("link-state-config-invalid");
+
+        let (listener, port, _seen) = recording_door(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"config-invalid","detail":"config-invalid: config-unreadable"}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
+        );
+        let mut node = unpaired_node("elsewhere");
+        node.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "waiting").unwrap();
+        aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(envelope)).unwrap();
+
+        drain_node("elsewhere").unwrap();
+        let held = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert!(!held[0].refused, "`config-invalid` is not a verdict on the letter: {held:?}");
+        assert!(held[0].last_outcome.contains("config-invalid"), "{held:?}");
+        assert!(aoide_storage::outbox::read_link_state("elsewhere").unwrap().is_some(), "the link backs off");
+
+        drop(listener);
+        aoide_storage::outbox::clear_link_state("elsewhere").unwrap();
+        let (acceptor, port, _seen) = recording_door(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted","msgid":"00"}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
+        );
+        let mut node = unpaired_node("elsewhere");
+        node.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        drain_node("elsewhere").unwrap();
+        let after = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert!(!after[0].refused, "{after:?}");
+        assert_eq!(after[0].last_outcome, "accepted", "{after:?}");
+
+        drop(acceptor);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn unpaired_node(name: &str) -> Node {

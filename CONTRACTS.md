@@ -8008,7 +8008,12 @@ sealed container's own payload, never filed as correspondence.
 §Transit names for each of these among its `refused` reasons; the rest
 of that list — `no-route`, `down`, `unknown-mesh`, `zone-violation` —
 belongs to the transit lane and to a sealed charter container's own
-zone check, below, not to this one.
+zone check, below, not to this one. **Two of those words are LINK states on
+the sender's side — `down` and `config-invalid` — and never park anything**:
+the entry stays live and retries on the link's own back-off, so it flows once
+the peer's declaration loads or stops calling the node `down`
+(`aoide mail outbox retry --refused` is for the words that are verdicts on the
+letter).
 `detail` carries what the code used to raise as the `-32602` message's
 own text — which field mismatched, which node's key was missing — for a
 human reading `mail outbox`, never for a caller to match on.
