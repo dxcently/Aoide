@@ -6,7 +6,7 @@
 
 mod common;
 
-use common::{fixture, env_lock, AWAY, HOME, ONE_SIDED_GATE, TWO_KEYS};
+use common::{fixture, env_lock, Fixture, AWAY, HOME, ONE_SIDED_GATE, TWO_KEYS};
 
 use aoide::dispatch::{dispatch, Invocation};
 use aoide_protocol::output::Status;
@@ -559,6 +559,249 @@ fn a_learnt_binding_that_is_not_the_declared_key_is_not_used() {
     assert_ne!(container.to.age, stale_binding.age_pubkey, "never to the stale record's");
 }
 
+/// The doors really answer: the fixture's boxes raised as `aoide a2a serve`
+/// children, and a `aoide/mailPoll` POSTed to `sakaki`'s own door — signed as
+/// `osaka`, over plain HTTP, on the port its charter line declares. The answer is
+/// the door's, and the relay's own audit log says so.
+#[test]
+fn the_fixtures_boxes_answer_on_their_own_doors() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("doors-up");
+    let _doors = fx.doors(&["osaka", "sakaki"]);
+
+    fx.enter("osaka");
+    // A verified record for osaka at SAKAKI's box, first: this diagnostic run
+    // separates "my signed request is wrong" from "the charter rung did not
+    // resolve".
+    let osaka_key = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
+    fx.enter("sakaki");
+    let mut nodes = aoide_storage::node_store::load_nodes();
+    aoide_storage::node_store::upsert_paired_node(
+        &mut nodes,
+        "osaka",
+        "http://127.0.0.1:1/",
+        &osaka_key,
+        &aoide_storage::time::now_iso_utc(),
+        &["message".to_string()],
+        HOME,
+    );
+    aoide_storage::node_store::save_nodes(&nodes).unwrap();
+    fx.enter("osaka");
+    // The client's own signed POST to the same door, over a plain-http record:
+    // if THIS reaches the door, the child's env is right and only my
+    // hand-written request is wrong.
+    let mut nodes = aoide_storage::node_store::load_nodes();
+    aoide_storage::node_store::upsert_paired_node(
+        &mut nodes,
+        "sakaki",
+        &format!("http://127.0.0.1:{}/", fx.ports["sakaki"]),
+        &aoide_storage::charter::governing(HOME).unwrap().nodes["sakaki"].key.clone(),
+        &aoide_storage::time::now_iso_utc(),
+        &["message".to_string()],
+        HOME,
+    );
+    aoide_storage::node_store::save_nodes(&nodes).unwrap();
+    let polled = aoide_client::mail_wire::poll_node("sakaki", None);
+    assert!(polled.is_ok(), "the client's own poll reached the door: {polled:?}");
+    let relay_log = std::fs::read_to_string(fx.boxes["sakaki"].join("log")).unwrap_or_default();
+    assert!(
+        relay_log.contains("a2a.aoide/mailPoll"),
+        "the relay's OWN door answered the poll: {relay_log}"
+    );
+}
+
+/// One JSON-RPC POST to a door, signed the way every node signs a request:
+/// the four headers over `wire_auth::canonical_string` (plus `X-Aoide-Mesh` when
+/// the request acts in one), over plain HTTP to the loopback port the fixture's
+/// door answers on. The client's own dial cannot reach a `https://` address with
+/// no TLS in front of it (`dial_of` knows no `http://`), so a door-level test
+/// speaks the wire itself — the same hand-written shape
+/// `mail_adapter_round_trip.rs` uses for its records.
+fn door_post(
+    fx: &Fixture,
+    from: &str,
+    mesh: &str,
+    method: &str,
+    params: serde_json::Value,
+) -> serde_json::Value {
+    use std::io::{Read, Write};
+    let body = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }).to_string();
+    let ts = aoide_storage::time::now_iso_utc();
+    let nonce = aoide_storage::pairing::random_hex(16);
+    // The canonical string signs the HTTP shape — method, path, and the BODY —
+    // never the JSON-RPC method name inside the body.
+    let canonical = aoide_storage::wire_auth::canonical_string(
+        "POST",
+        "/",
+        &ts,
+        &nonce,
+        body.as_bytes(),
+        (!mesh.is_empty()).then_some(mesh),
+    );
+    let signing = fixture_box_key(fx, from);
+    let sig = aoide_storage::wire_auth::sign_hex(&signing, canonical.as_bytes());
+    assert!(
+        aoide_storage::wire_auth::verify_signature_hex(
+            &signing.info().pubkey_hex,
+            canonical.as_bytes(),
+            &sig
+        ),
+        "the signature verifies locally — a failure at the door is a wire difference"
+    );
+    let request = format!(
+        "POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{}: {}\r\n{}: {}\r\n{}: {}\r\n{}: {}\r\n{}Connection: close\r\n\r\n{}",
+        body.len(),
+        aoide_storage::wire_auth::HEADER_NODE,
+        from,
+        aoide_storage::wire_auth::HEADER_TIMESTAMP,
+        ts,
+        aoide_storage::wire_auth::HEADER_NONCE,
+        nonce,
+        aoide_storage::wire_auth::HEADER_SIGNATURE,
+        sig,
+        if mesh.is_empty() {
+            String::new()
+        } else {
+            format!("{}: {}\r\n", aoide_storage::wire_auth::HEADER_MESH, mesh)
+        },
+        body
+    );
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", fx.ports[from])).unwrap();
+    stream.write_all(request.as_bytes()).unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    let (_, payload) = response.split_once("\r\n\r\n").unwrap_or(("", ""));
+    serde_json::from_str(payload).unwrap_or_else(|e| panic!("door answered junk: {e}\n{response}"))
+}
+
+/// A box's own identity keypair, read from ITS root (the process is entered on
+/// that box when this is called).
+fn fixture_box_key(fx: &Fixture, name: &str) -> aoide_storage::identity::Keypair {
+    let _ = fx;
+    let _ = name;
+    aoide_storage::identity::load_or_mint().unwrap().0
+}
+
+/// **The whole journey, driven by the boxes' own doors.** Every hop is a real
+/// `aoide a2a serve` child answering a real signed poll from the next box:
+/// `osaka` spools the sealed container toward its relay and `sakaki` PULLS it
+/// (the relay-first model), `sakaki` carries it on — its own hop signature, held
+/// for `chiyo` — `chiyo` pulls it, files the letter and spools the receipt back,
+/// and `osaka` pulls the receipt and retires its entry. Each box's own spool and
+/// audit are grepped on the way: a hub's records hold the routed container and no
+/// letter, and the origin's entry lives until the destination's receipt.
+#[test]
+fn the_whole_journey_runs_through_the_boxes_own_doors() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("journey-doors");
+    let _doors = fx.doors(&["osaka", "sakaki", "chiyo"]);
+
+    // `osaka` seals a letter for `chiyo` (from the charter line's binding) and
+    // spools it toward the relay its route picks.
+    fx.enter("osaka");
+    let sent = dispatch(&cli_invocation(
+        &["mail", "send"],
+        &["through the doors"],
+        &[("to", "chiyo/conductor"), ("json", "true")],
+    ));
+    assert_eq!(sent.status, Status::Ok, "{}", sent.message);
+    assert_eq!(sent.data.as_ref().unwrap()["next"], "sakaki");
+    let msgid = sent.data.as_ref().unwrap()["msgid"].as_str().unwrap().to_string();
+    assert_eq!(
+        aoide_storage::outbox::list_entries("sakaki").unwrap().len(),
+        1,
+        "spooled toward the relay"
+    );
+
+    // `sakaki` ASKS osaka for what is spooled toward it (a record gives it the
+    // door; the charter gives it the key), and carries the container on.
+    fx.enter("sakaki");
+    let osaka_key = aoide_storage::charter::governing(HOME).unwrap().nodes["osaka"].key.clone();
+    let mut nodes = aoide_storage::node_store::load_nodes();
+    aoide_storage::node_store::upsert_paired_node(
+        &mut nodes,
+        "osaka",
+        &format!("http://127.0.0.1:{}/", fx.ports["osaka"]),
+        &osaka_key,
+        &aoide_storage::time::now_iso_utc(),
+        &["message".to_string()],
+        HOME,
+    );
+    aoide_storage::node_store::save_nodes(&nodes).unwrap();
+    let pulled = aoide_client::mail_wire::poll_node("osaka", None).unwrap();
+    assert!(pulled.refused.is_empty(), "nothing refused: {:?}", pulled.refused);
+    assert_eq!(aoide_storage::mail::read_transit_unlocked().unwrap().len(), 1, "the hop is recorded");
+    assert_eq!(aoide_storage::outbox::list_entries("chiyo").unwrap().len(), 1, "held toward `chiyo`");
+    let hub_spool = serde_json::to_string(&aoide_storage::outbox::list_entries("chiyo").unwrap()).unwrap();
+    assert!(!hub_spool.contains("conductor"), "no mailbox name at the hub: {hub_spool}");
+    assert!(!hub_spool.contains("through the doors"), "and no letter body: {hub_spool}");
+    let hub_log = std::fs::read_to_string(fx.boxes["sakaki"].join("log")).unwrap_or_default();
+    assert!(
+        hub_log.contains("mail.poll.transit") && hub_log.contains("carried on to `chiyo`"),
+        "the hub's own audit records the hop it made: {hub_log}"
+    );
+    let osaka_log = std::fs::read_to_string(fx.boxes["osaka"].join("log")).unwrap_or_default();
+    assert!(osaka_log.contains("a2a.aoide/mailPoll"), "and osaka's door answered the ask: {osaka_log}");
+
+    // `chiyo` asks its relay: the hand-over is a real deposit through `sakaki`'s
+    // door, the letter is filed, and the receipt is spooled back.
+    fx.enter("chiyo");
+    let sakaki_key = aoide_storage::charter::governing(HOME).unwrap().nodes["sakaki"].key.clone();
+    let mut nodes = aoide_storage::node_store::load_nodes();
+    aoide_storage::node_store::upsert_paired_node(
+        &mut nodes,
+        "sakaki",
+        &format!("http://127.0.0.1:{}/", fx.ports["sakaki"]),
+        &sakaki_key,
+        &aoide_storage::time::now_iso_utc(),
+        &["message".to_string()],
+        HOME,
+    );
+    aoide_storage::node_store::save_nodes(&nodes).unwrap();
+    let received = aoide_client::mail_wire::poll_node("sakaki", None).unwrap();
+    assert_eq!(received.filed, 1, "the poller filed it: {:?}", received.refused);
+    assert_eq!(
+        aoide_storage::mail::filed_kind(&msgid).as_deref(),
+        Some(aoide_storage::mail::ENTRY_TYPE_LETTER),
+        "the letter is in the destination's own mailbase"
+    );
+    let ack_spooled = aoide_storage::outbox::nodes_with_outbox().unwrap();
+    assert!(ack_spooled.contains(&"osaka".to_string()), "the receipt is spooled toward the origin: {ack_spooled:?}");
+    // The relay's custody ends on the next ask that names what it filed.
+    let ask_again = aoide_client::mail_wire::poll_node("sakaki", None).unwrap();
+    assert!(ask_again.refused.is_empty(), "{:?}", ask_again.refused);
+    assert!(
+        aoide_storage::outbox::filed_pending("sakaki").unwrap().is_empty(),
+        "the acknowledgement went with the second ask"
+    );
+
+    // `osaka` asks chiyo for the receipt, files it, and its own entry retires.
+    fx.enter("osaka");
+    let chiyo_key = aoide_storage::charter::governing(HOME).unwrap().nodes["chiyo"].key.clone();
+    let mut nodes = aoide_storage::node_store::load_nodes();
+    // `chiyo` is a `poll` node: it is never dialled, and it never asks — its
+    // receipt is pulled from... nothing: the relay is what holds it, so the ask
+    // goes to the relay that carried the letter.
+    aoide_storage::node_store::upsert_paired_node(
+        &mut nodes,
+        "chiyo",
+        &format!("http://127.0.0.1:{}/", fx.ports["chiyo"]),
+        &chiyo_key,
+        &aoide_storage::time::now_iso_utc(),
+        &["message".to_string()],
+        HOME,
+    );
+    aoide_storage::node_store::save_nodes(&nodes).unwrap();
+    let _ = aoide_client::mail_wire::poll_node("chiyo", None);
+    assert!(
+        aoide_storage::outbox::list_entries("sakaki").unwrap().is_empty(),
+        "the origin's entry lives until the destination's receipt retires it"
+    );
+    let origin_log = std::fs::read_to_string(fx.boxes["osaka"].join("log")).unwrap_or_default();
+    assert!(origin_log.contains("a2a.aoide/mailPoll"), "the origin's door answered: {origin_log}");
+}
+
+/// A chain truncated by dropping the tail never reaches the destination: the last
 /// hop still in it hands the letter to `sakaki`, so `chiyo` refuses it
 /// (`broken-chain`) and owes no ack — the letter is on no mailbox, and the
 /// origin's own spool still reports it undelivered.
