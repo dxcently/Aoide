@@ -95,12 +95,20 @@ already uses, `https://…` as an ordinary door or adapter URL, `poll` as no
 dial target at all — a node that asks, whose letters wait at its mesh's relay.
 An address that is none of the three is refused rather than guessed at, at
 `sign` time and again whenever a route reads it. The four steps read it to
-answer reachability, and `aoide mail route` prints it; the DRAIN does not read
-it yet, so what a drain dials is still the node RECORD it holds and not a
-charter line's address. **There is no version signal on the wire**, so a relay
+answer reachability, `aoide mail route` prints it, and the DRAIN turns it into
+the node it opens a link to (`aoide_client::mail_wire::dial_node`): a charter
+hop this box holds no record for is reached at its declared address (an `ssh://`
+one through its tunnel, at the far side's own door) instead of being silently
+skipped — so what a drain dials is a record when there is one and a declaration
+when there is not. **There is no version signal on the wire**, so a relay
 that cannot carry a container refuses it rather than announcing that it is
 old: the letter parks at its sender and waits for the relay to be brought up
-to date (`docs/architecture/MAIL.md` §Transit).
+to date (`docs/architecture/MAIL.md` §Transit). **Transit therefore deploys
+before the declaration that uses it**: `relays`, `[status]` and `[gates]` are
+declared only once every box of the mesh runs this version — a relay that
+predates it refuses a routed container outright, and a destination that
+predates it refuses a two-entry hop chain, so the declaration comes last and
+`aoide mail route` (plus the drift report) is the dry run.
 
 ### Degenerate topologies
 
@@ -235,15 +243,12 @@ machines. It is shaped like agenix: public keys in one file, one signer.
    mesh charter accept <file>`. Later versions arrive as letters. From then on the
    machine trusts every charter node with the charter's grants.
 
-   **A later version is spooled for every node on the charter, but it only
-   travels to the ones this box can DIAL — a node it has a record for.** The
-   charter's own `address` is a declaration, and
-   `aoide_storage::charter::dial_of` turns it into a dial target (Transports
-   and relays; MAIL.md §Transit) — but the drain still dials a RECORD, so a
-   version signed after a machine joined by `--operator` or by file — the two
-   non-LAN paths, which create no pairwise record — WAITS in the signer's
-   spool until either that machine is paired (giving it a record to dial) or
-   the drain reads the declaration. The receive
+   **A later version is spooled for every node on the charter, and it travels
+   to the ones this box can DIAL — a node it has a record for, or a charter
+   `address` the drain reads.** A node with no record of its own is reached at
+   the address the charter declares for it (`dial_of` → `dial_node`), so a
+   machine that joined by `--operator` or by file is no longer unreachable:
+   only an address that is `poll` waits for that machine's own ask. The receive
    half is already in place: the door admits and applies such a letter from an
    origin it holds no record for (Connections and trust, above). `aoide mesh
    charter sign` reports each spooled node as `drained` or `NOT DIALED — no

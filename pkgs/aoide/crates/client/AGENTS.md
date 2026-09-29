@@ -790,10 +790,17 @@
   node.** Do not add a second address test for this, and do not push the
   decision back out to callers. `settle_deposit` is the ONE place an outcome
   turns into spool side effects (ack minted and spooled on a filed letter
-  or a letter duplicate, `retire_by_ack` on a filed receipt); the door
+  or a letter duplicate, `retire_by_ack` on a filed receipt, a `transit`
+  entry retired on the hop that took it); the door
   reaches it through `aoide_conduct::mail_bridge::settle_deposit`, so
   `aoide-server` never keeps a second copy — do not put the ack mint back
-  in `a2a.rs`. A poll's answer is bounded at
+  in `a2a.rs`. **A letter's spool directory is the HOP the route picked, not
+  its destination** (`spool_entry(dest, next, mesh, …)`): the container stays
+  addressed to `dest` while the entry is dialled toward `next`, and a hop this
+  box holds no record for is dialled at the address the DECLARATION gives it
+  (`dial_node` → `charter::dial_of`) or held if that address is `poll`. A new
+  "may I dial this node" test belongs in `hop_is_never_dialled`, never at a
+  call site. A poll's answer is bounded at
   `aoide_storage::outbox::POLL_BATCH_CAP` (50) and must stay bounded: the
   poller's own `MAX_RESPONSE_BYTES` is what an unbounded batch walks into.
   A poll may ask this same crate to drain a node whose `.bsy`
@@ -802,7 +809,16 @@
   ack waits for the next tick — correct, not a leak; never make `.bsy`
   blocking to "fix" it.
 - **`handle_mail_send` reports the WRITE, never the drain's outcome (spec
-  item 8).** Minting and spooling the outbox entry is what the command's
+  item 8), and it READS THE ROUTE FIRST.** The four steps are asked before
+  anything is minted: a letter with no route is the sender's own answer
+  (`no-route`, `zone-violation`, the letter's mesh's own word) with nothing
+  written, and the hop the route picks is entry 1's `next`, the spool
+  directory, and the node the drain dials (`data.next`/`nextMesh` report it).
+  A destination this box holds NO record of is a charter node whose mesh comes
+  from the declarations (`send_mesh`), and the letter is signed as this box's
+  DECLARED name in that mesh (`own_name_in` via `mint_outbound_letter_from`),
+  because `from.node` is inside the signature every receiver and hop checks.
+  Minting and spooling the outbox entry is what the command's
   `Outcome` status describes; the best-effort `mail_wire::drain_node` call
   after it is a latency shortcut only, and its `Err` (a genuine local I/O
   failure inside the drain itself, never "remote unreachable") never

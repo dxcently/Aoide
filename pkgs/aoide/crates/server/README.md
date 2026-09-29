@@ -532,7 +532,15 @@ the inbound half of the two-door contract (the outbound half is
   **letter** mints an ack back to the origin, spools it, and best-effort
   drains that node once through the SAME `aoide_conduct::mail_bridge::
   drain_node` the daemon's own periodic tick uses — one drain
-  implementation; `aoide-server` never dials out on its own account. It
+  implementation; `aoide-server` never dials out on its own account. **A
+  container addressed to another node is not this receiver's to open**
+  (`deposit_sealed`'s `Hopped` arm): the door files it as a `transit` entry,
+  spools it toward the node the four steps pick, best-effort drains that hop
+  (never one the route said is HELD), and answers `accepted` with the hop
+  named — nothing filed as correspondence, no reader armed and NO ack, because
+  the letter is not here. The audit stamp and the chain agree on the caller's
+  name through the charter line (`declared_caller_name` →
+  `routing::declared_name`), never the `nodes.json` nickname. It
   never rings the doorbell itself (P-M5a-2c: the resident daemon is the
   policy and audit boundary for every ring, so this door files and acks
   and stops there) — a remotely-deposited letter arms its readers

@@ -658,14 +658,19 @@ fn dial_node(node_name: &str) -> Option<(aoide_storage::node_store::Node, bool)>
 ///
 /// A hand-over that does not deserialize, or that `deposit` refuses
 /// (`bad-msgid`, `unverified-origin` — a letter whose ORIGIN this box holds
-/// no key for, which for a direct edge at P-M3 means a relayed letter from a
-/// third node, P-M4's transit), is skipped: the pull has no response to
+/// no key for, which for a direct edge means a relayed letter from a third
+/// node), is skipped: the pull has no response to
 /// carry that news back, and one bad element must never cost the rest of
-/// the batch. The count returned is envelopes FILED.
+/// the batch. The count returned is envelopes FILED. A container whose chain
+/// does not end here is not a refusal at all: it is one hop of someone else's
+/// letter, and the poll forwards it (`ContainerOutcome::Hopped`).
 ///
 /// `Err` is the honest "we could not ask" — a refused or unreachable poll.
-/// Nothing is recorded on the spool either way: a poll writes nothing, and
-/// the entries the far end did not hand over are the far end's own state.
+/// Nothing is recorded on the spool either way — a poll writes nothing except
+/// the retirement of a hub's OWN transit custody
+/// (`outbox::retire_transit_handover`, the hand-over being the acceptance for a
+/// `poll` hop) — and the entries the far end did not hand over are the far
+/// end's own state.
 /// What one poll did: how many envelopes it FILED, the containers it
 /// REFUSED, each `"<msgid>: <reason>"` (review N13 — a refusal a caller
 /// cannot see is a refusal nobody acts on), and the entries the far end

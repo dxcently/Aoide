@@ -1034,6 +1034,24 @@
   a boolean. The doc sites a new key
   touches are MAIL.md §Transit, CONTRACTS.md §4's `mesh.<name>` list, and
   this crate's README entry for `routing`.
+- **A hop's own step is `seal::deposit_container`'s `Hopped` arm plus
+  `seal::file_transit_hop`, and a hub opens NOTHING.** The keyless half runs
+  first (the chain walk with its per-hop zone clause, the `loop` guard for a
+  chain that already names this box, dedup), this box's own name is its
+  declaration's for that mesh (`routing::own_name_in`), and only the route's
+  answer rewrites `mesh` — and only where this box is the declared gate. The
+  outcome is neither `Opened` nor a filing: the caller writes the `transit`
+  line and the spool entry toward `next`, then records the container. A hub
+  that acks, rings a reader, or files a letter has broken the seam; so has a
+  module that reads `container.mesh` as policy (it is hop-mutable and read by
+  nobody on the receiving side).
+- **The mesh rule is a zone clause, and it lives in the chain walk.** A hop's
+  key is the declaration's for the mesh THAT HOP signed (`entry.mesh`); a mesh
+  change between two entries must be signed by the node the previous mesh
+  declares as its gate into the new one; the last entry must be signed in the
+  mesh the deposit is made in. Anything else is `zone-violation`. A new
+  crossing rule belongs in `seal::walk_chain_with`, next to the walk, and not
+  in a caller comparing two unsigned fields.
 - **A routing decision is `routing::Letter::route`'s, and it stays pure.**
   Steps 1–4 read the declarations this box holds and nothing else: no dial, no
   link state, no spool write, no clock. Anything a hop needs to know beyond

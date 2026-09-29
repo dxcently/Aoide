@@ -874,6 +874,17 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `a_landed_charter_retires_the_senders_entry` reads this exact shape, and this
   crate's `a_landed_charter_is_answered_accepted_with_its_detail_in_data` is the
   half that fails if the word changes.
+- **A container addressed elsewhere is a HOP, and the door must not ack it
+  (P-M4).** `deposit_sealed`'s `Hopped` arm files the container as a `transit`
+  entry, spools it toward the node the four steps picked (the storage seam
+  `seal::file_transit_hop`), best-effort drains that hop unless the route said
+  it is held, and answers `{"status":"accepted","transit":{"next","mesh","held"}}`.
+  Three things are forbidden there and each has a test: filing anything as
+  correspondence, ringing a reader, and minting an ACK (the letter is not here;
+  only the destination's own receipt may tell an origin otherwise). The audit
+  stamp and the hop's own signature use the caller's DECLARED name for the
+  request's mesh (`declared_caller_name` → `routing::declared_name`), never the
+  record's `nodes.json` nickname — a charter line's name IS the policy name.
 - **`aoide/mailDeposit` (P-M2) is the SECOND capability-gated A2A arm,
   after Spawn, and the first not gated on `spawn` — `deposit_admitted`
   mirrors `spawn_admitted` one capability over, but signature-only from

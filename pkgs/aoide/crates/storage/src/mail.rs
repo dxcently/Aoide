@@ -8,9 +8,12 @@
 //! [`Envelope`] into [`crate::outbox`]; the far door's `aoide/mailDeposit`
 //! arm calls [`deposit`] here to verify and file it, ONLY ever via a
 //! [`file_received_entry`] (never re-minted — the envelope arrives already
-//! signed). **No transit and no zone check yet** — the router that adds them
-//! reads a mesh declaration through [`crate::routing`]; `--hold` is a spool
-//! flavor ([`crate::outbox`]), and nothing here consults a declaration.
+//! signed). **Transit is not filed here**: a sealed container addressed to
+//! another node is a HOP, and [`crate::seal`] answers it as one
+//! (`ContainerOutcome::Hopped`) — the hub writes a `transit` line
+//! ([`file_transit`]) holding the container and its routing metadata, and this
+//! module never opens it, never names a mailbox for it, and never rings a
+//! reader. The zone checks a receiver runs live in [`crate::seal`]'s chain walk.
 //! The doorbell's own latch and its targeting queries ([`arms`],
 //! [`ring_targets`], [`stamp_rung`], [`armed_names_for_reader`],
 //! [`enrol_reader`]) live here (P-M5a-1); the ring itself — injecting a byte
