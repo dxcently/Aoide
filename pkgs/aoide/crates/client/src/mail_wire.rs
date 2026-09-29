@@ -1371,6 +1371,66 @@ mod tests {
         (listener, port)
     }
 
+    /// **D6: an older relay refuses transit, and the refusal PARKS the letter at
+    /// its sender.** Nothing on the wire names a peer's version, so a pre-P-M4
+    /// relay cannot be recognised — it answers the taught word for a container
+    /// addressed somewhere else (`addressing-mismatch`: it has never heard of a
+    /// hop), the drain classifies that as a refusal, and the entry parks
+    /// (`mail outbox retry --refused` is the hand). Holding is the honest answer
+    /// while a mesh rolls out, and this is the shape it takes.
+    #[test]
+    fn an_older_relay_refusing_transit_parks_the_letter_at_its_sender() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("transit-old-relay");
+
+        let (listener, port) = fake_deposit_server(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"addressing-mismatch","detail":"container is addressed to `chiyo`, not this node"}}"#,
+        );
+        let mut node = unpaired_node("sakaki");
+        node.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        // A routed letter: the container is addressed to `chiyo`, and the entry
+        // is spooled toward the relay the route picked.
+        let now = aoide_storage::time::now_iso_utc();
+        let envelope = aoide_storage::mail::mint_outbound_letter_from(
+            "osaka",
+            "alice",
+            "chiyo",
+            "bob",
+            "routed through an old relay",
+            "home",
+        )
+        .unwrap();
+        let msgid = envelope.msgid.clone();
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let container = aoide_storage::seal::seal_envelope(
+            &envelope,
+            &binding,
+            "home",
+            "home",
+            "chiyo",
+            "sakaki",
+            &now,
+        )
+        .unwrap();
+        aoide_storage::outbox::write_entry("sakaki", &OutboxEntry::sealed(envelope, container)).unwrap();
+
+        drain_node("sakaki").unwrap();
+
+        let entries = aoide_storage::outbox::list_entries("sakaki").unwrap();
+        let parked = entries.iter().find(|e| e.envelope.msgid == msgid).expect("still spooled");
+        assert!(parked.refused, "a refusal parks the entry rather than rerouting it");
+        assert!(
+            parked.last_outcome.starts_with("refused:") && parked.last_outcome.contains("addressing-mismatch"),
+            "and the far end's word is recorded: {}",
+            parked.last_outcome
+        );
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The cap counts ATTEMPTS, not spool positions. Parked entries sort
     /// oldest-first (they were tried, and every later letter is newer), so a
     /// cap applied before the refused filter hands one whole batch to a loop
