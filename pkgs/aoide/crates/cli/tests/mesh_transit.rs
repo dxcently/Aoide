@@ -433,6 +433,57 @@ fn chiyos_poll_files_the_letter_and_the_origins_entry_retires_on_the_receipt() {
     assert!(aoide_storage::outbox::list_entries("sakaki").unwrap().is_empty());
 }
 
+/// **The box's OS name is not the name its mesh gave it.** Every other test in
+/// this file lets `AOIDE_A2A_NODE_NAME` stand in for the node so one process can
+/// play several boxes; the mail path must not depend on that coincidence. With
+/// the host left as the host (`sakaki-host`, `chiyo-host`) and the charters still
+/// naming `sakaki` and `chiyo`, the relay still hops the container and the
+/// destination still opens it — the names that matter are the ones the
+/// declarations give these keys (`routing::own_name_in`), for the chain's
+/// last-next check, the loop guard and the destination check alike.
+#[test]
+fn a_host_whose_name_is_not_its_charter_name_still_hops_and_still_receives() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("host-vs-line");
+    fx.enter("osaka");
+    let sent = dispatch(&cli_invocation(
+        &["mail", "send"],
+        &["a letter for chiyo"],
+        &[("to", "chiyo/conductor"), ("json", "true")],
+    ));
+    assert_eq!(sent.status, Status::Ok, "{}", sent.message);
+    assert_eq!(sent.data.as_ref().unwrap()["next"], "sakaki");
+
+    // The hop happens on `sakaki`'s own box, whose host is `sakaki-host`: the
+    // container is read from osaka's spool first, then the box is entered.
+    let container = aoide_storage::outbox::list_entries("sakaki").unwrap()[0].container.clone().unwrap();
+    fx.enter("sakaki");
+    std::env::set_var("AOIDE_A2A_NODE_NAME", "sakaki-host");
+    let key = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
+    let set = routing::declarations().unwrap();
+    assert_eq!(
+        routing::own_name_in(&set, HOME, &key).as_deref(),
+        Some("sakaki"),
+        "this box's key is `sakaki`'s line in `home`, whatever the host is called"
+    );
+    let hop = match aoide_storage::seal::deposit_container(&container, HOME).unwrap() {
+        aoide_storage::seal::ContainerOutcome::Hopped(hop) => hop,
+        other => panic!("a hub carries it on: {other:?}"),
+    };
+    assert_eq!(hop.next, "chiyo");
+    aoide_storage::seal::file_transit_hop(&hop, "osaka").unwrap();
+
+    // And the destination answers to its own charter line too.
+    fx.enter("chiyo");
+    std::env::set_var("AOIDE_A2A_NODE_NAME", "chiyo-host");
+    match aoide_storage::seal::deposit_container(&hop.container, HOME).unwrap() {
+        aoide_storage::seal::ContainerOutcome::Opened { envelope, .. } => {
+            assert_eq!(envelope.text, "a letter for chiyo");
+        }
+        other => panic!("the destination opens a chain that ends at its charter name: {other:?}"),
+    }
+}
+
 /// A chain truncated by dropping the tail never reaches the destination: the last
 /// hop still in it hands the letter to `sakaki`, so `chiyo` refuses it
 /// (`broken-chain`) and owes no ack — the letter is on no mailbox, and the
