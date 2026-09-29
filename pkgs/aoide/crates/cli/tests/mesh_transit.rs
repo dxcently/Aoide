@@ -151,7 +151,7 @@ fn mail_route_prints_the_path_and_sends_nothing() {
     assert_eq!(data["next"], "sakaki", "a plain member hands a `poll` letter to the relay");
     assert_eq!(data["nextMesh"], HOME);
     assert_eq!(data["held"], false);
-    assert_eq!(data["dial"], "ssh://sakaki");
+    assert_eq!(data["dial"], fx.url_of("sakaki"), "the hop's declared address, dialled as declared");
     let steps: Vec<&str> =
         data["steps"].as_array().unwrap().iter().map(|s| s.as_str().unwrap()).collect();
     assert!(steps.iter().any(|s| s.starts_with("step 1:")), "{steps:?}");

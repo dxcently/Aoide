@@ -69,6 +69,80 @@ pub struct Fixture {
     /// Every box's node line, as minted on its own machine: `sakaki`'s goes
     /// into both charters, which is the fixture's one-node-one-key case.
     pub lines: BTreeMap<&'static str, String>,
+    /// Node name → the loopback port that box's `https://` address names, where
+    /// a REAL door can be raised (`Fixture::doors`). `chiyo` has one too, though
+    /// its declared address is `poll` — nothing dials it.
+    pub ports: BTreeMap<&'static str, u16>,
+}
+
+/// Real doors for some of the fixture's boxes: one `aoide a2a serve` child per
+/// box, on that box's own port and root, killed when this drops.
+///
+/// The children are the fixture's own, spawned and reaped by the test that asked
+/// for them (never by a shell, never in the background, and never found again by
+/// name): a door-level test needs a door, and `aoide mail serve`'s own round trip
+/// (`mail_adapter_round_trip.rs`) is the shape this follows.
+pub struct Doors {
+    children: Vec<std::process::Child>,
+}
+
+impl Drop for Doors {
+    fn drop(&mut self) {
+        for child in &mut self.children {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+impl Fixture {
+    /// The URL a box's door answers on, as its own charter line declares it.
+    pub fn url_of(&self, name: &str) -> String {
+        format!("https://127.0.0.1:{}/", self.ports[name])
+    }
+
+    /// Raise a real door for each name, and wait until each answers TCP.
+    pub fn doors(&self, names: &[&'static str]) -> Doors {
+        let mut children = Vec::new();
+        for name in names {
+            let root = self.boxes[name].clone();
+            let port = self.ports[name];
+            let runtime = root.join("runtime");
+            std::fs::create_dir_all(&runtime).unwrap();
+            let child = std::process::Command::new(aoide_test_support::built_aoide_bin())
+                .args(["a2a", "serve", "--bind", "127.0.0.1", "--port", &port.to_string()])
+                .env("AOIDE_ROOT", &root)
+                .env("AOIDE_AUDIT_LOG", root.join("log"))
+                .env("AOIDE_A2A_NODE_NAME", name)
+                .env("XDG_RUNTIME_DIR", &runtime)
+                .env_remove("AOIDE_STATE_DIR")
+                .env_remove("AOIDE_STAGE_DIR")
+                .env_remove("AOIDE_SESSION_ID")
+                .env_remove("AOIDE_CONFIG")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::inherit())
+                .spawn()
+                .expect("the built aoide binary runs");
+            children.push(child);
+        }
+        let doors = Doors { children };
+        for name in names {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+            loop {
+                if std::net::TcpStream::connect(("127.0.0.1", self.ports[name])).is_ok() {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the door for `{name}` never came up on port {}",
+                    self.ports[name]
+                );
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+        }
+        doors
+    }
 }
 
 impl Drop for Fixture {
@@ -102,11 +176,13 @@ impl Fixture {
         // Every box's node line, minted on its own root — the identity is a
         // host fact, so it is the box that publishes it. Each line carries the
         // hop its box answers on: `chiyo` is the `poll` node, every other box
-        // answers on ssh.
+        // answers on the loopback door its own port names.
+        let ports: BTreeMap<&'static str, u16> =
+            BOXES.iter().map(|name| (*name, free_port())).collect();
         let mut lines = BTreeMap::new();
         for (name, dir) in &boxes {
             enter(dir, name);
-            let line = line_at(&charter::node_line().unwrap(), &hop_of(name));
+            let line = line_at(&charter::node_line().unwrap(), &hop_of(name, ports[name]));
             lines.insert(*name, line);
         }
 
@@ -153,7 +229,7 @@ impl Fixture {
             })
             .collect();
 
-        let fixture = Fixture { root, operator: operator_root, boxes, operators, signed, lines };
+        let fixture = Fixture { root, operator: operator_root, boxes, operators, signed, lines, ports };
         // Every other box trusts the operator key and TAKES both charters —
         // the real path by which a signature reaches a machine.
         for name in BOXES {
@@ -220,12 +296,20 @@ fn rename(line: &str, from: &str, to: &str) -> String {
 
 /// The hop one box of the fixture answers on: `chiyo` takes no inbound
 /// connection at all (`poll` — its letters wait at the relay for its own ask),
-/// every other box answers on ssh.
-fn hop_of(name: &str) -> String {
+/// and every other box answers on the loopback door its `https://` address names.
+/// A REAL door can be raised on that port (`Fixture::doors`), which is what makes
+/// the door-level tests door-level.
+fn hop_of(name: &str, port: u16) -> String {
     match name {
         "chiyo" => charter::DEFAULT_ADDRESS.to_string(),
-        other => format!("ssh://{other}"),
+        _ => format!("https://127.0.0.1:{port}/"),
     }
+}
+
+/// A free loopback port: bind `:0`, read it back, drop the listener. A tiny
+/// re-bind race is acceptable in a test.
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
 }
 
 /// One node's line at a declared address. `charter::node_line` writes a line
