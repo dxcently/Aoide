@@ -410,7 +410,8 @@ never the inbound/serve half (that's `aoide-server`).
   read of `routing::declarations()` serves every section's rows, so the set the
   statuses are read from is the set the refusals are read from. A pair-mesh name
   with no VERIFIED record is not one of these rows — routing cannot name it — so
-  it stays in the section's `rows` as `missing`, which is where it already showed.
+  it stays in the section's `rows` as `missing` (no record) or `unverified` (a
+  record not yet verified), which is where it already showed.
 
   **The converge.** `aoide mesh pair [<mesh>]` runs that SAME `drift` — no
   second comparison exists anywhere in the tree — and `plan` selects the

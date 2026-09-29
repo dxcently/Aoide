@@ -915,11 +915,12 @@ count.
   `unverified` is what nothing-observed reads, which is never `dead` and never
   the declared `down`. A pair-mesh name with no VERIFIED record is not one of
   these rows — routing cannot name it — so it stays where it already showed, in
-  the section's `rows` as `missing`.
+  the section's `rows` as `missing` (no record) or `unverified` (a record not
+  yet verified).
   `--json`'s `data.report` shape: `{"sections":
   [{"name", "source", "grant", "sameOperatorNote"?, "grants", "declared",
   "selfDeclared", "rows": [{"node", "class", …}], "kind", "charterVersion"?,
-  "refusal"?, "nodes": [{"name", "nickname"?, "status", "role", "gates"?,
+  "refusal"?, "nodes": [{"name", "nicknames"?, "warnings"?, "status", "role", "gates"?,
   "keySource", "liveness"}]}], "undeclared": [...],
   "charters": [{"mesh", "declared", "inForce", "version", "operator",
   "operatorKey", "trust", "trusted", "highWater", "rekeyed", "inert",
