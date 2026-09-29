@@ -1367,7 +1367,7 @@ The beta path runs in this order. MAIL.md §Phases holds each mail-side slice's 
 and its mail-side tests; the tests below are this design's acceptance evidence for
 the same slices. They are required, not suggestions.
 
-1. **P-M3: hold and poll** (in progress). MAIL.md.
+1. **P-M3: hold and poll.** MAIL.md.
 2. **P-SEAL: sealing and key bindings**, on the SSH direct lane, the only transport
    the slice has.
 3. **P-CHARTER: the charter and trust per mesh.**

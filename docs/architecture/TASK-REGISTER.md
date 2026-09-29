@@ -2271,14 +2271,21 @@ project/parent inheritance across local/remote/app/subagents;
   (the new owner rotates the epoch), and a pair-mesh board whose owner
   is gone is frozen and recreated.
 - Beta path (slice order, each with its tests in the two docs): P-M3 hold +
-  poll (in progress) → P-SEAL sealing + key bindings (SSH direct lane) →
+  poll → P-SEAL sealing + key bindings (SSH direct lane) →
   P-CHARTER charter + trust per mesh → H1 mail-only HTTPS adapter on the
   relay (native Windows `poll` node in its acceptance, §28) → P-M4 transit
   with the `next` hop chain → P-BOARD boards. Then H2 state/events, H3
   direct HTTPS edges, H4 typed control, each after its own review.
 - Status: design amended to the rulings; the encryption-library profile
-  (`age` 0.12.1, no features) and the encodings are fixed; P-SEAL
-  implementation remains. HTTPS has no plaintext fallback. Existing
+  (`age` 0.12.1, no features) and the encodings are fixed. P-M3, P-SEAL,
+  P-CHARTER, H1 and P-M4 are on main (P-M4: per-mesh `relays`/`[status]`/
+  `[gates]` declarations, the router and `mail route`, transit at the hop
+  with the zone clause, `down`/`hold` enforced at the door, the route and
+  the drain, and `aoide mesh` status/role/key-source/liveness columns);
+  P-BOARD is next. The P-M4 live gate (osaka→sakaki→chiyo) waits on every
+  box running the transit version and chiyo being lit, since transit
+  declarations are deployed only after every box runs it. HTTPS has no
+  plaintext fallback. Existing
   SSH delivery remains in service until parity and recovery are
   demonstrated.
 - Open (the docs' "Open design decisions"): where the relay runs (an
