@@ -356,7 +356,7 @@ mod tests {
         /// its own box.
         fn dir(&self, name: &str) -> PathBuf {
             let dir = self.root.join(name);
-            std::fs::create_dir_all(dir.join("state")).unwrap();
+            std::fs::create_dir_all(&dir).unwrap();
             dir
         }
     }
