@@ -102,6 +102,42 @@ pub fn declarations() -> Result<Vec<Loaded>, Refusal> {
     Ok(out)
 }
 
+/// This box's own name IN `mesh`: the declared name its identity `key` belongs
+/// to, or `None` for a key the mesh does not carry — which is exactly "not a
+/// member of this mesh". The ONE resolution every policy, routing and audit
+/// lookup that starts from a verifying key goes through
+/// ([`Declaration::name_of_key`]); the OS hostname and a `nodes.json` nickname
+/// are display facts and never inputs. A mesh this node cannot read names
+/// nobody, so a box whose own mesh has fallen over cannot speak for it.
+pub fn declared_name(set: &[Loaded], mesh: &str, key: &str) -> Option<String> {
+    set.iter()
+        .find(|loaded| loaded.mesh == mesh)
+        .and_then(|loaded| loaded.declaration.as_ref().ok())
+        .and_then(|declaration| declaration.name_of_key(key))
+        .map(str::to_string)
+}
+
+/// This box's own name in `mesh` — what `from` is for the four steps, for the
+/// hop an entry is signed as, and for the door's audit stamp.
+///
+/// A name is the one the mesh's declaration gives this box's identity `key`
+/// ([`declared_name`]). Failing that, the address form of this box's own name
+/// (`crate::display::local_node_name`) answers **only for a mesh no charter
+/// governs**: a pair mesh's own records are all about OTHER boxes, so a box
+/// that has no record of itself is still itself there. A CHARTER mesh that does
+/// not carry this box's key names nobody, and the hostname is not a name: a box
+/// whose hostname happens to spell a member's name is a stranger in that mesh —
+/// `None` here — never that member.
+pub fn own_name_in(set: &[Loaded], mesh: &str, key: &str) -> Option<String> {
+    if let Some(declared) = declared_name(set, mesh, key) {
+        return Some(declared);
+    }
+    if charter::charter_shaped(mesh) {
+        return None;
+    }
+    Some(crate::display::local_node_name())
+}
+
 /// The two invariants only a SET of declarations can see, each refused against
 /// the mesh that is inconsistent, as `mesh name → refusal`.
 ///
@@ -237,11 +273,12 @@ fn gate_verdict(
     })
 }
 
-/// One mesh's routing declaration. There is exactly one place a declaration is
-/// built: [`Declaration::load`], and the two readers it shares with
-/// [`declarations`] ([`Declaration::from_charter`]/[`Declaration::from_section`],
-/// which take the snapshot the caller already read) — never a caller assembling
-/// one out of a section or a charter file it read itself.
+/// One mesh's routing declaration. Every declaration this box holds is built by
+/// one of three readers and nothing else: [`Declaration::load`] for a caller
+/// with one mesh in hand, and the two it shares with [`declarations`]
+/// ([`Declaration::from_charter`]/[`Declaration::from_section`], which take the
+/// snapshot the caller already read) — never a caller assembling one out of a
+/// section or a charter file it read itself.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
     mesh: String,
