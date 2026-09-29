@@ -269,6 +269,16 @@ impl OutboxEntry {
         self.flavor == FLAVOR_HOLD
     }
 
+    /// Is this entry a hub's CUSTODY of someone else's sealed letter — a
+    /// `transit` container spooled toward the hop it goes to next? Its own kind
+    /// answers: the bookkeeping envelope is built from the container's outer
+    /// claims and marked [`crate::mail::ENTRY_TYPE_TRANSIT`]. A drain retires
+    /// such an entry on the HOP's acceptance, never on the destination's ack (a
+    /// hub keeps no receipt of a letter it never opened).
+    pub fn is_transit(&self) -> bool {
+        self.envelope.header.kind == crate::mail::ENTRY_TYPE_TRANSIT
+    }
+
     /// Has this entry's own last attempt already reached the peer? The one
     /// spelling of "the deposit landed" in `last_outcome` (written by
     /// `aoide_client::mail_wire::drain_node`'s delivered arm, and by nothing

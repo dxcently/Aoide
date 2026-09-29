@@ -1144,13 +1144,19 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
 /// implementation of that decision, so the arm [`drain_node`] runs and the
 /// test that pins it cannot drift.
 ///
-/// **A receipt and a `charter` letter retire on the spot; a letter waits for a
-/// real ack.** For a receipt the deposit outcome *is* confirmation (there is no
-/// ack-of-an-ack). A `charter` letter is the same case for a stronger reason:
-/// the enclosed charter is APPLIED, never filed, so there is no mailbox on the
-/// far end to ack from at all, and the outcome of its own deposit is the whole
-/// confirmation there can be. A letter still waits for a receipt naming its
-/// `msgid` (spec item 7), so its attempt is recorded and it stays spooled.
+/// **A receipt and a `charter` letter retire on the spot; a transit container
+/// retires on the HOP's acceptance; a letter waits for a real ack.** For a
+/// receipt the deposit outcome *is* confirmation (there is no ack-of-an-ack). A
+/// `charter` letter is the same case for a stronger reason: the enclosed charter
+/// is APPLIED, never filed, so there is no mailbox on the far end to ack from at
+/// all, and the outcome of its own deposit is the whole confirmation there can
+/// be. A **transit** container is a hub's custody of someone else's letter: its
+/// obligation is to hand it to `next` and to be able to prove it did, so `next`'s
+/// own acceptance ends it — waiting for the DESTINATION's receipt would leave
+/// every hub holding a copy of every letter it ever relayed, and the destination
+/// need not even be able to reach the hub (a `poll` next asks, and never
+/// answers). A letter still waits for a receipt naming its `msgid` (spec item 7),
+/// so its attempt is recorded and it stays spooled.
 ///
 /// `status` is the far end's own word, recorded verbatim as `last_outcome` —
 /// the same string [`DepositAttempt::Delivered`] carries, never re-derived.
@@ -1162,7 +1168,9 @@ fn settle_delivered(
     aoide_storage::outbox::clear_link_state(node_name)?;
     if matches!(
         entry.envelope.header.kind.as_str(),
-        aoide_storage::mail::ENTRY_TYPE_RECEIPT | aoide_storage::mail::ENTRY_TYPE_CHARTER
+        aoide_storage::mail::ENTRY_TYPE_RECEIPT
+            | aoide_storage::mail::ENTRY_TYPE_CHARTER
+            | aoide_storage::mail::ENTRY_TYPE_TRANSIT
     ) {
         aoide_storage::outbox::remove_entry(node_name, &entry.envelope.msgid)?;
     } else {
@@ -2394,6 +2402,36 @@ mod tests {
             DepositAttempt::Refused(reason) => assert!(reason.contains("applied"), "{reason}"),
             other => panic!("an unrecognised status must never read as delivery, got {other:?}"),
         }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A hub's custody ends when the NEXT HOP takes the container — not when the
+    /// destination acks. The entry is the `transit` spool entry a hop writes
+    /// (`seal::file_transit_hop`): its kind is what the delivered arm reads, and
+    /// the destination's receipt retires the ORIGIN's entry (which lives under
+    /// its own hop), never a hub's copy of a letter it could not open.
+    #[test]
+    fn a_hub_retires_its_transit_entry_on_the_next_hops_acceptance() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("transit-retire");
+
+        let now = aoide_storage::time::now_iso_utc();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "chiyo", "bob", "through the hub").unwrap();
+        let container = {
+            let live = aoide_storage::seal::publish_binding().unwrap();
+            aoide_storage::seal::seal_envelope(&envelope, &live, "home", "home", "chiyo", "chiyo", &now).unwrap()
+        };
+        let hop_entry = OutboxEntry::transit(container);
+        assert!(hop_entry.is_transit(), "the bookkeeping envelope carries the transit kind");
+        assert!(!hop_entry.is_held());
+        aoide_storage::outbox::write_entry("chiyo", &hop_entry).unwrap();
+
+        settle_delivered("chiyo", hop_entry.clone(), "accepted").unwrap();
+        assert!(
+            aoide_storage::outbox::list_entries("chiyo").unwrap().is_empty(),
+            "the hub's own obligation is done once the next hop accepted it"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
