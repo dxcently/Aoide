@@ -1358,8 +1358,7 @@ fn an_unloadable_declaration_refuses_both_mail_methods_and_nothing_else() {
     // A CHARTER-ONLY caller: `yomi` holds a line on `home` and no `nodes.json`
     // record on osaka. Its signature checks out cryptographically under that
     // line's key, so what the door owes it is the host's own broken state — the
-    // declaration set it cannot load — and NOT a claim about `yomi` (user ruling
-    // D8).
+    // declaration set it cannot load — and NOT a claim about `yomi`.
     fx.enter("yomi");
     let deposit = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/mailDeposit", serde_json::json!({ "container": {} }));
     assert_eq!(deposit["result"]["status"], "refused", "{deposit}");
@@ -1380,7 +1379,7 @@ fn an_unloadable_declaration_refuses_both_mail_methods_and_nothing_else() {
     assert_eq!(poll["result"]["status"], "refused", "{poll}");
     assert_eq!(poll["result"]["reason"], "config-invalid", "{poll}");
 
-    // **A signature that does NOT check out keeps `-32007`.** The ruling is
+    // **A signature that does NOT check out keeps `-32007`.** The condition is
     // "once the signature checks out cryptographically"; a forged one is forged
     // whatever this host's config says.
     let forged = door_post_tampered(fx.ports["osaka"], "yomi", HOME, "aoide/mailDeposit", serde_json::json!({ "container": {} }));
@@ -1400,7 +1399,7 @@ fn an_unloadable_declaration_refuses_both_mail_methods_and_nothing_else() {
     assert!(log.contains("config.toml"), "and the LOG is where the load error lives: {log}");
 
     // The SAME fixed detail on the other path: with a record for the caller the
-    // request resolves, so `mail_declarations` answers instead of the D8 gate —
+    // request resolves, so `mail_declarations` answers instead of the door's declaration gate —
     // and it must not hand the load error over either.
     fx.enter("yomi");
     let yomi_key = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
@@ -1425,8 +1424,8 @@ fn an_unloadable_declaration_refuses_both_mail_methods_and_nothing_else() {
     );
 }
 
-/// **The two negatives that keep D8 honest.** With the same broken config:
-/// a TAMPERED signature still reads `-32007` (the ruling is "once the signature
+/// **The two negatives that keep the gate honest.** With the same broken config:
+/// a TAMPERED signature still reads `-32007` (the condition is "once the signature
 /// checks out cryptographically"), and so does a request whose key no line of the
 /// charter in force carries — the door has no key to believe there, and it says
 /// exactly that rather than blaming its own config for a caller it cannot place.
@@ -1472,7 +1471,7 @@ fn a_caller_no_line_carries_over_a_broken_config_still_reads_32007() {
 }
 
 /// `osaka`'s config with a `[status]` for a node `home` does not have: the
-/// section is refused as a whole, so `declarations()` fails and D8's branch is
+/// section is refused as a whole, so `declarations()` fails and the gate's branch is
 /// reachable at all.
 fn break_osaka_config(fx: &common::Fixture) {
     let config = format!(
@@ -1532,7 +1531,7 @@ fn a_replayed_mail_request_is_refused_while_the_config_is_broken() {
     /// **The named line is the ONLY line that can verify.** A caller whose key
     /// holds a DIFFERENT line of the same charter — so the door could place it,
     /// but not as the node it names — must read `-32007`, not `config-invalid`:
-    /// the D8 answer is owed to the node the request itself names, verified
+    /// the declaration answer is owed to the node the request itself names, verified
     /// against THAT node's key.
     #[test]
     fn a_caller_naming_another_line_over_a_broken_config_still_reads_32007() {

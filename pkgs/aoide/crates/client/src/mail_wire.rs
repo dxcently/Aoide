@@ -1565,7 +1565,7 @@ mod tests {
     }
 
     /// **Only a refusal that is a verdict on the LETTER parks it.** A word about
-    /// the link (`down`, `config-invalid`) leaves the entry live — user ruling D7
+    /// the link (`down`, `config-invalid`) leaves the entry live
     /// — while every other word (`zone-violation`, `broken-chain`, `bad-msgid`,
     /// `not-correspondence`, …) parks it, because that one will never be true.
     /// The classifier is pure, so the whole vocabulary is provable here without a
