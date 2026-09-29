@@ -739,8 +739,7 @@ dropped. Deposit `refused` reasons — `no-route`, `unknown-mesh`,
 `zone-violation`, `unverified-origin`, `bad-msgid`, `not-correspondence` —
 return to the
 depositing hop, which records `lastOutcome` on that entry and stops
-retrying it; the origin learns through `aoide mail outbox`. **Two of them are
-not verdicts on the letter**: `down` and `config-invalid` say something about
+retrying it; the origin learns through `aoide mail outbox`. **Two other refused words are not verdicts on the letter**: `down` and `config-invalid` say something about
 the far end's own state, so the entry stays live, the LINK's ordinary back-off
 carries it back, and it is never parked (§Status).
 

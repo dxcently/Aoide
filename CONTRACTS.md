@@ -913,7 +913,9 @@ count.
   `reachable`/`unreachable`/`unverified` — an OBSERVATION from the outbox's own
   bookkeeping and the link's back-off, never a probe and never a dial:
   `unverified` is what nothing-observed reads, which is never `dead` and never
-  the declared `down`.
+  the declared `down`. A pair-mesh name with no VERIFIED record is not one of
+  these rows — routing cannot name it — so it stays where it already showed, in
+  the section's `rows` as `missing`.
   `--json`'s `data.report` shape: `{"sections":
   [{"name", "source", "grant", "sameOperatorNote"?, "grants", "declared",
   "selfDeclared", "rows": [{"node", "class", …}], "kind", "charterVersion"?,
@@ -6712,8 +6714,8 @@ for a cheaper reason:
    and ONE message whether the signing key is unknown, the node is
    unverified/keyless, or a known node's signature is simply bad: the
    refusal is never an existence oracle over the registry. **For
-   `aoide/mailDeposit` and `aoide/mailPoll` there is one narrow exception**
-  : where the declaration set will not load AND the signature
+   `aoide/mailDeposit` and `aoide/mailPoll` there is one narrow exception**:
+   where the declaration set will not load AND the signature
    verifies against the key the node the request itself names holds on the
    mesh's charter IN FORCE, the door answers the refused `config-invalid`
    result — fixed text, never the load error (that goes to the audit line) —

@@ -1956,7 +1956,7 @@ mod tests {
     }
 
     /// **An older relay refuses transit, and the refusal PARKS the letter at
-    /// its sender.** Nothing on the wire names a peer's version, so a older
+    /// its sender.** Nothing on the wire names a peer's version, so an older
     /// relay cannot be recognised — it answers the taught word for a container
     /// addressed somewhere else (`addressing-mismatch`: it has never heard of a
     /// hop), the drain classifies that as a refusal, and the entry parks

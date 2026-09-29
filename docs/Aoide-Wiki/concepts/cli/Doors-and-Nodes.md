@@ -780,7 +780,9 @@ aoide mesh [--json]
   (`reachable`/`unreachable`/`unverified`) — an OBSERVATION read from the
   outbox's own bookkeeping and the link's back-off and nothing else, so this
   command never probes, never dials and never blocks; `unverified` is what a node
-  with no signal reads, which is never `dead` and never the declared `down`.
+  with no signal reads, which is never `dead` and never the declared `down`. A
+  pair-mesh name with no VERIFIED record is not one of these rows — routing cannot
+  name it — so it stays in the section's `rows` as `missing`.
 - **`--json` (P-CHARTER).** `data.report` is
   `{"sections": [{"name", "source", "grant", "sameOperatorNote"?,
   "grants", "declared", "selfDeclared", "rows": [{"node", "class", …}], "kind",

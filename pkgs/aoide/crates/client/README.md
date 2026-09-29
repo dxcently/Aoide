@@ -408,7 +408,9 @@ never the inbound/serve half (that's `aoide-server`).
   never dials, never probes and never blocks on a network; a node with no signal
   reads `unverified`, which is never `dead` and never the declared `down`. One
   read of `routing::declarations()` serves every section's rows, so the set the
-  statuses are read from is the set the refusals are read from.
+  statuses are read from is the set the refusals are read from. A pair-mesh name
+  with no VERIFIED record is not one of these rows — routing cannot name it — so
+  it stays in the section's `rows` as `missing`, which is where it already showed.
 
   **The converge.** `aoide mesh pair [<mesh>]` runs that SAME `drift` — no
   second comparison exists anywhere in the tree — and `plan` selects the
