@@ -1724,6 +1724,33 @@ fn a_charter_mesh_shows_the_charter_name_not_the_nickname() {
     );
 }
 
+/// **Every key the docs promise is the key the wire carries.** `keySource` is
+/// camelCase like its siblings (`charterVersion`, `selfDeclared`), and this is
+/// the test that keeps the docs and the JSON from drifting apart.
+#[test]
+fn the_json_shape_names_every_documented_key() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("mesh-json-shape");
+    fx.enter("osaka");
+    let json = serde_json::to_value(mesh_report()).expect("the report serializes");
+
+    for key in ["sections", "undeclared", "charters"] {
+        assert!(json.get(key).is_some(), "report key `{key}`: {json}");
+    }
+    let sections = json["sections"].as_array().expect("sections are a list");
+    let home = sections.iter().find(|s| s["name"] == serde_json::json!(HOME)).expect("home is a section");
+    for key in ["name", "source", "grant", "grants", "declared", "selfDeclared", "rows", "kind", "charterVersion", "nodes"] {
+        assert!(home.get(key).is_some(), "section key `{key}`: {home}");
+    }
+    let rows = home["nodes"].as_array().expect("nodes are a list");
+    let sakaki = rows.iter().find(|r| r["name"] == serde_json::json!("sakaki")).expect("sakaki has a row");
+    for key in ["name", "status", "role", "gates", "keySource", "liveness"] {
+        assert!(sakaki.get(key).is_some(), "node-row key `{key}`: {sakaki}");
+    }
+    assert!(sakaki.get("key_source").is_none(), "the wire name is camelCase: {sakaki}");
+    assert!(sakaki.get("keySource").is_some(), "and it is exactly the documented one: {sakaki}");
+}
+
 /// **A `down` node's queued letter is KEPT, and is drained once the declaration
 /// no longer says `down`.** `down` stops this box SENDING; it never confiscates
 /// what is already spooled, and it never leaves the entry looking dialled.

@@ -174,6 +174,7 @@ pub struct NodeRow {
     pub gates: Vec<String>,
     /// Where this node's identity key comes from: `charter` (a signed line) or
     /// `record` (a paired record).
+    #[serde(rename = "keySource")]
     pub key_source: String,
     /// What this box has OBSERVED about reaching it: `reachable` (a recorded
     /// attempt reached the peer), `unreachable` (a recorded attempt did not), or
