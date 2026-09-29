@@ -1496,7 +1496,7 @@ fn restore_osaka_config(fx: &common::Fixture) {
 }
 
 /// **A verified request CONSUMES its nonce even when the answer is
-/// `config-invalid`** (S4 review round 2). Without that, bytes the door already
+/// `config-invalid`**. Without that, bytes the door already
 /// answered could be replayed inside the skew window — once the config is back —
 /// into a method that has never seen them, and a replayed `mailPoll` retires and
 /// hands over entries. So: a signed `mailPoll` reads `config-invalid`; the SAME
@@ -1688,7 +1688,7 @@ fn a_refused_mesh_shows_its_word_while_the_other_mesh_still_lists() {
     assert_eq!(home_json["nodes"], serde_json::json!([]), "and it lists no nodes: {home_json}");
 }
 
-/// **A charter mesh shows the charter LINE's name, not the nickname** (D5): a
+/// **A charter mesh shows the charter LINE's name, not the nickname**: a
 /// record holding the same key under another name is display, and rides beside
 /// the row rather than becoming one.
 #[test]

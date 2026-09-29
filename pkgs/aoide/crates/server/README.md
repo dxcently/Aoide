@@ -605,7 +605,7 @@ the inbound half of the two-door contract (the outbound half is
   UNLOADABLE set refuses both methods with `config-invalid` and keeps
   serving everything else: no zone checks means no mail, never mail with
   the walls down. **An unloadable set is answered BEFORE caller resolution, to
-  every caller** (user ruling D8): where the request's signature verifies
+  every caller**: where the request's signature verifies
   against the key its own `X-Aoide-Node` holds on the charter in force, the door
   answers the refused `config-invalid` result — fixed text, with the load error
   audited only, never sent — and CONSUMES the nonce, so those bytes cannot be

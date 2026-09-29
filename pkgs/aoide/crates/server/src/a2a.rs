@@ -149,7 +149,7 @@ const SEALED_REQUIRED: &str = "sealed-required";
 /// broken zone table means no zone check can run, and no zone check means no
 /// mail — never "mail with the walls down". It is a refused RESULT, like
 /// [`SEALED_REQUIRED`], and the SENDER treats it as a state of the LINK, never a
-/// verdict on the letter (user ruling D7): the entry stays live and retries on
+/// verdict on the letter: the entry stays live and retries on
 /// the ordinary back-off. One source, in the crate both ends share
 /// (`aoide_storage::charter::CONFIG_INVALID`), because the sender classifies it
 /// by this word.
@@ -5229,7 +5229,7 @@ enum PreDispatch {
 }
 
 /// **The cryptographic half of the door's signature ladder, without the half
-/// that needs the declaration set** (user ruling D8): `Unloadable` when the set
+/// that needs the declaration set**: `Unloadable` when the set
 /// will not load, the request names a mesh and a node, and its signature verifies
 /// under the key the charter IN FORCE for that mesh gives THAT node. `Keep` in
 /// every other case — a genuinely bad signature, a name the charter does not
@@ -6852,7 +6852,7 @@ fn handle_connection(
         }
         SignedRequestOutcome::Refused(code, message) => {
             // **The two mail methods read `config-invalid`, not a lie about their
-            // caller** (user ruling D8). When this host's declaration set will not
+            // caller**. When this host's declaration set will not
             // load, what failed is RESOLUTION — the declarations that name people
             // are the ones this host cannot read — so `-32007 signature
             // verification failed` both blames a caller who may be perfectly

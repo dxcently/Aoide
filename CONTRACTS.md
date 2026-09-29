@@ -6713,7 +6713,7 @@ for a cheaper reason:
    unverified/keyless, or a known node's signature is simply bad: the
    refusal is never an existence oracle over the registry. **For
    `aoide/mailDeposit` and `aoide/mailPoll` there is one narrow exception**
-   (user ruling D8): where the declaration set will not load AND the signature
+  : where the declaration set will not load AND the signature
    verifies against the key the node the request itself names holds on the
    mesh's charter IN FORCE, the door answers the refused `config-invalid`
    result — fixed text, never the load error (that goes to the audit line) —

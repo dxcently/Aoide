@@ -226,7 +226,7 @@ fn classify_deposit_response(result: &Value) -> DepositAttempt {
                 Some(d) => format!("{reason}: {d}"),
                 None => reason.to_string(),
             };
-            // **A LINK state is not a verdict on the letter** (user ruling D7).
+            // **A LINK state is not a verdict on the letter**.
             // `down` and `config-invalid` say something about the far end's own
             // state — a node its mesh quarantined, a declaration set that will not
             // load — and the sender's answer is the one it gives a link that
@@ -668,7 +668,7 @@ pub fn route_for(
 /// The direct edge: the destination ITSELF as the hop, for a mesh this box holds
 /// no declaration of at all. That is the lane every box had before the four steps
 /// existed (a paired record and nothing else), and refusing it here would make
-/// the declarations' absence a send-time outage for every pre-P-M4 pair. The
+/// the declarations' absence a send-time outage for every older pair. The
 /// facts are the record's own — a stored key, and an address that is not `poll`
 /// (which is HELD, never dialled) — so this is step 1 with the record as the
 /// declaration, not a second routing rule: `no-route` where the record cannot
@@ -1254,7 +1254,7 @@ fn revoked_by_charter(node: &aoide_storage::node_store::Node) -> bool {
 /// the node's record of this box — which is what the far door checks when it
 /// answers. Keeping the two in step is the operator's business; a node
 /// without `message` on either side is not one this box trades mail with.
-/// P-M4's declared `down` status narrows this set further: a node the mesh a
+/// A declared `down` status narrows this set further: a node the mesh a
 /// poll of it would act in declares `down` is not asked, because `down` means
 /// this box stops SENDING to it — its spooled entries are kept, not
 /// confiscated, and no dial is opened for either direction.
@@ -1597,7 +1597,7 @@ mod tests {
     }
 
     /// **A `down` refusal is a LINK state, and the next pass delivers once the
-    /// peer is no longer `down`** (user ruling D7): the entry is never parked,
+    /// peer is no longer `down`**: the entry is never parked,
     /// never needs `retry --refused`, and the link's own back-off is what brings
     /// it back.
     #[test]
@@ -1913,7 +1913,7 @@ mod tests {
     }
 
     /// **An older relay refuses transit, and the refusal PARKS the letter at
-    /// its sender.** Nothing on the wire names a peer's version, so a pre-P-M4
+    /// its sender.** Nothing on the wire names a peer's version, so a older
     /// relay cannot be recognised — it answers the taught word for a container
     /// addressed somewhere else (`addressing-mismatch`: it has never heard of a
     /// hop), the drain classifies that as a refusal, and the entry parks

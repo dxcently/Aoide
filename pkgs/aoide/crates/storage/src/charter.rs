@@ -80,7 +80,7 @@ pub const CONFIG_UNREADABLE: &str = "config-unreadable";
 /// unloadable"). It lives here, in the crate both ends share, because the
 /// SENDER classifies it: a `config-invalid` refusal is a state of the LINK, not a
 /// verdict on the letter — its entry stays live and retries on the ordinary
-/// back-off (user ruling D7) — which is what `mail_wire`'s own classifier reads
+/// back-off — which is what `mail_wire`'s own classifier reads
 /// this constant for.
 pub const CONFIG_INVALID: &str = "config-invalid";
 /// The charter itself was fine; THIS node could not read or write its own

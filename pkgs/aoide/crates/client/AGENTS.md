@@ -825,7 +825,7 @@
   "may I dial this node" test belongs in `hop_is_never_dialled`, never at a
   call site.
   **A refusal that says something about the LINK is not a verdict on the
-  letter** (user ruling D7): `mail_wire::classify_deposit_response` sends the
+  letter**: `mail_wire::classify_deposit_response` sends the
   far end's `down` and `config-invalid` words down the same arm a transport
   failure takes — the entry stays live (`refused` untouched, never needing
   `retry --refused`), `tries`/`lastOutcome` record the far end's own words, the

@@ -970,7 +970,7 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `down` is a statement about the NODE, so it must not be expressible through
   the caller's grant. `aoide node allow <node> message off` remains the
   per-request quarantine that lands on the `message` half. **An unloadable set
-  is answered BEFORE caller resolution, to every caller** (user ruling D8): a
+  is answered BEFORE caller resolution, to every caller**: a
   request whose signature verifies against the key its own `X-Aoide-Node` holds
   on the charter in force reads the refused `config-invalid` result instead of
   `-32007`, with fixed text on the wire (the load error is audited only), and
