@@ -355,6 +355,15 @@ pub fn spool_entry(
     // A declared line is verified exactly as a learnt binding is (against that
     // line's own identity key, which the operator signed).
     let binding = aoide_storage::seal::usable_binding_for(dest, &now)
+        // **A learnt binding is only usable if it is the DECLARED key's.** A
+        // binding is learnt per NAME, so a node whose key the mesh has since
+        // changed (or a stale file left by an earlier pairing) would otherwise
+        // seal a letter to a key this box no longer trusts that name for. Where
+        // the mesh names the node, the declaration decides; where it does not
+        // (a pair mesh with no declaration at all), the record the binding was
+        // learnt against is the whole authority, which `learn_binding` already
+        // pinned.
+        .filter(|binding| binding_matches_the_declaration(binding, dest, mesh))
         .or_else(|| declared_binding(dest, mesh, &now));
     // **Plaintext is the DIRECT lane's, and only the direct lane's.** A relay
     // carries sealed containers and nothing else ("no relay, hub or HTTPS hop
@@ -438,6 +447,24 @@ fn hop_is_never_dialled(node_name: &str, mesh: &str) -> bool {
 /// letter is parked, visible in `mail outbox`, and `mail outbox retry --refused`
 /// is the hand once a binding exists.
 pub const NO_BINDING_FOR_A_RELAY: &str = "sealed-required";
+
+/// Does this LEARNT binding belong to the key the mesh declares for `dest`? Where
+/// no declaration names it (a mesh the set does not hold, or a pair mesh whose
+/// section lists no nodes), nothing contradicts the binding: it was learnt
+/// against a pinned record and `learn_binding` owns that rule.
+fn binding_matches_the_declaration(
+    binding: &aoide_storage::seal::Binding,
+    dest: &str,
+    mesh: &str,
+) -> bool {
+    let Ok(set) = aoide_storage::routing::declarations() else {
+        return false;
+    };
+    match aoide_storage::routing::key_in(&set, mesh, dest) {
+        Some(declared) => binding.identity_key.eq_ignore_ascii_case(&declared),
+        None => true,
+    }
+}
 
 /// The age binding the mesh DECLARES for `dest`, if it is usable now — a charter
 /// line's own `age` key, verified under that line's identity key
@@ -823,6 +850,13 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
         // container is verified against it here — `deposit_container` compares
         // the container's SIGNED `originMesh` with this, so a letter minted for
         // another mesh is refused on the pull side exactly as on the push side.
+        // The polled node must be the chain's LAST hop: the hand-over this pull
+        // is taking is the one that node signed for. Anything else is refused
+        // like any other bad chain (the refusal is reported and audited below).
+        if aoide_storage::seal::chain_deposited_by(&container, node_name).is_err() {
+            refused.push(format!("{}: {}", container.msgid, aoide_storage::seal::BROKEN_CHAIN));
+            continue;
+        }
         let outcome = match aoide_storage::seal::deposit_container(&container, &mesh) {
             Ok(outcome) => outcome,
             Err(_) => continue,
@@ -2500,17 +2534,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **A loop is a loop under another name.** A chain entry whose node holds
-    /// THIS box's identity key already came through this box, whatever name the
-    /// entry spells — so a polled container like that is refused `loop` (there is
-    /// no `transit` line, nothing is spooled onward) and the refusal is audited.
-    /// One process cannot build a genuine third party's chain (the only key it can
-    /// sign with is its own), which is what makes this the guard's own probe; the
-    /// forwarding half is the fixture's (`cli/tests/mesh_transit.rs`).
+    /// A polled container whose chain does not end here is one hop of someone
+    /// else's letter, and the poll FORWARDS it — `poll_node`'s own arm, which
+    /// audits both outcomes (this process is the only witness a pull has) and
+    /// files the container as `transit`. The chain's entry 1 is the origin's own
+    /// hand-off, which is never a loop; a hop entry that names this box again is.
     #[test]
-    fn a_polled_container_whose_chain_names_this_box_by_key_is_a_loop() {
+    fn a_polled_hop_is_forwarded_and_audited() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_env, dir) = root("poll-hop-loop");
+        let (_env, dir) = root("poll-hop-forward");
 
         std::fs::write(
             aoide_storage::config::source().path,
@@ -2579,17 +2611,15 @@ mod tests {
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
         let outcome = poll_node("relay", None).unwrap();
-        assert!(
-            outcome.refused.iter().any(|line| line.ends_with(": loop")),
-            "the chain already names this box by key: {:?}",
-            outcome.refused
-        );
-        assert!(aoide_storage::mail::read_transit_unlocked().unwrap().is_empty(), "nothing is filed as transit");
-        assert!(aoide_storage::outbox::list_entries("dave").unwrap().is_empty(), "and nothing is spooled onward");
+        assert!(outcome.refused.is_empty(), "nothing refused: {:?}", outcome.refused);
+        let transit = aoide_storage::mail::read_transit_unlocked().unwrap();
+        assert_eq!(transit.len(), 1, "the hop is filed as a transit entry");
+        assert_eq!(transit[0].next, "dave");
+        assert_eq!(aoide_storage::outbox::list_entries("dave").unwrap().len(), 1, "and spooled onward");
         let log = std::fs::read_to_string(std::path::Path::new(&dir).join("log")).unwrap_or_default();
         assert!(
-            log.contains("mail.poll.container-refused") && log.contains(&msgid),
-            "the refusal is audited: {log}"
+            log.contains("mail.poll.transit") && log.contains(&msgid),
+            "the hop is audited: {log}"
         );
 
         drop(listener);

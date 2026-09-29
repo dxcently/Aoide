@@ -42,6 +42,11 @@ pub const ONE_SIDED_GATE: &str = "one-sided-gate";
 /// No mesh of this name is declared here — neither a charter in force nor a
 /// `[mesh.<name>]` section.
 pub const NO_DECLARATION: &str = "no-declaration";
+/// This box is not a member of the mesh it was asked to act in: a CHARTER mesh
+/// does not carry its identity key, so the mesh never gave it a name, and a
+/// hostname is not a name a mesh gives anyone. The word `mail route` and both
+/// lanes answer with, so a stranger reads the same refusal wherever it asks.
+pub const NOT_A_MEMBER: &str = "not-a-member";
 
 /// One mesh's load outcome: its declaration, or the taught refusal that stands
 /// in for it. A mesh that cannot be read is refused HERE, in its own entry, and

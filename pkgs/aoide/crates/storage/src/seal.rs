@@ -1548,19 +1548,30 @@ pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<Co
     // 5. Whose letter is this? This box's own names in that zone are the charter
     //    line's name for its identity key (`routing::own_name_in` — the policy
     //    name, D5) and the address form the origin wrote into `to.node`.
-    let (own_key, local) = own_key_and_local_name()?;
+    let (kp, local) = own_keypair_and_local_name()?;
+    let own_key = kp.info().pubkey_hex.clone();
     let declared = crate::routing::own_name_in(&set, request_mesh, &own_key);
     if container.to.node != local && declared.as_deref() != Some(container.to.node.as_str()) {
         // A letter in transit: nothing on this branch opens it, so the chain is
-        // checked here, without a key — every hop's own signature, every
-        // crossing by a declared gate, and the last hop signed in the zone the
-        // depositing hop is speaking in.
+        // checked here, without a key — every hop's own entry, every crossing by
+        // a declared gate, and the last hop signed in the zone the depositing hop
+        // is speaking in.
         if let Err(refusal) = walk_chain(container, &ctx, request_mesh, &set) {
             return Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail });
         }
-        return match hop_here(
-            container, &ctx, request_mesh, &own_key, declared.as_deref().unwrap_or(&local), digest,
-        )? {
+        // This box carries a letter AS a mesh's member: a charter mesh that does
+        // not carry its key has no name to carry it as, and a hostname is not a
+        // name a mesh gave anyone.
+        let Some(own_name) = declared.as_deref() else {
+            return Ok(refusal(
+                crate::routing::NOT_A_MEMBER,
+                format!(
+                    "this box's identity key is not on mesh `{request_mesh}`'s declaration, so it has \
+                     no name there to carry a letter as"
+                ),
+            ));
+        };
+        return match hop_here(container, &ctx, request_mesh, &kp, own_name, digest)? {
             HopStep::Hop(hop) => Ok(ContainerOutcome::Hopped(Box::new(hop))),
             HopStep::Refused(refusal) => {
                 Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail })
@@ -1662,13 +1673,14 @@ pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<Co
     Ok(ContainerOutcome::Opened { envelope: Box::new(envelope), digest })
 }
 
-/// This box's identity key (bare hex) and the address form of its own name
+/// This box's identity keypair and the address form of its own name
 /// (`display::local_node_name`, which is what every mint writes into `to.node`).
 /// Minting on a first touch is the ordinary path here, exactly as it is at mint
-/// and at every sealing read.
-fn own_key_and_local_name() -> Result<(String, String), String> {
+/// and at every sealing read, and the keypair is handed on rather than reloaded:
+/// one deposit, one identity read.
+fn own_keypair_and_local_name() -> Result<(identity::Keypair, String), String> {
     let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
-    Ok((kp.info().pubkey_hex, crate::display::local_node_name()))
+    Ok((kp, crate::display::local_node_name()))
 }
 
 /// The key `node` signs with in `mesh` — that mesh's declaration (a charter line
@@ -1698,15 +1710,16 @@ fn hop_here(
     container: &Container,
     ctx: &Ctx,
     mesh: &str,
-    own_key: &str,
+    kp: &identity::Keypair,
     own_name: &str,
     digest: String,
 ) -> Result<HopStep, String> {
+    let own_key = kp.info().pubkey_hex;
     // The chain's own names, resolved to keys in the zone each entry signed: a
     // name that is this box under another spelling is this box.
     let set = crate::routing::declarations().map_err(|r| format!("{}: {}", r.reason, r.detail))?;
     let mine = crate::routing::key_in(&set, mesh, own_name)
-        .is_some_and(|key| key.eq_ignore_ascii_case(own_key));
+        .is_some_and(|key| key.eq_ignore_ascii_case(&own_key));
     // Entry 1 is the ORIGIN's own: a box handing its own outbound letter to a hop
     // is the ordinary path, not a bounce. A loop is a hop entry (2 onward) that
     // names a machine which already carried the letter — by name, or by KEY,
@@ -1715,7 +1728,7 @@ fn hop_here(
         entry.node == own_name
             || mine
                 && crate::routing::key_in(&set, &entry.mesh, &entry.node)
-                    .is_some_and(|key| key.eq_ignore_ascii_case(own_key))
+                    .is_some_and(|key| key.eq_ignore_ascii_case(&own_key))
     });
     if looped {
         return Ok(HopStep::Refused(Refusal::new(
@@ -1728,10 +1741,6 @@ fn hop_here(
         Ok(hop) => hop,
         Err(refusal) => return Ok(HopStep::Refused(refusal)),
     };
-    let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
-    if !kp.info().pubkey_hex.eq_ignore_ascii_case(own_key) {
-        return Err("this box's identity key changed under the deposit".to_string());
-    }
     let prev = chain_prev(container, ctx)?;
     let at = now_iso_utc();
     let mut forwarded = container.clone();
@@ -1741,7 +1750,7 @@ fn hop_here(
         next: hop.next.clone(),
         at: at.clone(),
         mesh: hop.mesh.clone(),
-        sig: wire_auth::sign_hex(&kp, &hop_bytes(&ctx.msgid, &prev, own_name, &hop.next, &at, &hop.mesh)),
+        sig: wire_auth::sign_hex(kp, &hop_bytes(&ctx.msgid, &prev, own_name, &hop.next, &at, &hop.mesh)),
     });
     Ok(HopStep::Hop(TransitHop {
         container: Box::new(forwarded),
@@ -1967,6 +1976,26 @@ fn answers_to(set: &[crate::routing::Loaded], mesh: &str, name: &str) -> bool {
 /// This box's identity key (bare hex), read once per decision.
 fn own_key() -> Option<String> {
     identity::load_or_mint().ok().map(|(kp, _)| kp.info().pubkey_hex)
+}
+
+/// **The chain's last hop must be the node that deposited it.** `caller` is the
+/// depositor's own verified name — the door's resolved caller, or the node a poll
+/// pulled from — and a chain that ends with somebody else's signature is somebody
+/// else's hand-over: the depositor is claiming a custody the chain does not give
+/// it. Whatever the connection proved, it did not prove this.
+pub fn chain_deposited_by(container: &Container, caller: &str) -> Result<(), Refusal> {
+    match container.transit.last() {
+        Some(last) if last.node == caller => Ok(()),
+        Some(last) => Err(Refusal::new(
+            BROKEN_CHAIN,
+            format!(
+                "the chain's last hop is by `{}`, and this deposit is from `{caller}` — a hop hands \
+                 over what IT carried",
+                last.node
+            ),
+        )),
+        None => Err(Refusal::new(BROKEN_CHAIN, "the hop chain is empty".to_string())),
+    }
 }
 
 /// The chain's own two bytes-worth of state: the container's `msgid` as bytes,

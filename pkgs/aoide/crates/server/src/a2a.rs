@@ -3936,6 +3936,21 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
         declared_caller_name(&request_mesh, caller)
     };
 
+    // The chain's last hop is the node that deposited it — the caller this door
+    // verified, by the name its mesh gives it. A caller presenting somebody
+    // else's hand-over is refused before anything is opened, filed or hopped.
+    if let Err(refusal) = aoide_storage::seal::chain_deposited_by(&container, &hop_name) {
+        let _ = audit(
+            ctx.audit_log,
+            Door::A2a,
+            EventClass::Audit,
+            "a2a.aoide/mailDeposit",
+            "invalid",
+            &format!("sealed msgid {} via {hop_name}: {}: {}", container.msgid, refusal.reason, refusal.detail),
+        );
+        return Ok(json!({ "status": "refused", "reason": refusal.reason, "detail": refusal.detail }));
+    }
+
     let outcome = aoide_storage::seal::deposit_container(&container, &request_mesh)
         .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
 
