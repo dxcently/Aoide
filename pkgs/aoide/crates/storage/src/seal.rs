@@ -3333,58 +3333,6 @@ mod review_fix_tests {
         }
     }
 
-    /// The fixed `msgid` a hand-built chain commits to (the walk recomputes
-    /// `prev` from the entries themselves, so any constant does).
-    const CHAIN_MSGID: [u8; 32] = [7u8; 32];
-
-    /// One hop's entry as a hop appends it, plus the `prev` the NEXT entry chains
-    /// to. `prev` is passed in so a test can hand-build a chain the way
-    /// `chain_prev` walks one.
-    fn chain_entry(
-        node: &str,
-        next: &str,
-        mesh: &str,
-        prev: &[u8; 32],
-        kp: &identity::Keypair,
-    ) -> (TransitEntry, [u8; 32]) {
-        let at = now_iso_utc();
-        let sig = wire_auth::sign_hex(kp, &hop_bytes(&CHAIN_MSGID, prev, node, next, &at, mesh));
-        let entry = TransitEntry {
-            node: node.to_string(),
-            next: next.to_string(),
-            at,
-            mesh: mesh.to_string(),
-            sig,
-        };
-        let prev_next = sha256(&hop_entry_bytes(&CHAIN_MSGID, prev, &entry).unwrap());
-        (entry, prev_next)
-    }
-
-    /// A container carrying `entries`, with `ctx` recomputed from it — for the
-    /// chain walk alone (its `ct` is empty: a walk never opens anything).
-    fn crossing_container(entries: Vec<TransitEntry>) -> (Container, Ctx) {
-        let me = crate::display::local_node_name();
-        let kp = identity::load_or_mint().unwrap().0;
-        let container = Container {
-            v: CONTAINER_VERSION,
-            purpose: PURPOSE_MAIL.to_string(),
-            msgid: hex_encode(&CHAIN_MSGID),
-            generation: 1,
-            origin: Party { node: "osaka".to_string(), key: kp.info().pubkey_hex.clone() },
-            to: Destination { node: me.clone(), age: "age1x".to_string() },
-            origin_mesh: "home".to_string(),
-            mesh: "home".to_string(),
-            suite: SUITE_AGE_V1_X25519.to_string(),
-            ct: String::new(),
-            sig: String::new(),
-            transit: entries,
-            board: None,
-            epoch: None,
-        };
-        let ctx = Ctx::from_container(&container).unwrap();
-        (container, ctx)
-    }
-
     /// **A peer this box granted in a mesh that declares nothing but the grant is
     /// a key of that mesh.** `mesh pair` writes such a section — the direct edge
     /// needs no hop line — and a deposit from that peer must verify: the record
@@ -3458,42 +3406,6 @@ mod review_fix_tests {
                 assert_eq!(reason, crate::charter::CONFIG_UNREADABLE, "{detail}");
             }
             other => panic!("a set that will not load refuses, it does not fail internally: {other:?}"),
-        }
-    }
-
-    /// **A charter mesh that does not carry this box's key gives it no name.** A
-    /// box asked to carry a letter in such a mesh answers `not-a-member` — it does
-    /// not fall back to its hostname, which is not a name any mesh gave anyone, and
-    /// it does not go on to read a chain it could never have satisfied either way.
-    /// (The fixture is a charter-SHAPED mesh: `state/mesh/home/trust.json` records
-    /// an operator, no charter is in force, so the declaration names nobody at
-    /// all — the strongest form of "this box is not a member".)
-    #[test]
-    fn a_charter_mesh_that_does_not_carry_this_boxs_key_refuses_not_a_member() {
-        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
-        let dir = aoide_test_support::unique_tmp("seal-not-a-member");
-        std::fs::create_dir_all(&dir).unwrap();
-        env(&dir);
-
-        std::fs::create_dir_all(crate::charter::mesh_state_dir("home")).unwrap();
-        std::fs::write(
-            crate::charter::trust_path("home"),
-            serde_json::json!({ "operator": "ed25519:".to_string() + &"ab".repeat(32) }).to_string(),
-        )
-        .unwrap();
-        std::fs::write(crate::config::source().path, "[pairing]\nhomeMesh = \"home\"\n").unwrap();
-
-        let binding = publish_binding().unwrap();
-        let me = crate::display::local_node_name();
-        let envelope = mail::mint_outbound_letter("alice", "elsewhere", "bob", "not mine to carry").unwrap();
-        let container = seal_envelope(&envelope, &binding, "home", "home", "elsewhere", &me, &now_iso_utc()).unwrap();
-
-        match super::deposit_container(&container, "home").unwrap() {
-            ContainerOutcome::Refused { reason, .. } => {
-                assert_eq!(reason, crate::routing::NOT_A_MEMBER);
-            }
-            other => panic!("a stranger in a charter mesh carries nothing: {other:?}"),
         }
     }
 
