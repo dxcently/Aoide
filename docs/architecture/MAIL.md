@@ -478,8 +478,9 @@ door's audit name whitelist gains both names so they never log as bare
      by the deposit's acceptance; on a poll, by the poller's next poll naming
      the msgid in `filed`, since a hand-over it never acknowledged may have
      been lost. The destination's own receipt is what ends the ORIGIN's
-     custody, and it reaches the origin the same way the letter travelled (a
-     `poll` destination's receipt rides back through its relay); a hub waits
+     custody, and it reaches the origin by the same four steps the letter
+     travelled (a `poll` destination's receipt is spooled toward the hop the
+     route picks for it, exactly as its letters are); a hub waits
      for none of it, or every hub would hold a copy of every letter it
      relayed.
   Receipts (acks) are envelopes deposited through the same method — one

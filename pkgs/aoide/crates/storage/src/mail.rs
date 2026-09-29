@@ -1128,10 +1128,6 @@ pub fn verify_origin_signature_in(envelope: &Envelope, set: &[crate::routing::Lo
     crate::wire_auth::verify_signature_hex(&pubkey_hex, &sig_input, &envelope.sig)
 }
 
-/// The key `node` signs with in `mesh` — [`crate::routing::key_in`] over the
-/// declaration set read here, so an inner signature and an outer one can never
-/// disagree about who signed (`crate::seal`'s own half reads the same set for
-/// the same deposit).
 /// The outcome of [`deposit`]'s policy chain, once the caller has already
 /// cleared admission (verified + `message` — the door's job, before ever
 /// calling here; MAIL.md's zone check, step 3, is P-M4's and is skipped

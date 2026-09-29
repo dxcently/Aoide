@@ -1211,7 +1211,8 @@ mod tests {
     }
 
     fn envelope(from_node: &str, to_node: &str, msgid: &str) -> Envelope {
-        Envelope {            header: Header {
+        Envelope {
+            header: Header {
                 version: "1".to_string(),
                 from: Address { node: from_node.to_string(), name: "alice".to_string() },
                 to: Address { node: to_node.to_string(), name: "bob".to_string() },

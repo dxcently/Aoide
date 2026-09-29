@@ -2552,6 +2552,78 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **The list a poll SENDS is the list it clears** — with an acknowledgement
+    /// recorded WHILE the answer was in flight. That is the only shape that tells
+    /// the fix from the bug: reading `filed_pending` again after the response
+    /// would clear a name the hub has never seen, and the hub would keep offering
+    /// a container this box already has. (The door is slow on purpose, so the
+    /// window is real rather than hoped for.)
+    #[test]
+    fn a_name_recorded_while_the_poll_was_in_flight_is_not_cleared() {
+        use std::io::{Read, Write};
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("poll-ack-in-flight");
+
+        // A door that reads each request, waits on the POLL, then answers. (The
+        // poll's own binding exchange arrives first — one connection for it, one
+        // for the poll — and is answered immediately.)
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accepter = listener.try_clone().unwrap();
+        let door = std::thread::spawn(move || {
+            for _ in 0..4 {
+                let Ok((mut stream, _)) = accepter.accept() else { return };
+                let mut buf = [0u8; 4096];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let request = String::from_utf8_lossy(&buf[..n]).to_string();
+                let is_poll = request.contains("aoide/mailPoll");
+                if is_poll {
+                    std::thread::sleep(std::time::Duration::from_millis(400));
+                }
+                let body = r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+                if is_poll {
+                    return;
+                }
+            }
+        });
+        let mut node = unpaired_node("relay");
+        node.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        let sent = "cd".repeat(32);
+        let in_flight = "ef".repeat(32);
+        aoide_storage::outbox::record_filed("relay", &sent).unwrap();
+
+        // What the filing this poll performs would record: an ack minted while
+        // the answer is on its way. Recorded from another thread, inside the
+        // door's own pause.
+        let writer = {
+            let in_flight = in_flight.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                aoide_storage::outbox::record_filed("relay", &in_flight).unwrap();
+            })
+        };
+
+        assert!(poll_node("relay", None).is_ok());
+        writer.join().unwrap();
+        door.join().unwrap();
+        assert_eq!(
+            aoide_storage::outbox::filed_pending("relay").unwrap(),
+            vec![in_flight],
+            "the name that was sent went with the ask; the one recorded meanwhile stays for the next"
+        );
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// A polled container whose chain does not end here is one hop of someone
     /// else's letter, and the poll FORWARDS it — `poll_node`'s own arm, which
     /// audits both outcomes (this process is the only witness a pull has) and
