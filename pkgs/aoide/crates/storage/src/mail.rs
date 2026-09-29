@@ -1103,12 +1103,23 @@ pub fn mint_ack(from_name: &str, to: Address, acked_msgid: &str) -> Result<Envel
 /// place a node this box never paired with has a key at all — and the name the
 /// charter gave it, so a letter signed by a charter line's name verifies here and
 /// one signed by a nickname does not. Where that mesh has no declaration, the
-/// paired RECORD answers, exactly as it did before the declarations existed. Two
-/// lookups, one answer: the same split `seal::origin_key_in` makes for the outer
-/// signature, so the two halves of a container can never disagree about who
-/// signed it.
+/// paired RECORD answers, exactly as it did before the declarations existed. The
+/// SEALED lane calls [`verify_origin_signature_in`] with the set its own deposit
+/// already loaded, so the container's two halves cannot read two different sets.
 pub fn verify_origin_signature(envelope: &Envelope) -> bool {
-    let Some(pubkey_hex) = origin_key_in(&envelope.header.origin_mesh, &envelope.header.from.node) else {
+    let Ok(set) = crate::routing::declarations() else {
+        // A set that will not load names nobody: nothing verifies.
+        return false;
+    };
+    verify_origin_signature_in(envelope, &set)
+}
+
+/// [`verify_origin_signature`] over a declaration set the caller already holds —
+/// what a SEALED deposit uses, so one deposit reads the declarations once and
+/// its two signature checks cannot disagree about which set they read.
+pub fn verify_origin_signature_in(envelope: &Envelope, set: &[crate::routing::Loaded]) -> bool {
+    let Some(pubkey_hex) = crate::routing::key_in(set, &envelope.header.origin_mesh, &envelope.header.from.node)
+    else {
         return false;
     };
     let mut sig_input = canonical_header_bytes(&envelope.header);
@@ -1121,11 +1132,6 @@ pub fn verify_origin_signature(envelope: &Envelope) -> bool {
 /// declaration set read here, so an inner signature and an outer one can never
 /// disagree about who signed (`crate::seal`'s own half reads the same set for
 /// the same deposit).
-fn origin_key_in(mesh: &str, node: &str) -> Option<String> {
-    let set = crate::routing::declarations().ok()?;
-    crate::routing::key_in(&set, mesh, node)
-}
-
 /// The outcome of [`deposit`]'s policy chain, once the caller has already
 /// cleared admission (verified + `message` — the door's job, before ever
 /// calling here; MAIL.md's zone check, step 3, is P-M4's and is skipped

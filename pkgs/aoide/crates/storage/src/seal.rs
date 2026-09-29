@@ -1573,7 +1573,7 @@ pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<Co
         if let Err(refusal) = walk_chain(container, &ctx, request_mesh, &set) {
             return Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail });
         }
-        return match hop_here(container, &ctx, request_mesh, &kp, own_name, digest)? {
+        return match hop_here(container, &ctx, request_mesh, &set, &kp, own_name, digest)? {
             HopStep::Hop(hop) => Ok(ContainerOutcome::Hopped(Box::new(hop))),
             HopStep::Refused(refusal) => {
                 Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail })
@@ -1664,8 +1664,8 @@ pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<Co
             "inner originMesh is not the container's".to_string(),
         ));
     }
-    // 6. The inner envelope's own signature.
-    if !mail::verify_origin_signature(&envelope) {
+    // 6. The inner envelope's own signature, over the SAME set this deposit read.
+    if !mail::verify_origin_signature_in(&envelope, &set) {
         return Ok(refusal("unverified-origin", "the inner envelope signature does not verify".to_string()));
     }
     // 7. Walk the chain, in the zone the depositing hop signed for.
@@ -1712,6 +1712,7 @@ fn hop_here(
     container: &Container,
     ctx: &Ctx,
     mesh: &str,
+    set: &[crate::routing::Loaded],
     kp: &identity::Keypair,
     own_name: &str,
     digest: String,
@@ -1719,8 +1720,7 @@ fn hop_here(
     let own_key = kp.info().pubkey_hex;
     // The chain's own names, resolved to keys in the zone each entry signed: a
     // name that is this box under another spelling is this box.
-    let set = crate::routing::declarations().map_err(|r| format!("{}: {}", r.reason, r.detail))?;
-    let mine = crate::routing::key_in(&set, mesh, own_name)
+    let mine = crate::routing::key_in(set, mesh, own_name)
         .is_some_and(|key| key.eq_ignore_ascii_case(&own_key));
     // Entry 1 is the ORIGIN's own: a box handing its own outbound letter to a hop
     // is the ordinary path, not a bounce. A loop is a hop entry (2 onward) that
@@ -1817,6 +1817,10 @@ fn deposit_charter(
     let refusal = |reason: &str, detail: String| ContainerOutcome::Refused {
         reason: reason.to_string(),
         detail,
+    };
+    let refusal_of = |r: &crate::charter::Refusal| ContainerOutcome::Refused {
+        reason: r.reason.clone(),
+        detail: r.detail.clone(),
     };
 
     let outer = outer_bytes(ctx, ct);
@@ -1932,11 +1936,15 @@ fn deposit_charter(
         }
     }
 
-    // The chain, over the declarations this deposit already loaded: the mesh the
-    // letter rides names its hops, and a charter letter's mesh is the charter it
-    // just applied — which `accept` has written, so the set reads it here like
-    // any other.
-    let set = crate::routing::declarations().map_err(|r| format!("{}: {}", r.reason, r.detail))?;
+    // The chain, over the declarations as they stand NOW — this deposit read
+    // none before now, because the branch above needed none: a charter letter's
+    // mesh is the charter it just applied, and `accept` has written that, so the
+    // set reads it here like any other mesh. A set that will not load is the
+    // depositing hop's own answer, not an internal error.
+    let set = match crate::routing::declarations() {
+        Ok(set) => set,
+        Err(refusal) => return Ok(refusal_of(&refusal)),
+    };
     if let Err(refusal) = walk_chain_with(container, ctx, request_mesh, &set) {
         return Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail });
     }
