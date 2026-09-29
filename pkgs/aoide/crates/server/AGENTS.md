@@ -969,7 +969,15 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   mesh declares `down` with that word (`down_caller_refusal`, audited) —
   `down` is a statement about the NODE, so it must not be expressible through
   the caller's grant. `aoide node allow <node> message off` remains the
-  per-request quarantine that lands on the `message` half.
+  per-request quarantine that lands on the `message` half. **An unloadable set
+  is answered BEFORE caller resolution, to every caller** (user ruling D8): a
+  request whose signature verifies against the key its own `X-Aoide-Node` holds
+  on the charter in force reads the refused `config-invalid` result instead of
+  `-32007`, with fixed text on the wire (the load error is audited only), and
+  that answer CONSUMES the nonce — so the same bytes can never be replayed into
+  the method once the config returns. Everything else keeps `-32007`, and the
+  method is never dispatched with an unresolved caller
+  (`mail_unloadable_declaration`'s own doc has the shape).
   **`mail_poll` writes nothing at all.** Its whole body is
   `aoide_storage::outbox::poll_payloads` (the ONE place the offer rule lives:
   held always, `now` only when its own attempts have been failing) plus a

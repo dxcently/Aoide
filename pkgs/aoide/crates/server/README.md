@@ -604,7 +604,14 @@ the inbound half of the two-door contract (the outbound half is
   quarantine `aoide node allow <node> message off` (MAIL.md §Status). An
   UNLOADABLE set refuses both methods with `config-invalid` and keeps
   serving everything else: no zone checks means no mail, never mail with
-  the walls down.
+  the walls down. **An unloadable set is answered BEFORE caller resolution, to
+  every caller** (user ruling D8): where the request's signature verifies
+  against the key its own `X-Aoide-Node` holds on the charter in force, the door
+  answers the refused `config-invalid` result — fixed text, with the load error
+  audited only, never sent — and CONSUMES the nonce, so those bytes cannot be
+  replayed into the method once the config returns. A request whose signature
+  does not verify, or naming a node that charter does not carry, still reads
+  `-32007`.
 - **The mail adapter (`aoide mail serve`, H1) — a second LISTENER, and not a
   second door.** `serve_mail` binds `127.0.0.1` and nothing else (no bind
   option, no flag, no env var: the front that faces the mesh is a

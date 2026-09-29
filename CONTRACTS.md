@@ -6694,7 +6694,17 @@ for a cheaper reason:
    key verifies → `-32007` "signature verification failed" — ONE code path
    and ONE message whether the signing key is unknown, the node is
    unverified/keyless, or a known node's signature is simply bad: the
-   refusal is never an existence oracle over the registry.
+   refusal is never an existence oracle over the registry. **For
+   `aoide/mailDeposit` and `aoide/mailPoll` there is one narrow exception**
+   (user ruling D8): where the declaration set will not load AND the signature
+   verifies against the key the node the request itself names holds on the
+   mesh's charter IN FORCE, the door answers the refused `config-invalid`
+   result — fixed text, never the load error (that goes to the audit line) —
+   audited under the method's own label. A request whose signature does not
+   verify, or whose named node that charter does not carry, still reads
+   `-32007`. That answer CONSUMES the nonce (step 7's own keying: the signer's
+   lowercase key hex plus the nonce), so the same bytes can never be replayed
+   into the method once the config returns.
 6. **Collision semantics**: exactly one record's key verifies → that record
    IS the caller. Multiple verified records sharing the verifying pubkey
    (possible — `upsert_paired_node` matches by name only, so one remote
