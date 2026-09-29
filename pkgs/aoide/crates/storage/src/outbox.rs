@@ -835,16 +835,18 @@ fn clear_marker_pointing_to_msgid(node: &str, msgid: &str) {
     }
 }
 
-/// Retire a hub's OWN custody of a container it just handed over on a poll —
-/// and only that. A `transit` entry's obligation is to get the letter to `next`:
-/// on a drain `next`'s acceptance ends it, and on a poll **the ask itself is that
-/// acceptance** (the poller reached out for it and the hub handed it over), so
-/// the entry goes with the hand-over rather than sitting in the spool forever
-/// with no signal that could ever end it. A `letter` is NOT retired here: it
-/// waits for the destination's receipt, which is the only thing that can say the
-/// far end FILED it (CONTRACTS §6's poll rule). `Ok(false)` for anything else —
-/// a missing entry, or a kind that is not this hub's custody.
-pub fn retire_transit_handover(node: &str, msgid: &str) -> Result<bool, String> {
+/// Retire a hub's OWN custody of a container the far end has **acknowledged
+/// filing** — and only that. A `transit` entry's obligation ends when the poller
+/// it is held for says it has the letter: a poll's response can be lost, so the
+/// hand-over itself is not an acknowledgement (retiring on the response would
+/// drop a letter whose response never arrived — exactly the loss the re-offer
+/// exists to prevent). The poller's NEXT poll carries what it filed
+/// ([`filed_pending`]), the hub retires those here, and anything not yet named is
+/// offered again. A `letter` is NOT retired here: it waits for the destination's
+/// receipt, which is the only thing that can say the far end FILED it without
+/// this box having to trust a claim. `Ok(false)` for anything else — a missing
+/// entry, or a kind that is not this hub's custody.
+pub fn retire_acknowledged(node: &str, msgid: &str) -> Result<bool, String> {
     let Some(entry) = list_entries(node)?.into_iter().find(|e| e.envelope.msgid == msgid) else {
         return Ok(false);
     };
@@ -852,6 +854,71 @@ pub fn retire_transit_handover(node: &str, msgid: &str) -> Result<bool, String> 
         return Ok(false);
     }
     remove_entry(node, msgid)
+}
+
+fn filed_path(node: &str) -> PathBuf {
+    node_dir(node).join(".filed")
+}
+
+/// The msgids THIS box filed out of `node`'s poll and has not yet told `node`
+/// about — the acknowledgement the next `aoide/mailPoll` carries. Empty when
+/// nothing is pending, and tolerant of a missing or unreadable file (an
+/// acknowledgement is bookkeeping, never a reason to refuse a poll).
+pub fn filed_pending(node: &str) -> Result<Vec<String>, String> {
+    let raw = match std::fs::read_to_string(filed_path(node)) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("{}: {e}", filed_path(node).display())),
+    };
+    Ok(serde_json::from_str::<Vec<String>>(&raw).unwrap_or_default())
+}
+
+/// Record that `msgid` was filed out of `node`'s poll, so the next poll of that
+/// node can tell it to retire its custody. Idempotent per msgid.
+pub fn record_filed(node: &str, msgid: &str) -> Result<(), String> {
+    let node = node.to_string();
+    let msgid = msgid.to_string();
+    with_lock(move || {
+        let mut pending = read_filed_unlocked(&node)?;
+        if pending.iter().any(|held| held == &msgid) {
+            return Ok(());
+        }
+        pending.push(msgid);
+        write_filed_unlocked(&node, &pending)
+    })
+}
+
+/// Drop the acknowledgements this box has just HANDED OVER (the ones a poll
+/// carried), leaving anything filed since — which the next poll will carry.
+pub fn clear_filed(node: &str, acked: &[String]) -> Result<(), String> {
+    let node = node.to_string();
+    let acked = acked.to_vec();
+    with_lock(move || {
+        let mut pending = read_filed_unlocked(&node)?;
+        pending.retain(|held| !acked.iter().any(|a| a == held));
+        write_filed_unlocked(&node, &pending)
+    })
+}
+
+fn read_filed_unlocked(node: &str) -> Result<Vec<String>, String> {
+    let path = filed_path(node);
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => Ok(serde_json::from_str::<Vec<String>>(&raw).unwrap_or_default()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+fn write_filed_unlocked(node: &str, pending: &[String]) -> Result<(), String> {
+    let dir = node_dir(node);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = filed_path(node);
+    if pending.is_empty() {
+        let _ = std::fs::remove_file(&path);
+        return Ok(());
+    }
+    let json = serde_json::to_string(&pending).map_err(|e| e.to_string())?;
+    crate::fs::atomic_write(&path, &json).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Retire the one local outbox entry `ack` confirms (spec item 7: "a

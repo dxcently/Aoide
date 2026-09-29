@@ -783,13 +783,28 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
     // stamps and the same one a peer's poll is answered against. A raw OS host
     // name would not match on a host whose name is case-preserved (native
     // Windows' is upper-case — measured red against the folded fixture).
-    let params = json!({ "node": aoide_storage::display::local_node_name() });
+    let params = json!({
+        "node": aoide_storage::display::local_node_name(),
+        // What THIS box filed out of its previous poll of this node: the
+        // acknowledgement that ends the hub's custody of a container it handed
+        // over (`outbox::filed_pending`). A response can be lost, so the
+        // hand-over cannot be the acknowledgement, and anything not yet named
+        // here is offered again.
+        "filed": aoide_storage::outbox::filed_pending(node_name).unwrap_or_default(),
+    });
     let result = match post_signed(node, "aoide/mailPoll", params, Some(&mesh)) {
         SignedCall::Result(result) => result,
         SignedCall::Refused(detail) => return Err(detail),
         SignedCall::TransportFailed(reason) => return Err(reason),
     };
     let mut filed = 0usize;
+    // The acknowledgements just handed over are cleared on a RESPONSE (the hub
+    // has them); anything filed from THIS answer is recorded for the next poll.
+    // A poll that never got answers clears nothing, so its list is carried again.
+    let _ = aoide_storage::outbox::clear_filed(
+        node_name,
+        &aoide_storage::outbox::filed_pending(node_name).unwrap_or_default(),
+    );
     // Review N13: what the poll REFUSED, carried back to the caller so the
     // command reports it. The audit line above is not a report — a poll of a
     // mesh-asymmetric pair used to answer "polled 1 node(s): 0 filed" with no
@@ -839,6 +854,11 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
                     }
                 }
                 settle_deposit(&envelope, &filed_outcome);
+                // The hub's custody of the CONTAINER ends when it is told this
+                // box has it: the next poll of that node carries this msgid
+                // (`outbox::record_filed`), and until then the entry is offered
+                // again — a lost response must not lose the letter.
+                let _ = aoide_storage::outbox::record_filed(node_name, &container.msgid);
             }
             aoide_storage::seal::ContainerOutcome::Duplicate { filed_letter } => {
                 if filed_letter {
@@ -2377,6 +2397,79 @@ mod tests {
         assert!(!direct.is_sealed());
         assert!(!direct.refused, "the per-peer upgrade path still sends plaintext in the clear");
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A hub re-offers a container until the poller SAYS it has it: the
+    /// hand-over alone retires nothing (a response can be lost), and the poller's
+    /// next poll carries the msgid it filed — the acknowledgement this hub
+    /// retires on, and only for its own `transit` custody.
+    #[test]
+    fn a_polled_container_is_re_offered_until_the_poller_acknowledges_it() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("poll-ack");
+
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "chiyo", "bob", "held for chiyo").unwrap();
+        let container = {
+            let live = aoide_storage::seal::publish_binding().unwrap();
+            aoide_storage::seal::seal_envelope(&envelope, &live, "home", "home", "chiyo", "chiyo", &aoide_storage::time::now_iso_utc()).unwrap()
+        };
+        let msgid = container.msgid.clone();
+        let entry = OutboxEntry::transit_held(container);
+        aoide_storage::outbox::write_entry("chiyo", &entry).unwrap();
+
+        // Offered — and still held after the hand-over: no signal has said the
+        // poller has it.
+        assert_eq!(aoide_storage::outbox::poll_payloads("chiyo").unwrap().len(), 1);
+        assert!(matches!(
+            aoide_storage::outbox::hand_over("chiyo", &msgid).unwrap(),
+            aoide_storage::outbox::HandOver::Container(_)
+        ));
+        assert_eq!(aoide_storage::outbox::list_entries("chiyo").unwrap().len(), 1, "the hand-over retires nothing");
+        assert_eq!(aoide_storage::outbox::poll_payloads("chiyo").unwrap().len(), 1, "so it is offered again");
+
+        // Acknowledged: the next poll's own list retires the hub's custody, and
+        // a msgid this box never held is a no-op.
+        assert!(!aoide_storage::outbox::retire_acknowledged("chiyo", "00".repeat(32).as_str()).unwrap());
+        assert!(aoide_storage::outbox::retire_acknowledged("chiyo", &msgid).unwrap());
+        assert!(aoide_storage::outbox::list_entries("chiyo").unwrap().is_empty());
+        assert!(aoide_storage::outbox::poll_payloads("chiyo").unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The acknowledgement travels: what this box filed out of a poll is recorded
+    /// per polled node and handed to that node's NEXT poll, then cleared once the
+    /// answer says the hub has it.
+    #[test]
+    fn the_next_poll_carries_what_this_box_filed() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("poll-ack-carried");
+
+        let (listener, port, seen) = recording_door(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"status":"ok"}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
+        );
+        let mut node = unpaired_node("relay");
+        node.url = format!("http://127.0.0.1:{port}/");
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        let filed = "ab".repeat(32);
+        aoide_storage::outbox::record_filed("relay", &filed).unwrap();
+        assert_eq!(aoide_storage::outbox::filed_pending("relay").unwrap(), vec![filed.clone()]);
+
+        assert!(poll_node("relay", None).is_ok());
+        assert!(
+            aoide_storage::outbox::filed_pending("relay").unwrap().is_empty(),
+            "the answer carried it, so it is not carried again"
+        );
+        let bodies = seen.lock().unwrap().clone();
+        assert!(
+            bodies.iter().any(|body| body.contains("filed") && body.contains(&filed)),
+            "the poll named what it filed: {bodies:?}"
+        );
+
+        drop(listener);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

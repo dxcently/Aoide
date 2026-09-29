@@ -380,8 +380,9 @@ fn chiyos_poll_files_the_letter_and_the_origins_entry_retires_on_the_receipt() {
     assert_eq!(aoide_storage::outbox::list_entries("chiyo").unwrap().len(), 1, "held for `chiyo` — the relay's own spool");
 
     // `chiyo` asks: the RELAY's own offer and hand-over read (a poll is computed
-    // where the letters are held), which ends the relay's custody of a container
-    // — the ask is the acceptance for a `poll` hop.
+    // where the letters are held). The hand-over alone retires nothing — a
+    // response can be lost — so the entry is still the relay's until `chiyo`
+    // says it has it, which its next poll does.
     let offered = aoide_storage::outbox::poll_payloads("chiyo").unwrap();
     assert_eq!(offered.len(), 1, "the relay offers exactly what it holds toward the poller");
     let hand_over = match aoide_storage::outbox::hand_over("chiyo", &hop.container.msgid).unwrap() {
@@ -389,11 +390,7 @@ fn chiyos_poll_files_the_letter_and_the_origins_entry_retires_on_the_receipt() {
         aoide_storage::outbox::HandOver::Envelope(_) => panic!("a sealed entry hands over the container"),
         aoide_storage::outbox::HandOver::Nothing => panic!("the entry is still spooled"),
     };
-    assert!(aoide_storage::outbox::retire_transit_handover("chiyo", &hop.container.msgid).unwrap());
-    assert!(
-        aoide_storage::outbox::list_entries("chiyo").unwrap().is_empty(),
-        "the hub's custody ends with the hand-over"
-    );
+    assert_eq!(aoide_storage::outbox::poll_payloads("chiyo").unwrap().len(), 1, "…and re-offers it until then");
 
     // `chiyo` receives it: the door's verification, then the filing.
     fx.enter("chiyo");

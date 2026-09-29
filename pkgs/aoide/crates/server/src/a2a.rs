@@ -3748,6 +3748,16 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
     if claimed.is_empty() {
         return Err((-32602, "invalid params: node is required".to_string()));
     }
+    // What the poller says it FILED out of its last poll, if it says anything:
+    // the acknowledgement that ends this hub's custody of a container it handed
+    // over (`outbox::retire_acknowledged` — a `transit` entry, and nothing else).
+    // A response can be lost, so the hand-over is not an acknowledgement, and an
+    // unacknowledged entry is offered again below.
+    let acknowledged: Vec<String> = params
+        .get("filed")
+        .and_then(Value::as_array)
+        .map(|list| list.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default();
 
     let mesh = mesh_or_refusal(
         "mail poll refused",
@@ -3765,6 +3775,13 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
 
     let payloads = aoide_storage::outbox::poll_payloads(&poller)
         .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
+    // The acknowledgements land FIRST, so what this answer offers is what the
+    // poller has NOT yet said it has: an entry whose response was lost is offered
+    // again rather than retired into silence.
+    for msgid in &acknowledged {
+        aoide_storage::outbox::retire_acknowledged(&poller, msgid)
+            .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
+    }
     // P-SEAL: one answer, two lists. A sealed entry's container is what a
     // destination holding this node's binding needs; the plaintext envelope
     // rides beside it for one that has published none, which is the per-peer
@@ -3803,13 +3820,7 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
             .map_err(|e| (-32603_i64, format!("internal error: {e}")))?
         {
             aoide_storage::outbox::HandOver::Container(container) => {
-                // A hub's own custody ends with the hand-over: the ask IS the
-                // acceptance for a `poll` hop (`retire_transit_handover` retires
-                // a `transit` entry and nothing else), so a relay does not hold
-                // a copy of every letter it ever handed to a poller.
-                let msgid = container.msgid.clone();
                 containers.push(*container);
-                let _ = aoide_storage::outbox::retire_transit_handover(&poller, &msgid);
             }
             aoide_storage::outbox::HandOver::Envelope(envelope) => {
                 if ctx.sealed_only {
