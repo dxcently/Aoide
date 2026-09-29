@@ -568,6 +568,14 @@ fn node_rows(
         .collect()
 }
 
+/// Did the far end ANSWER, judged from the LINK's own record of the attempt? The
+/// link carries the same vocabulary the entries do, one field over: a refusal
+/// (`refused: …` — a far end that spoke, about its own state or the letter) is an
+/// answer, and a dial that never connected is not.
+fn link_was_answered(link: &aoide_storage::outbox::LinkState) -> bool {
+    link.last_outcome.starts_with("refused:")
+}
+
 /// What this box has OBSERVED about reaching `node`: a recorded attempt that got
 /// an ANSWER (a delivery or a refusal — any word the far end sent back), one that
 /// got none, or nothing at all. It reads the outbox's own bookkeeping and the
@@ -575,18 +583,15 @@ fn node_rows(
 /// is a fact about the past, and a nodelist command that reached out would be its
 /// own witness.
 ///
-/// **The MOST RECENT thing this box knows decides**: a link still inside its
-/// back-off is a failure in progress and answers first, and otherwise it is the
-/// entry with the latest `last_try_at`. One old `accepted` sitting beside a fresh
-/// failure is a stale fact, and a refusal is an ANSWER — a peer that is up and
-/// says no, including one whose mesh declares it `down`, has been reached.
-fn liveness_of(node: &str) -> &'static str {
-    if let Ok(Some(link)) = aoide_storage::outbox::read_link_state(node) {
-        let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap_or(0);
-        if aoide_storage::outbox::is_held_off(&link, now_epoch) {
-            return "unreachable";
-        }
-    }
+/// **The most recent attempt decides, and the ENTRY is the finer record.** A
+/// back-off on the link is the sender's own retry state, written for a refusal
+/// exactly as for a dial that failed, so it cannot answer the question by itself:
+/// a peer that stays `down` is UP, and reading its refusals as `unreachable`
+/// would be the declaration/observation conflation this view exists to avoid.
+/// The link decides only where no entry records an attempt — or where the entry's
+/// own bookkeeping write failed, which is the case its word is still good for.
+pub(crate) fn liveness_of(node: &str) -> &'static str {
+    let link = aoide_storage::outbox::read_link_state(node).ok().flatten();
     let Ok(entries) = aoide_storage::outbox::list_entries(node) else {
         return "unverified";
     };
@@ -594,9 +599,19 @@ fn liveness_of(node: &str) -> &'static str {
         .iter()
         .filter(|entry| !entry.last_try_at.is_empty())
         .max_by(|left, right| left.last_try_at.cmp(&right.last_try_at));
+    // The LINK's own word: where it recorded something that is NOT an answer,
+    // that attempt got nothing back, and no entry's older outcome changes it.
+    if let Some(link) = &link {
+        if !link_was_answered(link) {
+            return "unreachable";
+        }
+    }
     match latest {
         Some(entry) if entry.last_attempt_was_answered() => "reachable",
         Some(_) => "unreachable",
+        // No entry to speak: the link is all there is, and its own word said an
+        // answer.
+        None if link.is_some() => "reachable",
         None => "unverified",
     }
 }
@@ -1445,6 +1460,16 @@ mod tests {
                 "refused: down: node `elsewhere` is declared `down` in mesh `friends`",
                 "2026-09-29T10:00:00Z",
             );
+            // AND the LINK the drain writes beside it — a back-off, which is the
+            // sender's own retry state and must not answer as a failure.
+            let now_epoch =
+                aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap_or(0);
+            aoide_storage::outbox::back_off(
+                "elsewhere",
+                now_epoch,
+                "refused: down: node `elsewhere` is declared `down`",
+            )
+            .unwrap();
             assert_eq!(liveness_of_row("elsewhere"), "reachable", "it answered");
         });
     }

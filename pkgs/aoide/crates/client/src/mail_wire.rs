@@ -1508,7 +1508,10 @@ fn record_failed_attempt(
     updated.last_try_at = aoide_storage::time::now_iso_utc();
     updated.last_outcome = format!("{word}: {reason}");
     let recorded = aoide_storage::outbox::write_entry(node_name, &updated);
-    aoide_storage::outbox::back_off(node_name, now_epoch, reason)?;
+    // The LINK's own record of the same attempt carries the same word, so a
+    // reader that has only the link (an entry whose bookkeeping write failed)
+    // can still tell a far end that ANSWERED from a dial that never connected.
+    aoide_storage::outbox::back_off(node_name, now_epoch, &format!("{word}: {reason}"))?;
     recorded
 }
 
@@ -1728,6 +1731,46 @@ mod tests {
         let asked = poll_node("elsewhere", None).unwrap();
         assert_eq!(asked.filed, 0, "nothing is taken");
         assert!(seen.lock().unwrap().is_empty(), "and no door was contacted at all");
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A peer that stays `down` is UP and talking.** The REAL drain against a
+    /// door that answers `down` leaves the link backed off — the sender's own
+    /// retry state, written for a refusal exactly as for a dead dial — and
+    /// liveness must still read `reachable`: the entry that records the attempt
+    /// answered, and reading the declaration back as an observation is the
+    /// conflation this view exists to avoid.
+    #[test]
+    fn a_down_answer_from_a_real_drain_reads_reachable() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("liveness-real-down");
+        let (listener, port, _seen) = recording_door(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"status":"refused","reason":"down","detail":"node `elsewhere` is declared `down`"}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
+        );
+        let mut node = unpaired_node("elsewhere");
+        node.url = format!("http://127.0.0.1:{port}/");
+        node.verified = true;
+        node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "elsewhere", "bob", "waiting").unwrap();
+        aoide_storage::outbox::write_entry("elsewhere", &OutboxEntry::fresh(envelope)).unwrap();
+
+        drain_node("elsewhere").unwrap();
+        let held = aoide_storage::outbox::list_entries("elsewhere").unwrap();
+        assert!(!held[0].refused, "the entry stays live: {held:?}");
+        assert!(held[0].last_outcome.starts_with("refused:"), "the far end's word: {held:?}");
+        assert!(
+            aoide_storage::outbox::read_link_state("elsewhere").unwrap().is_some(),
+            "the LINK backs off, which is the sender's own retry state"
+        );
+        assert_eq!(
+            crate::mesh::liveness_of("elsewhere"),
+            "reachable",
+            "it ANSWERED, so it has been reached"
+        );
 
         drop(listener);
         let _ = std::fs::remove_dir_all(&dir);
