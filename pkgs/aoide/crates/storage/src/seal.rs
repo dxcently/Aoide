@@ -3236,9 +3236,11 @@ mod review_fix_tests {
 
     /// **A crossing signed by a node the declaration does NOT name as its gate
     /// is the wall.** The same fixture, with the second entry signed by `origin`
-    /// — a member of `alpha`, and no gate — instead of by `gate`: the walk
-    /// refuses `zone-violation`. Forcing `gate_in` to accept every crossing makes
-    /// this walk succeed and this test fail, which is what pins the direction.
+    /// instead of by `gate`: `origin` holds this process's key in BOTH meshes, so
+    /// it is a dual member and no gate, and nothing is missing from its chain —
+    /// the walk still refuses `zone-violation`. Forcing `gate_in` to accept every
+    /// crossing makes this walk succeed and this test fail, which is what pins
+    /// the direction.
     #[test]
     fn a_crossing_signed_by_a_node_that_is_not_the_gate_is_the_wall() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -3260,7 +3262,7 @@ mod review_fix_tests {
         let (kp, _) = identity::load_or_mint().unwrap();
         let me = kp.info().pubkey_hex.clone();
         let record = |node: &str, key: String, mesh: &str| {
-            let mut row = node_store::Node {
+            let row = node_store::Node {
                 name: node.to_string(),
                 url: "ssh://self".to_string(),
                 autogate: false,
@@ -3274,15 +3276,17 @@ mod review_fix_tests {
                 via: None,
                 added_at: "2026-09-07T00:00:00Z".to_string(),
             };
-            row.narrowed = node_store::Grants::new();
             row
         };
-        // `origin` holds this process's key too, so the test CAN sign the
-        // crossing as it — the point being that `alpha` does not name it a gate.
+        // `origin` holds this process's key in BOTH meshes too, so it can sign
+        // the crossing as neither is refused for a missing key: the one thing
+        // that stands between it and `far` is that `alpha` does not name it a
+        // gate.
         node_store::save_nodes(&[
             record("gate", me.clone(), "alpha"),
             record("gate", me.clone(), "beta"),
             record("origin", me.clone(), "alpha"),
+            record("origin", me.clone(), "beta"),
             record("far", "d4d4d4d4".repeat(8), "beta"),
         ])
         .unwrap();
@@ -3296,10 +3300,13 @@ mod review_fix_tests {
         let mut forwarded = container.clone();
         forwarded.transit.push(TransitEntry {
             node: "origin".to_string(),
-            next: "origin".to_string(),
+            // `origin` hands the letter to `gate` — the name this box holds in
+            // `beta` — so the chain's TAIL is well-formed and the only thing
+            // the walk has left to refuse is the crossing itself.
+            next: "gate".to_string(),
             at: at.clone(),
             mesh: "beta".to_string(),
-            sig: wire_auth::sign_hex(&kp, &hop_bytes(&msgid, &prev, "origin", "origin", &at, "beta")),
+            sig: wire_auth::sign_hex(&kp, &hop_bytes(&msgid, &prev, "origin", "gate", &at, "beta")),
         });
 
         let ctx = Ctx::from_container(&forwarded).unwrap();

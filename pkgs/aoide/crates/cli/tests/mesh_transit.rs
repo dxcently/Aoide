@@ -1152,10 +1152,15 @@ fn a_deposit_whose_last_hop_is_someone_else_is_refused() {
     );
     let log = std::fs::read_to_string(fx.boxes["osaka"].join("log")).unwrap_or_default();
     assert!(log.contains(aoide_storage::seal::BROKEN_CHAIN), "audited: {log}");
+    // At the BOX the hop was refused for: a hop that did not carry the letter
+    // files nothing there — not the receipt, whose own msgid is the
+    // container's, and not the msgid it claims to acknowledge.
+    fx.enter("osaka");
     assert!(
-        aoide_storage::mail::filed_kind(&msgid).is_none(),
+        aoide_storage::mail::filed_kind(&container.msgid).is_none(),
         "a hop that did not carry the letter files nothing"
     );
+    assert!(aoide_storage::mail::filed_kind(&msgid).is_none(), "nor is the acknowledged msgid filed");
 }
 
 /// The same binding on the PULL side: a relay offers a container whose last hop

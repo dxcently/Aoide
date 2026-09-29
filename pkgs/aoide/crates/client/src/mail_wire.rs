@@ -2556,17 +2556,21 @@ mod tests {
     /// recorded WHILE the answer was in flight. That is the only shape that tells
     /// the fix from the bug: reading `filed_pending` again after the response
     /// would clear a name the hub has never seen, and the hub would keep offering
-    /// a container this box already has. (The door is slow on purpose, so the
-    /// window is real rather than hoped for.)
+    /// a container this box already has. The door HOLDS the poll on a handshake
+    /// until the acknowledgement is on disk, so "in flight" is the window rather
+    /// than a race against a sleep.
     #[test]
     fn a_name_recorded_while_the_poll_was_in_flight_is_not_cleared() {
         use std::io::{Read, Write};
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("poll-ack-in-flight");
 
-        // A door that reads each request, waits on the POLL, then answers. (The
+        // A door that reads each request, HANDS THE POLL OVER to the test, and
+        // only answers once the test says the acknowledgement is recorded. (The
         // poll's own binding exchange arrives first — one connection for it, one
         // for the poll — and is answered immediately.)
+        let (poll_seen_tx, poll_seen_rx) = std::sync::mpsc::channel::<()>();
+        let (ack_recorded_tx, ack_recorded_rx) = std::sync::mpsc::channel::<()>();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let accepter = listener.try_clone().unwrap();
@@ -2578,7 +2582,8 @@ mod tests {
                 let request = String::from_utf8_lossy(&buf[..n]).to_string();
                 let is_poll = request.contains("aoide/mailPoll");
                 if is_poll {
-                    std::thread::sleep(std::time::Duration::from_millis(400));
+                    poll_seen_tx.send(()).unwrap();
+                    ack_recorded_rx.recv().unwrap();
                 }
                 let body = r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#;
                 let response = format!(
@@ -2601,13 +2606,14 @@ mod tests {
         aoide_storage::outbox::record_filed("relay", &sent).unwrap();
 
         // What the filing this poll performs would record: an ack minted while
-        // the answer is on its way. Recorded from another thread, inside the
-        // door's own pause.
+        // the answer is on its way. Recorded from another thread, INSIDE the
+        // door's own pause — the door cannot answer before this write is on disk.
         let writer = {
             let in_flight = in_flight.clone();
             std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(150));
+                poll_seen_rx.recv().unwrap();
                 aoide_storage::outbox::record_filed("relay", &in_flight).unwrap();
+                ack_recorded_tx.send(()).unwrap();
             })
         };
 
