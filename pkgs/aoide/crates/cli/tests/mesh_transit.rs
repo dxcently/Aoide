@@ -603,6 +603,11 @@ fn the_fixtures_boxes_answer_on_their_own_doors() {
     aoide_storage::node_store::save_nodes(&nodes).unwrap();
     let polled = aoide_client::mail_wire::poll_node("sakaki", None);
     assert!(polled.is_ok(), "the client's own poll reached the door: {polled:?}");
+    // And a request signed by hand reaches the same door, which is what a
+    // deposit AT A NAMED DOOR needs (the client's dial cannot open a `https://`
+    // declaration with no TLS in front of it).
+    let answer = door_post(&fx, "osaka", HOME, "aoide/mailPoll", serde_json::json!({ "node": "osaka" }));
+    assert!(answer["result"].is_object(), "a hand-signed request verifies: {answer}");
     let relay_log = std::fs::read_to_string(fx.boxes["sakaki"].join("log")).unwrap_or_default();
     assert!(
         relay_log.contains("a2a.aoide/mailPoll"),
@@ -614,9 +619,8 @@ fn the_fixtures_boxes_answer_on_their_own_doors() {
 /// the four headers over `wire_auth::canonical_string` (plus `X-Aoide-Mesh` when
 /// the request acts in one), over plain HTTP to the loopback port the fixture's
 /// door answers on. The client's own dial cannot reach a `https://` address with
-/// no TLS in front of it (`dial_of` knows no `http://`), so a door-level test
-/// speaks the wire itself — the same hand-written shape
-/// `mail_adapter_round_trip.rs` uses for its records.
+/// no TLS in front of it (`dial_of` knows no `http://`), so a test that needs to
+/// deposit AT A NAMED DOOR (rather than poll from it) speaks the wire itself.
 fn door_post(
     fx: &Fixture,
     from: &str,
@@ -674,11 +678,9 @@ fn door_post(
     serde_json::from_str(payload).unwrap_or_else(|e| panic!("door answered junk: {e}\n{response}"))
 }
 
-/// A box's own identity keypair, read from ITS root (the process is entered on
-/// that box when this is called).
+/// A box's own identity keypair, as the process entered on that box reads it.
 fn fixture_box_key(fx: &Fixture, name: &str) -> aoide_storage::identity::Keypair {
-    let _ = fx;
-    let _ = name;
+    let _ = (fx, name);
     aoide_storage::identity::load_or_mint().unwrap().0
 }
 
