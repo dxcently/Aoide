@@ -1528,7 +1528,7 @@ pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<Co
 
     // 5. Whose letter is this? This box's own names in that zone are the charter
     //    line's name for its identity key (`routing::own_name_in` — the policy
-    //    name, D5) and the address form the origin wrote into `to.node`.
+    //    name) and the address form the origin wrote into `to.node`.
     let (kp, local) = own_keypair_and_local_name()?;
     let own_key = kp.info().pubkey_hex.clone();
     let declared = crate::routing::own_name_in(&set, request_mesh, &own_key);

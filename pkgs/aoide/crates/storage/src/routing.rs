@@ -176,7 +176,8 @@ pub fn gate_in(set: &[Loaded], from: &str, to: &str, node: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// This box's own name IN `mesh`: the declared name its identity `key` belongs/// to, or `None` for a key the mesh does not carry — which is exactly "not a
+/// This box's own name IN `mesh`: the declared name its identity `key` belongs
+/// to, or `None` for a key the mesh does not carry — which is exactly "not a
 /// member of this mesh". The ONE resolution every policy, routing and audit
 /// lookup that starts from a verifying key goes through
 /// ([`Declaration::name_of_key`]); the OS hostname and a `nodes.json` nickname

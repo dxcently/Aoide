@@ -698,7 +698,7 @@ fn dial_node(node_name: &str, mesh: Option<&str>) -> Option<(aoide_storage::node
         // A mesh the set cannot read names no address: fail closed.
         _ => None,
     });
-    let charter_mesh = declared.is_some() && declared.is_some_and(|d| d.is_charter());
+    let charter_mesh = declared.is_some_and(|d| d.is_charter());
     let nodes = aoide_storage::node_store::load_nodes();
     if !charter_mesh {
         if let Some(record) = nodes.into_iter().find(|n| n.name == node_name) {
@@ -740,7 +740,10 @@ fn spool_mesh(node_name: &str) -> Option<String> {
                 .as_ref()
                 .map(|container| container.mesh.clone())
                 .or_else(|| Some(entry.envelope.header.origin_mesh.clone()))
-                .filter(|mesh| !mesh.is_empty())
+                // An EMPTY mesh is the home mesh (`routing::zone_name`), not a
+                // missing answer: a container minted before the mesh was carried
+                // rides home, and dropping it here would dial by the wrong name.
+                .map(|mesh| aoide_storage::routing::zone_name(&mesh))
         })
 }
 
@@ -2453,7 +2456,7 @@ mod tests {
     /// binding (or pairs) instead of putting their letter in front of a hub.
     /// The direct lane is the one exception, and it is unchanged.
     #[test]
-    fn a_hop_that_is_not_the_destination_parkes_an_unsealable_letter() {
+    fn a_hop_that_is_not_the_destination_parks_an_unsealable_letter() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, dir) = root("spool-needs-a-binding");
 

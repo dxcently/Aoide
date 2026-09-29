@@ -11,7 +11,9 @@
 //! osaka→sakaki, sakaki→chiyo, osaka→yomi, evo→sakaki and sakaki→evo.
 //!
 //! **And each box answers on its own hop**, which is what makes those edges
-//! routable at all: every box but `chiyo` is declared at `ssh://<name>`, and
+//! routable at all: every box but `chiyo` is declared at
+//! `https://127.0.0.1:<port>/` (its own free loopback port, where a REAL door
+//! can be raised), and
 //! `chiyo` is the `poll` node the route ends at — no inbound transport, so its
 //! letters are held at the relay until it asks for them. A mesh whose nodes all
 //! read `poll` (the shape a bare node line has) routes nowhere: a hop cannot
@@ -83,15 +85,9 @@ pub struct Fixture {
 /// name): a door-level test needs a door, and `aoide mail serve`'s own round trip
 /// (`mail_adapter_round_trip.rs`) is the shape this follows.
 pub struct Doors {
+    /// Each `Door` kills its own child when it drops, so the vec is the whole
+    /// lifetime: no `Drop` of its own to keep in step with the field.
     doors: Vec<Door>,
-}
-
-impl Drop for Doors {
-    fn drop(&mut self) {
-        // Each `Door` kills its own child; this is only here so the vec is
-        // dropped as ONE thing (and so a future reader sees the lifetime).
-        self.doors.clear();
-    }
 }
 
 /// A real door for an arbitrary box root: one `aoide a2a serve` child, on

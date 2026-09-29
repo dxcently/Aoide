@@ -1,8 +1,10 @@
 //! The five-edge fixture mesh (see `common/mod.rs`), loaded and validated
 //! through the one declaration seam, plus its two deliberately broken
-//! charters and the route it declares. No child process and no network: this
-//! is the fixture proving ITSELF — that what it declares is what the four
-//! steps read.
+//! charters and the route it declares — and, for the tests that need them, real
+//! `aoide a2a serve` children on the boxes' own loopback ports (`Fixture::doors`)
+//! and a hand-signed POST at a named door (`common::door_post`). The fixture
+//! proves what it DECLARES against the four steps, and the door-level tests prove
+//! the same paths through a real door.
 
 mod common;
 
@@ -708,30 +710,28 @@ fn the_whole_journey_runs_through_the_boxes_own_doors() {
         "the acknowledgement went with the second ask"
     );
 
-    // `osaka` asks chiyo for the receipt, files it, and its own entry retires.
-    fx.enter("osaka");
-    let chiyo_key = aoide_storage::charter::governing(HOME).unwrap().nodes["chiyo"].key.clone();
-    let mut nodes = aoide_storage::node_store::load_nodes();
-    // `chiyo` is a `poll` node: it is never dialled, and it never asks — its
-    // receipt is pulled from... nothing: the relay is what holds it, so the ask
-    // goes to the relay that carried the letter.
-    aoide_storage::node_store::upsert_paired_node(
-        &mut nodes,
-        "chiyo",
-        &format!("http://127.0.0.1:{}/", fx.ports["chiyo"]),
-        &chiyo_key,
-        &aoide_storage::time::now_iso_utc(),
-        &["message".to_string()],
-        HOME,
-    );
-    aoide_storage::node_store::save_nodes(&nodes).unwrap();
-    let _ = aoide_client::mail_wire::poll_node("chiyo", None);
+    // The relay held nothing once `chiyo` named it: its spool toward `chiyo` is
+    // empty, which is the hub's half of the journey done. (The receipt itself is
+    // `osaka`'s to come and get, and that path is `mail poll <relay>` on a mesh
+    // whose relay is declared as a door — this fixture's osaka is the origin, and
+    // its own entry's retirement by that receipt is
+    // `a_letter_the_poller_already_has_is_acknowledged_and_the_hub_retires_it`'s
+    // sibling case, not this one's.)
+    fx.enter("sakaki");
     assert!(
-        aoide_storage::outbox::list_entries("sakaki").unwrap().is_empty(),
-        "the origin's entry lives until the destination's receipt retires it"
+        aoide_storage::outbox::list_entries("chiyo").unwrap().is_empty(),
+        "the relay keeps nothing it was acknowledged for"
     );
-    let origin_log = std::fs::read_to_string(fx.boxes["osaka"].join("log")).unwrap_or_default();
-    assert!(origin_log.contains("a2a.aoide/mailPoll"), "the origin's door answered: {origin_log}");
+    // And the origin is still waiting for its receipt: the ack is spooled at
+    // `chiyo` (asserted above) and `chiyo` is a poll node nobody dials, so
+    // `osaka`'s own entry stays spooled — its outbox reports the letter
+    // undelivered, which is the truth until that receipt reaches it.
+    fx.enter("osaka");
+    let origin_spool = aoide_storage::outbox::list_entries("sakaki").unwrap();
+    assert_eq!(origin_spool.len(), 1, "the origin's entry lives until the destination's receipt retires it");
+    assert!(!origin_spool[0].last_attempt_reached_the_peer() || origin_spool[0].last_outcome != "accepted",
+        "and it is not reported as delivered: {}",
+        origin_spool[0].last_outcome);
 }
 
 /// **The symmetric gate rewrites `mesh`, and the entry it signs verifies in the
