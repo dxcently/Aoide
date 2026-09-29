@@ -3562,6 +3562,30 @@ fn mail_deposit(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)
         .map(|c| c.name)
         .expect("deposit_admitted only returns true when a signed caller resolved");
 
+    // **A plaintext envelope is addressed to THIS box or it is refused.** `to.node`
+    // is what makes a letter a letter here, and `mail::deposit` files whatever it
+    // verifies — it never asks whether this box was the addressee, because on the
+    // direct lane the carrier IS the destination. A depositing hop that hands over
+    // an envelope addressed to a third node is asking this door to relay PLAINTEXT
+    // (`addressing-mismatch`): the container lane is the one that carries a letter
+    // onward, and it carries it sealed.
+    let own_key = aoide_storage::identity::load_or_mint().ok().map(|(kp, _)| kp.info().pubkey_hex);
+    let declared = own_key.as_deref().and_then(|key| {
+        aoide_storage::routing::declarations()
+            .ok()
+            .and_then(|set| aoide_storage::routing::own_name_in(&set, &mesh, key))
+    });
+    let names = [Some(aoide_storage::display::local_node_name()), declared];
+    if !names.iter().flatten().any(|mine| mine == &envelope.header.to.node) {
+        let detail = format!(
+            "envelope is addressed to `{}`, not this node: a plaintext deposit is the direct lane's — \
+             a letter in transit travels as a sealed container, never in the clear through a hop",
+            envelope.header.to.node
+        );
+        let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "invalid", &detail);
+        return Ok(json!({ "status": "refused", "reason": "addressing-mismatch", "detail": detail }));
+    }
+
     let outcome = aoide_storage::mail::deposit(envelope.clone(), hop_name).map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
 
     // Spec item 11: mail self-audits at the door (the one place a deposit
@@ -15496,6 +15520,41 @@ mod tests {
     }
 
     #[test]
+    fn a_plaintext_envelope_addressed_to_a_third_node_is_refused_and_audited() {
+        // The plaintext lane is the DIRECT lane's: a hop that hands this door an
+        // envelope addressed to someone else is asking it to relay plaintext, and
+        // `mail::deposit` (which verifies and files — it never asks who the
+        // addressee is) would happily file it. The door refuses it with the word
+        // it teaches, and says so in the audit log.
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("plaintext-third-party");
+        act_as(&root, "here");
+
+        let origin_name = setup_verifiable_origin(&["message"]);
+        // Addressed somewhere else — and, since `to.name` is free attribution,
+        // the letter is well-formed in every way except the one that matters.
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "away-node", "conductor", "in the clear").unwrap();
+        assert_eq!(envelope.header.from.node, origin_name);
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
+        let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "aoide/mailDeposit", "params": { "envelope": envelope } });
+        let resp = handle_jsonrpc(&req, &ctx);
+        assert_eq!(resp["result"]["status"], "refused", "{resp}");
+        assert_eq!(resp["result"]["reason"], aoide_storage::seal::ADDRESSING_MISMATCH, "{resp}");
+        assert!(
+            aoide_storage::mail::read_base().unwrap().is_empty(),
+            "nothing is filed for a node this box is not"
+        );
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("away-node") && log.contains("invalid"), "the refusal is audited: {log}");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    #[test]
     fn a_deposit_from_a_verified_message_holding_node_files_a_letter() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
@@ -15504,7 +15563,7 @@ mod tests {
         act_as(&root, "here");
 
         let origin_name = setup_verifiable_origin(&["message"]);
-        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "here", "conductor", "hello from the wire").unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hello from the wire").unwrap();
         assert_eq!(envelope.header.from.node, origin_name);
 
         let audit_log = root.join("log");
@@ -15568,7 +15627,7 @@ mod tests {
         write_stage(&sessions_path(), &SessionsFile { schema_version: String::new(), sessions: vec![wrap, child] }).unwrap();
         aoide_storage::mail::enrol_reader("conductor", wrap_id).unwrap();
 
-        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "here", "conductor", "hello from the wire").unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hello from the wire").unwrap();
         let audit_log = root.join("log");
         let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
         let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "aoide/mailDeposit", "params": { "envelope": envelope } });
@@ -15626,7 +15685,7 @@ mod tests {
         nodes[0].url = "http://127.0.0.1:1/".to_string();
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
-        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "here", "conductor", "hello twice").unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hello twice").unwrap();
         let audit_log = root.join("log");
         let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
         let params = json!({ "envelope": envelope });
@@ -15656,7 +15715,7 @@ mod tests {
         nodes[0].url = "http://127.0.0.1:1/".to_string();
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
-        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "here", "conductor", "hi").unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hi").unwrap();
         let audit_log = root.join("log");
         let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
         let params = json!({ "envelope": envelope });
@@ -15698,7 +15757,7 @@ mod tests {
         nodes[0].url = "http://127.0.0.1:1/".to_string();
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
-        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "here", "conductor", "hi").unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hi").unwrap();
         let audit_log = root.join("log");
         let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
         let params = json!({ "envelope": envelope });
@@ -15737,7 +15796,7 @@ mod tests {
         nodes[0].url = "http://127.0.0.1:1/".to_string();
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
-        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "here", "conductor", "hi").unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hi").unwrap();
         let audit_log = root.join("log");
         let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
         let params = json!({ "envelope": envelope });
@@ -15768,7 +15827,7 @@ mod tests {
         nodes[0].url = "http://127.0.0.1:1/".to_string();
         aoide_storage::node_store::save_nodes(&nodes).unwrap();
 
-        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "here", "conductor", "hi").unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hi").unwrap();
         let audit_log = root.join("log");
         let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
         let params = json!({ "envelope": envelope });
@@ -15799,7 +15858,7 @@ mod tests {
         // coincide is not the same as them being the same read.
         setup_signed_node_with_allows("box-hop", &["message"]);
 
-        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "here", "conductor", "hi").unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hi").unwrap();
         let origin_name = envelope.header.from.node.clone();
         assert!(
             aoide_storage::node_store::load_nodes().iter().all(|n| n.name != origin_name),
@@ -15838,7 +15897,7 @@ mod tests {
         // this proves the msgid check is what refuses, not a side effect of
         // an origin this test never bothered to register.
         let origin_name = setup_verifiable_origin(&["message"]);
-        let mut envelope = aoide_storage::mail::mint_outbound_letter("alice", "here", "conductor", "hi").unwrap();
+        let mut envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "conductor", "hi").unwrap();
         envelope.msgid = "0".repeat(64); // well-formed hex, does not recompute
 
         let audit_log = root.join("log");
@@ -17510,7 +17569,7 @@ mod tests {
         let origin_name = setup_verifiable_origin(&["message"]);
 
         let audit_log = root.join("log");
-        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "there", "bob", "hi").unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", &aoide_storage::display::local_node_name(), "bob", "hi").unwrap();
         let params = json!({ "envelope": envelope });
 
         // The adapter: refused as a RESULT carrying the taught word, audited,

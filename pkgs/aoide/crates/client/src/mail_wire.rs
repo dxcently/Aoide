@@ -356,6 +356,14 @@ pub fn spool_entry(
     // line's own identity key, which the operator signed).
     let binding = aoide_storage::seal::usable_binding_for(dest, &now)
         .or_else(|| declared_binding(dest, mesh, &now));
+    // **Plaintext is the DIRECT lane's, and only the direct lane's.** A relay
+    // carries sealed containers and nothing else ("no relay, hub or HTTPS hop
+    // ever carries plaintext", HTTPS-MESH-API), so an entry whose `next` is not
+    // the destination itself must be sealed to it — and where no binding can be
+    // had, it is PARKED rather than put in the clear for a hub to read. `dest ==
+    // next` to a peer that has published no binding is the one legitimate
+    // plaintext send any node still makes (the per-peer upgrade path).
+    let direct = dest == next;
     match binding {
         Some(binding) => {
             let container = aoide_storage::seal::seal_envelope(
@@ -373,9 +381,8 @@ pub fn spool_entry(
                 OutboxEntry::sealed(envelope, container)
             })
         }
-        // No binding anywhere: the per-peer upgrade path, and the only
-        // plaintext a node still sends.
-        None if aoide_storage::seal::binding_for(dest).is_none()
+        None if direct
+            && aoide_storage::seal::binding_for(dest).is_none()
             && !declares_a_binding(dest, mesh) =>
         {
             Ok(if hold { OutboxEntry::held(envelope) } else { OutboxEntry::fresh(envelope) })
@@ -392,7 +399,15 @@ pub fn spool_entry(
             };
             entry.refused = true;
             entry.last_try_at = now;
-            entry.last_outcome = "parked: the destination holds a binding that is not usable now".to_string();
+            entry.last_outcome = if direct {
+                "parked: the destination holds a binding that is not usable now".to_string()
+            } else {
+                format!(
+                    "parked ({NO_BINDING_FOR_A_RELAY}): `{dest}` publishes no age binding this box can \
+                     use, and a relay carries sealed containers only — publish one (`aoide mail poll` \
+                     exchanges them), or pair with `{dest}`"
+                )
+            };
             Ok(entry)
         }
     }
@@ -421,6 +436,13 @@ fn hop_is_never_dialled(node_name: &str, mesh: &str) -> bool {
         .map(|dial| matches!(dial, aoide_storage::charter::Dial::Poll))
         .unwrap_or(false)
 }
+
+/// The word a caller reads when a letter cannot be sent in the clear: the
+/// destination publishes no age binding this box can use, and the entry's next
+/// hop is not the destination itself — so a relay would have to read it. The
+/// letter is parked, visible in `mail outbox`, and `mail outbox retry --refused`
+/// is the hand once a binding exists.
+pub const NO_BINDING_FOR_A_RELAY: &str = "sealed-required";
 
 /// The age binding the mesh DECLARES for `dest`, if it is usable now — a charter
 /// line's own `age` key, verified under that line's identity key
@@ -2270,6 +2292,35 @@ mod tests {
             aoide_storage::outbox::reseal_entry("liveb", &sealed, &now).unwrap(),
             Reseal::Sealed(None)
         ));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A relay never carries plaintext.** An entry whose next hop is not the
+    /// destination cannot be sent in the clear just because no binding can be
+    /// had: it is PARKED with a word that says why, so the operator publishes a
+    /// binding (or pairs) instead of putting their letter in front of a hub.
+    /// The direct lane is the one exception, and it is unchanged.
+    #[test]
+    fn a_hop_that_is_not_the_destination_parkes_an_unsealable_letter() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("spool-needs-a-binding");
+
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "chiyo", "bob", "through a hub").unwrap();
+        // `dest != next`: the relay `sakaki` would be the one to read it.
+        let relayed = spool_entry("chiyo", "sakaki", "home", envelope.clone(), false).unwrap();
+        assert!(!relayed.is_sealed(), "there is no binding to seal to");
+        assert!(relayed.refused, "and therefore no plaintext either: the entry parks");
+        assert!(
+            relayed.last_outcome.contains(crate::mail_wire::NO_BINDING_FOR_A_RELAY),
+            "with the taught word: {}",
+            relayed.last_outcome
+        );
+
+        // The direct lane is untouched: no binding, no relay, plaintext as before.
+        let direct = spool_entry("chiyo", "chiyo", "home", envelope, false).unwrap();
+        assert!(!direct.is_sealed());
+        assert!(!direct.refused, "the per-peer upgrade path still sends plaintext in the clear");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

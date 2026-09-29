@@ -9356,7 +9356,13 @@ mod tests {
         let spooled = aoide_storage::outbox::list_entries("relay").unwrap();
         assert_eq!(spooled.len(), 1, "spooled toward the hop the route picked");
         assert_eq!(spooled[0].envelope.header.to.node, "dave", "and still addressed to the destination");
-        assert!(!spooled[0].is_sealed(), "`dave` holds no binding anywhere, so the direct lane is plaintext");
+        assert!(
+            !spooled[0].is_sealed() && spooled[0].refused,
+            "no binding for `dave` means no seal: a relay would have to read it, so the entry parks \
+             rather than travelling in the clear ({})",
+            spooled[0].last_outcome
+        );
+        assert!(spooled[0].last_outcome.contains(crate::mail_wire::NO_BINDING_FOR_A_RELAY));
 
         // A destination no declaration names: refused before anything is written.
         let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "ghost/bob")]));
