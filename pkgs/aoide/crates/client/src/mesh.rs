@@ -1142,6 +1142,7 @@ mod tests {
             same_operator: false,
             nodes: nodes.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
             operator: None,
+            ..Default::default()
         }
     }
 

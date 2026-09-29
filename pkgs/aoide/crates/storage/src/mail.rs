@@ -8,8 +8,10 @@
 //! [`Envelope`] into [`crate::outbox`]; the far door's `aoide/mailDeposit`
 //! arm calls [`deposit`] here to verify and file it, ONLY ever via a
 //! [`file_received_entry`] (never re-minted — the envelope arrives already
-//! signed). **No transit, no zones, no `--hold`** — those are P-M3/P-M4
-//! (MAIL.md's own Phases section); nothing here reads a mesh declaration.
+//! signed). **No transit and no zone check yet** — those are P-M4's router
+//! (S2 onward); `--hold` landed at P-M3 as a spool flavor
+//! ([`crate::outbox`]), and nothing here reads a mesh declaration — the read
+//! is [`crate::routing`].
 //! The doorbell's own latch and its targeting queries ([`arms`],
 //! [`ring_targets`], [`stamp_rung`], [`armed_names_for_reader`],
 //! [`enrol_reader`]) live here (P-M5a-1); the ring itself — injecting a byte

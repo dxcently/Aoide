@@ -251,7 +251,10 @@ relays. Keys:
   - `grant` — capabilities; default `["message"]`.
 - Optional `[status]` (`hold`, `down` per node) and `[gates]` (a mesh name to the
   node that gates it), with MAIL.md's meanings; `sign` checks their shapes and that
-  they name nodes of the charter, and their semantics are the router's.
+  they name nodes of the charter, and the read that carries them to the router is
+  `aoide_storage::routing` — one seam for a charter mesh's signed file and a pair
+  mesh's `[mesh.<name>]` section, which is also where a gate the other mesh does
+  not answer back is refused.
 
 The source lives at `$AOIDE_ROOT/charters/<mesh>.toml` by default; `--file` points
 anywhere, such as the operator's Nix repository, since it holds public keys only.
@@ -891,7 +894,7 @@ v           = 1
 msgid       = 5f3c9a1d0e7b24c8a6f1d3b5097e42ca18b6d0f3a2c75e9184b0d6f2a3c8e14b
 origin.node = "thinkchiyo"
 origin.key  = 9d2f81c4a70be35610f48d2c7b19ea50c3d6f8024a9e1b73c85d0f2a6e4b9c17
-to.node     = "relay"
+to.node     = "osaka"
 to.age      = age1hgvpn9afcg7dwa3pmh3atmw2gkf3hzhy8cfvcx88qkr4y0mt8flqqn079j
 originMesh  = "home"
 suite       = "age-v1-x25519"
@@ -904,8 +907,8 @@ epoch       = 0
 616f6964652f6d61696c2d63747800000000080000000000000001000000046d
 61696c000000205f3c9a1d0e7b24c8a6f1d3b5097e42ca18b6d0f3a2c75e9184
 b0d6f2a3c8e14b0000000a7468696e6b636869796f000000209d2f81c4a70be3
-5610f48d2c7b19ea50c3d6f8024a9e1b73c85d0f2a6e4b9c170000000572656c
-61790000003e61676531686776706e39616663673764776133706d683361746d
+5610f48d2c7b19ea50c3d6f8024a9e1b73c85d0f2a6e4b9c17000000056f7361
+6b610000003e61676531686776706e39616663673764776133706d683361746d
 7732676b6633687a68793863667663783838716b723479306d7438666c71716e
 3037396a00000004686f6d650000000d6167652d76312d783235353139000000
 08000000000000000100000000000000080000000000000000

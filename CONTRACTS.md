@@ -1467,7 +1467,13 @@ Upgrading every node is the remedy the fleet's own rollout takes.
   `name -> ssh hop` map (`aoide_storage::tunnel::parse_via`'s own
   `ssh://[user@]host[:port]` shape) — a map, not an array of records, so a
   duplicate node name within one mesh is structural, not a second check to
-  write; the same node name may not appear in two different meshes. One key
+  write. **A node name MAY be declared in several meshes** (P-CHARTER: a
+  mesh is a trust scope, and the same machine legitimately sits in more
+  than one with a different grant in each; `state/nodes.json` is keyed by
+  name alone, so its one record carries the grant map) — what may not is
+  two different *keys* for one node anywhere, "one node, one identity key,
+  in every mesh", refused where both declarations are in hand
+  (`aoide_storage::routing::validate`). One key
   is expected to name the box the file lives on: `aoide mesh` matches
   against `display::local_host_name()` by exact string equality, so that
   key must be exactly what the function returns — an FQDN or mixed-case OS
@@ -1493,6 +1499,18 @@ Upgrading every node is the remedy the fleet's own rollout takes.
   note on its report. The question it asks is answered by the signed charter
   (`docs/architecture/HTTPS-MESH-API.md`, "Charters"): one operator is one
   charter signer, so the key is never acted on and retires with P-CHARTER.
+  `mesh.<name>.relays` (list of node names, default absent), 
+  `mesh.<name>.status` (a node name to `hold`/`down`, default absent) and
+  `mesh.<name>.gates` (another mesh's name to the node of THIS mesh that
+  carries transit into it, default absent) are a PAIR mesh's transit table
+  (P-M4, `docs/architecture/MAIL.md` §Transit); a charter mesh's comes from
+  its signed charter and a section that declares an `operator` is refused
+  for all three. Each name must be a node of this mesh, a status must be
+  `hold`/`down`, and a gate this file can answer for must be answered —
+  `aoide_storage::config::validate_pair_transit`, with the cross-file half
+  in `aoide_storage::routing`. `aoide_storage::routing::Declaration` is the
+  ONE read of either kind, and the module that turns them into routes is
+  `aoide_storage::routing` (P-M4).
   This section is validated the same as the two above it — an invalid
   mesh/node name, an out-of-vocabulary `grant` element, an unparseable
   hop, or a node declared twice is a LOUD error naming the offence — but
@@ -3508,11 +3526,11 @@ can never make two hops disagree, and a receiver re-derives the header
 from the fields and rejects if `msgid` does not recompute. `node` is
 always this box's own name (`display::local_host_name()` — `self`
 resolves to it when the envelope is minted and the literal never enters a
-header); `originMesh` is always `""` — mail does not yet consult a
-declared mesh when addressing, sending, or filing (P-M4's zone check,
-`docs/architecture/MAIL.md` step 3, still skipped entirely rather than
-stubbed, even though task #135 gave `[mesh.<name>]` a real declaration to
-post into).
+header); `originMesh` is the declared mesh the letter was minted in —
+signed with the rest of the header since P-CHARTER, and the field P-M4's
+zone clause reads (`docs/architecture/MAIL.md` §Transit; mint sites
+`aoide_client::commands`' `mail send` and `aoide_storage::mail`'s
+`mint_outbound_letter_in_mesh`).
 
 `seq` is local to the node, like an NNTP article number — never crosses a
 link; it is `last line's seq + 1`, read under the lock. `type=letter` is

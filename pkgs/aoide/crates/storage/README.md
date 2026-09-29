@@ -43,6 +43,26 @@ by decision — no embedded database yet
   machine that already trusts someone, and `reroot` refuses to move a machine
   whose config pins the key it is replacing.
 
+- `routing` — a mesh's DECLARED routing table, read once (P-M4 slice 1,
+  `docs/architecture/MAIL.md` §Transit). ONE seam for both kinds of
+  declaration, because a mesh's routing table has one source and a second
+  one is a load error, never a precedence question: `Declaration::load`
+  reads the signed charter where the mesh is charter-shaped
+  (`charter::charter_shaped` — state-only, the same answer the door gets,
+  never a second discovery path) and the `[mesh.<name>]` section otherwise,
+  and never falls back from one to the other. Its accessors are pure lookups
+  on what was read: `relays` in declaration order (the route's preference
+  order), `status_of`, `gates`, `address_of`, `key_of`, and `name_of_key` —
+  the resolution D5 rules: a charter mesh answers with the NAME ON ITS
+  CHARTER LINE for that key, and only a pair mesh reads a name out of
+  `state/nodes.json`, where the record IS the declaration. `declarations()`
+  loads every mesh this host declares or holds state for and refuses the two
+  invariants only the set can see: one node name never carries two identity
+  keys (`key-divergence`), and a gate is answered by the mesh on the other
+  side (`one-sided-gate`). One unloadable mesh refuses the whole set. No
+  router here yet — the four steps are P-M4 S2's, and this module is the
+  table they read.
+
 - `letter` defines optional `AOIDE-LETTER/1` content within the existing
   signed envelope text: Subject, To, Cc, body, and optional threadId/replyTo.
   Absent thread metadata preserves the four-field format. It performs no I/O

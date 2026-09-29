@@ -209,17 +209,18 @@ pub struct NodeLine {
 
 /// A parsed and validated charter.
 ///
-/// `relays`, `address` and `grant` are carried rather than validated-and-
-/// dropped: they are the routing table and the grants P-M4 and the door read
-/// out of the charter in force, and a parser that silently discards half the
-/// document is a liar to the next reader. `[status]` and `[gates]` are the
-/// opposite case — their semantics are P-M4's alone, so this slice checks
-/// their shape and carries nothing.
+/// Every field is carried rather than validated-and-dropped: `relays`,
+/// `address` and `grant` are the routing table and the grants the door reads
+/// out of the charter in force, `[status]` and `[gates]` are the rest of that
+/// table (`crate::routing`), and a parser that silently discards half the
+/// document is a liar to the next reader.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Charter {
     pub mesh: String,
     pub version: u64,
     pub relays: Vec<String>,
+    pub status: BTreeMap<String, String>,
+    pub gates: BTreeMap<String, String>,
     pub nodes: BTreeMap<String, NodeLine>,
 }
 
@@ -245,9 +246,10 @@ impl Charter {
 
 /// `Charter`'s deserialization twin: the same document with the fields
 /// validation turns into types (`key` → bare hex + verified binding) still in
-/// their written form, and with `[status]`/`[gates]` present so they can be
-/// checked at all. `deny_unknown_fields` on both: a typo'd key in a file that
-/// grants mesh access is refused by name, never ignored.
+/// their written form — and `[status]`/`[gates]` in the same written form
+/// [`Charter`] carries, since this is the shape that checks them first.
+/// `deny_unknown_fields` on both: a typo'd key in a file that grants mesh
+/// access is refused by name, never ignored.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawCharter {
@@ -372,6 +374,8 @@ pub fn parse(text: &str) -> Result<Charter, String> {
         mesh: raw.mesh,
         version: raw.version,
         relays: raw.relays,
+        status: raw.status,
+        gates: raw.gates,
         nodes,
     })
 }
@@ -1615,6 +1619,25 @@ mod tests {
         let bad = format!("mesh = \"home\"\nversion = 0\n\n[nodes]\n{head}key = \"ed25519:{flopped}");
         let err = parse(&bad).unwrap_err();
         assert!(err.contains("does not verify under the key on its own line"), "{err}");
+
+        let _ = std::fs::remove_dir_all(&op);
+    }
+
+    #[test]
+    fn the_document_carries_its_status_and_gates() {
+        let (_guard, _saver) = isolate();
+        let op = machine_dir("transit");
+        machine(&op, "opbox");
+        let line = node_line().unwrap();
+        let src = format!(
+            "mesh = \"home\"\nversion = 0\nrelays = [\"opbox\"]\n\n[nodes]\n{line}\n\n\
+             [status]\nopbox = \"hold\"\n\n[gates]\naway = \"opbox\"\n"
+        );
+
+        let charter = parse(&src).unwrap();
+        assert_eq!(charter.relays, vec!["opbox".to_string()], "relays stay in declaration order");
+        assert_eq!(charter.status.get("opbox").map(String::as_str), Some("hold"));
+        assert_eq!(charter.gates.get("away").map(String::as_str), Some("opbox"));
 
         let _ = std::fs::remove_dir_all(&op);
     }

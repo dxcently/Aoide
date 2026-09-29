@@ -1014,6 +1014,18 @@
   validates the declaration.
   Updates CONTRACTS.md §4's `config.toml` subsection in the same commit,
   same as a settable section.
+- **A new DECLARED transit fact — `relays`, `[status]`, `[gates]`, a node's
+  `address` — lands in `config`'s `Mesh` for a pair mesh and in `charter`'s
+  document for a charter mesh, and is read in `routing` and NOWHERE else.**
+  `config::validate_pair_transit` checks the half a section can answer for
+  (each name a node of the mesh, a status in `charter::STATUS_VALUES`, a
+  gate the same file answers back); `routing::validate` checks the half that
+  needs two declarations in hand (the same gate out of another file, one
+  node name with two keys). A second read of a declaration — a module
+  scanning `config.toml` or `charters/*.toml` for itself — is the drift this
+  seam exists to remove: ask `routing::Declaration`. The doc sites a new key
+  touches are MAIL.md §Transit, CONTRACTS.md §4's `mesh.<name>` list, and
+  this crate's README entry for `routing`.
 - **A new CLI command** (this crate has three groups today, `usage`,
   `identity`, and `config`/`config set`) adds a `cmd!`/`register` entry in
   `commands.rs`, wired into the owning app crate's `commands::all()`. The
