@@ -1028,6 +1028,18 @@
   a boolean. The doc sites a new key
   touches are MAIL.md §Transit, CONTRACTS.md §4's `mesh.<name>` list, and
   this crate's README entry for `routing`.
+- **A routing decision is `routing::Letter::route`'s, and it stays pure.**
+  Steps 1–4 read the declarations this box holds and nothing else: no dial, no
+  link state, no spool write, no clock. Anything a hop needs to know beyond
+  the declaration is a bug in the seam, not a reason to reach past it — a
+  caller acts on the `Hop` (`next`, `mesh`, `held`) and the `trail` only. Do
+  not add a second predicate for trust, status or reachability: `reach` is
+  the one that answers all three out of `Declaration::key_of`, `status_of`
+  and `address_of`. `charter::dial_of` is the ONE turn from a declared
+  `address` into a dial target (the drain reads it too), so an address shape
+  is never re-parsed at a second site. The two refusal words a route can
+  mint are `routing::NO_ROUTE` and `seal::ZONE_VIOLATION`; a mesh that cannot
+  be read refuses with ITS OWN word, and only for itself.
 - **A new CLI command** (this crate has three groups today, `usage`,
   `identity`, and `config`/`config set`) adds a `cmd!`/`register` entry in
   `commands.rs`, wired into the owning app crate's `commands::all()`. The

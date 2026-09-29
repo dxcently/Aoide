@@ -644,6 +644,18 @@ Routing, at the sender and at every hop, for `to.node`:
    otherwise reach G by steps 1–2 with G as the target.
 4. Else refuse: `no-route` — the sender sees it at send time.
 
+The four steps are `aoide_storage::routing::Letter::route`: a pure read of the
+mesh declarations in force, answering the next node, the mesh the letter rides
+by then, and the reason each step picked or passed. Nothing in it dials, writes
+or consults a link — the caller acts on the answer. Its refusal words are a
+closed set: `no-route` (step 4), the letter's OWN mesh's word when that mesh
+cannot be read (`no-declaration`, `no-charter-in-force`, `charter-tampered`,
+`one-sided-gate`, `key-divergence`, `config-unreadable`), and `zone-violation` —
+the word for the wall itself, when the box asked is a member of the
+destination's mesh as well and the letter's mesh declares no gate that lets it
+carry the letter across. A mesh that refuses to load routes NOTHING, and only
+for itself: no other mesh, and no other letter, is held up by it.
+
 Step 1's mesh clause is the zone wall: a node paired into two meshes
 never forwards a letter across them because it happens to know the
 destination — only a declared gate rewrites `mesh`, and every hop's
@@ -673,7 +685,13 @@ refused rather than recognised, and the origin's entry records
 `refused` and stops retrying (`aoide mail outbox retry --refused` is
 the hand). Holding is the honest answer while a mesh rolls out, and
 `mail route` shows which hop a letter will be offered to before it is
-sent.
+sent. **Transit makes the deploy order load-bearing twice over**: every box
+must already run the transit half before `relays`, `[status]` or `[gates]`
+are declared, because a relay that predates it refuses a routed container
+outright rather than passing it on, and a destination that predates it
+refuses a two-entry hop chain. Nothing is lost while that happens — the
+letter parks at its sender — but nothing moves either, so the declaration
+comes last and the drift report is the dry run.
 
 At a hub, a deposit whose `to.node` is not self: run the keyless checks
 (§Wire, "Lane and payload"), file the sealed container as `transit`,

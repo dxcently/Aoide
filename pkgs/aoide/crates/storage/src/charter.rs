@@ -96,10 +96,16 @@ pub const DEFAULT_ADDRESS: &str = "poll";
 /// A node with no declared grant gets `message` and nothing else: the
 /// conservative default, because writing the line is what grants more.
 pub const DEFAULT_GRANT: &str = "message";
+/// `[status]`'s queueing word: the far end has no inbound transport it takes
+/// us on, so its letters wait for its own poll. Never dialled.
+pub const STATUS_HOLD: &str = "hold";
+/// `[status]`'s refusal word: never a hop and never a destination, and a
+/// letter already queued toward it is kept rather than dropped.
+pub const STATUS_DOWN: &str = "down";
 /// The closed vocabulary `[status]` may hold (MAIL.md §Transit). Read by the
 /// router through [`crate::routing`]; parsed and checked here so a typo is
 /// refused at `sign` rather than ignored at routing time.
-pub const STATUS_VALUES: &[&str] = &["hold", "down"];
+pub const STATUS_VALUES: &[&str] = &[STATUS_HOLD, STATUS_DOWN];
 
 // ── Paths ───────────────────────────────────────────────────────────────
 
@@ -393,24 +399,55 @@ pub fn parse(text: &str) -> Result<Charter, String> {
     })
 }
 
-/// A node's `address` is one of the three transports the design names, or it
-/// is nothing: `poll`, `ssh://[user@]host[:port]` (through the one parser
-/// that grammar already has), or `https://host`.
-fn validate_address(node: &str, address: &str) -> Result<(), String> {
+/// A declared `address`, read as what a caller can do with it — the three
+/// transports the design names, and nothing else
+/// (`docs/architecture/HTTPS-MESH-API.md`, "Transports and relays").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Dial {
+    /// `ssh://[user@]host[:port]` — the tunnel to a node's door, parsed by the
+    /// one parser that grammar has ([`crate::tunnel::parse_via`], which `--via`
+    /// reads too).
+    Ssh(crate::tunnel::Via),
+    /// `https://host` — a door or mail adapter behind something that owns 443.
+    Https(String),
+    /// `poll` — no inbound transport: this node asks its relay, and the relay
+    /// holds its letters until it does.
+    Poll,
+}
+
+impl std::fmt::Display for Dial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Dial::Ssh(via) => write!(f, "{via}"),
+            Dial::Https(url) => write!(f, "{url}"),
+            Dial::Poll => write!(f, "{DEFAULT_ADDRESS}"),
+        }
+    }
+}
+
+/// Turn a declared `address` into a dial target. Pure, and the ONE place an
+/// address stops being a declaration: the router asks it whether a hop can be
+/// reached, and the drain asks it what to dial. Fails closed — an address that
+/// is none of the three is refused, never guessed at.
+pub fn dial_of(address: &str) -> Result<Dial, String> {
+    let address = address.trim();
     if address == DEFAULT_ADDRESS {
-        return Ok(());
+        return Ok(Dial::Poll);
     }
     if address.starts_with("ssh://") {
-        return crate::tunnel::parse_via(address)
-            .map(|_| ())
-            .map_err(|e| format!("node `{node}`: address: {e}"));
+        return Ok(Dial::Ssh(crate::tunnel::parse_via(address)?));
     }
     if address.starts_with("https://") && node_store::url_host(address).is_some() {
-        return Ok(());
+        return Ok(Dial::Https(address.to_string()));
     }
-    Err(format!(
-        "node `{node}`: address `{address}` is not `poll`, `ssh://…` or `https://…`"
-    ))
+    Err(format!("`{address}` is not `poll`, `ssh://…` or `https://…`"))
+}
+
+/// A node's `address` is one of the three transports the design names, or it
+/// is nothing: [`dial_of`] is that rule, and this is the refusal an operator
+/// reads at `sign` time.
+fn validate_address(node: &str, address: &str) -> Result<(), String> {
+    dial_of(address).map(|_| ()).map_err(|e| format!("node `{node}`: address {e}"))
 }
 
 /// The bare lowercase hex of an `ed25519:<hex>` field, refusing anything else

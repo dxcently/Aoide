@@ -64,8 +64,26 @@ by decision — no embedded database yet
   inconsistent: `key-divergence` (one node name never carries two identity
   keys, charters read first so a stale paired record is the copy that
   yields) and `one-sided-gate` (a gate is answered by the mesh on the other
-  side; a mesh is never its own answer). No router here yet — the four steps
-  are the transport's, and this module is the table they read.
+  side; a mesh is never its own answer). `Declaration::declares` is the plain
+  membership question the route asks first.
+
+- **`routing::Letter::route` is the four steps of MAIL.md §Transit**, run over
+  the declarations a box holds and nothing else — no dial, no clock, no spool
+  write on any path, so a hop's decision is testable without a wire. The
+  answer is a `Hop` (the node to hand the letter to, the mesh in force when it
+  arrives, and whether that hop HOLDS it — a `poll` address or a declared
+  `hold` — rather than dialling) plus the `trail` of every step with its
+  reason; a refusal carries its word: `no-route`, the letter's own mesh's
+  refusal when that mesh cannot be read, or `seal::ZONE_VIOLATION` when a box
+  that sits in two meshes is asked to bridge between them without being the
+  declared gate. Step 1 comes first at every hop, so `relays` is the fallback
+  in declaration order, never a mandatory chain; a `poll` node is reachable
+  through the relay it asks; and reachability is the declaration's own
+  `address`, read through [`charter::dial_of`] — the one turn from a declared
+  address (`ssh://…`, `https://…`, `poll`) into something a caller can dial,
+  which is what the drain uses too. Link state is deliberately not consulted:
+  a relay this box can address but cannot presently reach is still chosen, and
+  the letter waits for it.
 
 - `letter` defines optional `AOIDE-LETTER/1` content within the existing
   signed envelope text: Subject, To, Cc, body, and optional threadId/replyTo.

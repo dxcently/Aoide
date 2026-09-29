@@ -18,11 +18,20 @@
 //! the name on its CHARTER LINE; only a pair mesh reads one out of
 //! `state/nodes.json`, where the paired record IS the declaration. A nickname
 //! is display and never an input.
+//!
+//! **And this is where a letter is routed.** [`Letter::route`] is the four
+//! steps of MAIL.md §Transit, run over the declarations this box holds and
+//! nothing else: no dial, no clock, no spool write on any path. It answers
+//! where a letter goes next, the mesh it rides by then, and the reason every
+//! step picked or passed — a hop that can deliver delivers first, `relays` is
+//! the fallback in declaration order, only a declared gate rewrites a letter's
+//! mesh, and a box that knows two meshes never moves a letter between them
+//! because it happens to know the destination.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::charter::{self, Charter, Refusal};
-use crate::{config, node_store};
+use crate::charter::{self, Charter, Dial, Refusal};
+use crate::{config, node_store, seal};
 
 /// One node name carrying two different identity keys — "one node, one
 /// identity key, in every mesh" (MAIL.md §Transit).
@@ -258,8 +267,9 @@ impl Declaration {
 
     /// The address `node` is declared at — `ssh://…`, `https://…` or `poll` —
     /// or `None` for a node this declaration does not name. An address is a
-    /// declaration, not a dial target; turning one into the other is the
-    /// caller's (`docs/architecture/HTTPS-MESH-API.md` "Transports and relays").
+    /// declaration, not a dial target; [`charter::dial_of`] is the one turn
+    /// from one to the other, and the route below reads reachability through
+    /// it (`docs/architecture/HTTPS-MESH-API.md`, "Transports and relays").
     pub fn address_of(&self, node: &str) -> Option<&str> {
         match &self.kind {
             Kind::Charter(c) => c.nodes.get(node).map(|line| line.address.as_str()),
@@ -276,6 +286,15 @@ impl Declaration {
             Kind::Charter(c) => c.nodes.get(node).map(|line| line.key.as_str()),
             Kind::Pair(p) => p.keys.get(node).map(String::as_str),
         }
+    }
+
+    /// Is `node` a node of this mesh AT ALL — declared, whatever its trust or
+    /// its `[status]`? A line always carries a key and an address, so the two
+    /// accessors above are its two halves; this is the one question a route
+    /// asks before it asks anything harder ("is the destination in a mesh this
+    /// box holds, and is this box in that mesh too?").
+    pub fn declares(&self, node: &str) -> bool {
+        self.address_of(node).is_some() || self.key_of(node).is_some()
     }
 
     /// The declared NAME the identity key `key` belongs to — what a policy,
@@ -330,6 +349,302 @@ fn pair_from(section: &config::Mesh) -> Pair {
         addresses: section.nodes.clone(),
         keys,
     }
+}
+
+// ── The four steps (MAIL.md §Transit) ───────────────────────────────────
+
+/// No path to the destination from this hop, in the mesh the letter rides.
+pub const NO_ROUTE: &str = "no-route";
+
+/// One letter's question at one hop: this box's own declared name, the node
+/// the letter is addressed to, and the mesh it rides (`envelope.mesh`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Letter<'a> {
+    pub from: &'a str,
+    pub to: &'a str,
+    pub mesh: &'a str,
+}
+
+/// The hop a route picks: the node this box hands the letter to, the mesh in
+/// force when it arrives there, and whether that hop HOLDS it rather than
+/// dialling — a `poll` address, or a node declared `hold`, leaves only when
+/// the far end asks for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hop {
+    pub next: String,
+    pub mesh: String,
+    pub held: bool,
+}
+
+/// One dry run: the hop, or the refusal that stands in for it, and every step
+/// that ran with its reason.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Route {
+    /// Where the letter goes next, or the word that says why it goes nowhere:
+    /// the letter's OWN mesh's refusal when that mesh cannot be read,
+    /// [`NO_ROUTE`] when no step produced a hop, or
+    /// [`seal::ZONE_VIOLATION`] when the only thing in the way is the wall
+    /// between two meshes this box happens to sit in.
+    pub outcome: Result<Hop, Refusal>,
+    /// Each step, in order, with the reason it picked or passed.
+    pub trail: Vec<String>,
+}
+
+impl<'a> Letter<'a> {
+    /// The four steps, over the declarations this box holds and nothing else.
+    ///
+    /// **Step 1 comes first at every hop.** A box that can hand the letter to
+    /// the destination does, even when it is also a declared relay: `relays`
+    /// is the fallback in declaration order, never a mandatory chain. Step 1
+    /// is also the zone wall — it applies to the mesh the letter RIDES, so a
+    /// box in two meshes reaches the destination in one of them only through
+    /// the gate the letter's mesh declares (step 3). Nothing here dials, reads
+    /// a clock, or writes a spool: the answer is a hop, a mesh and a trail,
+    /// and the caller is what acts on it.
+    pub fn route(&self, set: &[Loaded]) -> Route {
+        let mut trail = Vec::new();
+        let mut walked: BTreeSet<String> = BTreeSet::new();
+        walked.insert(self.mesh.to_string());
+        let outcome = self.walk(set, self.mesh, &mut trail, &mut walked);
+        Route { outcome, trail }
+    }
+
+    /// The same steps in `mesh` — the mesh the letter rides, which only the
+    /// gate clause ever changes. `walked` is every mesh a rewrite has already
+    /// carried this letter out of: a gate chain that comes back to one of them
+    /// is a loop, and is refused rather than walked.
+    fn walk(
+        &self,
+        set: &[Loaded],
+        mesh: &str,
+        trail: &mut Vec<String>,
+        walked: &mut BTreeSet<String>,
+    ) -> Result<Hop, Refusal> {
+        let Some(loaded) = set.iter().find(|l| l.mesh == mesh) else {
+            trail.push(format!("mesh `{mesh}`: no declaration at this node"));
+            return Err(Refusal::new(
+                NO_DECLARATION,
+                format!(
+                    "no declaration for mesh `{mesh}` at this node, so nothing here can say whether \
+                     `{}` is a member of it, trusted, reachable or `down`",
+                    self.to
+                ),
+            ));
+        };
+        // A mesh this node cannot read routes NOTHING, and only for itself:
+        // its own word, and never a fallback to another mesh's declaration or
+        // to the paired records under this one.
+        let declaration = match &loaded.declaration {
+            Ok(declaration) => declaration,
+            Err(refusal) => {
+                trail.push(format!("mesh `{mesh}` cannot be read: {refusal}"));
+                return Err(refusal.clone());
+            }
+        };
+
+        // A letter addressed to this box is filed here, whatever the mesh says
+        // about trust or reachability: there is nothing to hand on.
+        if self.to == self.from {
+            trail.push(format!("step 1: `{}` is this box — file it here", self.to));
+            return Ok(Hop { next: self.to.to_string(), mesh: mesh.to_string(), held: false });
+        }
+
+        // Steps 1 and 2: the destination in the mesh the letter rides, first;
+        // then that mesh's relays, in declaration order.
+        if let Some(hop) =
+            by_steps_one_and_two(declaration, self.from, self.to, trail, "step 1", "step 2")
+        {
+            return Ok(hop);
+        }
+
+        // Step 3: the destination is a node of a mesh this box ALSO holds, and
+        // the mesh the letter rides declares the node that carries transit into
+        // it. Only the declared gate may cross, and only the gate itself may
+        // rewrite `envelope.mesh` — a dual member's own knowledge of the
+        // destination is not a route.
+        let mut walled: Option<&str> = None;
+        for other in set.iter().filter(|l| l.mesh != mesh) {
+            let Ok(theirs) = &other.declaration else { continue };
+            if !theirs.declares(self.to) {
+                continue;
+            }
+            let their_mesh = other.mesh.as_str();
+            match declaration.gates().get(their_mesh) {
+                None => {
+                    if theirs.declares(self.from) {
+                        trail.push(format!(
+                            "step 3: `{}` is a node of mesh `{their_mesh}` too, and mesh `{mesh}` gates \
+                             into no mesh that holds `{}` — this box may not bridge",
+                            self.from, self.to
+                        ));
+                        walled = walled.or(Some(their_mesh));
+                    } else {
+                        trail.push(format!(
+                            "step 3: `{}` is a node of mesh `{their_mesh}`, which mesh `{mesh}` declares \
+                             no gate into",
+                            self.to
+                        ));
+                    }
+                }
+                Some(gate) if gate == self.from => {
+                    if !walked.insert(their_mesh.to_string()) {
+                        let detail = format!(
+                            "mesh `{mesh}` gates into `{their_mesh}` and `{their_mesh}` gates back into \
+                             `{mesh}`, and this box is the gate both ways — the letter would bounce"
+                        );
+                        trail.push(format!("step 3: {detail}"));
+                        return Err(Refusal::new(NO_ROUTE, detail));
+                    }
+                    trail.push(format!(
+                        "step 3: this box is `{gate}`, the node mesh `{mesh}` declares as its gate into \
+                         `{their_mesh}` — the letter's mesh is rewritten and the steps restart there"
+                    ));
+                    return self.walk(set, their_mesh, trail, walked);
+                }
+                Some(gate) => {
+                    trail.push(format!(
+                        "step 3: `{}` is a node of mesh `{their_mesh}`, and mesh `{mesh}` gates into it \
+                         through `{gate}`",
+                        self.to
+                    ));
+                    if let Some(hop) =
+                        by_steps_one_and_two(declaration, self.from, gate, trail, "step 3", "step 3")
+                    {
+                        return Ok(hop);
+                    }
+                    // The declared way in is out of reach, and this box is in
+                    // the destination's mesh too: the wall is what is left.
+                    if theirs.declares(self.from) {
+                        walled = walled.or(Some(their_mesh));
+                    }
+                }
+            }
+        }
+
+        // Step 4: nothing above produced a hop.
+        match walled {
+            Some(other) => Err(Refusal::new(
+                seal::ZONE_VIOLATION,
+                format!(
+                    "`{}` is a node of mesh `{other}`, which this box is also in, and mesh `{mesh}` \
+                     gives this box no way to carry the letter there. A box that knows two meshes does \
+                     not move a letter between them because it happens to know the destination — only \
+                     the gate the letter's own mesh declares crosses a zone, and this box is not it",
+                    self.to
+                ),
+            )),
+            None if declaration.declares(self.to) => Err(Refusal::new(
+                NO_ROUTE,
+                format!(
+                    "`{}` is a node of mesh `{mesh}` and no step of the route from `{}` produced a hop: \
+                     not the destination itself, not a relay of that mesh and not a gate into another",
+                    self.to, self.from
+                ),
+            )),
+            None => Err(Refusal::new(
+                NO_ROUTE,
+                format!(
+                    "`{}` is not a node of mesh `{mesh}`, and no mesh this node holds that `{mesh}` \
+                     declares a gate into declares it either",
+                    self.to
+                ),
+            )),
+        }
+    }
+}
+
+/// Steps 1 and 2 with `target` as the target: the target itself when this box
+/// can hand it the letter, else the first relay of the mesh it trusts and can
+/// reach, in declaration order.
+///
+/// The two labels are the caller's, because they name where the attempt is:
+/// the main walk's are `step 1` and `step 2`, and a gate standing in for a
+/// destination in another mesh reaches its own target under `step 3`.
+fn by_steps_one_and_two(
+    declaration: &Declaration,
+    from: &str,
+    target: &str,
+    trail: &mut Vec<String>,
+    direct: &str,
+    via_relay: &str,
+) -> Option<Hop> {
+    match reach(declaration, from, target) {
+        Ok(hop) => {
+            trail.push(format!("{direct}: {}", picked(declaration, &hop)));
+            return Some(hop);
+        }
+        Err(reason) => trail.push(format!("{direct}: {reason}")),
+    }
+    for relay in declaration.relays() {
+        match reach(declaration, from, relay) {
+            Ok(hop) => {
+                trail.push(format!("{via_relay}: {}", picked(declaration, &hop)));
+                return Some(hop);
+            }
+            Err(reason) => trail.push(format!("{via_relay}: {reason}")),
+        }
+    }
+    if declaration.relays().is_empty() {
+        trail.push(format!("{via_relay}: mesh `{}` declares no relay", declaration.mesh()));
+    }
+    None
+}
+
+/// Why a step picked this hop, in the trail's own words.
+fn picked(declaration: &Declaration, hop: &Hop) -> String {
+    let address = declaration.address_of(&hop.next).unwrap_or_default();
+    if hop.held {
+        format!("`{}` holds it at `{address}` — it leaves when `{}` asks for it", hop.next, hop.next)
+    } else {
+        format!("`{}` takes it at `{address}`", hop.next)
+    }
+}
+
+/// Whether this hop can hand the letter to `node`, and what that hop IS. `Ok`
+/// is the hop it makes; `Err` is the reason, in the trail's own words.
+///
+/// Every fact is the DECLARATION's, which keeps the route pure and testable:
+/// trust is a key this box holds for the name ([`Declaration::key_of`] — a
+/// charter line, or a paired record for a pair mesh), status is `[status]`,
+/// and reachability is the node's `address` read as a dial target
+/// ([`charter::dial_of`]). A link that is merely down right now is NOT
+/// consulted: a relay this box can address but cannot presently reach is still
+/// chosen, and the letter waits for it
+/// (`docs/architecture/HTTPS-MESH-API.md`, "Degenerate topologies").
+///
+/// A `poll` node is reachable through the box it asks, and that box is its
+/// mesh's relay: the letter is HELD there for the node's own `mailPoll`, and a
+/// `poll` node whose relay is not this box is not something this hop can serve
+/// directly.
+fn reach(declaration: &Declaration, from: &str, node: &str) -> Result<Hop, String> {
+    if node == from {
+        return Err(format!("`{node}` is this box — a letter already here is handed to nobody"));
+    }
+    let Some(address) = declaration.address_of(node) else {
+        return Err(format!("`{node}` is not a node of mesh `{}`", declaration.mesh()));
+    };
+    if declaration.key_of(node).is_none() {
+        return Err(format!(
+            "`{node}` carries no identity key in mesh `{}`, so this box does not trust it there",
+            declaration.mesh()
+        ));
+    }
+    if declaration.status_of(node) == Some(charter::STATUS_DOWN) {
+        return Err(format!("`{node}` is declared `down` in mesh `{}`", declaration.mesh()));
+    }
+    let dial = charter::dial_of(address).map_err(|e| {
+        format!("`{node}`'s address in mesh `{}` is not a transport: {e}", declaration.mesh())
+    })?;
+    let held =
+        declaration.status_of(node) == Some(charter::STATUS_HOLD) || matches!(dial, Dial::Poll);
+    if matches!(dial, Dial::Poll) && !declaration.relays().iter().any(|relay| relay == from) {
+        return Err(format!(
+            "`{node}` is a `poll` node of mesh `{}` and asks its relay, not `{from}` — the letter has \
+             to be handed to a relay that holds it",
+            declaration.mesh()
+        ));
+    }
+    Ok(Hop { next: node.to_string(), mesh: declaration.mesh().to_string(), held })
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
@@ -450,15 +765,42 @@ mod tests {
         out
     }
 
+    /// One node's charter line, minted on its own machine, at a declared
+    /// address. `node_line` writes a line with no address at all (which the
+    /// charter reads as `poll`), so a test that needs a hop this box can DIAL
+    /// has to say so.
+    fn line_at(root: &Path, name: &str, address: &str) -> String {
+        let line = line_for(root, name);
+        if address == charter::DEFAULT_ADDRESS {
+            return line;
+        }
+        let at = line.replacen(" }", &format!(", address = \"{address}\" }}"), 1);
+        assert!(at.contains(address), "line at {address}: {at}");
+        at
+    }
+
+    /// The hop each box of the five-edge fixture answers on: `chiyo` is the
+    /// `poll` node a route ends at (no inbound transport at all), every other
+    /// box answers on ssh.
+    fn hop_of(name: &str) -> String {
+        match name {
+            "chiyo" => charter::DEFAULT_ADDRESS.to_string(),
+            other => format!("ssh://{other}"),
+        }
+    }
+
     /// The five-edge fixture's home mesh: osaka, the relay sakaki, yomi and the
-    /// `poll` node chiyo — gated into `away` through sakaki, with yomi declared
-    /// `down`.
+    /// `poll` node chiyo — each at its own hop, gated into `away` through
+    /// sakaki, with yomi declared `down`.
     fn home_of(nodes: &[(PathBuf, &str)]) -> String {
         body(
             &["sakaki"],
             &[("yomi", "down")],
             &[("away", "sakaki")],
-            &nodes.iter().map(|(dir, name)| line_for(dir, name)).collect::<Vec<_>>(),
+            &nodes
+                .iter()
+                .map(|(dir, name)| line_at(dir, name, &hop_of(name)))
+                .collect::<Vec<_>>(),
         )
     }
 
@@ -769,5 +1111,198 @@ mod tests {
             "a mesh this host does not hold cannot be judged here"
         );
         assert!(gate_verdict("home", "away", "sakaki", Some(&BTreeMap::new())).is_some(), "one-sided");
+    }
+
+    // ── The four steps ──────────────────────────────────────────────────
+
+    /// The five-edge fixture's two meshes, signed on the operator's box, with
+    /// the env left pointing at it — so `declarations()` reads both. `home` is
+    /// {osaka, sakaki (relay + gate), yomi (`down`), chiyo (`poll`)} and `away`
+    /// is {evo, sakaki}.
+    fn five_edges(scratch: &Scratch) -> PathBuf {
+        let operator = scratch.dir("operator");
+        let nodes: Vec<(PathBuf, &str)> =
+            ["osaka", "sakaki", "yomi", "chiyo"].iter().map(|n| (scratch.dir(n), *n)).collect();
+        let sakaki = line_for(&scratch.dir("sakaki"), "sakaki");
+        let evo = line_for(&scratch.dir("evo"), "evo");
+        sign_on(&operator, "home", &home_of(&nodes));
+        sign_on(&operator, "away", &body(&["sakaki"], &[], &[("home", "sakaki")], &[evo, sakaki]));
+        operator
+    }
+
+    /// One route, asked of the declarations currently in force, with the trail
+    /// joined for an assertion that names the step it came from.
+    fn route(from: &str, to: &str, mesh: &str) -> Route {
+        Letter { from, to, mesh }.route(&declarations())
+    }
+
+    fn next_of(route: &Route) -> &Hop {
+        route.outcome.as_ref().unwrap_or_else(|e| panic!("expected a hop, got {e}\n{}", trail(route)))
+    }
+
+    fn trail(route: &Route) -> String {
+        route.trail.join("\n")
+    }
+
+    #[test]
+    fn the_router_prefers_a_reachable_destination_in_the_letters_mesh() {
+        let (_guard, _env) = isolate();
+        let scratch = Scratch::new("prefer");
+        let operator = scratch.dir("operator");
+        let nodes: Vec<(PathBuf, &str)> =
+            ["osaka", "sakaki", "yomi"].iter().map(|n| (scratch.dir(n), *n)).collect();
+        // Two relays, and the destination is a plain member: the destination
+        // wins at every hop, so the first relay is never consulted.
+        let lines: Vec<String> =
+            nodes.iter().map(|(dir, name)| line_at(dir, name, &format!("ssh://{name}"))).collect();
+        sign_on(&operator, "home", &body(&["sakaki", "osaka"], &[], &[], &lines));
+
+        let at_origin = route("osaka", "yomi", "home");
+        assert_eq!(next_of(&at_origin).next, "yomi", "{}", trail(&at_origin));
+        assert!(!next_of(&at_origin).held);
+        assert_eq!(at_origin.trail.len(), 1, "step 1 decided it: {}", trail(&at_origin));
+        assert!(trail(&at_origin).starts_with("step 1:"), "{}", trail(&at_origin));
+
+        // The same at a hop: `sakaki` is a declared relay AND can deliver.
+        let at_relay = route("sakaki", "yomi", "home");
+        assert_eq!(next_of(&at_relay).next, "yomi", "{}", trail(&at_relay));
+        assert_eq!(at_relay.trail.len(), 1, "{}", trail(&at_relay));
+    }
+
+    #[test]
+    fn an_unshared_mesh_is_no_route() {
+        let (_guard, _env) = isolate();
+        let scratch = Scratch::new("unshared");
+        let operator = scratch.dir("operator");
+        let osaka = line_for(&scratch.dir("osaka"), "osaka");
+        let stranger = line_for(&scratch.dir("stranger"), "stranger");
+        // Neither mesh declares a relay or a gate, which is the shape a mesh
+        // that shares nothing has.
+        sign_on(&operator, "home", &body(&[], &[], &[], &[osaka]));
+        sign_on(&operator, "club", &body(&[], &[], &[], &[stranger]));
+
+        let out = route("osaka", "stranger", "home");
+        assert_eq!(outcome_word(&out), Some(NO_ROUTE), "{}", trail(&out));
+        assert_eq!(out.trail.len(), 3, "steps 1 and 2 passed before step 4: {}", trail(&out));
+    }
+
+    fn outcome_word(route: &Route) -> Option<&str> {
+        route.outcome.as_ref().err().map(|r| r.reason.as_str())
+    }
+
+    #[test]
+    fn a_down_relay_is_skipped_and_the_next_declared_one_taken() {
+        let (_guard, _env) = isolate();
+        let scratch = Scratch::new("down-relay");
+        let operator = scratch.dir("operator");
+        let home_nodes: Vec<(PathBuf, &str)> =
+            ["osaka", "sakaki", "chiyo"].iter().map(|n| (scratch.dir(n), *n)).collect();
+        let evo = line_for(&scratch.dir("evo"), "evo");
+        sign_on(&operator, "home", &home_of_relays(&home_nodes, &["sakaki", "chiyo"], &[("sakaki", "down")]));
+        sign_on(&operator, "away", &body(&[], &[], &[], &[evo]));
+
+        let out = route("osaka", "evo", "home");
+        assert_eq!(next_of(&out).next, "chiyo", "{}", trail(&out));
+        assert!(trail(&out).contains("`sakaki` is declared `down`"), "{}", trail(&out));
+    }
+
+    /// `home_of`'s shape with the relays and statuses a test varies, and no
+    /// gate — the mesh a letter leaves for another one by relay alone. Every
+    /// box here answers on ssh, including the relays: a relay this hop cannot
+    /// DIAL is not one it can hand a letter to.
+    fn home_of_relays(nodes: &[(PathBuf, &str)], relays: &[&str], status: &[(&str, &str)]) -> String {
+        body(
+            relays,
+            status,
+            &[],
+            &nodes
+                .iter()
+                .map(|(dir, name)| line_at(dir, name, &format!("ssh://{name}")))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    #[test]
+    fn a_poll_destination_spools_held_at_its_relay_at_the_route_step() {
+        let (_guard, _env) = isolate();
+        let scratch = Scratch::new("poll");
+        let _operator = five_edges(&scratch);
+
+        // From a plain member the poll node is not this box's to hold: the
+        // letter goes to the relay.
+        let from_member = route("osaka", "chiyo", "home");
+        assert_eq!(next_of(&from_member).next, "sakaki", "{}", trail(&from_member));
+        assert!(!next_of(&from_member).held);
+        assert!(trail(&from_member).contains("asks its relay"), "{}", trail(&from_member));
+
+        // At the relay it is held for the node's own poll.
+        let at_relay = route("sakaki", "chiyo", "home");
+        assert_eq!(next_of(&at_relay).next, "chiyo", "{}", trail(&at_relay));
+        assert!(next_of(&at_relay).held, "{}", trail(&at_relay));
+    }
+
+    #[test]
+    fn a_dual_member_that_is_not_the_gate_refuses_zone_violation() {
+        let (_guard, _env) = isolate();
+        let scratch = Scratch::new("wall");
+        let operator = scratch.dir("operator");
+        let a = line_for(&scratch.dir("a"), "a");
+        let b = line_for(&scratch.dir("b"), "b");
+        let evo = line_for(&scratch.dir("evo"), "evo");
+        // Two meshes that share one machine and declare no gate between them.
+        sign_on(&operator, "alpha", &body(&[], &[], &[], &[a, evo.clone()]));
+        sign_on(&operator, "beta", &body(&[], &[], &[], &[b, evo]));
+
+        // `evo` knows both and may not bridge: the destination is in `beta`,
+        // the letter rides `alpha`, and no gate crosses.
+        let out = route("evo", "b", "alpha");
+        assert_eq!(outcome_word(&out), Some(seal::ZONE_VIOLATION), "{}", trail(&out));
+
+        // A box in `alpha` alone has no wall to be stopped by — it simply has
+        // no route.
+        let plain = route("a", "b", "alpha");
+        assert_eq!(outcome_word(&plain), Some(NO_ROUTE), "{}", trail(&plain));
+    }
+
+    #[test]
+    fn a_symmetric_gate_rewrites_the_mesh_and_the_steps_restart() {
+        let (_guard, _env) = isolate();
+        let scratch = Scratch::new("gate");
+        let _operator = five_edges(&scratch);
+
+        // A plain member cannot bridge either: it hands the letter to the gate
+        // and the mesh it rides stays `home`.
+        let from_member = route("osaka", "evo", "home");
+        assert_eq!(next_of(&from_member).next, "sakaki", "{}", trail(&from_member));
+        assert_eq!(next_of(&from_member).mesh, "home");
+
+        // The gate itself rewrites the mesh and restarts: `evo` is a node of
+        // `away`, reachable there.
+        let at_gate = route("sakaki", "evo", "home");
+        assert_eq!(next_of(&at_gate).next, "evo", "{}", trail(&at_gate));
+        assert_eq!(next_of(&at_gate).mesh, "away", "{}", trail(&at_gate));
+        assert!(trail(&at_gate).contains("rewritten"), "{}", trail(&at_gate));
+    }
+
+    #[test]
+    fn a_refused_mesh_routes_nothing_and_the_other_meshes_still_route() {
+        let (_guard, _env) = isolate();
+        let scratch = Scratch::new("refused");
+        let operator = scratch.dir("operator");
+        let osaka = line_at(&scratch.dir("osaka"), "osaka", "ssh://osaka");
+        let sakaki = line_at(&scratch.dir("sakaki"), "sakaki", "ssh://sakaki");
+        let evo = line_at(&scratch.dir("evo"), "evo", "ssh://evo");
+        // `away` gates into `home` and `home` does not answer back: the gate is
+        // one-sided, so `away`'s own declaration is the one refused.
+        sign_on(&operator, "home", &body(&["sakaki"], &[], &[], &[osaka, sakaki.clone()]));
+        sign_on(&operator, "away", &body(&[], &[], &[("home", "sakaki")], &[evo, sakaki]));
+        assert_eq!(refused("away").reason, ONE_SIDED_GATE);
+
+        let refused_route = route("osaka", "osaka", "away");
+        assert_eq!(outcome_word(&refused_route), Some(ONE_SIDED_GATE), "{}", trail(&refused_route));
+
+        // The mesh that is not inconsistent keeps routing.
+        let other = route("osaka", "sakaki", "home");
+        assert_eq!(next_of(&other).next, "sakaki", "{}", trail(&other));
     }
 }
