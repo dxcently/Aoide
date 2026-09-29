@@ -1662,6 +1662,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// **An unloadable declaration is never dialled, judged by the RECORD.**
+    /// `record_is_down`'s fail-closed arm (a set that will not load means "do not
+    /// reach it") is what a RECORDED node goes through, so with the config refused
+    /// the bare sweep must leave it out and an explicit poll must contact nobody.
+    #[test]
+    fn an_unloadable_declaration_leaves_a_recorded_node_undialled() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("unloadable-poll");
+        let (listener, port, seen) = recording_door(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted","msgid":"00"}}"#,
+            r#"{"jsonrpc":"2.0","id":1,"result":{"containers":[],"envelopes":[]}}"#.to_string(),
+        );
+        // A `[status]` for a node `home` does not have: `validate_mesh` refuses
+        // the section whole, so `declarations()` itself fails.
+        std::fs::write(
+            aoide_storage::config::source().path,
+            "[pairing]\nhomeMesh = \"home\"\n\n[mesh.home.status]\nnobody = \"down\"\n",
+        )
+        .unwrap();
+        let mut node = unpaired_node("elsewhere");
+        node.url = format!("http://127.0.0.1:{port}/");
+        node.verified = true;
+        node.grants = aoide_storage::node_store::grants_in("home", &["message"]);
+        aoide_storage::node_store::save_nodes(&[node]).unwrap();
+
+        assert!(
+            !pollable_nodes().contains(&"elsewhere".to_string()),
+            "an unreadable declaration lists nobody: {:?}",
+            pollable_nodes()
+        );
+        let asked = poll_node("elsewhere", None).unwrap();
+        assert_eq!(asked.filed, 0, "nothing is taken");
+        assert!(seen.lock().unwrap().is_empty(), "and no door was contacted at all");
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn unpaired_node(name: &str) -> Node {
         Node {
             name: name.to_string(),
