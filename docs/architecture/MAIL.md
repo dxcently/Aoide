@@ -608,11 +608,13 @@ home = "sakaki"                          # the OTHER mesh must declare it back
 
 - **A node may be declared in several meshes**, with a different grant
   in each (decision 16); two different keys for one node, anywhere, is a
-  load-time error — one node, one key. Only a charter can break it: a
-  pair mesh's key comes from one record per name, so two pair meshes
-  cannot disagree, and the read that refuses is
-  `aoide_storage::routing::validate` — the one place both kinds of
-  declaration are in hand at once (`storage/src/routing.rs`).
+  load-time error — one node, one key. Every declaration's keys count,
+  charters and paired records alike, so a record left behind by an earlier
+  pairing after a charter re-keyed a name is caught too: the charter is the
+  authority for a name it lists, so the stale record is the copy that
+  yields and the PAIR mesh is the one refused. The read that refuses is
+  `aoide_storage::routing` — the one place both kinds of declaration are in
+  hand at once (`storage/src/routing.rs`).
 - **Keys come from trust, never from a hop.** Decision 10 needs the
   destination to hold the origin's public key even with no direct edge.
   In a charter mesh the charter carries every node's key — the nodelist
@@ -622,7 +624,10 @@ home = "sakaki"                          # the OTHER mesh must declare it back
   other. A hub never supplies a key, and a paired key in a charter mesh is
   inert (HTTPS-MESH-API.md, "Keys").
 - A gate is symmetric or it is nothing: `friends.gates.home = "sakaki"`
-  requires `home.gates.friends = "sakaki"`, else `validate` refuses. How a
+  requires `home.gates.friends = "sakaki"`, else `validate` refuses — and a
+  mesh may not name itself (`home.gates.home`), because a gate carries
+  transit into ANOTHER mesh and a self-gate is answered by the mesh that
+  wrote it. How a
   destination verifies an origin from the other mesh is an open decision
   (HTTPS-MESH-API.md).
 
@@ -647,26 +652,28 @@ zone it claims to carry, and that a rewritten `mesh` is signed by the
 declared gate. Every membership, gate, and status lookup in those
 checks starts from the **verifying key** and maps it to a declared
 name through the charter or the paired record; the `nodes.json`
-nickname is a display fact and never an input to policy — for a
+nickname is a display fact and never an input to policy. For a
 charter mesh the name policy, routing and the audit stamp use is the
-**charter line's** name for that key (decision D5, 2026-09-29), and
-only a pair mesh, where the record IS the declaration, names a node
-out of `nodes.json`. `aoide_storage::routing::Declaration::name_of_key`
-is that resolution.
+**charter line's** name for that key; only a pair mesh, where the
+record IS the declaration, names a node out of `nodes.json`.
+`aoide_storage::routing::Declaration::name_of_key` is that resolution,
+and the door's own audit stamp moves onto it with the door's
+declaration read — until then the two disagree for a record whose
+name is not the charter line's.
 
-**Step 1 comes first at every hop, and that is the ruling** (D2,
-2026-09-29): a hub that trusts `to.node` in `envelope.mesh`, is not
-`down` and can reach it delivers there, even when it is also a declared
-relay — `relays` is the fallback in declaration order, never a mandatory
-chain. A routing change is a declaration change, so `aoide mail route`
-is the dry run before one.
+**Step 1 comes first at every hop.** A hub that trusts `to.node` in
+`envelope.mesh`, is not `down` and can reach it delivers there, even
+when it is also a declared relay — `relays` is the fallback in
+declaration order, never a mandatory chain. A routing change is a
+declaration change, so `aoide mail route` is the dry run before one.
 
-**A letter whose chosen relay refuses parks, it does not reroute** (D6,
-2026-09-29): nothing on the wire names a peer's version, so a pre-P-M4
-relay is refused rather than recognised, and the origin's entry records
-`refused` and stops retrying (`aoide mail outbox retry --refused` is the
-hand). Holding is the honest answer while a mesh rolls out; `mail route`
-shows which hop it will be offered to before it is sent.
+**A letter whose chosen relay refuses parks, it does not reroute.**
+Nothing on the wire names a peer's version, so an older relay is
+refused rather than recognised, and the origin's entry records
+`refused` and stops retrying (`aoide mail outbox retry --refused` is
+the hand). Holding is the honest answer while a mesh rolls out, and
+`mail route` shows which hop a letter will be offered to before it is
+sent.
 
 At a hub, a deposit whose `to.node` is not self: run the keyless checks
 (§Wire, "Lane and payload"), file the sealed container as `transit`,

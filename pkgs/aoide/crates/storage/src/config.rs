@@ -283,8 +283,8 @@ pub struct Mesh {
     /// (the same additive/v0-safe discipline every other new key here holds).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator: Option<String>,
-    /// A PAIR mesh's transit hubs, in preference order (P-M4,
-    /// `docs/architecture/MAIL.md` §Transit). A charter mesh's relays come
+    /// A PAIR mesh's transit hubs, in preference order
+    /// (`docs/architecture/MAIL.md` §Transit). A charter mesh's relays come
     /// from its signed charter and never from here — the operator line refuses
     /// this key ([`validate_mesh`]). Absent is the ordinary case: a mesh that
     /// declares no relay routes to its own members only, and a letter for
@@ -751,6 +751,15 @@ fn validate_pair_transit(
                 ),
             ));
         }
+        if other == name {
+            return Err(invalid(
+                format!("mesh.{name}.gates.{other}"),
+                format!(
+                    "`mesh.{name}` gates into itself through `{gate}` — a gate carries transit into \
+                     ANOTHER mesh, and `relays`/`[status]` are how this one describes its own members"
+                ),
+            ));
+        }
         if !m.nodes.contains_key(gate) {
             return Err(invalid(
                 format!("mesh.{name}.gates.{other}"),
@@ -760,8 +769,8 @@ fn validate_pair_transit(
                 ),
             ));
         }
-        match all.get(other) {
-            Some(back) if back.operator.is_none() => {
+        match all.get(other).filter(|b| b.operator.is_none()) {
+            Some(back) => {
                 if back.gates.get(name).map(String::as_str) != Some(gate.as_str()) {
                     return Err(invalid(
                         format!("mesh.{name}.gates.{other}"),
@@ -773,7 +782,7 @@ fn validate_pair_transit(
                     ));
                 }
             }
-            _ => {}
+            None => {}
         }
     }
     Ok(())
@@ -1357,7 +1366,7 @@ mod tests {
         assert_eq!(c.mesh["away"].nodes["sakaki"], "ssh://khoa@10.0.0.5");
     }
 
-    // ── the pair mesh's transit table (P-M4) ────────────────────────────────
+    // ── the pair mesh's transit table ───────────────────────────────────────
 
     /// The pair mesh `[mesh.friends]` of MAIL.md §Transit: a relay, a status
     /// and a gate, each naming a node of the mesh.
@@ -1441,6 +1450,18 @@ mod tests {
         let msg = err.to_string();
         assert!(matches!(err, LoadError::InvalidValue { .. }), "{msg}");
         assert!(msg.contains("mesh.home.gates.away") && msg.contains("sakaki"), "{msg}");
+    }
+
+    #[test]
+    fn a_pair_mesh_gate_into_its_own_mesh_is_refused() {
+        let err = parse(
+            "[mesh.home.nodes]\nsakaki = \"ssh://khoa@192.168.1.202\"\n[mesh.home.gates]\nhome = \"sakaki\"\n",
+            &probe(),
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(matches!(err, LoadError::InvalidValue { .. }), "{msg}");
+        assert!(msg.contains("mesh.home.gates.home") && msg.contains("itself"), "{msg}");
     }
 
     #[test]

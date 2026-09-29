@@ -43,8 +43,8 @@ by decision — no embedded database yet
   machine that already trusts someone, and `reroot` refuses to move a machine
   whose config pins the key it is replacing.
 
-- `routing` — a mesh's DECLARED routing table, read once (P-M4 slice 1,
-  `docs/architecture/MAIL.md` §Transit). ONE seam for both kinds of
+- `routing` — a mesh's DECLARED routing table, read once
+  (`docs/architecture/MAIL.md` §Transit). ONE seam for both kinds of
   declaration, because a mesh's routing table has one source and a second
   one is a load error, never a precedence question: `Declaration::load`
   reads the signed charter where the mesh is charter-shaped
@@ -53,15 +53,19 @@ by decision — no embedded database yet
   and never falls back from one to the other. Its accessors are pure lookups
   on what was read: `relays` in declaration order (the route's preference
   order), `status_of`, `gates`, `address_of`, `key_of`, and `name_of_key` —
-  the resolution D5 rules: a charter mesh answers with the NAME ON ITS
-  CHARTER LINE for that key, and only a pair mesh reads a name out of
-  `state/nodes.json`, where the record IS the declaration. `declarations()`
-  loads every mesh this host declares or holds state for and refuses the two
-  invariants only the set can see: one node name never carries two identity
-  keys (`key-divergence`), and a gate is answered by the mesh on the other
-  side (`one-sided-gate`). One unloadable mesh refuses the whole set. No
-  router here yet — the four steps are P-M4 S2's, and this module is the
-  table they read.
+  a charter mesh answers a key with the name on its CHARTER LINE, and only a
+  pair mesh reads a name out of `state/nodes.json`, where the record IS the
+  declaration. `declarations()` returns one entry PER MESH (a `Loaded`):
+  each mesh loads on its own, so one that cannot be read is refused with the
+  word that says why — its own charter's word (`no-charter-in-force`,
+  `charter-tampered`, or the operator's) or `no-declaration` — and never
+  takes another mesh out of routing. The two invariants only a SET of
+  declarations can see are then refused against the single mesh that is
+  inconsistent: `key-divergence` (one node name never carries two identity
+  keys, charters read first so a stale paired record is the copy that
+  yields) and `one-sided-gate` (a gate is answered by the mesh on the other
+  side; a mesh is never its own answer). No router here yet — the four steps
+  are the transport's, and this module is the table they read.
 
 - `letter` defines optional `AOIDE-LETTER/1` content within the existing
   signed envelope text: Subject, To, Cc, body, and optional threadId/replyTo.

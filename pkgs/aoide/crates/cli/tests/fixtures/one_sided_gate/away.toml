@@ -2,8 +2,7 @@
 # is refused when it is not answered: `home` gates into `away` through `sakaki`
 # and this `away` never gates back. `{sakaki}` is the real node line the fixture
 # mints for that box (a template, not a static file, because a node line carries
-# a live key and a live age binding). Signed at version 2, above the good
-# charter's 1, so it is applied rather than refused `stale-charter`.
+# a live key and a live age binding).
 mesh = "away"
 version = 1
 relays = []

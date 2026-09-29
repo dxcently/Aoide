@@ -77,6 +77,14 @@ pub const CONFIG_UNREADABLE: &str = "config-unreadable";
 /// charter — and, unlike them, it can leave the writes it had already made in
 /// place (see `accept`'s write order).
 pub const LOCAL_IO: &str = "local-io";
+/// A mesh is CHARTER-SHAPED here — a trust record names an operator, or a
+/// charter was accepted once — and there is no readable charter in force for
+/// it: nothing has been signed yet, or `charter.toml` is gone. Distinct from
+/// the operator words above (which one key is trusted is not the question) and
+/// from [`CHARTER_TAMPERED`] (a document that IS there and is not this mesh's
+/// charter). Nothing may be routed in a mesh in this state, and nothing is
+/// guessed from the paired records to fill the hole.
+pub const NO_CHARTER_IN_FORCE: &str = "no-charter-in-force";
 
 /// The prefix every identity key carries wherever it is written down: a
 /// charter line's `key`, and config's `[mesh.<name>] operator`.
@@ -88,9 +96,9 @@ pub const DEFAULT_ADDRESS: &str = "poll";
 /// A node with no declared grant gets `message` and nothing else: the
 /// conservative default, because writing the line is what grants more.
 pub const DEFAULT_GRANT: &str = "message";
-/// The closed vocabulary `[status]` may hold (MAIL.md §Transit). Read by
-/// P-M4's router; parsed and checked here so a typo is refused at `sign`
-/// rather than ignored at routing time.
+/// The closed vocabulary `[status]` may hold (MAIL.md §Transit). Read by the
+/// router through [`crate::routing`]; parsed and checked here so a typo is
+/// refused at `sign` rather than ignored at routing time.
 pub const STATUS_VALUES: &[&str] = &["hold", "down"];
 
 // ── Paths ───────────────────────────────────────────────────────────────
@@ -363,6 +371,11 @@ pub fn parse(text: &str) -> Result<Charter, String> {
     for (mesh, node) in &raw.gates {
         if !node_store::valid_node_name(mesh) {
             return Err(format!("`[gates]` names `{mesh}`, which is not a valid mesh name"));
+        }
+        if *mesh == raw.mesh {
+            return Err(format!(
+                "`[gates]` sends mesh `{mesh}` through `{node}` — a mesh cannot gate into itself: a gate carries transit into ANOTHER mesh, and `[status]`/`relays` are how this one describes its own members"
+            ));
         }
         if !nodes.contains_key(node) {
             return Err(format!(
@@ -820,24 +833,59 @@ pub fn charter_shaped(mesh: &str) -> bool {
         .is_some_and(|trust| !trust.operator.is_empty())
 }
 
-/// The charter **governing** `mesh` at this node: in force on disk, for this
-/// mesh by name, and under an operator key this node can actually decide
-/// ([`trusted_operator`]). `None` for a pair mesh — the ordinary case, where
-/// the paired records are the source — and `None` for every way a mesh's
-/// operator key can become undecidable (config line against state record
-/// disagree, config unreadable): those leave NO charter in force rather than a
-/// guessed one, so a disagreement refuses rather than widens.
+/// The charter **governing** `mesh` at this node, and [`governing_refusal`]'s
+/// `Ok`: in force on disk, for this mesh by name, and under an operator key
+/// this node can actually decide ([`trusted_operator`]). `None` for a pair mesh
+/// — the ordinary case, where the paired records are the source — and for every
+/// way there is no such charter.
 ///
 /// Distinct from [`in_force_charter`] on purpose: that one is the raw read the
 /// re-key comparison and the report want (they must see what is on disk even
 /// while a human is resolving an operator disagreement), and this one is the
 /// trust-gated read the DOOR wants.
 pub fn governing(mesh: &str) -> Option<Charter> {
-    if trusted_operator(mesh).is_err() {
-        return None;
+    governing_refusal(mesh).ok()
+}
+
+/// [`governing`]'s fallible twin: the same charter, or the taught refusal that
+/// says which of the ways it is not there this is — [`trusted_operator`]'s own
+/// word when the operator key itself cannot be decided, [`NO_CHARTER_IN_FORCE`]
+/// when nothing has been signed (or `charter.toml` is gone), and
+/// [`CHARTER_TAMPERED`] when a document IS there and is not this mesh's charter
+/// — it does not parse, or it declares another mesh by name.
+///
+/// One implementation, two readers: the door wants `Option` (a mesh with no
+/// charter is a pair mesh to it), and a caller that must fail closed with a
+/// reason wants the word (`crate::routing`, and the door's own declaration
+/// read).
+pub fn governing_refusal(mesh: &str) -> Result<Charter, Refusal> {
+    trusted_operator(mesh)?;
+    let path = in_force_path(mesh);
+    let text = std::fs::read_to_string(&path).map_err(|_| {
+        Refusal::new(
+            NO_CHARTER_IN_FORCE,
+            format!(
+                "mesh `{mesh}` is charter-shaped at this node but {} is not readable — nothing signed \
+                 is in force for it: take its charter (`aoide mesh charter accept`), or its operator \
+                 signs one",
+                path.display()
+            ),
+        )
+    })?;
+    let charter = parse(&text)
+        .map_err(|e| Refusal::new(CHARTER_TAMPERED, format!("{}: {e}", path.display())))?;
+    if charter.mesh != mesh {
+        return Err(Refusal::new(
+            CHARTER_TAMPERED,
+            format!(
+                "{} declares mesh `{}`, not `{mesh}` — the document in force for this mesh is not its \
+                 charter",
+                path.display(),
+                charter.mesh
+            ),
+        ));
     }
-    let charter = in_force_charter(mesh)?;
-    (charter.mesh == mesh).then_some(charter)
+    Ok(charter)
 }
 
 /// The capabilities the charter governing `mesh` gives the key `key`, or
@@ -2307,6 +2355,10 @@ mod tests {
         let cases: Vec<(String, &str)> = vec![
             (format!("mesh = \"Home\"\nversion = 0\n\n[nodes]\n{line}\n"), "valid mesh name"),
             (format!("mesh = \"home\"\nversion = 0\nrelays = [\"nowhere\"]\n\n[nodes]\n{line}\n"), "not a node on this charter"),
+            (
+                format!("mesh = \"home\"\nversion = 0\n\n[gates]\nhome = \"opbox\"\n\n[nodes]\n{line}\n"),
+                "cannot gate into itself",
+            ),
             (
                 format!("mesh = \"home\"\nversion = 0\n\n[nodes]\n{}\n", line.replace(" }", ", port = 22 }")),
                 "unknown field",

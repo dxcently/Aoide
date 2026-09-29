@@ -8,10 +8,9 @@
 //! [`Envelope`] into [`crate::outbox`]; the far door's `aoide/mailDeposit`
 //! arm calls [`deposit`] here to verify and file it, ONLY ever via a
 //! [`file_received_entry`] (never re-minted — the envelope arrives already
-//! signed). **No transit and no zone check yet** — those are P-M4's router
-//! (S2 onward); `--hold` landed at P-M3 as a spool flavor
-//! ([`crate::outbox`]), and nothing here reads a mesh declaration — the read
-//! is [`crate::routing`].
+//! signed). **No transit and no zone check yet** — the router that adds them
+//! reads a mesh declaration through [`crate::routing`]; `--hold` is a spool
+//! flavor ([`crate::outbox`]), and nothing here consults a declaration.
 //! The doorbell's own latch and its targeting queries ([`arms`],
 //! [`ring_targets`], [`stamp_rung`], [`armed_names_for_reader`],
 //! [`enrol_reader`]) live here (P-M5a-1); the ring itself — injecting a byte
@@ -103,11 +102,12 @@
 //! `aoide_client::commands::register_mail` wires `mail`, `mail send`
 //! (`--to self/<name>` or `--to <node>/<name>` for a direct verified edge),
 //! `mail read`, `mail show`, `mail mark`, `mail rm`, `mail outbox`, `mail
-//! outbox rm` — moved out of this crate's own `commands.rs` at P-M2 because
-//! sending over a direct edge needs the wire lane (`aoide-client`'s own
-//! domain); this module stays the mailbase's storage layer regardless of
-//! which crate dispatches into it. `mail route`/`--hold`/`--transit` are
-//! later phases and are not registered yet.
+//! outbox rm` and `mail outbox retry` — moved out of this crate's own
+//! `commands.rs` at P-M2 because sending over a direct edge needs the wire
+//! lane (`aoide-client`'s own domain); this module stays the mailbase's
+//! storage layer regardless of which crate dispatches into it. `mail route`
+//! and the `--transit` surface are not registered yet, and `--hold` is a
+//! spool flavor a send may carry rather than a command of its own.
 
 use crate::display;
 use crate::fs::{atomic_write, state_dir};
