@@ -1316,6 +1316,24 @@ fn a_down_nodes_requests_are_refused_at_the_door() {
         log.contains("declared `down`") && log.contains("a2a.aoide/mailDeposit"),
         "and it is audited under the method's own label: {log}"
     );
+
+    // The PLAINTEXT arm is the same gate: `down` is refused before the envelope
+    // is looked at as a letter at all.
+    let plaintext = serde_json::to_value(
+        aoide_storage::mail::mint_outbound_letter_from("yomi", "alice", "chiyo", "bob", "plaintext", HOME).unwrap(),
+    )
+    .unwrap();
+    let plain = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/mailDeposit", serde_json::json!({ "envelope": plaintext }));
+    assert_eq!(plain["result"]["status"], "refused", "{plain}");
+    assert_eq!(plain["result"]["reason"], aoide_storage::charter::STATUS_DOWN, "{plain}");
+
+    // And the POLL arm: a `down` node asking for its own outbox is refused the
+    // same way, before anything is retired or handed over.
+    let poll = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/mailPoll", serde_json::json!({ "node": "yomi" }));
+    assert_eq!(poll["result"]["status"], "refused", "{poll}");
+    assert_eq!(poll["result"]["reason"], aoide_storage::charter::STATUS_DOWN, "{poll}");
+    let log = std::fs::read_to_string(fx.boxes["osaka"].join("log")).unwrap_or_default();
+    assert!(log.contains("a2a.aoide/mailPoll"), "the poll refusal is audited too: {log}");
 }
 
 /// **An unloadable declaration refuses BOTH mail methods, and only them.**
@@ -1448,4 +1466,128 @@ fn an_entry_toward_a_declared_hold_node_is_spooled_held() {
     assert_eq!(entries.len(), 1, "{entries:?}");
     assert!(entries[0].is_held(), "spooled held, never dialled: {entries:?}");
     assert_eq!(entries[0].tries, 0, "and the drain that followed did not dial it: {entries:?}");
+}
+
+/// **A record's nickname is not a policy name.** `yomi` is declared `down` in
+/// `home`; a record for `yomi`'s own identity key under a DIFFERENT name must be
+/// neither listed nor polled, because the status lookup reads the declaration's
+/// name for the verifying KEY (`routing::declared_name`), never the nickname.
+/// The declared name is here too, so one test pins both spellings and both sites:
+/// the bare sweep's list and an explicit `poll_node`, which must contact the door
+/// not at all.
+#[test]
+fn a_down_node_is_neither_polled_nor_listed_under_any_name() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("down-poll-list");
+    let _doors = fx.doors(&["yomi"]);
+
+    fx.enter("yomi");
+    let yomi_key = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
+    fx.enter("osaka");
+    let mut nodes = aoide_storage::node_store::load_nodes();
+    for name in ["yomi", "yuki"] {
+        aoide_storage::node_store::upsert_paired_node(
+            &mut nodes,
+            name,
+            &format!("http://127.0.0.1:{}/", fx.ports["yomi"]),
+            &yomi_key,
+            &aoide_storage::time::now_iso_utc(),
+            &["message".to_string()],
+            HOME,
+        );
+    }
+    aoide_storage::node_store::save_nodes(&nodes).unwrap();
+
+    let listed = aoide_client::mail_wire::pollable_nodes();
+    assert!(!listed.contains(&"yomi".to_string()), "a `down` node is not listed: {listed:?}");
+    assert!(!listed.contains(&"yuki".to_string()), "and a nickname cannot dodge it: {listed:?}");
+
+    for name in ["yomi", "yuki"] {
+        let asked = aoide_client::mail_wire::poll_node(name, None).unwrap();
+        assert_eq!(asked.filed, 0, "{name}: nothing is taken from a `down` node");
+    }
+    let log = std::fs::read_to_string(fx.boxes["yomi"].join("log")).unwrap_or_default();
+    assert!(
+        !log.contains("a2a.aoide/mailPoll"),
+        "and neither name ever contacted the door: {log}"
+    );
+}
+
+/// **A declaration this box cannot read is never dialled.** A set that will not
+/// load at all, and a mesh the set REFUSES (a charter tampered after signing),
+/// both mean "do not reach it" — the fail-closed direction the `poll`-address rule
+/// already takes — so a queued letter stays queued and no link is opened. The
+/// report says which of the two it is, and neither word claims the mesh declared
+/// the node `down`, because nobody can read it.
+#[test]
+fn a_refused_or_unloadable_declaration_is_never_dialled() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("unreadable-drain");
+    fx.enter("osaka");
+    // A RECORD for `yomi` — a dial target that is its own, so a declaration that
+    // cannot be read is the ONLY thing standing between this box and the dial
+    // (`dial_node` falls back to the record when the mesh names no address).
+    let mut nodes = aoide_storage::node_store::load_nodes();
+    aoide_storage::node_store::upsert_paired_node(
+        &mut nodes,
+        "yomi",
+        "http://127.0.0.1:1/",
+        &"ab".repeat(32),
+        &aoide_storage::time::now_iso_utc(),
+        &["message".to_string()],
+        HOME,
+    );
+    aoide_storage::node_store::save_nodes(&nodes).unwrap();
+
+    let valid_config = || {
+        format!(
+            "[pairing]\nhomeMesh = \"{HOME}\"\n\n[mesh.{HOME}]\n{}\n[mesh.{AWAY}]\n{}\n",
+            aoide_storage::charter::operator_line(&fx.operators[HOME]),
+            aoide_storage::charter::operator_line(&fx.operators[AWAY]),
+        )
+    };
+    let spool = |body: &str| {
+        let envelope = aoide_storage::mail::mint_outbound_letter_from("osaka", "alice", "yomi", "bob", body, HOME).unwrap();
+        aoide_storage::outbox::write_entry("yomi", &aoide_storage::outbox::OutboxEntry::fresh(envelope)).unwrap();
+    };
+    let tries_of = |body: &str| {
+        aoide_storage::outbox::list_entries("yomi")
+            .unwrap()
+            .into_iter()
+            .find(|e| e.envelope.text == body)
+            .unwrap_or_else(|| panic!("`{body}` is still spooled"))
+            .tries
+    };
+
+    // A declaration that reads and says nothing about `yomi`: the letter DIALS.
+    // This is the positive control the two negatives below are measured against.
+    fx.set_home_status("osaka", &[]);
+    spool("dials");
+    aoide_client::mail_wire::drain_node("yomi").unwrap();
+    assert_eq!(tries_of("dials"), 1, "nothing declares it down, so the drain tries it");
+    // The failure backed the link off; clear that so the next shape dials too
+    // unless something stops it.
+    aoide_storage::outbox::clear_link_state("yomi").unwrap();
+
+    // (1) An unloadable SET: a `[status]` for a node `home` does not have, which
+    // `validate_mesh` refuses whole — so `declarations()` itself fails.
+    std::fs::write(fx.boxes["osaka"].join("config.toml"), "[pairing]\nhomeMesh = \"home\"\n\n[mesh.home.status]\nnobody = \"down\"\n").unwrap();
+    spool("unloadable");
+    aoide_client::mail_wire::drain_node("yomi").unwrap();
+    assert_eq!(tries_of("unloadable"), 0, "an unloadable set never dials");
+    assert!(aoide_storage::outbox::read_link_state("yomi").unwrap().is_none(), "and opens no link");
+
+    // (2) A REFUSED mesh: a valid config again, and `home`'s charter in force with
+    // a byte appended after it was signed, so the declaration cannot be honoured.
+    std::fs::write(fx.boxes["osaka"].join("config.toml"), valid_config()).unwrap();
+    let in_force = aoide_storage::charter::in_force_path(HOME);
+    let mut tampered = std::fs::read(&in_force).unwrap();
+    tampered.push(b'\n');
+    std::fs::write(&in_force, &tampered).unwrap();
+
+    spool("refused");
+    aoide_client::mail_wire::drain_node("yomi").unwrap();
+    assert_eq!(tries_of("refused"), 0, "a refused mesh never dials either");
+    assert!(aoide_storage::outbox::read_link_state("yomi").unwrap().is_none(), "and opens no link");
+    assert_eq!(aoide_storage::outbox::list_entries("yomi").unwrap().len(), 3, "and nothing was dropped");
 }

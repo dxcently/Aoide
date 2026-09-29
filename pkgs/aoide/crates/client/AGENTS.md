@@ -800,14 +800,20 @@
   box holds no record for is dialled at the address the DECLARATION gives it
   (`dial_node` → `charter::dial_of`) or held if that address is `poll`.
   **A node the mesh declares `down` is never dialled either, and that is
-  `mail_wire::declared_down`'s** — asked over the set, so no caller can
+  `mail_wire::record_is_down`'s** — asked over the set, so no caller can
   forget it: `drain_node` returns before the link lock, `poll_node` returns
   before the binding exchange, `pollable_nodes` leaves such a node out of a
   bare poll, and the two REPORTS (`charter::drain_spooled`,
   `handle_mail_poll`) say `down` rather than reading the empty answer as
-  `drained`/`polled`. Its spooled entries are KEPT — `down` stops sending, it
-  never confiscates — so the pass after the declaration changes dials them,
-  unchanged. A new
+  `drained`/`polled`. The judged NAME is the declaration's own for the
+  record's identity KEY (`judged_name` → `routing::declared_name`), falling
+  back to the record's name only where the mesh names no such key: a
+  `nodes.json` nickname must not be able to dodge a status. It FAILS CLOSED —
+  a set that will not load or an entry the set refuses means never dialled —
+  and a report for such a mesh says `declaration-unreadable`, never `down`,
+  because a mesh nobody can read declared nothing. Its spooled entries are
+  KEPT — `down` stops sending, it never confiscates — so the pass after the
+  declaration changes dials them, unchanged. A new
   "may I dial this node" test belongs in `hop_is_never_dialled`, never at a
   call site. A poll's answer is bounded at
   `aoide_storage::outbox::POLL_BATCH_CAP` (50) and must stay bounded: the

@@ -843,6 +843,18 @@ fn drain_spooled(mesh: &str, spooled: &[String]) -> Vec<serde_json::Value> {
     spooled
         .iter()
         .map(|node| {
+            // **A mesh whose declaration cannot be read is never dialled, and
+            // that is its own answer** — a `down` node is a node the mesh DID
+            // declare, and saying so about a mesh nobody can read would be a
+            // false word. Nothing is dialled either way (fail closed).
+            if crate::mail_wire::declaration_unreadable(mesh) {
+                return json!({
+                    "node": node,
+                    "drained": false,
+                    "reason": "declaration-unreadable",
+                    "detail": "not dialled: this mesh's declaration cannot be read here, and nothing dials a node its own mesh cannot vouch for",
+                });
+            }
             // **A `down` node is never dialled, and the entry stays.** Asked
             // before the record half below: `down` is a fact about the mesh's
             // declaration, and a node with no record is still `down`.
@@ -851,7 +863,7 @@ fn drain_spooled(mesh: &str, spooled: &[String]) -> Vec<serde_json::Value> {
                     "node": node,
                     "drained": false,
                     "reason": "down",
-                    "detail": "not dialled: down — the declaration says this box stops sending to it, so nothing was dialed and the entry is kept in the spool until that changes",
+                    "detail": "not dialled: down — the declaration says this box stops sending to it, so nothing was dialled and the entry is kept in the spool until that changes",
                 });
             }
             let Some(poll_only) = known.get(node) else {
@@ -859,7 +871,7 @@ fn drain_spooled(mesh: &str, spooled: &[String]) -> Vec<serde_json::Value> {
                     "node": node,
                     "drained": false,
                     "reason": "no-record",
-                    "detail": "this box holds no node record for it, so nothing was dialed — the entry waits in the spool until it is paired (giving it a record) or a declaration addresses it",
+                    "detail": "this box holds no node record for it, so nothing was dialled — the entry waits in the spool until it is paired (giving it a record) or a declaration addresses it",
                 });
             };
             // **A `poll` node is never dialled either** (confirm finding 6):
@@ -884,7 +896,7 @@ fn drain_spooled(mesh: &str, spooled: &[String]) -> Vec<serde_json::Value> {
 }
 
 /// The human rendering of [`drain_spooled`]'s rows — one line per node, and
-/// `not dialed` for the record-less case rather than silence (review N2: the
+/// `not dialled` for the record-less case rather than silence (review N2: the
 /// command's message has to say what its `--json` says).
 fn render_spooled(rows: &[serde_json::Value]) -> String {
     if rows.is_empty() {
@@ -897,15 +909,19 @@ fn render_spooled(rows: &[serde_json::Value]) -> String {
             lines.push(format!("  {node}: drained now"));
         } else if row["reason"].as_str() == Some("no-record") {
             lines.push(format!(
-                "  {node}: NOT DIALED — no node record here (the entry waits in the spool until a pairing or a declaration addresses it)"
+                "  {node}: NOT DIALLED — no node record here (the entry waits in the spool until a pairing or a declaration addresses it)"
+            ));
+        } else if row["reason"].as_str() == Some("declaration-unreadable") {
+            lines.push(format!(
+                "  {node}: NOT DIALLED — this mesh's declaration cannot be read here (nothing dials a node its own mesh cannot vouch for)"
             ));
         } else if row["reason"].as_str() == Some("down") {
             lines.push(format!(
-                "  {node}: NOT DIALED — declared `down` (the entry waits in the spool until the declaration changes)"
+                "  {node}: NOT DIALLED — declared `down` (the entry waits in the spool until the declaration changes)"
             ));
         } else if row["reason"].as_str() == Some("poll-only") {
             lines.push(format!(
-                "  {node}: NOT DIALED — a `poll` node is never dialled (the entry waits for its own `aoide mail poll`)"
+                "  {node}: NOT DIALLED — a `poll` node is never dialled (the entry waits for its own `aoide mail poll`)"
             ));
         } else {
             lines.push(format!(
@@ -1046,7 +1062,7 @@ mod tests {
     /// "no record here" — the operator acting on the first must change a
     /// declaration, on the second must pair.
     #[test]
-    fn a_down_node_is_reported_as_not_dialed() {
+    fn a_down_node_is_reported_as_not_dialled() {
         with_root("drain-down", |_dir| {
             let _ = charter::init("home").unwrap();
             let me = aoide_storage::display::local_node_name();
@@ -1066,7 +1082,7 @@ mod tests {
                 "and the answer is the one the task asks for: {rows:?}"
             );
             let text = render_spooled(&rows);
-            assert!(text.contains("NOT DIALED") && text.contains("down"), "{text}");
+            assert!(text.contains("NOT DIALLED") && text.contains("down"), "{text}");
         });
     }
 
@@ -1077,14 +1093,17 @@ mod tests {
     /// letter had gone to a machine that was never contacted. A charter
     /// `address` IS a route now, so what is left for this case is a name no
     /// declaration addresses and no record names: the honest answer is
-    /// "not dialed, the entry waits".
+    /// "not dialled, the entry waits".
     #[test]
-    fn a_recordless_charter_node_is_reported_as_not_dialed() {
+    fn a_recordless_charter_node_is_reported_as_not_dialled() {
         with_root("drain-no-record", |_dir| {
             let init = charter::init("home").unwrap();
             let line = charter::node_line().unwrap();
             let src = format!("mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{line}\n");
             std::fs::write(charter::source_path("home"), &src).unwrap();
+            // SIGNED, so the mesh is readable and the case this test is about —
+            // a name no record, and no declaration, names — is the one answered.
+            charter::sign("home", None).unwrap();
             // `sign` spools one `charter` letter per OTHER charter node — and
             // there is none here, so drive the reporter directly with a name
             // this box holds no record for (the LAN/`--operator` join case).
@@ -1102,7 +1121,7 @@ mod tests {
                 "and the reason names how it leaves: {rows:?}"
             );
             let text = render_spooled(&rows);
-            assert!(text.contains("NOT DIALED"), "{text}");
+            assert!(text.contains("NOT DIALLED"), "{text}");
             assert!(text.contains("pairing"), "{text}");
 
             // A node WITH a record keeps the old answer: nothing to send, but

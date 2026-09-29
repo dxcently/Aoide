@@ -5720,12 +5720,28 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
         // **A `down` node is not polled, and the command SAYS so.** `poll_node`
         // returns an empty outcome for it, and reporting that as "polled" is the
         // same lie `no-record` was: the node's own declaration says this box must
-        // not reach it, and what is spooled toward it stays spooled.
-        if crate::mail_wire::poll_mesh(node, mesh_flag)
-            .is_some_and(|mesh| crate::mail_wire::declared_down(&mesh, node))
-        {
+        // not reach it, and what is spooled toward it stays spooled. The name is
+        // judged by the record's own key, so a nickname cannot dodge it.
+        let down = nodes
+            .iter()
+            .find(|n| &n.name == node)
+            .is_some_and(|record| {
+                crate::mail_wire::poll_mesh(node, mesh_flag)
+                    .is_some_and(|mesh| crate::mail_wire::record_is_down(&mesh, record))
+            });
+        if down {
+            // An unreadable mesh and a `down` node are both "not dialled", and
+            // they are different words: one is a declaration this box cannot
+            // read, the other a declaration that names the node.
+            let reason = if crate::mail_wire::poll_mesh(node, mesh_flag)
+                .is_some_and(|mesh| crate::mail_wire::declaration_unreadable(&mesh))
+            {
+                "declaration-unreadable"
+            } else {
+                "down"
+            };
             not_dialled += 1;
-            rows.push(json!({ "node": node, "status": "not-dialled", "reason": "down", "filed": 0 }));
+            rows.push(json!({ "node": node, "status": "not-dialled", "reason": reason, "filed": 0 }));
             continue;
         }
         match crate::mail_wire::poll_node(node, mesh_flag) {

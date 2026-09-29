@@ -881,10 +881,9 @@ fn reach(declaration: &Declaration, from: &str, node: &str) -> Result<Hop, Strin
         return Err(format!("`{node}` is this box — a letter already here is handed to nobody"));
     }
     // **`down` is decided HERE, before the address picks a lane.** Every step
-    // reads its target through this one call, and a node may be a grant of the
-    // mesh with no address line at all (the shape `mesh pair` writes, answered
-    // off the paired record) — so a check living inside the address branch alone
-    // would hand a letter to a node the mesh declared unreachable (MAIL.md
+    // reads its target through this one call, so the guarantee is the function's
+    // own order rather than a fact about one branch: a `down` node is never a hop
+    // and never a destination, whichever lane would have answered it (MAIL.md
     // §Status).
     if declaration.status_of(node) == Some(charter::STATUS_DOWN) {
         return Err(format!("`{node}` is declared `down` in mesh `{}`", declaration.mesh()));
