@@ -135,6 +135,54 @@ pub struct MeshRow {
     pub class: DriftClass,
 }
 
+/// Which KIND of declaration a mesh's routing table comes from — the same two
+/// sources [`MeshSource`] names, read as a fact about the mesh rather than as
+/// the choice one of them wins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MeshKind {
+    /// `[mesh.<name>]` in config: the paired records are the declaration.
+    Pair,
+    /// A signed charter is the declaration.
+    Charter,
+}
+
+/// **One node a mesh declares**, with what this box can state about it. Every
+/// fact here is the DECLARATION's, read through the one routing seam, except
+/// [`NodeRow::nickname`] (display only) and [`NodeRow::liveness`] (observation
+/// only).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct NodeRow {
+    /// The name the DECLARATION gives this node: a charter LINE's name for a
+    /// charter mesh — the name every policy, routing and audit lookup uses for
+    /// it — and the recorded name for a pair mesh, where the record IS the
+    /// declaration.
+    pub name: String,
+    /// The `nodes.json` nickname this node's key is ALSO recorded under, where
+    /// one exists and differs from `name`. Display, never an input: a mesh's
+    /// own answer about a node comes from its declaration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nickname: Option<String>,
+    /// The declared status — `active` (declared with none), `hold` or `down` —
+    /// exactly the words `[status]` uses.
+    pub status: String,
+    /// `relay`, `gate` or `member`.
+    pub role: String,
+    /// The other meshes this node is THIS mesh's declared gate into. Empty
+    /// unless `role` is `gate`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub gates: Vec<String>,
+    /// Where this node's identity key comes from: `charter` (a signed line) or
+    /// `record` (a paired record).
+    pub key_source: String,
+    /// What this box has OBSERVED about reaching it: `reachable` (a recorded
+    /// attempt reached the peer), `unreachable` (a recorded attempt did not), or
+    /// `unverified` — nothing observed at all. **`unverified` is never `dead`
+    /// and never `down`**: liveness is observation, and `down` is a
+    /// declaration, so the two are different facts about different things.
+    pub liveness: String,
+}
+
 /// One declared `[mesh.<name>]`, compared. `grant`/`same_operator_note` are
 /// copied straight off the declaration for display — [`drift`] never
 /// compares them against anything (see the module doc's note on grants).
@@ -188,6 +236,21 @@ pub struct MeshSection {
     #[serde(rename = "selfDeclared")]
     pub self_declared: bool,
     pub rows: Vec<MeshRow>,
+    /// Which kind of declaration this mesh's routing table is.
+    pub kind: MeshKind,
+    /// The version of the charter in force, for a charter mesh — the version
+    /// every check in that mesh is decided by. Absent for a pair mesh.
+    #[serde(rename = "charterVersion", skip_serializing_if = "Option::is_none")]
+    pub charter_version: Option<u64>,
+    /// The word this box's declaration SET refuses this mesh with, when it does
+    /// (`charter-tampered`, `key-divergence`, …). A refused mesh fails closed for
+    /// ITSELF alone: its `nodes` stay empty, because nothing in it is decidable
+    /// here, and the other meshes still report.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<String>,
+    /// **The nodelist view**: every node this mesh declares, with the facts
+    /// [`NodeRow`] carries. Empty for a mesh this box cannot read.
+    pub nodes: Vec<NodeRow>,
 }
 
 /// The whole comparison, every declared mesh plus the separate
@@ -355,6 +418,13 @@ pub fn drift(meshes: &BTreeMap<String, Mesh>, nodes: &[Node], local_name: &str) 
             declared: compared,
             self_declared: mesh.nodes.contains_key(local_name),
             rows,
+            // The declaration's own facts, and what this box has observed, are
+            // [`report`]'s to fill: [`drift`] compares two sources and knows
+            // nothing about a charter or an outbox.
+            kind: MeshKind::Pair,
+            charter_version: None,
+            refusal: None,
+            nodes: Vec::new(),
         });
     }
 
@@ -376,13 +446,115 @@ pub fn drift(meshes: &BTreeMap<String, Mesh>, nodes: &[Node], local_name: &str) 
 /// not.
 pub fn report(meshes: &BTreeMap<String, Mesh>, nodes: &[Node], local_name: &str) -> MeshReport {
     let mut report = drift(meshes, nodes, local_name);
-    report.charters = charter_rows(&meshes.keys().cloned().collect(), nodes);
+    let charters = charter_rows(&meshes.keys().cloned().collect(), nodes);
+    // ONE read of the declaration set for the whole view, so every mesh's kind,
+    // refusal and node list are answered from the same snapshot — and a set that
+    // will not load leaves every section without a node list rather than
+    // inventing one from a second, weaker source.
+    let set = aoide_storage::routing::declarations().ok();
     for section in &mut report.sections {
-        if report.charters.iter().any(|c| c.mesh == section.name) {
+        let charter = charters.iter().find(|c| c.mesh == section.name);
+        if charter.is_some() {
             section.source = MeshSource::Charter;
         }
+        section.kind = if charter.is_some() { MeshKind::Charter } else { MeshKind::Pair };
+        section.charter_version = charter.map(|c| c.version);
+        match set.as_deref().and_then(|set| aoide_storage::routing::declaration_of(set, &section.name)) {
+            // A refused mesh is its word and nothing else: no node list can be
+            // read out of a declaration this box could not honour.
+            Some(Err(refusal)) => section.refusal = Some(refusal.reason.clone()),
+            Some(Ok(declaration)) => {
+                section.nodes = node_rows(&section.name, meshes.get(&section.name), declaration, nodes);
+            }
+            None => {}
+        }
     }
+    report.charters = charters;
     report
+}
+
+/// The nodelist rows of one mesh: every node its declaration names, in name
+/// order, with the facts [`NodeRow`] carries.
+///
+/// **The names are the DECLARATION's.** A charter mesh lists its signed lines —
+/// the names every lookup uses for it — and a pair mesh lists the section's own
+/// keys plus every record GRANTED `message` in it, which is the shape `mesh pair`
+/// writes without a hop address. The `nodes.json` nickname rides beside a name
+/// only where a record's key proves the same node is recorded under another one.
+fn node_rows(
+    mesh: &str,
+    section: Option<&Mesh>,
+    declaration: &aoide_storage::routing::Declaration,
+    records: &[Node],
+) -> Vec<NodeRow> {
+    let mut names: BTreeSet<String> = if declaration.is_charter() {
+        aoide_storage::charter::governing(mesh)
+            .map(|charter| charter.nodes.keys().cloned().collect())
+            .unwrap_or_default()
+    } else {
+        section.map(|section| section.nodes.keys().cloned().collect()).unwrap_or_default()
+    };
+    if !declaration.is_charter() {
+        for record in records {
+            if record.grant(mesh).iter().any(|cap| cap == "message") {
+                names.insert(record.name.clone());
+            }
+        }
+    }
+    names
+        .into_iter()
+        .map(|name| {
+            let key = declaration.key_of(&name);
+            let nickname = records
+                .iter()
+                .find(|record| {
+                    record.name != name
+                        && match (key, record.pubkey.as_deref()) {
+                            (Some(key), Some(recorded)) => key.eq_ignore_ascii_case(recorded),
+                            _ => false,
+                        }
+                })
+                .map(|record| record.name.clone());
+            let gates: Vec<String> = declaration
+                .gates()
+                .iter()
+                .filter(|(_, gate)| gate.as_str() == name)
+                .map(|(other, _)| other.clone())
+                .collect();
+            // A node can be both the mesh's relay and its gate (the fixture's
+            // `sakaki` is), so the two facts are both reported: `role` is the
+            // relay when there is one — transit is what the route reads first —
+            // and `gates` names the meshes it carries transit into.
+            let role = if declaration.relays().iter().any(|relay| relay == &name) {
+                "relay"
+            } else if !gates.is_empty() {
+                "gate"
+            } else {
+                "member"
+            };
+            let status =
+                declaration.status_of(&name).map(str::to_string).unwrap_or_else(|| "active".to_string());
+            let key_source = if declaration.is_charter() { "charter" } else { "record" }.to_string();
+            let liveness = liveness_of(&name).to_string();
+            NodeRow { name, nickname, status, role: role.to_string(), gates, key_source, liveness }
+        })
+        .collect()
+}
+
+/// What this box has OBSERVED about reaching `node`: a recorded attempt that
+/// reached the peer, one that did not, or nothing at all. It reads the outbox's
+/// own bookkeeping (each entry's `tries`/`lastOutcome`) and the link's back-off —
+/// **no probe, no dial, no network I/O** — because liveness here is a fact about
+/// the past, and a nodelist command that reached out would be its own witness.
+fn liveness_of(node: &str) -> &'static str {
+    match aoide_storage::outbox::list_entries(node) {
+        Ok(entries) if entries.iter().any(|entry| entry.last_attempt_reached_the_peer()) => "reachable",
+        Ok(entries) if entries.iter().any(|entry| !entry.last_try_at.is_empty()) => "unreachable",
+        _ => match aoide_storage::outbox::read_link_state(node) {
+            Ok(Some(_)) => "unreachable",
+            _ => "unverified",
+        },
+    }
 }
 
 /// The charter rows: every mesh with a charter on disk at this node
@@ -485,6 +657,14 @@ fn render_report(report: &MeshReport, local_name: &str) -> String {
         for row in &section.rows {
             lines.push(format!("  {}", render_row(row)));
         }
+        if let Some(refusal) = &section.refusal {
+            lines.push(format!(
+                "  refused here: {refusal} — no node list: nothing in this mesh is decidable on this box"
+            ));
+        }
+        for node in &section.nodes {
+            lines.push(format!("  {}", render_node(node)));
+        }
         if !section.self_declared {
             lines.push(format!(
                 "  note: this box is not named in mesh.{} — if it should be, \
@@ -514,6 +694,23 @@ fn render_report(report: &MeshReport, local_name: &str) -> String {
         lines.push(render_undeclared(&report.undeclared));
     }
     lines.join("\n")
+}
+
+/// One nodelist row, human-rendered: the declared name, any nickname its key is
+/// also recorded under, and the four facts this box can state about it.
+fn render_node(node: &NodeRow) -> String {
+    let mut line = node.name.clone();
+    if let Some(nickname) = &node.nickname {
+        line.push_str(&format!(" (recorded as `{nickname}`)"));
+    }
+    line.push_str(&format!(
+        "  {}/{}  key: {}  liveness: {}",
+        node.status, node.role, node.key_source, node.liveness
+    ));
+    if !node.gates.is_empty() {
+        line.push_str(&format!("  gate into: {}", node.gates.join(",")));
+    }
+    line
 }
 
 /// One charter row, human-rendered: what it is, how far it is seen, who signed

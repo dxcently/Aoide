@@ -1381,9 +1381,10 @@ the same slices. They are required, not suggestions.
    reachable from it. The relay's ingress target is the mail adapter's port, and
    the A2A door is never fronted by a TLS-terminating front — an unsigned loopback
    request reaching that door is conduct. No node accepts inbound connections
-   except the relay's loopback adapter. Until P-M4, a `poll` node exchanges letters
-   with the relay node itself only, which is also the bound on its charter: the
-   first one arrives by LAN join or as a file.
+   except the relay's loopback adapter. A `poll` node exchanges letters with the
+   relay node itself — transit carries them on — which is also the bound on its
+   charter: the first one arrives by LAN join, as a file, or as a charter letter
+   over transit.
 5. **P-M4: transit with the `next` hop chain.** MAIL.md.
 6. **P-BOARD: boards.** MAIL.md.
 

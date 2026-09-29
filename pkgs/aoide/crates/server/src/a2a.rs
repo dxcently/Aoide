@@ -3520,7 +3520,7 @@ fn charter_refusal(what: &str, mesh: &str, label: &str, audit_log: &Path) -> Opt
              `aoide node allow … on --mesh {mesh}` answers `widens-charter` and changes nothing (narrowing \
              a line with `… off` is the only local move). Re-listing the key is the charter's OPERATOR \
              signing a new version that carries it, delivered to this host as a `mesh charter accept \
-             <file>` on the LAN, or as a charter letter once transit exists. `aoide mesh charter show \
+             <file>` on the LAN, or as a charter letter over transit. `aoide mesh charter show \
              {mesh}` reads the version in force"
         ),
     ))

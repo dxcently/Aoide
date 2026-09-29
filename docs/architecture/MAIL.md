@@ -1471,8 +1471,9 @@ path.
 - **H1 — the mail adapter on the relay.** `aoide mail serve`, HTTPS-MESH-API.md:
   a loopback listener (127.0.0.1 only, no bind option) whose whole method set is
   `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding` and the stripped card,
-  fronted by whatever owns 443. Until P-M4, a `poll` node exchanges letters with
-  the relay node itself only, and its charter arrives by LAN join or as a file.
+  fronted by whatever owns 443. A `poll` node exchanges letters with the relay
+  node itself — transit carries them on from there — and its charter arrives by
+  LAN join, as a file, or as a charter letter over transit.
 - **P-M4 — zones and transit (L).** `relays`/`status`/`gates` from the
   charter (charter mesh) or config (pair mesh) (validate_mesh:
   multi-membership allowed, key divergence and one-sided gates refused;

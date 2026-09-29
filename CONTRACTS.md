@@ -899,9 +899,26 @@ count.
   `data.report`, never a non-zero exit by itself. The one exception is the
   read — a config that fails to load returns `Outcome::error` with
   `data.reason` naming why and no `data.report`, same as any other command
-  whose config read fails. `--json`'s `data.report` shape: `{"sections":
+  whose config read fails. **Every section also carries the mesh's kind and its
+  node rows**: `kind` (`pair`/`charter`), `charterVersion` (the version in force
+  for a charter mesh), `refusal` (the word this box's declaration set refuses the
+  mesh with — a refused mesh fails closed for ITSELF alone, so its `nodes` stay
+  empty and the other meshes still report), and `nodes`: one row per declared
+  node of `{"name", "nickname"?, "status", "role", "gates"?, "keySource",
+  "liveness"}`. `name` is the name the DECLARATION gives the node (a charter
+  LINE's name for a charter mesh; a `nodes.json` nickname only ever rides beside
+  it), `status` is `active`/`hold`/`down` exactly as declared, `role` is
+  `relay`/`gate`/`member` (`gates` names the meshes a gate carries transit into),
+  `keySource` is `charter`/`record`, and `liveness` is
+  `reachable`/`unreachable`/`unverified` — an OBSERVATION from the outbox's own
+  bookkeeping and the link's back-off, never a probe and never a dial:
+  `unverified` is what nothing-observed reads, which is never `dead` and never
+  the declared `down`.
+  `--json`'s `data.report` shape: `{"sections":
   [{"name", "source", "grant", "sameOperatorNote"?, "grants", "declared",
-  "selfDeclared", "rows": [{"node", "class", …}]}], "undeclared": [...],
+  "selfDeclared", "rows": [{"node", "class", …}], "kind", "charterVersion"?,
+  "refusal"?, "nodes": [{"name", "nickname"?, "status", "role", "gates"?,
+  "keySource", "liveness"}]}], "undeclared": [...],
   "charters": [{"mesh", "declared", "inForce", "version", "operator",
   "operatorKey", "trust", "trusted", "highWater", "rekeyed", "inert",
   "nodes"}]}` — `inForce` says whether a charter DOCUMENT is readable here
@@ -7988,9 +8005,10 @@ never a JSON-RPC error: MAIL.md §Wire's admission/outcome split makes
 step 1 above (admission, `-32010`) the only error this method ever
 returns, because whether the caller may speak to the method at all is a
 different question from what became of a well-formed envelope. The zone
-check MAIL.md's step 3 describes is P-M4's, skipped here entirely, not
-stubbed — this plaintext lane's envelope carries no `mesh` at all, and
-`header.originMesh` stays `""` (§4); a SEALED charter container has a
+check MAIL.md's step 3 describes belongs to the TRANSIT lane, which this
+plaintext lane never rides — its envelope carries no `mesh` at all — so the
+check is skipped by SHAPE, not by omission: `header.originMesh` stays `""`
+(§4), and a SEALED charter container has a
 zone check of its own, against the charter it applies (below). A
 successful deposit answers:
 
@@ -8165,9 +8183,10 @@ two triggers, and they are the same call:
   (write-is-the-report), never the far end's outcome. This is the receive
   trigger a node with nothing to send needs: an empty outbox never dials, so
   poll-on-contact alone can never reach it, and an OS timer driving this
-  command is H1's own scope. A charter line's `address` is P-M4's to route, not
-  a dial target yet (§4's charter carriage), so a charter node this box holds
-  no record for is simply not asked — and a caller that reports the attempt
+  command is H1's own scope. A charter line's `address` IS a dial target
+  (`dial_node`, §4's charter carriage), so a charter node this box holds no
+  record for is dialled at the address its mesh gives it — and a caller that
+  reports the attempt
   (`client::charter::drain_spooled`) must say `no-record` rather than claim a
   drain.
 - **poll-on-contact** — the end of any drain pass that actually reached a

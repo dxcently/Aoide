@@ -397,6 +397,19 @@ never the inbound/serve half (that's `aoide-server`).
   (`data.reason`, no `data.report`), same as any other command whose config
   read fails.
 
+  **The nodelist view rides on the same report.** Each section carries the
+  mesh's `kind`, the `charter_version` in force, the set's `refusal` word where
+  it refuses that mesh, and one `NodeRow` per declared node: the DECLARED name
+  (a charter line's name for a charter mesh — a nickname only ever rides beside
+  it), the declared `status`, the `role` with the meshes a gate carries transit
+  into, the `key_source`, and `liveness`. Liveness is an OBSERVATION and only
+  ever from what the box already recorded — the outbox's per-entry
+  `tries`/`lastOutcome` and the link's back-off (`liveness_of`) — so this command
+  never dials, never probes and never blocks on a network; a node with no signal
+  reads `unverified`, which is never `dead` and never the declared `down`. One
+  read of `routing::declarations()` serves every section's rows, so the set the
+  statuses are read from is the set the refusals are read from.
+
   **The converge.** `aoide mesh pair [<mesh>]` runs that SAME `drift` — no
   second comparison exists anywhere in the tree — and `plan` selects the
   `missing` and `unverified` rows, in declared-name order. Each goes

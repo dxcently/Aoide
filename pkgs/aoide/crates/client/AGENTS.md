@@ -583,7 +583,15 @@
     them, so a machine that took its first charter by file is reported too)
     and flips `MeshSection::source` from `Paired` to `Charter`. `drift`'s own
     field says `Paired` because it knows nothing about charters: do not teach
-    it to read state, and do not let a second place flip `source`. A charter
+    it to read state, and do not let a second place flip `source`. **`report` is
+    also where each section's `kind`, `charter_version`, `refusal` and `nodes`
+    come from** — one `routing::declarations()` read for the whole view, so a
+    row's status and the section's refusal are answered from the same set, and a
+    refused mesh fills `refusal` and leaves `nodes` empty (it fails closed for
+    itself alone). `NodeRow::liveness` is an OBSERVATION from the box's own
+    records only (the outbox's `tries`/`lastOutcome`, the link's back-off): do
+    not add a probe, a dial or any network I/O to this command, and do not read
+    `down` into liveness — a declaration is not an observation. A charter
     row is also where a paired record in a charter mesh is REPORTED inert
     (`CharterRow::inert`) — the record's own grant entry is not what the door
     reads there, and an operator must not have to infer that from the door's

@@ -1556,6 +1556,174 @@ fn a_replayed_mail_request_is_refused_while_the_config_is_broken() {
         assert!(other["result"].is_null(), "and nothing was dispatched: {other}");
     }
 
+// ── `aoide mesh`'s nodelist view ───────────────────────────────────────
+
+/// The report `aoide mesh` renders, read from the box this process is entered
+/// on — the same call `handle_mesh` makes.
+fn mesh_report() -> aoide_client::mesh::MeshReport {
+    let loaded = aoide_storage::config::load().expect("the fixture's config loads");
+    let nodes = aoide_storage::node_store::load_nodes();
+    aoide_client::mesh::report(&loaded.config.mesh, &nodes, &aoide_storage::display::local_node_name())
+}
+
+fn section<'a>(report: &'a aoide_client::mesh::MeshReport, mesh: &str) -> &'a aoide_client::mesh::MeshSection {
+    report.sections.iter().find(|s| s.name == mesh).unwrap_or_else(|| panic!("`{mesh}` has a section"))
+}
+
+fn node_row<'a>(
+    section: &'a aoide_client::mesh::MeshSection,
+    name: &str,
+) -> &'a aoide_client::mesh::NodeRow {
+    section.nodes.iter().find(|r| r.name == name).unwrap_or_else(|| panic!("`{name}` has a row: {section:?}"))
+}
+
+/// **A node's own facts, as its mesh declares them.** `home` is a charter mesh:
+/// `sakaki` is its relay AND its gate into `away`, `yomi` is declared `down`,
+/// `chiyo` is a plain member, and every key comes from a charter LINE.
+#[test]
+fn a_mesh_row_reports_the_declared_status_role_and_key_source() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("mesh-rows");
+    fx.enter("osaka");
+    let report = mesh_report();
+    let home = section(&report, HOME);
+
+    assert_eq!(home.kind, aoide_client::mesh::MeshKind::Charter, "a charter mesh says so");
+    assert_eq!(node_row(home, "yomi").status, "down", "the declared status, as declared");
+    assert_eq!(node_row(home, "osaka").status, "active", "a node declared with no status is active");
+    assert_eq!(node_row(home, "sakaki").role, "relay", "the mesh's own relay");
+    assert_eq!(node_row(home, "sakaki").gates, vec![AWAY.to_string()], "and its declared gate");
+    assert_eq!(node_row(home, "chiyo").role, "member");
+    assert!(node_row(home, "chiyo").gates.is_empty());
+    for name in ["osaka", "sakaki", "yomi", "chiyo"] {
+        assert_eq!(node_row(home, name).key_source, "charter", "a charter line is the key source");
+    }
+    // `away` is a pair-shaped mesh here: its keys are records.
+    let away = section(&report, AWAY);
+    assert_eq!(away.kind, aoide_client::mesh::MeshKind::Charter, "away took a charter too");
+}
+
+/// **A charter mesh's row carries the version in force and the declared node
+/// lines** — the same lines the door resolves a caller through.
+#[test]
+fn a_charter_row_reports_the_version_in_force_and_the_status_lines() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("mesh-charter-row");
+    fx.enter("osaka");
+    let report = mesh_report();
+    let home = section(&report, HOME);
+
+    assert_eq!(home.kind, aoide_client::mesh::MeshKind::Charter);
+    assert_eq!(home.charter_version, Some(1), "v1 is what the fixture signed and every box took");
+    let mut names: Vec<&str> = home.nodes.iter().map(|r| r.name.as_str()).collect();
+    names.sort();
+    assert_eq!(names, ["chiyo", "osaka", "sakaki", "yomi"], "the charter's own node lines");
+
+    // And the status lines are the DECLARED ones — the same answer the routing
+    // seam gives, read here where the operator is looking.
+    let set = routing::declarations().expect("the fixture's declarations load");
+    let declaration = routing::declaration_of(&set, HOME).expect("home is in the set").as_ref().unwrap();
+    for row in &home.nodes {
+        let declared = declaration.status_of(&row.name).unwrap_or("active");
+        assert_eq!(row.status, declared, "{}", row.name);
+    }
+}
+
+/// **Liveness is observation, and `down` is a declaration.** A node nothing has
+/// been observed about reads `unverified` — never `dead`, and never its declared
+/// status.
+#[test]
+fn a_node_with_no_liveness_signal_reports_unverified_never_dead() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("mesh-liveness");
+    fx.enter("osaka");
+    let report = mesh_report();
+    let home = section(&report, HOME);
+
+    for row in &home.nodes {
+        assert_eq!(row.liveness, "unverified", "nothing has been observed about `{}`", row.name);
+        assert!(
+            !["dead", "down", "active"].contains(&row.liveness.as_str()),
+            "liveness never borrows the declaration's words: {row:?}"
+        );
+    }
+    // The two facts are different facts about `yomi`, and the row says both.
+    let yomi = node_row(home, "yomi");
+    assert_eq!(yomi.status, "down", "{yomi:?}");
+    assert_eq!(yomi.liveness, "unverified", "{yomi:?}");
+}
+
+/// **A refused mesh fails closed for itself alone**: it shows the word, keeps no
+/// node list, and the mesh beside it still lists — in the text and in `--json`.
+#[test]
+fn a_refused_mesh_shows_its_word_while_the_other_mesh_still_lists() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("mesh-refused");
+    fx.enter("sakaki");
+    fx.take_broken_away("sakaki", ONE_SIDED_GATE);
+
+    let report = mesh_report();
+    let home = section(&report, HOME);
+    assert_eq!(home.refusal.as_deref(), Some(routing::ONE_SIDED_GATE), "{home:?}");
+    assert!(home.nodes.is_empty(), "nothing in a refused mesh is decidable here: {home:?}");
+    let away = section(&report, AWAY);
+    assert!(away.refusal.is_none(), "the mesh that declared no gate still reads: {away:?}");
+    assert!(
+        away.nodes.iter().any(|r| r.name == "sakaki"),
+        "and it still lists its own line (the broken charter carries only that one): {away:?}"
+    );
+
+    let out = dispatch(&cli_invocation(&["mesh"], &[], &[]));
+    assert_eq!(out.status, Status::Ok, "{}", out.message);
+    assert!(out.message.contains(routing::ONE_SIDED_GATE), "the text says the word: {}", out.message);
+    assert!(out.message.contains("refused here"), "and says what a refused mesh means: {}", out.message);
+    let data = out.data.expect("mesh reports its data");
+    let sections = data["report"]["sections"].as_array().expect("sections are a list");
+    let home_json = sections
+        .iter()
+        .find(|s| s["name"] == serde_json::json!(HOME))
+        .expect("home is a section");
+    assert_eq!(home_json["refusal"], serde_json::json!(routing::ONE_SIDED_GATE), "{home_json}");
+    assert_eq!(home_json["nodes"], serde_json::json!([]), "and it lists no nodes: {home_json}");
+}
+
+/// **A charter mesh shows the charter LINE's name, not the nickname** (D5): a
+/// record holding the same key under another name is display, and rides beside
+/// the row rather than becoming one.
+#[test]
+fn a_charter_mesh_shows_the_charter_name_not_the_nickname() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("mesh-nickname");
+
+    fx.enter("yomi");
+    let yomi_key = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
+    fx.enter("osaka");
+    let mut nodes = aoide_storage::node_store::load_nodes();
+    aoide_storage::node_store::upsert_paired_node(
+        &mut nodes,
+        "yuki",
+        "http://127.0.0.1:1/",
+        &yomi_key,
+        &aoide_storage::time::now_iso_utc(),
+        &["message".to_string()],
+        HOME,
+    );
+    aoide_storage::node_store::save_nodes(&nodes).unwrap();
+
+    let report = mesh_report();
+    let home = section(&report, HOME);
+    assert!(home.nodes.iter().any(|r| r.name == "yomi"), "the line's name is the row: {home:?}");
+    assert!(
+        !home.nodes.iter().any(|r| r.name == "yuki"),
+        "a nickname is never a row of its own: {home:?}"
+    );
+    assert_eq!(
+        node_row(home, "yomi").nickname.as_deref(),
+        Some("yuki"),
+        "it rides along as display, keyed by the same identity"
+    );
+}
+
 /// **A `down` node's queued letter is KEPT, and is drained once the declaration
 /// no longer says `down`.** `down` stops this box SENDING; it never confiscates
 /// what is already spooled, and it never leaves the entry looking dialled.

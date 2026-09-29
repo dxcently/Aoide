@@ -765,10 +765,26 @@ aoide mesh [--json]
   comparison structured under `data.report` (one shape, the same one the
   P-CHARTER subsection below repeats): `{"sections": [{"name", "source",
   "grant", "sameOperatorNote"?, "grants", "declared", "selfDeclared", "rows":
-  [{"node", "class", …}]}], "undeclared": [...], "charters": []}`.
+  [{"node", "class", …}], "kind", "charterVersion"?, "refusal"?, "nodes":
+  [{"name", "nickname"?, "status", "role", "gates"?, "keySource", "liveness"}]}],
+  "undeclared": [...], "charters": []}`. **Each section also lists its nodes**:
+  the mesh's `kind` (`pair`/`charter`), the `charterVersion` in force for a
+  charter mesh, the set's `refusal` word where this box refuses the mesh (which
+  fails closed for ITSELF alone — the word stands in place of its node rows, and
+  every other mesh still lists), and one row per declared node: the **declared**
+  name (a charter line's name for a charter mesh; a `nodes.json` nickname only
+  ever rides beside it, where a record's key proves the same node is recorded
+  under another one), the declared `status` (`active`/`hold`/`down`), the `role`
+  (`relay`/`gate`/`member`, with the meshes a gate carries transit into),
+  `keySource` (`charter`/`record`), and `liveness`
+  (`reachable`/`unreachable`/`unverified`) — an OBSERVATION read from the
+  outbox's own bookkeeping and the link's back-off and nothing else, so this
+  command never probes, never dials and never blocks; `unverified` is what a node
+  with no signal reads, which is never `dead` and never the declared `down`.
 - **`--json` (P-CHARTER).** `data.report` is
   `{"sections": [{"name", "source", "grant", "sameOperatorNote"?,
-  "grants", "declared", "selfDeclared", "rows": [{"node", "class", …}]}],
+  "grants", "declared", "selfDeclared", "rows": [{"node", "class", …}], "kind",
+  "charterVersion"?, "refusal"?, "nodes": [NodeRow]}],
   "undeclared": [...], "charters": [CharterRow]}` — `source` is
   `"charter"`/`"paired"`, and each `CharterRow` is
   `{"mesh", "declared", "version", "operator", "operatorKey", "trust",
