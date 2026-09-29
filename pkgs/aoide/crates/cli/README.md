@@ -64,6 +64,19 @@ and waiting for the child before restoring the environment. `#[ignore]`'d
 like the node-connectivity pair: it needs real loopback TCP, real `curl` and
 the built binary.
 
+`mesh_transit.rs` (P-M4) raises the five-edge fixture mesh — two CHARTER
+meshes, `home` = {osaka, sakaki(relay), yomi, chiyo} gated into `away` =
+{evo, sakaki} through sakaki, with `sakaki` the one node in both. It is the
+multi-root pattern above taken to five boxes: each box gets its own
+`AOIDE_ROOT` and its own minted identity, the operator box roots both meshes
+and signs both charters, and every other box trusts the operator key from its
+`config.toml` and takes the signed pair. The two deliberately broken charters
+live under `tests/fixtures/` as TEMPLATES (`{sakaki}`/`{stranger}` stand in
+for node lines, which carry a live key and binding and so can only be minted
+at run time). No child process, no network — it reads declarations through
+`aoide_storage::routing`, and its `fixture()`/`Fixture` helpers are the ones
+S2–S4 reuse to route and deposit over the same mesh.
+
 ## What it consumes
 
 `aoide-protocol`, `aoide-storage`, `aoide-conduct`, `aoide-client`,
