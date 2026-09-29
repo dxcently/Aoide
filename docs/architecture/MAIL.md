@@ -308,14 +308,18 @@ An entry is an envelope plus local facts:
   per-entry read flag has no high-water counterpart and is not carried:
   every migrated entry is unread once. Acks are receipts addressed back
   to the origin.
-- `type=transit` entries are letters the node is relaying (§Transit),
-  held sealed — the container and its routing metadata (the hop that
-  deposited it, the `next` node it goes to, the mesh it rides there, and
-  whether that node is held for), never an opened envelope, never a
-  mailbox name, never a byte of the letter; readers hide them unless
-  asked. The line is the hub's own record and stays (append-only); the
-  hub's SPOOL entry toward `next` is what retires, and it retires when
-  that hop accepts the container.
+- `type=transit` entries are letters the node is relaying (§Transit): the
+  ROUTING METADATA of the hop it made — the hop that deposited it, the
+  `next` node it goes to, the mesh it rides there, whether that node is
+  held for, and the container's own digest — and nothing else, never an
+  opened envelope, never a mailbox name, never a byte of the letter and
+  never the ciphertext (the container itself waits in the spool toward
+  `next`, which is what a retry resends and what that node's poll reads);
+  readers hide these lines unless asked. The line is the hub's own record
+  and stays (append-only); the hub's SPOOL entry toward `next` is what
+  retires, and it retires when that hop ACKNOWLEDGES having it — on a
+  drain, by the deposit's acceptance; on a poll, by the poller's next poll
+  naming it in `filed`.
 - `type=post` entries are opened board posts, filed once per node and
   carrying their board id (§Boards). A charter letter and a wrap are
   applied, not filed as correspondence: the charter to `state/mesh/`, the

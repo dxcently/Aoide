@@ -328,15 +328,18 @@ fn osaka_to_chiyo_routes_via_sakaki_and_the_chain_of_two_verifies_at_chiyo() {
     aoide_storage::seal::file_transit_hop(&hop, "osaka").unwrap();
     assert_eq!(aoide_storage::outbox::list_entries("chiyo").unwrap().len(), 1, "held toward `chiyo`");
 
-    // What the hub's own store holds: the sealed container and its routing, and
-    // neither a mailbox name nor a byte of the letter.
+    // What the hub's own store holds: the routing metadata and the container's
+    // digest — no mailbox name, no byte of the letter, and no second copy of the
+    // ciphertext (the spool toward `chiyo` is where the container lives).
     let transit = aoide_storage::mail::read_transit_unlocked().unwrap();
     assert_eq!(transit.len(), 1, "one transit line at the hub");
     assert_eq!(transit[0].next, "chiyo");
     assert!(transit[0].held);
+    assert_eq!(transit[0].digest.len(), 64, "the container's own digest, hex");
     let logged = serde_json::to_string(&transit[0]).unwrap();
     assert!(!logged.contains("conductor"), "no mailbox name at the hub: {logged}");
     assert!(!logged.contains("a letter for chiyo"), "and no letter bytes: {logged}");
+    assert!(!logged.contains("\"ct\""), "and no ciphertext: the spool is where that is: {logged}");
 
     // `chiyo` opens it: two hops, the origin's and the relay's, ending here.
     fx.enter("chiyo");

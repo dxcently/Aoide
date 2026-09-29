@@ -1755,14 +1755,16 @@ enum HopStep {
 }
 
 /// Put one hop's container on THIS box's own disk, in the two places a hub keeps
-/// it: the mailbase's `transit` entry (the container and its routing metadata,
-/// never an opened envelope) and the spool toward `next`, where it waits for the
-/// drain or for `next`'s own poll. Only then is the container recorded as
-/// admitted — the same filed-then-recorded rule `Opened` follows, so a refusal
-/// or a crash before the write re-runs instead of answering `duplicate` for a
-/// letter that is on no disk.
+/// it: the spool toward `next`, where it waits for the drain or for `next`'s own
+/// poll and from which a retry resends the container byte-identically, and the
+/// mailbase's `transit` entry — this hop's own record of what it carried, holding
+/// the routing metadata and the container's digest and NOT the ciphertext (a
+/// second copy of the letter is what the spool is for). Only then is the
+/// container recorded as admitted — the same filed-then-recorded rule `Opened`
+/// follows, so a refusal or a crash before the write re-runs instead of answering
+/// `duplicate` for a letter that is on no disk.
 pub fn file_transit_hop(hop: &TransitHop, via: &str) -> Result<(), String> {
-    mail::file_transit(&hop.container, &hop.next, &hop.mesh, hop.held, via)?;
+    mail::file_transit(&hop.digest, &hop.next, &hop.mesh, hop.held, via)?;
     let entry = if hop.held {
         crate::outbox::OutboxEntry::transit_held((*hop.container).clone())
     } else {

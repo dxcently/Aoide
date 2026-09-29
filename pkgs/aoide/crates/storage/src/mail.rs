@@ -221,14 +221,21 @@ pub struct Entry {
     pub envelope: Envelope,
 }
 
-/// One `base.jsonl` line holding a SEALED CONTAINER this node is relaying
-/// (MAIL.md §Transit): the container and the routing metadata, never an opened
-/// envelope. No mailbox name reaches this disk — a hub cannot open the
-/// container, so it has no names to write, and `to.name` lives only inside `ct`.
+/// One `base.jsonl` line recording a hop this node made for a sealed container
+/// (MAIL.md §Transit): the routing metadata — where it went, in which zone,
+/// whether that node is held, and the container's digest — and NOT the container.
 ///
-/// Written by [`file_transit`], one line per hop, keyed by the container's
-/// `msgid` and local `seq` like every other entry, so `next_seq` counts it and
-/// the append-only/truncate-a-torn-tail discipline is the same one.
+/// **Nothing here is the letter.** The ciphertext, the routing metadata and the
+/// container's own bytes live in the SPOOL toward `next`, which is what a retry
+/// resends and what `next`'s own poll reads; this line is the hub's record that
+/// the hop happened, so a second copy of `ct` would be the whole letter kept for
+/// a reason nothing reads it for. No mailbox name reaches this disk either: a hub
+/// cannot open the container, so it has no names to write, and `to.name` lives
+/// only inside `ct`.
+///
+/// Written by [`file_transit`], one line per hop, with a local `seq` like every
+/// other entry, so `next_seq` counts it and the append-only/truncate-a-torn-tail
+/// discipline is the same one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransitEntry {
@@ -241,7 +248,12 @@ pub struct TransitEntry {
     pub kind: String,
     /// The hop that deposited it here.
     pub via: String,
-    pub container: crate::seal::Container,
+    /// The container's own immutable-fields digest (`seal`'s dedup digest) — what
+    /// identifies the bytes this hop is carrying WITHOUT holding them. The
+    /// container itself lives in the spool toward `next`, which is what a retry
+    /// and the poll read; a second copy here would be the whole ciphertext kept
+    /// for a reason nothing reads it for.
+    pub digest: String,
     /// The node this hop hands it to next, and the zone it rides there.
     pub next: String,
     pub mesh: String,
@@ -683,7 +695,7 @@ pub fn read_transit_unlocked() -> Result<Vec<TransitEntry>, String> {
 /// landed. So there is no write-order pair here — this one append is the whole
 /// step.
 pub fn file_transit(
-    container: &crate::seal::Container,
+    digest: &str,
     next: &str,
     mesh: &str,
     held: bool,
@@ -692,7 +704,7 @@ pub fn file_transit(
     let next = next.to_string();
     let mesh = mesh.to_string();
     let via = via.to_string();
-    let container = container.clone();
+    let digest = digest.to_string();
     with_lock(move || {
         let seq = next_seq()?;
         let entry = TransitEntry {
@@ -700,7 +712,7 @@ pub fn file_transit(
             received_at: now_iso_utc(),
             kind: ENTRY_TYPE_TRANSIT.to_string(),
             via,
-            container,
+            digest,
             next,
             mesh,
             held,

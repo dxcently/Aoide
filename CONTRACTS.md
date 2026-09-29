@@ -3551,7 +3551,15 @@ third mesh choice.
 
 `seq` is local to the node, like an NNTP article number — never crosses a
 link; it is `last line's seq + 1`, read under the lock. `type=letter` is
-`mail send`'s own filing; `type=receipt` carries what a delivered message
+`mail send`'s own filing; `type=transit` is a HOP this node made for a sealed
+container (`mail::file_transit`, MAIL.md §Transit): one line holding the
+routing metadata — the depositing hop, the `next` node, the mesh it rides
+there, whether that node is held for, and the container's own digest — and
+NOT the container: the ciphertext waits in `state/outbox/<next>/`, which is
+what a retry resends and what that node's own poll reads, so a copy here
+would be the whole letter kept for a reason nothing reads it for. Readers
+hide `transit` lines (`mail::read_entries_unlocked`); `mail::read_transit_unlocked`
+is the hub's own view. `type=receipt` carries what a delivered message
 lands with (from, target, text, receivedAt) inside the envelope shape,
 signed by the box identity (`identity::load_or_mint` — a box that has
 never paired mints its key on its first letter) — both
