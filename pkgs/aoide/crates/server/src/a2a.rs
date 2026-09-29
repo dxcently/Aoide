@@ -3778,9 +3778,17 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
     // The acknowledgements land FIRST, so what this answer offers is what the
     // poller has NOT yet said it has: an entry whose response was lost is offered
     // again rather than retired into silence.
+    let mut retired: Vec<String> = Vec::new();
     for msgid in &acknowledged {
-        aoide_storage::outbox::retire_acknowledged(&poller, msgid)
-            .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
+        // **A retirement is a write, and rule 6 puts it in the log.** The
+        // poller's own acknowledgement is what ends this hub's custody of a
+        // container, so an operator reading the log sees which letters stopped
+        // being held here and on whose word.
+        if aoide_storage::outbox::retire_acknowledged(&poller, msgid)
+            .map_err(|e| (-32603_i64, format!("internal error: {e}")))?
+        {
+            retired.push(msgid.clone());
+        }
     }
     // P-SEAL: one answer, two lists. A sealed entry's container is what a
     // destination holding this node's binding needs; the plaintext envelope
@@ -3847,13 +3855,20 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
         "a2a.aoide/mailPoll",
         "ok",
         &format!(
-            "node {poller} polled: {} container(s) and {} plaintext envelope(s) handed over{}",
+            "node {poller} polled: {} container(s) and {} plaintext envelope(s) handed over{}, {} \
+             acknowledged and retired{}",
             containers.len(),
             envelopes.len(),
             if withheld.is_empty() {
                 String::new()
             } else {
                 format!(", {} withheld ({SEALED_REQUIRED})", withheld.len())
+            },
+            retired.len(),
+            if retired.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", retired.join(", "))
             }
         ),
     );
@@ -16078,6 +16093,13 @@ mod tests {
         let second = mail_poll(&json!({ "node": "box-b", "filed": [msgid] }), &ctx).unwrap();
         assert_eq!(second["containers"].as_array().unwrap().len(), 0, "named: retired, not offered");
         assert!(aoide_storage::outbox::list_entries("box-b").unwrap().is_empty());
+        // The retirement is a write, and it is in the log: the count, the msgids,
+        // and the poller whose word ended this hub's custody.
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(
+            log.contains("1 acknowledged and retired") && log.contains(&msgid),
+            "the ok line names what it retired: {log}"
+        );
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
