@@ -1582,7 +1582,7 @@ mod tests {
         (listener, port)
     }
 
-    /// **D6: an older relay refuses transit, and the refusal PARKS the letter at
+    /// **An older relay refuses transit, and the refusal PARKS the letter at
     /// its sender.** Nothing on the wire names a peer's version, so a pre-P-M4
     /// relay cannot be recognised — it answers the taught word for a container
     /// addressed somewhere else (`addressing-mismatch`: it has never heard of a

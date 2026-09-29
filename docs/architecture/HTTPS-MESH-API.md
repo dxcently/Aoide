@@ -247,7 +247,7 @@ machines. It is shaped like agenix: public keys in one file, one signer.
    to the ones this box can DIAL — a node it has a record for, or a charter
    `address` the drain reads.** A node with no record of its own is reached at
    the address the charter declares for it (`dial_of` → `dial_node`), so a
-   machine that joined by `--operator` or by file is no longer unreachable:
+   machine that joined by `--operator` or by file is dialled like any other:
    only an address that is `poll` waits for that machine's own ask. The receive
    half is already in place: the door admits and applies such a letter from an
    origin it holds no record for (Connections and trust, above). `aoide mesh

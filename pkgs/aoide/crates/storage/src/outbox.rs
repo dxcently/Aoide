@@ -960,10 +960,11 @@ pub fn parked_transit_refusal(msgid: &str) -> Option<String> {
 /// **The entry is found by `msgid` across the spool, and the `to.node` check is
 /// what makes that safe.** Under transit a letter's entry lives under the HOP it
 /// was handed to, not under its destination — the destination's spool was never
-/// this box's to write — so "the spool directory named by `ack.header.from.node`"
-/// is no longer where its entry is. What still identifies the entry is what spec
+/// this box's to write — so the spool directory a receipt's signer names is not
+/// where its entry sits. What still identifies the entry is what spec
 /// item 7 says: a receipt from `X` naming `msgid` M retires an entry whose own
-/// `to.node` is `X`. So the lookup is the file named M in any node's spool, kept
+/// `to.node` is `X` and whose mesh is the receipt's own. So the lookup is the file
+/// named M in any node's spool, kept
 /// only when that entry's `envelope.header.to.node` is the ack's signer — no
 /// looser than before, and blind to where a hop put it. The ack's signer is
 /// already proven genuine by [`crate::mail::deposit`]'s own origin-signature

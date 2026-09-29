@@ -2402,8 +2402,8 @@ pub(crate) fn default_self_url() -> String {
 /// overrides this whole function outright, mirroring `--self-url`; every
 /// caller only ever reaches this as an `Option::or_else` fallback.
 ///
-/// **A route that resolves to a LOOPBACK address claims NO hop at all
-/// (D5).** `pair` between two daemons on one machine — `pair
+/// **A route that resolves to a LOOPBACK address claims NO hop at all.**
+/// `pair` between two daemons on one machine — `pair
 /// http://127.0.0.1:18712/`, and the hostname arm's own heard-source when
 /// the second daemon advertises over loopback — routed the outbound trick
 /// to `127.0.0.1`, so the record was stamped `via:"ssh://khoa@127.0.0.1"`:
@@ -5068,7 +5068,7 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
             Err(e) => return Outcome::error(cmd, format!("state/mail: {e}")),
         };
     let msgid = envelope.msgid.clone();
-    // P-SEAL + P-M4: the entry is built at MINT — sealed to the destination's
+    // The entry is built at MINT — sealed to the destination's
     // binding when one is held, plaintext when none is, parked when the one
     // held is not usable now (`mail_wire::spool_entry`) — and it is spooled
     // toward the node the ROUTE picked, which is the destination itself on a

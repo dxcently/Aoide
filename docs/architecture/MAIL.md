@@ -474,12 +474,18 @@ door's audit name whitelist gains both names so they never log as bare
      `transit` filing rings nothing and owes NO ack: the hub appends its own
      hop signature naming the `next` node the route picks, spools the
      container toward that node (held when the route says the node asks for
-     itself), and retires its own custody when that hop ACCEPTS it — waiting
-     for the destination's receipt would leave every hub holding a copy of
-     every letter it relayed, and a `poll` destination never answers at all.
+     itself), and retires its own custody when that hop takes it — on a drain,
+     by the deposit's acceptance; on a poll, by the poller's next poll naming
+     the msgid in `filed`, since a hand-over it never acknowledged may have
+     been lost. The destination's own receipt is what ends the ORIGIN's
+     custody, and it reaches the origin the same way the letter travelled (a
+     `poll` destination's receipt rides back through its relay); a hub waits
+     for none of it, or every hub would hold a copy of every letter it
+     relayed.
   Receipts (acks) are envelopes deposited through the same method — one
   routing path for everything, so acks traverse hubs for free.
-- **`aoide/mailPoll`** `{ node }` → `{ envelopes[] }`. The caller asks
+- **`aoide/mailPoll`** `{ node, filed? }` → `{ envelopes[], containers[] }`.
+  The caller asks
   "anything waiting for me?" and receives every outbox entry spooled
   toward the caller's node — all `hold` ones, and `now` ones whose own
   attempts have been failing — oldest first, at most fifty of them per
@@ -487,8 +493,14 @@ door's audit name whitelist gains both names so they never log as bare
   what it filed, so a spool bigger than one answer drains over the next
   asks instead of being declined as one oversized body). The caller's
   verified identity must BE `node` (no polling on another's behalf), hold
-  `message` in the mesh the request names, and not be `down`. Handed-over
-  entries stay in the outbox
+  `message` in the mesh the request names, and not be `down`. **`filed` is
+  the caller's acknowledgement** — the msgids it filed out of its PREVIOUS
+  poll of this node (`aoide_storage::outbox::filed_pending`) — and the hub
+  retires its own custody of those (a `transit` entry, and only that) before
+  it offers: a response can be lost, so the hand-over itself is not an
+  acknowledgement, and anything the poller has not yet named is offered
+  again. Handed-over
+  `letter` entries stay in the outbox
   until acked like any other; a re-poll before the ack re-hands them and
   the receiver's dedup makes that harmless. **An HTTPS adapter's answer names
   what it would not hand over**: an entry spooled before the poller published

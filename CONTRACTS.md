@@ -8103,9 +8103,14 @@ the drain owns those, and offering one here would double-drive it from two
 callers). Nothing else rides the answer: no flavor, no tries, no route, and
 no marker that a batch was ever handed over.
 
-**A poll writes nothing at all.** No `tries` stamp, no `last_polled_at`,
+**A poll writes one thing, and it is the caller's own acknowledgement.** The
+request may carry `filed` — the msgids the poller filed out of its previous poll
+of this node — and the hub retires its own `transit` custody of exactly those
+(`outbox::retire_acknowledged`) BEFORE it offers, which is why an entry whose
+response was lost is offered again rather than retired into silence. Nothing
+else is written: no `tries` stamp, no `last_polled_at`,
 no "already handed over" bookmark — which is exactly why a re-poll before
-the ack hands the same envelopes over again, and why an entry still leaves
+the ack hands the same envelopes over again, and why a `letter` entry still leaves
 the spool only when the far end's ordinary receipt retires it (a `letter`
 filed by the poller mints a receipt exactly as a deposit would; an ack is
 an envelope, so the poller's own next drain carries it back) or through

@@ -752,15 +752,19 @@ by decision — no embedded database yet
   and `deposit` carry neither `mesh` nor `transit` — P-M2's envelope is
   exactly P-M1's shape, addressed at a real node instead of `self`.
 
-  P-M4 adds the second kind of line the store holds, and the hop that writes
-  it: `mail::TransitEntry` (`ENTRY_TYPE_TRANSIT`) is a SEALED CONTAINER this
-  node is relaying, with its routing metadata — never an envelope, never a
-  mailbox name, never a byte of the letter — and `seal::file_transit_hop` is
+  The store holds a second kind of line too, and a hop is what writes it:
+  `mail::TransitEntry` (`ENTRY_TYPE_TRANSIT`) is a hop this node made for a
+  sealed container — the routing metadata and the container's digest, never an
+  envelope, never a mailbox name, never a byte of the letter and never the
+  ciphertext (the container waits in the spool toward `next`, which is what a
+  retry resends) — and
+  `seal::file_transit_hop` is
   what files it and spools the container toward the next hop. Readers hide
   transit lines (`read_entries_unlocked`), `next_seq` counts them, and the
-  hub's own spool entry retires when that hop accepts the container
-  (`outbox::retire_transit_handover` on a poll, the deposit's own acceptance on
-  a drain) — never on the destination's receipt, which the hub cannot read.
+  hub's own spool entry retires when that hop HAS the letter
+  (`outbox::retire_acknowledged` when a poller names the msgid in `filed`, the
+  deposit's own acceptance on a drain) — never on the destination's receipt,
+  which a hub never sees.
 
   P-M5a-1 adds the doorbell's own state and its safety floor: `arms(kind)`
   is the one place that decides which entry kinds ring (`letter` only,
