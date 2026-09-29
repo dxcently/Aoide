@@ -7685,14 +7685,19 @@ no relay, hub or HTTPS hop ever carries plaintext.
 **The mesh rule (P-CHARTER).** Every signed request names the mesh it acts
 in, inside its per-request signature (`X-Aoide-Mesh`, a sixth field of
 `wire_auth::canonical_string`), and the caller's grant is read in that mesh
-and no other. For a deposit, the request's mesh is compared with the
-container's **`ctx.originMesh`** — the SIGNED one — inside
-`seal::deposit_container`, AFTER the origin signature verifies; a mismatch
-is refused with `mesh-mismatch`. The container's own `mesh` field is
-deliberately NOT an admission input: it is hop-mutable by design, so a
-spooling relay or a TLS edge could otherwise turn an accepted deposit into
-a permanent refusal by flipping one unsigned byte. P-M4's transit is where
-a hop's `mesh` is checked, at the hop, against the zone clause. A request
+and no other. The container's own `mesh` field is NOT an admission input: it
+is hop-mutable by design, so a spooling relay or a TLS edge could otherwise
+turn an accepted deposit into a permanent refusal by flipping one unsigned
+byte. What decides where a letter may be deposited is the hop chain's zone
+clause (`seal::walk_chain_with`, MAIL.md §Wire step 3): each element is
+verified in the mesh THAT HOP signed (a charter line for a charter mesh, a
+paired record for a pair mesh), a mesh change between two elements must be
+signed by the node the previous mesh declares as its gate into the new one,
+the last element must be signed in the mesh the deposit is made in, and the
+ORIGIN's two signatures are verified in `ctx.originMesh` — the mesh the
+origin signed — through that mesh's declaration. A crossing no gate signed,
+or a last hop whose signed zone is not the one offered, is `zone-violation`.
+A request
 that names no mesh (a pre-charter peer) is evaluated in `[pairing]
 homeMesh` **by that mesh's rules** — its governing charter first, its paired
 records only where no charter is shaped for it (review N1; the row below).
