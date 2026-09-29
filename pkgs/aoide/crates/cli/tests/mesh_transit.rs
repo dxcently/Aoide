@@ -975,6 +975,50 @@ fn entry_prev(container: &aoide_storage::seal::Container, index: usize) -> [u8; 
     prev
 }
 
+/// **A charter mesh that does not carry a box's key gives it no name.** `evo` is
+/// a member of `away` and of no other mesh; a container riding `home` — signed by
+/// `osaka`, who IS a member — deposited at evo's own door is answered
+/// `not-a-member`: the box asked to carry it has no name in that mesh, and its
+/// hostname is not a name the charter gave anyone. The message rides a REAL door,
+/// and the box that is a stranger is a real one.
+#[test]
+fn a_stranger_in_a_charter_mesh_is_told_not_a_member_at_the_door() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("stranger-door");
+    let _doors = fx.doors(&["osaka", "evo"]);
+
+    // osaka spools a letter for chiyo toward its relay — a container the relay
+    // would carry, signed by a member of `home`.
+    fx.enter("osaka");
+    let sent = dispatch(&cli_invocation(
+        &["mail", "send"],
+        &["not evo's to carry"],
+        &[("to", "chiyo/conductor"), ("json", "true")],
+    ));
+    assert_eq!(sent.status, Status::Ok, "{}", sent.message);
+    let container = aoide_storage::outbox::list_entries("sakaki").unwrap()[0]
+        .container
+        .clone()
+        .expect("sealed");
+
+    // At EVO's door — a member of `away`, a stranger in `home`.
+    let answer = door_post(
+        fx.ports["evo"],
+        "osaka",
+        HOME,
+        "aoide/mailDeposit",
+        serde_json::json!({ "container": container }),
+    );
+    let result = &answer["result"];
+    assert_eq!(result["status"], "refused", "{answer}");
+    assert_eq!(result["reason"], aoide_storage::routing::NOT_A_MEMBER, "{answer}");
+    let log = std::fs::read_to_string(fx.boxes["evo"].join("log")).unwrap_or_default();
+    assert!(log.contains(aoide_storage::routing::NOT_A_MEMBER), "and it is audited: {log}");
+    fx.enter("evo");
+    assert!(aoide_storage::mail::read_transit_unlocked().unwrap().is_empty(), "a stranger files no hop");
+    assert!(aoide_storage::outbox::list_entries("chiyo").unwrap().is_empty(), "and spools nothing onward");
+}
+
 /// A chain truncated by dropping the tail never reaches the destination: the last
 /// hop still in it hands the letter to `sakaki`, so `chiyo` refuses it
 /// (`broken-chain`) and owes no ack — the letter is on no mailbox, and the
