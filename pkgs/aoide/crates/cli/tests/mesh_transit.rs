@@ -484,7 +484,81 @@ fn a_host_whose_name_is_not_its_charter_name_still_hops_and_still_receives() {
     }
 }
 
-/// A chain truncated by dropping the tail never reaches the destination: the last
+/// **A learnt binding is only usable if it is the DECLARED key's.** A binding is
+/// stored per NAME, so a file left by an earlier pairing — or written by anything
+/// on this machine — would otherwise seal a letter to a key the mesh no longer
+/// trusts that name for. Here `home`'s charter gives `chiyo` one age key and a
+/// stale paired record gives the same name another, with a binding signed by the
+/// stale one on disk: the letter is sealed to the CHARTER's key, never the stale
+/// record's.
+#[test]
+fn a_learnt_binding_that_is_not_the_declared_key_is_not_used() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("stale-binding");
+    fx.enter("osaka");
+
+    let declared = aoide_storage::charter::governing(HOME).unwrap().nodes["chiyo"].age.clone();
+    // The stale record's key: a second identity, minted for this test alone.
+    let stale_kp = aoide_storage::identity::load_or_mint_seed_file(
+        &std::path::PathBuf::from(aoide_storage::fs::state_dir()).join("stale.key"),
+    )
+    .unwrap()
+    .0;
+    // A DIFFERENT age key, so which binding was used is visible in the container.
+    let (stale_age, _) = aoide_storage::seal::load_or_mint_age_identity().unwrap();
+    let stale_recipient = aoide_storage::seal::recipient_of(&stale_age);
+    let stale_binding = aoide_storage::seal::mint_binding(
+        &stale_kp,
+        &stale_recipient,
+        1,
+        &aoide_storage::time::now_iso_utc(),
+        &aoide_storage::time::shift_iso_utc(&aoide_storage::time::now_iso_utc(), 86_400),
+    )
+    .unwrap();
+    assert_ne!(stale_recipient, declared.age_pubkey, "two different age keys, one per binding");
+    assert_ne!(stale_binding.identity_key, aoide_storage::charter::governing(HOME).unwrap().nodes["chiyo"].key);
+
+    // The record the stale binding is learnt against, and the binding itself.
+    let mut nodes = aoide_storage::node_store::load_nodes();
+    aoide_storage::node_store::upsert_paired_node(
+        &mut nodes,
+        "chiyo",
+        "ssh://chiyo",
+        &stale_kp.info().pubkey_hex,
+        &aoide_storage::time::now_iso_utc(),
+        &["message".to_string()],
+        HOME,
+    );
+    aoide_storage::node_store::save_nodes(&nodes).unwrap();
+    std::fs::create_dir_all(aoide_storage::seal::peer_bindings_dir()).unwrap();
+    std::fs::write(
+        aoide_storage::seal::peer_bindings_dir().join("chiyo.json"),
+        serde_json::to_string(&stale_binding).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        aoide_storage::seal::usable_binding_for("chiyo", &aoide_storage::time::now_iso_utc()).is_some(),
+        "the stale file IS usable by itself — that is the trap"
+    );
+
+    let envelope = aoide_storage::mail::mint_outbound_letter_from(
+        "osaka",
+        "conductor",
+        "chiyo",
+        "conductor",
+        "to the charter's key, not the stale record's",
+        HOME,
+    )
+    .unwrap();
+    let entry = aoide_client::mail_wire::spool_entry("chiyo", "chiyo", HOME, envelope, false).unwrap();
+    let container = entry.container.expect("the charter line's own binding seals it");
+    assert_eq!(
+        container.to.age, declared.age_pubkey,
+        "sealed to the age key the CHARTER declares for `chiyo`"
+    );
+    assert_ne!(container.to.age, stale_binding.age_pubkey, "never to the stale record's");
+}
+
 /// hop still in it hands the letter to `sakaki`, so `chiyo` refuses it
 /// (`broken-chain`) and owes no ack — the letter is on no mailbox, and the
 /// origin's own spool still reports it undelivered.

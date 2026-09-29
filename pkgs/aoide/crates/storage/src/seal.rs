@@ -1552,16 +1552,11 @@ pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<Co
     let own_key = kp.info().pubkey_hex.clone();
     let declared = crate::routing::own_name_in(&set, request_mesh, &own_key);
     if container.to.node != local && declared.as_deref() != Some(container.to.node.as_str()) {
-        // A letter in transit: nothing on this branch opens it, so the chain is
-        // checked here, without a key — every hop's own entry, every crossing by
-        // a declared gate, and the last hop signed in the zone the depositing hop
-        // is speaking in.
-        if let Err(refusal) = walk_chain(container, &ctx, request_mesh, &set) {
-            return Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail });
-        }
         // This box carries a letter AS a mesh's member: a charter mesh that does
-        // not carry its key has no name to carry it as, and a hostname is not a
-        // name a mesh gave anyone.
+        // not carry its key has no name to carry it as — NOT the hostname, which
+        // is not a name any mesh gave anyone — and there is nothing to check the
+        // chain against, so the stranger reads that word rather than a broken
+        // chain it could never have satisfied.
         let Some(own_name) = declared.as_deref() else {
             return Ok(refusal(
                 crate::routing::NOT_A_MEMBER,
@@ -1571,6 +1566,13 @@ pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<Co
                 ),
             ));
         };
+        // A letter in transit: nothing on this branch opens it, so the chain is
+        // checked here, without a key — every hop's own entry, every crossing by
+        // a declared gate, and the last hop signed in the zone the depositing hop
+        // is speaking in.
+        if let Err(refusal) = walk_chain(container, &ctx, request_mesh, &set) {
+            return Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail });
+        }
         return match hop_here(container, &ctx, request_mesh, &kp, own_name, digest)? {
             HopStep::Hop(hop) => Ok(ContainerOutcome::Hopped(Box::new(hop))),
             HopStep::Refused(refusal) => {
@@ -3456,6 +3458,42 @@ mod review_fix_tests {
                 assert_eq!(reason, crate::charter::CONFIG_UNREADABLE, "{detail}");
             }
             other => panic!("a set that will not load refuses, it does not fail internally: {other:?}"),
+        }
+    }
+
+    /// **A charter mesh that does not carry this box's key gives it no name.** A
+    /// box asked to carry a letter in such a mesh answers `not-a-member` — it does
+    /// not fall back to its hostname, which is not a name any mesh gave anyone, and
+    /// it does not go on to read a chain it could never have satisfied either way.
+    /// (The fixture is a charter-SHAPED mesh: `state/mesh/home/trust.json` records
+    /// an operator, no charter is in force, so the declaration names nobody at
+    /// all — the strongest form of "this box is not a member".)
+    #[test]
+    fn a_charter_mesh_that_does_not_carry_this_boxs_key_refuses_not_a_member() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let dir = aoide_test_support::unique_tmp("seal-not-a-member");
+        std::fs::create_dir_all(&dir).unwrap();
+        env(&dir);
+
+        std::fs::create_dir_all(crate::charter::mesh_state_dir("home")).unwrap();
+        std::fs::write(
+            crate::charter::trust_path("home"),
+            serde_json::json!({ "operator": "ed25519:".to_string() + &"ab".repeat(32) }).to_string(),
+        )
+        .unwrap();
+        std::fs::write(crate::config::source().path, "[pairing]\nhomeMesh = \"home\"\n").unwrap();
+
+        let binding = publish_binding().unwrap();
+        let me = crate::display::local_node_name();
+        let envelope = mail::mint_outbound_letter("alice", "elsewhere", "bob", "not mine to carry").unwrap();
+        let container = seal_envelope(&envelope, &binding, "home", "home", "elsewhere", &me, &now_iso_utc()).unwrap();
+
+        match super::deposit_container(&container, "home").unwrap() {
+            ContainerOutcome::Refused { reason, .. } => {
+                assert_eq!(reason, crate::routing::NOT_A_MEMBER);
+            }
+            other => panic!("a stranger in a charter mesh carries nothing: {other:?}"),
         }
     }
 
