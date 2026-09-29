@@ -5727,7 +5727,7 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
             .find(|n| &n.name == node)
             .is_some_and(|record| {
                 crate::mail_wire::poll_mesh(node, mesh_flag)
-                    .is_some_and(|mesh| crate::mail_wire::record_never_dialled(&mesh, record))
+                    .is_some_and(|mesh| crate::mail_wire::record_forbidden_by_declaration(&mesh, record))
             });
         if down {
             // An unreadable mesh and a `down` node are both "not dialled", and

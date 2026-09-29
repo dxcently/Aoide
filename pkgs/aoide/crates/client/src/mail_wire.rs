@@ -552,30 +552,29 @@ fn declared_never_dialled(mesh: &str, node: &str) -> bool {
     }
 }
 
-/// Is `node` declared `down` in `mesh`? The ONE predicate the drain, the poll
-/// and the reports that answer for them ask before reaching a node by name, read
-/// from the declaration SET so a mesh the set REFUSES — or a set that will not
-/// load at all — cannot say "not `down`" and dial a node its own declaration
-/// cannot vouch for. Both are FAIL CLOSED, the direction
-/// [`declared_never_dialled`] takes; a mesh the set does not hold names nothing,
-/// which is not a `down`.
-pub fn never_dialled(mesh: &str, node: &str) -> bool {
+/// **Does the declaration forbid dialling `node` in `mesh`?** True for a node the
+/// mesh declares `down` and for a mesh this box cannot read at all — a set that
+/// will not load, or an entry it REFUSES — because both mean "never dial it": the
+/// second is the fail-closed direction [`declared_never_dialled`] already takes
+/// for a `poll` address. The ONE predicate the drain, the poll and the reports
+/// that answer for them ask before reaching a node by name; a mesh the set does
+/// not hold declares nothing, so it forbids nothing.
+pub fn declaration_forbids_dial(mesh: &str, node: &str) -> bool {
     match aoide_storage::routing::declarations() {
-        Ok(set) => status_is_down(&set, mesh, node),
+        Ok(set) => forbidden_by_declaration(&set, mesh, node),
         Err(_) => true,
     }
 }
 
-/// Is the node `record` stands for declared `down` in `mesh`? The judged name is
-/// the declaration's own for the record's identity KEY
-/// (`routing::declared_name`), falling back to the record's own name only where
-/// the mesh names no such key — a `nodes.json` nickname is display, never a
-/// policy input (MAIL.md §Transit). The drain, the poll and their reports all
-/// reach the question through here, so none of them can judge a node by a name
-/// no mesh gave it.
-pub fn record_never_dialled(mesh: &str, record: &aoide_storage::node_store::Node) -> bool {
+/// [`declaration_forbids_dial`] for a RECORD: the judged name is the
+/// declaration's own for the record's identity KEY (`routing::declared_name`),
+/// falling back to the record's own name only where the mesh names no such key —
+/// a `nodes.json` nickname is display, never a policy input (MAIL.md §Transit).
+/// The drain, the poll and their reports all reach the question through here, so
+/// none of them can judge a node by a name no mesh gave it.
+pub fn record_forbidden_by_declaration(mesh: &str, record: &aoide_storage::node_store::Node) -> bool {
     match aoide_storage::routing::declarations() {
-        Ok(set) => status_is_down(&set, mesh, &judged_name(&set, mesh, record)),
+        Ok(set) => forbidden_by_declaration(&set, mesh, &judged_name(&set, mesh, record)),
         Err(_) => true,
     }
 }
@@ -597,7 +596,7 @@ fn judged_name(
 /// holds the mesh AND reads it — a set that will not load, or an entry the set
 /// REFUSES (a tampered charter, a one-sided gate, a mesh with no charter in
 /// force), means no. No report can call a node `down` in such a mesh, and nothing
-/// dials one either: [`never_dialled`] fails closed on the same two shapes.
+/// dials one either: [`declaration_forbids_dial`] fails closed on the same two shapes.
 pub fn declaration_unreadable(mesh: &str) -> bool {
     match aoide_storage::routing::declarations() {
         Ok(set) => matches!(
@@ -608,9 +607,9 @@ pub fn declaration_unreadable(mesh: &str) -> bool {
     }
 }
 
-/// [`never_dialled`] over a set the caller already loaded, failing closed the
-/// same way: a refused mesh is never dialled.
-fn status_is_down(set: &[aoide_storage::routing::Loaded], mesh: &str, name: &str) -> bool {
+/// [`declaration_forbids_dial`] over a set the caller already loaded, failing
+/// closed the same way: a mesh the set REFUSES forbids the dial too.
+fn forbidden_by_declaration(set: &[aoide_storage::routing::Loaded], mesh: &str, name: &str) -> bool {
     match aoide_storage::routing::declaration_of(set, mesh) {
         Some(Ok(declaration)) => declaration.status_of(name) == Some(aoide_storage::charter::STATUS_DOWN),
         Some(Err(_)) => true,
@@ -898,7 +897,7 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
     // own declaration says this box must not reach it (MAIL.md §Status). What is
     // spooled toward it stays spooled, and a later poll — or drain — acts on
     // whatever the declaration says then.
-    if record_never_dialled(&mesh, node) {
+    if record_forbidden_by_declaration(&mesh, node) {
         return Ok(PollOutcome::default());
     }
     // P-SEAL: publish our binding and learn theirs before taking anything
@@ -1276,7 +1275,7 @@ pub fn pollable_nodes() -> Vec<String> {
             node.verified
                 && !node.never_dialled()
                 && !revoked_by_charter(node)
-                && !poll_mesh(&node.name, None).is_some_and(|mesh| record_never_dialled(&mesh, node))
+                && !poll_mesh(&node.name, None).is_some_and(|mesh| record_forbidden_by_declaration(&mesh, node))
                 && node.grants.values().any(|caps| caps.iter().any(|a| a == "message"))
         })
         .map(|node| node.name)
@@ -1329,7 +1328,7 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
     // confiscates what was already queued (MAIL.md §Status, decision 14). The
     // spool is left exactly as it stands, so the next pass after the declaration
     // changes dials it — unchanged, no re-mint, no lost letter.
-    if mesh.as_deref().is_some_and(|mesh| record_never_dialled(mesh, &node)) {
+    if mesh.as_deref().is_some_and(|mesh| record_forbidden_by_declaration(mesh, &node)) {
         return Ok(());
     }
     // **A `poll` node is never dialled, so a drain of one opens no link at
@@ -1663,7 +1662,7 @@ mod tests {
     }
 
     /// **An unloadable declaration is never dialled, judged by the RECORD.**
-    /// `record_never_dialled`'s fail-closed arm (a set that will not load means "do not
+    /// `record_forbidden_by_declaration`'s fail-closed arm (a set that will not load means "do not
     /// reach it") is what a RECORDED node goes through, so with the config refused
     /// the bare sweep must leave it out and an explicit poll must contact nobody.
     #[test]

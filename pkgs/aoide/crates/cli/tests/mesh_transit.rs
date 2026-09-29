@@ -1750,7 +1750,7 @@ fn a_refused_or_unloadable_declaration_is_never_dialled() {
         link.is_none(),
         "and opens no link: link={link:?} entries={spooled:?} unreadable={} down={}",
         aoide_client::mail_wire::declaration_unreadable(HOME),
-        aoide_client::mail_wire::never_dialled(HOME, "yomi")
+        aoide_client::mail_wire::declaration_forbids_dial(HOME, "yomi")
     );
     assert_eq!(spooled.len(), 3, "and nothing was dropped");
 }

@@ -833,7 +833,8 @@ fn mesh_arg(inv: &Invocation) -> Option<&str> {
 ///
 /// A node WITH a record is unchanged: dialled, and its own `Err` reported —
 /// unless the mesh being signed declares it `down`, which is its own answer
-/// before any record is consulted ([`declared_down`]): never dialled, and the
+/// before any record is consulted ([`declaration_forbids_dial`]): never dialled,
+/// and the
 /// entry KEPT in the spool, since `down` stops SENDING and never confiscates.
 fn drain_spooled(mesh: &str, spooled: &[String]) -> Vec<serde_json::Value> {
     let known: std::collections::BTreeMap<String, bool> = aoide_storage::node_store::load_nodes()
@@ -858,7 +859,7 @@ fn drain_spooled(mesh: &str, spooled: &[String]) -> Vec<serde_json::Value> {
             // **A `down` node is never dialled, and the entry stays.** Asked
             // before the record half below: `down` is a fact about the mesh's
             // declaration, and a node with no record is still `down`.
-            if crate::mail_wire::never_dialled(mesh, node) {
+            if crate::mail_wire::declaration_forbids_dial(mesh, node) {
                 return json!({
                     "node": node,
                     "drained": false,
