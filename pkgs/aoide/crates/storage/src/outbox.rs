@@ -287,6 +287,16 @@ impl OutboxEntry {
     pub fn last_attempt_reached_the_peer(&self) -> bool {
         self.last_outcome == "accepted" || self.last_outcome == "duplicate"
     }
+
+    /// Did the last attempt get an ANSWER from the far end at all — a delivery
+    /// (`accepted`/`duplicate`) or a refusal (`refused: <word>`)? A transport
+    /// failure is the one thing that is not an answer: nothing came back. The
+    /// words are the DRAIN's vocabulary, so it is read HERE and nowhere else,
+    /// and it is read POSITIVELY — the answer words decide, not the absence of a
+    /// prefix.
+    pub fn last_attempt_was_answered(&self) -> bool {
+        ["accepted", "duplicate", "refused:"].iter().any(|word| self.last_outcome.starts_with(word))
+    }
 }
 
 /// Strip everything from an envelope that a sealed spool must not hold.

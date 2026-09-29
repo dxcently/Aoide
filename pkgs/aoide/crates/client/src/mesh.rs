@@ -542,19 +542,36 @@ fn node_rows(
         .collect()
 }
 
-/// What this box has OBSERVED about reaching `node`: a recorded attempt that
-/// reached the peer, one that did not, or nothing at all. It reads the outbox's
-/// own bookkeeping (each entry's `tries`/`lastOutcome`) and the link's back-off —
-/// **no probe, no dial, no network I/O** — because liveness here is a fact about
-/// the past, and a nodelist command that reached out would be its own witness.
+/// What this box has OBSERVED about reaching `node`: a recorded attempt that got
+/// an ANSWER (a delivery or a refusal — any word the far end sent back), one that
+/// got none, or nothing at all. It reads the outbox's own bookkeeping and the
+/// link's back-off — **no probe, no dial, no network I/O** — because liveness here
+/// is a fact about the past, and a nodelist command that reached out would be its
+/// own witness.
+///
+/// **The MOST RECENT thing this box knows decides**: a link still inside its
+/// back-off is a failure in progress and answers first, and otherwise it is the
+/// entry with the latest `last_try_at`. One old `accepted` sitting beside a fresh
+/// failure is a stale fact, and a refusal is an ANSWER — a peer that is up and
+/// says no, including one whose mesh declares it `down`, has been reached.
 fn liveness_of(node: &str) -> &'static str {
-    match aoide_storage::outbox::list_entries(node) {
-        Ok(entries) if entries.iter().any(|entry| entry.last_attempt_reached_the_peer()) => "reachable",
-        Ok(entries) if entries.iter().any(|entry| !entry.last_try_at.is_empty()) => "unreachable",
-        _ => match aoide_storage::outbox::read_link_state(node) {
-            Ok(Some(_)) => "unreachable",
-            _ => "unverified",
-        },
+    if let Ok(Some(link)) = aoide_storage::outbox::read_link_state(node) {
+        let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap_or(0);
+        if aoide_storage::outbox::is_held_off(&link, now_epoch) {
+            return "unreachable";
+        }
+    }
+    let Ok(entries) = aoide_storage::outbox::list_entries(node) else {
+        return "unverified";
+    };
+    let latest = entries
+        .iter()
+        .filter(|entry| !entry.last_try_at.is_empty())
+        .max_by(|left, right| left.last_try_at.cmp(&right.last_try_at));
+    match latest {
+        Some(entry) if entry.last_attempt_was_answered() => "reachable",
+        Some(_) => "unreachable",
+        None => "unverified",
     }
 }
 
@@ -1333,6 +1350,94 @@ pub fn register(r: &mut Registry) {
 mod tests {
     use super::*;
     use aoide_protocol::Door;
+
+    /// A `[mesh.<friends.nodes>]` section naming one node, written where
+    /// `config::load()` will read it — what a pair mesh's rows are read from.
+    fn declare_elsewhere(dir: &std::path::Path) {
+        std::fs::write(dir.join("config.toml"), "[mesh.friends.nodes]\nelsewhere = \"ssh://elsewhere\"\n")
+            .unwrap();
+    }
+
+    /// One spooled entry toward `node` with the bookkeeping a drain leaves behind.
+    /// The `lastOutcome` words are `OutboxEntry`'s own, so a test can describe an
+    /// observation without running a drain.
+    fn entry_with_outcome(node: &str, outcome: &str, at: &str) {
+        // The outcome doubles as the body, so two entries toward one node are
+        // two DIFFERENT msgids: a test that writes the same envelope twice in one
+        // second would overwrite its own first entry and prove nothing.
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", node, "bob", outcome).unwrap();
+        let mut entry = aoide_storage::outbox::OutboxEntry::fresh(envelope);
+        entry.tries = 1;
+        entry.last_try_at = at.to_string();
+        entry.last_outcome = outcome.to_string();
+        aoide_storage::outbox::write_entry(node, &entry).unwrap();
+    }
+
+    fn liveness_of_row(name: &str) -> String {
+        let meshes: BTreeMap<String, Mesh> =
+            [("friends".to_string(), mesh(&[(name, "ssh://elsewhere")]))].into_iter().collect();
+        let nodes = vec![node(name, true, None)];
+        let report = report(&meshes, &nodes, "selfbox");
+        report.sections[0]
+            .nodes
+            .iter()
+            .find(|row| row.name == name)
+            .unwrap_or_else(|| panic!("`{name}` has a row: {:?}", report.sections[0].nodes))
+            .liveness
+            .clone()
+    }
+
+    /// **A peer that ANSWERED has been reached, even when the answer was a
+    /// refusal.** Liveness is observation, and "it said no" is an observation.
+    #[test]
+    fn a_refused_attempt_still_counts_as_reached() {
+        with_config_root("liveness-refusal", |dir| {
+            declare_elsewhere(dir);
+            entry_with_outcome(
+                "elsewhere",
+                "refused: zone-violation: a hop carried it across a zone nobody declared",
+                "2026-09-29T10:00:00Z",
+            );
+            assert_eq!(liveness_of_row("elsewhere"), "reachable", "a refusal is an answer");
+        });
+    }
+
+    /// **A `down` (or `config-invalid`) answer is an ANSWER too**, and never a
+    /// transport failure: the peer is up, it spoke, and what it said was about
+    /// its own declaration. Reading that as `unreachable` would conflate a
+    /// declaration with an observation.
+    #[test]
+    fn a_link_state_answer_is_not_a_transport_failure() {
+        with_config_root("liveness-declared", |dir| {
+            declare_elsewhere(dir);
+            entry_with_outcome(
+                "elsewhere",
+                "refused: down: node `elsewhere` is declared `down` in mesh `friends`",
+                "2026-09-29T10:00:00Z",
+            );
+            assert_eq!(liveness_of_row("elsewhere"), "reachable", "it answered");
+        });
+    }
+
+    /// **The MOST RECENT observation decides, and a live back-off comes first.** A
+    /// stale `accepted` beside a fresh transport failure is a stale fact.
+    #[test]
+    fn an_old_answer_beside_a_fresh_failure_reads_unreachable() {
+        with_config_root("liveness-stale", |dir| {
+            declare_elsewhere(dir);
+            entry_with_outcome("elsewhere", "accepted", "2026-09-29T09:00:00Z");
+            entry_with_outcome("elsewhere", "transport: could not reach the agent", "2026-09-29T10:00:00Z");
+            assert_eq!(liveness_of_row("elsewhere"), "unreachable", "the latest attempt decides");
+
+            // A back-off in force answers before any entry does, even if the
+            // newest thing an entry records is an answer.
+            entry_with_outcome("elsewhere", "accepted", "2026-09-29T11:00:00Z");
+            assert_eq!(liveness_of_row("elsewhere"), "reachable", "with no back-off, the newest wins");
+            let now_epoch = aoide_storage::time::parse_iso_utc(&aoide_storage::time::now_iso_utc()).unwrap_or(0);
+            aoide_storage::outbox::back_off("elsewhere", now_epoch, "could not reach the agent").unwrap();
+            assert_eq!(liveness_of_row("elsewhere"), "unreachable", "a failure in progress answers first");
+        });
+    }
 
     fn mesh(nodes: &[(&str, &str)]) -> Mesh {
         Mesh {

@@ -145,6 +145,11 @@ enum DepositAttempt {
     /// which of the two shapes carried that news. The link itself is fine
     /// either way; this ONE entry is the problem.
     Refused(String),
+    /// The far end ANSWERED, with a word about its own state rather than about
+    /// this letter (`down`, `config-invalid`) — so the entry is not parked, the
+    /// LINK backs off, and the next pass retries (the same treatment a transport
+    /// failure gets, because either way there is nothing wrong with the letter).
+    LinkRefused(String),
     /// No JSON-RPC response at all — dial/tunnel/HTTP/parse failure. The
     /// LINK is the suspect, not this entry.
     TransportFailed(String),
@@ -233,7 +238,7 @@ fn classify_deposit_response(result: &Value) -> DepositAttempt {
             if reason == aoide_storage::charter::STATUS_DOWN
                 || reason == aoide_storage::charter::CONFIG_INVALID
             {
-                return DepositAttempt::TransportFailed(msg);
+                return DepositAttempt::LinkRefused(msg);
             }
             DepositAttempt::Refused(msg)
         }
@@ -1442,13 +1447,19 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
                 // used to skip `back_off` entirely on that write's error —
                 // leaving the link un-backed-off and re-dialed on every
                 // following tick, exactly when the box is already sick.
-                let mut updated = entry;
-                updated.tries += 1;
-                updated.last_try_at = aoide_storage::time::now_iso_utc();
-                updated.last_outcome = format!("transport: {reason}");
-                let recorded = aoide_storage::outbox::write_entry(node_name, &updated);
-                aoide_storage::outbox::back_off(node_name, now_epoch, &reason)?;
-                recorded?;
+                record_failed_attempt(node_name, entry, now_epoch, "transport", &reason)?;
+                break;
+            }
+            DepositAttempt::LinkRefused(reason) => {
+                // The far end ANSWERED — with a word about its OWN state (a node
+                // its mesh quarantines, a declaration set that will not load),
+                // not about this letter — so this is not a transport failure and
+                // the entry is not parked. It is recorded under the same
+                // `refused:` word a policy refusal gets, which is the vocabulary
+                // the spool reads back (`last_attempt_was_answered`), so liveness
+                // counts it as REACHED; the LINK backs off and the next pass
+                // retries.
+                record_failed_attempt(node_name, entry, now_epoch, "refused", &reason)?;
                 break;
             }
             DepositAttempt::Refused(reason) => {
@@ -1476,6 +1487,29 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
         let _ = poll_node(node_name, None);
     }
     Ok(())
+}
+
+/// Record one FAILED attempt on the entry that hit it, then back the LINK off —
+/// in that order, and never conditionally: `tries`/`lastOutcome` must move even
+/// when the spool write itself fails (a full or read-only disk is the very
+/// condition under which the link is failing too), or a dead link looks exactly
+/// like a drain that never tried. `word` is the spool's own vocabulary:
+/// `transport` for a link that answered nothing, `refused` for a far end that
+/// answered with a policy word and left the letter alone.
+fn record_failed_attempt(
+    node_name: &str,
+    entry: aoide_storage::outbox::OutboxEntry,
+    now_epoch: i64,
+    word: &str,
+    reason: &str,
+) -> Result<(), String> {
+    let mut updated = entry;
+    updated.tries += 1;
+    updated.last_try_at = aoide_storage::time::now_iso_utc();
+    updated.last_outcome = format!("{word}: {reason}");
+    let recorded = aoide_storage::outbox::write_entry(node_name, &updated);
+    aoide_storage::outbox::back_off(node_name, now_epoch, reason)?;
+    recorded
 }
 
 /// What a **delivered** deposit does to the entry it carried — the one
@@ -1552,10 +1586,10 @@ mod tests {
         assert!(matches!(word("broken-chain"), DepositAttempt::Refused(_)));
         assert!(matches!(word("bad-msgid"), DepositAttempt::Refused(_)));
         assert!(
-            matches!(word("down"), DepositAttempt::TransportFailed(_)),
-            "a link state does not: the entry stays live and retries"
+            matches!(word("down"), DepositAttempt::LinkRefused(_)),
+            "a link state does not park it: the entry stays live and retries"
         );
-        assert!(matches!(word("config-invalid"), DepositAttempt::TransportFailed(_)));
+        assert!(matches!(word("config-invalid"), DepositAttempt::LinkRefused(_)));
         assert!(matches!(
             classify_deposit_response(&serde_json::json!({ "status": "accepted" })),
             DepositAttempt::Delivered { .. }
