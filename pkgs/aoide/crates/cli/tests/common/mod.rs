@@ -349,6 +349,37 @@ impl Fixture {
         charter::accept(&source, &sig)
             .unwrap_or_else(|e| panic!("{name} takes the broken `{AWAY}`: {e}"));
     }
+
+    /// Re-sign `home` with a new `[status]` block and hand it to `name`: a
+    /// declaration change applied the way every charter is — the operator signs,
+    /// the box accepts. The fixture's own node lines fill the `[nodes]` block and
+    /// the version bumps on its own, so nothing about the mesh moves but the
+    /// statuses this call carries.
+    pub fn set_home_status(&self, name: &str, status: &[(&str, &str)]) {
+        self.enter(OPERATOR);
+        // Start from the version IN FORCE and let `sign` bump it: a re-sign is
+        // the next version or it is refused `stale-charter`.
+        let current = charter::in_force_charter(HOME).map(|c| c.version).unwrap_or(0);
+        let mut body = format!(
+            "mesh = \"{HOME}\"\nversion = {current}\nrelays = [\"sakaki\"]\n\n[nodes]\n{}\n{}\n{}\n{}\n",
+            self.lines["osaka"], self.lines["sakaki"], self.lines["yomi"], self.lines["chiyo"],
+        );
+        if !status.is_empty() {
+            body.push_str("\n[status]\n");
+            for (node, s) in status {
+                body.push_str(&format!("{node} = \"{s}\"\n"));
+            }
+        }
+        body.push_str(&format!("\n[gates]\n{AWAY} = \"sakaki\"\n"));
+        std::fs::write(charter::source_path(HOME), body).unwrap();
+        charter::sign(HOME, None).unwrap();
+        let source = std::fs::read(charter::source_path(HOME)).unwrap();
+        let sig = std::fs::read(charter::source_sig_path(HOME)).unwrap();
+
+        self.enter(name);
+        charter::accept(&source, &sig)
+            .unwrap_or_else(|e| panic!("{name} takes the re-signed `{HOME}`: {e}"));
+    }
 }
 
 /// Take a minted node line's own name off it, leaving the identity it declares

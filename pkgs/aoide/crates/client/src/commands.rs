@@ -5710,12 +5710,25 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
         None => crate::mail_wire::pollable_nodes(),
     };
 
+    let mesh_flag = inv.flags.get("mesh").map(String::as_str);
     let mut rows: Vec<Value> = Vec::new();
     let mut filed = 0usize;
     let mut refused_total = 0usize;
     let mut withheld_total = 0usize;
+    let mut not_dialled = 0usize;
     for node in &targets {
-        match crate::mail_wire::poll_node(node, inv.flags.get("mesh").map(String::as_str)) {
+        // **A `down` node is not polled, and the command SAYS so.** `poll_node`
+        // returns an empty outcome for it, and reporting that as "polled" is the
+        // same lie `no-record` was: the node's own declaration says this box must
+        // not reach it, and what is spooled toward it stays spooled.
+        if crate::mail_wire::poll_mesh(node, mesh_flag)
+            .is_some_and(|mesh| crate::mail_wire::declared_down(&mesh, node))
+        {
+            not_dialled += 1;
+            rows.push(json!({ "node": node, "status": "not-dialled", "reason": "down", "filed": 0 }));
+            continue;
+        }
+        match crate::mail_wire::poll_node(node, mesh_flag) {
             Ok(outcome) => {
                 filed += outcome.filed;
                 refused_total += outcome.refused.len();
@@ -5743,7 +5756,7 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
         "no paired node holds `message` — nothing to poll".to_string()
     } else {
         format!(
-            "polled {} node(s): {filed} envelope(s) filed{}{}{}",
+            "polled {} node(s): {filed} envelope(s) filed{}{}{}{}",
             targets.len(),
             if refused_total == 0 { String::new() } else { format!(", {refused_total} container(s) refused") },
             if withheld_total == 0 {
@@ -5751,7 +5764,8 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
             } else {
                 format!(", {withheld_total} withheld (sealed-required — they stay on the far side until this box publishes a binding)")
             },
-            if unreachable == 0 { String::new() } else { format!(", {unreachable} unreachable") }
+            if unreachable == 0 { String::new() } else { format!(", {unreachable} unreachable") },
+            if not_dialled == 0 { String::new() } else { format!(", {not_dialled} not dialled (declared `down`)") }
         )
     };
     Outcome::ok(cmd, message)

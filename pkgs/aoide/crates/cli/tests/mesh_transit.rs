@@ -1270,3 +1270,182 @@ fn a_chain_truncated_by_dropping_the_tail_yields_no_ack_and_leaves_the_letter_un
     assert_eq!(still[0].envelope.msgid, msgid);
     assert!(!still[0].last_attempt_reached_the_peer(), "and reports it undelivered");
 }
+
+// ── `down` and `hold` (MAIL.md §Status) ─────────────────────────────────
+
+/// **A `down` node's own door requests are refused.** `yomi` is the fixture's
+/// quarantined node; a request it signs — a letter it would have carried — is
+/// answered `down`, before anything is filed or hopped, and the refusal is in
+/// the receiving box's own log. The letters it queued before are another
+/// test's business: this one is about the REQUEST.
+#[test]
+fn a_down_nodes_requests_are_refused_at_the_door() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("down-door");
+    let _doors = fx.doors(&["osaka"]);
+
+    // A real container, minted and spooled by a box that is not `down`.
+    fx.enter("osaka");
+    let sent = dispatch(&cli_invocation(
+        &["mail", "send"],
+        &["somebody else's"],
+        &[("to", "chiyo/conductor"), ("json", "true")],
+    ));
+    assert_eq!(sent.status, Status::Ok, "{}", sent.message);
+    let container = aoide_storage::outbox::list_entries("sakaki").unwrap()[0]
+        .container
+        .clone()
+        .expect("sealed");
+
+    // `yomi` signs the same deposit at osaka's door. Its mesh declares it
+    // `down`, so its own requests stop here — the container never reaches the
+    // chain check, let alone a filing.
+    fx.enter("yomi");
+    let answer = door_post(
+        fx.ports["osaka"],
+        "yomi",
+        HOME,
+        "aoide/mailDeposit",
+        serde_json::json!({ "container": container }),
+    );
+    let result = &answer["result"];
+    assert_eq!(result["status"], "refused", "{answer}");
+    assert_eq!(result["reason"], aoide_storage::charter::STATUS_DOWN, "{answer}");
+    let log = std::fs::read_to_string(fx.boxes["osaka"].join("log")).unwrap_or_default();
+    assert!(
+        log.contains("declared `down`") && log.contains("a2a.aoide/mailDeposit"),
+        "and it is audited under the method's own label: {log}"
+    );
+}
+
+/// **An unloadable declaration refuses BOTH mail methods, and only them.**
+/// MAIL.md §Status: a broken zone table means no zone checks, and no zone checks
+/// means no mail — never mail with the walls down — while every other method is
+/// answered exactly as before. A real door, on a box whose `[status]` names a
+/// node the mesh does not have (the section is refused as a whole).
+#[test]
+fn an_unloadable_declaration_refuses_both_mail_methods_and_nothing_else() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("door-config-invalid");
+    let _doors = fx.doors(&["osaka"]);
+
+    let config = format!(
+        "[pairing]\nhomeMesh = \"{HOME}\"\n\n[mesh.{HOME}]\n{}\n[mesh.{AWAY}]\n{}\n\n\
+         [mesh.{HOME}.status]\nnobody = \"down\"\n",
+        aoide_storage::charter::operator_line(&fx.operators[HOME]),
+        aoide_storage::charter::operator_line(&fx.operators[AWAY]),
+    );
+    std::fs::write(fx.boxes["osaka"].join("config.toml"), config).unwrap();
+
+    // A caller still has to RESOLVE before the method runs, and a broken config
+    // takes the charter rung away with it (that rung is a config question) — so
+    // the caller's own verified record is what proves it here. The registry rung
+    // reads no config at all.
+    fx.enter("yomi");
+    let yomi_key = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
+    fx.enter("osaka");
+    let mut nodes = aoide_storage::node_store::load_nodes();
+    aoide_storage::node_store::upsert_paired_node(
+        &mut nodes,
+        "yomi",
+        "http://127.0.0.1:1/",
+        &yomi_key,
+        &aoide_storage::time::now_iso_utc(),
+        &["message".to_string()],
+        HOME,
+    );
+    aoide_storage::node_store::save_nodes(&nodes).unwrap();
+
+    // `door_post` signs as the box this process is entered on, so the caller is
+    // `yomi` and the request must be made FROM yomi's box.
+    fx.enter("yomi");
+    let deposit = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/mailDeposit", serde_json::json!({ "container": {} }));
+    assert_eq!(deposit["result"]["status"], "refused", "{deposit}");
+    assert_eq!(deposit["result"]["reason"], "config-invalid", "{deposit}");
+
+    let poll = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/mailPoll", serde_json::json!({ "node": "yomi" }));
+    assert_eq!(poll["result"]["status"], "refused", "{poll}");
+    assert_eq!(poll["result"]["reason"], "config-invalid", "{poll}");
+
+    // Every other method is untouched: a method outside the mail lane is
+    // dispatched normally, and only the two mail methods ever read the
+    // declarations. (`aoide/binding` is NOT a probe for this — it rides the
+    // mail lane and reads the charter to resolve its caller's grant.)
+    let other = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/notAMethod", serde_json::json!({}));
+    assert!(!other["error"].is_null(), "the door still answers a non-mail method: {other}");
+    let message = other["error"]["message"].as_str().unwrap_or_default();
+    assert!(!message.contains("config-invalid"), "and not with the mail lane's word: {other}");
+
+    let log = std::fs::read_to_string(fx.boxes["osaka"].join("log")).unwrap_or_default();
+    assert!(
+        log.contains("config-invalid") && log.contains("a2a.aoide/mailPoll"),
+        "the host's own log says why, under the method's label: {log}"
+    );
+}
+
+/// **A `down` node's queued letter is KEPT, and is drained once the declaration
+/// no longer says `down`.** `down` stops this box SENDING; it never confiscates
+/// what is already spooled, and it never leaves the entry looking dialled.
+#[test]
+fn a_down_nodes_letters_are_kept_and_drained_once_it_is_no_longer_down() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("down-drain");
+
+    // A letter already queued for `yomi`, which `home` declares `down` — the
+    // letter the route would no longer mint, and the one that must survive.
+    fx.enter("osaka");
+    let envelope =
+        aoide_storage::mail::mint_outbound_letter_from("osaka", "alice", "yomi", "bob", "kept", HOME).unwrap();
+    aoide_storage::outbox::write_entry("yomi", &aoide_storage::outbox::OutboxEntry::fresh(envelope)).unwrap();
+
+    aoide_client::mail_wire::drain_node("yomi").unwrap();
+    let held = aoide_storage::outbox::list_entries("yomi").unwrap();
+    assert_eq!(held.len(), 1, "a `down` node's letter is kept");
+    assert_eq!(held[0].tries, 0, "and never dialled: {held:?}");
+    assert!(held[0].last_outcome.is_empty(), "untouched: {held:?}");
+    assert!(!held[0].refused, "`down` is not a refusal OF the letter");
+    assert!(
+        aoide_storage::outbox::read_link_state("yomi").unwrap().is_none(),
+        "no link was opened, not even a back-off"
+    );
+
+    // The declaration changes — `home` re-signs without the status, and osaka
+    // takes it — and the very next drain dials the letter.
+    fx.set_home_status("osaka", &[]);
+    aoide_client::mail_wire::drain_node("yomi").unwrap();
+    let after = aoide_storage::outbox::list_entries("yomi").unwrap();
+    assert_eq!(after.len(), 1, "a dial that did not land keeps the letter");
+    assert_eq!(after[0].tries, 1, "the drain TRIED: {after:?}");
+    assert!(after[0].last_outcome.starts_with("transport:"), "and recorded why: {after:?}");
+}
+
+/// **A node declared `hold` spools every entry toward it held, and the drain
+/// never dials one.** The declaration decides the flavor at MINT — not the
+/// caller's `--hold` — so the route's own answer is what the spool carries.
+#[test]
+fn an_entry_toward_a_declared_hold_node_is_spooled_held() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("hold-spool");
+    fx.set_home_status("osaka", &[("yomi", "hold")]);
+
+    fx.enter("osaka");
+    let sent = dispatch(&cli_invocation(
+        &["mail", "send"],
+        &["held at the hop"],
+        &[("to", "yomi/conductor"), ("json", "true")],
+    ));
+    assert_eq!(sent.status, Status::Ok, "{}", sent.message);
+    let data = sent.data.clone().expect("send reports");
+    assert_eq!(data["next"], "yomi", "step 1 hands it to the destination: {data}");
+
+    // The route is the dry run that says so out loud, and `mail send` spools
+    // what the route answered.
+    let route = dispatch(&cli_invocation(&["mail", "route"], &["yomi/conductor"], &[("json", "true")]));
+    assert_eq!(route.status, Status::Ok, "{}", route.message);
+    assert_eq!(route.data.clone().expect("route reports")["held"], true, "`hold` is its own hop");
+
+    let entries = aoide_storage::outbox::list_entries("yomi").unwrap();
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    assert!(entries[0].is_held(), "spooled held, never dialled: {entries:?}");
+    assert_eq!(entries[0].tries, 0, "and the drain that followed did not dial it: {entries:?}");
+}

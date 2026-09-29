@@ -664,7 +664,7 @@ fn handle_charter_sign(inv: &Invocation) -> Outcome {
         .map(PathBuf::from);
     match charter::sign(mesh, file.as_deref()) {
         Ok(signed) => {
-            let delivery = drain_spooled(&signed.spooled);
+            let delivery = drain_spooled(&signed.mesh, &signed.spooled);
             Outcome::ok(
                 cmd,
                 format!(
@@ -778,7 +778,7 @@ fn handle_charter_reroot(inv: &Invocation) -> Outcome {
     };
     match charter::reroot(mesh) {
         Ok(signed) => {
-            let delivery = drain_spooled(&signed.spooled);
+            let delivery = drain_spooled(&signed.mesh, &signed.spooled);
             Outcome::ok(
                 cmd,
                 format!(
@@ -831,8 +831,11 @@ fn mesh_arg(inv: &Invocation) -> Option<&str> {
 /// naming the two ways it will leave — a pairing that gives the node a record,
 /// or P-M4's router learning the charter's addresses.
 ///
-/// A node WITH a record is unchanged: dialled, and its own `Err` reported.
-fn drain_spooled(spooled: &[String]) -> Vec<serde_json::Value> {
+/// A node WITH a record is unchanged: dialled, and its own `Err` reported —
+/// unless the mesh being signed declares it `down`, which is its own answer
+/// before any record is consulted ([`declared_down`]): never dialled, and the
+/// entry KEPT in the spool, since `down` stops SENDING and never confiscates.
+fn drain_spooled(mesh: &str, spooled: &[String]) -> Vec<serde_json::Value> {
     let known: std::collections::BTreeMap<String, bool> = aoide_storage::node_store::load_nodes()
         .into_iter()
         .map(|node| (node.name.clone(), node.never_dialled()))
@@ -840,6 +843,17 @@ fn drain_spooled(spooled: &[String]) -> Vec<serde_json::Value> {
     spooled
         .iter()
         .map(|node| {
+            // **A `down` node is never dialled, and the entry stays.** Asked
+            // before the record half below: `down` is a fact about the mesh's
+            // declaration, and a node with no record is still `down`.
+            if crate::mail_wire::declared_down(mesh, node) {
+                return json!({
+                    "node": node,
+                    "drained": false,
+                    "reason": "down",
+                    "detail": "not dialled: down — the declaration says this box stops sending to it, so nothing was dialed and the entry is kept in the spool until that changes",
+                });
+            }
             let Some(poll_only) = known.get(node) else {
                 return json!({
                     "node": node,
@@ -884,6 +898,10 @@ fn render_spooled(rows: &[serde_json::Value]) -> String {
         } else if row["reason"].as_str() == Some("no-record") {
             lines.push(format!(
                 "  {node}: NOT DIALED — no node record here (the entry waits in the spool until a pairing or P-M4's charter routing)"
+            ));
+        } else if row["reason"].as_str() == Some("down") {
+            lines.push(format!(
+                "  {node}: NOT DIALED — declared `down` (the entry waits in the spool until the declaration changes)"
             ));
         } else if row["reason"].as_str() == Some("poll-only") {
             lines.push(format!(
@@ -1022,6 +1040,36 @@ mod tests {
         });
     }
 
+    /// **A `down` node is NOT dialled, and its entry is KEPT.** This arm comes
+    /// before the record half on purpose: a node with no `nodes.json` record can
+    /// be `down` too, and "not dialled, declared `down`" is a different fact from
+    /// "no record here" — the operator acting on the first must change a
+    /// declaration, on the second must pair.
+    #[test]
+    fn a_down_node_is_reported_as_not_dialed() {
+        with_root("drain-down", |_dir| {
+            let _ = charter::init("home").unwrap();
+            let me = aoide_storage::display::local_node_name();
+            let line = charter::node_line().unwrap();
+            let src = format!(
+                "mesh = \"home\"\nversion = 0\nrelays = []\n\n[nodes]\n{line}\n\n[status]\n{me} = \"down\"\n"
+            );
+            std::fs::write(charter::source_path("home"), &src).unwrap();
+            charter::sign("home", None).unwrap();
+
+            let rows = drain_spooled("home", &[me.clone()]);
+            assert_eq!(rows[0]["node"], me);
+            assert_eq!(rows[0]["drained"], false, "nothing was dialled: {rows:?}");
+            assert_eq!(rows[0]["reason"], "down", "{rows:?}");
+            assert!(
+                rows[0]["detail"].as_str().unwrap().contains("not dialled: down"),
+                "and the answer is the one the task asks for: {rows:?}"
+            );
+            let text = render_spooled(&rows);
+            assert!(text.contains("NOT DIALED") && text.contains("down"), "{text}");
+        });
+    }
+
     /// **A charter node this box has no record for is NOT reported as
     /// drained** (re-review N2). `drain_node` returns `Ok(())` for a name it
     /// cannot dial — correctly, there is nothing to dial — and the sign
@@ -1040,7 +1088,7 @@ mod tests {
             // there is none here, so drive the reporter directly with a name
             // this box holds no record for (the LAN/`--operator` join case).
             let _ = init;
-            let rows = drain_spooled(&["laptop".to_string()]);
+            let rows = drain_spooled("home", &["laptop".to_string()]);
             assert_eq!(rows[0]["node"], "laptop");
             assert_eq!(
                 rows[0]["drained"],
@@ -1070,7 +1118,7 @@ mod tests {
                 "home",
             );
             aoide_storage::node_store::save_nodes(&nodes).unwrap();
-            let rows = drain_spooled(&["peerbox".to_string()]);
+            let rows = drain_spooled("home", &["peerbox".to_string()]);
             assert_eq!(rows[0]["drained"], true, "a dialled node still answers for itself: {rows:?}");
 
             // And a node WITH a record whose address is `poll` is its own
@@ -1098,7 +1146,7 @@ mod tests {
             poll_only.grants = aoide_storage::node_store::grants_in("home", &["message"]);
             nodes.push(poll_only);
             aoide_storage::node_store::save_nodes(&nodes).unwrap();
-            let rows = drain_spooled(&["laptop".to_string()]);
+            let rows = drain_spooled("home", &["laptop".to_string()]);
             assert_eq!(rows[0]["drained"], false, "{rows:?}");
             assert_eq!(rows[0]["reason"], "poll-only");
             assert!(

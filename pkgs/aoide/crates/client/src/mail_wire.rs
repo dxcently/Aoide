@@ -538,6 +538,26 @@ fn declared_never_dialled(mesh: &str, node: &str) -> bool {
     }
 }
 
+/// Is `node` declared `down` in `mesh` — read from the declaration SET, so a
+/// mesh the set refuses cannot say "not `down`" and dial a node its own
+/// declaration cannot vouch for. The ONE predicate the drain, the poll and the
+/// reports that answer for them ask before reaching a node by name.
+pub fn declared_down(mesh: &str, node: &str) -> bool {
+    let Ok(set) = aoide_storage::routing::declarations() else {
+        return false;
+    };
+    aoide_storage::routing::status_of(&set, mesh, node) == Some(aoide_storage::charter::STATUS_DOWN)
+}
+
+/// The mesh a poll of `node_name` acts in — `named` where the caller typed one,
+/// else the record's own `message` mesh ([`crate::commands::request_mesh`], the
+/// same resolution [`poll_node`] signs with), so a caller that refuses before
+/// the dial and the dial itself cannot choose two meshes.
+pub fn poll_mesh(node_name: &str, named: Option<&str>) -> Option<String> {
+    let node = aoide_storage::node_store::load_nodes().into_iter().find(|n| n.name == node_name)?;
+    crate::commands::request_mesh(&node, named, "message").ok()
+}
+
 /// Where this box hands a letter addressed to `dest` in `mesh` — the four steps
 /// over the declarations in force, read as this box's own name in that mesh
 /// (`routing::own_name_in`: the name this box's identity key holds there, and
@@ -796,10 +816,6 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
     let Some(node) = nodes.iter().find(|n| n.name == node_name) else {
         return Ok(PollOutcome::default());
     };
-    // P-SEAL: publish our binding and learn theirs before taking anything
-    // over, so a node that has just published one never hands us plaintext
-    // it did not have to.
-    let _ = exchange_bindings(node, named);
     // P-CHARTER: the ONE mesh this poll acts in — the `--mesh` typed, else the
     // sole mesh where the record holds `message`, else the home mesh; a
     // genuine tie refuses, naming the meshes (`mail poll --mesh`). The
@@ -808,6 +824,18 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
     // below: the request is SIGNED with it, and a handed-over container is
     // verified against the mesh the letter was minted in.
     let mesh = crate::commands::request_mesh(node, named, "message").map_err(|e| format!("mesh: {e}"))?;
+    // **A node that mesh declares `down` is never polled, and nothing is filed.**
+    // Not even the binding exchange below, which is a dial in its own right: its
+    // own declaration says this box must not reach it (MAIL.md §Status). What is
+    // spooled toward it stays spooled, and a later poll — or drain — acts on
+    // whatever the declaration says then.
+    if declared_down(&mesh, node_name) {
+        return Ok(PollOutcome::default());
+    }
+    // P-SEAL: publish our binding and learn theirs before taking anything
+    // over, so a node that has just published one never hands us plaintext
+    // it did not have to.
+    let _ = exchange_bindings(node, named);
     // The calling node's own name in the mail protocol — the ADDRESS form
     // (`display::local_node_name`), the same one every envelope this box mints
     // stamps and the same one a peer's poll is answered against. A raw OS host
@@ -1153,8 +1181,10 @@ fn revoked_by_charter(node: &aoide_storage::node_store::Node) -> bool {
 /// the node's record of this box — which is what the far door checks when it
 /// answers. Keeping the two in step is the operator's business; a node
 /// without `message` on either side is not one this box trades mail with.
-/// P-M4's declared `down`/`hold` status narrows this set further, at the same
-/// predicate the door's own admission uses.
+/// P-M4's declared `down` status narrows this set further: a node the mesh a
+/// poll of it would act in declares `down` is not asked, because `down` means
+/// this box stops SENDING to it — its spooled entries are kept, not
+/// confiscated, and no dial is opened for either direction.
 ///
 /// **A `poll` node is not in it.** Polling is a DIAL, and that address says
 /// this node has no inbound transport to be dialled on — it is the one that
@@ -1177,6 +1207,7 @@ pub fn pollable_nodes() -> Vec<String> {
             node.verified
                 && !node.never_dialled()
                 && !revoked_by_charter(node)
+                && !poll_mesh(&node.name, None).is_some_and(|mesh| declared_down(&mesh, &node.name))
                 && node.grants.values().any(|caps| caps.iter().any(|a| a == "message"))
         })
         .map(|node| node.name)
@@ -1206,7 +1237,8 @@ pub fn pollable_nodes() -> Vec<String> {
 ///
 /// `Ok(())` covers every ordinary non-error outcome: nothing registered
 /// under `node_name`, the link already held off, `.bsy` already held by a
-/// concurrent drain (ruling 3 — skipped, never queued), an empty spool, or
+/// concurrent drain (ruling 3 — skipped, never queued), an empty spool, a
+/// node its mesh declares `down` (never dialled, and its entries kept), or
 /// a completed pass regardless of how many entries it delivered/refused/
 /// backed off on. `Err` is reserved for a genuine local I/O failure
 /// (`.bsy`'s own lock file, or an outbox read/write) — never for "the
@@ -1219,9 +1251,18 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
     // Without that half a charter relay would be silently un-dialled: the drain
     // would answer "nothing to do" forever while the spool filled, which is the
     // one thing a drained-looking entry must never be.
-    let Some((node, dial_only)) = dial_node(node_name, spool_mesh(node_name).as_deref()) else {
+    let mesh = spool_mesh(node_name);
+    let Some((node, dial_only)) = dial_node(node_name, mesh.as_deref()) else {
         return Ok(());
     };
+    // **A node the letters' own mesh declares `down` is never dialled, and its
+    // entries are KEPT.** `down` says this box stops SENDING to it; it never
+    // confiscates what was already queued (MAIL.md §Status, decision 14). The
+    // spool is left exactly as it stands, so the next pass after the declaration
+    // changes dials it — unchanged, no re-mint, no lost letter.
+    if mesh.as_deref().is_some_and(|mesh| declared_down(mesh, node_name)) {
+        return Ok(());
+    }
     // **A `poll` node is never dialled, so a drain of one opens no link at
     // all** — before the link lock, before the binding exchange (which is a
     // dial in its own right, and the one a held-entry filter would not have

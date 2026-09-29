@@ -798,7 +798,16 @@
   its destination** (`spool_entry(dest, next, mesh, …)`): the container stays
   addressed to `dest` while the entry is dialled toward `next`, and a hop this
   box holds no record for is dialled at the address the DECLARATION gives it
-  (`dial_node` → `charter::dial_of`) or held if that address is `poll`. A new
+  (`dial_node` → `charter::dial_of`) or held if that address is `poll`.
+  **A node the mesh declares `down` is never dialled either, and that is
+  `mail_wire::declared_down`'s** — asked over the set, so no caller can
+  forget it: `drain_node` returns before the link lock, `poll_node` returns
+  before the binding exchange, `pollable_nodes` leaves such a node out of a
+  bare poll, and the two REPORTS (`charter::drain_spooled`,
+  `handle_mail_poll`) say `down` rather than reading the empty answer as
+  `drained`/`polled`. Its spooled entries are KEPT — `down` stops sending, it
+  never confiscates — so the pass after the declaration changes dials them,
+  unchanged. A new
   "may I dial this node" test belongs in `hop_is_never_dialled`, never at a
   call site. A poll's answer is bounded at
   `aoide_storage::outbox::POLL_BATCH_CAP` (50) and must stay bounded: the
