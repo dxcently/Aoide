@@ -824,12 +824,12 @@ fn mesh_arg(inv: &Invocation) -> Option<&str> {
 /// `state/nodes.json` record for — correctly, since it has nothing to dial —
 /// and the first cut of this function mapped that `Ok` to `drained: true`,
 /// telling the operator a letter had gone out to a machine that was never
-/// contacted. The charter's `address` is not a dial target in this phase:
-/// nothing turns `NodeLine.address` into a route, and that read is P-M4's
-/// (`HTTPS-MESH-API.md` "Transits and relays"; `MAIL.md` §Transit). So the
+/// contacted. A charter `address` IS a dial target now (`dial_node` turns it
+/// into one, a pairing or a declaration alike), so the case left here is a name
+/// NO declaration addresses and NO record names. So the
 /// entry STAYS in the spool and this says so: `drained: false`, with a reason
 /// naming the two ways it will leave — a pairing that gives the node a record,
-/// or P-M4's router learning the charter's addresses.
+/// or a declaration that addresses it.
 ///
 /// A node WITH a record is unchanged: dialled, and its own `Err` reported —
 /// unless the mesh being signed declares it `down`, which is its own answer
@@ -859,7 +859,7 @@ fn drain_spooled(mesh: &str, spooled: &[String]) -> Vec<serde_json::Value> {
                     "node": node,
                     "drained": false,
                     "reason": "no-record",
-                    "detail": "this box holds no node record for it, so nothing was dialed — the entry waits in the spool until it is paired (giving it a record) or P-M4 routes charter addresses",
+                    "detail": "this box holds no node record for it, so nothing was dialed — the entry waits in the spool until it is paired (giving it a record) or a declaration addresses it",
                 });
             };
             // **A `poll` node is never dialled either** (confirm finding 6):
@@ -897,7 +897,7 @@ fn render_spooled(rows: &[serde_json::Value]) -> String {
             lines.push(format!("  {node}: drained now"));
         } else if row["reason"].as_str() == Some("no-record") {
             lines.push(format!(
-                "  {node}: NOT DIALED — no node record here (the entry waits in the spool until a pairing or P-M4's charter routing)"
+                "  {node}: NOT DIALED — no node record here (the entry waits in the spool until a pairing or a declaration addresses it)"
             ));
         } else if row["reason"].as_str() == Some("down") {
             lines.push(format!(
@@ -1074,8 +1074,9 @@ mod tests {
     /// drained** (re-review N2). `drain_node` returns `Ok(())` for a name it
     /// cannot dial — correctly, there is nothing to dial — and the sign
     /// command used to map that to `drained: true`, telling the operator a
-    /// letter had gone to a machine that was never contacted. The charter's
-    /// `address` becomes a route at P-M4, so until then the honest answer is
+    /// letter had gone to a machine that was never contacted. A charter
+    /// `address` IS a route now, so what is left for this case is a name no
+    /// declaration addresses and no record names: the honest answer is
     /// "not dialed, the entry waits".
     #[test]
     fn a_recordless_charter_node_is_reported_as_not_dialed() {
@@ -1097,12 +1098,12 @@ mod tests {
             );
             assert_eq!(rows[0]["reason"], "no-record");
             assert!(
-                rows[0]["detail"].as_str().unwrap().contains("P-M4"),
-                "and the reason names who routes it: {rows:?}"
+                rows[0]["detail"].as_str().unwrap().contains("paired"),
+                "and the reason names how it leaves: {rows:?}"
             );
             let text = render_spooled(&rows);
             assert!(text.contains("NOT DIALED"), "{text}");
-            assert!(text.contains("P-M4"), "{text}");
+            assert!(text.contains("pairing"), "{text}");
 
             // A node WITH a record keeps the old answer: nothing to send, but
             // the drain is a real (empty) pass over a real record.
