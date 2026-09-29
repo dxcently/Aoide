@@ -883,12 +883,27 @@ pub fn retire_by_ack(ack: &Envelope) -> Result<Option<String>, String> {
         if !entry_path(&node, &acked_msgid).exists() {
             continue;
         }
-        let to_node = list_entries(&node)?
+        let mut found = list_entries(&node)?
             .into_iter()
-            .find(|entry| entry.envelope.msgid == acked_msgid)
-            .map(|entry| entry.envelope.header.to.node);
-        if to_node.as_deref() == Some(from.as_str()) && remove_entry(&node, &acked_msgid)? {
-            return Ok(Some(acked_msgid));
+            .find(|entry| entry.envelope.msgid == acked_msgid);
+        // **The mesh has to match too.** A receipt is signed in ONE mesh
+        // (`header.origin_mesh`, inside its origin signature), and a letter rides
+        // one: a receipt minted for another mesh — the same names, the same
+        // `msgid`, a different zone — retires nothing here. Without this the
+        // `to.node` check is satisfied by any ack that names the right signer,
+        // and a replay from a mesh this box is not speaking in would clear an
+        // entry that is still waiting.
+        if let Some(entry) = &found {
+            if crate::routing::zone_name(&entry.envelope.header.origin_mesh)
+                != crate::routing::zone_name(&ack.header.origin_mesh)
+            {
+                found = None;
+            }
+        }
+        if let Some(entry) = &found {
+            if entry.envelope.header.to.node == from && remove_entry(&node, &acked_msgid)? {
+                return Ok(Some(acked_msgid));
+            }
         }
     }
     Ok(None)

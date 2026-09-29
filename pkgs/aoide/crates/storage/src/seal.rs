@@ -1487,7 +1487,7 @@ pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<Co
     //    maps to; the connection-signature ladder that tries every verified
     //    key must not be reused here, or a paired node signing as another
     //    paired node would file under the wrong name.
-    let Some(recorded) = origin_key_in(&ctx.origin_mesh, &ctx.origin_node) else {
+    let Some(recorded) = origin_key_in(&set, &ctx.origin_mesh, &ctx.origin_node) else {
         return Ok(refusal(
             "unverified-origin",
             format!("`{}` has no key on record in mesh `{}`", ctx.origin_node, ctx.origin_mesh),
@@ -1534,7 +1534,7 @@ pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<Co
         // checked here, without a key — every hop's own signature, every
         // crossing by a declared gate, and the last hop signed in the zone the
         // depositing hop is speaking in.
-        if let Err(refusal) = walk_chain(container, &ctx, request_mesh) {
+        if let Err(refusal) = walk_chain(container, &ctx, request_mesh, &set) {
             return Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail });
         }
         return match hop_here(
@@ -1635,7 +1635,7 @@ pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<Co
         return Ok(refusal("unverified-origin", "the inner envelope signature does not verify".to_string()));
     }
     // 7. Walk the chain, in the zone the depositing hop signed for.
-    if let Err(refusal) = walk_chain(container, &ctx, request_mesh) {
+    if let Err(refusal) = walk_chain(container, &ctx, request_mesh, &set) {
         return Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail });
     }
     Ok(ContainerOutcome::Opened { envelope: Box::new(envelope), digest })
@@ -1652,24 +1652,22 @@ fn own_key_and_local_name() -> Result<(String, String), String> {
 
 /// The key `node` signs with in `mesh` — that mesh's declaration (a charter line
 /// or a paired record), and a paired record alone only where the mesh has NO
-/// declaration at all, which is the pre-charter lane.
-fn origin_key_in(mesh: &str, node: &str) -> Option<String> {
-    if let Ok(declaration) = crate::routing::Declaration::load(mesh) {
-        return declaration.key_of(node).map(str::to_string);
-    }
-    node_store::load_nodes()
-        .iter()
-        .find(|n| n.name == node)
-        .and_then(|n| n.pubkey.clone())
+/// The key the ORIGIN signs with, in the zone the origin signed: the declaration
+/// set's own answer for it (`routing::key_in` — a charter line, a verified
+/// record, and a mesh the set refuses answers nobody).
+fn origin_key_in(set: &[crate::routing::Loaded], mesh: &str, node: &str) -> Option<String> {
+    crate::routing::key_in(set, mesh, node)
 }
 
 /// One hop of transit: this box is not the destination, so it carries the
 /// container on rather than opening it (MAIL.md §Transit).
 ///
-/// A letter the chain already names THIS box dies here: a hop that hands a
-/// letter back to a machine that already carried it is a loop, and the second
-/// guard (`msgid` seen, at the dedup gate above) is not enough on its own —
-/// a loop can come back before anything was ever filed.
+/// A letter the chain already names THIS box dies here — compared by KEY, not by
+/// name: a hop entry carries the name its signer wrote, and two names for one
+/// machine are one machine (a charter line's and an address form are the same
+/// box, and a loop that came back under the other spelling is the same loop).
+/// The second guard (`msgid` seen, at the dedup gate above) is not enough on its
+/// own: a loop can come back before anything was ever filed.
 ///
 /// The route is the four steps over the declarations in force, read as THIS
 /// box's own declared name in the zone the depositing hop signed for. Only the
@@ -1683,13 +1681,23 @@ fn hop_here(
     own_name: &str,
     digest: String,
 ) -> Result<HopStep, String> {
-    if container.transit.iter().any(|entry| entry.node == own_name) {
+    // The chain's own names, resolved to keys in the zone each entry signed: a
+    // name that is this box under another spelling is this box.
+    let set = crate::routing::declarations().map_err(|r| format!("{}: {}", r.reason, r.detail))?;
+    let mine = crate::routing::key_in(&set, mesh, own_name)
+        .is_some_and(|key| key.eq_ignore_ascii_case(own_key));
+    let looped = container.transit.iter().any(|entry| {
+        entry.node == own_name
+            || mine
+                && crate::routing::key_in(&set, &entry.mesh, &entry.node)
+                    .is_some_and(|key| key.eq_ignore_ascii_case(own_key))
+    });
+    if looped {
         return Ok(HopStep::Refused(Refusal::new(
             CHAIN_LOOP,
-            format!("the chain already names `{own_name}`, which carried it once already"),
+            format!("the chain already names this box (`{own_name}`), which carried it once already"),
         )));
     }
-    let set = crate::routing::declarations().map_err(|r| format!("{}: {}", r.reason, r.detail))?;
     let route = crate::routing::Letter { from: own_name, to: &container.to.node, mesh }.route(&set);
     let hop = match route.outcome {
         Ok(hop) => hop,
@@ -1886,21 +1894,12 @@ fn deposit_charter(
         }
     }
 
-    // The chain, with hop keys resolved the same way the origin was: the
-    // accepted charter first — for the mesh it names and no other — then a
-    // paired record where that mesh has no declaration of its own. A charter
-    // node this box never paired with is a legitimate hop once the charter
-    // names it.
-    let nodes = node_store::load_nodes();
-    if let Err(refusal) = walk_chain_with(container, ctx, request_mesh, |mesh, name| {
-        if crate::routing::Declaration::load(mesh).is_err() {
-            return nodes.iter().find(|n| n.name == name).and_then(|n| n.pubkey.clone());
-        }
-        accepted
-            .charter
-            .node_key(name)
-            .or_else(|| nodes.iter().find(|n| n.name == name).and_then(|n| n.pubkey.clone()))
-    }) {
+    // The chain, over the declarations this deposit already loaded: the mesh the
+    // letter rides names its hops, and a charter letter's mesh is the charter it
+    // just applied — which `accept` has written, so the set reads it here like
+    // any other.
+    let set = crate::routing::declarations().map_err(|r| format!("{}: {}", r.reason, r.detail))?;
+    if let Err(refusal) = walk_chain_with(container, ctx, request_mesh, &set) {
         return Ok(ContainerOutcome::Refused { reason: refusal.reason, detail: refusal.detail });
     }
 
@@ -1917,45 +1916,30 @@ fn deposit_charter(
 /// that is what makes the origin unerasable, and what refuses a relay that
 /// dropped entry 1 and re-appended itself.
 ///
-/// **Every hop's key is read in the mesh that hop SIGNED** (its entry's `mesh`):
-/// a charter line for a charter mesh, a paired record for a pair mesh, and never
-/// `nodes.json` for a mesh a charter governs. That is the same name source the
-/// route picks with, so a hop cannot sign in one zone and be trusted in another.
-pub fn walk_chain(container: &Container, ctx: &Ctx, mesh: &str) -> Result<(), Refusal> {
-    walk_chain_with(container, ctx, mesh, hop_key_in)
+/// **Every hop's key is read in the mesh that hop SIGNED** (its entry's `mesh`),
+/// through [`crate::routing::key_in`] over the set this deposit already loaded:
+/// a charter line for a charter mesh, a paired record for a pair mesh — and a
+/// mesh that set REFUSES names nobody, so a hop cannot be trusted through a
+/// declaration that will not load.
+pub fn walk_chain(container: &Container, ctx: &Ctx, mesh: &str, set: &[crate::routing::Loaded]) -> Result<(), Refusal> {
+    walk_chain_with(container, ctx, mesh, set)
 }
 
-/// The identity key `node` hops with in `mesh` — the declaration of THAT mesh
-/// first (charter line or paired record, `crate::routing::Declaration`), and a
-/// paired record only where the mesh has no declaration at all, which is the
-/// pre-charter lane.
-fn hop_key_in(mesh: &str, node: &str) -> Option<String> {
-    if let Ok(declaration) = crate::routing::Declaration::load(mesh) {
-        return declaration.key_of(node).map(str::to_string);
+/// Does THIS box answer to `name` in `mesh`? Its address form
+/// (`display::local_node_name`, which is what a mint writes into `to.node`) and
+/// the name its own identity key holds there (`routing::own_name_in`) — the
+/// second is what makes a box whose hostname is not its charter line's name a
+/// legitimate destination of its own mesh's letters.
+fn answers_to(set: &[crate::routing::Loaded], mesh: &str, name: &str) -> bool {
+    if name == crate::display::local_node_name() {
+        return true;
     }
-    node_store::load_nodes()
-        .iter()
-        .find(|n| n.name == node)
-        .and_then(|n| n.pubkey.clone())
+    own_key().is_some_and(|key| crate::routing::own_name_in(set, mesh, &key).as_deref() == Some(name))
 }
 
-/// The node `from` declares as the carrier INTO `to` — the only crossing a hop
-/// may sign (MAIL.md §Transit, "a gate is symmetric or it is nothing", so one
-/// side of the pair answers this).
-fn gate_into(from: &str, to: &str) -> Option<String> {
-    crate::routing::Declaration::load(from).ok().and_then(|d| d.gates().get(to).cloned())
-}
-
-/// The one zone-name resolution: an EMPTY name is the home mesh on either side
-/// (`crate::config::home_mesh`), because a container minted before the mesh was
-/// carried names none.
-fn zone_name(mesh: &str) -> String {
-    let t = mesh.trim();
-    if t.is_empty() {
-        crate::config::home_mesh()
-    } else {
-        t.to_ascii_lowercase()
-    }
+/// This box's identity key (bare hex), read once per decision.
+fn own_key() -> Option<String> {
+    identity::load_or_mint().ok().map(|(kp, _)| kp.info().pubkey_hex)
 }
 
 /// The `prev` a NEXT hop's entry chains to: the running digest of every entry
@@ -1970,10 +1954,10 @@ fn chain_prev(container: &Container, ctx: &Ctx) -> Result<[u8; 32], String> {
     Ok(prev)
 }
 
-/// [`walk_chain`] with the hop-key lookup supplied by the caller: a mail
-/// container resolves every hop through the declaration of the mesh that hop
-/// signed, a `charter` container through the charter it just applied first.
-/// One walk, one rule.
+/// [`walk_chain`] with the declaration SET the caller already loaded: every hop
+/// is resolved through [`crate::routing::key_in`] and every crossing through
+/// [`crate::routing::gate_in`], so a mesh the set refuses names no key and
+/// declares no gate.
 ///
 /// **The zone clause is here because this is where the chain is** (MAIL.md
 /// §Wire, step 3). A hop whose entry names a different mesh from the entry
@@ -1987,14 +1971,14 @@ pub fn walk_chain_with(
     container: &Container,
     ctx: &Ctx,
     mesh: &str,
-    key_for: impl Fn(&str, &str) -> Option<String>,
+    set: &[crate::routing::Loaded],
 ) -> Result<(), Refusal> {
     let broken = |detail: String| Refusal::new(BROKEN_CHAIN, detail);
     let crossing = |detail: String| Refusal::new(ZONE_VIOLATION, detail);
     let msgid = ctx.msgid;
     let mut prev = msgid;
     let mut expected_next: Option<String> = None;
-    let mut zone = zone_name(&ctx.origin_mesh);
+    let mut zone = crate::routing::zone_name(&ctx.origin_mesh);
     for (index, entry) in container.transit.iter().enumerate() {
         if let Some(expected) = &expected_next {
             if &entry.node != expected {
@@ -2014,7 +1998,7 @@ pub fn walk_chain_with(
             }
             // The origin mints in ONE zone and signs it into its own entry, so
             // the first crossing there is to compare against is the origin's.
-            if zone_name(&entry.mesh) != zone {
+            if crate::routing::zone_name(&entry.mesh) != zone {
                 return Err(crossing(format!(
                     "entry 1 is signed in zone `{}`, and the origin signed `{}`",
                     entry.mesh, ctx.origin_mesh
@@ -2022,28 +2006,18 @@ pub fn walk_chain_with(
             }
             container.origin.key.clone()
         } else {
-            let signed_in = zone_name(&entry.mesh);
+            let signed_in = crate::routing::zone_name(&entry.mesh);
             if signed_in != zone {
-                match gate_into(&zone, &signed_in) {
-                    Some(gate) if gate == entry.node => {}
-                    Some(gate) => {
-                        return Err(crossing(format!(
-                            "hop `{}` carries the letter out of zone `{zone}` into `{signed_in}`, and \
-                             `{zone}` declares `{gate}` as its gate there",
-                            entry.node
-                        )))
-                    }
-                    None => {
-                        return Err(crossing(format!(
-                            "hop `{}` carries the letter out of zone `{zone}` into `{signed_in}`, and \
-                             `{zone}` declares no gate into it",
-                            entry.node
-                        )))
-                    }
+                if !crate::routing::gate_in(set, &zone, &signed_in, &entry.node) {
+                    return Err(crossing(format!(
+                        "hop `{}` carries the letter out of zone `{zone}` into `{signed_in}`, and \
+                         `{zone}` declares no gate there that answers for it",
+                        entry.node
+                    )));
                 }
                 zone = signed_in;
             }
-            match key_for(&entry.mesh, &entry.node) {
+            match crate::routing::key_in(set, &entry.mesh, &entry.node) {
                 Some(key) => key,
                 None => {
                     return Err(broken(format!(
@@ -2061,8 +2035,11 @@ pub fn walk_chain_with(
         expected_next = Some(entry.next.clone());
     }
     match expected_next {
-        // Address form — see the destination branch above.
-        Some(last) if last == crate::display::local_node_name() => {}
+        // The last hop hands the letter to a name THIS box answers to: the
+        // address form of its own name, or the name its identity key holds in
+        // the zone the letter rides (`routing::own_name_in` — a charter line's
+        // name, for a box whose hostname is not its line's).
+        Some(last) if answers_to(set, mesh, &last) => {}
         Some(last) => {
             return Err(broken(format!("the last hop hands the letter to `{last}`, not this node")))
         }
@@ -2071,7 +2048,7 @@ pub fn walk_chain_with(
     // The last hop signed the zone this deposit is made in, or the letter claims
     // a zone no hop ever carried it into.
     if let Some(last) = container.transit.last() {
-        if zone_name(&last.mesh) != zone_name(mesh) {
+        if crate::routing::zone_name(&last.mesh) != crate::routing::zone_name(mesh) {
             return Err(crossing(format!(
                 "the last hop signed zone `{}` and this deposit is made in `{mesh}` — a zone a letter \
                  rides is one a hop carried it into",
@@ -3168,22 +3145,25 @@ mod review_fix_tests {
             board: None,
             epoch: None,
         };
-        // The whole chain walks.
-        if let Err(e) = walk_chain(&container(vec![entry1.clone(), entry2.clone()]), &ctx, mesh) {
+        // The whole chain walks. The declaration set is empty here (no mesh is
+        // declared in this fixture), so the walk reads the paired records —
+        // which is the pre-charter lane this test is about.
+        let set = crate::routing::declarations().unwrap();
+        if let Err(e) = walk_chain(&container(vec![entry1.clone(), entry2.clone()]), &ctx, mesh, &set) {
             panic!("origin -> relay -> self must walk: {e}");
         }
 
         // Interior truncation: drop entry 1 and keep entry 2. Its `prev` was
         // computed over entry 1's frame, and `prev` is recomputed, so the
         // link breaks — the cut-and-reappend the chain exists to refuse.
-        let err = walk_chain(&container(vec![entry2.clone()]), &ctx, mesh).unwrap_err();
+        let err = walk_chain(&container(vec![entry2.clone()]), &ctx, mesh, &set).unwrap_err();
         assert!(err.detail.contains("not the origin"), "{err}");
 
         // Reordering breaks the `next` link: entry 2 was rewritten to hand
         // the letter to `self`, so entry 3 cannot be relay's.
         let mut reordered = entry2.clone();
         reordered.next = me.clone();
-        let err = walk_chain(&container(vec![entry1.clone(), reordered, entry2.clone()]), &ctx, mesh)
+        let err = walk_chain(&container(vec![entry1.clone(), reordered, entry2.clone()]), &ctx, mesh, &set)
             .unwrap_err();
         assert!(err.detail.contains("entry 3 is by `relay`"), "{err}");
 
@@ -3191,8 +3171,147 @@ mod review_fix_tests {
         // one and the interior hop fails.
         let mut forged = entry2.clone();
         forged.sig = wire_auth::sign_hex(&origin_kp, &hop_bytes(&msgid, &prev2, "relay", &me, &at, mesh));
-        let err = walk_chain(&container(vec![entry1, forged]), &ctx, mesh).unwrap_err();
+        let err = walk_chain(&container(vec![entry1, forged]), &ctx, mesh, &set).unwrap_err();
         assert!(err.detail.contains("does not verify"), "{err}");
+    }
+
+    /// **A one-sided gate never lets a crossing through.** `set_verdicts` refuses
+    /// the mesh that declares a gate the other side does not answer, and the hop
+    /// chain reads THAT answer rather than the file: a hop carrying a letter out
+    /// of a mesh whose declaration the set refuses has no declared gate, so the
+    /// crossing is the zone wall. Reading the file directly — outside the
+    /// validated set — is what would wave it through.
+    #[test]
+    fn a_one_sided_gate_refused_by_the_set_does_not_let_the_walk_accept_the_crossing() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let dir = aoide_test_support::unique_tmp("seal-one-sided-gate");
+        std::fs::create_dir_all(&dir).unwrap();
+        env(&dir);
+
+        // `home` declares a gate into `away`; `away` answers nothing back. Both
+        // sections parse and validate on their own.
+        std::fs::write(
+            crate::config::source().path,
+            "[mesh.home]\nrelays = [\"sakaki\"]\n[mesh.home.nodes]\nosaka = \"ssh://osaka\"\nsakaki = \"ssh://sakaki\"\n[mesh.home.gates]\naway = \"sakaki\"\n\
+             \n[mesh.away]\n[mesh.away.nodes]\nsakaki = \"ssh://sakaki\"\nevo = \"ssh://evo\"\n",
+        )
+        .unwrap();
+
+        // A one-sided gate in a PAIR mesh is refused when the config loads, so the
+        // set refuses as a whole (`config-unreadable`): nothing routes in any mesh
+        // whose table cannot be read, which is the fail-closed direction. A
+        // CHARTER one-sided gate is refused per mesh by `set_verdicts`, and
+        // `a_one_sided_gate_refused_by_the_set_answers_no_crossing` (routing) pins
+        // that the crossing question reads the refusal either way.
+        let refusal = crate::routing::declarations().unwrap_err();
+        assert_eq!(refusal.reason, crate::charter::CONFIG_UNREADABLE, "{refusal}");
+    }
+
+    /// **A joined charter mesh with no charter in force names nobody.** The box
+    /// holds a stale paired record for a peer it once paired with, and a letter
+    /// signed under that record's key must NOT verify: a charter-shaped mesh
+    /// whose charter is missing is exactly the state in which the paired records
+    /// underneath it are the pre-charter lane a revoked key would come back
+    /// through.
+    #[test]
+    fn a_charter_shaped_mesh_with_no_charter_in_force_does_not_read_its_paired_record() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let dir = aoide_test_support::unique_tmp("seal-no-charter-in-force");
+        std::fs::create_dir_all(&dir).unwrap();
+        env(&dir);
+
+        // Charter-shaped by its trust file, with no charter on disk.
+        std::fs::create_dir_all(crate::charter::mesh_state_dir("home")).unwrap();
+        std::fs::write(
+            crate::charter::trust_path("home"),
+            serde_json::json!({ "operator": "ed25519:".to_string() + &"ab".repeat(32) }).to_string(),
+        )
+        .unwrap();
+        std::fs::write(crate::config::source().path, "[pairing]\nhomeMesh = \"home\"\n").unwrap();
+
+        let me = crate::display::local_node_name();
+        let (kp, _) = identity::load_or_mint().unwrap();
+        let mut nodes = node_store::load_nodes();
+        node_store::upsert_paired_node(
+            &mut nodes,
+            &me,
+            "ssh://self",
+            &kp.info().pubkey_hex,
+            &now_iso_utc(),
+            &["message".to_string()],
+            "home",
+        );
+        node_store::save_nodes(&nodes).unwrap();
+
+        let set = crate::routing::declarations().unwrap();
+        assert!(
+            crate::routing::key_in(&set, "home", &me).is_none(),
+            "no charter is in force, so the mesh names nobody — whatever a stale record says"
+        );
+
+        // A letter this box signs as itself, riding `home`: the stale record's
+        // key would verify it, and must not.
+        let binding = publish_binding().unwrap();
+        let envelope = mail::mint_outbound_letter("alice", &me, "bob", "stale key letter").unwrap();
+        let container = seal_envelope(&envelope, &binding, "home", "home", &me, &me, &now_iso_utc()).unwrap();
+        match super::deposit_container(&container, "home").unwrap() {
+            ContainerOutcome::Refused { reason, .. } => assert_eq!(reason, "unverified-origin"),
+            other => panic!("a mesh that cannot be read names nobody: {other:?}"),
+        }
+    }
+
+    /// The fixed `msgid` a hand-built chain commits to (the walk recomputes
+    /// `prev` from the entries themselves, so any constant does).
+    const CHAIN_MSGID: [u8; 32] = [7u8; 32];
+
+    /// One hop's entry as a hop appends it, plus the `prev` the NEXT entry chains
+    /// to. `prev` is passed in so a test can hand-build a chain the way
+    /// `chain_prev` walks one.
+    fn chain_entry(
+        node: &str,
+        next: &str,
+        mesh: &str,
+        prev: &[u8; 32],
+        kp: &identity::Keypair,
+    ) -> (TransitEntry, [u8; 32]) {
+        let at = now_iso_utc();
+        let sig = wire_auth::sign_hex(kp, &hop_bytes(&CHAIN_MSGID, prev, node, next, &at, mesh));
+        let entry = TransitEntry {
+            node: node.to_string(),
+            next: next.to_string(),
+            at,
+            mesh: mesh.to_string(),
+            sig,
+        };
+        let prev_next = sha256(&hop_entry_bytes(&CHAIN_MSGID, prev, &entry).unwrap());
+        (entry, prev_next)
+    }
+
+    /// A container carrying `entries`, with `ctx` recomputed from it — for the
+    /// chain walk alone (its `ct` is empty: a walk never opens anything).
+    fn crossing_container(entries: Vec<TransitEntry>) -> (Container, Ctx) {
+        let me = crate::display::local_node_name();
+        let kp = identity::load_or_mint().unwrap().0;
+        let container = Container {
+            v: CONTAINER_VERSION,
+            purpose: PURPOSE_MAIL.to_string(),
+            msgid: hex_encode(&CHAIN_MSGID),
+            generation: 1,
+            origin: Party { node: "osaka".to_string(), key: kp.info().pubkey_hex.clone() },
+            to: Destination { node: me.clone(), age: "age1x".to_string() },
+            origin_mesh: "home".to_string(),
+            mesh: "home".to_string(),
+            suite: SUITE_AGE_V1_X25519.to_string(),
+            ct: String::new(),
+            sig: String::new(),
+            transit: entries,
+            board: None,
+            epoch: None,
+        };
+        let ctx = Ctx::from_container(&container).unwrap();
+        (container, ctx)
     }
 
     /// L7: "Already-filed letters survive loss of the age key" — structurally

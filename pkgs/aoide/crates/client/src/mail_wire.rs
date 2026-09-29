@@ -429,12 +429,7 @@ fn hop_is_never_dialled(node_name: &str, mesh: &str) -> bool {
     if dest_is_never_dialled(node_name) {
         return true;
     }
-    aoide_storage::routing::Declaration::load(mesh)
-        .ok()
-        .and_then(|declaration| declaration.address_of(node_name).map(str::to_string))
-        .and_then(|address| aoide_storage::charter::dial_of(&address).ok())
-        .map(|dial| matches!(dial, aoide_storage::charter::Dial::Poll))
-        .unwrap_or(false)
+    declared_never_dialled(mesh, node_name)
 }
 
 /// The word a caller reads when a letter cannot be sent in the clear: the
@@ -456,10 +451,11 @@ fn declared_binding(
     mesh: &str,
     now: &str,
 ) -> Option<aoide_storage::seal::Binding> {
-    let declaration = aoide_storage::routing::Declaration::load(mesh).ok()?;
+    let set = aoide_storage::routing::declarations().ok()?;
+    let declaration = aoide_storage::routing::declaration_of(&set, mesh)?.as_ref().ok()?;
     let binding = declaration.binding_of(dest)?.clone();
-    let key = declaration.key_of(dest)?;
-    if !aoide_storage::seal::verify_binding(&binding, Some(key)) {
+    let key = aoide_storage::routing::key_in(&set, mesh, dest)?;
+    if !aoide_storage::seal::verify_binding(&binding, Some(&key)) {
         return None;
     }
     if aoide_storage::seal::binding_expired(&binding, now)
@@ -470,14 +466,21 @@ fn declared_binding(
     Some(binding)
 }
 
-/// Does the mesh declare an age binding for `dest` at all — usable or not? The
-/// question [`spool_entry`]'s parking arm asks, so a destination whose declared
-/// binding is expired is held rather than sent in the clear.
+/// Does the mesh give this box a binding to seal to `dest` — usable or not, and
+/// INCLUDING a mesh that cannot be read at all? The question
+/// [`spool_entry`]'s parking arm asks, so a destination whose declared binding
+/// is expired is held rather than sent in the clear, and an unreadable mesh
+/// parks the letter instead of downgrading it (a binding this box cannot read is
+/// not a licence to send plaintext).
 fn declares_a_binding(dest: &str, mesh: &str) -> bool {
-    aoide_storage::routing::Declaration::load(mesh)
-        .ok()
-        .and_then(|declaration| declaration.binding_of(dest).map(|_| ()))
-        .is_some()
+    let Ok(set) = aoide_storage::routing::declarations() else {
+        return true;
+    };
+    match aoide_storage::routing::declaration_of(&set, mesh) {
+        Some(Ok(declaration)) => declaration.binding_of(dest).is_some(),
+        Some(Err(_)) => true,
+        None => false,
+    }
 }
 
 /// The record half of [`hop_is_never_dialled`]: a node this box has paired with,
@@ -486,6 +489,26 @@ fn dest_is_never_dialled(node_name: &str) -> bool {
     aoide_storage::node_store::load_nodes()
         .iter()
         .any(|n| n.name == node_name && n.never_dialled())
+}
+
+/// Is `node` the `poll` node of the DECLARATION of the mesh the letter rides?
+/// Read from the declaration SET, so a mesh the set refuses cannot say "not
+/// `poll`" and send the letter out in the clear to a node that never listens —
+/// a refused mesh is treated as never-dialled (parked), the fail-closed
+/// direction.
+fn declared_never_dialled(mesh: &str, node: &str) -> bool {
+    let Ok(set) = aoide_storage::routing::declarations() else {
+        return true;
+    };
+    match aoide_storage::routing::declaration_of(&set, mesh) {
+        Some(Ok(declaration)) => declaration
+            .address_of(node)
+            .and_then(|address| aoide_storage::charter::dial_of(address).ok())
+            .map(|dial| matches!(dial, aoide_storage::charter::Dial::Poll))
+            .unwrap_or(false),
+        Some(Err(_)) => true,
+        None => false,
+    }
 }
 
 /// Where this box hands a letter addressed to `dest` in `mesh` — the four steps
@@ -635,21 +658,35 @@ impl SendMeshError {
 /// declaration addresses, and for one whose address is `poll`: that one owns no
 /// inbound transport, so a drain never dials it (its own ask moves its letters),
 /// and the caller answers "nothing to do here".
-fn dial_node(node_name: &str) -> Option<(aoide_storage::node_store::Node, bool)> {
+///
+/// **`mesh` is the mesh the letters in that spool RIDE**, and the declaration
+/// read is that one's alone: one node name may sit in several meshes with a
+/// different address in each, so dialling "the first declaration that names it"
+/// would reach the wrong machine's door — and a same-named `nodes.json` record
+/// never wins over the declaration where a charter governs the mesh.
+fn dial_node(node_name: &str, mesh: Option<&str>) -> Option<(aoide_storage::node_store::Node, bool)> {
+    let set = aoide_storage::routing::declarations().ok()?;
+    let declared = mesh.and_then(|mesh| match aoide_storage::routing::declaration_of(&set, mesh) {
+        Some(Ok(declaration)) => Some(declaration),
+        // A mesh the set cannot read names no address: fail closed.
+        _ => None,
+    });
+    let charter_mesh = declared.is_some() && declared.is_some_and(|d| d.is_charter());
     let nodes = aoide_storage::node_store::load_nodes();
-    if let Some(record) = nodes.into_iter().find(|n| n.name == node_name) {
-        return Some((record, false));
+    if !charter_mesh {
+        if let Some(record) = nodes.into_iter().find(|n| n.name == node_name) {
+            return Some((record, false));
+        }
     }
-    // No record: a hop the route picked off a declaration. Its address says how
-    // to reach it and which of the three transports that is; an `ssh://` hop is
-    // dialled through its tunnel at the far side's own door
+    // A hop the route picked off a declaration (or a name a charter governs,
+    // where the declaration is the only authority there is): its address says
+    // how to reach it and which of the three transports that is; an `ssh://` hop
+    // is dialled through its tunnel at the far side's own door
     // (`http://127.0.0.1:<AOIDE_A2A_PORT or 8710>/`, the same loopback form a
     // paired ssh node's record holds), and an `https://` hop at the URL itself.
-    let address = aoide_storage::routing::declarations()
-        .ok()?
-        .iter()
-        .filter_map(|loaded| loaded.declaration.as_ref().ok())
-        .find_map(|declaration| declaration.address_of(node_name).map(str::to_string))?;
+    let address = declared?
+        .address_of(node_name)
+        .map(str::to_string)?;
     match aoide_storage::charter::dial_of(&address).ok()? {
         aoide_storage::charter::Dial::Https(url) => {
             Some((aoide_storage::node_store::Node::dial_only(node_name, &url, None), true))
@@ -660,6 +697,24 @@ fn dial_node(node_name: &str) -> Option<(aoide_storage::node_store::Node, bool)>
         }
         aoide_storage::charter::Dial::Poll => None,
     }
+}
+
+/// The mesh the letters spooled toward `node_name` RIDE — the first entry's own
+/// answer: a sealed container's `mesh`, else the envelope's signed `originMesh`.
+/// `None` for an empty spool (nothing to dial anyway) and for a plaintext entry
+/// that names no mesh at all.
+fn spool_mesh(node_name: &str) -> Option<String> {
+    aoide_storage::outbox::list_entries(node_name)
+        .ok()?
+        .into_iter()
+        .find_map(|entry| {
+            entry
+                .container
+                .as_ref()
+                .map(|container| container.mesh.clone())
+                .or_else(|| Some(entry.envelope.header.origin_mesh.clone()))
+                .filter(|mesh| !mesh.is_empty())
+        })
 }
 
 /// Poll `node_name` once — the relay-first half of the model (MAIL.md §Wire,
@@ -1065,7 +1120,7 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
     // Without that half a charter relay would be silently un-dialled: the drain
     // would answer "nothing to do" forever while the spool filled, which is the
     // one thing a drained-looking entry must never be.
-    let Some((node, dial_only)) = dial_node(node_name) else {
+    let Some((node, dial_only)) = dial_node(node_name, spool_mesh(node_name).as_deref()) else {
         return Ok(());
     };
     // **A `poll` node is never dialled, so a drain of one opens no link at

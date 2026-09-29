@@ -102,8 +102,76 @@ pub fn declarations() -> Result<Vec<Loaded>, Refusal> {
     Ok(out)
 }
 
-/// This box's own name IN `mesh`: the declared name its identity `key` belongs
-/// to, or `None` for a key the mesh does not carry — which is exactly "not a
+/// The one zone-name resolution: an EMPTY name is the home mesh on either side
+/// (`crate::config::home_mesh`), because a container minted before the mesh was
+/// carried names none. Every lookup that compares two mesh names goes through it
+/// — the walk's crossing check, this module's key resolution, and the door's
+/// own mesh comparison.
+pub fn zone_name(mesh: &str) -> String {
+    let t = mesh.trim();
+    if t.is_empty() {
+        crate::config::home_mesh()
+    } else {
+        t.to_ascii_lowercase()
+    }
+}
+
+/// The declaration the set holds for `mesh`, normalised with [`zone_name`]:
+/// `Some(Ok)` where the mesh is declared and readable, `Some(Err)` where the set
+/// REFUSES it, `None` where the set does not name the mesh at all. The three
+/// answers are different questions — "declared", "cannot be read", "not here" —
+/// and a caller that reads a binding, an address or a hop must tell them apart:
+/// a refused mesh must PARK or refuse, never fall through to a weaker source.
+pub fn declaration_of<'a>(set: &'a [Loaded], mesh: &str) -> Option<&'a Result<Declaration, Refusal>> {
+    let mesh = zone_name(mesh);
+    set.iter().find(|loaded| zone_name(&loaded.mesh) == mesh).map(|loaded| &loaded.declaration)
+}
+
+/// The identity key `node` holds in `mesh` — the ONE resolution every
+/// verification reads (a hop's entry, an origin's two signatures, a binding's
+/// signer), over the declaration SET the caller already loaded.
+///
+/// **A mesh the set holds answers from its declaration and from nothing else**,
+/// and a mesh the set REFUSES answers `None`: a key read out of a declaration
+/// that will not load — a charter that is missing, tampered with or one-sided, a
+/// pair mesh whose records disagree — is a key nobody vouched for, and reading
+/// the paired records underneath it is exactly how a revoked or stale key comes
+/// back. A paired record answers ONLY where the mesh is absent from the set AND
+/// no charter governs it, which is the pre-charter lane.
+pub fn key_in(set: &[Loaded], mesh: &str, node: &str) -> Option<String> {
+    let mesh = zone_name(mesh);
+    if let Some(loaded) = set.iter().find(|loaded| zone_name(&loaded.mesh) == mesh) {
+        return loaded
+            .declaration
+            .as_ref()
+            .ok()
+            .and_then(|declaration| declaration.key_of(node))
+            .map(str::to_string);
+    }
+    if charter::charter_shaped(&mesh) {
+        return None;
+    }
+    node_store::load_nodes()
+        .iter()
+        .find(|n| n.name == node)
+        .and_then(|n| n.pubkey.clone())
+}
+
+/// Does the mesh `from` declare `node` as its gate into `to` — read from the SET,
+/// so a mesh the set refuses (a one-sided gate, a read that fails) declares
+/// nothing and a crossing through it is refused rather than waved through.
+pub fn gate_in(set: &[Loaded], from: &str, to: &str, node: &str) -> bool {
+    let from = zone_name(from);
+    let to = zone_name(to);
+    set.iter()
+        .find(|loaded| zone_name(&loaded.mesh) == from)
+        .and_then(|loaded| loaded.declaration.as_ref().ok())
+        .and_then(|declaration| declaration.gates().get(&to))
+        .map(|gate| gate == node)
+        .unwrap_or(false)
+}
+
+/// This box's own name IN `mesh`: the declared name its identity `key` belongs/// to, or `None` for a key the mesh does not carry — which is exactly "not a
 /// member of this mesh". The ONE resolution every policy, routing and audit
 /// lookup that starts from a verifying key goes through
 /// ([`Declaration::name_of_key`]); the OS hostname and a `nodes.json` nickname
@@ -416,7 +484,9 @@ impl Declaration {
     /// The identity key (bare lowercase hex) this declaration gives `node`, or
     /// `None`. For a charter mesh that is the charter's line; for a pair mesh
     /// the node's VERIFIED paired record — nothing else, because a relay never
-    /// supplies a key (MAIL.md §Transit, "Keys come from trust").
+    /// supplies a key (MAIL.md §Transit, "Keys come from trust"). Read by
+    /// [`key_in`], which is where a caller resolves a key: this is the
+    /// declaration's own half.
     pub fn key_of(&self, node: &str) -> Option<&str> {
         match &self.kind {
             Kind::Charter(c) => c.nodes.get(node).map(|line| line.key.as_str()),
@@ -1278,6 +1348,31 @@ mod tests {
         sign_on(&operator, "away", &body(&[], &[], &[], &[sakaki_line, evo_line]));
 
         assert_eq!(ok("home").key_of("sakaki"), ok("away").key_of("sakaki"), "one name, one key");
+    }
+
+    /// **A one-sided gate refuses the crossing even though the gate's own charter
+    /// parses.** The set refuses the mesh that declares a gate the other side does
+    /// not answer (`one-sided-gate`), and the hop chain reads THAT answer: a hop
+    /// carrying a letter out of a mesh whose declaration the set refuses has no
+    /// declared gate, so the crossing is the zone wall. Resolving a gate by
+    /// loading the file directly — outside the validated set — is what would wave
+    /// it through, and the walk calls this one function.
+    #[test]
+    fn a_one_sided_gate_refused_by_the_set_answers_no_crossing() {
+        let (_guard, _env) = isolate();
+        let scratch = Scratch::new("one-sided-gate");
+        let operator = scratch.dir("operator");
+        let line = line_for(&scratch.dir("sakaki"), "sakaki");
+        sign_on(&operator, "home", &body(&[], &[], &[("away", "sakaki")], &[line.clone()]));
+        sign_on(&operator, "away", &body(&[], &[], &[], &[line]));
+
+        assert_eq!(refused("home").reason, ONE_SIDED_GATE);
+        let set = crate::routing::declarations().unwrap();
+        assert!(
+            !gate_in(&set, "home", "away", "sakaki"),
+            "the gate question reads the set's refusal, not `home`'s own file"
+        );
+        assert!(!gate_in(&set, "away", "home", "sakaki"), "and the mesh that answered nothing has no gate");
     }
 
     #[test]

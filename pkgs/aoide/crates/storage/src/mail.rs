@@ -1105,18 +1105,13 @@ pub fn verify_origin_signature(envelope: &Envelope) -> bool {
     crate::wire_auth::verify_signature_hex(&pubkey_hex, &sig_input, &envelope.sig)
 }
 
-/// The key `node` signs with in `mesh`: that mesh's declaration (a charter line
-/// or a paired record), and a paired record alone only where the mesh has no
-/// declaration at all — the pre-charter lane. [`crate::seal`]'s own
-/// `origin_key_in` is the outer-signature half of this same rule.
+/// The key `node` signs with in `mesh` — [`crate::routing::key_in`] over the
+/// declaration set read here, so an inner signature and an outer one can never
+/// disagree about who signed (`crate::seal`'s own half reads the same set for
+/// the same deposit).
 fn origin_key_in(mesh: &str, node: &str) -> Option<String> {
-    if let Ok(declaration) = crate::routing::Declaration::load(mesh) {
-        return declaration.key_of(node).map(str::to_string);
-    }
-    crate::node_store::load_nodes()
-        .iter()
-        .find(|n| n.name == node)
-        .and_then(|n| n.pubkey.clone())
+    let set = crate::routing::declarations().ok()?;
+    crate::routing::key_in(&set, mesh, node)
 }
 
 /// The outcome of [`deposit`]'s policy chain, once the caller has already
