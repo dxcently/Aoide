@@ -1388,6 +1388,65 @@ fn an_unloadable_declaration_refuses_both_mail_methods_and_nothing_else() {
     );
 }
 
+/// **The two negatives that keep D8 honest.** With the same broken config:
+/// a TAMPERED signature still reads `-32007` (the ruling is "once the signature
+/// checks out cryptographically"), and so does a request whose key no line of the
+/// charter in force carries — the door has no key to believe there, and it says
+/// exactly that rather than blaming its own config for a caller it cannot place.
+#[test]
+fn a_tampered_signature_over_a_broken_config_still_reads_32007() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("door-config-invalid-forged");
+    let _doors = fx.doors(&["osaka"]);
+    break_osaka_config(&fx);
+
+    fx.enter("yomi");
+    let forged = door_post_tampered(
+        fx.ports["osaka"],
+        "yomi",
+        HOME,
+        "aoide/mailDeposit",
+        serde_json::json!({ "container": {} }),
+    );
+    assert_eq!(forged["error"]["code"], serde_json::json!(-32007), "{forged}");
+    assert!(forged["result"].is_null(), "no result, and no `config-invalid`: {forged}");
+}
+
+#[test]
+fn a_caller_no_line_carries_over_a_broken_config_still_reads_32007() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("door-config-invalid-stranger");
+    let _doors = fx.doors(&["osaka"]);
+    break_osaka_config(&fx);
+
+    // `evo` is a real machine whose key no line of `home` carries, and the
+    // request names `stranger`: there is nothing here to verify against, so the
+    // refusal stays the door's own.
+    fx.enter("evo");
+    let stranger = door_post(
+        fx.ports["osaka"],
+        "stranger",
+        HOME,
+        "aoide/mailDeposit",
+        serde_json::json!({ "container": {} }),
+    );
+    assert_eq!(stranger["error"]["code"], serde_json::json!(-32007), "{stranger}");
+    assert!(stranger["result"].is_null(), "no result, and no `config-invalid`: {stranger}");
+}
+
+/// `osaka`'s config with a `[status]` for a node `home` does not have: the
+/// section is refused as a whole, so `declarations()` fails and D8's branch is
+/// reachable at all.
+fn break_osaka_config(fx: &common::Fixture) {
+    let config = format!(
+        "[pairing]\nhomeMesh = \"{HOME}\"\n\n[mesh.{HOME}]\n{}\n[mesh.{AWAY}]\n{}\n\n\
+         [mesh.{HOME}.status]\nnobody = \"down\"\n",
+        aoide_storage::charter::operator_line(&fx.operators[HOME]),
+        aoide_storage::charter::operator_line(&fx.operators[AWAY]),
+    );
+    std::fs::write(fx.boxes["osaka"].join("config.toml"), config).unwrap();
+}
+
 /// **A `down` node's queued letter is KEPT, and is drained once the declaration
 /// no longer says `down`.** `down` stops this box SENDING; it never confiscates
 /// what is already spooled, and it never leaves the entry looking dialled.
