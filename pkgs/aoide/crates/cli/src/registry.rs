@@ -326,10 +326,17 @@ mod tests {
         // LAN ceremony) — reached 88.
         //
         // **The running total above is the CHAIN's history, not this list's
-        // length: the vec below holds 109 paths** (counted, review F7 — the
+        // length: the vec below holds 111 paths** (counted, review F7 — the
         // chain lost count with it somewhere around "+1 for bare `node list`",
         // and a comment that asserts a wrong number is worse than no number).
         // Treat THIS line as the authority and the chain as the history.
+        //
+        // The same line went stale by one more when `mail.serve` landed (a new
+        // name in the vec, no bump here); `mail.route` — the four-step dry run
+        // (`aoide_client::commands::handle_mail_route`,
+        // `docs/architecture/MAIL.md` §Transit) — is the one this count
+        // includes: it sorts in the mail family between `mail.rm` and
+        // `mail.send`.
         let mut expected: Vec<&str> = vec![
             "a2a.serve",
             "adapter.melete",
@@ -359,6 +366,7 @@ mod tests {
             "mail.read",
             "mail.ring",
             "mail.rm",
+            "mail.route",
             "mail.send",
             "mail.serve",
             "mail.show",

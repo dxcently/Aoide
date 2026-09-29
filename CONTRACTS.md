@@ -673,7 +673,14 @@ count.
   on individual commands, newest first: `mail`/`mail send|read|show|mark|rm|
   ring`, the addressed, signed, append-only mailbase and its doorbell,
   messaging plan P-M1/P-M5a (see `docs/architecture/MAIL.md` and this
-  document's own `state/mail/` subsection below); `secrets serve|exec|add|rm|grant|revoke`,
+  document's own `state/mail/` subsection below); `mail route <node>/<name>
+  [--mesh <mesh>]` — the four-step dry run of MAIL.md §Transit, a READ that
+  sends nothing: it prints the next hop, the mesh the letter rides by then
+  (`nextMesh`, rewritten only by a declared gate) and each step's reason.
+  `--json` carries `from`/`to`/`name`/`mesh`/`next`/`nextMesh`/`held`/`dial`/
+  `steps`, and `reason`/`detail`/`steps` instead when no step produced a hop
+  — `dial` being `charter::dial_of`'s reading of the next hop's declared
+  `address`; `secrets serve|exec|add|rm|grant|revoke`,
   appended newest, Workstream SECRETS P-V2; `secrets enroll`, appended
   newest, Workstream SECRETS P-V3; spelled `vault ...` until the P-V4b
   rename — paths rename in place, registration order and count unchanged;
@@ -1473,7 +1480,7 @@ Upgrading every node is the remedy the fleet's own rollout takes.
   name alone, so its one record carries the grant map) — what may not is
   two different *keys* for one node anywhere, "one node, one identity key,
   in every mesh", refused where both declarations are in hand
-  (`aoide_storage::routing::validate`). One key
+  (`aoide_storage::routing::declarations`). One key
   is expected to name the box the file lives on: `aoide mesh` matches
   against `display::local_host_name()` by exact string equality, so that
   key must be exactly what the function returns — an FQDN or mixed-case OS

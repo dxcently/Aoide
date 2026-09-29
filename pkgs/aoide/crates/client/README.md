@@ -554,8 +554,8 @@ never the inbound/serve half (that's `aoide-server`).
 - `commands` — this crate's CLI commands:
   `node add/remove/pull/status/hub/allow/spawn/discover`,
   `aoide pair` + `pair.reject`/`pair.watch` (P-P2, P-PV2, task #135 P3',
-  CONTRACTS.md §6/§7 — **`register_mail`'s ten commands (`mail`, `mail
-  send/read/show/mark/rm/outbox/outbox.rm/outbox.retry/export`, P-M1/P-M2,
+  CONTRACTS.md §6/§7 — **`register_mail`'s eleven commands (`mail`, `mail
+  send/read/show/mark/rm/outbox/outbox.rm/outbox.retry/export/route`, P-M1/P-M2,
   `docs/architecture/MAIL.md`) moved here from `aoide-storage` at P-M2,
   because `handle_mail_send`'s non-self branch now dials out and only this
   crate may hold that dial:** `handle_mail_send` mints and spools an outbound
@@ -628,7 +628,21 @@ never the inbound/serve half (that's `aoide-server`).
   mailboxes), `state/mail-export/` by default, advancing no cursor and
   writing no note whose bytes already match (see the `mail_export` module
   bullet and MAIL.md "Export") —
-  `handle_node_allow` (`node allow <name> <cap> on|off [--mesh <m>]`, P-P3, per
+  `handle_mail_route` (`mail route <node>/<name> [--mesh <m>]`) is the fourth
+  read of this family and the only one that answers about a letter that does
+  not exist yet: it resolves the mesh the letter would ride off the mesh
+  DECLARATIONS (the meshes whose declaration names the destination; `--mesh`
+  breaks a tie, the same rule `resolve_mesh_any` gives every mesh-carrying
+  command), runs `aoide_storage::routing::Letter::route` over
+  `routing::declarations()` and prints the next hop, the mesh it arrives in
+  and each step's reason — plus that hop's declared address read through
+  `charter::dial_of`. It sends nothing, spools nothing and dials nothing, so a
+  route report is safe to run before a routing change; the letter's mailbox
+  `<name>` is accepted because `mail send --to` takes it and plays no part in
+  the route. `--json` carries
+  `from`/`to`/`name`/`mesh`/`next`/`nextMesh`/`held`/`dial`/`steps`, or
+  `reason`/`detail`/`steps` when no step produced a hop (a refusal is an
+  error outcome carrying the word, never prose alone). `handle_node_allow` (`node allow <name> <cap> on|off [--mesh <m>]`, P-P3, per
   mesh since P-CHARTER, `docs/
   architecture/PAIRING.md` decision 5) is a thin wire around
   `aoide_storage::node_store::set_node_allow` — idempotent, refuses an

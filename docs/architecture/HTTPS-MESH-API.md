@@ -89,6 +89,18 @@ Hostnames are illustrative. In the home mesh, sakaki is the hub behind its exist
 Cloudflare Tunnel, which dials out and forwards to a loopback listener. Other meshes
 may use a VPS or a tailnet hub.
 
+`aoide_storage::charter::dial_of` is the ONE turn from a declared `address`
+into something a caller can act on: `ssh://…` through the parser `--via`
+already uses, `https://…` as an ordinary door or adapter URL, `poll` as no
+dial target at all — a node that asks, whose letters wait at its mesh's relay.
+An address that is none of the three is refused rather than guessed at, at
+`sign` time and again when the route reads it. The router asks it whether a
+hop can be reached *by declaration*; the drain asks it what to dial. **There
+is no version signal on the wire**, so a relay that cannot carry a container
+refuses it rather than announcing that it is old: the letter parks at its
+sender and waits for the relay to be brought up to date
+(`docs/architecture/MAIL.md` §Transit).
+
 ### Degenerate topologies
 
 | Topology | Behaviour |
@@ -224,12 +236,13 @@ machines. It is shaped like agenix: public keys in one file, one signer.
 
    **A later version is spooled for every node on the charter, but it only
    travels to the ones this box can DIAL — a node it has a record for.** The
-   charter's own `address` is not a route in this phase: turning a line's
-   `address` into a dial target is the router's job, at P-M4 (Transports and
-   relays; MAIL.md §Transit). So a version signed after a machine joined by
-   `--operator` or by file — the two non-LAN paths, which create no pairwise
-   record — WAITS in the signer's spool until either that machine is paired
-   (giving it a record to dial) or P-M4 routes charter addresses. The receive
+   charter's own `address` is a declaration, and
+   `aoide_storage::charter::dial_of` turns it into a dial target (Transports
+   and relays; MAIL.md §Transit) — but the drain still dials a RECORD, so a
+   version signed after a machine joined by `--operator` or by file — the two
+   non-LAN paths, which create no pairwise record — WAITS in the signer's
+   spool until either that machine is paired (giving it a record to dial) or
+   the drain reads the declaration. The receive
    half is already in place: the door admits and applies such a letter from an
    origin it holds no record for (Connections and trust, above). `aoide mesh
    charter sign` reports each spooled node as `drained` or `NOT DIALED — no

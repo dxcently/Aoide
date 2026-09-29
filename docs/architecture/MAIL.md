@@ -1142,8 +1142,9 @@ network"). It grows columns: mesh, status (`hold`/`down`/normal), role
 (relay/gate/spoke), key source (paired/charter), liveness, and the charter
 version in force for each charter mesh. Statuses are declared like every
 other mesh fact — in the charter for a charter mesh, in config for a pair
-mesh; the command reports, it does not edit. `aoide mail route <node>` runs the four steps and prints
-the path without sending — the dry run before a routing change. A later
+mesh; the command reports, it does not edit. `aoide mail route <node>/<name>
+[--mesh <m>]` runs the four steps and prints the path without sending — the
+dry run before a routing change. A later
 `aoide mesh down <node>` that edits the declaration for the User is a
 convenience allowed by this document, not required by it.
 
@@ -1216,6 +1217,15 @@ authoritative first:
   spool write already succeeded, or the entry is only being listed, so
   the failure is about REPORTING, never about the mail itself.
 
+`mail route` does not speak that vocabulary: it reports a ROUTE — the next
+hop, the mesh the letter rides by then, and each step's reason — or ONE
+refusal word from the closed set §Transit gives (`no-route`, the letter's own
+mesh's word, `zone-violation`), with the sentence explaining it beside the
+word and never instead of it. Nothing has moved when it answers, so there is
+no `data.delivery` and no per-entry state to read; the two are read together
+before a routing change, the route saying where a letter will be offered and
+`data.delivery` saying what became of the one already spooled.
+
 ## Security model
 
 Threat: code execution as the aoide unix user on one node; also a
@@ -1282,7 +1292,7 @@ aoide mail read [--for <name>] [--all-names] [--reread] [--transit]   print + ad
 aoide mail show <msgid>                                  one entry, framed
 aoide mail mark --for <name>                            advance a cursor without printing
 aoide mail outbox [<node>] [rm <msgid>]                  the spool, truthfully, per entry
-aoide mail route <node>                                  dry-run the four steps
+aoide mail route <node>/<name> [--mesh <m>]              dry-run the four steps: the path, each step's reason, nothing sent
 aoide mail rm --older-than <Nd|Nh>                       prune the base, never seen.jsonl
 aoide mail export [--dir <path>]                         one Markdown note per thread (read-only)
 aoide mail poll [<node>]                                 ask without depositing; no <node> polls every paired node holding message (a poll node: its relay, from the OS scheduler)

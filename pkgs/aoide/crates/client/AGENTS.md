@@ -817,6 +817,18 @@
   background daemon's schedule) leak into a command that already
   succeeded at its own job; the drain's result is data for the projection,
   not a verdict on the spool.
+- **`mail_route` is a READ, and it stays one.** It resolves the mesh off the
+  mesh DECLARATIONS (`routing::declarations`, the same set the door and the
+  drain read), runs `aoide_storage::routing::Letter::route`, prints the hop,
+  the mesh and each step's reason, and stops: no spool write, no mailbase
+  write, no `drain_node`, no dial — the whole point of the command is that a
+  route may be inspected before a declaration changes. Do not "helpfully"
+  drain the chosen hop, and do not resolve the mesh off a paired record's
+  grants the way `mail send` does: a charter line is what declares a node, so
+  a destination that exists only there has a route and no record. A refusal is
+  an `Outcome::error` carrying the router's word in `data.reason`, with the
+  trail beside it — never a bare reason string the caller has to parse
+  (MAIL.md "Status and the nodelist view").
 - **`mail_export` is READ-ONLY on the mailbase and clamps everything that
   leaves a fence (register §30).** It reads `base.jsonl` once
   (`mail::read_base`), groups and renders, and writes notes under

@@ -8,7 +8,19 @@ mod common;
 
 use common::{fixture, env_lock, AWAY, HOME, ONE_SIDED_GATE, TWO_KEYS};
 
+use aoide::dispatch::{dispatch, Invocation};
+use aoide_protocol::output::Status;
+use aoide_protocol::Door;
 use aoide_storage::routing;
+
+fn cli_invocation(path: &[&str], args: &[&str], flags: &[(&str, &str)]) -> Invocation {
+    Invocation {
+        path: path.iter().map(|s| s.to_string()).collect(),
+        args: args.iter().map(|s| s.to_string()).collect(),
+        flags: flags.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        door: Door::Cli,
+    }
+}
 
 #[test]
 fn the_five_edge_fixture_loads_and_validates_through_the_declaration_seam() {
@@ -113,4 +125,62 @@ fn the_fixture_edges_route_through_the_declaration_seam() {
     let at_evo = bridged.outcome.as_ref().unwrap_or_else(|e| panic!("{e}\n{}", bridged.trail.join("\n")));
     assert_eq!(at_evo.next, "evo", "{}", bridged.trail.join("\n"));
     assert_eq!(at_evo.mesh, AWAY, "{}", bridged.trail.join("\n"));
+}
+
+/// `mail route` over the same fixture: the command prints the path and every
+/// step's reason, and sends nothing at all — no spool, no mailbase, no dial.
+#[test]
+fn mail_route_prints_the_path_and_sends_nothing() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("mail-route");
+    fx.enter("osaka");
+
+    let out = dispatch(&cli_invocation(&["mail", "route"], &["chiyo/conductor"], &[("json", "true")]));
+    assert_eq!(out.status, Status::Ok, "{}", out.message);
+    let data = out.data.as_ref().expect("--json carries the route");
+    assert_eq!(data["from"], "osaka");
+    assert_eq!(data["to"], "chiyo");
+    assert_eq!(data["mesh"], HOME);
+    assert_eq!(data["next"], "sakaki", "a plain member hands a `poll` letter to the relay");
+    assert_eq!(data["nextMesh"], HOME);
+    assert_eq!(data["held"], false);
+    assert_eq!(data["dial"], "ssh://sakaki");
+    let steps: Vec<&str> =
+        data["steps"].as_array().unwrap().iter().map(|s| s.as_str().unwrap()).collect();
+    assert!(steps.iter().any(|s| s.starts_with("step 1:")), "{steps:?}");
+    assert!(steps.iter().any(|s| s.starts_with("step 2:")), "{steps:?}");
+
+    // The human body: the path, each step's reason, and what a refusing hop
+    // does to the letter.
+    let text = dispatch(&cli_invocation(&["mail", "route"], &["chiyo/conductor"], &[]));
+    assert_eq!(text.status, Status::Ok, "{}", text.message);
+    assert!(text.message.contains("route: osaka -> chiyo/conductor"), "{}", text.message);
+    assert!(text.message.contains("next hop: sakaki"), "{}", text.message);
+    assert!(text.message.contains("step 2:"), "{}", text.message);
+    assert!(text.message.contains("parks"), "{}", text.message);
+
+    let osaka = &fx.boxes["osaka"];
+    assert!(!osaka.join("state/outbox").exists(), "a route spools nothing");
+    assert!(!osaka.join("state/mail").exists(), "and files nothing");
+
+    // At the gate: the mesh is rewritten, and a `poll` destination is held at
+    // the relay that holds its letters. Neither report sends anything.
+    fx.enter("sakaki");
+    let bridged = dispatch(&cli_invocation(&["mail", "route"], &["evo/conductor"], &[("json", "true")]));
+    assert_eq!(bridged.status, Status::Ok, "{}", bridged.message);
+    let data = bridged.data.as_ref().unwrap();
+    assert_eq!(data["next"], "evo");
+    assert_eq!(data["nextMesh"], AWAY, "the gate rewrites the mesh it carries");
+
+    let held = dispatch(&cli_invocation(&["mail", "route"], &["chiyo/conductor"], &[("json", "true")]));
+    let data = held.data.as_ref().unwrap();
+    assert_eq!(data["next"], "chiyo");
+    assert_eq!(data["held"], true, "held for `chiyo`'s own ask");
+    assert_eq!(data["dial"], "poll");
+    assert!(!fx.boxes["sakaki"].join("state/outbox").exists(), "still nothing spooled");
+
+    // A name no declaration carries, and a mesh asked for that cannot be read.
+    let unknown = dispatch(&cli_invocation(&["mail", "route"], &["nobody/conductor"], &[]));
+    assert_eq!(unknown.status, Status::Error, "{}", unknown.message);
+    assert_eq!(unknown.data.as_ref().unwrap()["reason"], "unknown-node");
 }

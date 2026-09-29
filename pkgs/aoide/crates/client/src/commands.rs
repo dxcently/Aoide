@@ -4532,17 +4532,19 @@ pub fn register_post_graph(r: &mut Registry) {
 // ── `aoide mail` (messaging plan P-M1/P-M2, docs/architecture/MAIL.md) ─────
 
 /// `aoide mail[.send|.read|.show|.mark|.rm|.outbox|.outbox.rm|.outbox.retry|
-/// .export]` commands.
+/// .export|.poll|.route]` commands — the mail family this crate registers
+/// (`mail ring` sits in conduct's own registration, `mail serve` in
+/// `aoide-server` beside `a2a.serve`).
 /// Registered here, in `aoide-client`, rather than in `aoide-storage` where
 /// the store itself ([`aoide_storage::mail`]/[`aoide_storage::outbox`])
 /// lives: from P-M2 on, `mail send` can dial another node ([`crate::
 /// mail_wire`]'s outbox drain), and `aoide-storage` sits below
 /// `aoide-client` in the crate DAG and must not depend on it (P-M2
-/// ruling 1). `mail outbox`/`mail outbox rm` are new at P-M2, `mail
-/// outbox retry` is the un-park that makes a `refused` entry retriable
-/// rather than a permanent verdict; `--hold`,
-/// `mail route`, and mesh-aware addressing are later phases (MAIL.md
-/// §Phases) and are not registered yet.
+/// ruling 1). `mail outbox retry` is the un-park that makes a `refused`
+/// entry retriable rather than a permanent verdict, `mail poll` is the
+/// receive trigger a quiet box needs, and `mail route` is the dry run of the
+/// four steps ([`aoide_storage::routing::Letter::route`]) — a read that
+/// prints the path and sends nothing.
 pub fn register_mail(r: &mut Registry) {
     r.insert(cmd!(
         path: ["mail"],
@@ -4668,6 +4670,16 @@ pub fn register_mail(r: &mut Registry) {
         implemented: true,
         handler: handle_mail_poll,
         examples: ["mail poll", "mail poll yomi-strix"],
+    ));
+    r.insert(cmd!(
+        path: ["mail", "route"],
+        summary: "Show where a letter addressed that way goes next from this box: the four steps of MAIL.md §Transit over the mesh declarations in force, with each step's reason. A READ — nothing is sent, spooled or dialled, so it is the dry run before a routing change. A hop that refuses transit parks the letter rather than rerouting it.",
+        args: [arg!("address", "string", true, "Recipient address, <node>/<name> (or just <node>) — the same shape `mail send --to` takes. <name> is the mailbox the letter is filed under and plays no part in the route.")],
+        flags: [flag!("mesh", "string", "The mesh the letter rides: it is what the steps read, and what a send would sign into the request. Absent = the sole mesh that declares the node, else `[pairing] homeMesh`; required when more than one declares it.")],
+        gated: false,
+        implemented: true,
+        handler: handle_mail_route,
+        examples: ["mail route chiyo/conductor", "mail route evo/conductor --mesh home"],
     ));
 }
 
@@ -5065,6 +5077,126 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
         if hold { "hold" } else { "now" }
     )])
     .with_data(data)
+}
+
+/// What every `mail route` report ends with. The four steps answer where a
+/// letter goes next and why; they do not send it. And a hop that REFUSES to
+/// carry a container — a relay too old to know what one is, which nothing on
+/// the wire can announce — parks the letter at its sender rather than making
+/// it reroute (`docs/architecture/MAIL.md` §Transit).
+const ROUTE_NOTE: &str = "nothing was sent — this is the route, not the letter. A hop that refuses to carry it parks it instead of rerouting: `aoide mail outbox retry --refused` is the hand.";
+
+/// `aoide mail route <node>/<name> [--mesh <mesh>] [--json]` — the dry run of
+/// the four steps (`docs/architecture/MAIL.md` §Transit): where a letter
+/// addressed that way goes next from this box, and why. It reads the mesh
+/// declarations and prints, and it sends nothing, spools nothing and dials
+/// nothing — which is what makes it the check to run BEFORE a routing change.
+///
+/// The mesh the letter rides resolves off the DECLARATIONS, not off a paired
+/// record: a charter line is what declares a node, so a destination named only
+/// there is routed for on the strength of that line. `--mesh` says which mesh
+/// when more than one names the destination, the same tie rule every other
+/// mesh-carrying command uses.
+fn handle_mail_route(inv: &Invocation) -> Outcome {
+    let cmd = "mail.route";
+    const USAGE: &str = "usage: aoide mail route <node>/<name> [--mesh <mesh>]";
+    let Some(address) = inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()) else {
+        return Outcome::usage(cmd, USAGE);
+    };
+    // `<node>` alone is accepted: the mailbox is the filing end of an address
+    // and plays no part in the route, so the destination is all this needs.
+    let (node, name) = match address.split_once('/') {
+        Some((node, name)) => (node.trim(), name.trim()),
+        None => (address, ""),
+    };
+    if !aoide_storage::node_store::valid_node_name(node) {
+        return Outcome::usage(cmd, format!("`{address}` is not `<node>/<name>`"))
+            .with_data(json!({ "reason": "bad-address", "address": address }));
+    }
+    if !name.is_empty() && !aoide_storage::node_store::valid_node_name(name) {
+        return Outcome::error(cmd, "mailbox name must match ^[a-z0-9][a-z0-9-]*$")
+            .with_data(json!({ "reason": "invalid-name" }));
+    }
+
+    let set = aoide_storage::routing::declarations();
+    // The meshes whose declaration names the destination. A mesh that cannot
+    // be read names nothing here — it is not a name source, and `--mesh` is
+    // how a caller asks the route about it anyway.
+    let named: std::collections::BTreeSet<String> = set
+        .iter()
+        .filter(|loaded| loaded.declaration.as_ref().map(|d| d.declares(node)).unwrap_or(false))
+        .map(|loaded| loaded.mesh.clone())
+        .collect();
+    let asked = inv.flags.get("mesh").map(String::as_str).filter(|m| !m.trim().is_empty());
+    if named.is_empty() && asked.is_none() {
+        return Outcome::error(cmd, format!("no mesh declared at this node names `{node}`"))
+            .with_data(json!({ "reason": "unknown-node", "node": node }));
+    }
+    let mesh = match aoide_storage::node_store::resolve_mesh_any(
+        asked,
+        &named,
+        &aoide_storage::config::home_mesh(),
+    ) {
+        Ok(mesh) => mesh,
+        Err(e) => {
+            return Outcome::error(cmd, format!("--mesh: {e}"))
+                .with_data(json!({ "reason": "mesh-ambiguous", "node": node }))
+        }
+    };
+
+    let from = aoide_storage::display::local_node_name();
+    let route = aoide_storage::routing::Letter { from: &from, to: node, mesh: &mesh }.route(&set);
+    let steps = route.trail.clone();
+    let addressed = if name.is_empty() { node.to_string() } else { format!("{node}/{name}") };
+    match route.outcome {
+        Ok(hop) => {
+            let address = set
+                .iter()
+                .find(|loaded| loaded.mesh == hop.mesh)
+                .and_then(|loaded| loaded.declaration.as_ref().ok())
+                .and_then(|declaration| declaration.address_of(&hop.next))
+                .unwrap_or_default();
+            let dial = aoide_storage::charter::dial_of(address)
+                .map(|dial| dial.to_string())
+                .unwrap_or_else(|_| address.to_string());
+            let body = format!(
+                "route: {from} -> {addressed} in mesh `{mesh}`\n\
+                 next hop: {} ({dial} in mesh `{}`){}\n  {}\n{ROUTE_NOTE}",
+                hop.next,
+                hop.mesh,
+                if hop.held { " — HELD for its own ask, never dialled" } else { "" },
+                steps.join("\n  "),
+            );
+            Outcome::ok(cmd, body).with_data(json!({
+                "from": from,
+                "to": node,
+                "name": name,
+                "mesh": mesh,
+                "next": hop.next,
+                "nextMesh": hop.mesh,
+                "held": hop.held,
+                "dial": dial,
+                "steps": steps,
+            }))
+        }
+        Err(refusal) => {
+            let body = format!(
+                "no route: {from} -> {addressed} in mesh `{mesh}`\n  {}\nreason: {} — {}\n{ROUTE_NOTE}",
+                steps.join("\n  "),
+                refusal.reason,
+                refusal.detail,
+            );
+            Outcome::error(cmd, body).with_data(json!({
+                "from": from,
+                "to": node,
+                "name": name,
+                "mesh": mesh,
+                "reason": refusal.reason,
+                "detail": refusal.detail,
+                "steps": steps,
+            }))
+        }
+    }
 }
 
 /// `aoide mail read (--for <name> | --all-names) [--reread] [--json]`.
