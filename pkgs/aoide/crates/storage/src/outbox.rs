@@ -931,20 +931,30 @@ fn write_filed_unlocked(node: &str, pending: &[String]) -> Result<(), String> {
 /// its next hop gave, and `mail outbox` on either box shows it.
 pub fn parked_transit_refusal(msgid: &str) -> Option<String> {
     for node in nodes_with_outbox().ok()? {
-        let Some(entry) = list_entries(&node).ok()?.into_iter().find(|e| e.envelope.msgid == msgid)
-        else {
+        // **One unreadable spool is that spool's problem.** Giving up the whole
+        // scan on the first `Err` would hide a park in a LATER spool — a
+        // refusal this box owes the depositing hop — so the scan skips it.
+        let Ok(entries) = list_entries(&node) else { continue };
+        let Some(entry) = entries.into_iter().find(|e| e.envelope.msgid == msgid) else {
             continue;
         };
         if !entry.refused || !entry.is_transit() {
             continue;
         }
-        let word = entry
+        let text = entry
             .last_outcome
             .trim()
             .strip_prefix("refused:")
             .map(str::trim)
             .unwrap_or(&entry.last_outcome);
-        return Some(word.split(':').next().unwrap_or(word).trim().to_string());
+        // **Only the closed word crosses the wire**, never the peer's own
+        // sentence: every taught refusal word is one lowercase-hyphen token, and
+        // anything with a space, a capital or punctuation is somebody's prose —
+        // relaying it would carry a stranger's text into this hop's answer.
+        let word = text.split(':').next().unwrap_or(text).trim();
+        let closed = !word.is_empty()
+            && word.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        return Some(if closed { word.to_string() } else { "refused".to_string() });
     }
     None
 }
@@ -1132,9 +1142,76 @@ mod tests {
         aoide_test_support::isolated_mail_root(tag)
     }
 
+    /// **An unreadable spool is skipped, and only a closed word crosses.** A
+    /// spool this box cannot list must not hide a park in a later one, and a park
+    /// whose recorded reason is somebody's PROSE must not carry that prose into
+    /// this hop's answer: the depositing hop is owed the taught word or the
+    /// generic one, never a stranger's sentence.
+    #[test]
+    fn a_parked_hub_answer_relays_a_closed_word_and_skips_an_unreadable_spool() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("parked-word");
+
+        let transit = |msgid: &str, reason: &str| {
+            let mut entry = OutboxEntry::transit(crate::seal::Container {
+                v: crate::seal::CONTAINER_VERSION,
+                purpose: crate::seal::PURPOSE_MAIL.to_string(),
+                msgid: msgid.to_string(),
+                generation: 1,
+                origin: crate::seal::Party { node: "osaka".to_string(), key: "aa".repeat(32) },
+                to: crate::seal::Destination { node: "chiyo".to_string(), age: "age1x".to_string() },
+                origin_mesh: "home".to_string(),
+                mesh: "home".to_string(),
+                suite: crate::seal::SUITE_AGE_V1_X25519.to_string(),
+                ct: "00".to_string(),
+                sig: "00".to_string(),
+                transit: Vec::new(),
+                board: None,
+                epoch: None,
+            });
+            entry.refused = true;
+            entry.last_outcome = reason.to_string();
+            entry
+        };
+
+        // A taught word is relayed as itself…
+        let taught = "aa".repeat(32);
+        write_entry("chiyo", &transit(&taught, "refused: no-route: `chiyo` is not a node of mesh `home`")).unwrap();
+        assert_eq!(parked_transit_refusal(&taught).as_deref(), Some("no-route"));
+
+        // …a sentence is not: the closed words are tokens, and this is prose.
+        let prose = "bb".repeat(32);
+        write_entry("dave", &transit(&prose, "refused: this node is not a member of the mesh that letter names, so it has no name there")).unwrap();
+        assert_eq!(parked_transit_refusal(&prose).as_deref(), Some("refused"));
+
+        // And an unreadable spool does not end the scan: the park in the next one
+        // is still found. (`dave`'s node dir is made unlistable, the way a
+        // permission or I/O failure looks.)
+        let unreadable = node_dir("dave");
+        let _ = std::fs::remove_file(unreadable.join("link.json"));
+        let hidden = "cc".repeat(32);
+        write_entry("evo", &transit(&hidden, "refused: down")).unwrap();
+        let mut perms = std::fs::metadata(&unreadable).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o000);
+        std::fs::set_permissions(&unreadable, perms).unwrap();
+        let found = parked_transit_refusal(&hidden);
+        let mut restore = std::fs::metadata(&unreadable).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut restore, 0o700);
+        std::fs::set_permissions(&unreadable, restore).unwrap();
+        assert_eq!(
+            found.as_deref(),
+            Some("down"),
+            "a spool that cannot be listed is skipped, not fatal"
+        );
+        // `dave`'s own park, read once it is listable again, is still the prose
+        // case — the skip changed nothing about it.
+        assert_eq!(parked_transit_refusal(&prose).as_deref(), Some("refused"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn envelope(from_node: &str, to_node: &str, msgid: &str) -> Envelope {
-        Envelope {
-            header: Header {
+        Envelope {            header: Header {
                 version: "1".to_string(),
                 from: Address { node: from_node.to_string(), name: "alice".to_string() },
                 to: Address { node: to_node.to_string(), name: "bob".to_string() },
