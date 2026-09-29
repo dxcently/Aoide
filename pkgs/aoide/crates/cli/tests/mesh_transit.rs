@@ -209,8 +209,8 @@ fn mail_route_prints_the_path_and_sends_nothing() {
 
 /// This box's name in a mesh is the name its own identity key resolves to
 /// there, never the OS hostname: a box whose hostname is not its charter line's
-/// name routes as itself, and one whose key the mesh does not carry is not a
-/// member of it at all.
+/// name routes as itself, and a charter mesh that does not carry its key names
+/// nobody — the hostname does not stand in for a name that mesh never gave it.
 #[test]
 fn mail_route_resolves_self_by_identity_key_not_by_hostname() {
     let _lock = env_lock();
@@ -247,4 +247,36 @@ fn mail_route_resolves_self_by_identity_key_not_by_hostname() {
     let data = bridged.data.as_ref().unwrap();
     assert_eq!(data["next"], "evo");
     assert_eq!(data["nextMesh"], AWAY, "this box is the gate: {}", data["steps"]);
+}
+
+/// A charter mesh names this box only where its own line carries this box's
+/// identity key. Let the hostname spell a member's name and nothing changes: the
+/// box is a stranger in that mesh and gets no route at all — never the member's
+/// route, never handed a letter the member would have carried.
+#[test]
+fn a_box_whose_hostname_spells_a_member_is_a_stranger_in_a_charter_mesh() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("stranger");
+    // `evo`'s key is on `away`'s charter alone, and this is the name home's
+    // lines happen to spell.
+    fx.enter("evo");
+    std::env::set_var("AOIDE_A2A_NODE_NAME", "sakaki");
+
+    let stranger = dispatch(&cli_invocation(
+        &["mail", "route"],
+        &["chiyo/conductor"],
+        &[("mesh", HOME), ("json", "true")],
+    ));
+    assert_eq!(stranger.status, Status::Error, "{}", stranger.message);
+    assert_eq!(stranger.data.as_ref().unwrap()["reason"], "not-a-member");
+
+    // The mesh that DOES carry its key routes as `evo`, so the refusal above is
+    // the membership rule and not a box that cannot read its own name at all.
+    let at_home = dispatch(&cli_invocation(
+        &["mail", "route"],
+        &["sakaki/conductor"],
+        &[("mesh", AWAY), ("json", "true")],
+    ));
+    assert_eq!(at_home.status, Status::Ok, "{}", at_home.message);
+    assert_eq!(at_home.data.as_ref().unwrap()["from"], "evo");
 }

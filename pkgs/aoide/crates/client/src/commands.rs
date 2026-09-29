@@ -5165,25 +5165,35 @@ fn handle_mail_route(inv: &Invocation) -> Outcome {
         }
     };
 
-    // This box's name IN THIS MESH: the declared name its own identity key
-    // resolves to, which for a charter mesh is the name on the charter line and
-    // not the hostname (`Declaration::name_of_key`; the nickname and the OS
-    // hostname are display facts and never inputs to policy). A box whose key
-    // this mesh does not carry resolves to no name at all, and is therefore not
-    // a member of it: the route is then read as a stranger's, which is what it
-    // is. Loading the identity may mint the key on a first touch, as every mail
-    // command may.
-    let own = aoide_storage::identity::load_or_mint().ok().map(|(k, _)| k.info().pubkey_hex);
-    let from = own
-        .as_deref()
-        .and_then(|key| {
-            set.iter()
-                .find(|loaded| loaded.mesh == mesh)
-                .and_then(|loaded| loaded.declaration.as_ref().ok())
-                .and_then(|declaration| declaration.name_of_key(key))
-        })
-        .map(str::to_string)
-        .unwrap_or_else(aoide_storage::display::local_node_name);
+    // This box's name IN THIS MESH — the declared name its identity key holds
+    // there (`routing::own_name_in`). Only a mesh no charter governs falls back
+    // to the box's own name: a pair mesh's records are all about OTHER boxes, so
+    // a box with no record of itself is still itself, while a CHARTER mesh that
+    // does not carry this key names nobody — a hostname that happens to spell a
+    // member's name is a stranger there, never that member. Loading the identity
+    // may mint the key on a first touch, as every mail command may.
+    let own = match aoide_storage::identity::load_or_mint() {
+        Ok((kp, _)) => kp.info().pubkey_hex,
+        Err(e) => {
+            return Outcome::error(cmd, format!("this box's identity key cannot be read: {e}"))
+                .with_data(json!({ "reason": "no-identity" }))
+        }
+    };
+    let Some(from) = aoide_storage::routing::own_name_in(&set, &mesh, &own) else {
+        return Outcome::error(
+            cmd,
+            format!(
+                "this box is not a member of mesh `{mesh}`: no line on its declaration carries this \
+                 box's identity key, so the route has no sender to read"
+            ),
+        )
+        .with_data(json!({
+            "reason": "not-a-member",
+            "to": node,
+            "mesh": mesh,
+            "steps": Vec::<String>::new(),
+        }));
+    };
     let route = aoide_storage::routing::Letter { from: &from, to: node, mesh: &mesh }.route(&set);
     let steps = route.trail.clone();
     let addressed = if name.is_empty() { node.to_string() } else { format!("{node}/{name}") };
