@@ -3972,21 +3972,14 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
             ("invalid", format!("sealed msgid {} via {hop_name}: {reason}: {detail}", container.msgid))
         }
         // A hop: this box is not the destination, so the letter is carried on
-        // rather than opened. `hop_name` is the name the hop SIGNS with (the
-        // charter line's), so the audit line and the chain agree on who carried
-        // it.
-        aoide_storage::seal::ContainerOutcome::Hopped(hop) => (
-            "ok",
-            format!(
-                "sealed transit msgid {} via {hop_name}: next `{}` in mesh `{}`{}",
-                hop.container.msgid,
-                hop.next,
-                hop.mesh,
-                if hop.held { ", HELD for its own poll" } else { "" }
-            ),
-        ),
+        // rather than opened. Its own audit line is written by the arm below,
+        // AFTER `file_transit_hop` — the write is what the line is about, so a
+        // filing that failed must not read as one that happened.
+        aoide_storage::seal::ContainerOutcome::Hopped(_) => ("", String::new()),
     };
-    let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", audit_status, &audit_detail);
+    if !audit_status.is_empty() {
+        let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", audit_status, &audit_detail);
+    }
 
     match outcome {
         aoide_storage::seal::ContainerOutcome::Refused { reason, detail } => {
@@ -3999,8 +3992,39 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
         // hop taking custody, which is exactly what `accepted` means to a drain
         // (the entry stays spooled until a real receipt retires it).
         aoide_storage::seal::ContainerOutcome::Hopped(hop) => {
-            aoide_storage::seal::file_transit_hop(&hop, &hop_name)
-                .map_err(|e| (-32603_i64, format!("internal error: {e}")))?;
+            // The write comes FIRST, and the audit line follows it: a `transit`
+            // entry the hub could not write is not a hop, and an audit that said
+            // "next `chiyo`" about it would be the one record of a letter that is
+            // nowhere.
+            match aoide_storage::seal::file_transit_hop(&hop, &hop_name) {
+                Ok(()) => {
+                    let _ = audit(
+                        ctx.audit_log,
+                        Door::A2a,
+                        EventClass::Audit,
+                        "a2a.aoide/mailDeposit",
+                        "ok",
+                        &format!(
+                            "sealed transit msgid {} via {hop_name}: next `{}` in mesh `{}`{}",
+                            hop.container.msgid,
+                            hop.next,
+                            hop.mesh,
+                            if hop.held { ", HELD for its own poll" } else { "" }
+                        ),
+                    );
+                }
+                Err(e) => {
+                    let _ = audit(
+                        ctx.audit_log,
+                        Door::A2a,
+                        EventClass::Audit,
+                        "a2a.aoide/mailDeposit",
+                        "invalid",
+                        &format!("sealed transit msgid {} via {hop_name}: NOT FILED: {e}", hop.container.msgid),
+                    );
+                    return Err((-32603_i64, format!("internal error: {e}")));
+                }
+            }
             if !hop.held {
                 // Best-effort, exactly like the destination's own post-filing
                 // drain. The container is on this box's disk now, so a dial that

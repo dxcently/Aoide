@@ -908,14 +908,41 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
             // A container whose chain does not end at this box: this hand-over
             // is one hop of it, and the step is the door's own
             // (`deposit_sealed`'s `Hopped` arm) — a relay that polls another
-            // relay forwards rather than dropping. A failed write is audited by
-            // `file_transit_hop`'s own caller in the door; here the container is
-            // left spooled where it was, un-opened.
+            // relay forwards rather than dropping. Both outcomes are AUDITED
+            // here (this process is the only witness the poll has: the pull's
+            // response carries no line of its own), and the container is left
+            // spooled where it was when the write fails.
             aoide_storage::seal::ContainerOutcome::Hopped(hop) => {
+                let at = aoide_storage::time::now_iso_utc();
                 if let Err(e) = aoide_storage::seal::file_transit_hop(&hop, node_name) {
+                    let _ = aoide_protocol::audit::audit(
+                        &aoide_protocol::audit::default_audit_log(),
+                        aoide_protocol::audit::Door::Cli,
+                        aoide_protocol::audit::EventClass::Audit,
+                        "mail.poll.transit-not-filed",
+                        "invalid",
+                        &format!(
+                            "container {} from `{node_name}` could not be filed as transit at {at}: {e}",
+                            hop.container.msgid
+                        ),
+                    );
                     refused.push(format!("{}: transit: {e}", hop.container.msgid));
                     continue;
                 }
+                let _ = aoide_protocol::audit::audit(
+                    &aoide_protocol::audit::default_audit_log(),
+                    aoide_protocol::audit::Door::Cli,
+                    aoide_protocol::audit::EventClass::Audit,
+                    "mail.poll.transit",
+                    "ok",
+                    &format!(
+                        "container {} from `{node_name}` carried on to `{}` in mesh `{}`{}",
+                        hop.container.msgid,
+                        hop.next,
+                        hop.mesh,
+                        if hop.held { ", held for its own poll" } else { "" }
+                    ),
+                );
                 if !hop.held {
                     let _ = drain_node(&hop.next);
                 }
@@ -2467,6 +2494,102 @@ mod tests {
         assert!(
             bodies.iter().any(|body| body.contains("filed") && body.contains(&filed)),
             "the poll named what it filed: {bodies:?}"
+        );
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A loop is a loop under another name.** A chain entry whose node holds
+    /// THIS box's identity key already came through this box, whatever name the
+    /// entry spells — so a polled container like that is refused `loop` (there is
+    /// no `transit` line, nothing is spooled onward) and the refusal is audited.
+    /// One process cannot build a genuine third party's chain (the only key it can
+    /// sign with is its own), which is what makes this the guard's own probe; the
+    /// forwarding half is the fixture's (`cli/tests/mesh_transit.rs`).
+    #[test]
+    fn a_polled_container_whose_chain_names_this_box_by_key_is_a_loop() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("poll-hop-loop");
+
+        std::fs::write(
+            aoide_storage::config::source().path,
+            "[pairing]\nhomeMesh = \"family\"\n\n\
+             [mesh.family]\n[mesh.family.nodes]\nrelay = \"ssh://relay\"\ndave = \"ssh://dave\"\n",
+        )
+        .unwrap();
+        let node = |name: &str, url: &str, key: String| aoide_storage::node_store::Node {
+            name: name.to_string(),
+            url: url.to_string(),
+            autogate: false,
+            token_file: None,
+            bearer_secret: None,
+            hub: false,
+            pubkey: Some(key),
+            verified: true,
+            grants: aoide_storage::node_store::grants_in("family", &["message"]),
+            narrowed: aoide_storage::node_store::Grants::new(),
+            via: None,
+            added_at: "2026-09-07T00:00:00Z".to_string(),
+        };
+        let me = aoide_storage::display::local_node_name();
+        let mine = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
+        let fake = |tag: &str| format!("{tag}{tag}{tag}{tag}").repeat(4);
+        // This process plays the RELAY too, so its record carries this box's own
+        // key: the container it hands over is signed by that key, as a relay's
+        // own deposit into the hub would be.
+        aoide_storage::node_store::save_nodes(&[
+            node(&me, "ssh://self", fake("a1")),
+            node("relay", "ssh://relay", mine.clone()),
+            node("dave", "ssh://dave", fake("c3")),
+        ])
+        .unwrap();
+
+        let envelope = aoide_storage::mail::mint_outbound_letter_from(
+            "relay",
+            "alice",
+            "dave",
+            "bob",
+            "someone else's letter",
+            "family",
+        )
+        .unwrap();
+        let container = {
+            let binding = aoide_storage::seal::publish_binding().unwrap();
+            aoide_storage::seal::seal_envelope(&envelope, &binding, "family", "family", "dave", "relay", &aoide_storage::time::now_iso_utc()).unwrap()
+        };
+        let msgid = container.msgid.clone();
+        let set = aoide_storage::routing::declarations().unwrap();
+        assert_eq!(
+            aoide_storage::routing::key_in(&set, "family", "relay").as_deref(),
+            Some(mine.as_str()),
+            "the relay's record is its key in that mesh"
+        );
+        assert!(
+            aoide_storage::mail::verify_origin_signature(&envelope),
+            "and the letter is signed as it"
+        );
+        let answer = json!({ "jsonrpc": "2.0", "id": 1, "result": { "containers": [container], "envelopes": [] } }).to_string();
+        let (listener, port, _seen) = recording_door(r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#, answer);
+        let mut relay = node("relay", &format!("http://127.0.0.1:{port}/"), mine.clone());
+        relay.verified = true;
+        let mut nodes = aoide_storage::node_store::load_nodes();
+        nodes.retain(|n| n.name != "relay");
+        nodes.push(relay);
+        aoide_storage::node_store::save_nodes(&nodes).unwrap();
+
+        let outcome = poll_node("relay", None).unwrap();
+        assert!(
+            outcome.refused.iter().any(|line| line.ends_with(": loop")),
+            "the chain already names this box by key: {:?}",
+            outcome.refused
+        );
+        assert!(aoide_storage::mail::read_transit_unlocked().unwrap().is_empty(), "nothing is filed as transit");
+        assert!(aoide_storage::outbox::list_entries("dave").unwrap().is_empty(), "and nothing is spooled onward");
+        let log = std::fs::read_to_string(std::path::Path::new(&dir).join("log")).unwrap_or_default();
+        assert!(
+            log.contains("mail.poll.container-refused") && log.contains(&msgid),
+            "the refusal is audited: {log}"
         );
 
         drop(listener);
