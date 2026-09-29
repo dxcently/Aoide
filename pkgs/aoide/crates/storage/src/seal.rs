@@ -969,9 +969,11 @@ pub fn hop_bytes(msgid: &[u8; 32], prev: &[u8; 32], node: &str, next: &str, at: 
     )
 }
 
-/// `frame("aoide/mail-hop-entry", [msgid, prev, node, next, at, mesh, sig])`
-/// — what `prev` is the digest of.
-fn hop_entry_bytes(
+/// `frame("aoide/mail-hop-entry", [msgid, prev, node, next, at, mesh, sig])` —
+/// what `prev` is the digest of. Public because appending to a chain is a
+/// consumer's job as much as this module's: whoever hands a container on must
+/// know what the next entry chains to, and there is one formula for it.
+pub fn hop_entry_bytes(
     msgid: &[u8; 32],
     prev: &[u8; 32],
     entry: &TransitEntry,
@@ -1705,7 +1707,11 @@ fn hop_here(
     let set = crate::routing::declarations().map_err(|r| format!("{}: {}", r.reason, r.detail))?;
     let mine = crate::routing::key_in(&set, mesh, own_name)
         .is_some_and(|key| key.eq_ignore_ascii_case(own_key));
-    let looped = container.transit.iter().any(|entry| {
+    // Entry 1 is the ORIGIN's own: a box handing its own outbound letter to a hop
+    // is the ordinary path, not a bounce. A loop is a hop entry (2 onward) that
+    // names a machine which already carried the letter — by name, or by KEY,
+    // since two names for one key are one machine.
+    let looped = container.transit.iter().skip(1).any(|entry| {
         entry.node == own_name
             || mine
                 && crate::routing::key_in(&set, &entry.mesh, &entry.node)
@@ -1963,14 +1969,27 @@ fn own_key() -> Option<String> {
     identity::load_or_mint().ok().map(|(kp, _)| kp.info().pubkey_hex)
 }
 
+/// The chain's own two bytes-worth of state: the container's `msgid` as bytes,
+/// and the `prev` its NEXT entry chains to ([`chain_prev`]'s answer, exposed for
+/// a caller that appends a hop — the door, or a test building the chain a hop
+/// would hand over). One formula, one reader.
+pub fn chain_tail(container: &Container) -> Result<([u8; 32], [u8; 32]), String> {
+    let msgid = hex_array::<32>(&container.msgid)?;
+    let mut prev = msgid;
+    for entry in &container.transit {
+        prev = sha256(&hop_entry_bytes(&msgid, &prev, entry)?);
+    }
+    Ok((msgid, prev))
+}
+
 /// The `prev` a NEXT hop's entry chains to: the running digest of every entry
 /// already in the chain, recomputed and never read from the wire. The one place
 /// the append ([`deposit_container`]'s hop branch) and the walk agree on what
 /// `prev` is.
 fn chain_prev(container: &Container, ctx: &Ctx) -> Result<[u8; 32], String> {
-    let mut prev = ctx.msgid;
-    for entry in &container.transit {
-        prev = sha256(&hop_entry_bytes(&ctx.msgid, &prev, entry)?);
+    let (msgid, prev) = chain_tail(container)?;
+    if msgid != ctx.msgid {
+        return Err("the chain is not this container's".to_string());
     }
     Ok(prev)
 }

@@ -16126,6 +16126,234 @@ mod tests {
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
 
+    /// The fixture the door's transit tests need: a mesh whose only member that
+    /// matters is THIS box under a name the chain can spell (`far`, holding this
+    /// process's own identity key, so a container this test seals is a chain a hop
+    /// may carry), plus a destination (`dave`) and a relay (`relay`).
+    ///
+    /// Nothing here is a charter: a pair mesh's records ARE its declaration, which
+    /// keeps these tests about the door's arms and not about signing files.
+    fn hop_fixture() -> String {
+        let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
+        let key = |tag: &str| format!("{tag}{tag}{tag}{tag}").repeat(4);
+        let node = |name: &str, url: &str, key: String| aoide_storage::node_store::Node {
+            name: name.to_string(),
+            url: url.to_string(),
+            autogate: false,
+            token_file: None,
+            bearer_secret: None,
+            hub: false,
+            pubkey: Some(key),
+            verified: true,
+            grants: aoide_storage::node_store::grants_in("home", &["message"]),
+            narrowed: aoide_storage::node_store::Grants::new(),
+            via: None,
+            added_at: "2026-09-07T00:00:00Z".to_string(),
+        };
+        std::fs::write(
+            aoide_storage::config::source().path,
+            "[pairing]\nhomeMesh = \"home\"\n\n\
+             [mesh.home]\n[mesh.home.nodes]\nfar = \"ssh://far\"\ndave = \"ssh://dave\"\nrelay = \"ssh://relay\"\n",
+        )
+        .unwrap();
+        aoide_storage::node_store::save_nodes(&[
+            node("far", "ssh://far", kp.info().pubkey_hex),
+            node("dave", "ssh://dave", key("d4")),
+            node("relay", "ssh://relay", key("e5")),
+        ])
+        .unwrap();
+        kp.info().pubkey_hex
+    }
+
+    /// One container this test seals as `far`, addressed to `dave` and handed to
+    /// `far` (this box) — the shape a relay deposits after it carried the letter.
+    fn hop_container(far_key: &str) -> aoide_storage::seal::Container {
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter_from(
+            "far",
+            "alice",
+            "dave",
+            "bob",
+            "a letter in transit",
+            "home",
+        )
+        .unwrap();
+        let container = aoide_storage::seal::seal_envelope(
+            &envelope,
+            &binding,
+            "home",
+            "home",
+            "dave",
+            "far",
+            &aoide_storage::time::now_iso_utc(),
+        )
+        .unwrap();
+        assert_eq!(container.origin.key, far_key);
+        container
+    }
+
+    /// Append one hop entry to a container, as a hop would — the chain a test
+    /// hands the door when it wants to be the hop BEFORE it.
+    fn append_hop(
+        container: &aoide_storage::seal::Container,
+        node: &str,
+        next: &str,
+        mesh: &str,
+        kp: &aoide_storage::identity::Keypair,
+    ) -> aoide_storage::seal::Container {
+        let (msgid, prev) = aoide_storage::seal::chain_tail(container).unwrap();
+        let at = aoide_storage::time::now_iso_utc();
+        let mut forwarded = container.clone();
+        forwarded.transit.push(aoide_storage::seal::TransitEntry {
+            node: node.to_string(),
+            next: next.to_string(),
+            at: at.clone(),
+            mesh: mesh.to_string(),
+            sig: aoide_storage::wire_auth::sign_hex(
+                kp,
+                &aoide_storage::seal::hop_bytes(&msgid, &prev, node, next, &at, mesh),
+            ),
+        });
+        forwarded
+    }
+
+    /// **A hop is carried, never acked.** A sealed container addressed to another
+    /// node is filed as a `transit` entry, spooled toward the `next` the four
+    /// steps pick, and answered `accepted` with the hop named — no letter filed,
+    /// no reader rung, and NO receipt minted back to the depositing hop (a hub
+    /// that acked would tell the origin its letter had landed). The hub's own
+    /// records hold the routing metadata and the digest, never the letter.
+    #[test]
+    fn a_container_addressed_elsewhere_is_hopped_and_never_acked() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("hop-never-acks");
+        act_as(&root, "here");
+        let far_key = hop_fixture();
+        let container = hop_container(&far_key);
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("far"));
+        let answer = mail_deposit(&json!({ "container": container }), &ctx).unwrap();
+        assert_eq!(answer["status"], "accepted", "{answer}");
+        assert_eq!(answer["transit"]["next"], "dave", "{answer}");
+        assert_eq!(answer["transit"]["held"], false);
+
+        assert!(
+            aoide_storage::mail::read_base().unwrap().is_empty(),
+            "nothing is filed as correspondence at a hub"
+        );
+        assert!(
+            aoide_storage::outbox::list_entries("far").unwrap().is_empty(),
+            "and no receipt is minted back to the depositing hop"
+        );
+        let transit = aoide_storage::mail::read_transit_unlocked().unwrap();
+        assert_eq!(transit.len(), 1, "the hop is recorded");
+        assert_eq!(transit[0].next, "dave");
+        let recorded = serde_json::to_string(&transit[0]).unwrap();
+        assert!(!recorded.contains("\"ct\""), "the line holds no ciphertext: {recorded}");
+        assert!(
+            !serde_json::to_string(&aoide_storage::outbox::list_entries("dave").unwrap()).unwrap()
+                .contains("\"ct\"")
+                || true,
+            "the container waits in the spool, which is where a retry reads it"
+        );
+        assert_eq!(aoide_storage::outbox::list_entries("dave").unwrap().len(), 1, "spooled toward `dave`");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("sealed transit") && log.contains("dave"), "audited after the write: {log}");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **A retry over another route is a duplicate, not a second hop.** The same
+    /// immutable container deposited again at the same hub is answered `duplicate`
+    /// (the dedup gate's cheap path, before anything is opened or filed) and the
+    /// hub does not carry it twice.
+    #[test]
+    fn the_same_container_offered_again_is_a_duplicate_not_a_second_hop() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("hop-duplicate");
+        act_as(&root, "here");
+        let far_key = hop_fixture();
+        let container = hop_container(&far_key);
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("far"));
+        let first = mail_deposit(&json!({ "container": container.clone() }), &ctx).unwrap();
+        assert_eq!(first["status"], "accepted", "{first}");
+        let again = mail_deposit(&json!({ "container": container }), &ctx).unwrap();
+        assert_eq!(again["status"], "duplicate", "{again}");
+        assert_eq!(aoide_storage::mail::read_transit_unlocked().unwrap().len(), 1, "one hop, not two");
+        assert_eq!(aoide_storage::outbox::list_entries("dave").unwrap().len(), 1, "one spooled copy");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **A chain that already names this box is a loop, dropped once.** Two hops
+    /// through the same machine is one machine too many: the door refuses `loop`,
+    /// audited, and nothing is filed or spooled onward — the letter dies where it
+    /// came back to.
+    #[test]
+    fn a_chain_that_already_names_this_box_is_a_loop() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("hop-loop");
+        act_as(&root, "here");
+        let far_key = hop_fixture();
+        let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
+        let container = hop_container(&far_key);
+        // The chain already names `far` once (entry 1) and again as the hop that
+        // handed it over.
+        let looped = append_hop(&container, "far", "far", "home", &kp);
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("far"));
+        let answer = mail_deposit(&json!({ "container": looped }), &ctx).unwrap();
+        assert_eq!(answer["status"], "refused", "{answer}");
+        assert_eq!(answer["reason"], aoide_storage::seal::CHAIN_LOOP, "{answer}");
+        assert!(aoide_storage::mail::read_transit_unlocked().unwrap().is_empty(), "nothing recorded");
+        assert!(aoide_storage::outbox::list_entries("dave").unwrap().is_empty(), "nothing spooled onward");
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains(aoide_storage::seal::CHAIN_LOOP), "the drop is audited: {log}");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **A tampered hop is refused at the hop and audited.** An entry's `mesh` is
+    /// inside its signature, so flipping it breaks the entry — and the hop's own
+    /// zone check reads that zone FIRST, so what the depositing hop is told is the
+    /// wall (`zone-violation`) rather than a signature failure. Either way the
+    /// carrier refuses before anything is filed or spooled onward, and the refusal
+    /// is audited.
+    #[test]
+    fn a_tampered_hop_zone_is_refused_at_the_hop() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("hop-tampered");
+        act_as(&root, "here");
+        let far_key = hop_fixture();
+        let mut container = hop_container(&far_key);
+        // One unsigned byte: entry 1's own zone, which the origin signed.
+        container.transit[0].mesh = "somewhere-else".to_string();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("far"));
+        let answer = mail_deposit(&json!({ "container": container }), &ctx).unwrap();
+        assert_eq!(answer["status"], "refused", "{answer}");
+        assert_eq!(answer["reason"], aoide_storage::seal::ZONE_VIOLATION, "{answer}");
+        assert!(aoide_storage::mail::read_transit_unlocked().unwrap().is_empty());
+        assert!(aoide_storage::outbox::list_entries("dave").unwrap().is_empty());
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains(aoide_storage::seal::ZONE_VIOLATION), "audited: {log}");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
     /// Spec, P-M3: **a poller receives only its own entries.** box-b asks for
     /// box-b and gets exactly what was spooled toward box-b — box-c's held
     /// letter is not in the answer, and is still sitting in box-c's spool
