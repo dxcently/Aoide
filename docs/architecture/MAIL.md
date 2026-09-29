@@ -735,11 +735,14 @@ At a hub, a deposit whose `to.node` is not self: run the keyless checks
 append the hub's chained hop signature naming the `next` node the route
 picks, re-spool by the four steps. Loops die twice over:
 `msgid` seen, and any envelope whose transit chain already names self is
-dropped. Deposit `refused` reasons — `no-route`, `down`, `unknown-mesh`,
+dropped. Deposit `refused` reasons — `no-route`, `unknown-mesh`,
 `zone-violation`, `unverified-origin`, `bad-msgid`, `not-correspondence` —
 return to the
 depositing hop, which records `lastOutcome` on that entry and stops
-retrying it; the origin learns through `aoide mail outbox`.
+retrying it; the origin learns through `aoide mail outbox`. **Two of them are
+not verdicts on the letter**: `down` and `config-invalid` say something about
+the far end's own state, so the entry stays live, the LINK's ordinary back-off
+carries it back, and it is never parked (§Status).
 
 `not-correspondence` is the plaintext lane's own: an envelope whose `type`
 is `charter` carries no charter — a charter letter is applied from the
