@@ -1447,6 +1447,51 @@ fn break_osaka_config(fx: &common::Fixture) {
     std::fs::write(fx.boxes["osaka"].join("config.toml"), config).unwrap();
 }
 
+/// `osaka`'s config as the fixture wrote it — the restore step for a test that
+/// breaks it on purpose.
+fn restore_osaka_config(fx: &common::Fixture) {
+    let config = format!(
+        "[pairing]\nhomeMesh = \"{HOME}\"\n\n[mesh.{HOME}]\n{}\n[mesh.{AWAY}]\n{}\n",
+        aoide_storage::charter::operator_line(&fx.operators[HOME]),
+        aoide_storage::charter::operator_line(&fx.operators[AWAY]),
+    );
+    std::fs::write(fx.boxes["osaka"].join("config.toml"), config).unwrap();
+}
+
+/// **A verified request CONSUMES its nonce even when the answer is
+/// `config-invalid`** (S4 review round 2). Without that, bytes the door already
+/// answered could be replayed inside the skew window — once the config is back —
+/// into a method that has never seen them, and a replayed `mailPoll` retires and
+/// hands over entries. So: a signed `mailPoll` reads `config-invalid`; the SAME
+/// bytes again read `-32009`; with the config fixed, those bytes read `-32009`
+/// from the ordinary ladder too, and the method is never dispatched.
+#[test]
+fn a_replayed_mail_request_is_refused_while_the_config_is_broken() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("replay-config-invalid");
+    let _doors = fx.doors(&["osaka"]);
+    break_osaka_config(&fx);
+
+    fx.enter("yomi");
+    let request =
+        common::signed_door_request("yomi", HOME, "aoide/mailPoll", serde_json::json!({ "node": "yomi" }), false);
+
+    let first = common::door_post_raw(fx.ports["osaka"], &request);
+    assert_eq!(first["result"]["reason"], "config-invalid", "{first}");
+
+    let replayed = common::door_post_raw(fx.ports["osaka"], &request);
+    assert_eq!(replayed["error"]["code"], serde_json::json!(-32009), "{replayed}");
+    assert!(replayed["result"].is_null(), "and nothing was dispatched: {replayed}");
+
+    // The config is back, so the ordinary ladder would resolve this caller — and
+    // the nonce is spent, so it still never reaches the method.
+    fx.enter("osaka");
+    restore_osaka_config(&fx);
+    let after = common::door_post_raw(fx.ports["osaka"], &request);
+    assert_eq!(after["error"]["code"], serde_json::json!(-32009), "{after}");
+    assert!(after["result"].is_null(), "the spent nonce is what stops it: {after}");
+}
+
 /// **A `down` node's queued letter is KEPT, and is drained once the declaration
 /// no longer says `down`.** `down` stops this box SENDING; it never confiscates
 /// what is already spooled, and it never leaves the entry looking dialled.

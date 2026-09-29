@@ -5208,28 +5208,53 @@ fn mail_method_of(body: &[u8]) -> Option<&'static str> {
     }
 }
 
+/// What the door answers a mail method with BEFORE dispatch, when this host's
+/// declarations will not load — or that it should keep the refusal it has.
+enum PreDispatch {
+    /// The refused `config-invalid` result.
+    Unloadable(String),
+    /// A JSON-RPC error instead: a nonce this request reused.
+    Error(i64, String),
+    /// Leave the door's own `-32007` standing.
+    Keep,
+}
+
 /// **The cryptographic half of the door's signature ladder, without the half
-/// that needs the declaration set** (user ruling D8): `Some(detail)` — the
-/// refusal to answer a mail method with — when the set will not load, the request
-/// names a mesh and a node, and its signature verifies under the key the charter
-/// IN FORCE for that mesh gives that node. Every other case is `None`, which
-/// leaves the door's own `-32007` standing: a genuinely bad signature, a pair
-/// mesh (its keys need no declaration and would have resolved), or a node the
-/// charter does not name. One file read, and the audit line it writes under the
-/// method's own label.
-fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path) -> Option<String> {
-    let refusal = aoide_storage::routing::declarations().err()?;
-    let mesh = req.signed_mesh.as_deref()?;
-    let node = req.signed_node.as_deref()?;
-    let timestamp = req.signed_timestamp.as_deref()?;
-    let nonce = req.signed_nonce.as_deref()?;
-    let signature = req.signed_signature.as_deref()?;
-    let text = std::fs::read_to_string(aoide_storage::charter::in_force_path(mesh)).ok()?;
-    let charter = aoide_storage::charter::parse(&text).ok()?;
+/// that needs the declaration set** (user ruling D8): `Unloadable` when the set
+/// will not load, the request names a mesh and a node, and its signature verifies
+/// under the key the charter IN FORCE for that mesh gives THAT node. `Keep` in
+/// every other case — a genuinely bad signature, a name the charter does not
+/// carry, a pair mesh (its keys need no declaration and would have resolved) —
+/// which leaves the door's own `-32007` standing.
+///
+/// **A verified request still CONSUMES its nonce** (`nonce_is_replay`, keyed
+/// exactly as the ladder keys it: the signer's lowercase key hex plus the nonce),
+/// and a replay answers `-32009` here rather than being dispatched: without it,
+/// bytes the door already answered `config-invalid` could be replayed inside the
+/// skew window — once the config is back — into a method that has never seen
+/// them, and a `mailPoll` retires and hands over entries. The audit line is the
+/// method's own; nothing about the load error goes on the wire.
+fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path) -> PreDispatch {
+    let Some(refusal) = aoide_storage::routing::declarations().err() else {
+        return PreDispatch::Keep;
+    };
+    let Some(mesh) = req.signed_mesh.as_deref() else { return PreDispatch::Keep };
+    let Some(node) = req.signed_node.as_deref() else { return PreDispatch::Keep };
+    let (Some(timestamp), Some(nonce), Some(signature)) = (
+        req.signed_timestamp.as_deref(),
+        req.signed_nonce.as_deref(),
+        req.signed_signature.as_deref(),
+    ) else {
+        return PreDispatch::Keep;
+    };
+    let Ok(text) = std::fs::read_to_string(aoide_storage::charter::in_force_path(mesh)) else {
+        return PreDispatch::Keep;
+    };
+    let Ok(charter) = aoide_storage::charter::parse(&text) else { return PreDispatch::Keep };
     if charter.mesh != mesh {
-        return None;
+        return PreDispatch::Keep;
     }
-    let line = charter.nodes.get(node)?;
+    let Some(line) = charter.nodes.get(node) else { return PreDispatch::Keep };
     let canonical = aoide_storage::wire_auth::canonical_string(
         &req.method,
         &req.path,
@@ -5239,11 +5264,27 @@ fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path
         Some(mesh),
     );
     if !aoide_storage::wire_auth::verify_signature_hex(&line.key, canonical.as_bytes(), signature) {
-        return None;
+        return PreDispatch::Keep;
+    }
+    if nonce_is_replay(&line.key.to_ascii_lowercase(), nonce) {
+        let message = format!(
+            "nonce replay: charter node `{node}` reused a `{}` value already seen within the current \
+             replay window",
+            aoide_storage::wire_auth::HEADER_NONCE
+        );
+        let _ = audit(
+            audit_log,
+            Door::A2a,
+            EventClass::Audit,
+            "a2a.signed-request",
+            "unauthorized",
+            &message,
+        );
+        return PreDispatch::Error(-32009, message);
     }
     let detail = format!("{CONFIG_INVALID}: {refusal}");
     let _ = audit(audit_log, Door::A2a, EventClass::Audit, method, "invalid", &detail);
-    Some(detail)
+    PreDispatch::Unloadable(detail)
 }
 
 fn jsonrpc_error_value(code: i64, message: impl Into<String>) -> Value {
@@ -6808,13 +6849,21 @@ fn handle_connection(
             // an unresolved caller. Every other case keeps `-32007`.
             if code == -32007 {
                 if let Some(method) = mail_method_of(&req.body) {
-                    if let Some(detail) = mail_unloadable_declaration(&req, method, audit_log) {
-                        let body_val = JsonRpcResponse::ok(
-                            request_id(&req.body),
-                            json!({ "status": "refused", "reason": CONFIG_INVALID, "detail": detail }),
-                        );
-                        let body = serde_json::to_vec(&body_val).unwrap_or_default();
-                        return write_http_response(&mut writer, 200, &body);
+                    match mail_unloadable_declaration(&req, method, audit_log) {
+                        PreDispatch::Unloadable(detail) => {
+                            let body_val = JsonRpcResponse::ok(
+                                request_id(&req.body),
+                                json!({ "status": "refused", "reason": CONFIG_INVALID, "detail": detail }),
+                            );
+                            let body = serde_json::to_vec(&body_val).unwrap_or_default();
+                            return write_http_response(&mut writer, 200, &body);
+                        }
+                        PreDispatch::Error(err, message) => {
+                            let body_val = jsonrpc_error_value(err, message);
+                            let body = serde_json::to_vec(&body_val).unwrap_or_default();
+                            return write_http_response(&mut writer, 200, &body);
+                        }
+                        PreDispatch::Keep => {}
                     }
                 }
             }

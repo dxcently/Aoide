@@ -187,7 +187,19 @@ fn door_post_with(
     params: serde_json::Value,
     tamper: bool,
 ) -> serde_json::Value {
-    use std::io::{Read, Write};
+    door_post_raw(port, &signed_door_request(from, mesh, method, params, tamper))
+}
+
+/// One signed JSON-RPC POST as the exact bytes that go on the wire — exposed so a
+/// test can send the SAME bytes twice: a replay is about the bytes, and re-signing
+/// would mint a fresh nonce and hide the very thing being tested.
+pub fn signed_door_request(
+    from: &str,
+    mesh: &str,
+    method: &str,
+    params: serde_json::Value,
+    tamper: bool,
+) -> String {
     let body = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }).to_string();
     let ts = aoide_storage::time::now_iso_utc();
     let nonce = aoide_storage::pairing::random_hex(16);
@@ -220,6 +232,12 @@ fn door_post_with(
         },
         body
     );
+    request
+}
+
+/// POST `request` verbatim to `port` and return the parsed answer.
+pub fn door_post_raw(port: u16, request: &str) -> serde_json::Value {
+    use std::io::{Read, Write};
     let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
     stream.write_all(request.as_bytes()).unwrap();
     let mut response = String::new();
