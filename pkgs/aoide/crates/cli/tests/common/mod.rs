@@ -10,6 +10,13 @@
 //! zone check has a node that must refuse to bridge. The five edges are
 //! osaka→sakaki, sakaki→chiyo, osaka→yomi, evo→sakaki and sakaki→evo.
 //!
+//! **And each box answers on its own hop**, which is what makes those edges
+//! routable at all: every box but `chiyo` is declared at `ssh://<name>`, and
+//! `chiyo` is the `poll` node the route ends at — no inbound transport, so its
+//! letters are held at the relay until it asks for them. A mesh whose nodes all
+//! read `poll` (the shape a bare node line has) routes nowhere: a hop cannot
+//! hand a letter to a node it cannot dial.
+//!
 //! **Every box is a REAL isolated root.** `AOIDE_ROOT` is process-global, so
 //! the fixture builds each box one at a time (mint its identity, take its node
 //! line) and a caller then `enter`s one box to read or dial from it. The
@@ -93,11 +100,14 @@ impl Fixture {
         std::fs::create_dir_all(&operator_root).unwrap();
 
         // Every box's node line, minted on its own root — the identity is a
-        // host fact, so it is the box that publishes it.
+        // host fact, so it is the box that publishes it. Each line carries the
+        // hop its box answers on: `chiyo` is the `poll` node, every other box
+        // answers on ssh.
         let mut lines = BTreeMap::new();
         for (name, dir) in &boxes {
             enter(dir, name);
-            lines.insert(*name, charter::node_line().unwrap());
+            let line = line_at(&charter::node_line().unwrap(), &hop_of(name));
+            lines.insert(*name, line);
         }
 
         // The operator roots both meshes and signs both charters. `sakaki`'s
@@ -206,6 +216,27 @@ fn rename(line: &str, from: &str, to: &str) -> String {
     let line = line.replacen(&format!("{from} = "), &format!("{to} = "), 1);
     assert!(line.starts_with(&format!("{to} = ")), "renamed line: {line}");
     line
+}
+
+/// The hop one box of the fixture answers on: `chiyo` takes no inbound
+/// connection at all (`poll` — its letters wait at the relay for its own ask),
+/// every other box answers on ssh.
+fn hop_of(name: &str) -> String {
+    match name {
+        "chiyo" => charter::DEFAULT_ADDRESS.to_string(),
+        other => format!("ssh://{other}"),
+    }
+}
+
+/// One node's line at a declared address. `charter::node_line` writes a line
+/// with no address at all, which a charter reads as `poll`.
+fn line_at(line: &str, address: &str) -> String {
+    if address == charter::DEFAULT_ADDRESS {
+        return line.to_string();
+    }
+    let at = line.replacen(" }", &format!(", address = \"{address}\" }}"), 1);
+    assert!(at.contains(address), "line at {address}: {at}");
+    at
 }
 
 /// A fixture that restores the environment when its guard drops, and removes

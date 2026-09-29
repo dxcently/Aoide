@@ -1,7 +1,8 @@
 //! The five-edge fixture mesh (see `common/mod.rs`), loaded and validated
 //! through the one declaration seam, plus its two deliberately broken
-//! charters. No child process and no network: this is the fixture proving
-//! ITSELF before any slice routes over it.
+//! charters and the route it declares. No child process and no network: this
+//! is the fixture proving ITSELF — that what it declares is what the four
+//! steps read.
 
 mod common;
 
@@ -78,4 +79,38 @@ fn one_node_name_with_two_keys_across_the_two_meshes_is_refused_at_load() {
         .find(|r| r.reason == routing::KEY_DIVERGENCE)
         .unwrap_or_else(|| panic!("one node with two keys is refused: {set:?}"));
     assert!(refusal.detail.contains("sakaki"), "{refusal}");
+}
+
+/// The edges the fixture declares are the edges the route takes: the letters
+/// go osaka → sakaki → chiyo, with the last leg held at the relay, and the
+/// gate is the only hop that rewrites a letter's mesh.
+#[test]
+fn the_fixture_edges_route_through_the_declaration_seam() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("route");
+
+    let hop = |from: &str, to: &str, mesh: &str| {
+        fx.enter(from);
+        routing::Letter { from, to, mesh }.route(&routing::declarations())
+    };
+
+    // A plain member cannot dial the `poll` node: the letter goes to the relay.
+    let first = hop("osaka", "chiyo", HOME);
+    let hop_to_relay = first.outcome.as_ref().unwrap_or_else(|e| panic!("{e}\n{}", first.trail.join("\n")));
+    assert_eq!(hop_to_relay.next, "sakaki", "{}", first.trail.join("\n"));
+    assert!(!hop_to_relay.held);
+    assert_eq!(hop_to_relay.mesh, HOME);
+
+    // At the relay the same letter is held for `chiyo`'s own ask.
+    let second = hop("sakaki", "chiyo", HOME);
+    let held = second.outcome.as_ref().unwrap_or_else(|e| panic!("{e}\n{}", second.trail.join("\n")));
+    assert_eq!(held.next, "chiyo", "{}", second.trail.join("\n"));
+    assert!(held.held, "a `poll` destination is held at its relay: {}", second.trail.join("\n"));
+
+    // Across the meshes only the gate crosses, and it rewrites the mesh it
+    // carries: `evo` is a node of `away`, not of `home`.
+    let bridged = hop("sakaki", "evo", HOME);
+    let at_evo = bridged.outcome.as_ref().unwrap_or_else(|e| panic!("{e}\n{}", bridged.trail.join("\n")));
+    assert_eq!(at_evo.next, "evo", "{}", bridged.trail.join("\n"));
+    assert_eq!(at_evo.mesh, AWAY, "{}", bridged.trail.join("\n"));
 }
