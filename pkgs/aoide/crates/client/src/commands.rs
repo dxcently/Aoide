@@ -2402,8 +2402,8 @@ pub(crate) fn default_self_url() -> String {
 /// overrides this whole function outright, mirroring `--self-url`; every
 /// caller only ever reaches this as an `Option::or_else` fallback.
 ///
-/// **A route that resolves to a LOOPBACK address claims NO hop at all
-/// (D5).** `pair` between two daemons on one machine — `pair
+/// **A route that resolves to a LOOPBACK address claims NO hop at all.**
+/// `pair` between two daemons on one machine — `pair
 /// http://127.0.0.1:18712/`, and the hostname arm's own heard-source when
 /// the second daemon advertises over loopback — routed the outbound trick
 /// to `127.0.0.1`, so the record was stamped `via:"ssh://khoa@127.0.0.1"`:
@@ -4532,17 +4532,19 @@ pub fn register_post_graph(r: &mut Registry) {
 // ── `aoide mail` (messaging plan P-M1/P-M2, docs/architecture/MAIL.md) ─────
 
 /// `aoide mail[.send|.read|.show|.mark|.rm|.outbox|.outbox.rm|.outbox.retry|
-/// .export]` commands.
+/// .export|.poll|.route]` commands — the mail family this crate registers
+/// (`mail ring` sits in conduct's own registration, `mail serve` in
+/// `aoide-server` beside `a2a.serve`).
 /// Registered here, in `aoide-client`, rather than in `aoide-storage` where
 /// the store itself ([`aoide_storage::mail`]/[`aoide_storage::outbox`])
 /// lives: from P-M2 on, `mail send` can dial another node ([`crate::
 /// mail_wire`]'s outbox drain), and `aoide-storage` sits below
 /// `aoide-client` in the crate DAG and must not depend on it (P-M2
-/// ruling 1). `mail outbox`/`mail outbox rm` are new at P-M2, `mail
-/// outbox retry` is the un-park that makes a `refused` entry retriable
-/// rather than a permanent verdict; `--hold`,
-/// `mail route`, and mesh-aware addressing are later phases (MAIL.md
-/// §Phases) and are not registered yet.
+/// ruling 1). `mail outbox retry` is the un-park that makes a `refused`
+/// entry retriable rather than a permanent verdict, `mail poll` is the
+/// receive trigger a quiet box needs, and `mail route` is the dry run of the
+/// four steps ([`aoide_storage::routing::Letter::route`]) — a read that
+/// prints the path and sends nothing.
 pub fn register_mail(r: &mut Registry) {
     r.insert(cmd!(
         path: ["mail"],
@@ -4668,6 +4670,16 @@ pub fn register_mail(r: &mut Registry) {
         implemented: true,
         handler: handle_mail_poll,
         examples: ["mail poll", "mail poll yomi-strix"],
+    ));
+    r.insert(cmd!(
+        path: ["mail", "route"],
+        summary: "Show where a letter addressed that way goes next from this box: the four steps of MAIL.md §Transit over the mesh declarations in force, with each step's reason. A READ — nothing is sent, spooled or dialled, so it is the dry run before a routing change. A hop that refuses transit parks the letter rather than rerouting it.",
+        args: [arg!("address", "string", true, "Recipient address, <node>/<name> (or just <node>) — the same shape `mail send --to` takes. <name> is the mailbox the letter is filed under and plays no part in the route.")],
+        flags: [flag!("mesh", "string", "The mesh the letter rides: it is what the steps read, and what a send would sign into the request. Absent = the sole mesh that declares the node, else `[pairing] homeMesh`; required when more than one declares it.")],
+        gated: false,
+        implemented: true,
+        handler: handle_mail_route,
+        examples: ["mail route chiyo/conductor", "mail route evo/conductor --mesh home"],
     ));
 }
 
@@ -4974,9 +4986,13 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
         };
     }
 
-    match aoide_storage::node_store::load_nodes().iter().find(|p| p.name == node) {
-        Some(p) if p.verified => {}
-        Some(_) => {
+    // A node this box has a RECORD of must be paired (the P-M2 rule: mail to a
+    // registered-but-unverified peer is refused before anything touches the
+    // spool). A node it holds NO record of is a charter node: the declarations
+    // decide whether it has a route at all, and a destination that has one has a
+    // send — that is what makes a charter mesh work without pairing.
+    if let Some(registered) = aoide_storage::node_store::load_nodes().iter().find(|p| p.name == node) {
+        if !registered.verified {
             return Outcome::error(
                 cmd,
                 format!(
@@ -4985,10 +5001,6 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
                 ),
             )
             .with_data(json!({ "reason": "unpaired-node", "name": node }));
-        }
-        None => {
-            return Outcome::error(cmd, format!("no node named `{node}`"))
-                .with_data(json!({ "reason": "unknown-node", "name": node }));
         }
     }
 
@@ -4999,27 +5011,77 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
     // refuses, naming them). `origin_mesh` is signed into the header, so a
     // letter minted unnamed could never be deposited to a peer trusted only
     // outside the home mesh.
+    //
+    // A destination this box holds NO RECORD of is a charter node: the meshes
+    // that both DECLARE it and carry this box's own identity key are the ones a
+    // send can act in (`mail route`'s own resolution), so a charter node this box
+    // never paired with has a route and no record.
     let record = aoide_storage::node_store::load_nodes().into_iter().find(|p| p.name == node);
-    let mesh = match record.as_ref().map(|p| request_mesh(p, inv.flags.get("mesh").map(String::as_str), "message")) {
-        Some(Ok(mesh)) => mesh,
-        Some(Err(e)) => return Outcome::error(cmd, format!("--mesh: {e}")).with_data(json!({ "reason": "mesh-ambiguous", "node": node })),
-        None => return Outcome::error(cmd, format!("no node named `{node}`")).with_data(json!({ "reason": "unknown-node", "name": node })),
+    let asked = inv.flags.get("mesh").map(String::as_str).filter(|m| !m.trim().is_empty());
+    let mesh = match &record {
+        Some(p) => match request_mesh(p, asked, "message") {
+            Ok(mesh) => mesh,
+            Err(e) => {
+                return Outcome::error(cmd, format!("--mesh: {e}"))
+                    .with_data(json!({ "reason": "mesh-ambiguous", "node": node }))
+            }
+        },
+        None => match crate::mail_wire::send_mesh(node, asked) {
+            Ok(mesh) => mesh,
+            Err(e) => return Outcome::error(cmd, e.message).with_data(e.data),
+        },
     };
 
-    let envelope = match aoide_storage::mail::mint_outbound_letter_in_mesh(&from, node, name, &text, &mesh) {
-        Ok(e) => e,
-        Err(e) => return Outcome::error(cmd, format!("state/mail: {e}")),
+    // The name this letter is signed as: this box's declared name in that mesh
+    // (`mail_wire::route_for`'s own resolution). A charter mesh that does not
+    // carry this box's key has no sender, so there is nothing to send as.
+    let Some(from_node) = crate::mail_wire::own_name(&mesh) else {
+        return Outcome::error(
+            cmd,
+            format!("this box is not a member of mesh `{mesh}`: no line on its declaration carries its identity key"),
+        )
+        .with_data(json!({ "reason": crate::mail_wire::NOT_A_MEMBER, "mesh": mesh, "to": node }));
     };
+
+    // The route, read BEFORE anything is minted or spooled: a letter with no
+    // route is the sender's own answer (`no-route`, `zone-violation`, or the
+    // letter's mesh's word), and nothing is written for it.
+    let hop = match crate::mail_wire::route_for(node, &mesh) {
+        Ok(hop) => hop,
+        Err(refusal) => {
+            return Outcome::error(
+                cmd,
+                format!("no route to {node}/{name} in mesh `{mesh}`: {} — {}", refusal.reason, refusal.detail),
+            )
+            .with_data(json!({
+                "reason": refusal.reason,
+                "detail": refusal.detail,
+                "to": node,
+                "mesh": mesh,
+            }))
+        }
+    };
+
+    let envelope =
+        match aoide_storage::mail::mint_outbound_letter_from(&from_node, &from, node, name, &text, &mesh) {
+            Ok(e) => e,
+            Err(e) => return Outcome::error(cmd, format!("state/mail: {e}")),
+        };
     let msgid = envelope.msgid.clone();
-    // P-SEAL: the entry is built at MINT — sealed to the destination's
+    // The entry is built at MINT — sealed to the destination's
     // binding when one is held, plaintext when none is, parked when the one
-    // held is not usable now (`mail_wire::spool_entry`).
-    let entry = match crate::mail_wire::spool_entry(node, envelope.clone(), hold) {
+    // held is not usable now (`mail_wire::spool_entry`) — and it is spooled
+    // toward the node the ROUTE picked, which is the destination itself on a
+    // direct edge and a relay otherwise. `hop.held` (a `poll` node, or one
+    // declared `hold`) holds the flavor regardless of what the caller asked.
+    let next = hop.next.clone();
+    let hold = hold || hop.held;
+    let entry = match crate::mail_wire::spool_entry(node, &next, &mesh, envelope.clone(), hold) {
         Ok(entry) => entry,
         Err(e) => return Outcome::error(cmd, format!("state/outbox: {e}")),
     };
     let sealed = entry.is_sealed();
-    if let Err(e) = aoide_storage::outbox::write_entry(node, &entry) {
+    if let Err(e) = aoide_storage::outbox::write_entry(&next, &entry) {
         return Outcome::error(cmd, format!("state/outbox: {e}"));
     }
     // Best-effort — this command already reported the WRITE above and
@@ -5028,13 +5090,15 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
     // `data.delivery` below (and a later `mail outbox`) shows what
     // happened, and the daemon's own periodic drain (or the next `mail
     // send`/deposit from this node) tries again.
-    let delivery = match crate::mail_wire::drain_node(node) {
-        Ok(()) => post_send_delivery(node, &msgid),
+    let delivery = match crate::mail_wire::drain_node(&next) {
+        Ok(()) => post_send_delivery(&next, &msgid),
         Err(e) => delivery_shape("failed", Some(e), Some("local"), None, false),
     };
     let mut data = serde_json::to_value(&envelope).unwrap_or_default();
     if let Some(obj) = data.as_object_mut() {
         obj.insert("delivery".to_string(), delivery);
+        obj.insert("next".to_string(), json!(next));
+        obj.insert("nextMesh".to_string(), json!(hop.mesh));
     }
 
     // L11 (the branch review): three states, not two. `!is_sealed()` was
@@ -5054,17 +5118,186 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
         cmd,
         if hold {
             format!(
-                "held for {node}/{name} (msgid {msgid}, {disposition}) — a drain never dials it; it leaves when {node} polls"
+                "held for {node}/{name} (msgid {msgid}, {disposition}) — a drain never dials it; it leaves when {next} polls"
             )
         } else {
             format!("spooled to {node}/{name} (msgid {msgid}, {disposition})")
         },
     )
     .changed(vec![format!(
-        "state/outbox/{node}/: +1 {} entry",
+        "state/outbox/{next}/: +1 {} entry",
         if hold { "hold" } else { "now" }
     )])
     .with_data(data)
+}
+
+/// What every `mail route` report ends with. The four steps answer where a
+/// letter goes next and why; they do not send it. And a hop that REFUSES to
+/// carry a container — a relay too old to know what one is, which nothing on
+/// the wire can announce — parks the letter at its sender rather than making
+/// it reroute (`docs/architecture/MAIL.md` §Transit).
+const ROUTE_NOTE: &str = "nothing was sent — this is the route, not the letter. A hop that refuses to carry it parks it instead of rerouting: `aoide mail outbox retry --refused` is the hand.";
+
+/// `aoide mail route <node>/<name> [--mesh <mesh>] [--json]` — the dry run of
+/// the four steps (`docs/architecture/MAIL.md` §Transit): where a letter
+/// addressed that way goes next from this box, and why. It reads the mesh
+/// declarations and prints, and it sends nothing, spools nothing and dials
+/// nothing — which is what makes it the check to run BEFORE a routing change.
+///
+/// The mesh the letter rides resolves off the DECLARATIONS, not off a paired
+/// record: a charter line is what declares a node, so a destination named only
+/// there is routed for on the strength of that line. `--mesh` says which mesh
+/// when more than one names the destination, the same tie rule every other
+/// mesh-carrying command uses.
+fn handle_mail_route(inv: &Invocation) -> Outcome {
+    let cmd = "mail.route";
+    const USAGE: &str = "usage: aoide mail route <node>/<name> [--mesh <mesh>]";
+    let Some(address) = inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()) else {
+        return Outcome::usage(cmd, USAGE);
+    };
+    // `<node>` alone is accepted: the mailbox is the filing end of an address
+    // and plays no part in the route, so the destination is all this needs.
+    let (node, name) = match address.split_once('/') {
+        Some((node, name)) => (node.trim(), name.trim()),
+        None => (address, ""),
+    };
+    if !aoide_storage::node_store::valid_node_name(node) {
+        return Outcome::usage(cmd, format!("`{address}` is not `<node>/<name>`"))
+            .with_data(json!({ "reason": "bad-address", "address": address }));
+    }
+    if !name.is_empty() && !aoide_storage::node_store::valid_node_name(name) {
+        return Outcome::error(cmd, "mailbox name must match ^[a-z0-9][a-z0-9-]*$")
+            .with_data(json!({ "reason": "invalid-name" }));
+    }
+
+    // A config this node cannot read refuses the set as a set: a broken config
+    // is not a name source, so the meshes it declares cannot even be listed.
+    let set = match aoide_storage::routing::declarations() {
+        Ok(set) => set,
+        Err(refusal) => {
+            return Outcome::error(
+                cmd,
+                format!("no route: {} — {}", refusal.reason, refusal.detail),
+            )
+            .with_data(json!({
+                "reason": refusal.reason,
+                "detail": refusal.detail,
+                "steps": Vec::<String>::new(),
+            }))
+        }
+    };
+    // The meshes whose declaration names the destination. A mesh that cannot
+    // be read names nothing here — it is not a name source, and `--mesh` is
+    // how a caller asks the route about it anyway.
+    let named: std::collections::BTreeSet<String> = set
+        .iter()
+        .filter(|loaded| loaded.declaration.as_ref().map(|d| d.declares(node)).unwrap_or(false))
+        .map(|loaded| loaded.mesh.clone())
+        .collect();
+    let asked = inv.flags.get("mesh").map(String::as_str).filter(|m| !m.trim().is_empty());
+    if named.is_empty() && asked.is_none() {
+        return Outcome::error(cmd, format!("no mesh declared at this node names `{node}`"))
+            .with_data(json!({ "reason": "unknown-node", "node": node }));
+    }
+    let mesh = match aoide_storage::node_store::resolve_mesh_any(
+        asked,
+        &named,
+        &aoide_storage::config::home_mesh(),
+    ) {
+        Ok(mesh) => mesh,
+        // Two failures with two honest words: a name that is not a mesh name at
+        // all, and a real ambiguity between meshes this node holds.
+        Err(e) if !asked.is_some_and(aoide_storage::node_store::valid_node_name) => {
+            return Outcome::usage(cmd, format!("--mesh: {e}"))
+                .with_data(json!({ "reason": "invalid-mesh", "mesh": asked }))
+        }
+        Err(e) => {
+            return Outcome::error(cmd, format!("--mesh: {e}"))
+                .with_data(json!({ "reason": "mesh-ambiguous", "node": node }))
+        }
+    };
+
+    // This box's name IN THIS MESH — the declared name its identity key holds
+    // there (`routing::own_name_in`). Only a mesh no charter governs falls back
+    // to the box's own name: a pair mesh's records are all about OTHER boxes, so
+    // a box with no record of itself is still itself, while a CHARTER mesh that
+    // does not carry this key names nobody — a hostname that happens to spell a
+    // member's name is a stranger there, never that member. Loading the identity
+    // may mint the key on a first touch, as every mail command may.
+    let own = match aoide_storage::identity::load_or_mint() {
+        Ok((kp, _)) => kp.info().pubkey_hex,
+        Err(e) => {
+            return Outcome::error(cmd, format!("this box's identity key cannot be read: {e}"))
+                .with_data(json!({ "reason": "no-identity" }))
+        }
+    };
+    let Some(from) = aoide_storage::routing::own_name_in(&set, &mesh, &own) else {
+        return Outcome::error(
+            cmd,
+            format!(
+                "this box is not a member of mesh `{mesh}`: no line on its declaration carries this \
+                 box's identity key, so the route has no sender to read"
+            ),
+        )
+        .with_data(json!({
+            "reason": "not-a-member",
+            "to": node,
+            "mesh": mesh,
+            "steps": Vec::<String>::new(),
+        }));
+    };
+    let route = aoide_storage::routing::Letter { from: &from, to: node, mesh: &mesh }.route(&set);
+    let steps = route.trail.clone();
+    let addressed = if name.is_empty() { node.to_string() } else { format!("{node}/{name}") };
+    match route.outcome {
+        Ok(hop) => {
+            let address = set
+                .iter()
+                .find(|loaded| loaded.mesh == hop.mesh)
+                .and_then(|loaded| loaded.declaration.as_ref().ok())
+                .and_then(|declaration| declaration.address_of(&hop.next))
+                .unwrap_or_default();
+            let dial = aoide_storage::charter::dial_of(address)
+                .map(|dial| dial.to_string())
+                .unwrap_or_else(|_| address.to_string());
+            let body = format!(
+                "route: {from} -> {addressed} in mesh `{mesh}`\n\
+                 next hop: {} ({dial} in mesh `{}`){}\n  {}\n{ROUTE_NOTE}",
+                hop.next,
+                hop.mesh,
+                if hop.held { " — HELD for its own ask, never dialled" } else { "" },
+                steps.join("\n  "),
+            );
+            Outcome::ok(cmd, body).with_data(json!({
+                "from": from,
+                "to": node,
+                "name": name,
+                "mesh": mesh,
+                "next": hop.next,
+                "nextMesh": hop.mesh,
+                "held": hop.held,
+                "dial": dial,
+                "steps": steps,
+            }))
+        }
+        Err(refusal) => {
+            let body = format!(
+                "no route: {from} -> {addressed} in mesh `{mesh}`\n  {}\nreason: {} — {}\n{ROUTE_NOTE}",
+                steps.join("\n  "),
+                refusal.reason,
+                refusal.detail,
+            );
+            Outcome::error(cmd, body).with_data(json!({
+                "from": from,
+                "to": node,
+                "name": name,
+                "mesh": mesh,
+                "reason": refusal.reason,
+                "detail": refusal.detail,
+                "steps": steps,
+            }))
+        }
+    }
 }
 
 /// `aoide mail read (--for <name> | --all-names) [--reread] [--json]`.
@@ -5477,12 +5710,41 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
         None => crate::mail_wire::pollable_nodes(),
     };
 
+    let mesh_flag = inv.flags.get("mesh").map(String::as_str);
     let mut rows: Vec<Value> = Vec::new();
     let mut filed = 0usize;
     let mut refused_total = 0usize;
     let mut withheld_total = 0usize;
+    let mut not_dialled = 0usize;
     for node in &targets {
-        match crate::mail_wire::poll_node(node, inv.flags.get("mesh").map(String::as_str)) {
+        // **A `down` node is not polled, and the command SAYS so.** `poll_node`
+        // returns an empty outcome for it, and reporting that as "polled" is the
+        // same lie `no-record` was: the node's own declaration says this box must
+        // not reach it, and what is spooled toward it stays spooled. The name is
+        // judged by the record's own key, so a nickname cannot dodge it.
+        let down = nodes
+            .iter()
+            .find(|n| &n.name == node)
+            .is_some_and(|record| {
+                crate::mail_wire::poll_mesh(node, mesh_flag)
+                    .is_some_and(|mesh| crate::mail_wire::record_forbidden_by_declaration(&mesh, record))
+            });
+        if down {
+            // An unreadable mesh and a `down` node are both "not dialled", and
+            // they are different words: one is a declaration this box cannot
+            // read, the other a declaration that names the node.
+            let reason = if crate::mail_wire::poll_mesh(node, mesh_flag)
+                .is_some_and(|mesh| crate::mail_wire::declaration_unreadable(&mesh))
+            {
+                "declaration-unreadable"
+            } else {
+                "down"
+            };
+            not_dialled += 1;
+            rows.push(json!({ "node": node, "status": "not-dialled", "reason": reason, "filed": 0 }));
+            continue;
+        }
+        match crate::mail_wire::poll_node(node, mesh_flag) {
             Ok(outcome) => {
                 filed += outcome.filed;
                 refused_total += outcome.refused.len();
@@ -5510,7 +5772,7 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
         "no paired node holds `message` — nothing to poll".to_string()
     } else {
         format!(
-            "polled {} node(s): {filed} envelope(s) filed{}{}{}",
+            "polled {} node(s): {filed} envelope(s) filed{}{}{}{}",
             targets.len(),
             if refused_total == 0 { String::new() } else { format!(", {refused_total} container(s) refused") },
             if withheld_total == 0 {
@@ -5518,7 +5780,8 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
             } else {
                 format!(", {withheld_total} withheld (sealed-required — they stay on the far side until this box publishes a binding)")
             },
-            if unreachable == 0 { String::new() } else { format!(", {unreachable} unreachable") }
+            if unreachable == 0 { String::new() } else { format!(", {unreachable} unreachable") },
+            if not_dialled == 0 { String::new() } else { format!(", {not_dialled} not dialled (declared `down`)") }
         )
     };
     Outcome::ok(cmd, message)
@@ -9067,6 +9330,123 @@ mod tests {
 
         let names = handle_mail_names(&mail_inv(&["mail"], &[]));
         assert_eq!(names.data.unwrap()["names"], json!([]), "a refused name must never be filed");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `mail send` reads the four steps BEFORE it mints (MAIL.md §Transit): with
+    /// a mesh declared, a letter for a node that only a relay can serve is
+    /// spooled toward that relay — the container stays addressed to the
+    /// destination — and a destination no declaration names is refused at send
+    /// time with nothing written.
+    /// **A pair mesh written by `mesh pair` is a grant and nothing else.** Its
+    /// section carries the mesh's grant and no node map at all — the direct edge
+    /// needs no hop line — so a send to a peer the records GRANT there must route
+    /// anyway, and the grant is what makes the record a key of the mesh.
+    #[test]
+    fn mail_send_reaches_a_paired_node_under_a_grant_only_section() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-grant-only");
+
+        std::fs::write(
+            aoide_storage::config::source().path,
+            "[pairing]\nhomeMesh = \"family\"\n\n[mesh.family]\ngrant = [\"message\"]\n",
+        )
+        .unwrap();
+        aoide_storage::config::load().unwrap();
+
+        let me = aoide_storage::display::local_node_name();
+        let mine = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
+        let peer = |name: &str, url: &str, key: String| aoide_storage::node_store::Node {
+            name: name.to_string(),
+            url: url.to_string(),
+            autogate: false,
+            token_file: None,
+            bearer_secret: None,
+            hub: false,
+            pubkey: Some(key),
+            verified: true,
+            grants: aoide_storage::node_store::grants_in("family", &["message"]),
+            narrowed: aoide_storage::node_store::Grants::new(),
+            via: None,
+            added_at: "2026-09-07T00:00:00Z".to_string(),
+        };
+        aoide_storage::node_store::save_nodes(&[
+            peer(&me, "ssh://self", mine),
+            peer("dave", "http://127.0.0.1:1/", "d4d4d4d4".repeat(8)),
+        ])
+        .unwrap();
+
+        let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "dave/bob")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        let data = out.data.unwrap();
+        assert_eq!(data["next"], "dave", "the direct edge is the only edge this mesh declares");
+        assert_eq!(data["nextMesh"], "family");
+        assert_eq!(aoide_storage::outbox::list_entries("dave").unwrap().len(), 1, "spooled to the peer itself");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mail_send_spools_toward_the_hop_a_declaration_names() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-routes");
+
+        std::fs::write(
+            aoide_storage::config::source().path,
+            "[pairing]\nhomeMesh = \"family\"\n\n\
+             [mesh.family]\nrelays = [\"relay\"]\n\n\
+             [mesh.family.nodes]\nrelay = \"ssh://relay\"\ndave = \"ssh://dave\"\n",
+        )
+        .unwrap();
+        aoide_storage::config::load().unwrap();
+
+        let me = aoide_storage::display::local_node_name();
+        let key = |tag: &str| format!("{tag}{tag}{tag}{tag}").repeat(4);
+        let mine = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
+        let node = |name: &str, url: &str, key: String| aoide_storage::node_store::Node {
+            name: name.to_string(),
+            url: url.to_string(),
+            autogate: false,
+            token_file: None,
+            bearer_secret: None,
+            hub: false,
+            pubkey: Some(key),
+            verified: true,
+            grants: aoide_storage::node_store::grants_in("family", &["message"]),
+            narrowed: aoide_storage::node_store::Grants::new(),
+            via: None,
+            added_at: "2026-09-07T00:00:00Z".to_string(),
+        };
+        // `dave` is DECLARED but not yet paired — so no key of its own is on
+        // record, and this box cannot hand it a letter directly. The relay can.
+        aoide_storage::node_store::save_nodes(&[
+            node(&me, "ssh://self", mine),
+            node("relay", "ssh://relay", key("b2")),
+        ])
+        .unwrap();
+
+        let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "dave/bob")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        let data = out.data.unwrap();
+        assert_eq!(data["next"], "relay", "`dave` polls, so its relay carries it");
+        assert_eq!(data["nextMesh"], "family");
+        let spooled = aoide_storage::outbox::list_entries("relay").unwrap();
+        assert_eq!(spooled.len(), 1, "spooled toward the hop the route picked");
+        assert_eq!(spooled[0].envelope.header.to.node, "dave", "and still addressed to the destination");
+        assert!(
+            !spooled[0].is_sealed() && spooled[0].refused,
+            "no binding for `dave` means no seal: a relay would have to read it, so the entry parks \
+             rather than travelling in the clear ({})",
+            spooled[0].last_outcome
+        );
+        assert!(spooled[0].last_outcome.contains(crate::mail_wire::NO_BINDING_FOR_A_RELAY));
+
+        // A destination no declaration names: refused before anything is written.
+        let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "ghost/bob")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{}", out.message);
+        assert_eq!(out.data.unwrap()["reason"], "unknown-node");
+        assert!(aoide_storage::outbox::list_entries("ghost").unwrap().is_empty());
 
         let _ = std::fs::remove_dir_all(&root);
     }

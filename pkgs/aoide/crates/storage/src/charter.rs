@@ -63,7 +63,10 @@ pub const UNKNOWN_OPERATOR: &str = "unknown-operator";
 pub const STALE_CHARTER: &str = "stale-charter";
 /// The received bytes are not the artifact the signature was made over. This
 /// is what a trailing newline, a formatter or a line-ending change produces,
-/// and it is a different answer from a key that does not verify.
+/// and it is a different answer from a key that does not verify. It covers
+/// every way the document IN HAND is not this mesh's charter: bytes that do not
+/// parse, and a charter that parses and belongs to another mesh — the one
+/// answer for both, because from here they are the same fact.
 pub const CHARTER_TAMPERED: &str = "charter-tampered";
 /// The config's operator line and the state record disagree about which key
 /// signs this mesh.
@@ -71,12 +74,30 @@ pub const OPERATOR_MISMATCH: &str = "operator-mismatch";
 /// `config.toml` exists and could not be honoured, so which operator key this
 /// host trusts is unknowable. Never a missing file (that is defaults).
 pub const CONFIG_UNREADABLE: &str = "config-unreadable";
+
+/// The word the DOOR refuses the two mail methods with when the declaration set
+/// will not load (MAIL.md §Status: "no mail served with the declaration
+/// unloadable"). It lives here, in the crate both ends share, because the
+/// SENDER classifies it: a `config-invalid` refusal is a state of the LINK, not a
+/// verdict on the letter — its entry stays live and retries on the ordinary
+/// back-off — which is what `mail_wire`'s own classifier reads
+/// this constant for.
+pub const CONFIG_INVALID: &str = "config-invalid";
 /// The charter itself was fine; THIS node could not read or write its own
 /// state (the mesh's lock, `charter.toml`, its `.sig`, `trust.json`). A
 /// distinct word from the four above because it says nothing about the
 /// charter — and, unlike them, it can leave the writes it had already made in
 /// place (see `accept`'s write order).
 pub const LOCAL_IO: &str = "local-io";
+/// A mesh is CHARTER-SHAPED here — a trust record names an operator, or a
+/// charter was accepted once — and `charter.toml` is NOT THERE: nothing has
+/// been signed yet, or the file is gone. Distinct from the operator words above
+/// (which one key is trusted is not the question), from [`CHARTER_TAMPERED`] (a
+/// document that IS there and is not this mesh's charter) and from [`LOCAL_IO`]
+/// (a document that is there and this node could not read it). Nothing may be
+/// routed in a mesh in this state, and nothing is guessed from the paired
+/// records to fill the hole.
+pub const NO_CHARTER_IN_FORCE: &str = "no-charter-in-force";
 
 /// The prefix every identity key carries wherever it is written down: a
 /// charter line's `key`, and config's `[mesh.<name>] operator`.
@@ -88,10 +109,16 @@ pub const DEFAULT_ADDRESS: &str = "poll";
 /// A node with no declared grant gets `message` and nothing else: the
 /// conservative default, because writing the line is what grants more.
 pub const DEFAULT_GRANT: &str = "message";
-/// The closed vocabulary `[status]` may hold (MAIL.md §Transit). Read by
-/// P-M4's router; parsed and checked here so a typo is refused at `sign`
-/// rather than ignored at routing time.
-pub const STATUS_VALUES: &[&str] = &["hold", "down"];
+/// `[status]`'s queueing word: the far end has no inbound transport it takes
+/// us on, so its letters wait for its own poll. Never dialled.
+pub const STATUS_HOLD: &str = "hold";
+/// `[status]`'s refusal word: never a hop and never a destination, and a
+/// letter already queued toward it is kept rather than dropped.
+pub const STATUS_DOWN: &str = "down";
+/// The closed vocabulary `[status]` may hold (MAIL.md §Transit). Read by the
+/// router through [`crate::routing`]; parsed and checked here so a typo is
+/// refused at `sign` rather than ignored at routing time.
+pub const STATUS_VALUES: &[&str] = &[STATUS_HOLD, STATUS_DOWN];
 
 // ── Paths ───────────────────────────────────────────────────────────────
 
@@ -209,17 +236,18 @@ pub struct NodeLine {
 
 /// A parsed and validated charter.
 ///
-/// `relays`, `address` and `grant` are carried rather than validated-and-
-/// dropped: they are the routing table and the grants P-M4 and the door read
-/// out of the charter in force, and a parser that silently discards half the
-/// document is a liar to the next reader. `[status]` and `[gates]` are the
-/// opposite case — their semantics are P-M4's alone, so this slice checks
-/// their shape and carries nothing.
+/// Every field is carried rather than validated-and-dropped: `relays`,
+/// `address` and `grant` are the routing table and the grants the door reads
+/// out of the charter in force, `[status]` and `[gates]` are the rest of that
+/// table (`crate::routing`), and a parser that silently discards half the
+/// document is a liar to the next reader.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Charter {
     pub mesh: String,
     pub version: u64,
     pub relays: Vec<String>,
+    pub status: BTreeMap<String, String>,
+    pub gates: BTreeMap<String, String>,
     pub nodes: BTreeMap<String, NodeLine>,
 }
 
@@ -245,9 +273,10 @@ impl Charter {
 
 /// `Charter`'s deserialization twin: the same document with the fields
 /// validation turns into types (`key` → bare hex + verified binding) still in
-/// their written form, and with `[status]`/`[gates]` present so they can be
-/// checked at all. `deny_unknown_fields` on both: a typo'd key in a file that
-/// grants mesh access is refused by name, never ignored.
+/// their written form — and `[status]`/`[gates]` in the same written form
+/// [`Charter`] carries, since this is the shape that checks them first.
+/// `deny_unknown_fields` on both: a typo'd key in a file that grants mesh
+/// access is refused by name, never ignored.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawCharter {
@@ -362,6 +391,11 @@ pub fn parse(text: &str) -> Result<Charter, String> {
         if !node_store::valid_node_name(mesh) {
             return Err(format!("`[gates]` names `{mesh}`, which is not a valid mesh name"));
         }
+        if *mesh == raw.mesh {
+            return Err(format!(
+                "`[gates]` sends mesh `{mesh}` through `{node}` — a mesh cannot gate into itself: a gate carries transit into ANOTHER mesh, and `[status]`/`relays` are how this one describes its own members"
+            ));
+        }
         if !nodes.contains_key(node) {
             return Err(format!(
                 "`[gates]` sends mesh `{mesh}` through `{node}`, which is not a node on this charter"
@@ -372,28 +406,64 @@ pub fn parse(text: &str) -> Result<Charter, String> {
         mesh: raw.mesh,
         version: raw.version,
         relays: raw.relays,
+        status: raw.status,
+        gates: raw.gates,
         nodes,
     })
 }
 
-/// A node's `address` is one of the three transports the design names, or it
-/// is nothing: `poll`, `ssh://[user@]host[:port]` (through the one parser
-/// that grammar already has), or `https://host`.
-fn validate_address(node: &str, address: &str) -> Result<(), String> {
+/// A declared `address`, read as what a caller can do with it — the three
+/// transports the design names, and nothing else
+/// (`docs/architecture/HTTPS-MESH-API.md`, "Transports and relays").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Dial {
+    /// `ssh://[user@]host[:port]` — the tunnel to a node's door, parsed by the
+    /// one parser that grammar has ([`crate::tunnel::parse_via`], which `--via`
+    /// reads too).
+    Ssh(crate::tunnel::Via),
+    /// `https://host` — a door or mail adapter behind something that owns 443.
+    Https(String),
+    /// `poll` — no inbound transport: this node asks its relay, and the relay
+    /// holds its letters until it does.
+    Poll,
+}
+
+impl std::fmt::Display for Dial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Dial::Ssh(via) => write!(f, "{via}"),
+            Dial::Https(url) => write!(f, "{url}"),
+            Dial::Poll => write!(f, "{DEFAULT_ADDRESS}"),
+        }
+    }
+}
+
+/// Turn a declared `address` into a dial target. Pure, and the ONE place an
+/// address stops being a declaration: the four steps ask it whether a hop can
+/// be reached, `mail route` prints what it answers, and the DRAIN turns it into
+/// the node it opens a link to — a charter relay this box never paired with is
+/// reached at its declared address (`aoide_client::mail_wire::dial_node`), not
+/// skipped (`docs/architecture/HTTPS-MESH-API.md`, "Charters"). Fails closed —
+/// an address that is none of the three is refused, never guessed at.
+pub fn dial_of(address: &str) -> Result<Dial, String> {
+    let address = address.trim();
     if address == DEFAULT_ADDRESS {
-        return Ok(());
+        return Ok(Dial::Poll);
     }
     if address.starts_with("ssh://") {
-        return crate::tunnel::parse_via(address)
-            .map(|_| ())
-            .map_err(|e| format!("node `{node}`: address: {e}"));
+        return Ok(Dial::Ssh(crate::tunnel::parse_via(address)?));
     }
     if address.starts_with("https://") && node_store::url_host(address).is_some() {
-        return Ok(());
+        return Ok(Dial::Https(address.to_string()));
     }
-    Err(format!(
-        "node `{node}`: address `{address}` is not `poll`, `ssh://…` or `https://…`"
-    ))
+    Err(format!("`{address}` is not `poll`, `ssh://…` or `https://…`"))
+}
+
+/// A node's `address` is one of the three transports the design names, or it
+/// is nothing: [`dial_of`] is that rule, and this is the refusal an operator
+/// reads at `sign` time.
+fn validate_address(node: &str, address: &str) -> Result<(), String> {
+    dial_of(address).map(|_| ()).map_err(|e| format!("node `{node}`: address {e}"))
 }
 
 /// The bare lowercase hex of an `ed25519:<hex>` field, refusing anything else
@@ -816,24 +886,74 @@ pub fn charter_shaped(mesh: &str) -> bool {
         .is_some_and(|trust| !trust.operator.is_empty())
 }
 
-/// The charter **governing** `mesh` at this node: in force on disk, for this
-/// mesh by name, and under an operator key this node can actually decide
-/// ([`trusted_operator`]). `None` for a pair mesh — the ordinary case, where
-/// the paired records are the source — and `None` for every way a mesh's
-/// operator key can become undecidable (config line against state record
-/// disagree, config unreadable): those leave NO charter in force rather than a
-/// guessed one, so a disagreement refuses rather than widens.
+/// The charter **governing** `mesh` at this node, and [`governing_refusal`]'s
+/// `Ok`: in force on disk, for this mesh by name, and under an operator key
+/// this node can actually decide ([`trusted_operator`]). `None` for a pair mesh
+/// — the ordinary case, where the paired records are the source — and for every
+/// way there is no such charter.
 ///
 /// Distinct from [`in_force_charter`] on purpose: that one is the raw read the
 /// re-key comparison and the report want (they must see what is on disk even
 /// while a human is resolving an operator disagreement), and this one is the
 /// trust-gated read the DOOR wants.
 pub fn governing(mesh: &str) -> Option<Charter> {
-    if trusted_operator(mesh).is_err() {
-        return None;
+    governing_refusal(mesh).ok()
+}
+
+/// [`governing`]'s fallible twin: the same charter, or the taught refusal that
+/// says which of the ways it is not there this is — [`trusted_operator`]'s own
+/// word when the operator key itself cannot be decided, [`NO_CHARTER_IN_FORCE`]
+/// when nothing has been signed (`charter.toml` is not there at all),
+/// [`LOCAL_IO`] when it is there and this node cannot read it, and
+/// [`CHARTER_TAMPERED`] when a document IS there and is not this mesh's charter
+/// — it does not parse, or it declares another mesh by name.
+///
+/// One implementation, two readers: the door wants `Option` (a mesh with no
+/// charter is a pair mesh to it), and a caller that must fail closed with a
+/// reason wants the word (`crate::routing`, and the door's own declaration
+/// read).
+pub fn governing_refusal(mesh: &str) -> Result<Charter, Refusal> {
+    trusted_operator(mesh)?;
+    let path = in_force_path(mesh);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        // Nothing signed is in force, which is what a mesh that has just been
+        // joined by operator key looks like.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(Refusal::new(
+                NO_CHARTER_IN_FORCE,
+                format!(
+                    "mesh `{mesh}` is charter-shaped at this node but {} is not there — nothing signed \
+                     is in force for it: take its charter (`aoide mesh charter accept`), or its operator \
+                     signs one",
+                    path.display()
+                ),
+            ))
+        }
+        // A document that IS there and this node cannot read it is this node's
+        // own failure, not a fact about the mesh: a permission problem must not
+        // read as "no charter was ever signed".
+        Err(e) => {
+            return Err(Refusal::new(
+                LOCAL_IO,
+                format!("{}: {e} — this node cannot read the charter in force for mesh `{mesh}`", path.display()),
+            ))
+        }
+    };
+    let charter = parse(&text)
+        .map_err(|e| Refusal::new(CHARTER_TAMPERED, format!("{}: {e}", path.display())))?;
+    if charter.mesh != mesh {
+        return Err(Refusal::new(
+            CHARTER_TAMPERED,
+            format!(
+                "{} declares mesh `{}`, not `{mesh}` — the document in force for this mesh is not its \
+                 charter",
+                path.display(),
+                charter.mesh
+            ),
+        ));
     }
-    let charter = in_force_charter(mesh)?;
-    (charter.mesh == mesh).then_some(charter)
+    Ok(charter)
 }
 
 /// The capabilities the charter governing `mesh` gives the key `key`, or
@@ -1620,6 +1740,25 @@ mod tests {
     }
 
     #[test]
+    fn the_document_carries_its_status_and_gates() {
+        let (_guard, _saver) = isolate();
+        let op = machine_dir("transit");
+        machine(&op, "opbox");
+        let line = node_line().unwrap();
+        let src = format!(
+            "mesh = \"home\"\nversion = 0\nrelays = [\"opbox\"]\n\n[nodes]\n{line}\n\n\
+             [status]\nopbox = \"hold\"\n\n[gates]\naway = \"opbox\"\n"
+        );
+
+        let charter = parse(&src).unwrap();
+        assert_eq!(charter.relays, vec!["opbox".to_string()], "relays stay in declaration order");
+        assert_eq!(charter.status.get("opbox").map(String::as_str), Some("hold"));
+        assert_eq!(charter.gates.get("away").map(String::as_str), Some("opbox"));
+
+        let _ = std::fs::remove_dir_all(&op);
+    }
+
+    #[test]
     fn signature_and_freshness() {
         let (_guard, _saver) = isolate();
         let op = machine_dir("fresh-op");
@@ -1677,6 +1816,36 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&op);
         let _ = std::fs::remove_dir_all(&peer);
+    }
+
+    /// A charter that is THERE and this node cannot read it is this node's own
+    /// failure (`local-io`), never read as "nothing has been signed": a
+    /// permission problem must not look like a mesh that needs a charter.
+    #[test]
+    fn an_unreadable_charter_in_force_is_local_io_not_a_missing_charter() {
+        let (_guard, _env) = isolate();
+        let op = machine_dir("governing-io");
+        machine(&op, "opbox");
+        init("home").unwrap();
+        std::fs::write(
+            source_path("home"),
+            format!("mesh = \"home\"\nversion = 0\n\n[nodes]\n{}\n", node_line().unwrap()),
+        )
+        .unwrap();
+        sign("home", None).unwrap();
+        assert_eq!(governing_refusal("home").unwrap().mesh, "home");
+
+        // Gone: nothing signed is in force.
+        std::fs::remove_file(in_force_path("home")).unwrap();
+        assert_eq!(governing_refusal("home").unwrap_err().reason, NO_CHARTER_IN_FORCE);
+
+        // There, and unreadable as a file (a directory stands in for any read
+        // failure whose kind is not "not found").
+        std::fs::create_dir_all(in_force_path("home")).unwrap();
+        let refusal = governing_refusal("home").unwrap_err();
+        assert_eq!(refusal.reason, LOCAL_IO, "{refusal}");
+        assert!(refusal.detail.contains("cannot read"), "{refusal}");
+        let _ = std::fs::remove_dir_all(&op);
     }
 
     /// **F2.** A machine that already trusts an operator for a mesh is a NODE
@@ -2284,6 +2453,10 @@ mod tests {
         let cases: Vec<(String, &str)> = vec![
             (format!("mesh = \"Home\"\nversion = 0\n\n[nodes]\n{line}\n"), "valid mesh name"),
             (format!("mesh = \"home\"\nversion = 0\nrelays = [\"nowhere\"]\n\n[nodes]\n{line}\n"), "not a node on this charter"),
+            (
+                format!("mesh = \"home\"\nversion = 0\n\n[gates]\nhome = \"opbox\"\n\n[nodes]\n{line}\n"),
+                "cannot gate into itself",
+            ),
             (
                 format!("mesh = \"home\"\nversion = 0\n\n[nodes]\n{}\n", line.replace(" }", ", port = 22 }")),
                 "unknown field",

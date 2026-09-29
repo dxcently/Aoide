@@ -1,0 +1,11 @@
+# The deliberately BROKEN half of the fixture's mesh pair, used to prove a gate
+# is refused when it is not answered: `home` gates into `away` through `sakaki`
+# and this `away` never gates back. `{sakaki}` is the real node line the fixture
+# mints for that box (a template, not a static file, because a node line carries
+# a live key and a live age binding).
+mesh = "away"
+version = 1
+relays = []
+
+[nodes]
+{sakaki}

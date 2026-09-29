@@ -583,7 +583,15 @@
     them, so a machine that took its first charter by file is reported too)
     and flips `MeshSection::source` from `Paired` to `Charter`. `drift`'s own
     field says `Paired` because it knows nothing about charters: do not teach
-    it to read state, and do not let a second place flip `source`. A charter
+    it to read state, and do not let a second place flip `source`. **`report` is
+    also where each section's `kind`, `charter_version`, `refusal` and `nodes`
+    come from** — one `routing::declarations()` read for the whole view, so a
+    row's status and the section's refusal are answered from the same set, and a
+    refused mesh fills `refusal` and leaves `nodes` empty (it fails closed for
+    itself alone). `NodeRow::liveness` is an OBSERVATION from the box's own
+    records only (the outbox's `tries`/`lastOutcome`, the link's back-off): do
+    not add a probe, a dial or any network I/O to this command, and do not read
+    `down` into liveness — a declaration is not an observation. A charter
     row is also where a paired record in a charter mesh is REPORTED inert
     (`CharterRow::inert`) — the record's own grant entry is not what the door
     reads there, and an operator must not have to infer that from the door's
@@ -790,10 +798,43 @@
   node.** Do not add a second address test for this, and do not push the
   decision back out to callers. `settle_deposit` is the ONE place an outcome
   turns into spool side effects (ack minted and spooled on a filed letter
-  or a letter duplicate, `retire_by_ack` on a filed receipt); the door
+  or a letter duplicate, `retire_by_ack` on a filed receipt, a `transit`
+  entry retired on the hop that took it); the door
   reaches it through `aoide_conduct::mail_bridge::settle_deposit`, so
   `aoide-server` never keeps a second copy — do not put the ack mint back
-  in `a2a.rs`. A poll's answer is bounded at
+  in `a2a.rs`. **A letter's spool directory is the HOP the route picked, not
+  its destination** (`spool_entry(dest, next, mesh, …)`): the container stays
+  addressed to `dest` while the entry is dialled toward `next`, and a hop this
+  box holds no record for is dialled at the address the DECLARATION gives it
+  (`dial_node` → `charter::dial_of`) or held if that address is `poll`.
+  **A node the mesh declares `down` is never dialled either, and that is
+  `mail_wire::record_forbidden_by_declaration`'s** — asked over the set, so no caller can
+  forget it: `drain_node` returns before the link lock, `poll_node` returns
+  before the binding exchange, `pollable_nodes` leaves such a node out of a
+  bare poll, and the two REPORTS (`charter::drain_spooled`,
+  `handle_mail_poll`) say `down` rather than reading the empty answer as
+  `drained`/`polled`. The judged NAME is the declaration's own for the
+  record's identity KEY (`judged_name` → `routing::declared_name`), falling
+  back to the record's name only where the mesh names no such key: a
+  `nodes.json` nickname must not be able to dodge a status. It FAILS CLOSED —
+  a set that will not load or an entry the set refuses means never dialled —
+  and a report for such a mesh says `declaration-unreadable`, never `down`,
+  because a mesh nobody can read declared nothing. Its spooled entries are
+  KEPT — `down` stops sending, it never confiscates — so the pass after the
+  declaration changes dials them, unchanged. A new
+  "may I dial this node" test belongs in `hop_is_never_dialled`, never at a
+  call site.
+  **A refusal that says something about the LINK is not a verdict on the
+  letter**: `mail_wire::classify_deposit_response` gives the far end's `down` and
+  `config-invalid` words their OWN arm (`DepositAttempt::LinkRefused`) — the entry
+  stays live (`refused` untouched, never needing `retry --refused`),
+  `tries`/`lastOutcome` record the far end's own words under the same `refused:`
+  word a policy refusal gets, the LINK backs off, and the next pass retries —
+  while every other word takes the `Refused` arm and parks the entry. **`refused:`
+  without the flag is not parked**: the word is how the spool records that an
+  attempt was ANSWERED (and liveness reads it as reached), and only the FLAG stops
+  the drain. Do not widen that set without the User's say: the words that park are
+  the ones that will never become true. A poll's answer is bounded at
   `aoide_storage::outbox::POLL_BATCH_CAP` (50) and must stay bounded: the
   poller's own `MAX_RESPONSE_BYTES` is what an unbounded batch walks into.
   A poll may ask this same crate to drain a node whose `.bsy`
@@ -802,7 +843,16 @@
   ack waits for the next tick — correct, not a leak; never make `.bsy`
   blocking to "fix" it.
 - **`handle_mail_send` reports the WRITE, never the drain's outcome (spec
-  item 8).** Minting and spooling the outbox entry is what the command's
+  item 8), and it READS THE ROUTE FIRST.** The four steps are asked before
+  anything is minted: a letter with no route is the sender's own answer
+  (`no-route`, `zone-violation`, the letter's mesh's own word) with nothing
+  written, and the hop the route picks is entry 1's `next`, the spool
+  directory, and the node the drain dials (`data.next`/`nextMesh` report it).
+  A destination this box holds NO record of is a charter node whose mesh comes
+  from the declarations (`send_mesh`), and the letter is signed as this box's
+  DECLARED name in that mesh (`own_name_in` via `mint_outbound_letter_from`),
+  because `from.node` is inside the signature every receiver and hop checks.
+  Minting and spooling the outbox entry is what the command's
   `Outcome` status describes; the best-effort `mail_wire::drain_node` call
   after it is a latency shortcut only, and its `Err` (a genuine local I/O
   failure inside the drain itself, never "remote unreachable") never
@@ -817,6 +867,26 @@
   background daemon's schedule) leak into a command that already
   succeeded at its own job; the drain's result is data for the projection,
   not a verdict on the spool.
+- **`mail_route` is a READ, and it stays one.** It resolves the mesh off the
+  mesh DECLARATIONS (`routing::declarations`, the same set the door and the
+  drain read), runs `aoide_storage::routing::Letter::route`, prints the hop,
+  the mesh and each step's reason, and stops: no spool write, no mailbase
+  write, no `drain_node`, no dial — the whole point of the command is that a
+  route may be inspected before a declaration changes. Do not "helpfully"
+  drain the chosen hop, and do not resolve the mesh off a paired record's
+  grants the way `mail send` does: a charter line is what declares a node, so
+  a destination that exists only there has a route and no record. **This box's
+  own name for the route is resolved PER MESH by
+  `aoide_storage::routing::own_name_in` — the declared name its own identity
+  key holds there, and only for a mesh no charter governs the address form of
+  its own name**, never the OS hostname or the `nodes.json` nickname in a
+  charter mesh: a box whose hostname is not its charter line's name routes as
+  itself, and one whose key the mesh does not carry is a stranger in it —
+  `not-a-member`, whatever its hostname spells. A refusal is
+  an `Outcome::error` carrying the router's word in `data.reason`, with the
+  trail beside it — never a bare reason string the caller has to parse
+  (MAIL.md "Status and the nodelist view"); a `--mesh` that is not a mesh name
+  is `invalid-mesh` rather than the `mesh-ambiguous` that a real tie gives.
 - **`mail_export` is READ-ONLY on the mailbase and clamps everything that
   leaves a fence (register §30).** It reads `base.jsonl` once
   (`mail::read_base`), groups and renders, and writes notes under

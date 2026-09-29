@@ -64,6 +64,21 @@ and waiting for the child before restoring the environment. `#[ignore]`'d
 like the node-connectivity pair: it needs real loopback TCP, real `curl` and
 the built binary.
 
+`common/mod.rs` raises the five-edge fixture mesh — two CHARTER
+meshes, `home` = {osaka, sakaki(relay), yomi, chiyo} gated into `away` =
+{evo, sakaki} through sakaki, with `sakaki` the one node in both. It is
+`mail_adapter_round_trip.rs`'s multi-root pattern taken to five boxes: each
+box gets its own `AOIDE_ROOT` and its own minted identity, the operator box
+roots both meshes and signs both charters, and every other box trusts the
+operator key from its `config.toml` and takes the signed pair. It is a
+`mod common;` include, so any test file beside it reuses the same mesh, and
+it removes its own root when the `Fixture` drops — a failed assertion leaves
+no scratch mesh behind. The two deliberately broken charters live under
+`tests/fixtures/` as TEMPLATES (`{sakaki}`/`{stranger}` stand in for node
+lines, which carry a live key and binding and so can only be minted at run
+time). `mesh_transit.rs` is its first caller: no child process and no
+network, it reads declarations through `aoide_storage::routing`.
+
 ## What it consumes
 
 `aoide-protocol`, `aoide-storage`, `aoide-conduct`, `aoide-client`,

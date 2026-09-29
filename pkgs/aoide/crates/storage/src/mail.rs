@@ -8,8 +8,12 @@
 //! [`Envelope`] into [`crate::outbox`]; the far door's `aoide/mailDeposit`
 //! arm calls [`deposit`] here to verify and file it, ONLY ever via a
 //! [`file_received_entry`] (never re-minted — the envelope arrives already
-//! signed). **No transit, no zones, no `--hold`** — those are P-M3/P-M4
-//! (MAIL.md's own Phases section); nothing here reads a mesh declaration.
+//! signed). **Transit is not filed here**: a sealed container addressed to
+//! another node is a HOP, and [`crate::seal`] answers it as one
+//! (`ContainerOutcome::Hopped`) — the hub writes a `transit` line
+//! ([`file_transit`]) holding the container and its routing metadata, and this
+//! module never opens it, never names a mailbox for it, and never rings a
+//! reader. The zone checks a receiver runs live in [`crate::seal`]'s chain walk.
 //! The doorbell's own latch and its targeting queries ([`arms`],
 //! [`ring_targets`], [`stamp_rung`], [`armed_names_for_reader`],
 //! [`enrol_reader`]) live here (P-M5a-1); the ring itself — injecting a byte
@@ -26,12 +30,11 @@
 //! and `msgid` (hex sha256 over `sig ‖ header ‖ 0x00 ‖ text` — no separator
 //! before `header`, one before `text`; see [`seal`]). Deliberately absent:
 //! the wire envelope's sibling `mesh`/`transit` fields — those are routing
-//! facts nothing here consults yet (P-M4's zone check, MAIL.md step 3,
-//! still skipped entirely rather than stubbed even now that a mesh CAN be
-//! declared, task #135), and `header.origin_mesh` (always `""` here) stands
-//! in for them wherever P-M1/P-M2 render a "mesh" column, since mesh and
-//! originMesh are defined to start equal and nothing before P-M4 can ever
-//! diverge them.
+//! facts nothing here consults yet: the zone check (MAIL.md step 3) belongs
+//! to the transit lane, which a PLAINTEXT envelope never rides, so it is
+//! skipped by shape rather than by omission (a sealed container takes it) —
+//! and `header.origin_mesh` (always `""` here) stands in for them wherever a
+//! "mesh" column is rendered.
 //!
 //! `self` resolves at mint time through [`crate::display::local_node_name`]
 //! (the ADDRESS form of this box's own name — see that function: an OS host
@@ -92,20 +95,20 @@
 //! ONE key `nodes.json` has on record under that exact name — never the
 //! connection path's try-every-verified-key ladder, or a paired node
 //! signing as another paired node's name would verify and file under the
-//! wrong identity. Origin and hop always coincide today (only direct edges
-//! exist); the split is written now for P-M4's transit hops, where they
-//! will not.
+//! wrong identity. Origin and hop coincide on the direct lane and are resolved
+//! separately, because a relayed container's last hop is not its origin.
 //!
 //! ## Commands
 //!
 //! `aoide_client::commands::register_mail` wires `mail`, `mail send`
 //! (`--to self/<name>` or `--to <node>/<name>` for a direct verified edge),
 //! `mail read`, `mail show`, `mail mark`, `mail rm`, `mail outbox`, `mail
-//! outbox rm` — moved out of this crate's own `commands.rs` at P-M2 because
-//! sending over a direct edge needs the wire lane (`aoide-client`'s own
-//! domain); this module stays the mailbase's storage layer regardless of
-//! which crate dispatches into it. `mail route`/`--hold`/`--transit` are
-//! later phases and are not registered yet.
+//! outbox rm` and `mail outbox retry` — moved out of this crate's own
+//! `commands.rs` at P-M2 because sending over a direct edge needs the wire
+//! lane (`aoide-client`'s own domain); this module stays the mailbase's
+//! storage layer regardless of which crate dispatches into it. `mail route`
+//! and the `--transit` surface are not registered yet, and `--hold` is a
+//! spool flavor a send may carry rather than a command of its own.
 
 use crate::display;
 use crate::fs::{atomic_write, state_dir};
@@ -132,13 +135,19 @@ pub const ENTRY_TYPE_RECEIPT: &str = "receipt";
 /// filing it as correspondence would file a letter whose only content is a
 /// claim about itself.
 pub const REFUSAL_NOT_CORRESPONDENCE: &str = "not-correspondence";
-/// `Header.kind`'s value for a `charter` letter (P-CHARTER) — a signed charter
-/// travelling as mail. Unlike a letter and a receipt this kind is never FILED:
-/// the enclosed charter is applied to `state/mesh/`, and the letter's local
+/// `Header.kind`/`Entry.kind`'s value for a `charter` letter (P-CHARTER) — a signed
+/// charter travelling as mail. Unlike a letter and a receipt this kind is never
+/// FILED: the enclosed charter is applied to `state/mesh/`, and the letter's local
 /// envelope exists only as the outbox's bookkeeping key. Which is also why
 /// [`arms`] is false for it and why the drain retires it on a delivered
 /// deposit instead of waiting for an ack — there is no mailbox to ack from.
 pub const ENTRY_TYPE_CHARTER: &str = "charter";
+/// `Entry.kind`'s value for a SEALED CONTAINER this node is relaying
+/// (MAIL.md §Transit): a letter in transit, held as the container and its
+/// routing metadata — never an opened envelope, never a mailbox name, and never
+/// letter bytes. A hub neither opens it nor files it as correspondence, so this
+/// kind is `false` for [`arms`] like a receipt, and readers hide it.
+pub const ENTRY_TYPE_TRANSIT: &str = "transit";
 
 /// Which entry kinds ARM a reader's doorbell. A `receipt` (a delivery
 /// record, or a deposit ack filed under the origin's name) never does, and
@@ -179,8 +188,8 @@ pub struct Header {
 }
 
 /// The signed, immutable unit that moves (MAIL.md "The envelope"). No
-/// `mesh`/`transit` fields — see this module's doc for why those wait for
-/// P-M4.
+/// `mesh`/`transit` fields — a plaintext envelope never rides a zone; see
+/// this module's doc.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Envelope {
     pub header: Header,
@@ -208,6 +217,46 @@ pub struct Entry {
     /// other hop yet.
     pub via: String,
     pub envelope: Envelope,
+}
+
+/// One `base.jsonl` line recording a hop this node made for a sealed container
+/// (MAIL.md §Transit): the routing metadata — where it went, in which zone,
+/// whether that node is held, and the container's digest — and NOT the container.
+///
+/// **Nothing here is the letter.** The ciphertext, the routing metadata and the
+/// container's own bytes live in the SPOOL toward `next`, which is what a retry
+/// resends and what `next`'s own poll reads; this line is the hub's record that
+/// the hop happened, so a second copy of `ct` would be the whole letter kept for
+/// a reason nothing reads it for. No mailbox name reaches this disk either: a hub
+/// cannot open the container, so it has no names to write, and `to.name` lives
+/// only inside `ct`.
+///
+/// Written by [`file_transit`], one line per hop, with a local `seq` like every
+/// other entry, so `next_seq` counts it and the append-only/truncate-a-torn-tail
+/// discipline is the same one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransitEntry {
+    pub seq: u64,
+    pub received_at: String,
+    /// Always [`ENTRY_TYPE_TRANSIT`] — the discriminator the untagged read of
+    /// this file turns on, and the reason a `transit` line and a correspondence
+    /// line can share one store.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// The hop that deposited it here.
+    pub via: String,
+    /// The container's own immutable-fields digest (`seal`'s dedup digest) — what
+    /// identifies the bytes this hop is carrying WITHOUT holding them. The
+    /// container itself lives in the spool toward `next`, which is what a retry
+    /// and the poll read; a second copy here would be the whole ciphertext kept
+    /// for a reason nothing reads it for.
+    pub digest: String,
+    /// The node this hop hands it to next, and the zone it rides there.
+    pub next: String,
+    pub mesh: String,
+    /// The far end never dials it: `next` polls, or is declared `hold`.
+    pub held: bool,
 }
 
 /// One reader's high-water mark, like an NNTP `.newsrc` line (MAIL.md
@@ -581,14 +630,94 @@ fn migrate_cursors_if_needed() -> Result<(), String> {
 /// write path does that). **Raw — assumes the caller already holds the
 /// lock**, same contract every other function in this "unlocked" family
 /// shares.
-fn read_entries_unlocked() -> Result<Vec<Entry>, String> {
+///
+/// Both line shapes come back: a correspondence [`Entry`] and a [`TransitEntry`]
+/// are disjoint (one has an envelope, the other a container), so one untagged
+/// read covers the store and `next_seq` counts every line — a `transit` line the
+/// seq walk skipped would hand the next writer a number already in use.
+fn read_lines_unlocked() -> Result<Vec<BaseLine>, String> {
     let path = base_path();
     let raw = match std::fs::read_to_string(&path) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
-    Ok(raw.lines().filter_map(|l| serde_json::from_str::<Entry>(l).ok()).collect())
+    Ok(raw.lines().filter_map(|l| serde_json::from_str::<BaseLine>(l).ok()).collect())
+}
+
+/// One `base.jsonl` line, as the store holds it.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum BaseLine {
+    Entry(Box<Entry>),
+    Transit(Box<TransitEntry>),
+}
+
+/// Every CORRESPONDENCE entry — the readers' own view. A relayed container is
+/// hidden from them (MAIL.md §Store: "readers hide them unless asked"): it is
+/// addressed to a mailbox on another machine, so no local reader has anything to
+/// read, and a hub that showed one would be showing a letter it cannot open.
+/// Raw — assumes the caller already holds the lock.
+fn read_entries_unlocked() -> Result<Vec<Entry>, String> {
+    Ok(read_lines_unlocked()?
+        .into_iter()
+        .filter_map(|line| match line {
+            BaseLine::Entry(entry) => Some(*entry),
+            BaseLine::Transit(_) => None,
+        })
+        .collect())
+}
+
+/// Every TRANSIT entry this node holds — the hub's own view of what it is
+/// carrying (its routing metadata and the sealed container). Raw — assumes the
+/// caller holds the lock.
+pub fn read_transit_unlocked() -> Result<Vec<TransitEntry>, String> {
+    Ok(read_lines_unlocked()?
+        .into_iter()
+        .filter_map(|line| match line {
+            BaseLine::Transit(entry) => Some(*entry),
+            BaseLine::Entry(_) => None,
+        })
+        .collect())
+}
+
+/// Append one SEALED CONTAINER to `base.jsonl` as a `transit` entry: this node
+/// is relaying it (MAIL.md §Transit). The container goes in verbatim — it is
+/// what a retry resends and what the spool toward `next` holds — beside the
+/// routing metadata a hop needs (`next`, `mesh`, `held`, and the hop that
+/// deposited it).
+///
+/// Deliberately NOT a `seen.jsonl` write: `seen` is the FILING record
+/// (`mail::deposit`'s own dedup memory for correspondence), while a container's
+/// dedup memory is `containers.jsonl`, written by the caller once this line has
+/// landed. So there is no write-order pair here — this one append is the whole
+/// step.
+pub fn file_transit(
+    digest: &str,
+    next: &str,
+    mesh: &str,
+    held: bool,
+    via: &str,
+) -> Result<TransitEntry, String> {
+    let next = next.to_string();
+    let mesh = mesh.to_string();
+    let via = via.to_string();
+    let digest = digest.to_string();
+    with_lock(move || {
+        let seq = next_seq()?;
+        let entry = TransitEntry {
+            seq,
+            received_at: now_iso_utc(),
+            kind: ENTRY_TYPE_TRANSIT.to_string(),
+            via,
+            digest,
+            next,
+            mesh,
+            held,
+        };
+        append_base_line(&entry)?;
+        Ok(entry)
+    })
 }
 
 /// Tolerant whole-file read of `seen.jsonl`'s `msgid` column into a set —
@@ -606,12 +735,20 @@ fn read_seen_msgids_unlocked() -> Result<HashSet<String>, String> {
     Ok(raw.lines().filter_map(|l| serde_json::from_str::<SeenEntry>(l).ok()).map(|s| s.msgid).collect())
 }
 
-/// `last line's seq + 1`, read under the lock (MAIL.md "Store"). Raw —
-/// assumes the caller already holds the lock and has already truncated any
-/// torn tail (every caller here is [`file_entry`]/[`migrate_if_needed`],
-/// both reached only through [`with_lock`]).
+/// `last line's seq + 1`, read under the lock (MAIL.md "Store"). Counts BOTH
+/// line shapes — a `transit` line holds a sequence number like any other, and a
+/// writer that reused one would collide with it. Raw — assumes the caller
+/// already holds the lock and has already truncated any torn tail (every caller
+/// here is [`file_entry`]/[`file_transit`]/[`migrate_if_needed`], all reached
+/// only through [`with_lock`]).
 fn next_seq() -> Result<u64, String> {
-    Ok(read_entries_unlocked()?.last().map(|e| e.seq + 1).unwrap_or(1))
+    Ok(read_lines_unlocked()?
+        .last()
+        .map(|line| match line {
+            BaseLine::Entry(entry) => entry.seq + 1,
+            BaseLine::Transit(entry) => entry.seq + 1,
+        })
+        .unwrap_or(1))
 }
 
 /// Truncate `base.jsonl` back to its last complete (`\n`-terminated) line —
@@ -639,8 +776,10 @@ fn truncate_torn_tail(path: &std::path::Path) -> Result<(), String> {
 }
 
 /// Append one line to `base.jsonl`: truncate any torn tail, append,
-/// `fsync`. Raw — assumes the caller already holds the lock.
-fn append_base_line(entry: &Entry) -> Result<(), String> {
+/// `fsync`. Raw — assumes the caller already holds the lock. One shape for both
+/// line kinds (`mail::Entry`, `mail::TransitEntry`), so the two never drift on
+/// how a line is written.
+fn append_base_line<T: Serialize>(entry: &T) -> Result<(), String> {
     let path = base_path();
     truncate_torn_tail(&path)?;
     let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
@@ -807,6 +946,23 @@ pub fn mint_outbound_letter_in_mesh(
     mint_kind(ENTRY_TYPE_LETTER, from_name, to_node, to_name, text, mesh)
 }
 
+/// [`mint_outbound_letter_in_mesh`] with the SENDER's node name stated explicitly
+/// — the name the letter is signed as, which for a charter mesh is the name the
+/// charter gives this box's identity key and not its OS hostname
+/// (`routing::own_name_in`). `from.node` is inside the signed header, so the
+/// receiver's origin check and every hop's entry-1 check read it: a box whose
+/// hostname is not its charter line's name must be able to say so here.
+pub fn mint_outbound_letter_from(
+    from_node: &str,
+    from_name: &str,
+    to_node: &str,
+    to_name: &str,
+    text: &str,
+    mesh: &str,
+) -> Result<Envelope, String> {
+    mint_kind_from(ENTRY_TYPE_LETTER, from_node, from_name, to_node, to_name, text, mesh)
+}
+
 /// Mint the local envelope a `charter` letter spools under (P-CHARTER).
 ///
 /// The envelope is **bookkeeping only**: a charter container's payload is the
@@ -835,13 +991,27 @@ fn mint_kind(
     text: &str,
     mesh: &str,
 ) -> Result<Envelope, String> {
+    mint_kind_from(kind, &display::local_node_name(), from_name, to_node, to_name, text, mesh)
+}
+
+/// [`mint_kind`] with `from.node` stated: the one body both entry points share,
+/// so the two can never disagree about what a mint signs.
+fn mint_kind_from(
+    kind: &str,
+    from_node: &str,
+    from_name: &str,
+    to_node: &str,
+    to_name: &str,
+    text: &str,
+    mesh: &str,
+) -> Result<Envelope, String> {
     if !crate::node_store::valid_node_name(to_name) {
         return Err("invalid mailbox name: must match ^[a-z0-9][a-z0-9-]*$".to_string());
     }
     let (kp, _) = identity::load_or_mint().map_err(|e| e.to_string())?;
     let header = Header {
         version: ENVELOPE_VERSION.to_string(),
-        from: Address { node: display::local_node_name(), name: from_name.to_string() },
+        from: Address { node: from_node.to_string(), name: from_name.to_string() },
         to: Address { node: to_node.to_string(), name: to_name.to_string() },
         kind: kind.to_string(),
         minted_at: now_iso_utc(),
@@ -855,11 +1025,13 @@ fn mint_kind(
 /// none: the destination's sole granted mesh, else the home mesh — the same
 /// rule the request-signing path applies
 /// (`aoide_storage::node_store::resolve_mesh`, over the destination record's
-/// granted meshes). `""` (UNNAMED) when this box knows the destination in
-/// more than one mesh: a mint cannot guess which one the request will be
-/// signed for, and an unnamed letter is the pre-charter shape the door reads
-/// as the home mesh. The operator's lever for that case is `--mesh` on the
-/// sending command, which mints through
+/// granted meshes). `""` (UNNAMED) only when the destination is trusted in
+/// more than one mesh and the home mesh is NOT one of them, which is
+/// `resolve_mesh`'s own refusal: more than one candidate and no home to break
+/// the tie, so a mint cannot guess which mesh the request will be signed for.
+/// A destination trusted in several meshes WITH the home mesh among them
+/// resolves to the home mesh, not to `""`. The operator's lever for the
+/// refused case is `--mesh` on the sending command, which mints through
 /// [`mint_outbound_letter_in_mesh`] outright.
 pub fn mesh_for_node(node: &str) -> String {
     let record = crate::node_store::load_nodes().into_iter().find(|p| p.name == node);
@@ -912,38 +1084,52 @@ pub fn mint_ack(from_name: &str, to: Address, acked_msgid: &str) -> Result<Envel
     mint_ack_in_mesh(from_name, to, acked_msgid, &mesh)
 }
 
-/// Verify `envelope`'s origin signature against the ONE key `nodes.json`
-/// has on record for `header.from.node` (P-M2 spec item 3) — a DIFFERENT
-/// question from `a2a::verify_signed_request`'s "which verified node's key
-/// verifies this connection," and deliberately not reused for it: this
-/// tries EXACTLY the one key on record under the CLAIMED origin name, never
-/// every verified key, so a paired node signing as another paired node's
-/// name is refused rather than silently verifying and filing under the
-/// wrong identity. Collapses "no node named `from.node`," "that node has no
-/// recorded key," and "the key on record doesn't verify" into the SAME
-/// `false` — same non-oracle discipline `verify_signed_request`'s own doc
-/// states for its ladder ("never an existence oracle over the registry").
-/// In P-M2 the origin and the hop always coincide (only direct edges
-/// exist); this two-lookup shape is written now for P-M4's transit hops,
-/// where they will not.
+/// Verify `envelope`'s origin signature against the ONE key this box has on
+/// record for `header.from.node` — a DIFFERENT question from
+/// `a2a::verify_signed_request`'s "which verified node's key verifies this
+/// connection," and deliberately not reused for it: this tries EXACTLY the one
+/// key on record under the CLAIMED origin name, never every verified key, so a
+/// paired node signing as another paired node's name is refused rather than
+/// silently verifying and filing under the wrong identity. Collapses "no node
+/// named `from.node`," "that node has no recorded key," and "the key on record
+/// doesn't verify" into the SAME `false` — same non-oracle discipline
+/// `verify_signed_request`'s own doc states for its ladder ("never an existence
+/// oracle over the registry").
+///
+/// **The one key is the DECLARATION's for the mesh the letter names**
+/// (`header.origin_mesh`): a charter mesh's line for that name, which is the only
+/// place a node this box never paired with has a key at all — and the name the
+/// charter gave it, so a letter signed by a charter line's name verifies here and
+/// one signed by a nickname does not. Where that mesh has no declaration, the
+/// paired RECORD answers, exactly as it did before the declarations existed. The
+/// SEALED lane calls [`verify_origin_signature_in`] with the set its own deposit
+/// already loaded, so the container's two halves cannot read two different sets.
 pub fn verify_origin_signature(envelope: &Envelope) -> bool {
-    let nodes = crate::node_store::load_nodes();
-    let Some(node) = nodes.iter().find(|n| n.name == envelope.header.from.node) else {
+    let Ok(set) = crate::routing::declarations() else {
+        // A set that will not load names nobody: nothing verifies.
         return false;
     };
-    let Some(pubkey_hex) = node.pubkey.as_deref() else {
+    verify_origin_signature_in(envelope, &set)
+}
+
+/// [`verify_origin_signature`] over a declaration set the caller already holds —
+/// what a SEALED deposit uses, so one deposit reads the declarations once and
+/// its two signature checks cannot disagree about which set they read.
+pub fn verify_origin_signature_in(envelope: &Envelope, set: &[crate::routing::Loaded]) -> bool {
+    let Some(pubkey_hex) = crate::routing::key_in(set, &envelope.header.origin_mesh, &envelope.header.from.node)
+    else {
         return false;
     };
     let mut sig_input = canonical_header_bytes(&envelope.header);
     sig_input.push(0u8);
     sig_input.extend_from_slice(envelope.text.as_bytes());
-    crate::wire_auth::verify_signature_hex(pubkey_hex, &sig_input, &envelope.sig)
+    crate::wire_auth::verify_signature_hex(&pubkey_hex, &sig_input, &envelope.sig)
 }
 
 /// The outcome of [`deposit`]'s policy chain, once the caller has already
 /// cleared admission (verified + `message` — the door's job, before ever
-/// calling here; MAIL.md's zone check, step 3, is P-M4's and is skipped
-/// entirely, not stubbed).
+/// calling here). The zone check (MAIL.md step 3) belongs to the transit lane,
+/// which this plaintext lane never rides: skipped by shape, not stubbed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DepositOutcome {
     /// A fresh envelope, filed. `msgid` is its own, for the caller to ack

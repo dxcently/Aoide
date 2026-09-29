@@ -89,6 +89,27 @@ Hostnames are illustrative. In the home mesh, sakaki is the hub behind its exist
 Cloudflare Tunnel, which dials out and forwards to a loopback listener. Other meshes
 may use a VPS or a tailnet hub.
 
+`aoide_storage::charter::dial_of` is the ONE turn from a declared `address`
+into something a caller can act on: `ssh://…` through the parser `--via`
+already uses, `https://…` as an ordinary door or adapter URL, `poll` as no
+dial target at all — a node that asks, whose letters wait at its mesh's relay.
+An address that is none of the three is refused rather than guessed at, at
+`sign` time and again whenever a route reads it. The four steps read it to
+answer reachability, `aoide mail route` prints it, and the DRAIN turns it into
+the node it opens a link to (`aoide_client::mail_wire::dial_node`): a charter
+hop this box holds no record for is reached at its declared address (an `ssh://`
+one through its tunnel, at the far side's own door) instead of being silently
+skipped — so what a drain dials is a record when there is one and a declaration
+when there is not. **There is no version signal on the wire**, so a relay
+that cannot carry a container refuses it rather than announcing that it is
+old: the letter parks at its sender and waits for the relay to be brought up
+to date (`docs/architecture/MAIL.md` §Transit). **Transit therefore deploys
+before the declaration that uses it**: `relays`, `[status]` and `[gates]` are
+declared only once every box of the mesh runs this version — a relay that
+predates it refuses a routed container outright, and a destination that
+predates it refuses a two-entry hop chain, so the declaration comes last and
+`aoide mail route` (plus the drift report) is the dry run.
+
 ### Degenerate topologies
 
 | Topology | Behaviour |
@@ -222,14 +243,12 @@ machines. It is shaped like agenix: public keys in one file, one signer.
    mesh charter accept <file>`. Later versions arrive as letters. From then on the
    machine trusts every charter node with the charter's grants.
 
-   **A later version is spooled for every node on the charter, but it only
-   travels to the ones this box can DIAL — a node it has a record for.** The
-   charter's own `address` is not a route in this phase: turning a line's
-   `address` into a dial target is the router's job, at P-M4 (Transports and
-   relays; MAIL.md §Transit). So a version signed after a machine joined by
-   `--operator` or by file — the two non-LAN paths, which create no pairwise
-   record — WAITS in the signer's spool until either that machine is paired
-   (giving it a record to dial) or P-M4 routes charter addresses. The receive
+   **A later version is spooled for every node on the charter, and it travels
+   to the ones this box can DIAL — a node it has a record for, or a charter
+   `address` the drain reads.** A node with no record of its own is reached at
+   the address the charter declares for it (`dial_of` → `dial_node`), so a
+   machine that joined by `--operator` or by file is dialled like any other:
+   only an address that is `poll` waits for that machine's own ask. The receive
    half is already in place: the door admits and applies such a letter from an
    origin it holds no record for (Connections and trust, above). `aoide mesh
    charter sign` reports each spooled node as `drained` or `NOT DIALED — no
@@ -251,7 +270,10 @@ relays. Keys:
   - `grant` — capabilities; default `["message"]`.
 - Optional `[status]` (`hold`, `down` per node) and `[gates]` (a mesh name to the
   node that gates it), with MAIL.md's meanings; `sign` checks their shapes and that
-  they name nodes of the charter, and their semantics are the router's.
+  they name nodes of the charter, and the read that carries them to the router is
+  `aoide_storage::routing` — one seam for a charter mesh's signed file and a pair
+  mesh's `[mesh.<name>]` section, which is also where a gate the other mesh does
+  not answer back is refused.
 
 The source lives at `$AOIDE_ROOT/charters/<mesh>.toml` by default; `--file` points
 anywhere, such as the operator's Nix repository, since it holds public keys only.
@@ -891,7 +913,7 @@ v           = 1
 msgid       = 5f3c9a1d0e7b24c8a6f1d3b5097e42ca18b6d0f3a2c75e9184b0d6f2a3c8e14b
 origin.node = "thinkchiyo"
 origin.key  = 9d2f81c4a70be35610f48d2c7b19ea50c3d6f8024a9e1b73c85d0f2a6e4b9c17
-to.node     = "relay"
+to.node     = "osaka"
 to.age      = age1hgvpn9afcg7dwa3pmh3atmw2gkf3hzhy8cfvcx88qkr4y0mt8flqqn079j
 originMesh  = "home"
 suite       = "age-v1-x25519"
@@ -904,8 +926,8 @@ epoch       = 0
 616f6964652f6d61696c2d63747800000000080000000000000001000000046d
 61696c000000205f3c9a1d0e7b24c8a6f1d3b5097e42ca18b6d0f3a2c75e9184
 b0d6f2a3c8e14b0000000a7468696e6b636869796f000000209d2f81c4a70be3
-5610f48d2c7b19ea50c3d6f8024a9e1b73c85d0f2a6e4b9c170000000572656c
-61790000003e61676531686776706e39616663673764776133706d683361746d
+5610f48d2c7b19ea50c3d6f8024a9e1b73c85d0f2a6e4b9c17000000056f7361
+6b610000003e61676531686776706e39616663673764776133706d683361746d
 7732676b6633687a68793863667663783838716b723479306d7438666c71716e
 3037396a00000004686f6d650000000d6167652d76312d783235353139000000
 08000000000000000100000000000000080000000000000000
@@ -1333,7 +1355,7 @@ governs (house rule 8):
 |---|---|
 | CONTRACTS.md §4 `config.toml` | `[mesh.<name>] operator`; a charter mesh's section carries only `operator` and `pins`; `[pairing] homeMesh`; `sameOperator` retires; the rule that one node name may not appear in two meshes is dropped, so a node may be declared in several meshes (its key the same in each). |
 | CONTRACTS.md §4 state files | `state/identity/age.key`, the age binding store beside the identity key (the current binding, the generation high-water mark, and any retired key inside its grace window), `state/operator/<mesh>.key`, `state/mesh/<mesh>/` (charter in force, its signature, the high-water mark), `state/boards/`. |
-| CONTRACTS.md §6 | Signed requests carry the mesh they act in. `mailDeposit`/`mailPoll` take the sealed container; admission reads the caller's grant in that mesh. `aoide/binding`. The refusal words are named, not "reasons above": `context-mismatch`, `addressing-mismatch`, `broken-chain`, `purpose-mismatch` (a container whose `purpose` and whose `board`/`epoch` fields disagree), `unsupported-suite`, `unsupported-container-version`, `open-failed` (the ciphertext opens under no identity this node holds — a wrong recipient, or a tampered `ct`), `key-retired`, `stale-binding`, `binding-mismatch`, `unknown-operator`, `stale-charter`, `charter-tampered`, `operator-mismatch`. |
+| CONTRACTS.md §6 | Signed requests carry the mesh they act in. `mailDeposit` takes the sealed container; `mailPoll` takes the node the caller is asking for itself and an optional `filed` list — the msgids it has already taken, which is what retires a relay's own transit custody of them. Admission reads the caller's grant in that mesh. `aoide/binding`. The refusal words are named, not "reasons above": `context-mismatch`, `addressing-mismatch`, `broken-chain`, `purpose-mismatch` (a container whose `purpose` and whose `board`/`epoch` fields disagree), `unsupported-suite`, `unsupported-container-version`, `open-failed` (the ciphertext opens under no identity this node holds — a wrong recipient, or a tampered `ct`), `key-retired`, `stale-binding`, `binding-mismatch`, `unknown-operator`, `stale-charter`, `charter-tampered`, `operator-mismatch`. |
 | CONTRACTS.md §7 `nodes.json` | `allows` becomes a grant per mesh, and existing records migrate into the home mesh. |
 | CONTRACTS.md mesh address grammar | Node addresses accept `https://host` and `poll` beside `ssh://`. |
 | PAIRING.md | The charter is the second trust entry beside the ceremony, for one operator's machines. The kill-list's "no mesh-level object" names the charter as its one exception: a signed object, never a transitive relay of pairwise trust. A pairing names its mesh. The ceremony carries the signed age binding and gains the local-network guard. `aoide mesh join <mesh> <operator-node>` rides the ceremony. The HTTPS adapter serves no pairing method. The "Mesh declaration" section describes a pair mesh, and `sameOperator` leaves it. |
@@ -1345,7 +1367,7 @@ The beta path runs in this order. MAIL.md §Phases holds each mail-side slice's 
 and its mail-side tests; the tests below are this design's acceptance evidence for
 the same slices. They are required, not suggestions.
 
-1. **P-M3: hold and poll** (in progress). MAIL.md.
+1. **P-M3: hold and poll.** MAIL.md.
 2. **P-SEAL: sealing and key bindings**, on the SSH direct lane, the only transport
    the slice has.
 3. **P-CHARTER: the charter and trust per mesh.**
@@ -1359,9 +1381,10 @@ the same slices. They are required, not suggestions.
    reachable from it. The relay's ingress target is the mail adapter's port, and
    the A2A door is never fronted by a TLS-terminating front — an unsigned loopback
    request reaching that door is conduct. No node accepts inbound connections
-   except the relay's loopback adapter. Until P-M4, a `poll` node exchanges letters
-   with the relay node itself only, which is also the bound on its charter: the
-   first one arrives by LAN join or as a file.
+   except the relay's loopback adapter. A `poll` node exchanges letters with the
+   relay node itself — transit carries them on — which is also the bound on its
+   charter: the first one arrives by LAN join, as a file, or as a charter letter
+   over transit.
 5. **P-M4: transit with the `next` hop chain.** MAIL.md.
 6. **P-BOARD: boards.** MAIL.md.
 

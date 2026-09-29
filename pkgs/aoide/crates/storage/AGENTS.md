@@ -1014,6 +1014,56 @@
   validates the declaration.
   Updates CONTRACTS.md §4's `config.toml` subsection in the same commit,
   same as a settable section.
+- **A new DECLARED transit fact — `relays`, `[status]`, `[gates]`, a node's
+  `address` — lands in `config`'s `Mesh` for a pair mesh and in `charter`'s
+  document for a charter mesh, and is read in `routing` and NOWHERE else.**
+  `config::validate_pair_transit` checks the half a section can answer for
+  (each name a node of the mesh, a status in `charter::STATUS_VALUES`, a
+  gate the same file answers back, a mesh never gating into itself);
+  `routing::declarations` checks the half that needs two declarations in hand
+  (the same gate out of another file, one node name with two keys) and refuses
+  the mesh that is inconsistent, never the whole set — the key the charters
+  AGREE on is the authority, so a copy that disagrees with it yields, and every
+  copy is refused only where the charters disagree with each other. The set is
+  read from ONE
+  snapshot of `config.toml` and `state/nodes.json` per call, and a config that
+  will not load refuses the set with `config-unreadable`: it is not a name
+  source, so its pair meshes cannot be listed at all. A second read of a declaration — a module
+  scanning `config.toml` or `charters/*.toml` for itself — is the drift this
+  seam exists to remove: ask `routing`, and hold its per-mesh entry rather than
+  a boolean. The doc sites a new key
+  touches are MAIL.md §Transit, CONTRACTS.md §4's `mesh.<name>` list, and
+  this crate's README entry for `routing`.
+- **A hop's own step is `seal::deposit_container`'s `Hopped` arm plus
+  `seal::file_transit_hop`, and a hub opens NOTHING.** The keyless half runs
+  first (the chain walk with its per-hop zone clause, the `loop` guard for a
+  chain that already names this box, dedup), this box's own name is its
+  declaration's for that mesh (`routing::own_name_in`), and only the route's
+  answer rewrites `mesh` — and only where this box is the declared gate. The
+  outcome is neither `Opened` nor a filing: the caller writes the `transit`
+  line and the spool entry toward `next`, then records the container. A hub
+  that acks, rings a reader, or files a letter has broken the seam; so has a
+  module that reads `container.mesh` as policy (it is hop-mutable and read by
+  nobody on the receiving side).
+- **The mesh rule is a zone clause, and it lives in the chain walk.** A hop's
+  key is the declaration's for the mesh THAT HOP signed (`entry.mesh`); a mesh
+  change between two entries must be signed by the node the previous mesh
+  declares as its gate into the new one; the last entry must be signed in the
+  mesh the deposit is made in. Anything else is `zone-violation`. A new
+  crossing rule belongs in `seal::walk_chain_with`, next to the walk, and not
+  in a caller comparing two unsigned fields.
+- **A routing decision is `routing::Letter::route`'s, and it stays pure.**
+  Steps 1–4 read the declarations this box holds and nothing else: no dial, no
+  link state, no spool write, no clock. Anything a hop needs to know beyond
+  the declaration is a bug in the seam, not a reason to reach past it — a
+  caller acts on the `Hop` (`next`, `mesh`, `held`) and the `trail` only. Do
+  not add a second predicate for trust, status or reachability: `reach` is
+  the one that answers all three out of `Declaration::key_of`, `status_of`
+  and `address_of`. `charter::dial_of` is the ONE turn from a declared
+  `address` into a dial target (the drain reads it too), so an address shape
+  is never re-parsed at a second site. The two refusal words a route can
+  mint are `routing::NO_ROUTE` and `seal::ZONE_VIOLATION`; a mesh that cannot
+  be read refuses with ITS OWN word, and only for itself.
 - **A new CLI command** (this crate has three groups today, `usage`,
   `identity`, and `config`/`config set`) adds a `cmd!`/`register` entry in
   `commands.rs`, wired into the owning app crate's `commands::all()`. The

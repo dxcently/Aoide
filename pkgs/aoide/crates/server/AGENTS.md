@@ -874,6 +874,20 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `a_landed_charter_retires_the_senders_entry` reads this exact shape, and this
   crate's `a_landed_charter_is_answered_accepted_with_its_detail_in_data` is the
   half that fails if the word changes.
+- **A container addressed elsewhere is a HOP, and the door must not ack it.**
+  `deposit_sealed`'s `Hopped` arm files the container as a `transit`
+  entry, spools it toward the node the four steps picked (the storage seam
+  `seal::file_transit_hop`), best-effort drains that hop unless the route said
+  it is held, and answers `{"status":"accepted","transit":{"next","mesh","held"}}`.
+  Three things are forbidden there, and
+  `a_container_addressed_elsewhere_is_hopped_and_never_acked` holds all three:
+  nothing is filed as correspondence (`read_base` stays empty), no reader is rung
+  (the spool toward `next` holds one sealed container and no receipt), and no ACK
+  is minted back to the depositing hop (its spool stays empty) — only the
+  destination's own receipt may tell an origin otherwise. The audit
+  stamp and the hop's own signature use the caller's DECLARED name for the
+  request's mesh (`declared_caller_name` → `routing::declared_name`), never the
+  record's `nodes.json` nickname — a charter line's name IS the policy name.
 - **`aoide/mailDeposit` (P-M2) is the SECOND capability-gated A2A arm,
   after Spawn, and the first not gated on `spawn` — `deposit_admitted`
   mirrors `spawn_admitted` one capability over, but signature-only from
@@ -948,11 +962,22 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   `poll_admitted` = `may_message` PLUS `params.node == the resolved
   caller's own name` — MAIL.md §Wire's "the caller's verified identity must
   BE `node`". A refusal reuses `-32010` (never a new code, never
-  `-32006`/`-32007`) in three shapes. **The `down` clause is NOT here yet**:
-  `down` lives in `[mesh.<name>.status]`, a declaration this door does not
-  read until P-M4 (`mail_poll`'s own doc says where the clause lands), so
-  don't invent a `down` lookup in the door to satisfy the spec line early —
-  `aoide node allow <node> message off` is the quarantine that exists.
+  `-32006`/`-32007`) in three shapes. **The `down` clause is the door's own
+  and lives BESIDE this predicate, never inside it**: both mail methods read
+  the declaration set once per request (`mail_declarations`), refuse an
+  unloadable one with `config-invalid` as a RESULT, and refuse a caller their
+  mesh declares `down` with that word (`down_caller_refusal`, audited) —
+  `down` is a statement about the NODE, so it must not be expressible through
+  the caller's grant. `aoide node allow <node> message off` remains the
+  per-request quarantine that lands on the `message` half. **An unloadable set
+  is answered BEFORE caller resolution, to every caller**: a
+  request whose signature verifies against the key its own `X-Aoide-Node` holds
+  on the charter in force reads the refused `config-invalid` result instead of
+  `-32007`, with fixed text on the wire (the load error is audited only), and
+  that answer CONSUMES the nonce — so the same bytes can never be replayed into
+  the method once the config returns. Everything else keeps `-32007`, and the
+  method is never dispatched with an unresolved caller
+  (`mail_unloadable_declaration`'s own doc has the shape).
   **`mail_poll` writes nothing at all.** Its whole body is
   `aoide_storage::outbox::poll_payloads` (the ONE place the offer rule lives:
   held always, `now` only when its own attempts have been failing) plus a

@@ -121,6 +121,17 @@
 //! the `remoteParent` field on `records::SessionRecord`, with the
 //! `aoide/from` claim predicate (`valid_claimed_session_id`) the client and
 //! the door both apply. Pure CRUD under the stage lock, same as `undying`.
+//!
+//! `routing` is the newest: the ONE read of a mesh's routing declaration —
+//! `relays`, per-node `[status]`, `[gates]`, addresses and identity keys —
+//! from the place that holds it, the signed charter for a charter mesh and
+//! `[mesh.<name>]` for a pair mesh. Each mesh loads on its own, so one mesh
+//! that cannot be read is refused with the word that says why and never takes
+//! another out of routing; the two invariants only a SET of declarations can
+//! see (one node never carries two keys; a gate is answered both ways) are
+//! refused against the one mesh that is inconsistent. See its own module doc
+//! for why the kind of a mesh is `charter::charter_shaped`'s answer and never
+//! a second discovery path.
 
 pub mod addr;
 pub mod advertise;
@@ -145,6 +156,7 @@ pub mod petname;
 pub mod pingback_remote;
 pub mod records;
 pub mod remote_children;
+pub mod routing;
 pub mod runtime_dir;
 pub mod seal;
 pub mod sealed_id;

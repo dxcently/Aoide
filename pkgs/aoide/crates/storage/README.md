@@ -43,6 +43,60 @@ by decision — no embedded database yet
   machine that already trusts someone, and `reroot` refuses to move a machine
   whose config pins the key it is replacing.
 
+- `routing` — a mesh's DECLARED routing table, read once
+  (`docs/architecture/MAIL.md` §Transit). ONE seam for both kinds of
+  declaration, because a mesh's routing table has one source and a second
+  one is a load error, never a precedence question: `Declaration::load`
+  reads the signed charter where the mesh is charter-shaped
+  (`charter::charter_shaped` — state-only, the same answer the door gets,
+  never a second discovery path) and the `[mesh.<name>]` section otherwise,
+  and never falls back from one to the other. Its accessors are pure lookups
+  on what was read: `relays` in declaration order (the route's preference
+  order), `status_of`, `gates`, `address_of`, `key_of`, and `name_of_key` —
+  a charter mesh answers a key with the name on its CHARTER LINE, and only a
+  pair mesh reads a name out of `state/nodes.json`, where the record IS the
+  declaration. `status_of(set, mesh, node)` is the same question asked of a
+  set the caller already holds — the ONE predicate the door, the route, the
+  drain and the poll ask before reaching a node by name, and the one
+  `reach` answers `down` with before an address picks a transport, so a
+  `down` node is never a hop and never a destination whichever lane would
+  have answered it. `declarations()` returns one entry PER MESH (a `Loaded`):
+  each mesh loads on its own, so one that cannot be read is refused with the
+  word that says why — its own charter's word (`no-charter-in-force`,
+  `charter-tampered`, `local-io`, or the operator's) or `no-declaration` — and
+  never takes another mesh out of routing. The two invariants only a SET of
+  declarations can see are then refused against the single mesh that is
+  inconsistent: `key-divergence` (one node name never carries two identity
+  keys — the key the CHARTERS agree on is the authority, so a pair mesh's
+  record that disagrees with it is the copy refused, and all copies are refused
+  only where the charters disagree with each other rather than one being kept
+  by name order) and `one-sided-gate` (a gate is
+  answered by the mesh on the other side; a mesh is never its own answer). The
+  whole set is read from ONE snapshot of `config.toml` and `state/nodes.json`,
+  so two entries can never disagree with each other about what config says —
+  and a `config.toml` that will not load refuses the set itself
+  (`config-unreadable`): a broken config cannot even name the pair meshes it
+  declares, and a table built by dropping the file that names half of it is
+  the guess this seam exists to refuse.
+
+- **`routing::Letter::route` is the four steps of MAIL.md §Transit**, run over
+  the declarations a box holds and nothing else — no dial, no clock, no spool
+  write on any path, so a hop's decision is testable without a wire. The
+  answer is a `Hop` (the node to hand the letter to, the mesh in force when it
+  arrives, and whether that hop HOLDS it — a `poll` address or a declared
+  `hold` — rather than dialling) plus the `trail` of every step with its
+  reason; a refusal carries its word: `no-route`, the letter's own mesh's
+  refusal when that mesh cannot be read, or `seal::ZONE_VIOLATION` when a box
+  that sits in two meshes is asked to bridge between them without being the
+  declared gate. Step 1 comes first at every hop, so `relays` is the fallback
+  in declaration order, never a mandatory chain; a `poll` node is reachable
+  through the relay it asks; and reachability is the declaration's own
+  `address`, read through [`charter::dial_of`] — the one turn from a declared
+  address (`ssh://…`, `https://…`, `poll`) into something a caller can dial,
+  which is what the drain uses too. Link state is deliberately not consulted:
+  a relay this box can address but cannot presently reach is still chosen, and
+  the letter waits for it.
+
 - `letter` defines optional `AOIDE-LETTER/1` content within the existing
   signed envelope text: Subject, To, Cc, body, and optional threadId/replyTo.
   Absent thread metadata preserves the four-field format. It performs no I/O
@@ -702,6 +756,20 @@ by decision — no embedded database yet
   ack), then file via the new `file_received_entry`. Both mint functions
   and `deposit` carry neither `mesh` nor `transit` — P-M2's envelope is
   exactly P-M1's shape, addressed at a real node instead of `self`.
+
+  The store holds a second kind of line too, and a hop is what writes it:
+  `mail::TransitEntry` (`ENTRY_TYPE_TRANSIT`) is a hop this node made for a
+  sealed container — the routing metadata and the container's digest, never an
+  envelope, never a mailbox name, never a byte of the letter and never the
+  ciphertext (the container waits in the spool toward `next`, which is what a
+  retry resends) — and
+  `seal::file_transit_hop` is
+  what files it and spools the container toward the next hop. Readers hide
+  transit lines (`read_entries_unlocked`), `next_seq` counts them, and the
+  hub's own spool entry retires when that hop HAS the letter
+  (`outbox::retire_acknowledged` when a poller names the msgid in `filed`, the
+  deposit's own acceptance on a drain) — never on the destination's receipt,
+  which a hub never sees.
 
   P-M5a-1 adds the doorbell's own state and its safety floor: `arms(kind)`
   is the one place that decides which entry kinds ring (`letter` only,

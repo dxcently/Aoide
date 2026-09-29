@@ -397,6 +397,22 @@ never the inbound/serve half (that's `aoide-server`).
   (`data.reason`, no `data.report`), same as any other command whose config
   read fails.
 
+  **The nodelist view rides on the same report.** Each section carries the
+  mesh's `kind`, the `charter_version` in force, the set's `refusal` word where
+  it refuses that mesh, and one `NodeRow` per declared node: the DECLARED name
+  (a charter line's name for a charter mesh — a nickname only ever rides beside
+  it), the declared `status`, the `role` with the meshes a gate carries transit
+  into, the `key_source`, and `liveness`. Liveness is an OBSERVATION and only
+  ever from what the box already recorded — the outbox's per-entry
+  `tries`/`lastOutcome` and the link's back-off (`liveness_of`) — so this command
+  never dials, never probes and never blocks on a network; a node with no signal
+  reads `unverified`, which is never `dead` and never the declared `down`. One
+  read of `routing::declarations()` serves every section's rows, so the set the
+  statuses are read from is the set the refusals are read from. A pair-mesh name
+  with no VERIFIED record is not one of these rows — routing cannot name it — so
+  it stays in the section's `rows` as `missing` (no record) or `unverified` (a
+  record not yet verified), which is where it already showed.
+
   **The converge.** `aoide mesh pair [<mesh>]` runs that SAME `drift` — no
   second comparison exists anywhere in the tree — and `plan` selects the
   `missing` and `unverified` rows, in declared-name order. Each goes
@@ -554,8 +570,8 @@ never the inbound/serve half (that's `aoide-server`).
 - `commands` — this crate's CLI commands:
   `node add/remove/pull/status/hub/allow/spawn/discover`,
   `aoide pair` + `pair.reject`/`pair.watch` (P-P2, P-PV2, task #135 P3',
-  CONTRACTS.md §6/§7 — **`register_mail`'s ten commands (`mail`, `mail
-  send/read/show/mark/rm/outbox/outbox.rm/outbox.retry/export`, P-M1/P-M2,
+  CONTRACTS.md §6/§7 — **`register_mail`'s eleven commands (`mail`, `mail
+  send/read/show/mark/rm/outbox/outbox.rm/outbox.retry/export/route`, P-M1/P-M2,
   `docs/architecture/MAIL.md`) moved here from `aoide-storage` at P-M2,
   because `handle_mail_send`'s non-self branch now dials out and only this
   crate may hold that dial:** `handle_mail_send` mints and spools an outbound
@@ -628,7 +644,21 @@ never the inbound/serve half (that's `aoide-server`).
   mailboxes), `state/mail-export/` by default, advancing no cursor and
   writing no note whose bytes already match (see the `mail_export` module
   bullet and MAIL.md "Export") —
-  `handle_node_allow` (`node allow <name> <cap> on|off [--mesh <m>]`, P-P3, per
+  `handle_mail_route` (`mail route <node>/<name> [--mesh <m>]`) is the fourth
+  read of this family and the only one that answers about a letter that does
+  not exist yet: it resolves the mesh the letter would ride off the mesh
+  DECLARATIONS (the meshes whose declaration names the destination; `--mesh`
+  breaks a tie, the same rule `resolve_mesh_any` gives every mesh-carrying
+  command), runs `aoide_storage::routing::Letter::route` over
+  `routing::declarations()` and prints the next hop, the mesh it arrives in
+  and each step's reason — plus that hop's declared address read through
+  `charter::dial_of`. It sends nothing, spools nothing and dials nothing, so a
+  route report is safe to run before a routing change; the letter's mailbox
+  `<name>` is accepted because `mail send --to` takes it and plays no part in
+  the route. `--json` carries
+  `from`/`to`/`name`/`mesh`/`next`/`nextMesh`/`held`/`dial`/`steps`, or
+  `reason`/`detail`/`steps` when no step produced a hop (a refusal is an
+  error outcome carrying the word, never prose alone). `handle_node_allow` (`node allow <name> <cap> on|off [--mesh <m>]`, P-P3, per
   mesh since P-CHARTER, `docs/
   architecture/PAIRING.md` decision 5) is a thin wire around
   `aoide_storage::node_store::set_node_allow` — idempotent, refuses an

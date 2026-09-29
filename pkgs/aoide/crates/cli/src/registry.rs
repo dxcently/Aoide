@@ -326,10 +326,9 @@ mod tests {
         // LAN ceremony) — reached 88.
         //
         // **The running total above is the CHAIN's history, not this list's
-        // length: the vec below holds 109 paths** (counted, review F7 — the
-        // chain lost count with it somewhere around "+1 for bare `node list`",
-        // and a comment that asserts a wrong number is worse than no number).
-        // Treat THIS line as the authority and the chain as the history.
+        // **The vec below holds 111 paths** (counted, review F7). This line is
+        // the authority for how many; the chain above is the history of how it
+        // got there and is never the answer.
         let mut expected: Vec<&str> = vec![
             "a2a.serve",
             "adapter.melete",
@@ -359,6 +358,7 @@ mod tests {
             "mail.read",
             "mail.ring",
             "mail.rm",
+            "mail.route",
             "mail.send",
             "mail.serve",
             "mail.show",

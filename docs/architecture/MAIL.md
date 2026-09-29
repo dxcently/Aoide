@@ -221,6 +221,10 @@ msgid   = hex sha256 over        sig ‖ header ‖ 0x00 ‖ text
   that node's key, and requires each entry's `next` to be the following
   entry's `node` and the last `next` to be itself, so no hop can cut the
   chain and re-append itself (HTTPS-MESH-API.md, "Hop-signature chain").
+  The hop frame itself is `HTTPS-MESH-API.md`'s two reserved labels —
+  `aoide/mail-hop` for the signed body and `aoide/mail-hop-entry` for the
+  entry a later hop hashes — length-prefixed per its "Encodings" section,
+  never joined with NUL.
 - **`prev` is never carried**, always recomputed from the entry before it.
   Each entry's `mesh` **is** carried: the container's `mesh` is the value
   after every rewrite, so a pre-gate hop's zone exists nowhere else. A hop
@@ -304,9 +308,18 @@ An entry is an envelope plus local facts:
   per-entry read flag has no high-water counterpart and is not carried:
   every migrated entry is unread once. Acks are receipts addressed back
   to the origin.
-- `type=transit` entries are letters the node is relaying (§Transit),
-  held sealed — the container and its routing metadata, never an opened
-  envelope; readers hide them unless asked.
+- `type=transit` entries are letters the node is relaying (§Transit): the
+  ROUTING METADATA of the hop it made — the hop that deposited it, the
+  `next` node it goes to, the mesh it rides there, whether that node is
+  held for, and the container's own digest — and nothing else, never an
+  opened envelope, never a mailbox name, never a byte of the letter and
+  never the ciphertext (the container itself waits in the spool toward
+  `next`, which is what a retry resends and what that node's poll reads);
+  readers hide these lines unless asked. The line is the hub's own record
+  and stays (append-only); the hub's SPOOL entry toward `next` is what
+  retires, and it retires when that hop ACKNOWLEDGES having it — on a
+  drain, by the deposit's acceptance; on a poll, by the poller's next poll
+  naming it in `filed`.
 - `type=post` entries are opened board posts, filed once per node and
   carrying their board id (§Boards). A charter letter and a wrap are
   applied, not filed as correspondence: the charter to `state/mesh/`, the
@@ -432,13 +445,17 @@ door's audit name whitelist gains both names so they never log as bare
      envelope's `mesh`, and the grant is read in that mesh only: the
      caller's charter line, or its paired record's grant there;
   2. `msgid` recomputes from the envelope;
-  3. **zone check:** the receiver declares `envelope.mesh`, and the hop
-     from step 1 is declared in it. If `envelope.mesh ≠ header.originMesh`
-     the letter has crossed a gate, and the last `transit` element must be
-     a hop signature (§The envelope) over this `mesh` from the declared
-     gate between the two meshes — else `zone-violation`. A dual-member
-     node cannot re-label a letter into its other mesh: its hop signature
-     would name a node that is no gate;
+  3. **zone check:** the depositing hop's request names the mesh the letter
+     rides, and every hop's `transit` element is verified in the mesh THAT
+     HOP signed (`entry.mesh`) — a charter line for a charter mesh, a paired
+     record for a pair mesh. Two consecutive entries that name different
+     meshes are a gate crossing, and only the node the previous mesh
+     declares as its gate into the new one may sign it; the last element
+     must be signed in the mesh this deposit is made in — else
+     `zone-violation`. A dual-member node cannot re-label a letter into its
+     other mesh: its hop signature would name a node that is no gate. The
+     container's own hop-mutable `mesh` field is read by nobody on the
+     receiving side, so a flipped byte there crosses no gate;
   4. origin signature verifies against **the key on record for
      `header.from.node`** in `header.originMesh` — its charter line in a
      charter mesh, its paired record in a pair mesh (§Transit). One key is
@@ -453,10 +470,23 @@ door's audit name whitelist gains both names so they never log as bare
      for a re-offer, and answering with silence would leave the origin
      retrying against a letter that already landed;
   6. file (`letter` if `to.node` is self, else `transit`), ring the
-     doorbell, and if `to.node` is not self, re-spool (§Transit).
+     doorbell, and if `to.node` is not self, re-spool (§Transit). A
+     `transit` filing rings nothing and owes NO ack: the hub appends its own
+     hop signature naming the `next` node the route picks, spools the
+     container toward that node (held when the route says the node asks for
+     itself), and retires its own custody when that hop takes it — on a drain,
+     by the deposit's acceptance; on a poll, by the poller's next poll naming
+     the msgid in `filed`, since a hand-over it never acknowledged may have
+     been lost. The destination's own receipt is what ends the ORIGIN's
+     custody, and it reaches the origin by the same four steps the letter
+     travelled (a `poll` destination's receipt is spooled toward the hop the
+     route picks for it, exactly as its letters are); a hub waits
+     for none of it, or every hub would hold a copy of every letter it
+     relayed.
   Receipts (acks) are envelopes deposited through the same method — one
   routing path for everything, so acks traverse hubs for free.
-- **`aoide/mailPoll`** `{ node }` → `{ envelopes[] }`. The caller asks
+- **`aoide/mailPoll`** `{ node, filed? }` → `{ envelopes[], containers[] }`.
+  The caller asks
   "anything waiting for me?" and receives every outbox entry spooled
   toward the caller's node — all `hold` ones, and `now` ones whose own
   attempts have been failing — oldest first, at most fifty of them per
@@ -464,8 +494,14 @@ door's audit name whitelist gains both names so they never log as bare
   what it filed, so a spool bigger than one answer drains over the next
   asks instead of being declined as one oversized body). The caller's
   verified identity must BE `node` (no polling on another's behalf), hold
-  `message` in the mesh the request names, and not be `down`. Handed-over
-  entries stay in the outbox
+  `message` in the mesh the request names, and not be `down`. **`filed` is
+  the caller's acknowledgement** — the msgids it filed out of its PREVIOUS
+  poll of this node (`aoide_storage::outbox::filed_pending`) — and the hub
+  retires its own custody of those (a `transit` entry, and only that) before
+  it offers: a response can be lost, so the hand-over itself is not an
+  acknowledgement, and anything the poller has not yet named is offered
+  again. Handed-over
+  `letter` entries stay in the outbox
   until acked like any other; a re-poll before the ack re-hands them and
   the receiver's dedup makes that harmless. **An HTTPS adapter's answer names
   what it would not hand over**: an entry spooled before the poller published
@@ -561,7 +597,9 @@ link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
 - `link.json` is `.hld`: exponential backoff per link on failure,
   cleared on success. Per-entry `tries`/`lastOutcome` live in the entry.
   A `refused` outcome parks that entry (drains skip it) and records the
-  reason. Parked is not condemned: the refusing grant is the RECEIVING
+  reason — **except `down` and `config-invalid`, which are LINK states and
+  never park anything** (§Status): the entry stays live and the link's own
+  back-off brings it back. Parked is not condemned: the refusing grant is the RECEIVING
   node's record of the sender, so once that host runs `aoide node allow
   <sender> message on` (or the operator adds `message` to the sender's
   charter line), the sender runs `aoide mail outbox retry <msgid>` (or
@@ -602,10 +640,15 @@ evo = "hold"
 home = "sakaki"                          # the OTHER mesh must declare it back
 ```
 
-- **A node may be declared in several meshes** (P-M4 relaxes today's
-  cross-mesh uniqueness check in `validate_mesh`), with a different grant
+- **A node may be declared in several meshes**, with a different grant
   in each (decision 16); two different keys for one node, anywhere, is a
-  load-time error — one node, one key.
+  load-time error — one node, one key. Every declaration's keys count,
+  charters and paired records alike, so a record left behind by an earlier
+  pairing after a charter re-keyed a name is caught too: the charter is the
+  authority for a name it lists, so the stale record is the copy that
+  yields and the PAIR mesh is the one refused. The read that refuses is
+  `aoide_storage::routing` — the one place both kinds of declaration are in
+  hand at once (`storage/src/routing.rs`).
 - **Keys come from trust, never from a hop.** Decision 10 needs the
   destination to hold the origin's public key even with no direct edge.
   In a charter mesh the charter carries every node's key — the nodelist
@@ -615,7 +658,10 @@ home = "sakaki"                          # the OTHER mesh must declare it back
   other. A hub never supplies a key, and a paired key in a charter mesh is
   inert (HTTPS-MESH-API.md, "Keys").
 - A gate is symmetric or it is nothing: `friends.gates.home = "sakaki"`
-  requires `home.gates.friends = "sakaki"`, else `validate` refuses. How a
+  requires `home.gates.friends = "sakaki"`, else `validate` refuses — and a
+  mesh may not name itself (`home.gates.home`), because a gate carries
+  transit into ANOTHER mesh and a self-gate is answered by the mesh that
+  wrote it. How a
   destination verifies an origin from the other mesh is an open decision
   (HTTPS-MESH-API.md).
 
@@ -632,6 +678,18 @@ Routing, at the sender and at every hop, for `to.node`:
    otherwise reach G by steps 1–2 with G as the target.
 4. Else refuse: `no-route` — the sender sees it at send time.
 
+The four steps are `aoide_storage::routing::Letter::route`: a pure read of the
+mesh declarations in force, answering the next node, the mesh the letter rides
+by then, and the reason each step picked or passed. Nothing in it dials, writes
+or consults a link — the caller acts on the answer. Its refusal words are a
+closed set: `no-route` (step 4), the letter's OWN mesh's word when that mesh
+cannot be read (`no-declaration`, `no-charter-in-force`, `charter-tampered`,
+`one-sided-gate`, `key-divergence`, `config-unreadable`), and `zone-violation` —
+the word for the wall itself, when the box asked is a member of the
+destination's mesh as well and the letter's mesh declares no gate that lets it
+carry the letter across. A mesh that refuses to load routes NOTHING, and only
+for itself: no other mesh, and no other letter, is held up by it.
+
 Step 1's mesh clause is the zone wall: a node paired into two meshes
 never forwards a letter across them because it happens to know the
 destination — only a declared gate rewrites `mesh`, and every hop's
@@ -640,18 +698,50 @@ zone it claims to carry, and that a rewritten `mesh` is signed by the
 declared gate. Every membership, gate, and status lookup in those
 checks starts from the **verifying key** and maps it to a declared
 name through the charter or the paired record; the `nodes.json`
-nickname is a display fact and never an input to policy.
+nickname is a display fact and never an input to policy. For a
+charter mesh the name policy, routing and the audit stamp use is the
+**charter line's** name for that key; only a pair mesh, where the
+record IS the declaration, names a node out of `nodes.json`.
+`aoide_storage::routing::Declaration::name_of_key` is that resolution,
+and the door's own audit stamp moves onto it with the door's
+declaration read — until then the two disagree for a record whose
+name is not the charter line's.
+
+**Step 1 comes first at every hop.** A hub that trusts `to.node` in
+`envelope.mesh`, is not `down` and can reach it delivers there, even
+when it is also a declared relay — `relays` is the fallback in
+declaration order, never a mandatory chain. A routing change is a
+declaration change, so `aoide mail route` is the dry run before one.
+
+**A letter whose chosen relay refuses parks, it does not reroute.**
+(A refusal about the LINK rather than the letter — `down`, `config-invalid` —
+does not park: the sender keeps it live and retries on the link's own
+back-off, §Status.)
+Nothing on the wire names a peer's version, so an older relay is
+refused rather than recognised, and the origin's entry records
+`refused` and stops retrying (`aoide mail outbox retry --refused` is
+the hand). Holding is the honest answer while a mesh rolls out, and
+`mail route` shows which hop a letter will be offered to before it is
+sent. **Transit makes the deploy order load-bearing twice over**: every box
+must already run the transit half before `relays`, `[status]` or `[gates]`
+are declared, because a relay that predates it refuses a routed container
+outright rather than passing it on, and a destination that predates it
+refuses a two-entry hop chain. Nothing is lost while that happens — the
+letter parks at its sender — but nothing moves either, so the declaration
+comes last and the drift report is the dry run.
 
 At a hub, a deposit whose `to.node` is not self: run the keyless checks
 (§Wire, "Lane and payload"), file the sealed container as `transit`,
 append the hub's chained hop signature naming the `next` node the route
 picks, re-spool by the four steps. Loops die twice over:
 `msgid` seen, and any envelope whose transit chain already names self is
-dropped. Deposit `refused` reasons — `no-route`, `down`, `unknown-mesh`,
+dropped. Deposit `refused` reasons — `no-route`, `unknown-mesh`,
 `zone-violation`, `unverified-origin`, `bad-msgid`, `not-correspondence` —
 return to the
 depositing hop, which records `lastOutcome` on that entry and stops
-retrying it; the origin learns through `aoide mail outbox`.
+retrying it; the origin learns through `aoide mail outbox`. **Two other refused words are not verdicts on the letter**: `down` and `config-invalid` say something about
+the far end's own state, so the entry stays live, the LINK's ordinary back-off
+carries it back, and it is never parked (§Status).
 
 `not-correspondence` is the plaintext lane's own: an envelope whose `type`
 is `charter` carries no charter — a charter letter is applied from the
@@ -1091,14 +1181,23 @@ network"). It grows columns: mesh, status (`hold`/`down`/normal), role
 (relay/gate/spoke), key source (paired/charter), liveness, and the charter
 version in force for each charter mesh. Statuses are declared like every
 other mesh fact — in the charter for a charter mesh, in config for a pair
-mesh; the command reports, it does not edit. `aoide mail route <node>` runs the four steps and prints
-the path without sending — the dry run before a routing change. A later
+mesh; the command reports, it does not edit. `aoide mail route <node>/<name>
+[--mesh <m>]` runs the four steps and prints the path without sending — the
+dry run before a routing change. A later
 `aoide mesh down <node>` that edits the declaration for the User is a
 convenience allowed by this document, not required by it.
 
 `down` is enforced at the door, in routing (never a hop, never a
-destination — `no-route`), and in the drain (skip the directory, drop
-entries from a `down` origin). `hold` is ergonomics, not a security
+destination — `no-route`), and in the drain (never dialled, and a letter
+already queued for it is KEPT, never dropped — no eviction is the
+flood-control rule, decision 14). A `down` origin's own door requests are
+refused and no new letter is accepted from it; what it queued before is
+not confiscated. **A `down` (or `config-invalid`) refusal is a state of the
+LINK, never a verdict on the letter**: the sender keeps its entry live and
+retries on the link's own back-off, so it flows by itself once the node is no
+longer `down` or the declaration loads again — `aoide mail outbox retry
+--refused` is for the words that ARE verdicts (`zone-violation`,
+`broken-chain`, …). `hold` is ergonomics, not a security
 control: it only changes which side initiates.
 
 Two speeds of quarantine, because `down` lives in the declaration and
@@ -1118,13 +1217,14 @@ rebuild, and the rebuild is the User's gate):
   refuses, routes around, drops. Removing the node's charter line is the
   stronger form: revocation (HTTPS-MESH-API.md, "Charters").
 
-The door reads `config.toml` and the charters in force per request for
-the mail methods — **new at P-M4**; today the door never loads the
-declaration, only `nodes.json`, so this is a seam added, not one reused.
-A declaration that fails to load refuses both mail methods with
-`config-invalid` and keeps serving everything else: a broken zone table
-means no zone checks can run, and no zone checks means no mail, never
-"mail with the walls down".
+The door reads `config.toml` and the charters in force per request for the
+mail methods only, and ONE read serves the whole request: the set the
+caller's `down` is judged by is the set the deposit is filed under, and the
+name a status is read by is the declaration's own for the verifying key — a
+nickname never names a policy. A declaration that fails to load refuses both
+mail methods with `config-invalid` and keeps serving everything else: a
+broken zone table means no zone checks can run, and no zone checks means no
+mail, never "mail with the walls down".
 
 The nodelist view above answers "is this NODE reachable"; `data.delivery`
 (both `aoide mail send`'s own post-spool report and `aoide mail outbox`)
@@ -1136,7 +1236,10 @@ authoritative first:
 - `refused` — the entry's own `refused` flag is set (a policy refusal
   the far end sent back, never a transport failure — "Outbox" above).
   Automatic retries have already stopped for this ONE entry, and no
-  link state changes that.
+  link state changes that. A `down` or `config-invalid` refusal is NOT
+  this: it is a state of the LINK, so the entry stays `retrying` on its
+  own back-off until the peer's declaration loads again or stops calling
+  the node `down`.
 - `delivered` — a real, destination-signed ack already sits in this
   box's own mailbase for this exact `msgid` (the ack mechanics: "Wire"
   and "Delivery and the doorbell" above). Never inferred from the
@@ -1161,6 +1264,15 @@ authoritative first:
   reason rather than either an error or a normal-looking queue: the
   spool write already succeeded, or the entry is only being listed, so
   the failure is about REPORTING, never about the mail itself.
+
+`mail route` does not speak that vocabulary: it reports a ROUTE — the next
+hop, the mesh the letter rides by then, and each step's reason — or ONE
+refusal word from the closed set §Transit gives (`no-route`, the letter's own
+mesh's word, `zone-violation`), with the sentence explaining it beside the
+word and never instead of it. Nothing has moved when it answers, so there is
+no `data.delivery` and no per-entry state to read; the two are read together
+before a routing change, the route saying where a letter will be offered and
+`data.delivery` saying what became of the one already spooled.
 
 ## Security model
 
@@ -1228,7 +1340,7 @@ aoide mail read [--for <name>] [--all-names] [--reread] [--transit]   print + ad
 aoide mail show <msgid>                                  one entry, framed
 aoide mail mark --for <name>                            advance a cursor without printing
 aoide mail outbox [<node>] [rm <msgid>]                  the spool, truthfully, per entry
-aoide mail route <node>                                  dry-run the four steps
+aoide mail route <node>/<name> [--mesh <m>]              dry-run the four steps: the path, each step's reason, nothing sent
 aoide mail rm --older-than <Nd|Nh>                       prune the base, never seen.jsonl
 aoide mail export [--dir <path>]                         one Markdown note per thread (read-only)
 aoide mail poll [<node>]                                 ask without depositing; no <node> polls every paired node holding message (a poll node: its relay, from the OS scheduler)
@@ -1361,8 +1473,9 @@ path.
 - **H1 — the mail adapter on the relay.** `aoide mail serve`, HTTPS-MESH-API.md:
   a loopback listener (127.0.0.1 only, no bind option) whose whole method set is
   `aoide/mailDeposit`, `aoide/mailPoll`, `aoide/binding` and the stripped card,
-  fronted by whatever owns 443. Until P-M4, a `poll` node exchanges letters with
-  the relay node itself only, and its charter arrives by LAN join or as a file.
+  fronted by whatever owns 443. A `poll` node exchanges letters with the relay
+  node itself — transit carries them on from there — and its charter arrives by
+  LAN join, as a file, or as a charter letter over transit.
 - **P-M4 — zones and transit (L).** `relays`/`status`/`gates` from the
   charter (charter mesh) or config (pair mesh) (validate_mesh:
   multi-membership allowed, key divergence and one-sided gates refused;

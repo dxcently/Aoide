@@ -673,7 +673,14 @@ count.
   on individual commands, newest first: `mail`/`mail send|read|show|mark|rm|
   ring`, the addressed, signed, append-only mailbase and its doorbell,
   messaging plan P-M1/P-M5a (see `docs/architecture/MAIL.md` and this
-  document's own `state/mail/` subsection below); `secrets serve|exec|add|rm|grant|revoke`,
+  document's own `state/mail/` subsection below); `mail route <node>/<name>
+  [--mesh <mesh>]` — the four-step dry run of MAIL.md §Transit, a READ that
+  sends nothing: it prints the next hop, the mesh the letter rides by then
+  (`nextMesh`, rewritten only by a declared gate) and each step's reason.
+  `--json` carries `from`/`to`/`name`/`mesh`/`next`/`nextMesh`/`held`/`dial`/
+  `steps`, and `reason`/`detail`/`steps` instead when no step produced a hop
+  — `dial` being `charter::dial_of`'s reading of the next hop's declared
+  `address`; `secrets serve|exec|add|rm|grant|revoke`,
   appended newest, Workstream SECRETS P-V2; `secrets enroll`, appended
   newest, Workstream SECRETS P-V3; spelled `vault ...` until the P-V4b
   rename — paths rename in place, registration order and count unchanged;
@@ -892,9 +899,29 @@ count.
   `data.report`, never a non-zero exit by itself. The one exception is the
   read — a config that fails to load returns `Outcome::error` with
   `data.reason` naming why and no `data.report`, same as any other command
-  whose config read fails. `--json`'s `data.report` shape: `{"sections":
+  whose config read fails. **Every section also carries the mesh's kind and its
+  node rows**: `kind` (`pair`/`charter`), `charterVersion` (the version in force
+  for a charter mesh), `refusal` (the word this box's declaration set refuses the
+  mesh with — a refused mesh fails closed for ITSELF alone, so its `nodes` stay
+  empty and the other meshes still report), and `nodes`: one row per declared
+  node of `{"name", "nicknames"?, "warnings"?, "status", "role", "gates"?,
+  "keySource", "liveness"}`. `name` is the name the DECLARATION gives the node (a charter
+  LINE's name for a charter mesh; a `nodes.json` nickname only ever rides beside
+  it), `status` is `active`/`hold`/`down` exactly as declared, `role` is
+  `relay`/`gate`/`member` (`gates` names the meshes a gate carries transit into),
+  `keySource` is `charter`/`record`, and `liveness` is
+  `reachable`/`unreachable`/`unverified` — an OBSERVATION from the outbox's own
+  bookkeeping and the link's back-off, never a probe and never a dial:
+  `unverified` is what nothing-observed reads, which is never `dead` and never
+  the declared `down`. A pair-mesh name with no VERIFIED record is not one of
+  these rows — routing cannot name it — so it stays where it already showed, in
+  the section's `rows` as `missing` (no record) or `unverified` (a record not
+  yet verified).
+  `--json`'s `data.report` shape: `{"sections":
   [{"name", "source", "grant", "sameOperatorNote"?, "grants", "declared",
-  "selfDeclared", "rows": [{"node", "class", …}]}], "undeclared": [...],
+  "selfDeclared", "rows": [{"node", "class", …}], "kind", "charterVersion"?,
+  "refusal"?, "nodes": [{"name", "nicknames"?, "warnings"?, "status", "role", "gates"?,
+  "keySource", "liveness"}]}], "undeclared": [...],
   "charters": [{"mesh", "declared", "inForce", "version", "operator",
   "operatorKey", "trust", "trusted", "highWater", "rekeyed", "inert",
   "nodes"}]}` — `inForce` says whether a charter DOCUMENT is readable here
@@ -1467,7 +1494,13 @@ Upgrading every node is the remedy the fleet's own rollout takes.
   `name -> ssh hop` map (`aoide_storage::tunnel::parse_via`'s own
   `ssh://[user@]host[:port]` shape) — a map, not an array of records, so a
   duplicate node name within one mesh is structural, not a second check to
-  write; the same node name may not appear in two different meshes. One key
+  write. **A node name MAY be declared in several meshes** (P-CHARTER: a
+  mesh is a trust scope, and the same machine legitimately sits in more
+  than one with a different grant in each; `state/nodes.json` is keyed by
+  name alone, so its one record carries the grant map) — what may not is
+  two different *keys* for one node anywhere, "one node, one identity key,
+  in every mesh", refused where both declarations are in hand
+  (`aoide_storage::routing::declarations`). One key
   is expected to name the box the file lives on: `aoide mesh` matches
   against `display::local_host_name()` by exact string equality, so that
   key must be exactly what the function returns — an FQDN or mixed-case OS
@@ -1493,6 +1526,20 @@ Upgrading every node is the remedy the fleet's own rollout takes.
   note on its report. The question it asks is answered by the signed charter
   (`docs/architecture/HTTPS-MESH-API.md`, "Charters"): one operator is one
   charter signer, so the key is never acted on and retires with P-CHARTER.
+  `mesh.<name>.relays` (list of node names, default absent),
+  `mesh.<name>.status` (a node name to `hold`/`down`, default absent) and
+  `mesh.<name>.gates` (another mesh's name — never this one's — to the node
+  of THIS mesh that carries transit into it, default absent) are a PAIR
+  mesh's transit table
+  (`docs/architecture/MAIL.md` §Transit); a charter mesh's comes from
+  its signed charter and a section that declares an `operator` is refused
+  for all three. Each name must be a node of this mesh, a status must be
+  `hold`/`down`, and a gate this file can answer for must be answered —
+  `aoide_storage::config::validate_pair_transit`, with the cross-file half
+  in `aoide_storage::routing`. `aoide_storage::routing::Declaration` is the
+  ONE read of either kind, per MESH (`routing::declarations` returns one
+  entry each, so a mesh that cannot be read is refused by itself), and the
+  router the four steps belong to reads it here and nowhere else.
   This section is validated the same as the two above it — an invalid
   mesh/node name, an out-of-vocabulary `grant` element, an unparseable
   hop, or a node declared twice is a LOUD error naming the offence — but
@@ -3508,15 +3555,31 @@ can never make two hops disagree, and a receiver re-derives the header
 from the fields and rejects if `msgid` does not recompute. `node` is
 always this box's own name (`display::local_host_name()` — `self`
 resolves to it when the envelope is minted and the literal never enters a
-header); `originMesh` is always `""` — mail does not yet consult a
-declared mesh when addressing, sending, or filing (P-M4's zone check,
-`docs/architecture/MAIL.md` step 3, still skipped entirely rather than
-stubbed, even though task #135 gave `[mesh.<name>]` a real declaration to
-post into).
+header); `originMesh` is the mesh the send is signed in — the
+destination's own mesh where it grants the capability, else
+`[pairing] homeMesh` — and it is signed with the rest of the header, so a
+letter minted unnamed could never be deposited to a peer trusted only
+outside the home mesh (`docs/architecture/MAIL.md` §Transit; mint sites
+`aoide_client::commands`' `mail send` and `aoide_storage::mail`'s
+`mint_outbound_letter_in_mesh`). A destination trusted in more than one
+mesh with the home mesh not among them refuses the send
+(`mesh-ambiguous`, naming them) rather than minting with no mesh; `""` is
+carried by everything that never chose one — `mail send --to self/<name>`,
+every receipt this box files about itself, and a receipt for a letter that
+arrived UNNAMED, which rides that letter's own `originMesh` back — not a
+third mesh choice.
 
 `seq` is local to the node, like an NNTP article number — never crosses a
 link; it is `last line's seq + 1`, read under the lock. `type=letter` is
-`mail send`'s own filing; `type=receipt` carries what a delivered message
+`mail send`'s own filing; `type=transit` is a HOP this node made for a sealed
+container (`mail::file_transit`, MAIL.md §Transit): one line holding the
+routing metadata — the depositing hop, the `next` node, the mesh it rides
+there, whether that node is held for, and the container's own digest — and
+NOT the container: the ciphertext waits in `state/outbox/<next>/`, which is
+what a retry resends and what that node's own poll reads, so a copy here
+would be the whole letter kept for a reason nothing reads it for. Readers
+hide `transit` lines (`mail::read_entries_unlocked`); `mail::read_transit_unlocked`
+is the hub's own view. `type=receipt` carries what a delivered message
 lands with (from, target, text, receivedAt) inside the envelope shape,
 signed by the box identity (`identity::load_or_mint` — a box that has
 never paired mints its key on its first letter) — both
@@ -6651,7 +6714,17 @@ for a cheaper reason:
    key verifies → `-32007` "signature verification failed" — ONE code path
    and ONE message whether the signing key is unknown, the node is
    unverified/keyless, or a known node's signature is simply bad: the
-   refusal is never an existence oracle over the registry.
+   refusal is never an existence oracle over the registry. **For
+   `aoide/mailDeposit` and `aoide/mailPoll` there is one narrow exception**:
+   where the declaration set will not load AND the signature
+   verifies against the key the node the request itself names holds on the
+   mesh's charter IN FORCE, the door answers the refused `config-invalid`
+   result — fixed text, never the load error (that goes to the audit line) —
+   audited under the method's own label. A request whose signature does not
+   verify, or whose named node that charter does not carry, still reads
+   `-32007`. That answer CONSUMES the nonce (step 7's own keying: the signer's
+   lowercase key hex plus the nonce), so the same bytes can never be replayed
+   into the method once the config returns.
 6. **Collision semantics**: exactly one record's key verifies → that record
    IS the caller. Multiple verified records sharing the verifying pubkey
    (possible — `upsert_paired_node` matches by name only, so one remote
@@ -7620,9 +7693,17 @@ Past the open, the inner `ctx` must equal the recomputed outer one
 (`addressing-mismatch`), the inner envelope signature must verify
 (`unverified-origin`), and the full hop chain must walk from `msgid` to
 this node with entry 1 named by and signed under `origin.key`
-(`broken-chain`). A ciphertext that opens under no identity this node holds
+(`broken-chain`) — each hop's key read in the mesh THAT HOP signed, and the
+zone clause (MAIL.md §Wire step 3) answering `zone-violation` for a
+crossing no declared gate signed or a last hop that signed a zone this
+deposit is not made in. A ciphertext that opens under no identity this node holds
 is `open-failed`; one addressed to a retired key past its grace window is
-`key-retired`.
+`key-retired`. A container addressed to a node that is not this one is not
+this receiver's to open at all: it is a HOP, answered
+`{"status":"accepted","transit":{"next":…,"mesh":…,"held":…}}` after the
+container is filed as a `transit` entry and spooled toward `next` — no
+reader rung, nothing filed as correspondence, and NO ack, because the
+letter is not here.
 
 A container that passes all of it is handed to the SAME
 `aoide_storage::mail::deposit` an envelope is, so filing, `seen.jsonl` and
@@ -7642,14 +7723,19 @@ no relay, hub or HTTPS hop ever carries plaintext.
 **The mesh rule (P-CHARTER).** Every signed request names the mesh it acts
 in, inside its per-request signature (`X-Aoide-Mesh`, a sixth field of
 `wire_auth::canonical_string`), and the caller's grant is read in that mesh
-and no other. For a deposit, the request's mesh is compared with the
-container's **`ctx.originMesh`** — the SIGNED one — inside
-`seal::deposit_container`, AFTER the origin signature verifies; a mismatch
-is refused with `mesh-mismatch`. The container's own `mesh` field is
-deliberately NOT an admission input: it is hop-mutable by design, so a
-spooling relay or a TLS edge could otherwise turn an accepted deposit into
-a permanent refusal by flipping one unsigned byte. P-M4's transit is where
-a hop's `mesh` is checked, at the hop, against the zone clause. A request
+and no other. The container's own `mesh` field is NOT an admission input: it
+is hop-mutable by design, so a spooling relay or a TLS edge could otherwise
+turn an accepted deposit into a permanent refusal by flipping one unsigned
+byte. What decides where a letter may be deposited is the hop chain's zone
+clause (`seal::walk_chain_with`, MAIL.md §Wire step 3): each element is
+verified in the mesh THAT HOP signed (a charter line for a charter mesh, a
+paired record for a pair mesh), a mesh change between two elements must be
+signed by the node the previous mesh declares as its gate into the new one,
+the last element must be signed in the mesh the deposit is made in, and the
+ORIGIN's two signatures are verified in `ctx.originMesh` — the mesh the
+origin signed — through that mesh's declaration. A crossing no gate signed,
+or a last hop whose signed zone is not the one offered, is `zone-violation`.
+A request
 that names no mesh (a pre-charter peer) is evaluated in `[pairing]
 homeMesh` **by that mesh's rules** — its governing charter first, its paired
 records only where no charter is shaped for it (review N1; the row below).
@@ -7922,9 +8008,10 @@ never a JSON-RPC error: MAIL.md §Wire's admission/outcome split makes
 step 1 above (admission, `-32010`) the only error this method ever
 returns, because whether the caller may speak to the method at all is a
 different question from what became of a well-formed envelope. The zone
-check MAIL.md's step 3 describes is P-M4's, skipped here entirely, not
-stubbed — this plaintext lane's envelope carries no `mesh` at all, and
-`header.originMesh` stays `""` (§4); a SEALED charter container has a
+check MAIL.md's step 3 describes belongs to the TRANSIT lane, which this
+plaintext lane never rides — its envelope carries no `mesh` at all — so the
+check is skipped by SHAPE, not by omission: `header.originMesh` stays `""`
+(§4), and a SEALED charter container has a
 zone check of its own, against the charter it applies (below). A
 successful deposit answers:
 
@@ -7952,7 +8039,12 @@ sealed container's own payload, never filed as correspondence.
 §Transit names for each of these among its `refused` reasons; the rest
 of that list — `no-route`, `down`, `unknown-mesh`, `zone-violation` —
 belongs to the transit lane and to a sealed charter container's own
-zone check, below, not to this one.
+zone check, below, not to this one. **Two of those words are LINK states on
+the sender's side — `down` and `config-invalid` — and never park anything**:
+the entry stays live and retries on the link's own back-off, so it flows once
+the peer's declaration loads or stops calling the node `down`
+(`aoide mail outbox retry --refused` is for the words that are verdicts on the
+letter).
 `detail` carries what the code used to raise as the `-32602` message's
 own text — which field mismatched, which node's key was missing — for a
 human reading `mail outbox`, never for a caller to match on.
@@ -8024,13 +8116,15 @@ the exact `aoide node allow <name> message on --mesh <m>` fix, which runs on
 the POLLED host), or no verified signature resolution at all (told to pair
 first).
 
-**`down` is not enforced here yet.** It is declared in
-`[mesh.<name>.status]`, a declaration the door does not read until P-M4
-(MAIL.md §Status); P-M3's reachable refusal is the `message` half, which
-`aoide node allow <node> message off` — the per-request quarantine that
-already exists — is expressed by. P-M4 adds the declaration read and the
-`down` clause to this same predicate; that is a scope line, not a stubbed
-branch.
+**`down` is enforced at this door, read from the declaration set the request
+itself loaded.** The two mail methods read `config.toml` and the charters in
+force once per request (`mail_declarations`) and refuse a caller their mesh
+declares `down` with that word as a RESULT — before anything is retired, filed
+or hopped, and audited — while a set that will not load refuses BOTH methods
+with `config-invalid` and leaves every other method untouched (the
+`aoide/mailDeposit` and `aoide/mailPoll` sections above; MAIL.md §Status).
+`aoide node allow <node> message off` is still the per-request quarantine that
+lands on the `message` half, which is the half a grant can express.
 
 A successful poll answers
 
@@ -8047,9 +8141,14 @@ the drain owns those, and offering one here would double-drive it from two
 callers). Nothing else rides the answer: no flavor, no tries, no route, and
 no marker that a batch was ever handed over.
 
-**A poll writes nothing at all.** No `tries` stamp, no `last_polled_at`,
+**A poll writes one thing, and it is the caller's own acknowledgement.** The
+request may carry `filed` — the msgids the poller filed out of its previous poll
+of this node — and the hub retires its own `transit` custody of exactly those
+(`outbox::retire_acknowledged`) BEFORE it offers, which is why an entry whose
+response was lost is offered again rather than retired into silence. Nothing
+else is written: no `tries` stamp, no `last_polled_at`,
 no "already handed over" bookmark — which is exactly why a re-poll before
-the ack hands the same envelopes over again, and why an entry still leaves
+the ack hands the same envelopes over again, and why a `letter` entry still leaves
 the spool only when the far end's ordinary receipt retires it (a `letter`
 filed by the poller mints a receipt exactly as a deposit would; an ack is
 an envelope, so the poller's own next drain carries it back) or through
@@ -8087,9 +8186,10 @@ two triggers, and they are the same call:
   (write-is-the-report), never the far end's outcome. This is the receive
   trigger a node with nothing to send needs: an empty outbox never dials, so
   poll-on-contact alone can never reach it, and an OS timer driving this
-  command is H1's own scope. A charter line's `address` is P-M4's to route, not
-  a dial target yet (§4's charter carriage), so a charter node this box holds
-  no record for is simply not asked — and a caller that reports the attempt
+  command is H1's own scope. A charter line's `address` IS a dial target
+  (`dial_node`, §4's charter carriage), so a charter node this box holds no
+  record for is dialled at the address its mesh gives it — and a caller that
+  reports the attempt
   (`client::charter::drain_spooled`) must say `no-record` rather than claim a
   drain.
 - **poll-on-contact** — the end of any drain pass that actually reached a

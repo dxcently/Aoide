@@ -225,6 +225,38 @@ impl OutboxEntry {
         Self { flavor: FLAVOR_HOLD.to_string(), ..Self::sealed(envelope, container) }
     }
 
+    /// A spooled **transit** container: this box is relaying a letter it cannot
+    /// open, so there is no envelope to redact — the bookkeeping shape is built
+    /// from the container's own outer claims (P-M5's `mail outbox` reads
+    /// `msgid`, `from.node`, `to.node` and `type`), and `text` and both mailbox
+    /// names stay empty. What the letter says is inside `ct` and nowhere else on
+    /// this disk.
+    pub fn transit(container: crate::seal::Container) -> Self {
+        Self::transit_bookkeeping(container, FLAVOR_NOW)
+    }
+
+    /// [`Self::transit`], held: the `next` hop is a `poll` node or is declared
+    /// `hold`, so it leaves only through that node's own ask.
+    pub fn transit_held(container: crate::seal::Container) -> Self {
+        Self::transit_bookkeeping(container, FLAVOR_HOLD)
+    }
+
+    fn transit_bookkeeping(container: crate::seal::Container, flavor: &str) -> Self {
+        let header = crate::mail::Header {
+            version: crate::mail::ENVELOPE_VERSION.to_string(),
+            from: crate::mail::Address { node: container.origin.node.clone(), name: String::new() },
+            to: crate::mail::Address { node: container.to.node.clone(), name: String::new() },
+            kind: crate::mail::ENTRY_TYPE_TRANSIT.to_string(),
+            // The container carries no mint time of its own; the spool needs one
+            // to sort oldest-first, and the moment this hop took custody is the
+            // honest one. `mail outbox` renders it.
+            minted_at: crate::time::now_iso_utc(),
+            origin_mesh: container.origin_mesh.clone(),
+        };
+        let envelope = Envelope { header, text: String::new(), sig: String::new(), msgid: container.msgid.clone() };
+        Self { envelope, container: Some(container), flavor: flavor.to_string(), tries: 0, last_try_at: String::new(), last_outcome: String::new(), refused: false }
+    }
+
     /// What this entry hands the far end on a deposit: the container when
     /// there is one, the plaintext envelope otherwise.
     pub fn is_sealed(&self) -> bool {
@@ -237,6 +269,16 @@ impl OutboxEntry {
         self.flavor == FLAVOR_HOLD
     }
 
+    /// Is this entry a hub's CUSTODY of someone else's sealed letter — a
+    /// `transit` container spooled toward the hop it goes to next? Its own kind
+    /// answers: the bookkeeping envelope is built from the container's outer
+    /// claims and marked [`crate::mail::ENTRY_TYPE_TRANSIT`]. A drain retires
+    /// such an entry on the HOP's acceptance, never on the destination's ack (a
+    /// hub keeps no receipt of a letter it never opened).
+    pub fn is_transit(&self) -> bool {
+        self.envelope.header.kind == crate::mail::ENTRY_TYPE_TRANSIT
+    }
+
     /// Has this entry's own last attempt already reached the peer? The one
     /// spelling of "the deposit landed" in `last_outcome` (written by
     /// `aoide_client::mail_wire::drain_node`'s delivered arm, and by nothing
@@ -244,6 +286,16 @@ impl OutboxEntry {
     /// been FAILING".
     pub fn last_attempt_reached_the_peer(&self) -> bool {
         self.last_outcome == "accepted" || self.last_outcome == "duplicate"
+    }
+
+    /// Did the last attempt get an ANSWER from the far end at all — a delivery
+    /// (`accepted`/`duplicate`) or a refusal (`refused: <word>`)? A transport
+    /// failure is the one thing that is not an answer: nothing came back. The
+    /// words are the DRAIN's vocabulary, so it is read HERE and nowhere else,
+    /// and it is read POSITIVELY — the answer words decide, not the absence of a
+    /// prefix.
+    pub fn last_attempt_was_answered(&self) -> bool {
+        ["accepted", "duplicate", "refused:"].iter().any(|word| self.last_outcome.starts_with(word))
     }
 }
 
@@ -353,6 +405,7 @@ pub fn reseal_entry(node: &str, entry: &OutboxEntry, now: &str) -> Result<Reseal
         &binding,
         &entry.envelope.header.origin_mesh,
         &entry.envelope.header.origin_mesh,
+        node,
         node,
         now,
     )?;
@@ -792,6 +845,130 @@ fn clear_marker_pointing_to_msgid(node: &str, msgid: &str) {
     }
 }
 
+/// Retire a hub's OWN custody of a container the far end has **acknowledged
+/// filing** — and only that. A `transit` entry's obligation ends when the poller
+/// it is held for says it has the letter: a poll's response can be lost, so the
+/// hand-over itself is not an acknowledgement (retiring on the response would
+/// drop a letter whose response never arrived — exactly the loss the re-offer
+/// exists to prevent). The poller's NEXT poll carries what it filed
+/// ([`filed_pending`]), the hub retires those here, and anything not yet named is
+/// offered again. A `letter` is NOT retired here: it waits for the destination's
+/// receipt, which is the only thing that can say the far end FILED it without
+/// this box having to trust a claim. `Ok(false)` for anything else — a missing
+/// entry, or a kind that is not this hub's custody.
+pub fn retire_acknowledged(node: &str, msgid: &str) -> Result<bool, String> {
+    let Some(entry) = list_entries(node)?.into_iter().find(|e| e.envelope.msgid == msgid) else {
+        return Ok(false);
+    };
+    if !entry.is_transit() {
+        return Ok(false);
+    }
+    remove_entry(node, msgid)
+}
+
+fn filed_path(node: &str) -> PathBuf {
+    node_dir(node).join(".filed")
+}
+
+/// The msgids THIS box filed out of `node`'s poll and has not yet told `node`
+/// about — the acknowledgement the next `aoide/mailPoll` carries. Empty when
+/// nothing is pending, and tolerant of a missing or unreadable file (an
+/// acknowledgement is bookkeeping, never a reason to refuse a poll).
+pub fn filed_pending(node: &str) -> Result<Vec<String>, String> {
+    let raw = match std::fs::read_to_string(filed_path(node)) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("{}: {e}", filed_path(node).display())),
+    };
+    Ok(serde_json::from_str::<Vec<String>>(&raw).unwrap_or_default())
+}
+
+/// Record that `msgid` was filed out of `node`'s poll, so the next poll of that
+/// node can tell it to retire its custody. Idempotent per msgid.
+pub fn record_filed(node: &str, msgid: &str) -> Result<(), String> {
+    let node = node.to_string();
+    let msgid = msgid.to_string();
+    with_lock(move || {
+        let mut pending = read_filed_unlocked(&node)?;
+        if pending.iter().any(|held| held == &msgid) {
+            return Ok(());
+        }
+        pending.push(msgid);
+        write_filed_unlocked(&node, &pending)
+    })
+}
+
+/// Drop the acknowledgements this box has just HANDED OVER (the ones a poll
+/// carried), leaving anything filed since — which the next poll will carry.
+pub fn clear_filed(node: &str, acked: &[String]) -> Result<(), String> {
+    let node = node.to_string();
+    let acked = acked.to_vec();
+    with_lock(move || {
+        let mut pending = read_filed_unlocked(&node)?;
+        pending.retain(|held| !acked.iter().any(|a| a == held));
+        write_filed_unlocked(&node, &pending)
+    })
+}
+
+fn read_filed_unlocked(node: &str) -> Result<Vec<String>, String> {
+    let path = filed_path(node);
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => Ok(serde_json::from_str::<Vec<String>>(&raw).unwrap_or_default()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+fn write_filed_unlocked(node: &str, pending: &[String]) -> Result<(), String> {
+    let dir = node_dir(node);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = filed_path(node);
+    if pending.is_empty() {
+        let _ = std::fs::remove_file(&path);
+        return Ok(());
+    }
+    let json = serde_json::to_string(&pending).map_err(|e| e.to_string())?;
+    crate::fs::atomic_write(&path, &json).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The word a hub owes the depositing hop when THIS box's own custody of a
+/// container is PARKED — `None` when there is no such entry anywhere in the
+/// spool. A hub whose next hop refuses (an older relay, a policy refusal) parks
+/// its entry and keeps the container; the origin's retry then dedups, and
+/// answering `duplicate` forever would leave the origin retrying against a letter
+/// that is going nowhere with no way to learn why. The word recorded on the park
+/// is what the door answers instead, so the hop behind it reads the same refusal
+/// its next hop gave, and `mail outbox` on either box shows it.
+pub fn parked_transit_refusal(msgid: &str) -> Option<String> {
+    for node in nodes_with_outbox().ok()? {
+        // **One unreadable spool is that spool's problem.** Giving up the whole
+        // scan on the first `Err` would hide a park in a LATER spool — a
+        // refusal this box owes the depositing hop — so the scan skips it.
+        let Ok(entries) = list_entries(&node) else { continue };
+        let Some(entry) = entries.into_iter().find(|e| e.envelope.msgid == msgid) else {
+            continue;
+        };
+        if !entry.refused || !entry.is_transit() {
+            continue;
+        }
+        let text = entry
+            .last_outcome
+            .trim()
+            .strip_prefix("refused:")
+            .map(str::trim)
+            .unwrap_or(&entry.last_outcome);
+        // **Only the closed word crosses the wire**, never the peer's own
+        // sentence: every taught refusal word is one lowercase-hyphen token, and
+        // anything with a space, a capital or punctuation is somebody's prose —
+        // relaying it would carry a stranger's text into this hop's answer.
+        let word = text.split(':').next().unwrap_or(text).trim();
+        let closed = !word.is_empty()
+            && word.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        return Some(if closed { word.to_string() } else { "refused".to_string() });
+    }
+    None
+}
+
 /// Retire the one local outbox entry `ack` confirms (spec item 7: "a
 /// receipt whose verified signer is that entry's `to.node` and whose text
 /// names that entry's `msgid`"). `Ok(None)` — never an error — covers
@@ -800,27 +977,52 @@ fn clear_marker_pointing_to_msgid(node: &str, msgid: &str) {
 /// names a `msgid` that node's spool doesn't hold (wrong text, an
 /// already-retired entry, or a stale replay).
 ///
-/// The two checks fall out of ONE path lookup rather than needing to be
-/// stated separately: an outbox entry is always spooled under the exact
-/// node its own `envelope.header.to.node` names ([`write_entry`]'s only
-/// caller convention), so indexing by `ack.header.from.node` — the
-/// receipt's ORIGIN, already proven genuine by [`crate::mail::deposit`]'s
-/// own origin-signature check before this function is ever reached, never
-/// re-verified here — IS "verified signer is entry's `to.node`"; and
-/// [`entry_path`] keying the file by `msgid` makes `ack.text` naming the
-/// wrong one a plain miss, never a partial match. A forged ack (wrong
-/// signer) never gets this far — [`crate::mail::deposit`] would have
-/// already refused it as `unverified-origin`.
+/// **The entry is found by `msgid` across the spool, and the `to.node` check is
+/// what makes that safe.** Under transit a letter's entry lives under the HOP it
+/// was handed to, not under its destination — the destination's spool was never
+/// this box's to write — so the spool directory a receipt's signer names is not
+/// where its entry sits. What still identifies the entry is what spec
+/// item 7 says: a receipt from `X` naming `msgid` M retires an entry whose own
+/// `to.node` is `X` and whose mesh is the receipt's own. So the lookup is the file
+/// named M in any node's spool, kept
+/// only when that entry's `envelope.header.to.node` is the ack's signer — no
+/// looser than before, and blind to where a hop put it. The ack's signer is
+/// already proven genuine by [`crate::mail::deposit`]'s own origin-signature
+/// check before this function is reached, never re-verified here.
 pub fn retire_by_ack(ack: &Envelope) -> Result<Option<String>, String> {
     if ack.header.kind != crate::mail::ENTRY_TYPE_RECEIPT {
         return Ok(None);
     }
     let acked_msgid = ack.text.clone();
-    if remove_entry(&ack.header.from.node, &acked_msgid)? {
-        Ok(Some(acked_msgid))
-    } else {
-        Ok(None)
+    let from = ack.header.from.node.clone();
+    for node in nodes_with_outbox()? {
+        if !entry_path(&node, &acked_msgid).exists() {
+            continue;
+        }
+        let mut found = list_entries(&node)?
+            .into_iter()
+            .find(|entry| entry.envelope.msgid == acked_msgid);
+        // **The mesh has to match too.** A receipt is signed in ONE mesh
+        // (`header.origin_mesh`, inside its origin signature), and a letter rides
+        // one: a receipt minted for another mesh — the same names, the same
+        // `msgid`, a different zone — retires nothing here. Without this the
+        // `to.node` check is satisfied by any ack that names the right signer,
+        // and a replay from a mesh this box is not speaking in would clear an
+        // entry that is still waiting.
+        if let Some(entry) = &found {
+            if crate::routing::zone_name(&entry.envelope.header.origin_mesh)
+                != crate::routing::zone_name(&ack.header.origin_mesh)
+            {
+                found = None;
+            }
+        }
+        if let Some(entry) = &found {
+            if entry.envelope.header.to.node == from && remove_entry(&node, &acked_msgid)? {
+                return Ok(Some(acked_msgid));
+            }
+        }
     }
+    Ok(None)
 }
 
 /// This link's current backoff state, if any (`None` = not held off).
@@ -948,6 +1150,74 @@ mod tests {
 
     fn root(tag: &str) -> (aoide_test_support::EnvSaver, std::path::PathBuf) {
         aoide_test_support::isolated_mail_root(tag)
+    }
+
+    /// **An unreadable spool is skipped, and only a closed word crosses.** A
+    /// spool this box cannot list must not hide a park in a later one, and a park
+    /// whose recorded reason is somebody's PROSE must not carry that prose into
+    /// this hop's answer: the depositing hop is owed the taught word or the
+    /// generic one, never a stranger's sentence.
+    #[test]
+    fn a_parked_hub_answer_relays_a_closed_word_and_skips_an_unreadable_spool() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("parked-word");
+
+        let transit = |msgid: &str, reason: &str| {
+            let mut entry = OutboxEntry::transit(crate::seal::Container {
+                v: crate::seal::CONTAINER_VERSION,
+                purpose: crate::seal::PURPOSE_MAIL.to_string(),
+                msgid: msgid.to_string(),
+                generation: 1,
+                origin: crate::seal::Party { node: "osaka".to_string(), key: "aa".repeat(32) },
+                to: crate::seal::Destination { node: "chiyo".to_string(), age: "age1x".to_string() },
+                origin_mesh: "home".to_string(),
+                mesh: "home".to_string(),
+                suite: crate::seal::SUITE_AGE_V1_X25519.to_string(),
+                ct: "00".to_string(),
+                sig: "00".to_string(),
+                transit: Vec::new(),
+                board: None,
+                epoch: None,
+            });
+            entry.refused = true;
+            entry.last_outcome = reason.to_string();
+            entry
+        };
+
+        // A taught word is relayed as itself…
+        let taught = "aa".repeat(32);
+        write_entry("chiyo", &transit(&taught, "refused: no-route: `chiyo` is not a node of mesh `home`")).unwrap();
+        assert_eq!(parked_transit_refusal(&taught).as_deref(), Some("no-route"));
+
+        // …a sentence is not: the closed words are tokens, and this is prose.
+        let prose = "bb".repeat(32);
+        write_entry("dave", &transit(&prose, "refused: this node is not a member of the mesh that letter names, so it has no name there")).unwrap();
+        assert_eq!(parked_transit_refusal(&prose).as_deref(), Some("refused"));
+
+        // And an unreadable spool does not end the scan: the park in the next one
+        // is still found. (`dave`'s node dir is made unlistable, the way a
+        // permission or I/O failure looks.)
+        let unreadable = node_dir("dave");
+        let _ = std::fs::remove_file(unreadable.join("link.json"));
+        let hidden = "cc".repeat(32);
+        write_entry("evo", &transit(&hidden, "refused: down")).unwrap();
+        let mut perms = std::fs::metadata(&unreadable).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o000);
+        std::fs::set_permissions(&unreadable, perms).unwrap();
+        let found = parked_transit_refusal(&hidden);
+        let mut restore = std::fs::metadata(&unreadable).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut restore, 0o700);
+        std::fs::set_permissions(&unreadable, restore).unwrap();
+        assert_eq!(
+            found.as_deref(),
+            Some("down"),
+            "a spool that cannot be listed is skipped, not fatal"
+        );
+        // `dave`'s own park, read once it is listable again, is still the prose
+        // case — the skip changed nothing about it.
+        assert_eq!(parked_transit_refusal(&prose).as_deref(), Some("refused"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn envelope(from_node: &str, to_node: &str, msgid: &str) -> Envelope {
@@ -1589,6 +1859,7 @@ mod sealed_spool_tests {
             &binding,
             &envelope.header.origin_mesh,
             &envelope.header.origin_mesh,
+            &me,
             &me,
             &crate::time::now_iso_utc(),
         )

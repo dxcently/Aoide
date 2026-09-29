@@ -223,8 +223,8 @@ impl Default for Upkeep {
 /// names nothing about whether a node is actually paired yet; `aoide mesh`
 /// (`aoide-client`) compares it against `state/nodes.json` and reports the
 /// difference. Validated in [`validate`] (mesh/node names, hop shape, grant
-/// vocabulary, no name shared across two meshes) but never in [`SCHEMA`] —
-/// see the module doc.
+/// vocabulary, the transit table's names and a gate answered both ways) but
+/// never in [`SCHEMA`] — see the module doc.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Mesh {
@@ -283,6 +283,30 @@ pub struct Mesh {
     /// (the same additive/v0-safe discipline every other new key here holds).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator: Option<String>,
+    /// A PAIR mesh's transit hubs, in preference order
+    /// (`docs/architecture/MAIL.md` §Transit). A charter mesh's relays come
+    /// from its signed charter and never from here — the operator line refuses
+    /// this key ([`validate_mesh`]). Absent is the ordinary case: a mesh that
+    /// declares no relay routes to its own members only, and a letter for
+    /// another mesh is `no-route` rather than routed through a node nobody
+    /// declared.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub relays: Vec<String>,
+    /// `[mesh.<name>.status]` — a declared node's status (`charter::
+    /// STATUS_VALUES`), absent meaning normal. `hold` queues at the sender,
+    /// `down` refuses fast and stops routing through or to that node. Carried
+    /// here for the same reason the charter carries it: it is part of the
+    /// mesh's routing table, and the read that answers routing is one seam
+    /// (`crate::routing`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub status: BTreeMap<String, String>,
+    /// `[mesh.<name>.gates]` — a mesh NAME to the node of THIS mesh that gates
+    /// transit into it. A gate is symmetric or it is nothing: the other mesh
+    /// must name the same node back, which is a refusal here when both meshes
+    /// are declared in this file and a cross-source one when they are not
+    /// (`crate::routing`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub gates: BTreeMap<String, String>,
 }
 
 /// The ONE reader of [`Mesh::same_operator`] left in the tree: the sentence a
@@ -573,7 +597,11 @@ fn validate_context(context: &Context, path: &Path) -> Result<(), LoadError> {
 /// with a different grant in each; `state/nodes.json` is keyed by name alone,
 /// so its ONE record carries the grant map). The earlier refusal of a shared
 /// name was the pre-charter "one global node namespace" assumption and is
-/// gone.
+/// gone. A pair mesh's transit table (`relays`/`status`/`gates`) is
+/// [`validate_pair_transit`]; the cross-source half of the same invariants
+/// (a node's key across two charters, a gate answered out of another file) is
+/// [`crate::routing`]'s, because a signed charter is not this function's to
+/// read.
 fn validate_mesh(mesh: &BTreeMap<String, Mesh>, path: &Path) -> Result<(), LoadError> {
     for (name, m) in mesh {
         if !crate::node_store::valid_node_name(name) {
@@ -597,15 +625,21 @@ fn validate_mesh(mesh: &BTreeMap<String, Mesh>, path: &Path) -> Result<(), LoadE
                 });
             }
             // One source per mesh: the signed charter is the whole declaration,
-            // so a node list, a grant or a same-operator claim beside the
-            // operator line would be a second one.
-            if !m.nodes.is_empty() || m.grant.is_some() || m.same_operator {
+            // so a node list, a grant, a same-operator claim or a transit table
+            // beside the operator line would be a second one.
+            if !m.nodes.is_empty()
+                || m.grant.is_some()
+                || m.same_operator
+                || !m.relays.is_empty()
+                || !m.status.is_empty()
+                || !m.gates.is_empty()
+            {
                 return Err(LoadError::InvalidValue {
                     path: path.to_path_buf(),
                     key: format!("mesh.{name}"),
                     detail: format!(
-                        "`mesh.{name}` declares an operator, so it is a CHARTER mesh: its nodes, grants and relays come from the signed charter and nothing else. \
-                         Remove `nodes`/`grant`/`sameOperator` from this section — leave the `operator` line, then edit `$AOIDE_ROOT/charters/{name}.toml` and run `aoide mesh charter sign {name}`"
+                        "`mesh.{name}` declares an operator, so it is a CHARTER mesh: its nodes, grants, relays, status and gates come from the signed charter and nothing else. \
+                         Remove `nodes`/`grant`/`sameOperator`/`relays`/`status`/`gates` from this section — leave the `operator` line, then edit `$AOIDE_ROOT/charters/{name}.toml` and run `aoide mesh charter sign {name}`"
                     ),
                 });
             }
@@ -639,6 +673,116 @@ fn validate_mesh(mesh: &BTreeMap<String, Mesh>, path: &Path) -> Result<(), LoadE
                     detail,
                 });
             }
+        }
+        validate_pair_transit(name, m, mesh, path)?;
+    }
+    Ok(())
+}
+
+/// A PAIR mesh's own transit table — `relays`, `[status]` and `[gates]`, the
+/// half of a mesh declaration a charter mesh reads out of its signed file
+/// instead (`crate::routing`). Every name must be a node of THIS mesh: a relay
+/// or a gate for a line that is not there is a silent no-op, which is exactly
+/// the drift a declaration exists to catch. A status must come from
+/// [`crate::charter::STATUS_VALUES`]. A gate must be answered — where the
+/// gated mesh is declared in this same file as a PAIR mesh, its own `gates`
+/// must name the same node back, because a gate is symmetric or it is nothing
+/// (`docs/architecture/MAIL.md` §Transit). A gate into a CHARTER mesh cannot
+/// be answered from here: that mesh's half lives in its charter, and the
+/// cross-source check is `crate::routing`'s.
+fn validate_pair_transit(
+    name: &str,
+    m: &Mesh,
+    all: &BTreeMap<String, Mesh>,
+    path: &Path,
+) -> Result<(), LoadError> {
+    let invalid = |key: String, detail: String| LoadError::InvalidValue {
+        path: path.to_path_buf(),
+        key,
+        detail,
+    };
+    for relay in &m.relays {
+        if !crate::node_store::valid_node_name(relay) {
+            return Err(invalid(
+                format!("mesh.{name}.relays"),
+                format!(
+                    "`{relay}` is not a valid node name — expected lowercase letters, digits, and \
+                     `-`, starting with a letter or digit"
+                ),
+            ));
+        }
+        if !m.nodes.contains_key(relay) {
+            return Err(invalid(
+                format!("mesh.{name}.relays"),
+                format!(
+                    "relay `{relay}` is not a node of `mesh.{name}` — a relay is a node of the mesh, \
+                     with a hop of its own; add it under `[mesh.{name}.nodes]`"
+                ),
+            ));
+        }
+    }
+    for (node, status) in &m.status {
+        if !m.nodes.contains_key(node) {
+            return Err(invalid(
+                format!("mesh.{name}.status.{node}"),
+                format!(
+                    "`{node}` is not a node of `mesh.{name}` — a status for a line that is not there \
+                     is a silent no-op, which is exactly the drift a declaration exists to catch"
+                ),
+            ));
+        }
+        if !crate::charter::STATUS_VALUES.contains(&status.as_str()) {
+            return Err(invalid(
+                format!("mesh.{name}.status.{node}"),
+                format!(
+                    "`{status}` is not one of {} or absent",
+                    crate::charter::STATUS_VALUES.join(", ")
+                ),
+            ));
+        }
+    }
+    for (other, gate) in &m.gates {
+        if !crate::node_store::valid_node_name(other) {
+            return Err(invalid(
+                format!("mesh.{name}.gates"),
+                format!(
+                    "`{other}` is not a valid mesh name — expected lowercase letters, digits, and \
+                     `-`, starting with a letter or digit"
+                ),
+            ));
+        }
+        if other == name {
+            return Err(invalid(
+                format!("mesh.{name}.gates.{other}"),
+                format!(
+                    "`mesh.{name}` gates into itself through `{gate}` — a gate carries transit into \
+                     ANOTHER mesh, and `relays`/`[status]` are how this one describes its own members"
+                ),
+            ));
+        }
+        if !m.nodes.contains_key(gate) {
+            return Err(invalid(
+                format!("mesh.{name}.gates.{other}"),
+                format!(
+                    "gate `{gate}` is not a node of `mesh.{name}` — the node that rewrites the zone \
+                     is a node of the zone that carries it"
+                ),
+            ));
+        }
+        match all.get(other).filter(|b| b.operator.is_none()) {
+            Some(back) => {
+                if back.gates.get(name).map(String::as_str) != Some(gate.as_str()) {
+                    return Err(invalid(
+                        format!("mesh.{name}.gates.{other}"),
+                        format!(
+                            "`mesh.{name}` gates into `{other}` through `{gate}`, but \
+                             `mesh.{other}` does not gate back through it — a gate is symmetric or it \
+                             is nothing: put `{name} = \"{gate}\"` under `[mesh.{other}.gates]`"
+                        ),
+                    ));
+                }
+            }
+            None => {}
         }
     }
     Ok(())
@@ -1220,6 +1364,133 @@ mod tests {
         .unwrap();
         assert_eq!(c.mesh["home"].nodes["sakaki"], "ssh://khoa@192.168.1.202");
         assert_eq!(c.mesh["away"].nodes["sakaki"], "ssh://khoa@10.0.0.5");
+    }
+
+    // ── the pair mesh's transit table ───────────────────────────────────────
+
+    /// The pair mesh `[mesh.friends]` of MAIL.md §Transit: a relay, a status
+    /// and a gate, each naming a node of the mesh.
+    const PAIR_TRANSIT: &str = "[mesh.friends]\n\
+         relays = [\"sakaki\"]\n\
+         [mesh.friends.nodes]\n\
+         sakaki = \"ssh://khoa@192.168.1.202\"\n\
+         evo = \"ssh://evo@192.168.1.40\"\n\
+         [mesh.friends.status]\n\
+         evo = \"hold\"\n\
+         [mesh.friends.gates]\n\
+         home = \"sakaki\"\n";
+
+    #[test]
+    fn a_pair_mesh_declares_relays_status_and_gates() {
+        let c = parse(PAIR_TRANSIT, &probe()).unwrap();
+        let friends = &c.mesh["friends"];
+        assert_eq!(friends.relays, vec!["sakaki".to_string()]);
+        assert_eq!(friends.status.get("evo").map(String::as_str), Some("hold"));
+        assert_eq!(friends.gates.get("home").map(String::as_str), Some("sakaki"));
+    }
+
+    #[test]
+    fn an_absent_transit_table_round_trips_byte_identically() {
+        // The additive discipline every key here holds: a mesh that declares
+        // none writes none.
+        let c = parse("[mesh.home.nodes]\nsakaki = \"ssh://khoa@192.168.1.202\"\n", &probe()).unwrap();
+        let text = toml::to_string(&c).unwrap();
+        assert!(!text.contains("relays") && !text.contains("status") && !text.contains("gates"), "{text}");
+    }
+
+    #[test]
+    fn a_charter_mesh_declaring_relays_in_config_is_refused() {
+        for line in ["relays = [\"sakaki\"]", "[mesh.home.status]\nsakaki = \"down\"", "[mesh.home.gates]\naway = \"sakaki\""] {
+            let err = parse(
+                &format!(
+                    "[mesh.home]\noperator = \"ed25519:{}\"\n{line}\n",
+                    "ab".repeat(32)
+                ),
+                &probe(),
+            )
+            .unwrap_err();
+            let msg = err.to_string();
+            assert!(matches!(err, LoadError::InvalidValue { .. }), "{msg}");
+            assert!(msg.contains("mesh.home"), "{msg}");
+            assert!(msg.contains("CHARTER mesh"), "{msg}");
+        }
+    }
+
+    #[test]
+    fn a_pair_mesh_relay_naming_no_node_of_the_mesh_is_refused() {
+        let err = parse(
+            "[mesh.home]\nrelays = [\"sakaki\"]\n[mesh.home.nodes]\nyomi = \"ssh://khoa@192.168.1.1\"\n",
+            &probe(),
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(matches!(err, LoadError::InvalidValue { .. }), "{msg}");
+        assert!(msg.contains("mesh.home.relays") && msg.contains("sakaki"), "{msg}");
+    }
+
+    #[test]
+    fn a_pair_mesh_status_outside_the_vocabulary_is_refused() {
+        let err = parse(
+            "[mesh.home.nodes]\nyomi = \"ssh://khoa@192.168.1.1\"\n[mesh.home.status]\nyomi = \"paused\"\n",
+            &probe(),
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(matches!(err, LoadError::InvalidValue { .. }), "{msg}");
+        assert!(msg.contains("mesh.home.status.yomi") && msg.contains("paused"), "{msg}");
+    }
+
+    #[test]
+    fn a_pair_mesh_gate_naming_no_node_of_the_mesh_is_refused() {
+        let err = parse(
+            "[mesh.home.nodes]\nyomi = \"ssh://khoa@192.168.1.1\"\n[mesh.home.gates]\naway = \"sakaki\"\n",
+            &probe(),
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(matches!(err, LoadError::InvalidValue { .. }), "{msg}");
+        assert!(msg.contains("mesh.home.gates.away") && msg.contains("sakaki"), "{msg}");
+    }
+
+    #[test]
+    fn a_pair_mesh_gate_into_its_own_mesh_is_refused() {
+        let err = parse(
+            "[mesh.home.nodes]\nsakaki = \"ssh://khoa@192.168.1.202\"\n[mesh.home.gates]\nhome = \"sakaki\"\n",
+            &probe(),
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(matches!(err, LoadError::InvalidValue { .. }), "{msg}");
+        assert!(msg.contains("mesh.home.gates.home") && msg.contains("itself"), "{msg}");
+    }
+
+    #[test]
+    fn a_one_sided_gate_fails_validate() {
+        // `home.gates.friends = "sakaki"` with no `friends.gates.home` back.
+        let err = parse(
+            "[mesh.home.nodes]\nsakaki = \"ssh://khoa@192.168.1.202\"\n\
+             [mesh.home.gates]\nfriends = \"sakaki\"\n\
+             [mesh.friends.nodes]\nsakaki = \"ssh://khoa@192.168.1.202\"\n",
+            &probe(),
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(matches!(err, LoadError::InvalidValue { .. }), "{msg}");
+        assert!(msg.contains("symmetric") && msg.contains("mesh.friends.gates"), "{msg}");
+    }
+
+    #[test]
+    fn a_symmetric_gate_between_two_pair_meshes_holds() {
+        let c = parse(
+            "[mesh.home.nodes]\nsakaki = \"ssh://khoa@192.168.1.202\"\n\
+             [mesh.home.gates]\nfriends = \"sakaki\"\n\
+             [mesh.friends.nodes]\nsakaki = \"ssh://khoa@192.168.1.202\"\n\
+             [mesh.friends.gates]\nhome = \"sakaki\"\n",
+            &probe(),
+        )
+        .unwrap();
+        assert_eq!(c.mesh["home"].gates["friends"], "sakaki");
+        assert_eq!(c.mesh["friends"].gates["home"], "sakaki");
     }
 
     // ── `[pairing] homeMesh` (P-CHARTER) ───────────────────────────────────

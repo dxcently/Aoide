@@ -1,0 +1,11 @@
+# The deliberately BROKEN half of the fixture's mesh pair, used to prove the
+# cross-mesh identity rule: the node name `sakaki` carrying a SECOND machine's
+# key, in the mesh pair `home` also declares it in — "one node, one identity
+# key, in every mesh" (MAIL.md §Transit). `{stranger}` is another box's real
+# node line, renamed to `sakaki` by the fixture.
+mesh = "away"
+version = 1
+relays = []
+
+[nodes]
+{stranger}

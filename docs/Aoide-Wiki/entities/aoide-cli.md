@@ -59,10 +59,10 @@ adding, removing, or renaming a leaf shows as a deliberate diff against that
 snapshot.
 
 The command surface holds **64 leaves across the groups this page tracks**;
-`aoide schema --json | jq '.commands | length'` reports 110, since further
+`aoide schema --json | jq '.commands | length'` reports 111, since further
 commands exist that are not yet covered here: the `mail` group (`mail`,
 `mail send`/`read`/`show`/`mark`/`rm`, `mail outbox`/`outbox rm`/`outbox
-retry`, `mail export`, `mail poll`, `mail serve`, `mail ring` —
+retry`, `mail route`, `mail export`, `mail poll`, `mail serve`, `mail ring` —
 `docs/architecture/MAIL.md`),
 `events tail`, `identity` (the keypair read surface — [[Pairing-Ceremony]]),
 the `melete` group (`status`/`graph`/`call`),
