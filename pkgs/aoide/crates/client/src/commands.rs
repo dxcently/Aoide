@@ -5118,7 +5118,22 @@ fn handle_mail_route(inv: &Invocation) -> Outcome {
             .with_data(json!({ "reason": "invalid-name" }));
     }
 
-    let set = aoide_storage::routing::declarations();
+    // A config this node cannot read refuses the set as a set: a broken config
+    // is not a name source, so the meshes it declares cannot even be listed.
+    let set = match aoide_storage::routing::declarations() {
+        Ok(set) => set,
+        Err(refusal) => {
+            return Outcome::error(
+                cmd,
+                format!("no route: {} — {}", refusal.reason, refusal.detail),
+            )
+            .with_data(json!({
+                "reason": refusal.reason,
+                "detail": refusal.detail,
+                "steps": Vec::<String>::new(),
+            }))
+        }
+    };
     // The meshes whose declaration names the destination. A mesh that cannot
     // be read names nothing here — it is not a name source, and `--mesh` is
     // how a caller asks the route about it anyway.

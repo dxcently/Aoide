@@ -58,14 +58,20 @@ by decision — no embedded database yet
   declaration. `declarations()` returns one entry PER MESH (a `Loaded`):
   each mesh loads on its own, so one that cannot be read is refused with the
   word that says why — its own charter's word (`no-charter-in-force`,
-  `charter-tampered`, or the operator's) or `no-declaration` — and never
-  takes another mesh out of routing. The two invariants only a SET of
+  `charter-tampered`, `local-io`, or the operator's) or `no-declaration` — and
+  never takes another mesh out of routing. The two invariants only a SET of
   declarations can see are then refused against the single mesh that is
   inconsistent: `key-divergence` (one node name never carries two identity
-  keys, charters read first so a stale paired record is the copy that
-  yields) and `one-sided-gate` (a gate is answered by the mesh on the other
-  side; a mesh is never its own answer). `Declaration::declares` is the plain
-  membership question the route asks first.
+  keys — charters are read first, a pair mesh yields to a charter that lists
+  the name, and where neither declaration is subordinate to the other BOTH are
+  refused rather than one kept by name order) and `one-sided-gate` (a gate is
+  answered by the mesh on the other side; a mesh is never its own answer). The
+  whole set is read from ONE snapshot of `config.toml` and `state/nodes.json`,
+  so two entries can never disagree with each other about what config says —
+  and a `config.toml` that will not load refuses the set itself
+  (`config-unreadable`): a broken config cannot even name the pair meshes it
+  declares, and a table built by dropping the file that names half of it is
+  the guess this seam exists to refuse.
 
 - **`routing::Letter::route` is the four steps of MAIL.md §Transit**, run over
   the declarations a box holds and nothing else — no dial, no clock, no spool

@@ -59,30 +59,47 @@ pub struct Loaded {
 /// declaration can see: one node name never carries two identity keys, and a
 /// gate is answered by the mesh on the other side.
 ///
+/// **One snapshot of `config.toml` and `state/nodes.json` for the whole set.**
+/// A mesh is read per entry, but the files under them are read once, so two
+/// entries can never disagree with each other about what config says. A config
+/// that will not load refuses the SET, with its own word
+/// ([`charter::CONFIG_UNREADABLE`]): a broken config is not a name source — the
+/// pair meshes it declares cannot even be listed — and a routing table built by
+/// dropping the file that names half of it is the guess this seam exists to
+/// refuse.
+///
 /// A violation is refused against the mesh whose own declaration is the
 /// inconsistent one — the pair mesh whose record disagrees with a charter, the
 /// mesh that declares an un-answered gate — so a disagreement between two
 /// meshes fails closed for the mesh that is wrong and leaves the rest routing.
-pub fn declarations() -> Vec<Loaded> {
-    let mut names: BTreeSet<String> = match config::load() {
-        Ok(loaded) => loaded.config.mesh.keys().cloned().collect(),
-        // A config that will not load is not a name source; every mesh whose
-        // state answers for itself still loads below, and a mesh that needed
-        // the section is refused `no-declaration` rather than silently gone.
-        Err(_) => BTreeSet::new(),
-    };
+/// When no mesh is subordinate to another (one name carrying two keys across
+/// two charters, or across two pair meshes) then BOTH are wrong, and both are
+/// refused: keeping one by mesh-name order would leave the other routing.
+pub fn declarations() -> Result<Vec<Loaded>, Refusal> {
+    let loaded =
+        config::load().map_err(|e| Refusal::new(charter::CONFIG_UNREADABLE, e.to_string()))?;
+    let records = node_store::load_nodes();
+
+    let mut names: BTreeSet<String> = loaded.config.mesh.keys().cloned().collect();
     names.extend(charter::meshes_with_state());
 
     let mut out: Vec<Loaded> = names
         .into_iter()
-        .map(|mesh| Loaded { declaration: Declaration::load(&mesh), mesh })
+        .map(|mesh| {
+            let declaration = if charter::charter_shaped(&mesh) {
+                Declaration::from_charter(&mesh)
+            } else {
+                Declaration::from_section(&mesh, &loaded, &records)
+            };
+            Loaded { mesh, declaration }
+        })
         .collect();
     for (mesh, refusal) in set_verdicts(&out) {
         if let Some(loaded) = out.iter_mut().find(|l| l.mesh == mesh) {
             loaded.declaration = Err(refusal);
         }
     }
-    out
+    Ok(out)
 }
 
 /// The two invariants only a SET of declarations can see, each refused against
@@ -90,11 +107,16 @@ pub fn declarations() -> Vec<Loaded> {
 ///
 /// **One node, one identity key, in every mesh.** A node may sit in several
 /// meshes with a different grant in each; identity is not per mesh, so a name
-/// carrying two keys is a load error. Every declaration's keys count — a pair
-/// mesh's too, which is how a paired record left over from before a charter
-/// re-keyed a name is caught — and the CHARTERS are read first: a charter is
-/// the authority for a name it lists, so a record that disagrees is the copy
-/// that yields, and the pair mesh is the mesh refused.
+/// carrying two keys is a load error, and every declaration's keys count — a
+/// pair mesh's too, which is how a paired record left over from before a
+/// charter re-keyed a name is caught.
+///
+/// Where a charter and a record disagree the charter is the authority for a
+/// name it lists, so the record is the copy that yields and the pair mesh is
+/// the one refused. Where the disagreement is between two declarations that
+/// are NOT subordinate to each other — two charters, or two pair meshes — no
+/// copy can be kept without the other routing behind it: BOTH are refused, and
+/// the mesh-name order they were read in decides nothing.
 ///
 /// **A gate is symmetric or it is nothing.** Each gate a mesh declares must be
 /// answered, by the mesh it names, with the same node; a mesh cannot be its own
@@ -102,30 +124,57 @@ pub fn declarations() -> Vec<Loaded> {
 /// be judged here and is left to the two declarations that do.
 fn set_verdicts(loaded: &[Loaded]) -> BTreeMap<String, Refusal> {
     let mut verdicts: BTreeMap<String, Refusal> = BTreeMap::new();
-    let mut keyed: BTreeMap<&str, (&str, &str)> = BTreeMap::new();
+    // node name -> every declaration that gives it a key, charters first (the
+    // authority order) and mesh-name order inside each half.
+    let mut keyed: BTreeMap<&str, Vec<(&str, &str, bool)>> = BTreeMap::new();
     let mut ordered: Vec<&Declaration> = loaded.iter().filter_map(|l| l.declaration.as_ref().ok()).collect();
     ordered.sort_by_key(|d| !d.is_charter());
     for declaration in ordered {
         for (node, key) in declaration.declared_keys() {
-            match keyed.get(node) {
-                Some((first_key, first_mesh)) if !first_key.eq_ignore_ascii_case(key) => {
-                    verdicts.entry(declaration.mesh().to_string()).or_insert_with(|| {
-                        Refusal::new(
-                            KEY_DIVERGENCE,
-                            format!(
-                                "`{node}` carries two identity keys — `{first_key}` in mesh `{first_mesh}` \
-                                 and `{key}` in mesh `{}`. One node, one identity key, in every mesh: a \
-                                 name that stands for two machines is a name no policy lookup can trust",
-                                declaration.mesh()
-                            ),
-                        )
-                    });
-                }
-                Some(_) => {}
-                None => {
-                    keyed.insert(node, (key, declaration.mesh()));
-                }
+            keyed.entry(node).or_default().push((declaration.mesh(), key, declaration.is_charter()));
+        }
+    }
+
+    for (node, members) in &keyed {
+        let mut keys: Vec<&str> = members.iter().map(|(_, key, _)| *key).collect();
+        keys.sort();
+        keys.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        if keys.len() < 2 {
+            continue;
+        }
+        // The one mesh this name's other copies yield to, if there is one: a
+        // lone charter, which is the authority for a name it lists.
+        let charters: Vec<&str> = members
+            .iter()
+            .filter(|(_, _, charter)| *charter)
+            .map(|(mesh, _, _)| *mesh)
+            .collect();
+        let authority = match charters.as_slice() {
+            [only] => Some(*only),
+            _ => None,
+        };
+        for (mesh, key, _) in members {
+            if Some(*mesh) == authority {
+                continue;
             }
+            // The other copy the refusal names, by declaration order (a
+            // charter before a pair; mesh name inside each) so the sentence is
+            // the same on every box that reads the same set.
+            let (other_mesh, other_key) = members
+                .iter()
+                .find(|(other, other_key, _)| *other != *mesh && !other_key.eq_ignore_ascii_case(key))
+                .map(|(other, other_key, _)| (*other, *other_key))
+                .unwrap_or_default();
+            verdicts.entry(mesh.to_string()).or_insert_with(|| {
+                Refusal::new(
+                    KEY_DIVERGENCE,
+                    format!(
+                        "`{node}` carries two identity keys — `{other_key}` in mesh `{other_mesh}` and \
+                         `{key}` in mesh `{mesh}`. One node, one identity key, in every mesh: a name that \
+                         stands for two machines is a name no policy lookup can trust"
+                    ),
+                )
+            });
         }
     }
 
@@ -203,16 +252,39 @@ struct Pair {
 }
 
 impl Declaration {
-    /// Read `mesh`'s declaration: the charter in force where the mesh is
-    /// charter-shaped, its `[mesh.<name>]` section otherwise. Fails closed —
-    /// a charter-shaped mesh with no readable charter is refused with that
-    /// charter's own word, never answered from the paired records.
+    /// Read `mesh`'s declaration on its own: the charter in force where the
+    /// mesh is charter-shaped, its `[mesh.<name>]` section otherwise.
+    ///
+    /// **A whole set is read by [`declarations`], which takes ONE snapshot of
+    /// `config.toml` and `state/nodes.json` for every mesh** and calls
+    /// [`from_charter`]/[`from_section`] with it; this entry point exists for a
+    /// caller that has one mesh in hand and is what that call reduces to.
     pub fn load(mesh: &str) -> Result<Declaration, Refusal> {
         if charter::charter_shaped(mesh) {
-            let charter = charter::governing_refusal(mesh)?;
-            return Ok(Declaration { mesh: mesh.to_string(), kind: Kind::Charter(charter) });
+            return Declaration::from_charter(mesh);
         }
-        let loaded = config::load().map_err(|e| Refusal::new(charter::CONFIG_UNREADABLE, e.to_string()))?;
+        let loaded =
+            config::load().map_err(|e| Refusal::new(charter::CONFIG_UNREADABLE, e.to_string()))?;
+        Declaration::from_section(mesh, &loaded, &node_store::load_nodes())
+    }
+
+    /// The charter branch: the signed file in force, and config is not
+    /// consulted for it at all. Fails closed — a charter-shaped mesh with no
+    /// readable charter is refused with that charter's own word, never answered
+    /// from the paired records.
+    fn from_charter(mesh: &str) -> Result<Declaration, Refusal> {
+        let charter = charter::governing_refusal(mesh)?;
+        Ok(Declaration { mesh: mesh.to_string(), kind: Kind::Charter(charter) })
+    }
+
+    /// The pair branch: this mesh's `[mesh.<name>]` section out of a snapshot
+    /// the caller already read, with the keys of the records it names read out
+    /// of that same snapshot.
+    fn from_section(
+        mesh: &str,
+        loaded: &config::Loaded,
+        records: &[node_store::Node],
+    ) -> Result<Declaration, Refusal> {
         let section = loaded.config.mesh.get(mesh).ok_or_else(|| {
             Refusal::new(
                 NO_DECLARATION,
@@ -223,7 +295,7 @@ impl Declaration {
                 ),
             )
         })?;
-        Ok(Declaration { mesh: mesh.to_string(), kind: Kind::Pair(pair_from(section)) })
+        Ok(Declaration { mesh: mesh.to_string(), kind: Kind::Pair(pair_from(section, records)) })
     }
 
     /// The mesh this declaration is for.
@@ -329,8 +401,9 @@ impl Declaration {
 
 /// The `[mesh.<name>]` section as a declaration, with the keys of the records
 /// it names read once.
-fn pair_from(section: &config::Mesh) -> Pair {
-    let records = node_store::load_nodes();
+/// The `[mesh.<name>]` section as a declaration, with the keys of the records
+/// it names read out of the `state/nodes.json` snapshot the caller holds.
+fn pair_from(section: &config::Mesh, records: &[node_store::Node]) -> Pair {
     let keys = section
         .nodes
         .keys()
@@ -806,7 +879,7 @@ mod tests {
 
     /// The one declaration in the set for `mesh`, which must have loaded.
     fn ok(mesh: &str) -> Declaration {
-        let set = declarations();
+        let set = set();
         set.iter()
             .find(|l| l.mesh == mesh)
             .unwrap_or_else(|| panic!("`{mesh}` is in the set: {set:?}"))
@@ -815,9 +888,15 @@ mod tests {
             .unwrap_or_else(|e| panic!("`{mesh}` loads: {e}"))
     }
 
+    /// The declarations in force, which must load: a config that will not is
+    /// the set's own refusal, and its own test.
+    fn set() -> Vec<Loaded> {
+        declarations().unwrap_or_else(|e| panic!("the set loads: {e}"))
+    }
+
     /// The refusal on `mesh`'s own entry.
     fn refused(mesh: &str) -> Refusal {
-        let set = declarations();
+        let set = set();
         set.iter()
             .find(|l| l.mesh == mesh)
             .unwrap_or_else(|| panic!("`{mesh}` is in the set: {set:?}"))
@@ -913,9 +992,27 @@ mod tests {
         machine(&scratch.dir("osaka"), "osaka");
         // A mesh nothing declares is not in the set at all — this is what a
         // caller that NAMED a mesh it does not hold gets.
-        assert!(declarations().is_empty(), "nothing is declared here");
+        assert!(set().is_empty(), "nothing is declared here");
         let refusal = Declaration::load("home").unwrap_err();
         assert_eq!(refusal.reason, NO_DECLARATION, "{refusal}");
+    }
+
+    #[test]
+    fn a_config_that_cannot_be_read_refuses_the_whole_set() {
+        let (_guard, _env) = isolate();
+        let scratch = Scratch::new("broken-config");
+        let operator = scratch.dir("operator");
+        let nodes: Vec<(PathBuf, &str)> =
+            ["osaka", "sakaki", "yomi", "chiyo"].iter().map(|n| (scratch.dir(n), *n)).collect();
+        sign_on(&operator, "home", &home_of(&nodes));
+
+        // A config that will not load is not a name source: the pair meshes it
+        // would declare cannot even be LISTED, so the set refuses as a set
+        // rather than dropping them and routing the rest of the table.
+        std::fs::write(operator.join("config.toml"), "this is not = toml at all\n").unwrap();
+        let refusal = declarations().expect_err("an unreadable config refuses the set");
+        assert_eq!(refusal.reason, charter::CONFIG_UNREADABLE, "{refusal}");
+        assert!(refusal.detail.contains("config.toml"), "{refusal}");
     }
 
     #[test]
@@ -1018,13 +1115,15 @@ mod tests {
         sign_on(&operator, "home", &body(&[], &[], &[], &[sakaki_line]));
         sign_on(&operator, "away", &body(&[], &[], &[], &[two_keys]));
 
-        // Two charters, one name, two keys: the second declaration to give the
-        // name a key is the one refused, and the first keeps routing. Neither is
-        // an authority over the other, so the order is the mesh name's.
-        let refusal = refused("home");
-        assert_eq!(refusal.reason, KEY_DIVERGENCE, "{refusal}");
-        assert!(refusal.detail.contains("sakaki"), "{refusal}");
-        assert_eq!(ok("away").key_of("sakaki").unwrap().len(), 64);
+        // Two charters, one name, two keys: NEITHER is an authority over the
+        // other, so neither can be kept — keeping one by mesh-name order would
+        // leave the imposter routing behind it. Both are refused, and the rest
+        // of each mesh's own facts stand as the file wrote them.
+        for mesh in ["home", "away"] {
+            let refusal = refused(mesh);
+            assert_eq!(refusal.reason, KEY_DIVERGENCE, "{refusal}");
+            assert!(refusal.detail.contains("sakaki"), "{refusal}");
+        }
     }
 
     #[test]
@@ -1133,7 +1232,7 @@ mod tests {
     /// One route, asked of the declarations currently in force, with the trail
     /// joined for an assertion that names the step it came from.
     fn route(from: &str, to: &str, mesh: &str) -> Route {
-        Letter { from, to, mesh }.route(&declarations())
+        Letter { from, to, mesh }.route(&set())
     }
 
     fn next_of(route: &Route) -> &Hop {

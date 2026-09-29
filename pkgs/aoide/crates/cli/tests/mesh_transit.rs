@@ -30,7 +30,7 @@ fn the_five_edge_fixture_loads_and_validates_through_the_declaration_seam() {
     // with two declarations in it.
     fx.enter("sakaki");
 
-    let set = routing::declarations();
+    let set = routing::declarations().expect("the fixture's declarations load");
     for loaded in &set {
         assert!(loaded.declaration.is_ok(), "`{}` loads: {:?}", loaded.mesh, loaded.declaration);
     }
@@ -68,7 +68,7 @@ fn a_one_sided_gate_charter_is_refused_at_load() {
     fx.enter("sakaki");
     fx.take_broken_away("sakaki", ONE_SIDED_GATE);
 
-    let set = routing::declarations();
+    let set = routing::declarations().expect("the fixture's declarations load");
     let home = set.iter().find(|l| l.mesh == HOME).expect("home is in the set");
     let refusal = home.declaration.as_ref().err().expect("home's gate is un-answered");
     assert_eq!(refusal.reason, routing::ONE_SIDED_GATE, "{refusal}");
@@ -84,13 +84,19 @@ fn one_node_name_with_two_keys_across_the_two_meshes_is_refused_at_load() {
     fx.enter("sakaki");
     fx.take_broken_away("sakaki", TWO_KEYS);
 
-    let set = routing::declarations();
-    let refusal = set
-        .iter()
-        .filter_map(|l| l.declaration.as_ref().err())
-        .find(|r| r.reason == routing::KEY_DIVERGENCE)
-        .unwrap_or_else(|| panic!("one node with two keys is refused: {set:?}"));
-    assert!(refusal.detail.contains("sakaki"), "{refusal}");
+    let set = routing::declarations().expect("the fixture's declarations load");
+    // Two charters, one name, two keys: neither mesh is an authority over the
+    // other, so BOTH are refused — a name that stands for two machines is a
+    // name neither mesh may route by.
+    for mesh in [HOME, AWAY] {
+        let refusal = set
+            .iter()
+            .find(|l| l.mesh == mesh)
+            .and_then(|l| l.declaration.as_ref().err())
+            .unwrap_or_else(|| panic!("`{mesh}` is refused: {set:?}"));
+        assert_eq!(refusal.reason, routing::KEY_DIVERGENCE, "{refusal}");
+        assert!(refusal.detail.contains("sakaki"), "{refusal}");
+    }
 }
 
 /// The edges the fixture declares are the edges the route takes: the letters
@@ -103,7 +109,8 @@ fn the_fixture_edges_route_through_the_declaration_seam() {
 
     let hop = |from: &str, to: &str, mesh: &str| {
         fx.enter(from);
-        routing::Letter { from, to, mesh }.route(&routing::declarations())
+        let set = routing::declarations().expect("the fixture's declarations load");
+        routing::Letter { from, to, mesh }.route(&set)
     };
 
     // A plain member cannot dial the `poll` node: the letter goes to the relay.

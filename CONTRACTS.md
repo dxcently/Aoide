@@ -3544,8 +3544,10 @@ outside the home mesh (`docs/architecture/MAIL.md` §Transit; mint sites
 `mint_outbound_letter_in_mesh`). A destination trusted in more than one
 mesh with the home mesh not among them refuses the send
 (`mesh-ambiguous`, naming them) rather than minting with no mesh; `""` is
-the local filing's own value — `mail send --to self/<name>` and every
-receipt this box files about itself — not a third mesh choice.
+carried by everything that never chose one — `mail send --to self/<name>`,
+every receipt this box files about itself, and a receipt for a letter that
+arrived UNNAMED, which rides that letter's own `originMesh` back — not a
+third mesh choice.
 
 `seq` is local to the node, like an NNTP article number — never crosses a
 link; it is `last line's seq + 1`, read under the lock. `type=letter` is

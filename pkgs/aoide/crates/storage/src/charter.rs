@@ -63,7 +63,10 @@ pub const UNKNOWN_OPERATOR: &str = "unknown-operator";
 pub const STALE_CHARTER: &str = "stale-charter";
 /// The received bytes are not the artifact the signature was made over. This
 /// is what a trailing newline, a formatter or a line-ending change produces,
-/// and it is a different answer from a key that does not verify.
+/// and it is a different answer from a key that does not verify. It covers
+/// every way the document IN HAND is not this mesh's charter: bytes that do not
+/// parse, and a charter that parses and belongs to another mesh — the one
+/// answer for both, because from here they are the same fact.
 pub const CHARTER_TAMPERED: &str = "charter-tampered";
 /// The config's operator line and the state record disagree about which key
 /// signs this mesh.
@@ -78,12 +81,13 @@ pub const CONFIG_UNREADABLE: &str = "config-unreadable";
 /// place (see `accept`'s write order).
 pub const LOCAL_IO: &str = "local-io";
 /// A mesh is CHARTER-SHAPED here — a trust record names an operator, or a
-/// charter was accepted once — and there is no readable charter in force for
-/// it: nothing has been signed yet, or `charter.toml` is gone. Distinct from
-/// the operator words above (which one key is trusted is not the question) and
-/// from [`CHARTER_TAMPERED`] (a document that IS there and is not this mesh's
-/// charter). Nothing may be routed in a mesh in this state, and nothing is
-/// guessed from the paired records to fill the hole.
+/// charter was accepted once — and `charter.toml` is NOT THERE: nothing has
+/// been signed yet, or the file is gone. Distinct from the operator words above
+/// (which one key is trusted is not the question), from [`CHARTER_TAMPERED`] (a
+/// document that IS there and is not this mesh's charter) and from [`LOCAL_IO`]
+/// (a document that is there and this node could not read it). Nothing may be
+/// routed in a mesh in this state, and nothing is guessed from the paired
+/// records to fill the hole.
 pub const NO_CHARTER_IN_FORCE: &str = "no-charter-in-force";
 
 /// The prefix every identity key carries wherever it is written down: a
@@ -887,7 +891,8 @@ pub fn governing(mesh: &str) -> Option<Charter> {
 /// [`governing`]'s fallible twin: the same charter, or the taught refusal that
 /// says which of the ways it is not there this is — [`trusted_operator`]'s own
 /// word when the operator key itself cannot be decided, [`NO_CHARTER_IN_FORCE`]
-/// when nothing has been signed (or `charter.toml` is gone), and
+/// when nothing has been signed (`charter.toml` is not there at all),
+/// [`LOCAL_IO`] when it is there and this node cannot read it, and
 /// [`CHARTER_TAMPERED`] when a document IS there and is not this mesh's charter
 /// — it does not parse, or it declares another mesh by name.
 ///
@@ -898,17 +903,31 @@ pub fn governing(mesh: &str) -> Option<Charter> {
 pub fn governing_refusal(mesh: &str) -> Result<Charter, Refusal> {
     trusted_operator(mesh)?;
     let path = in_force_path(mesh);
-    let text = std::fs::read_to_string(&path).map_err(|_| {
-        Refusal::new(
-            NO_CHARTER_IN_FORCE,
-            format!(
-                "mesh `{mesh}` is charter-shaped at this node but {} is not readable — nothing signed \
-                 is in force for it: take its charter (`aoide mesh charter accept`), or its operator \
-                 signs one",
-                path.display()
-            ),
-        )
-    })?;
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        // Nothing signed is in force, which is what a mesh that has just been
+        // joined by operator key looks like.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(Refusal::new(
+                NO_CHARTER_IN_FORCE,
+                format!(
+                    "mesh `{mesh}` is charter-shaped at this node but {} is not there — nothing signed \
+                     is in force for it: take its charter (`aoide mesh charter accept`), or its operator \
+                     signs one",
+                    path.display()
+                ),
+            ))
+        }
+        // A document that IS there and this node cannot read it is this node's
+        // own failure, not a fact about the mesh: a permission problem must not
+        // read as "no charter was ever signed".
+        Err(e) => {
+            return Err(Refusal::new(
+                LOCAL_IO,
+                format!("{}: {e} — this node cannot read the charter in force for mesh `{mesh}`", path.display()),
+            ))
+        }
+    };
     let charter = parse(&text)
         .map_err(|e| Refusal::new(CHARTER_TAMPERED, format!("{}: {e}", path.display())))?;
     if charter.mesh != mesh {
@@ -1785,6 +1804,36 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&op);
         let _ = std::fs::remove_dir_all(&peer);
+    }
+
+    /// A charter that is THERE and this node cannot read it is this node's own
+    /// failure (`local-io`), never read as "nothing has been signed": a
+    /// permission problem must not look like a mesh that needs a charter.
+    #[test]
+    fn an_unreadable_charter_in_force_is_local_io_not_a_missing_charter() {
+        let (_guard, _env) = isolate();
+        let op = machine_dir("governing-io");
+        machine(&op, "opbox");
+        init("home").unwrap();
+        std::fs::write(
+            source_path("home"),
+            format!("mesh = \"home\"\nversion = 0\n\n[nodes]\n{}\n", node_line().unwrap()),
+        )
+        .unwrap();
+        sign("home", None).unwrap();
+        assert_eq!(governing_refusal("home").unwrap().mesh, "home");
+
+        // Gone: nothing signed is in force.
+        std::fs::remove_file(in_force_path("home")).unwrap();
+        assert_eq!(governing_refusal("home").unwrap_err().reason, NO_CHARTER_IN_FORCE);
+
+        // There, and unreadable as a file (a directory stands in for any read
+        // failure whose kind is not "not found").
+        std::fs::create_dir_all(in_force_path("home")).unwrap();
+        let refusal = governing_refusal("home").unwrap_err();
+        assert_eq!(refusal.reason, LOCAL_IO, "{refusal}");
+        assert!(refusal.detail.contains("cannot read"), "{refusal}");
+        let _ = std::fs::remove_dir_all(&op);
     }
 
     /// **F2.** A machine that already trusts an operator for a mesh is a NODE

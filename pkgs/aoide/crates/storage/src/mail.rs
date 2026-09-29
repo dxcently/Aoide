@@ -857,11 +857,13 @@ fn mint_kind(
 /// none: the destination's sole granted mesh, else the home mesh — the same
 /// rule the request-signing path applies
 /// (`aoide_storage::node_store::resolve_mesh`, over the destination record's
-/// granted meshes). `""` (UNNAMED) when this box knows the destination in
-/// more than one mesh: a mint cannot guess which one the request will be
-/// signed for, and an unnamed letter is the pre-charter shape the door reads
-/// as the home mesh. The operator's lever for that case is `--mesh` on the
-/// sending command, which mints through
+/// granted meshes). `""` (UNNAMED) only when the destination is trusted in
+/// more than one mesh and the home mesh is NOT one of them, which is
+/// `resolve_mesh`'s own refusal: more than one candidate and no home to break
+/// the tie, so a mint cannot guess which mesh the request will be signed for.
+/// A destination trusted in several meshes WITH the home mesh among them
+/// resolves to the home mesh, not to `""`. The operator's lever for the
+/// refused case is `--mesh` on the sending command, which mints through
 /// [`mint_outbound_letter_in_mesh`] outright.
 pub fn mesh_for_node(node: &str) -> String {
     let record = crate::node_store::load_nodes().into_iter().find(|p| p.name == node);
