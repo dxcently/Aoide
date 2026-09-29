@@ -1364,6 +1364,17 @@ fn an_unloadable_declaration_refuses_both_mail_methods_and_nothing_else() {
     let deposit = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/mailDeposit", serde_json::json!({ "container": {} }));
     assert_eq!(deposit["result"]["status"], "refused", "{deposit}");
     assert_eq!(deposit["result"]["reason"], "config-invalid", "{deposit}");
+    // **The wire detail is fixed text.** The load error names this host's own
+    // config path and structure; that belongs in the log, never in an answer to
+    // a caller.
+    assert_eq!(
+        deposit["result"]["detail"], "this host's declaration will not load",
+        "{deposit}"
+    );
+    assert!(
+        !deposit["result"]["detail"].as_str().unwrap_or_default().contains("config.toml"),
+        "no path, no structure: {deposit}"
+    );
 
     let poll = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/mailPoll", serde_json::json!({ "node": "yomi" }));
     assert_eq!(poll["result"]["status"], "refused", "{poll}");
@@ -1385,6 +1396,32 @@ fn an_unloadable_declaration_refuses_both_mail_methods_and_nothing_else() {
     assert!(
         log.contains("config-invalid") && log.contains("aoide/mailPoll"),
         "the host's own log says why, under the method's label: {log}"
+    );
+    assert!(log.contains("config.toml"), "and the LOG is where the load error lives: {log}");
+
+    // The SAME fixed detail on the other path: with a record for the caller the
+    // request resolves, so `mail_declarations` answers instead of the D8 gate —
+    // and it must not hand the load error over either.
+    fx.enter("yomi");
+    let yomi_key = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
+    fx.enter("osaka");
+    let mut nodes = aoide_storage::node_store::load_nodes();
+    aoide_storage::node_store::upsert_paired_node(
+        &mut nodes,
+        "yomi",
+        "http://127.0.0.1:1/",
+        &yomi_key,
+        &aoide_storage::time::now_iso_utc(),
+        &["message".to_string()],
+        HOME,
+    );
+    aoide_storage::node_store::save_nodes(&nodes).unwrap();
+    fx.enter("yomi");
+    let resolved = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/mailPoll", serde_json::json!({ "node": "yomi" }));
+    assert_eq!(resolved["result"]["reason"], "config-invalid", "{resolved}");
+    assert_eq!(
+        resolved["result"]["detail"], "this host's declaration will not load",
+        "the resolved path hands over fixed text too: {resolved}"
     );
 }
 

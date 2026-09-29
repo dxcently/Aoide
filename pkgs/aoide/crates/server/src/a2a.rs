@@ -154,6 +154,12 @@ const SEALED_REQUIRED: &str = "sealed-required";
 /// this word is a LINK state, not a verdict on the letter (user ruling D7).
 const CONFIG_INVALID: &str = aoide_storage::charter::CONFIG_INVALID;
 
+/// What an unloadable declaration says ON THE WIRE: fixed text, and nothing else.
+/// The load error itself names absolute paths and the config's own structure, so
+/// it is this host's business and goes to the audit log only — a caller is told
+/// that mail is not being served, never where this host keeps its files.
+const CONFIG_INVALID_DETAIL: &str = "this host's declaration will not load";
+
 /// The address the mail adapter binds, ever and only. There is deliberately no
 /// `--bind`, no `aoide.mail.adapter.bindAddress` and no env var beside this
 /// one: a TLS-terminating front (cloudflared, a VPS, a tailnet) is what faces
@@ -3361,9 +3367,11 @@ fn mail_declarations(
     match aoide_storage::routing::declarations() {
         Ok(set) => Ok(set),
         Err(refusal) => {
+            // The load error names this host's own paths and structure, so it
+            // stops here, at the audit line; the wire gets fixed text.
             let detail = format!("{CONFIG_INVALID}: {refusal}");
             let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, label, "invalid", &detail);
-            Err(json!({ "status": "refused", "reason": CONFIG_INVALID, "detail": detail }))
+            Err(json!({ "status": "refused", "reason": CONFIG_INVALID, "detail": CONFIG_INVALID_DETAIL }))
         }
     }
 }
@@ -5284,7 +5292,7 @@ fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path
     }
     let detail = format!("{CONFIG_INVALID}: {refusal}");
     let _ = audit(audit_log, Door::A2a, EventClass::Audit, method, "invalid", &detail);
-    PreDispatch::Unloadable(detail)
+    PreDispatch::Unloadable(CONFIG_INVALID_DETAIL.to_string())
 }
 
 fn jsonrpc_error_value(code: i64, message: impl Into<String>) -> Value {
