@@ -290,12 +290,20 @@ fn spool_and_drain_ack(envelope: &Envelope, acked_msgid: &str) {
     let origin_node = envelope.header.from.node.clone();
     // An ack is sealed like any other letter when the far end has published
     // a binding, and stays plaintext over the direct lane when it has not.
-    let entry = match spool_entry(&origin_node, ack, false) {
+    //
+    // **And it leaves by the same four steps as a letter** — a receipt
+    // traverses hubs for free (MAIL.md §Wire), which is what lets an ack from a
+    // node behind a relay reach the origin. Where the declarations give no route
+    // at all, the direct edge is still tried: the ack is owed to a node this box
+    // could always dial, and a route read that fails must not cost the receipt.
+    let mesh = envelope.header.origin_mesh.clone();
+    let next = route_for(&origin_node, &mesh).map(|hop| hop.next).unwrap_or_else(|_| origin_node.clone());
+    let entry = match spool_entry(&origin_node, &next, &mesh, ack, false) {
         Ok(entry) => entry,
         Err(_) => return,
     };
-    if aoide_storage::outbox::write_ack_if_absent(&origin_node, acked_msgid, &entry) == Ok(true) {
-        let _ = drain_node(&origin_node);
+    if aoide_storage::outbox::write_ack_if_absent(&next, acked_msgid, &entry) == Ok(true) {
+        let _ = drain_node(&next);
     }
 }
 
@@ -318,31 +326,37 @@ fn spool_and_drain_ack(envelope: &Envelope, acked_msgid: &str) {
 ///   clears it), so the letter is held, visible and reported rather than
 ///   dropped or downgraded.
 pub fn spool_entry(
-    node_name: &str,
+    dest: &str,
+    next: &str,
+    mesh: &str,
     envelope: Envelope,
     hold: bool,
 ) -> Result<aoide_storage::outbox::OutboxEntry, String> {
     use aoide_storage::outbox::OutboxEntry;
     let now = aoide_storage::time::now_iso_utc();
-    // **A `poll` destination is held, whatever the caller asked for** — the
-    // design's rule at the one place the flavor is decided, so that EVERY
-    // caller inherits it and none can forget it: "a hub's outbox entry for a
-    // `poll` node is `hold`-flavored. The hub never dials it, and only the
+    // **A hop that owns no inbound transport IS held, whatever the caller asked
+    // for** — the design's rule at the one place the flavor is decided, so that
+    // EVERY caller inherits it and none can forget it: "a hub's outbox entry for
+    // a `poll` node is `hold`-flavored. The hub never dials it, and only the
     // node's own `mailPoll` drains it" (`docs/architecture/HTTPS-MESH-API.md`
     // "Transports and relays"). [`spool_and_drain_ack`] is the caller this
-    // matters for most: it passes a literal `false`, and its ack toward a
-    // `poll` origin is held by this line rather than by an argument it would
-    // have to remember to compute.
-    let hold = hold || dest_is_never_dialled(node_name);
-    match aoide_storage::seal::usable_binding_for(node_name, &now) {
+    // matters for most: it passes a literal `false`, and its ack toward a `poll`
+    // origin is held by this line rather than by an argument it would have to
+    // remember to compute.
+    //
+    // `dest` and `next` are different questions: the container is sealed to the
+    // DESTINATION (whose binding is the one that opens it), while the entry is
+    // spooled and dialled toward the HOP the route picked (MAIL.md §Transit).
+    let hold = hold || hop_is_never_dialled(next, mesh);
+    match aoide_storage::seal::usable_binding_for(dest, &now) {
         Some(binding) => {
             let container = aoide_storage::seal::seal_envelope(
                 &envelope,
                 &binding,
                 &envelope.header.origin_mesh,
-                &envelope.header.origin_mesh,
-                node_name,
-                node_name,
+                mesh,
+                dest,
+                next,
                 &now,
             )?;
             Ok(if hold {
@@ -351,7 +365,7 @@ pub fn spool_entry(
                 OutboxEntry::sealed(envelope, container)
             })
         }
-        None if aoide_storage::seal::binding_for(node_name).is_none() => {
+        None if aoide_storage::seal::binding_for(dest).is_none() => {
             Ok(if hold { OutboxEntry::held(envelope) } else { OutboxEntry::fresh(envelope) })
         }
         None => {
@@ -372,18 +386,102 @@ pub fn spool_entry(
     }
 }
 
-/// **Is this box's destination one it must never dial** — the record's address
-/// is `poll` (`Node::never_dialled`, the design's third transport)? The ONE
-/// by-name reader of that predicate on the mail path: [`spool_entry`] holds an
-/// entry toward such a node, [`drain_node`] returns without opening a link to
-/// one, and [`pollable_nodes`] leaves it out of a bare `mail poll` — it has no
-/// inbound transport to be asked on. A node this box has no record of is NOT
-/// never-dialled (there is no address to read, and the existing
-/// "not registered" answers stand).
+/// **Is this box's hop one it must never dial** — a `poll` address, whether the
+/// box reads it off a paired record or off a declaration? The ONE by-name reader
+/// of that predicate on the mail path: [`spool_entry`] holds an entry toward such
+/// a node, [`drain_node`] returns without opening a link to one, and
+/// [`pollable_nodes`] leaves it out of a bare `mail poll` — it has no inbound
+/// transport to be asked on.
+///
+/// Two sources, one answer: a node this box has PAIRED with carries the address
+/// in its record (`Node::never_dialled`), and a hop this box holds no record for
+/// carries it in the declaration of the mesh the letter rides
+/// (`charter::dial_of`). A node neither names is NOT never-dialled — there is no
+/// address to read, and the existing "not registered" answers stand.
+fn hop_is_never_dialled(node_name: &str, mesh: &str) -> bool {
+    if dest_is_never_dialled(node_name) {
+        return true;
+    }
+    aoide_storage::routing::Declaration::load(mesh)
+        .ok()
+        .and_then(|declaration| declaration.address_of(node_name).map(str::to_string))
+        .and_then(|address| aoide_storage::charter::dial_of(&address).ok())
+        .map(|dial| matches!(dial, aoide_storage::charter::Dial::Poll))
+        .unwrap_or(false)
+}
+
+/// The record half of [`hop_is_never_dialled`]: a node this box has paired with,
+/// whose own stored address reads `poll`.
 fn dest_is_never_dialled(node_name: &str) -> bool {
     aoide_storage::node_store::load_nodes()
         .iter()
         .any(|n| n.name == node_name && n.never_dialled())
+}
+
+/// Where this box hands a letter addressed to `dest` in `mesh` — the four steps
+/// over the declarations in force, read as this box's own name in that mesh
+/// (`routing::own_name_in`: the name this box's identity key holds there, and
+/// for a PAIR mesh its own name where the mesh has no record of itself, since a
+/// pair mesh's records are all about other boxes). A CHARTER mesh that does not
+/// carry the key has no sender to read, and says `not-a-member` rather than
+/// routing the letter as whoever the hostname happens to spell.
+pub fn route_for(
+    dest: &str,
+    mesh: &str,
+) -> Result<aoide_storage::routing::Hop, aoide_storage::charter::Refusal> {
+    use aoide_storage::charter::Refusal;
+    let set = aoide_storage::routing::declarations()?;
+    let own = aoide_storage::identity::load_or_mint()
+        .map_err(|e| Refusal::new("no-identity", e.to_string()))?
+        .0
+        .info()
+        .pubkey_hex;
+    let Some(from) = aoide_storage::routing::own_name_in(&set, mesh, &own) else {
+        return Err(Refusal::new(
+            NOT_A_MEMBER,
+            format!("no line on mesh `{mesh}` carries this box's identity key"),
+        ));
+    };
+    aoide_storage::routing::Letter { from: &from, to: dest, mesh }.route(&set).outcome
+}
+
+/// The word a caller reads when this box is not a member of the mesh it was
+/// asked to send in: the same answer `mail route` gives, so the command and the
+/// lane never disagree about whether the letter has a sender.
+pub const NOT_A_MEMBER: &str = "not-a-member";
+
+/// The record a drain DIALS for `node_name`: its own record where this box holds
+/// one, else the hop's declared ADDRESS turned into a dial target
+/// (`charter::dial_of`) — which is how a charter relay this box never paired
+/// with moves mail at all. `None` for a name no record declares and no
+/// declaration addresses, and for one whose address is `poll`: that one owns no
+/// inbound transport, so a drain never dials it (its own ask moves its letters),
+/// and the caller answers "nothing to do here".
+fn dial_node(node_name: &str) -> Option<(aoide_storage::node_store::Node, bool)> {
+    let nodes = aoide_storage::node_store::load_nodes();
+    if let Some(record) = nodes.into_iter().find(|n| n.name == node_name) {
+        return Some((record, false));
+    }
+    // No record: a hop the route picked off a declaration. Its address says how
+    // to reach it and which of the three transports that is; an `ssh://` hop is
+    // dialled through its tunnel at the far side's own door
+    // (`http://127.0.0.1:<AOIDE_A2A_PORT or 8710>/`, the same loopback form a
+    // paired ssh node's record holds), and an `https://` hop at the URL itself.
+    let address = aoide_storage::routing::declarations()
+        .ok()?
+        .iter()
+        .filter_map(|loaded| loaded.declaration.as_ref().ok())
+        .find_map(|declaration| declaration.address_of(node_name).map(str::to_string))?;
+    match aoide_storage::charter::dial_of(&address).ok()? {
+        aoide_storage::charter::Dial::Https(url) => {
+            Some((aoide_storage::node_store::Node::dial_only(node_name, &url, None), true))
+        }
+        aoide_storage::charter::Dial::Ssh(via) => {
+            let url = format!("http://127.0.0.1:{}/", crate::commands::default_a2a_port());
+            Some((aoide_storage::node_store::Node::dial_only(node_name, &url, Some(&via.to_string())), true))
+        }
+        aoide_storage::charter::Dial::Poll => None,
+    }
 }
 
 /// Poll `node_name` once — the relay-first half of the model (MAIL.md §Wire,
@@ -779,8 +877,12 @@ pub fn pollable_nodes() -> Vec<String> {
 /// outcome recorded in the entry/link state instead of surfaced as an
 /// error to this function's own caller.
 pub fn drain_node(node_name: &str) -> Result<(), String> {
-    let nodes = aoide_storage::node_store::load_nodes();
-    let Some(node) = nodes.iter().find(|n| n.name == node_name) else {
+    // The node this pass dials: its own record, or — where this box holds none
+    // — the hop's declared address turned into a dial target (`dial_node`).
+    // Without that half a charter relay would be silently un-dialled: the drain
+    // would answer "nothing to do" forever while the spool filled, which is the
+    // one thing a drained-looking entry must never be.
+    let Some((node, dial_only)) = dial_node(node_name) else {
         return Ok(());
     };
     // **A `poll` node is never dialled, so a drain of one opens no link at
@@ -813,14 +915,21 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
     // `""` — a binding exchange that cannot name its mesh cannot name its
     // grant either, so it is skipped outright and said so, rather than
     // re-resolved and re-failed inside the signing path where nobody sees it.
-    let mesh = match crate::commands::request_mesh(node, None, "message") {
-        Ok(mesh) => mesh,
-        Err(e) => {
-            eprintln!("aoide: no binding exchange with `{node_name}`: {e}");
-            return Ok(());
-        }
-    };
-    let _ = exchange_bindings(node, Some(&mesh));
+    //
+    // A hop this box holds NO RECORD for (a declaration-only `dial_node`) gets
+    // no exchange at all: the binding a peer publishes is what a letter TO it is
+    // sealed with, and a transit container is sealed to the DESTINATION, so there
+    // is nothing here to ask a hop for.
+    if !dial_only {
+        let mesh = match crate::commands::request_mesh(&node, None, "message") {
+            Ok(mesh) => mesh,
+            Err(e) => {
+                eprintln!("aoide: no binding exchange with `{node_name}`: {e}");
+                return Ok(());
+            }
+        };
+        let _ = exchange_bindings(&node, Some(&mesh));
+    }
 
     let now_epoch = unix_now();
     if let Some(link) = aoide_storage::outbox::read_link_state(node_name)? {
@@ -874,7 +983,7 @@ pub fn drain_node(node_name: &str) -> Result<(), String> {
             // again. Sending it in the clear is the one wrong answer.
             Err(_) => continue,
         };
-        match attempt_deposit(node, &entry) {
+        match attempt_deposit(&node, &entry) {
             DepositAttempt::TransportFailed(reason) => {
                 // Record the attempt on the entry that actually hit the
                 // failure BEFORE backing off the link — otherwise `tries`/
@@ -1639,7 +1748,7 @@ mod tests {
 
         // 1. The spool decides HELD although the caller asked for `now`.
         let letter = aoide_storage::mail::mint_outbound_letter("alice", "laptop", "bob", "for the laptop").unwrap();
-        let entry = spool_entry("laptop", letter.clone(), false).unwrap();
+        let entry = spool_entry("laptop", "laptop", &letter.header.origin_mesh.clone(), letter.clone(), false).unwrap();
         assert!(
             entry.is_held(),
             "a `poll` destination's entry is hold-flavored whatever the caller asked for"
@@ -1813,7 +1922,7 @@ mod tests {
         // entry is plaintext and the spool holds the letter.
         let canary = "CANARY-H1-BODY-ABCDEF";
         let envelope = aoide_storage::mail::mint_outbound_letter("alice", "liveb", "bob", canary).unwrap();
-        let spooled = spool_entry("liveb", envelope, false).unwrap();
+        let spooled = spool_entry("liveb", "liveb", &envelope.header.origin_mesh.clone(), envelope, false).unwrap();
         assert!(!spooled.is_sealed(), "spooled plaintext: the binding had not arrived");
         aoide_storage::outbox::write_entry("liveb", &spooled).unwrap();
         assert!(
@@ -2087,7 +2196,7 @@ mod tests {
         // Arm 1: no binding on record — plaintext, and NOT parked. This is
         // the per-peer upgrade path, the one remaining plaintext any node
         // sends.
-        let one = spool_entry("liveb", aoide_storage::mail::mint_outbound_letter("alice", "liveb", "bob", &text(1)).unwrap(), false).unwrap();
+        let one = spool_entry("liveb", "liveb", "", aoide_storage::mail::mint_outbound_letter("alice", "liveb", "bob", &text(1)).unwrap(), false).unwrap();
         assert!(!one.is_sealed(), "no binding, so plaintext");
         assert!(!one.refused, "and plaintext is not a refusal");
 
@@ -2095,7 +2204,7 @@ mod tests {
         // bytes.
         let binding = aoide_storage::seal::publish_binding().unwrap();
         aoide_storage::seal::learn_binding("liveb", &binding).unwrap();
-        let two = spool_entry("liveb", aoide_storage::mail::mint_outbound_letter("alice", "liveb", "bob", &text(2)).unwrap(), false).unwrap();
+        let two = spool_entry("liveb", "liveb", "", aoide_storage::mail::mint_outbound_letter("alice", "liveb", "bob", &text(2)).unwrap(), false).unwrap();
         assert!(two.is_sealed(), "a usable binding seals at mint");
         assert!(!two.refused);
         assert!(!serde_json::to_string(&two).unwrap().contains(&text(2)), "and the spool is redacted");
@@ -2122,7 +2231,7 @@ mod tests {
             aoide_storage::seal::usable_binding_for("liveb", &aoide_storage::time::now_iso_utc()).is_none(),
             "but not usable"
         );
-        let three = spool_entry("liveb", aoide_storage::mail::mint_outbound_letter("alice", "liveb", "bob", &text(3)).unwrap(), false).unwrap();
+        let three = spool_entry("liveb", "liveb", "", aoide_storage::mail::mint_outbound_letter("alice", "liveb", "bob", &text(3)).unwrap(), false).unwrap();
         assert!(!three.is_sealed(), "an unusable binding is never sealed to");
         assert!(three.refused, "the entry is parked, not downgraded to plaintext");
         assert!(

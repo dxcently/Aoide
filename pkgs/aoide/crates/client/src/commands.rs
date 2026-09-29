@@ -5026,7 +5026,7 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
     // P-SEAL: the entry is built at MINT — sealed to the destination's
     // binding when one is held, plaintext when none is, parked when the one
     // held is not usable now (`mail_wire::spool_entry`).
-    let entry = match crate::mail_wire::spool_entry(node, envelope.clone(), hold) {
+    let entry = match crate::mail_wire::spool_entry(node, node, &mesh, envelope.clone(), hold) {
         Ok(entry) => entry,
         Err(e) => return Outcome::error(cmd, format!("state/outbox: {e}")),
     };

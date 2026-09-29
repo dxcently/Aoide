@@ -248,6 +248,31 @@ pub fn valid_capability(cap: &str) -> bool {
 }
 
 impl Node {
+    /// The record a node this box has never PAIRED with is dialled as: its name,
+    /// the dial target a DECLARATION gives it, its transport marker, and nothing
+    /// else. A charter node is not a paired record — no key is learned from it,
+    /// no grant is read from it, no bearer is held for it — but a drain must be
+    /// able to open a link to it, and "we have no record of it" is exactly the
+    /// silent no-op this exists to remove. `verified`/`pubkey` stay empty:
+    /// nothing here claims a pairing, so every trust question keeps its own
+    /// answer (`grant_in_mesh` reads a declaration or a record, never this).
+    pub fn dial_only(name: &str, url: &str, via: Option<&str>) -> Node {
+        Node {
+            name: name.to_string(),
+            url: url.to_string(),
+            autogate: false,
+            token_file: None,
+            bearer_secret: None,
+            hub: false,
+            pubkey: None,
+            verified: false,
+            grants: Grants::new(),
+            narrowed: Grants::new(),
+            via: via.map(str::to_string),
+            added_at: crate::time::now_iso_utc(),
+        }
+    }
+
     /// This record's grant in `mesh` — the empty slice when it holds nothing
     /// there, which is also what a node in no mesh at all answers. Pure; the
     /// door wraps this in a `Grant` behind `grant_in_mesh` so no policy site
