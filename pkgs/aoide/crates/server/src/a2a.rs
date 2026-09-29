@@ -148,10 +148,11 @@ const SEALED_REQUIRED: &str = "sealed-required";
 /// (MAIL.md §Status: "no mail served with the declaration unloadable"). A
 /// broken zone table means no zone check can run, and no zone check means no
 /// mail — never "mail with the walls down". It is a refused RESULT, like
-/// [`SEALED_REQUIRED`], so a drain parks the entry rather than reading it as a
-/// dead link. One source, in the crate the SENDER shares
-/// (`aoide_storage::charter::CONFIG_INVALID`), because the sender classifies it:
-/// this word is a LINK state, not a verdict on the letter (user ruling D7).
+/// [`SEALED_REQUIRED`], and the SENDER treats it as a state of the LINK, never a
+/// verdict on the letter (user ruling D7): the entry stays live and retries on
+/// the ordinary back-off. One source, in the crate both ends share
+/// (`aoide_storage::charter::CONFIG_INVALID`), because the sender classifies it
+/// by this word.
 const CONFIG_INVALID: &str = aoide_storage::charter::CONFIG_INVALID;
 
 /// What an unloadable declaration says ON THE WIRE: fixed text, and nothing else.
