@@ -3253,7 +3253,15 @@ mod review_fix_tests {
     /// crossing is the zone wall. Reading the file directly — outside the
     /// validated set — is what would wave it through.
     #[test]
-    fn a_one_sided_gate_refused_by_the_set_does_not_let_the_walk_accept_the_crossing() {
+    /// **A one-sided gate in a pair mesh refuses the whole set, before any walk.**
+    /// `validate_pair_transit` catches it while the config loads, so
+    /// `declarations()` refuses everything with `config-unreadable` — fail closed,
+    /// and no chain is ever walked. (A CHARTER one-sided gate is refused per mesh
+    /// instead; `a_one_sided_gate_refused_by_the_set_answers_no_crossing` in
+    /// `routing` pins that the crossing question reads that refusal, and
+    /// `a_gate_crossing_the_declarations_allow_walks` here pins the positive.)
+    #[test]
+    fn a_one_sided_gate_in_a_pair_mesh_refuses_the_set_before_any_walk() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
         let dir = aoide_test_support::unique_tmp("seal-one-sided-gate");
@@ -3269,14 +3277,77 @@ mod review_fix_tests {
         )
         .unwrap();
 
-        // A one-sided gate in a PAIR mesh is refused when the config loads, so the
-        // set refuses as a whole (`config-unreadable`): nothing routes in any mesh
-        // whose table cannot be read, which is the fail-closed direction. A
-        // CHARTER one-sided gate is refused per mesh by `set_verdicts`, and
-        // `a_one_sided_gate_refused_by_the_set_answers_no_crossing` (routing) pins
-        // that the crossing question reads the refusal either way.
         let refusal = crate::routing::declarations().unwrap_err();
         assert_eq!(refusal.reason, crate::charter::CONFIG_UNREADABLE, "{refusal}");
+    }
+
+    /// **A crossing the declarations DO allow walks** — the positive half of the
+    /// zone clause, and the only storage test that reaches
+    /// `routing::gate_in`. `alpha` declares `beta = "gate"` and `beta` answers it
+    /// back; the box IS that gate (both meshes carry this process's identity key
+    /// under that name), so the second entry — signed in `beta`, by `gate` — is a
+    /// legitimate crossing. Stubbing `gate_in` to `if false` makes this walk
+    /// refuse `zone-violation` and the test fail, which is what pins the check.
+    #[test]
+    fn a_gate_crossing_the_declarations_allow_walks() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let dir = aoide_test_support::unique_tmp("seal-gate-walks");
+        std::fs::create_dir_all(&dir).unwrap();
+        env(&dir);
+
+        std::fs::write(
+            crate::config::source().path,
+            "[mesh.alpha]\n[mesh.alpha.nodes]\ngate = \"ssh://gate\"\norigin = \"ssh://origin\"\n\
+             [mesh.alpha.gates]\nbeta = \"gate\"\n\
+             [mesh.beta]\n[mesh.beta.nodes]\ngate = \"ssh://gate\"\nfar = \"ssh://far\"\n\
+             [mesh.beta.gates]\nalpha = \"gate\"\n",
+        )
+        .unwrap();
+        crate::config::load().unwrap();
+
+        let (kp, _) = identity::load_or_mint().unwrap();
+        let me = kp.info().pubkey_hex.clone();
+        let record = |node: &str, key: String| node_store::Node {
+            name: node.to_string(),
+            url: "ssh://self".to_string(),
+            autogate: false,
+            token_file: None,
+            bearer_secret: None,
+            hub: false,
+            pubkey: Some(key),
+            verified: true,
+            grants: node_store::grants_in("alpha", &["message"]),
+            narrowed: node_store::Grants::new(),
+            via: None,
+            added_at: "2026-09-07T00:00:00Z".to_string(),
+        };
+        let mut in_beta = record("gate", me.clone());
+        in_beta.grants = node_store::grants_in("beta", &["message"]);
+        // One key, two names — the same box on both sides of the gate; `far` is a
+        // stranger in `beta`, which is what the crossing reaches.
+        node_store::save_nodes(&[record("gate", me.clone()), in_beta, record("origin", me), record("far", "d4d4d4d4".repeat(8))]).unwrap();
+
+        let set = crate::routing::declarations().unwrap();
+        let binding = publish_binding().unwrap();
+        let envelope = mail::mint_outbound_letter_from("gate", "alice", "far", "bob", "across the gate", "alpha").unwrap();
+        let container = seal_envelope(&envelope, &binding, "alpha", "alpha", "far", "gate", &now_iso_utc()).unwrap();
+        let (msgid, prev) = chain_tail(&container).unwrap();
+        let at = now_iso_utc();
+        let mut forwarded = container.clone();
+        forwarded.transit.push(TransitEntry {
+            node: "gate".to_string(),
+            next: "gate".to_string(),
+            at: at.clone(),
+            mesh: "beta".to_string(),
+            sig: wire_auth::sign_hex(&kp, &hop_bytes(&msgid, &prev, "gate", "gate", &at, "beta")),
+        });
+
+        let ctx = Ctx::from_container(&forwarded).unwrap();
+        match walk_chain(&forwarded, &ctx, "beta", &set) {
+            Ok(()) => {}
+            Err(refusal) => panic!("a declared gate's crossing must walk: {refusal}"),
+        }
     }
 
     /// **A joined charter mesh with no charter in force names nobody.** The box
