@@ -1104,6 +1104,100 @@ fn a_letter_the_poller_already_has_is_acknowledged_and_the_hub_retires_it() {
     );
 }
 
+/// **The chain's last hop must be the node that deposited it.** `osaka` is a
+/// member of `home` and hands evo a container that `sakaki` — not `osaka` —
+/// signed the last hop of: whatever the connection proved, it did not prove this,
+/// and the door refuses `broken-chain` before anything is filed or hopped.
+#[test]
+fn a_deposit_whose_last_hop_is_someone_else_is_refused() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("not-my-hop");
+    let _doors = fx.doors(&["osaka", "sakaki", "evo"]);
+
+    // osaka spools a letter for chiyo; sakaki carries it on (its own hop entry
+    // is now the LAST one) and holds it for chiyo.
+    fx.enter("osaka");
+    let sent = dispatch(&cli_invocation(
+        &["mail", "send"],
+        &["someone else's custody"],
+        &[("to", "chiyo/conductor"), ("json", "true")],
+    ));
+    assert_eq!(sent.status, Status::Ok, "{}", sent.message);
+    record_for_door(&fx.boxes["sakaki"], "sakaki", "osaka", fx.ports["osaka"]);
+    let pulled = aoide_client::mail_wire::poll_node("osaka", None).unwrap();
+    assert!(pulled.refused.is_empty(), "{:?}", pulled.refused);
+    fx.enter("sakaki");
+    let forwarded = aoide_storage::outbox::list_entries("chiyo").unwrap()[0].container.clone().unwrap();
+
+    // osaka hands that SAME container to `evo`'s door — signed as itself, while
+    // the chain's last hop is `sakaki`'s.
+    fx.enter("osaka");
+    let answer = door_post(fx.ports["evo"], "osaka", HOME, "aoide/mailDeposit", serde_json::json!({ "container": forwarded }));
+    let result = &answer["result"];
+    assert_eq!(result["status"], "refused", "{answer}");
+    assert_eq!(result["reason"], aoide_storage::seal::BROKEN_CHAIN, "{answer}");
+    assert!(
+        result["detail"].as_str().unwrap().contains("sakaki"),
+        "and it names whose hop it was: {answer}"
+    );
+    let log = std::fs::read_to_string(fx.boxes["evo"].join("log")).unwrap_or_default();
+    assert!(log.contains(aoide_storage::seal::BROKEN_CHAIN), "audited: {log}");
+}
+
+/// The same binding on the PULL side: a relay offers a container whose last hop
+/// is SOMEONE ELSE's — `osaka` minted it straight for `chiyo`, and `sakaki` is
+/// handing it over as if it were its own custody. The poller refuses it
+/// `broken-chain` and reports it, rather than taking a hop somebody else signed.
+#[test]
+fn a_polled_container_whose_last_hop_is_someone_else_is_refused() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("poll-not-my-hop");
+    let _doors = fx.doors(&["sakaki", "chiyo"]);
+
+    // osaka's own container for chiyo — entry 1 is osaka's, and it names chiyo as
+    // the hop — planted in SAKAKI's spool toward chiyo, so the relay is offering
+    // custody it never signed for.
+    fx.enter("osaka");
+    let chiyo_binding = aoide_storage::charter::governing(HOME).unwrap().nodes["chiyo"].age.clone();
+    let envelope = aoide_storage::mail::mint_outbound_letter_from(
+        "osaka",
+        "alice",
+        "chiyo",
+        "bob",
+        "not the relay's custody",
+        HOME,
+    )
+    .unwrap();
+    let container = aoide_storage::seal::seal_envelope(
+        &envelope,
+        &chiyo_binding,
+        HOME,
+        HOME,
+        "chiyo",
+        "chiyo",
+        &aoide_storage::time::now_iso_utc(),
+    )
+    .unwrap();
+    let msgid = container.msgid.clone();
+    fx.enter("sakaki");
+    aoide_storage::outbox::write_entry(
+        "chiyo",
+        &aoide_storage::outbox::OutboxEntry::sealed_held(envelope, container),
+    )
+    .unwrap();
+
+    fx.enter("chiyo");
+    record_for_door(&fx.boxes["chiyo"], "chiyo", "sakaki", fx.ports["sakaki"]);
+    let asked = aoide_client::mail_wire::poll_node("sakaki", None).unwrap();
+    assert_eq!(asked.filed, 0, "nothing is taken from a hop that is not the relay's: {:?}", asked.refused);
+    assert!(
+        asked.refused.iter().any(|line| line.contains(&msgid) && line.contains(aoide_storage::seal::BROKEN_CHAIN)),
+        "and the refusal names it: {:?}",
+        asked.refused
+    );
+    assert!(aoide_storage::mail::read_base().unwrap().is_empty(), "nothing is filed");
+}
+
 /// A chain truncated by dropping the tail never reaches the destination: the last
 /// hop still in it hands the letter to `sakaki`, so `chiyo` refuses it
 /// (`broken-chain`) and owes no ack — the letter is on no mailbox, and the
