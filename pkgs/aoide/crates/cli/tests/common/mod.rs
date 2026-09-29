@@ -154,6 +154,39 @@ pub fn door_post(
     method: &str,
     params: serde_json::Value,
 ) -> serde_json::Value {
+    door_post_with(port, from, mesh, method, params, false)
+}
+
+/// [`door_post`], with the request's signature CORRUPTED after it is computed —
+/// the wire's "signature verification failed" case, and the only way a test can
+/// make the door disbelieve an otherwise well-formed caller.
+pub fn door_post_tampered(
+    port: u16,
+    from: &str,
+    mesh: &str,
+    method: &str,
+    params: serde_json::Value,
+) -> serde_json::Value {
+    door_post_with(port, from, mesh, method, params, true)
+}
+
+/// The same signature with its last hex digit changed: well-formed hex that
+/// cannot verify.
+fn flip_last_hex(sig: &str) -> String {
+    let mut out = sig.to_string();
+    let last = out.pop().unwrap();
+    out.push(if last == '0' { '1' } else { '0' });
+    out
+}
+
+fn door_post_with(
+    port: u16,
+    from: &str,
+    mesh: &str,
+    method: &str,
+    params: serde_json::Value,
+    tamper: bool,
+) -> serde_json::Value {
     use std::io::{Read, Write};
     let body = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }).to_string();
     let ts = aoide_storage::time::now_iso_utc();
@@ -168,6 +201,7 @@ pub fn door_post(
     );
     let signing = aoide_storage::identity::load_or_mint().unwrap().0;
     let sig = aoide_storage::wire_auth::sign_hex(&signing, canonical.as_bytes());
+    let sig = if tamper { flip_last_hex(&sig) } else { sig };
     let request = format!(
         "POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{}: {}\r\n{}: {}\r\n{}: {}\r\n{}: {}\r\n{}Connection: close\r\n\r\n{}",
         body.len(),

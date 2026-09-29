@@ -149,8 +149,10 @@ const SEALED_REQUIRED: &str = "sealed-required";
 /// broken zone table means no zone check can run, and no zone check means no
 /// mail — never "mail with the walls down". It is a refused RESULT, like
 /// [`SEALED_REQUIRED`], so a drain parks the entry rather than reading it as a
-/// dead link.
-const CONFIG_INVALID: &str = "config-invalid";
+/// dead link. One source, in the crate the SENDER shares
+/// (`aoide_storage::charter::CONFIG_INVALID`), because the sender classifies it:
+/// this word is a LINK state, not a verdict on the letter (user ruling D7).
+const CONFIG_INVALID: &str = aoide_storage::charter::CONFIG_INVALID;
 
 /// The address the mail adapter binds, ever and only. There is deliberately no
 /// `--bind`, no `aoide.mail.adapter.bindAddress` and no env var beside this
@@ -5183,6 +5185,67 @@ fn handle_jsonrpc(req: &Value, ctx: &RequestCtx) -> Value {
     serde_json::to_value(&resp).expect("JsonRpcResponse always serializes")
 }
 
+/// The JSON-RPC `id` a request body carries, read once for the one answer the
+/// door writes before dispatch. `null` for a body that does not parse — the same
+/// value [`JsonRpcResponse::ok`] takes for an id-less call.
+fn request_id(body: &[u8]) -> Value {
+    serde_json::from_slice::<Value>(body)
+        .ok()
+        .and_then(|v| v.get("id").cloned())
+        .unwrap_or(Value::Null)
+}
+
+/// The JSON-RPC method a request body names, where it is one of the two MAIL
+/// methods — the only two the door answers from the declaration set.
+/// `req.method` is the HTTP verb, so the name comes from the body, read once
+/// here and once more by the dispatcher that would have run.
+fn mail_method_of(body: &[u8]) -> Option<&'static str> {
+    let named = serde_json::from_slice::<Value>(body).ok()?;
+    match named.get("method").and_then(Value::as_str)? {
+        "aoide/mailDeposit" => Some("aoide/mailDeposit"),
+        "aoide/mailPoll" => Some("aoide/mailPoll"),
+        _ => None,
+    }
+}
+
+/// **The cryptographic half of the door's signature ladder, without the half
+/// that needs the declaration set** (user ruling D8): `Some(detail)` — the
+/// refusal to answer a mail method with — when the set will not load, the request
+/// names a mesh and a node, and its signature verifies under the key the charter
+/// IN FORCE for that mesh gives that node. Every other case is `None`, which
+/// leaves the door's own `-32007` standing: a genuinely bad signature, a pair
+/// mesh (its keys need no declaration and would have resolved), or a node the
+/// charter does not name. One file read, and the audit line it writes under the
+/// method's own label.
+fn mail_unloadable_declaration(req: &HttpRequest, method: &str, audit_log: &Path) -> Option<String> {
+    let refusal = aoide_storage::routing::declarations().err()?;
+    let mesh = req.signed_mesh.as_deref()?;
+    let node = req.signed_node.as_deref()?;
+    let timestamp = req.signed_timestamp.as_deref()?;
+    let nonce = req.signed_nonce.as_deref()?;
+    let signature = req.signed_signature.as_deref()?;
+    let text = std::fs::read_to_string(aoide_storage::charter::in_force_path(mesh)).ok()?;
+    let charter = aoide_storage::charter::parse(&text).ok()?;
+    if charter.mesh != mesh {
+        return None;
+    }
+    let line = charter.nodes.get(node)?;
+    let canonical = aoide_storage::wire_auth::canonical_string(
+        &req.method,
+        &req.path,
+        timestamp,
+        nonce,
+        &req.body,
+        Some(mesh),
+    );
+    if !aoide_storage::wire_auth::verify_signature_hex(&line.key, canonical.as_bytes(), signature) {
+        return None;
+    }
+    let detail = format!("{CONFIG_INVALID}: {refusal}");
+    let _ = audit(audit_log, Door::A2a, EventClass::Audit, method, "invalid", &detail);
+    Some(detail)
+}
+
 fn jsonrpc_error_value(code: i64, message: impl Into<String>) -> Value {
     serde_json::to_value(JsonRpcResponse::err(Value::Null, code, message))
         .expect("JsonRpcResponse always serializes")
@@ -6733,6 +6796,28 @@ fn handle_connection(
             Some((resolved, key, mesh))
         }
         SignedRequestOutcome::Refused(code, message) => {
+            // **The two mail methods read `config-invalid`, not a lie about their
+            // caller** (user ruling D8). When this host's declaration set will not
+            // load, what failed is RESOLUTION — the declarations that name people
+            // are the ones this host cannot read — so `-32007 signature
+            // verification failed` both blames a caller who may be perfectly
+            // honest and hides the host's own broken state. The signature is
+            // checked CRYPTOGRAPHICALLY here, against the key the node the request
+            // itself names holds on the charter in force; only then is
+            // `config-invalid` the answer, and the method is never dispatched with
+            // an unresolved caller. Every other case keeps `-32007`.
+            if code == -32007 {
+                if let Some(method) = mail_method_of(&req.body) {
+                    if let Some(detail) = mail_unloadable_declaration(&req, method, audit_log) {
+                        let body_val = JsonRpcResponse::ok(
+                            request_id(&req.body),
+                            json!({ "status": "refused", "reason": CONFIG_INVALID, "detail": detail }),
+                        );
+                        let body = serde_json::to_vec(&body_val).unwrap_or_default();
+                        return write_http_response(&mut writer, 200, &body);
+                    }
+                }
+            }
             let body_val = jsonrpc_error_value(code, message.clone());
             let body = serde_json::to_vec(&body_val).unwrap_or_default();
             let _ = audit(

@@ -74,6 +74,15 @@ pub const OPERATOR_MISMATCH: &str = "operator-mismatch";
 /// `config.toml` exists and could not be honoured, so which operator key this
 /// host trusts is unknowable. Never a missing file (that is defaults).
 pub const CONFIG_UNREADABLE: &str = "config-unreadable";
+
+/// The word the DOOR refuses the two mail methods with when the declaration set
+/// will not load (MAIL.md §Status: "no mail served with the declaration
+/// unloadable"). It lives here, in the crate both ends share, because the
+/// SENDER classifies it: a `config-invalid` refusal is a state of the LINK, not a
+/// verdict on the letter — its entry stays live and retries on the ordinary
+/// back-off (user ruling D7) — which is what `mail_wire`'s own classifier reads
+/// this constant for.
+pub const CONFIG_INVALID: &str = "config-invalid";
 /// The charter itself was fine; THIS node could not read or write its own
 /// state (the mesh's lock, `charter.toml`, its `.sig`, `trust.json`). A
 /// distinct word from the four above because it says nothing about the

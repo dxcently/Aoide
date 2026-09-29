@@ -8,7 +8,7 @@
 
 mod common;
 
-use common::{fixture, env_lock, door_post, AWAY, HOME, ONE_SIDED_GATE, TWO_KEYS};
+use common::{fixture, env_lock, door_post, door_post_tampered, AWAY, HOME, ONE_SIDED_GATE, TWO_KEYS};
 
 use aoide::dispatch::{dispatch, Invocation};
 use aoide_protocol::output::Status;
@@ -1355,27 +1355,11 @@ fn an_unloadable_declaration_refuses_both_mail_methods_and_nothing_else() {
     );
     std::fs::write(fx.boxes["osaka"].join("config.toml"), config).unwrap();
 
-    // A caller still has to RESOLVE before the method runs, and a broken config
-    // takes the charter rung away with it (that rung is a config question) — so
-    // the caller's own verified record is what proves it here. The registry rung
-    // reads no config at all.
-    fx.enter("yomi");
-    let yomi_key = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
-    fx.enter("osaka");
-    let mut nodes = aoide_storage::node_store::load_nodes();
-    aoide_storage::node_store::upsert_paired_node(
-        &mut nodes,
-        "yomi",
-        "http://127.0.0.1:1/",
-        &yomi_key,
-        &aoide_storage::time::now_iso_utc(),
-        &["message".to_string()],
-        HOME,
-    );
-    aoide_storage::node_store::save_nodes(&nodes).unwrap();
-
-    // `door_post` signs as the box this process is entered on, so the caller is
-    // `yomi` and the request must be made FROM yomi's box.
+    // A CHARTER-ONLY caller: `yomi` holds a line on `home` and no `nodes.json`
+    // record on osaka. Its signature checks out cryptographically under that
+    // line's key, so what the door owes it is the host's own broken state — the
+    // declaration set it cannot load — and NOT a claim about `yomi` (user ruling
+    // D8).
     fx.enter("yomi");
     let deposit = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/mailDeposit", serde_json::json!({ "container": {} }));
     assert_eq!(deposit["result"]["status"], "refused", "{deposit}");
@@ -1385,18 +1369,21 @@ fn an_unloadable_declaration_refuses_both_mail_methods_and_nothing_else() {
     assert_eq!(poll["result"]["status"], "refused", "{poll}");
     assert_eq!(poll["result"]["reason"], "config-invalid", "{poll}");
 
-    // Every other method is untouched: a method outside the mail lane is
-    // dispatched normally, and only the two mail methods ever read the
-    // declarations. (`aoide/binding` is NOT a probe for this — it rides the
-    // mail lane and reads the charter to resolve its caller's grant.)
-    let other = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/notAMethod", serde_json::json!({}));
-    assert!(!other["error"].is_null(), "the door still answers a non-mail method: {other}");
-    let message = other["error"]["message"].as_str().unwrap_or_default();
-    assert!(!message.contains("config-invalid"), "and not with the mail lane's word: {other}");
+    // **A signature that does NOT check out keeps `-32007`.** The ruling is
+    // "once the signature checks out cryptographically"; a forged one is forged
+    // whatever this host's config says.
+    let forged = door_post_tampered(fx.ports["osaka"], "yomi", HOME, "aoide/mailDeposit", serde_json::json!({ "container": {} }));
+    assert_eq!(forged["error"]["code"], serde_json::json!(-32007), "{forged}");
+
+    // **And a method that is not one of the two mail methods is unchanged**: it
+    // still reads `-32007`, because nothing about it is answered from the
+    // declaration set.
+    let other = door_post(fx.ports["osaka"], "yomi", HOME, "aoide/binding", serde_json::json!({}));
+    assert_eq!(other["error"]["code"], serde_json::json!(-32007), "a non-mail method is unchanged: {other}");
 
     let log = std::fs::read_to_string(fx.boxes["osaka"].join("log")).unwrap_or_default();
     assert!(
-        log.contains("config-invalid") && log.contains("a2a.aoide/mailPoll"),
+        log.contains("config-invalid") && log.contains("aoide/mailPoll"),
         "the host's own log says why, under the method's label: {log}"
     );
 }
