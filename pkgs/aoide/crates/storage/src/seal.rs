@@ -1425,22 +1425,30 @@ impl std::fmt::Debug for ContainerOutcome {
 ///
 /// **Who the container belongs to is not this comparison's business any more.**
 /// The mesh a deposit is made in is the one the depositing hop SIGNED for, and
-/// what proves the letter may ride it is the hop chain ([`walk_chain_with`]'s
-/// zone clause): the last hop signed that zone, and every crossing was signed by
+/// `aoide/mailDeposit`'s sealed half: verify the container and hand the inner
+/// envelope back for filing — or, when this box is not the destination, answer
+/// the hop that carries it on.
+///
+/// Every read it makes is a per-request one — the declarations, the origin's key
+/// and this box's own name all come from what is on disk NOW — and the mesh rule
+/// it applies is the hop chain's own zone clause (`walk_chain_with`): the last
+/// hop signed the zone this deposit is made in, and every crossing was signed by
 /// the mesh's declared gate. `container.mesh` is hop-mutable and read by nobody
 /// here.
-/// `aoide/mailDeposit`'s sealed half (P-SEAL): verify the container and hand
-/// the inner envelope back for filing — or, when this box is not the
-/// destination, return the hop that carries it on. Every read it makes is a
-/// per-request one: the declarations, the origin's key and this box's own name
-/// all come from what is on disk NOW, so a declaration change takes effect on
-/// the next deposit with no reload.
+///
+/// **A declaration set that will not load is a refusal, not an internal error**,
+/// and the load happens only where a declaration is actually read: a `charter`
+/// letter is applied from its own payload and needs no set at all, so an
+/// unreadable config never blocks one.
 pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<ContainerOutcome, String> {
     let refusal = |reason: &str, detail: String| ContainerOutcome::Refused {
         reason: reason.to_string(),
-        detail,
+        detail: detail,
     };
-    let set = crate::routing::declarations().map_err(|r| format!("{}: {}", r.reason, r.detail))?;
+    let refusal_of = |r: &crate::charter::Refusal| ContainerOutcome::Refused {
+        reason: r.reason.clone(),
+        detail: r.detail.clone(),
+    };
 
     // 2. Recompute ctx from the outer fields, never from the wire.
     if container.v != CONTAINER_VERSION {
@@ -1478,6 +1486,17 @@ pub fn deposit_container(container: &Container, request_mesh: &str) -> Result<Co
     if container.purpose == PURPOSE_CHARTER {
         return deposit_charter(container, &ctx, &ct, &sig, request_mesh);
     }
+
+    // 3. The declarations, read ONCE for this deposit — and only here, past the
+    //    branch that does not need them. A set that will not load is the
+    //    depositing hop's business, answered with the word that says why
+    //    (`config-unreadable`, a charter that cannot be read) rather than an
+    //    internal error: it is a refusal, and no key can be resolved from a
+    //    declaration this box could not validate.
+    let set = match crate::routing::declarations() {
+        Ok(set) => set,
+        Err(refusal) => return Ok(refusal_of(&refusal)),
+    };
 
     // 3. The outer origin signature, under the key `origin.key` names,
     //    resolved through the declaration of the mesh the ORIGIN signed in
@@ -3362,6 +3381,34 @@ mod review_fix_tests {
             other => panic!("a peer the mesh grants is a peer whose deposit verifies: {other:?}"),
         }
     }
+    /// **A declaration set that will not load is a refusal, and only where it is
+    /// read.** A malformed `config.toml` used to turn every sealed deposit into
+    /// an internal error (`-32603`), and it was read before the branch that
+    /// applies a charter letter — which needs no set at all. Now the load sits
+    /// past that branch and answers the taught word.
+    #[test]
+    fn an_unreadable_declaration_refuses_a_sealed_deposit_with_its_own_word() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let dir = aoide_test_support::unique_tmp("seal-config-unreadable");
+        std::fs::create_dir_all(&dir).unwrap();
+        env(&dir);
+
+        let binding = publish_binding().unwrap();
+        let me = crate::display::local_node_name();
+        let envelope = mail::mint_outbound_letter("alice", &me, "bob", "unreadable config").unwrap();
+        let container = seal_envelope(&envelope, &binding, "home", "home", &me, &me, &now_iso_utc()).unwrap();
+        // The config is there and cannot be parsed.
+        std::fs::write(crate::config::source().path, "[pairing]\nhomeMesh = \n").unwrap();
+
+        match super::deposit_container(&container, "home").unwrap() {
+            ContainerOutcome::Refused { reason, detail } => {
+                assert_eq!(reason, crate::charter::CONFIG_UNREADABLE, "{detail}");
+            }
+            other => panic!("a set that will not load refuses, it does not fail internally: {other:?}"),
+        }
+    }
+
     /// L7: "Already-filed letters survive loss of the age key" — structurally
     /// true because `base.jsonl` holds the opened envelope in plaintext, and
     /// asserted here rather than assumed.
