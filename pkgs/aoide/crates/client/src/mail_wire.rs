@@ -348,7 +348,15 @@ pub fn spool_entry(
     // DESTINATION (whose binding is the one that opens it), while the entry is
     // spooled and dialled toward the HOP the route picked (MAIL.md §Transit).
     let hold = hold || hop_is_never_dialled(next, mesh);
-    match aoide_storage::seal::usable_binding_for(dest, &now) {
+    // **Where a destination's age key comes from**: the one this box LEARNT
+    // (a signed exchange with a node it paired with), else the one the mesh
+    // DECLARES for it — a charter line carries every node's `age` key, which is
+    // how a sender that never paired with the destination can seal to it at all.
+    // A declared line is verified exactly as a learnt binding is (against that
+    // line's own identity key, which the operator signed).
+    let binding = aoide_storage::seal::usable_binding_for(dest, &now)
+        .or_else(|| declared_binding(dest, mesh, &now));
+    match binding {
         Some(binding) => {
             let container = aoide_storage::seal::seal_envelope(
                 &envelope,
@@ -365,7 +373,11 @@ pub fn spool_entry(
                 OutboxEntry::sealed(envelope, container)
             })
         }
-        None if aoide_storage::seal::binding_for(dest).is_none() => {
+        // No binding anywhere: the per-peer upgrade path, and the only
+        // plaintext a node still sends.
+        None if aoide_storage::seal::binding_for(dest).is_none()
+            && !declares_a_binding(dest, mesh) =>
+        {
             Ok(if hold { OutboxEntry::held(envelope) } else { OutboxEntry::fresh(envelope) })
         }
         None => {
@@ -408,6 +420,42 @@ fn hop_is_never_dialled(node_name: &str, mesh: &str) -> bool {
         .and_then(|address| aoide_storage::charter::dial_of(&address).ok())
         .map(|dial| matches!(dial, aoide_storage::charter::Dial::Poll))
         .unwrap_or(false)
+}
+
+/// The age binding the mesh DECLARES for `dest`, if it is usable now — a charter
+/// line's own `age` key, verified under that line's identity key
+/// (`seal::verify_binding`, the same check [`aoide_storage::seal::learn_binding`]
+/// makes against a pinned record) and inside its window. `None` for a pair mesh
+/// (a record is not a source for a binding), for a line that fails its own
+/// signature, and for one that is expired or not yet valid — which is the parking
+/// arm in [`spool_entry`], never a downgrade to plaintext.
+fn declared_binding(
+    dest: &str,
+    mesh: &str,
+    now: &str,
+) -> Option<aoide_storage::seal::Binding> {
+    let declaration = aoide_storage::routing::Declaration::load(mesh).ok()?;
+    let binding = declaration.binding_of(dest)?.clone();
+    let key = declaration.key_of(dest)?;
+    if !aoide_storage::seal::verify_binding(&binding, Some(key)) {
+        return None;
+    }
+    if aoide_storage::seal::binding_expired(&binding, now)
+        || aoide_storage::seal::binding_not_yet_valid(&binding, now)
+    {
+        return None;
+    }
+    Some(binding)
+}
+
+/// Does the mesh declare an age binding for `dest` at all — usable or not? The
+/// question [`spool_entry`]'s parking arm asks, so a destination whose declared
+/// binding is expired is held rather than sent in the clear.
+fn declares_a_binding(dest: &str, mesh: &str) -> bool {
+    aoide_storage::routing::Declaration::load(mesh)
+        .ok()
+        .and_then(|declaration| declaration.binding_of(dest).map(|_| ()))
+        .is_some()
 }
 
 /// The record half of [`hop_is_never_dialled`]: a node this box has paired with,

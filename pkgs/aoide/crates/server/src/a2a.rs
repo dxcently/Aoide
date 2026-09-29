@@ -3778,7 +3778,15 @@ fn mail_poll(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, String)> {
         match aoide_storage::outbox::hand_over(&poller, &offered.msgid)
             .map_err(|e| (-32603_i64, format!("internal error: {e}")))?
         {
-            aoide_storage::outbox::HandOver::Container(container) => containers.push(*container),
+            aoide_storage::outbox::HandOver::Container(container) => {
+                // A hub's own custody ends with the hand-over: the ask IS the
+                // acceptance for a `poll` hop (`retire_transit_handover` retires
+                // a `transit` entry and nothing else), so a relay does not hold
+                // a copy of every letter it ever handed to a poller.
+                let msgid = container.msgid.clone();
+                containers.push(*container);
+                let _ = aoide_storage::outbox::retire_transit_handover(&poller, &msgid);
+            }
             aoide_storage::outbox::HandOver::Envelope(envelope) => {
                 if ctx.sealed_only {
                     withheld.push(json!({

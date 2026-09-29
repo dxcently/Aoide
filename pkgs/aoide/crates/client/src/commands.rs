@@ -4986,9 +4986,13 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
         };
     }
 
-    match aoide_storage::node_store::load_nodes().iter().find(|p| p.name == node) {
-        Some(p) if p.verified => {}
-        Some(_) => {
+    // A node this box has a RECORD of must be paired (the P-M2 rule: mail to a
+    // registered-but-unverified peer is refused before anything touches the
+    // spool). A node it holds NO record of is a charter node: the declarations
+    // decide whether it has a route at all, and a destination that has one has a
+    // send — that is what makes a charter mesh work without pairing.
+    if let Some(registered) = aoide_storage::node_store::load_nodes().iter().find(|p| p.name == node) {
+        if !registered.verified {
             return Outcome::error(
                 cmd,
                 format!(
@@ -4997,10 +5001,6 @@ fn handle_mail_send(inv: &Invocation) -> Outcome {
                 ),
             )
             .with_data(json!({ "reason": "unpaired-node", "name": node }));
-        }
-        None => {
-            return Outcome::error(cmd, format!("no node named `{node}`"))
-                .with_data(json!({ "reason": "unknown-node", "name": node }));
         }
     }
 
@@ -9300,6 +9300,69 @@ mod tests {
 
         let names = handle_mail_names(&mail_inv(&["mail"], &[]));
         assert_eq!(names.data.unwrap()["names"], json!([]), "a refused name must never be filed");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `mail send` reads the four steps BEFORE it mints (MAIL.md §Transit): with
+    /// a mesh declared, a letter for a node that only a relay can serve is
+    /// spooled toward that relay — the container stays addressed to the
+    /// destination — and a destination no declaration names is refused at send
+    /// time with nothing written.
+    #[test]
+    fn mail_send_spools_toward_the_hop_a_declaration_names() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-routes");
+
+        std::fs::write(
+            aoide_storage::config::source().path,
+            "[pairing]\nhomeMesh = \"family\"\n\n\
+             [mesh.family]\nrelays = [\"relay\"]\n\n\
+             [mesh.family.nodes]\nrelay = \"ssh://relay\"\ndave = \"ssh://dave\"\n",
+        )
+        .unwrap();
+        aoide_storage::config::load().unwrap();
+
+        let me = aoide_storage::display::local_node_name();
+        let key = |tag: &str| format!("{tag}{tag}{tag}{tag}").repeat(4);
+        let mine = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
+        let node = |name: &str, url: &str, key: String| aoide_storage::node_store::Node {
+            name: name.to_string(),
+            url: url.to_string(),
+            autogate: false,
+            token_file: None,
+            bearer_secret: None,
+            hub: false,
+            pubkey: Some(key),
+            verified: true,
+            grants: aoide_storage::node_store::grants_in("family", &["message"]),
+            narrowed: aoide_storage::node_store::Grants::new(),
+            via: None,
+            added_at: "2026-09-07T00:00:00Z".to_string(),
+        };
+        // `dave` is DECLARED but not yet paired — so no key of its own is on
+        // record, and this box cannot hand it a letter directly. The relay can.
+        aoide_storage::node_store::save_nodes(&[
+            node(&me, "ssh://self", mine),
+            node("relay", "ssh://relay", key("b2")),
+        ])
+        .unwrap();
+
+        let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "dave/bob")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        let data = out.data.unwrap();
+        assert_eq!(data["next"], "relay", "`dave` polls, so its relay carries it");
+        assert_eq!(data["nextMesh"], "family");
+        let spooled = aoide_storage::outbox::list_entries("relay").unwrap();
+        assert_eq!(spooled.len(), 1, "spooled toward the hop the route picked");
+        assert_eq!(spooled[0].envelope.header.to.node, "dave", "and still addressed to the destination");
+        assert!(!spooled[0].is_sealed(), "`dave` holds no binding anywhere, so the direct lane is plaintext");
+
+        // A destination no declaration names: refused before anything is written.
+        let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "ghost/bob")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{}", out.message);
+        assert_eq!(out.data.unwrap()["reason"], "unknown-node");
+        assert!(aoide_storage::outbox::list_entries("ghost").unwrap().is_empty());
 
         let _ = std::fs::remove_dir_all(&root);
     }

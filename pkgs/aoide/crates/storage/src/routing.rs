@@ -386,6 +386,21 @@ impl Declaration {
         }
     }
 
+    /// The age binding `node` publishes IN THIS MESH — a charter line's own
+    /// `age` key (the nodelist carrying identity, MAIL.md §Transit), and `None`
+    /// for a pair mesh: a paired node's binding arrives by the signed exchange
+    /// and is learnt under `state/age-bindings/`, so a record is never a source
+    /// for one. The line was verified as the operator wrote it (`charter::parse`
+    /// refuses a line whose binding does not verify under that line's OWN key),
+    /// which is what makes it the same trust a pinned record gives
+    /// ([`crate::seal::learn_binding`]).
+    pub fn binding_of(&self, node: &str) -> Option<&seal::Binding> {
+        match &self.kind {
+            Kind::Charter(c) => c.nodes.get(node).map(|line| &line.age),
+            Kind::Pair(_) => None,
+        }
+    }
+
     /// The address `node` is declared at — `ssh://…`, `https://…` or `poll` —
     /// or `None` for a node this declaration does not name. An address is a
     /// declaration, not a dial target; [`charter::dial_of`] is the one turn

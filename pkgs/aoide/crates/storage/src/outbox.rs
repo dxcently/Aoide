@@ -835,6 +835,25 @@ fn clear_marker_pointing_to_msgid(node: &str, msgid: &str) {
     }
 }
 
+/// Retire a hub's OWN custody of a container it just handed over on a poll —
+/// and only that. A `transit` entry's obligation is to get the letter to `next`:
+/// on a drain `next`'s acceptance ends it, and on a poll **the ask itself is that
+/// acceptance** (the poller reached out for it and the hub handed it over), so
+/// the entry goes with the hand-over rather than sitting in the spool forever
+/// with no signal that could ever end it. A `letter` is NOT retired here: it
+/// waits for the destination's receipt, which is the only thing that can say the
+/// far end FILED it (CONTRACTS §6's poll rule). `Ok(false)` for anything else —
+/// a missing entry, or a kind that is not this hub's custody.
+pub fn retire_transit_handover(node: &str, msgid: &str) -> Result<bool, String> {
+    let Some(entry) = list_entries(node)?.into_iter().find(|e| e.envelope.msgid == msgid) else {
+        return Ok(false);
+    };
+    if !entry.is_transit() {
+        return Ok(false);
+    }
+    remove_entry(node, msgid)
+}
+
 /// Retire the one local outbox entry `ack` confirms (spec item 7: "a
 /// receipt whose verified signer is that entry's `to.node` and whose text
 /// names that entry's `msgid`"). `Ok(None)` — never an error — covers
