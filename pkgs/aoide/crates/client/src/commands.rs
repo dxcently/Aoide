@@ -9309,6 +9309,54 @@ mod tests {
     /// spooled toward that relay — the container stays addressed to the
     /// destination — and a destination no declaration names is refused at send
     /// time with nothing written.
+    /// **A pair mesh written by `mesh pair` is a grant and nothing else.** Its
+    /// section carries the mesh's grant and no node map at all — the direct edge
+    /// needs no hop line — so a send to a peer the records GRANT there must route
+    /// anyway, and the grant is what makes the record a key of the mesh.
+    #[test]
+    fn mail_send_reaches_a_paired_node_under_a_grant_only_section() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-grant-only");
+
+        std::fs::write(
+            aoide_storage::config::source().path,
+            "[pairing]\nhomeMesh = \"family\"\n\n[mesh.family]\ngrant = [\"message\"]\n",
+        )
+        .unwrap();
+        aoide_storage::config::load().unwrap();
+
+        let me = aoide_storage::display::local_node_name();
+        let mine = aoide_storage::identity::load_or_mint().unwrap().0.info().pubkey_hex;
+        let peer = |name: &str, url: &str, key: String| aoide_storage::node_store::Node {
+            name: name.to_string(),
+            url: url.to_string(),
+            autogate: false,
+            token_file: None,
+            bearer_secret: None,
+            hub: false,
+            pubkey: Some(key),
+            verified: true,
+            grants: aoide_storage::node_store::grants_in("family", &["message"]),
+            narrowed: aoide_storage::node_store::Grants::new(),
+            via: None,
+            added_at: "2026-09-07T00:00:00Z".to_string(),
+        };
+        aoide_storage::node_store::save_nodes(&[
+            peer(&me, "ssh://self", mine),
+            peer("dave", "http://127.0.0.1:1/", "d4d4d4d4".repeat(8)),
+        ])
+        .unwrap();
+
+        let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "dave/bob")]));
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{}", out.message);
+        let data = out.data.unwrap();
+        assert_eq!(data["next"], "dave", "the direct edge is the only edge this mesh declares");
+        assert_eq!(data["nextMesh"], "family");
+        assert_eq!(aoide_storage::outbox::list_entries("dave").unwrap().len(), 1, "spooled to the peer itself");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn mail_send_spools_toward_the_hop_a_declaration_names() {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

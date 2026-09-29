@@ -3314,6 +3314,54 @@ mod review_fix_tests {
         (container, ctx)
     }
 
+    /// **A peer this box granted in a mesh that declares nothing but the grant is
+    /// a key of that mesh.** `mesh pair` writes such a section — the direct edge
+    /// needs no hop line — and a deposit from that peer must verify: the record
+    /// and its grant ARE the declaration.
+    #[test]
+    fn a_deposit_from_a_peer_granted_in_a_grant_only_mesh_verifies() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        let dir = aoide_test_support::unique_tmp("seal-grant-only-mesh");
+        std::fs::create_dir_all(&dir).unwrap();
+        env(&dir);
+
+        std::fs::write(
+            crate::config::source().path,
+            "[pairing]\nhomeMesh = \"family\"\n\n[mesh.family]\ngrant = [\"message\"]\n",
+        )
+        .unwrap();
+        crate::config::load().unwrap();
+
+        let me = crate::display::local_node_name();
+        let (kp, _) = identity::load_or_mint().unwrap();
+        let mut nodes = node_store::load_nodes();
+        node_store::upsert_paired_node(
+            &mut nodes,
+            &me,
+            "ssh://self",
+            &kp.info().pubkey_hex,
+            &now_iso_utc(),
+            &["message".to_string()],
+            "family",
+        );
+        node_store::save_nodes(&nodes).unwrap();
+
+        let set = crate::routing::declarations().unwrap();
+        assert_eq!(
+            crate::routing::key_in(&set, "family", &me).as_deref(),
+            Some(kp.info().pubkey_hex.as_str()),
+            "the granted record is the mesh's whole declaration of this peer"
+        );
+
+        let binding = publish_binding().unwrap();
+        let envelope = mail::mint_outbound_letter_in_mesh("alice", &me, "bob", "from a granted peer", "family").unwrap();
+        let container = seal_envelope(&envelope, &binding, "family", "family", &me, &me, &now_iso_utc()).unwrap();
+        match super::deposit_container(&container, "family").unwrap() {
+            ContainerOutcome::Opened { .. } => {}
+            other => panic!("a peer the mesh grants is a peer whose deposit verifies: {other:?}"),
+        }
+    }
     /// L7: "Already-filed letters survive loss of the age key" — structurally
     /// true because `base.jsonl` holds the opened envelope in plaintext, and
     /// asserted here rather than assumed.
