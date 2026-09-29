@@ -4014,6 +4014,29 @@ fn deposit_sealed(params: &Value, ctx: &RequestCtx) -> Result<Value, (i64, Strin
             }))
         }
         aoide_storage::seal::ContainerOutcome::Duplicate { filed_letter } => {
+            // **A hub that is holding this container but cannot move it says so.**
+            // Its own custody being parked — its next hop refused, an older relay
+            // — is information the DEPOSITING hop needs: answering `duplicate`
+            // forever would leave the origin retrying against a letter that is
+            // going nowhere, with nothing anywhere saying why (the hub's own
+            // `mail outbox` is the only place that knew). The word is the one the
+            // hub's next hop gave, so the chain of custody reads the same refusal.
+            if let Some(word) = aoide_storage::outbox::parked_transit_refusal(&container.msgid) {
+                let detail = format!(
+                    "this hop holds the container and cannot move it on: its own next hop answered \
+                     `{word}`. The letter is parked here (`aoide mail outbox retry --refused` on this \
+                     node) and nothing about the letter itself is wrong"
+                );
+                let _ = audit(
+                    ctx.audit_log,
+                    Door::A2a,
+                    EventClass::Audit,
+                    "a2a.aoide/mailDeposit",
+                    "invalid",
+                    &format!("sealed transit msgid {} via {hop_name}: parked: {word}", container.msgid),
+                );
+                return Ok(json!({ "status": "refused", "reason": word, "detail": detail }));
+            }
             // Nothing is opened here — that is the point of deciding dedup
             // before the open. The receipt the first delivery never got is
             // recovered from the FILED record instead, which is where the
@@ -15971,6 +15994,112 @@ mod tests {
         );
         assert!(!poll_admitted(None, &grant, "box-b"), "no verified signature resolution at all");
         assert!(!poll_admitted(sig("box-b"), &Grant::none(), "box-b"), "and no grant to speak with either");
+    }
+
+    /// The poll's own acknowledgement, at the door: a `transit` entry held for
+    /// the poller is offered until the poller NAMES it in `filed`, and then it is
+    /// retired — the hand-over itself retires nothing (a response can be lost).
+    #[test]
+    fn a_poll_retires_a_held_container_only_when_the_poller_names_it() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("poll-ack");
+        act_as(&root, "here");
+
+        setup_signed_node_with_allows("box-b", &["message"]);
+        let envelope = aoide_storage::mail::mint_outbound_letter("alice", "box-b", "bob", "for b").unwrap();
+        let container = {
+            let binding = aoide_storage::seal::publish_binding().unwrap();
+            aoide_storage::seal::seal_envelope(
+                &envelope,
+                &binding,
+                "",
+                "",
+                "box-b",
+                "box-b",
+                &aoide_storage::time::now_iso_utc(),
+            )
+            .unwrap()
+        };
+        let msgid = container.msgid.clone();
+        aoide_storage::outbox::write_entry("box-b", &aoide_storage::outbox::OutboxEntry::transit_held(container)).unwrap();
+
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+
+        let first = mail_poll(&json!({ "node": "box-b" }), &ctx).unwrap();
+        assert_eq!(first["containers"].as_array().unwrap().len(), 1, "{first}");
+        assert_eq!(
+            aoide_storage::outbox::list_entries("box-b").unwrap().len(),
+            1,
+            "the hand-over retires nothing: only the poller's word does"
+        );
+
+        let second = mail_poll(&json!({ "node": "box-b", "filed": [msgid] }), &ctx).unwrap();
+        assert_eq!(second["containers"].as_array().unwrap().len(), 0, "named: retired, not offered");
+        assert!(aoide_storage::outbox::list_entries("box-b").unwrap().is_empty());
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// **A hub that holds a container it cannot move says so.** The origin's
+    /// retry at such a hub dedups; answering `duplicate` forever would leave the
+    /// origin retrying a letter that is going nowhere with nothing saying why. The
+    /// door answers the word the hub's own next hop gave, audited, and the letter
+    /// stays where it is.
+    #[test]
+    fn a_hub_whose_next_hop_refused_answers_the_retry_with_that_word() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("hub-parked");
+        act_as(&root, "here");
+
+        let origin_name = setup_verifiable_origin(&["message"]);
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some(&origin_name));
+
+        // A sealed letter this box IS the destination of: the first deposit files
+        // it and records the container, so the second is a duplicate.
+        let envelope = aoide_storage::mail::mint_outbound_letter(
+            "alice",
+            &aoide_storage::display::local_node_name(),
+            "bob",
+            "held here",
+        )
+        .unwrap();
+        let container = {
+            let binding = aoide_storage::seal::publish_binding().unwrap();
+            let mesh = envelope.header.origin_mesh.clone();
+            let me = aoide_storage::display::local_node_name();
+            aoide_storage::seal::seal_envelope(&envelope, &binding, &mesh, &mesh, &me, &me, &aoide_storage::time::now_iso_utc())
+                .unwrap()
+        };
+        let params = json!({ "container": container });
+        let first = mail_deposit(&params, &ctx).unwrap();
+        assert_eq!(first["status"], "accepted", "{first}");
+
+        // The hub's own custody of that letter is parked: its next hop answered
+        // `no-route`, which is what the origin must be told.
+        let mut parked = aoide_storage::outbox::OutboxEntry::transit(container.clone());
+        parked.refused = true;
+        parked.last_try_at = aoide_storage::time::now_iso_utc();
+        parked.last_outcome = "refused: no-route: `chiyo` is not a node of mesh `home`".to_string();
+        aoide_storage::outbox::write_entry("chiyo", &parked).unwrap();
+
+        let again = mail_deposit(&params, &ctx).unwrap();
+        assert_eq!(again["status"], "refused", "{again}");
+        assert_eq!(again["reason"], "no-route", "{again}");
+        assert!(
+            again["detail"].as_str().unwrap().contains("retry --refused"),
+            "and it says where the hand is: {again}"
+        );
+
+        let log = std::fs::read_to_string(&audit_log).unwrap_or_default();
+        assert!(log.contains("parked: no-route"), "the answer is audited: {log}");
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
     }
 
     /// Spec, P-M3: **a poller receives only its own entries.** box-b asks for

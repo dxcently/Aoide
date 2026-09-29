@@ -921,6 +921,34 @@ fn write_filed_unlocked(node: &str, pending: &[String]) -> Result<(), String> {
     crate::fs::atomic_write(&path, &json).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The word a hub owes the depositing hop when THIS box's own custody of a
+/// container is PARKED — `None` when there is no such entry anywhere in the
+/// spool. A hub whose next hop refuses (an older relay, a policy refusal) parks
+/// its entry and keeps the container; the origin's retry then dedups, and
+/// answering `duplicate` forever would leave the origin retrying against a letter
+/// that is going nowhere with no way to learn why. The word recorded on the park
+/// is what the door answers instead, so the hop behind it reads the same refusal
+/// its next hop gave, and `mail outbox` on either box shows it.
+pub fn parked_transit_refusal(msgid: &str) -> Option<String> {
+    for node in nodes_with_outbox().ok()? {
+        let Some(entry) = list_entries(&node).ok()?.into_iter().find(|e| e.envelope.msgid == msgid)
+        else {
+            continue;
+        };
+        if !entry.refused || !entry.is_transit() {
+            continue;
+        }
+        let word = entry
+            .last_outcome
+            .trim()
+            .strip_prefix("refused:")
+            .map(str::trim)
+            .unwrap_or(&entry.last_outcome);
+        return Some(word.split(':').next().unwrap_or(word).trim().to_string());
+    }
+    None
+}
+
 /// Retire the one local outbox entry `ack` confirms (spec item 7: "a
 /// receipt whose verified signer is that entry's `to.node` and whose text
 /// names that entry's `msgid`"). `Ok(None)` — never an error — covers
