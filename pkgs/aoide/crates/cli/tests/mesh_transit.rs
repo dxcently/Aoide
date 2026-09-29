@@ -1577,17 +1577,25 @@ fn a_refused_or_unloadable_declaration_is_never_dialled() {
     assert_eq!(tries_of("unloadable"), 0, "an unloadable set never dials");
     assert!(aoide_storage::outbox::read_link_state("yomi").unwrap().is_none(), "and opens no link");
 
-    // (2) A REFUSED mesh: a valid config again, and `home`'s charter in force with
-    // a byte appended after it was signed, so the declaration cannot be honoured.
+    // (2) A REFUSED mesh: one node name carrying two keys across `home` and
+    // `away` is a load error for BOTH charters, so `home`'s declaration cannot be
+    // read — a refusal the set holds, which is the shape this pins. (Appending a
+    // byte to the in-force file would prove nothing: `governing_refusal` reads
+    // that document but does not re-verify its signature, so it stays honoured.)
     std::fs::write(fx.boxes["osaka"].join("config.toml"), valid_config()).unwrap();
-    let in_force = aoide_storage::charter::in_force_path(HOME);
-    let mut tampered = std::fs::read(&in_force).unwrap();
-    tampered.push(b'\n');
-    std::fs::write(&in_force, &tampered).unwrap();
+    fx.take_broken_away("osaka", TWO_KEYS);
 
     spool("refused");
     aoide_client::mail_wire::drain_node("yomi").unwrap();
-    assert_eq!(tries_of("refused"), 0, "a refused mesh never dials either");
-    assert!(aoide_storage::outbox::read_link_state("yomi").unwrap().is_none(), "and opens no link");
-    assert_eq!(aoide_storage::outbox::list_entries("yomi").unwrap().len(), 3, "and nothing was dropped");
+    let refused_tries = tries_of("refused");
+    let link = aoide_storage::outbox::read_link_state("yomi").unwrap();
+    let spooled = aoide_storage::outbox::list_entries("yomi").unwrap();
+    assert_eq!(refused_tries, 0, "a refused mesh never dials either: link={link:?} entries={spooled:?}");
+    assert!(
+        link.is_none(),
+        "and opens no link: link={link:?} entries={spooled:?} unreadable={} down={}",
+        aoide_client::mail_wire::declaration_unreadable(HOME),
+        aoide_client::mail_wire::declared_down(HOME, "yomi")
+    );
+    assert_eq!(spooled.len(), 3, "and nothing was dropped");
 }
