@@ -1019,6 +1019,91 @@ fn a_stranger_in_a_charter_mesh_is_told_not_a_member_at_the_door() {
     assert!(aoide_storage::outbox::list_entries("chiyo").unwrap().is_empty(), "and spools nothing onward");
 }
 
+/// Give the box at `root` a verified record for `peer`, dialling `port`: a poll
+/// dials a RECORD (`poll_node`'s own rule), so a box that asks another needs one
+/// — the key its charter line carries, and the door's http url.
+fn record_for_door(root: &std::path::Path, me: &str, peer: &str, port: u16) {
+    fx_enter(root, me);
+    let key = aoide_storage::charter::governing(HOME).unwrap().nodes[peer].key.clone();
+    let mut nodes = aoide_storage::node_store::load_nodes();
+    aoide_storage::node_store::upsert_paired_node(
+        &mut nodes,
+        peer,
+        &format!("http://127.0.0.1:{port}/"),
+        &key,
+        &aoide_storage::time::now_iso_utc(),
+        &["message".to_string()],
+        HOME,
+    );
+    aoide_storage::node_store::save_nodes(&nodes).unwrap();
+}
+
+/// **A letter the poller already has is answered `duplicate` — and is still
+/// acknowledged.** The hub offers what it holds; a poller that filed that letter
+/// by another route (here: locally, before it ever asked) has the custody, says
+/// so, and the hub retires its own copy on the NEXT ask. Without the
+/// acknowledgement, a hub whose earlier answer was lost would hold that
+/// container forever, offering it on every ask.
+#[test]
+fn a_letter_the_poller_already_has_is_acknowledged_and_the_hub_retires_it() {
+    let _lock = env_lock();
+    let (_env, fx) = fixture("duplicate-ack");
+    let _doors = fx.doors(&["osaka", "sakaki", "chiyo"]);
+
+    // osaka spools the letter toward its relay...
+    fx.enter("osaka");
+    let sent = dispatch(&cli_invocation(
+        &["mail", "send"],
+        &["already here"],
+        &[("to", "chiyo/conductor"), ("json", "true")],
+    ));
+    assert_eq!(sent.status, Status::Ok, "{}", sent.message);
+    let msgid = sent.data.as_ref().unwrap()["msgid"].as_str().unwrap().to_string();
+
+    // ...sakaki pulls it and holds it for chiyo...
+    record_for_door(&fx.boxes["sakaki"], "sakaki", "osaka", fx.ports["osaka"]);
+    let pulled = aoide_client::mail_wire::poll_node("osaka", None).unwrap();
+    assert!(pulled.refused.is_empty(), "{:?}", pulled.refused);
+    fx.enter("sakaki");
+    let container = aoide_storage::outbox::list_entries("chiyo").unwrap()[0].container.clone().unwrap();
+
+    // ...and chiyo, having filed it by another route already, answers duplicate
+    // when the relay offers it — then acknowledges, and the relay retires.
+    fx.enter("chiyo");
+    let (container, digest) = match aoide_storage::seal::deposit_container(&container, HOME).unwrap() {
+        aoide_storage::seal::ContainerOutcome::Opened { envelope, digest } => {
+            assert!(matches!(
+                aoide_storage::mail::deposit((*envelope).clone(), "sakaki").unwrap(),
+                aoide_storage::mail::DepositOutcome::Filed { .. }
+            ));
+            (container, digest)
+        }
+        other => panic!("the destination opens it: {other:?}"),
+    };
+    aoide_storage::seal::record_admitted(&container, &digest).unwrap();
+
+    record_for_door(&fx.boxes["chiyo"], "chiyo", "sakaki", fx.ports["sakaki"]);
+    let first_ask = aoide_client::mail_wire::poll_node("sakaki", None).unwrap();
+    assert!(first_ask.refused.is_empty(), "the duplicate is not a refusal: {:?}", first_ask.refused);
+    assert_eq!(
+        aoide_storage::outbox::filed_pending("sakaki").unwrap(),
+        vec![msgid.clone()],
+        "the poller says it has it, so the relay is owed the acknowledgement"
+    );
+    fx.enter("sakaki");
+    assert_eq!(aoide_storage::outbox::list_entries("chiyo").unwrap().len(), 1, "still the relay's, until told");
+
+    // The next ask carries it, and the relay retires its custody.
+    fx.enter("chiyo");
+    let second_ask = aoide_client::mail_wire::poll_node("sakaki", None).unwrap();
+    assert!(second_ask.refused.is_empty(), "{:?}", second_ask.refused);
+    fx.enter("sakaki");
+    assert!(
+        aoide_storage::outbox::list_entries("chiyo").unwrap().is_empty(),
+        "the duplicate's acknowledgement retired the relay's copy"
+    );
+}
+
 /// A chain truncated by dropping the tail never reaches the destination: the last
 /// hop still in it hands the letter to `sakaki`, so `chiyo` refuses it
 /// (`broken-chain`) and owes no ack — the letter is on no mailbox, and the
