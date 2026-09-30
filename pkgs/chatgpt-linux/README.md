@@ -6,7 +6,10 @@ following the Kimi package convention. The OpenAI dendrite installs it.
 
 The versioned Debian archive and SHA-256 are pinned in `default.nix`.
 Updates use OpenAI's Debian repository package index; update the version
-and hash together. Debian maintainer scripts are not executed.
+and hash together. Verify updates with
+`NIXPKGS_ALLOW_UNFREE=1 nix build .#chatgpt-linux --impure --no-link`
+before activating them through a user-approved system rebuild.
+Debian maintainer scripts are not executed.
 
 `chatgpt` launches the bundled Linux runtime. Desktop entries and icons are
 installed with the package. Authentication remains interactive.
