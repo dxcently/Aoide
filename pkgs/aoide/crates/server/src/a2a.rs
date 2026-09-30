@@ -16565,10 +16565,13 @@ mod tests {
     #[test]
     fn a_container_addressed_elsewhere_is_hopped_and_never_acked() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_root = std::env::var("AOIDE_ROOT").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let root = mail_deposit_root("hop-never-acks");
         act_as(&root, "here");
+        // The fixture writes this box's config.toml, which lives under the root.
+        std::env::set_var("AOIDE_ROOT", &root);
         let far_key = hop_fixture();
         let container = hop_container(&far_key);
 
@@ -16603,6 +16606,10 @@ mod tests {
         assert!(log.contains("sealed transit") && log.contains("dave"), "audited after the write: {log}");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
+        match saved_root {
+            Some(v) => std::env::set_var("AOIDE_ROOT", v),
+            None => std::env::remove_var("AOIDE_ROOT"),
+        }
     }
 
     /// **A retry over another route is a duplicate, not a second hop.** The same
@@ -16612,10 +16619,13 @@ mod tests {
     #[test]
     fn the_same_container_offered_again_is_a_duplicate_not_a_second_hop() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_root = std::env::var("AOIDE_ROOT").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let root = mail_deposit_root("hop-duplicate");
         act_as(&root, "here");
+        // The fixture writes this box's config.toml, which lives under the root.
+        std::env::set_var("AOIDE_ROOT", &root);
         let far_key = hop_fixture();
         let container = hop_container(&far_key);
 
@@ -16629,6 +16639,10 @@ mod tests {
         assert_eq!(aoide_storage::outbox::list_entries("dave").unwrap().len(), 1, "one spooled copy");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
+        match saved_root {
+            Some(v) => std::env::set_var("AOIDE_ROOT", v),
+            None => std::env::remove_var("AOIDE_ROOT"),
+        }
     }
 
     /// **A chain that already names this box is a loop, dropped once.** Two hops
@@ -16638,10 +16652,13 @@ mod tests {
     #[test]
     fn a_chain_that_already_names_this_box_is_a_loop() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_root = std::env::var("AOIDE_ROOT").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let root = mail_deposit_root("hop-loop");
         act_as(&root, "here");
+        // The fixture writes this box's config.toml, which lives under the root.
+        std::env::set_var("AOIDE_ROOT", &root);
         let far_key = hop_fixture();
         let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
         let container = hop_container(&far_key);
@@ -16660,6 +16677,10 @@ mod tests {
         assert!(log.contains(aoide_storage::seal::CHAIN_LOOP), "the drop is audited: {log}");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
+        match saved_root {
+            Some(v) => std::env::set_var("AOIDE_ROOT", v),
+            None => std::env::remove_var("AOIDE_ROOT"),
+        }
     }
 
     /// **A tampered hop is refused at the hop and audited.** An entry's `mesh` is
@@ -16671,10 +16692,13 @@ mod tests {
     #[test]
     fn a_tampered_hop_zone_is_refused_at_the_hop() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_root = std::env::var("AOIDE_ROOT").ok();
         let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
         let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
         let root = mail_deposit_root("hop-tampered");
         act_as(&root, "here");
+        // The fixture writes this box's config.toml, which lives under the root.
+        std::env::set_var("AOIDE_ROOT", &root);
         let far_key = hop_fixture();
         let mut container = hop_container(&far_key);
         // One unsigned byte: entry 1's own zone, which the origin signed.
@@ -16691,6 +16715,10 @@ mod tests {
         assert!(log.contains(aoide_storage::seal::ZONE_VIOLATION), "audited: {log}");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
+        match saved_root {
+            Some(v) => std::env::set_var("AOIDE_ROOT", v),
+            None => std::env::remove_var("AOIDE_ROOT"),
+        }
     }
 
     /// Spec, P-M3: **a poller receives only its own entries.** box-b asks for
