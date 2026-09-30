@@ -27,7 +27,7 @@ const widgets = path.join(here, "..", "widgets")
 function loadTrace() {
     const src = fs.readFileSync(path.join(widgets, "Trace.js"), "utf8")
         .replace(/^\.pragma library\s*$/m, "")
-    return new Function(src + "\nreturn { flat, segs, at, length, rng, rr, ri, pickIdx, hash, index, sessions, live, stamps, advanced, want, spawn, dwell, reconcile, advance, ease, dist, tail, head }")()
+    return new Function(src + "\nreturn { flat, segs, at, length, rng, rr, ri, pickIdx, hash, index, sessions, live, stamps, advanced, want, spawn, dwell, reconcile, advance, ease, dist, tail, head, light, breath }")()
 }
 
 // ── the generator, lifted between its own markers (the file's own promise) ──
@@ -221,6 +221,92 @@ const ix = Trace.index(board)
         for (let n = 0; n < 400; n++)
             for (const p of Trace.reconcile([], { a: "working", b: "awaiting" }, ctx)) if (p.dwell) agentDwells++
         check("agent light is always a traveller, never a dwell", agentDwells === 0, agentDwells + " dwells")
+    }
+
+    // ── 5. the renderer's geometry: Trace.light's rectangles ───────────────
+    // This is what the item-based delegate draws, so it is the thing to hold:
+    // finite numbers, the tail BEHIND the head, every piece on the track, the
+    // ring on the node it claims.
+    {
+        const hues2 = { working: "#39ff6a", awaiting: "#ff4d4d", idle: "#4a905d" }
+        const ctx2 = { rng: Trace.rng(21), board: board, index: ix, hues: hues2, opts: { cap: 14, idleFloor: 2 } }
+        let nan = 0, offTrack = 0, aheadOfHead = 0, ringOff = 0, seen = 0, rings = 0
+
+        for (let n = 0; n < 300; n++) {
+            let list = Trace.reconcile([], { a: "working", b: "idle" }, ctx2)
+            for (let s = 0; s < 40; s++) {
+                list = Trace.advance(list, 1 / 30)
+                for (const p of list) {
+                    const f = Trace.light(p, 6, board, s / 30)
+                    seen++
+                    if (!f || !finite(f.alpha)) { nan++; continue }
+                    for (const seg of f.tail) {
+                        if (!finite(seg.x) || !finite(seg.y) || !finite(seg.w) || !finite(seg.h) || !finite(seg.rot) || !finite(seg.alpha)) nan++
+                        if (seg.w < 0 || seg.h <= 0) offTrack++
+                    }
+                    if (f.head) {
+                        if (!finite(f.head.x) || !finite(f.head.y) || f.head.r <= 0) nan++
+                        // the head must sit at the record's own progress
+                        const want = Trace.head(p)
+                        if (Math.abs(want.x - f.head.x) > 1e-6 || Math.abs(want.y - f.head.y) > 1e-6) aheadOfHead++
+                    }
+                    if (f.ring) {
+                        rings++
+                        if (!finite(f.ring.r) || !finite(f.ring.stroke) || f.ring.r <= 0) nan++
+                        const src = p.dwell ? p.ring : p.bloomRing
+                        const g = board.rings[src]
+                        if (!g || Math.abs(g[0] - f.ring.x) > 1e-6 || Math.abs(g[1] - f.ring.y) > 1e-6) ringOff++
+                    }
+                }
+            }
+        }
+        check("Trace.light: every rectangle is finite and non-degenerate", nan === 0, nan + " bad over " + seen + " faces")
+        check("Trace.light: the tail never leads the head", aheadOfHead === 0, aheadOfHead + " wrong heads")
+        check("Trace.light: a ring is always drawn on the node it names", ringOff === 0, ringOff + " off-node over " + rings + " rings")
+
+        // the breath is the one sine, bounded, and 0..1 for any clock
+        let bad = 0
+        for (let t = -50; t < 50; t += 0.37) {
+            const b = Trace.breath(t, 3.1)
+            if (!finite(b) || b < 0 || b > 1) bad++
+        }
+        check("breath stays 0..1 for any clock and phase", bad === 0, bad + " out of range")
+
+        // the delegate re-reads a MUTATING record: mutate, ask again, get a new
+        // face — no rebuild, no cache. Run on the LONGEST wired track so the
+        // light is still travelling inside the window (a short track can
+        // complete its round trip and land back where it started).
+        let longest = -1, longestLen = -1
+        for (const t of ix.wired) {
+            const L = Trace.length(board.tracks[t])
+            if (L > longestLen) { longestLen = L; longest = t }
+        }
+        const ends = ix.ends[longest]
+        const onePulse = Trace.spawn(Trace.rng(5), {
+            track: longest, pts: board.tracks[longest], dir: ends[1] >= 0 ? 1 : -1,
+            ring: ends[1] >= 0 ? ends[1] : ends[0], hue: hues2.working,
+            legs: 4, speed: 150, trail: 30, alpha: 0.8
+        })
+        const before = Trace.light(onePulse, 6, board, 0)
+        for (let s = 0; s < 60; s++) Trace.advance([onePulse], 1 / 30)
+        const after = Trace.light(onePulse, 6, board, 2)
+        check("a mutating record yields a new face without any rebuild (" + Math.round(longestLen) + "px track)",
+            before.head && after.head && (before.head.x !== after.head.x || before.head.y !== after.head.y))
+
+        // and a face is always drawable: alphas inside 0..1, even mid-death
+        let wild = 0
+        const dying = Trace.spawn(Trace.rng(6), {
+            track: longest, pts: board.tracks[longest], dir: 1, ring: -1,
+            hue: hues2.idle, legs: 1, speed: 400, trail: 20, alpha: 0.5
+        })
+        for (let s = 0; s < 400; s++) {
+            Trace.advance([dying], 1 / 30)
+            const f = Trace.light(dying, 6, board, s / 30)
+            if (f.alpha < 0 || f.alpha > 1) wild++
+            if (f.head && (f.head.alpha < 0 || f.head.alpha > 1)) wild++
+            for (const seg of f.tail) if (seg.alpha < 0 || seg.alpha > 1) wild++
+        }
+        check("every alpha handed to QML is inside 0..1, death included", wild === 0, wild + " out of range")
     }
 
     // determinism: same seed, same light

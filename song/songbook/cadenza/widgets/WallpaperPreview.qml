@@ -17,7 +17,7 @@
 //
 // Knobs — `$AOIDE_ROOT/wallpaper-preview.json` (optional; absent = live values)
 //     { "rate": 0.25,      // clock multiplier: 0.25 catches a slow leg mid-run
-//       "interval": 33,    // the light's frame
+//       "interval": 33,    // how often the light MOVES (ms) — not a repaint cost
 //       "pulseCap": 14,    // the most light the board may carry
 //       "idleFloor": 2,    // light with NOTHING running
 //       "seed": 7 }        // 0/absent: seeded from the clock (each run differs)

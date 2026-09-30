@@ -372,9 +372,12 @@ import "Trace.js" as Trace
 | `Trace.spawn(rng, spec)` · `dwell(...)` | one pulse RECORD — never a QML object |
 | `Trace.reconcile(list, states, ctx)` | the scheduler: keep the board's light at the level the machine earns |
 | `Trace.advance(list, dt)` | the step: position, legs, blooms, alpha. Total — no NaN, no escape |
-| `Trace.ease(u)` · `dist(p)` · `tail(p, back)` · `head(p)` | presentation, so the painter holds no maths |
+| `Trace.ease(u)` · `dist(p)` · `tail(p, back)` · `head(p)` | presentation, so the renderer holds no maths |
+| `Trace.breath(t, phase)` | the one sine a node breathes by (alpha and ring size) |
+| `Trace.light(p, segs, board, t)` | a record's whole drawable face as RECTANGLES: `{ head, tail[], ring }` — what the item delegate draws, so no geometry lives in QML |
 
 Two consumers, one implementation: the bar's lamp dash walks with
 `Trace.at` (its inline copy is gone), and `wallpaper.qml` runs the whole
-engine under the board. A new look is a new NUMBER in a record — legs,
-speed, trail, ease — never a new branch in the painter.
+engine — `Trace.light` feeds its one inline `Light` delegate, one per pulse
+plus one per claimed node. A new look is a new NUMBER in a record — legs,
+speed, trail, ease — never a new branch in the renderer.

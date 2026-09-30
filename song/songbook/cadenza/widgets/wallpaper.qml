@@ -7,10 +7,13 @@
 // ── What it draws ───────────────────────────────────────────────────────────
 //   · the copper — CoverPcb, instantiated by URL and left to paint itself
 //     (its own Canvas, rasterised once). This file never re-draws a track.
-//   · the light — ONE transparent Canvas over it, repainted on one timer. No
-//     Item per pulse, no animation object per effect: every pulse is a RECORD
-//     in `pulses` and every frame is a single pass over them (widgets/Trace.js
-//     is the whole engine — the walker, the scheduler, the step, the easing).
+//   · the light — ONE delegate per pulse (`component Light` below), each one a
+//     head, a handful of tail rectangles and its node ring. No Canvas: a
+//     full-surface Canvas damages the WHOLE output every frame (2.07 M px at
+//     1080p, plus the texture upload) and that starves the GUI thread — opening
+//     the launcher or the dock then crawls. Items damage only themselves.
+//     Every pulse is still a RECORD in `pulses` and all the geometry is still
+//     widgets/Trace.js's (`Trace.light` returns the rectangles).
 //   · the claimed nodes — one board ring per live session, in its state's
 //     colour (the kit's own table: `kit.lampColor`), breathing. More processes,
 //     more lit nodes. The board's own rings stay `dim` underneath.
@@ -30,12 +33,10 @@
 //
 // ── Cost, stated plainly ────────────────────────────────────────────────────
 // The copper is rasterised once (`Canvas.Image`, CoverPcb's own target). The
-// light canvas is a full-surface transparent repaint at `interval` ms — the
-// default is a CPU-rasterised Canvas because that is the target this shell is
-// already proven on. If a venue finds it heavy, `interval` is the one dial
-// (33 → 50 halves the cost); `Canvas.FramebufferObject` is the untested
-// alternative, not the default, because a failed FBO canvas draws nothing at
-// all on the wrong graphics API.
+// light costs one small binding pass per frame per pulse (~0.003 ms of engine
+// work for the whole board, measured) and damages only the rectangles it
+// occupies — a few thousand px, not the screen. The one dial left is
+// `interval`: it sets how often the light MOVES, not how much is repainted.
 //
 // Preview: WallpaperPreview.qml (the canvas harness) — knobs below.
 import QtQuick
@@ -52,7 +53,7 @@ Item {
 
     // ── preview knobs (WallpaperPreview.qml sets these; the live path never) ─
     property real rate: 1.0        // clock multiplier — 0.2 catches a slow leg
-    property int interval: 33      // the light's frame
+    property int interval: 33      // how often the light MOVES (ms), not a repaint cost
     property int pulseCap: 14      // Trace.want's cap
     property int idleFloor: 2      // …and its idle floor
     property int seedWanted: 0     // 0 → seeded from the clock, so each boot differs
@@ -71,7 +72,7 @@ Item {
     // `setSource` with initial properties (bar.qml's `Use` and BarPreview's own
     // loader do exactly this for helpers that declare `required property var
     // livery`): the props are applied at object creation, which is what a
-    // required property needs. `z: 1` keeps the board under the light canvas.
+    // required property needs. `z: 1` keeps the board under every light item.
     Loader {
         id: cover
         anchors.fill: parent
@@ -98,14 +99,41 @@ Item {
     property var stamps: ({})
     property bool stampsReady: false
 
+    // ── the claimed nodes: one ring per live session ────────────────────────
+    // A node is a DWELL-shaped record (Trace.dwell) that the scheduler never
+    // touches: it is not in `pulses`, so it costs no budget — it is a claim on
+    // a pad, not a pulse. The ring comes from a hash of the sessionId, so an
+    // agent keeps the same pad across reloads; the phase is hashed too, so two
+    // nodes never breathe in lockstep.
+    //
+    // Built by an explicit call, not a binding: Trace.dwell draws from the
+    // shared PRNG, and a binding that quietly consumed draws every time it
+    // re-evaluated would shift the scheduler's sequence under it.
+    property var nodes: []
+    function rebuildNodes() {
+        var out = []
+        var n = root.index && root.index.near ? root.index.near.length : 0
+        if (!n) { root.nodes = out; return }
+        for (var id in root.liveStates) {
+            var d = Trace.dwell(root.rngState, Trace.hash(id) % n,
+                "" + root.kit.lampColor(root.liveStates[id]),
+                root.liveStates[id] === "working" ? 0.55 : 0.35)
+            d.phase = (Trace.hash(id) % 63) / 10
+            out.push(d)
+        }
+        root.nodes = out
+    }
+    onIndexChanged: rebuildNodes()
+    onKitChanged: rebuildNodes()
+
     FileView {
         id: sessionsFile
         path: root.aoideRoot + "/state/stage/sessions.json"
         watchChanges: true
         printErrors: false
         onFileChanged: reload()
-        onTextChanged: root.rows = Trace.sessions(sessionsFile.text())
-        onLoadFailed: root.rows = []
+        onTextChanged: { root.rows = Trace.sessions(sessionsFile.text()); root.rebuildNodes() }
+        onLoadFailed: { root.rows = []; root.rebuildNodes() }
     }
     FileView {
         id: hookFile
@@ -124,7 +152,7 @@ Item {
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // THE LIGHT — one record array, one clock, one paint pass
+    // THE LIGHT — one record array, one clock, one delegate per light
     // ════════════════════════════════════════════════════════════════════════
     property var pulses: []
     property real clock: 0          // seconds since start, for the node breath
@@ -209,100 +237,114 @@ Item {
         onTriggered: {
             var dt = (interval / 1000) * root.rate
             root.clock += dt
-            if (root.index && root.board)
+            if (root.index && root.board) {
                 root.pulses = Trace.reconcile(root.pulses, root.liveStates, {
                     rng: root.rngState, board: root.board, index: root.index,
                     hues: root.hues, opts: { cap: root.pulseCap, idleFloor: root.idleFloor }
                 })
-            root.pulses = Trace.advance(root.pulses, dt)
-            light.requestPaint()
+                root.pulses = Trace.advance(root.pulses, dt)
+            }
+            // no repaint call: the delegates below re-read `clock` themselves.
+            // A Canvas here would damage the whole screen 30 times a second —
+            // see the note over the Repeaters.
         }
     }
 
-    Canvas {
-        id: light
-        anchors.fill: parent
+    // ── the light: ONE delegate per pulse, never one full-screen canvas ─────
+    // A Canvas repaints its WHOLE surface: at 1920x1080 that damages 2.07 M px
+    // and re-uploads the texture, every frame — measured at ~0 cost in the
+    // engine (0.003 ms/frame) and all of it in the rasterise, which is what made
+    // opening a surface (the launcher, the dock) crawl: the GUI thread never
+    // idled. Here the damaged area is the light itself — a head, six tail
+    // rectangles and a ring per pulse, a few thousand px in total.
+    //
+    // `model` is a COUNT, not the array. The count changes only when the SET of
+    // pulses does, so no delegate is rebuilt per frame; the records themselves
+    // mutate in place and the delegate re-reads them off `clock`.
+    Repeater {
+        model: root.pulses.length
+        delegate: Light {
+            required property int index
+            kit: root.kit
+            board: root.board
+            record: root.pulses[index]
+            clock: root.clock
+        }
+    }
+
+    // one ring per live session — a node claimed, breathing, in its state's
+    // colour (more processes, more lit nodes)
+    Repeater {
+        model: root.nodes.length
+        delegate: Light {
+            required property int index
+            kit: root.kit
+            board: root.board
+            record: root.nodes[index]
+            clock: root.clock
+        }
+    }
+
+    // The delegate, declared once and used by both Repeaters above. Inline on
+    // purpose: cadenza resolves nothing by type name (design/kit.md §1), and a
+    // local component needs no qmldir and no URL.
+    //
+    // `face` is the whole geometry for one frame (Trace.light): touching
+    // `clock` is what re-evaluates it, since the record's fields mutate in
+    // place and QML cannot observe that.
+    component Light: Item {
+        id: one
+        // above the board (the Loader is z 1): a Repeater is not a visual item,
+        // so the stacking has to be declared on the delegate itself.
         z: 2
-        renderTarget: Canvas.Image
-        onPaint: root.paintLight(getContext("2d"))
-    }
-    onWidthChanged: light.requestPaint()
-    onHeightChanged: light.requestPaint()
-    onKitChanged: light.requestPaint()
+        required property var kit
+        required property var board
+        required property var record
+        required property real clock
+        readonly property var face: Trace.light(one.record, 6, one.board, one.clock)
 
-    // ── the one paint pass ─────────────────────────────────────────────────
-    // Tail, head, bloom, node — every pulse the same way, so a new look is a
-    // new NUMBER in the record, never a new branch here.
-    function paintLight(ctx) {
-        ctx.reset()
-        var bd = root.board
-        if (!bd) return
-        ctx.lineCap = "round"
-
-        // 1. the claimed nodes: one ring per live session, breathing
-        var st = root.liveStates
-        var rw = bd.ring
-        ctx.lineWidth = rw
-        for (var id in st) {
-            var ring = root.index && root.index.near.length ? bd.rings[Trace.hash(id) % bd.rings.length] : null
-            if (!ring) continue
-            var col = st[id]
-            var breathe = 0.5 + 0.5 * Math.sin(root.clock * (col === "working" ? 2.2 : 1.1) + Trace.hash(id) % 7)
-            ctx.globalAlpha = col === "working" ? 0.35 + 0.45 * breathe : 0.22 + 0.3 * breathe
-            ctx.strokeStyle = "" + root.kit.lampColor(col)
-            ctx.beginPath()
-            ctx.arc(ring[0], ring[1], ring[2] + rw, 0, 2 * Math.PI)
-            ctx.stroke()
+        Rectangle {   // the node: this pulse's arrival bloom, or a dwell's breath
+            readonly property var g: one.face ? one.face.ring : null
+            visible: g !== null
+            x: g ? g.x - width / 2 : 0
+            y: g ? g.y - height / 2 : 0
+            width: g ? g.r * 2 : 0
+            height: width
+            radius: width / 2
+            color: "transparent"
+            border.width: g ? g.stroke : 0
+            border.color: one.face ? one.face.hue : "transparent"
+            opacity: g ? g.alpha : 0
+            antialiasing: true
         }
-
-        // 2. the light on the copper
-        var P = root.pulses
-        for (var i = 0; i < P.length; i++) {
-            var p = P[i]
-            if (p.dwell) continue
-            ctx.strokeStyle = p.hue
-            // tail: a handful of segments behind the head, fading — a comet on
-            // copper, not a gradient (cheap, and it follows every 45° bend)
-            var N = 6
-            for (var k = N; k >= 1; k--) {
-                var a = Trace.tail(p, (k - 1) * p.trail / N)
-                var b = Trace.tail(p, k * p.trail / N)
-                ctx.globalAlpha = Math.max(0, p.alpha * (1 - k / (N + 1)) * 0.8)
-                ctx.lineWidth = Math.max(1, p.head * (1 - k / (N + 1.5)))
-                ctx.beginPath()
-                ctx.moveTo(a.x, a.y)
-                ctx.lineTo(b.x, b.y)
-                ctx.stroke()
-            }
-            var hd = Trace.head(p)
-            ctx.globalAlpha = Math.min(1, p.alpha)
-            ctx.fillStyle = "" + root.kit.bright
-            ctx.beginPath()
-            ctx.arc(hd.x, hd.y, p.head, 0, 2 * Math.PI)
-            ctx.fill()
-            // 3. the node it just ran into
-            if (p.bloom > 0 && p.bloomRing >= 0 && p.bloomRing < bd.rings.length) {
-                var g = bd.rings[p.bloomRing]
-                ctx.globalAlpha = p.bloom * 0.7
-                ctx.strokeStyle = p.hue
-                ctx.lineWidth = rw * (1 + p.bloom)
-                ctx.beginPath()
-                ctx.arc(g[0], g[1], g[2] + 1.5 + p.bloom * 5, 0, 2 * Math.PI)
-                ctx.stroke()
+        Repeater {    // the tail: one flat rectangle per straight piece
+            model: one.face ? one.face.tail.length : 0
+            delegate: Rectangle {
+                required property int index
+                readonly property var s: one.face.tail[index]
+                x: s.x
+                y: s.y
+                width: s.w
+                height: s.h
+                rotation: s.rot
+                transformOrigin: Item.Left
+                color: one.face.hue
+                opacity: s.alpha
+                visible: s.alpha > 0.01
+                antialiasing: true
             }
         }
-        // 4. a dwelling pulse: the node itself, breathing, no traveller
-        for (i = 0; i < P.length; i++) {
-            var q = P[i]
-            if (!q.dwell || q.ring < 0 || q.ring >= bd.rings.length) continue
-            var rg = bd.rings[q.ring]
-            ctx.globalAlpha = 0.25 + 0.5 * q.bloom
-            ctx.strokeStyle = q.hue
-            ctx.lineWidth = rw * 1.6
-            ctx.beginPath()
-            ctx.arc(rg[0], rg[1], rg[2] + 2 + q.bloom * 3, 0, 2 * Math.PI)
-            ctx.stroke()
+        Rectangle {   // the head
+            readonly property var h: one.face ? one.face.head : null
+            visible: h !== null && h.alpha > 0.01
+            x: h ? h.x - width / 2 : 0
+            y: h ? h.y - height / 2 : 0
+            width: h ? h.r * 2 : 0
+            height: width
+            radius: width / 2
+            color: one.kit.bright
+            opacity: h ? h.alpha : 0
+            antialiasing: true
         }
-        ctx.globalAlpha = 1
     }
 }

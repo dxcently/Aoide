@@ -234,12 +234,14 @@ function spawn(r, spec) {
 // A dwell (no travel): the node breathes where it is, for `ttl` seconds, then
 // fades. It is the third look — a pad that answers without a traveller — and
 // it is why a dwell carries a lifetime: without one, dwells would fill the
-// budget and no scan could ever spawn again.
+// budget and no scan could ever spawn again. `phase` staggers the breath, so
+// two nodes never rise together.
 function dwell(r, ring, hue, alpha, ttl) {
     return { track: -1, pts: [], total: 0, u: 0, dir: 1, leg: 0, legs: 0,
              dwell: true, speed: 0, trail: 0, head: 0, hue: hue,
              alpha: alpha, decay: 0, state: "", ring: ring, ringOut: -1,
-             bloom: 0, bloomRing: -1, ttl: ttl || 6, dying: false, age: 0 }
+             bloom: 0, bloomRing: -1, ttl: ttl || 6, phase: rr(r, 0, 6.3),
+             dying: false, age: 0 }
 }
 
 // ── the scheduler: keep the board's light at the level the machine earns ────
@@ -333,8 +335,8 @@ function advance(list, dt) {
             continue
         }
         if (p.dwell) {
-            // breathe: up and down, for its lifetime, then die into the fade
-            p.bloom = 0.5 + 0.5 * Math.sin(p.age * 1.6 + p.alpha * 9)
+            // a dwell's LOOK is the renderer's (Trace.light breathes it off the
+            // widget's clock); advance only ages it and ends it
             if (p.ttl > 0) { p.ttl -= dt; if (p.ttl <= 0) p.dying = true }
             out.push(p)
             continue
@@ -375,3 +377,58 @@ function tail(p, back) { return at(p.pts, dist(p) - p.dir * back) }
 // The head itself (the tail at zero back, named so a caller does not have to
 // write `tail(p, 0)` and mean the front).
 function head(p) { return at(p.pts, dist(p)) }
+
+// The one breath: a slow sine, 0..1. Used by a node's alpha (the renderer) and
+// its ring size — and by nothing else, so a node can breathe in exactly one way.
+function breath(t, phase) { return 0.5 + 0.5 * Math.sin((t || 0) * 1.6 + (phase || 0)) }
+
+// The whole drawable face of one light as RECTANGLES — what an item-based
+// renderer needs, computed here so the QML holds no geometry (and so
+// design/trace.test.js can cover it).
+//
+//   { dwell, hue, alpha,
+//     head: { x, y, r, alpha } | null,
+//     tail: [ { x, y, w, h, rot, alpha } ],     // head backwards, in order
+//     ring: { x, y, r, stroke, alpha } | null }
+//
+// `segs` is how many straight pieces the tail is cut into. Colours are the
+// caller's: this returns geometry, the record's `hue`, and alphas. `t` is the
+// breath clock (the widget's own), used for dwells and nodes only — a
+// travelling pulse's position comes from its own progress.
+function light(p, segs, board, t) {
+    var N = segs || 6
+    var cl = function (a) { return a < 0 ? 0 : (a > 1 ? 1 : a) }
+    var out = { dwell: !!p.dwell, hue: p.hue, alpha: cl(p.alpha), head: null, tail: [], ring: null }
+    var i
+    if (p.dwell) {
+        if (board && p.ring >= 0 && p.ring < board.rings.length) {
+            var rg = board.rings[p.ring]
+            var b = breath(t, p.phase)
+            out.ring = { x: rg[0], y: rg[1], r: rg[2] + 2 + b * 3,
+                         stroke: (board.ring || 1.5) * 1.6,
+                         alpha: cl(p.alpha * (0.35 + 0.65 * b)) }
+        }
+        return out
+    }
+    if (!p.pts || p.pts.length < 4 || p.total <= 0) return out
+    var pt = []
+    for (i = 0; i <= N; i++) pt.push(tail(p, i * (p.trail / N)))
+    var hr = p.head || 2.5
+    out.head = { x: pt[0].x, y: pt[0].y, r: hr, alpha: cl(p.alpha) }
+    for (i = 0; i < N; i++) {
+        var a = pt[i], b2 = pt[i + 1]
+        var dx = b2.x - a.x, dy = b2.y - a.y
+        var thick = Math.max(1, hr * (1 - (i + 1) / (N + 1.5)))
+        out.tail.push({ x: a.x, y: a.y - thick / 2,
+                        w: Math.sqrt(dx * dx + dy * dy), h: thick,
+                        rot: Math.atan2(dy, dx) * 180 / Math.PI,
+                        alpha: cl(p.alpha * (1 - i / (N + 1)) * 0.8) })
+    }
+    if (p.bloom > 0 && board && p.bloomRing >= 0 && p.bloomRing < board.rings.length) {
+        var g = board.rings[p.bloomRing]
+        out.ring = { x: g[0], y: g[1], r: g[2] + 1.5 + p.bloom * 5,
+                     stroke: (board.ring || 1.5) * (1 + p.bloom),
+                     alpha: cl(p.bloom * 0.7) }
+    }
+    return out
+}

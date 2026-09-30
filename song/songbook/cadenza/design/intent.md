@@ -558,13 +558,19 @@ shell has no such slot.
   where the bar's own lamp walks from now on, so there is one
   implementation of "where is the light now", not two.
 - **The light.** A pulse is a RECORD (`{ track, u, dir, leg, legs, speed,
-  trail, hue }`), never a QML object: one transparent Canvas over the copper
-  repaints every pulse, every node and every bloom in a single pass on one
-  clock. The looks are data — a scan that arrives and dies (`legs = 1`), a
-  slide that bounces back and forth (`legs > 1`, velocity eased at both ends,
-  alpha lost a step per leg), a node that just breathes (`legs = 0`). Speed,
-  tail length, direction and legs are drawn per pulse, so nothing moves in
-  unison.
+  trail, hue }`), never an animation object of its own: `Trace.light` turns a
+  record into the rectangles to draw — a head, six tail pieces, its node ring —
+  and ONE delegate (`wallpaper.qml`'s inline `Light`) draws them. The looks are
+  data — a scan that arrives and dies (`legs = 1`), a slide that bounces back
+  and forth (`legs > 1`, velocity eased at both ends, alpha lost a step per
+  leg), a node that just breathes (`legs = 0`). Speed, tail length, direction
+  and legs are drawn per pulse, so nothing moves in unison.
+- **Why items and not a canvas.** A `Canvas` repaints its whole surface: at
+  1080p that is 2.07 M px and a fresh texture upload every frame, which
+  saturates the GUI thread and makes opening a surface (the launcher, the dock)
+  crawl. The light's own rectangles damage a few thousand px instead. Measured
+  on the engine alone: 0.003 ms/frame — the cost was never the maths, it was
+  the damage. `interval` sets how often the light MOVES, not how much is drawn.
 - **The machine drives it.** Every live session claims ONE ring, lit in its
   state's colour (`kit.lampColor`) and breathing — more processes, more lit
   nodes. The pulse budget is `Trace.want`: a floor of two slow dim pulses
