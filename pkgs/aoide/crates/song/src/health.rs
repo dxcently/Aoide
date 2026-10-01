@@ -15,12 +15,14 @@
 //!
 //! The first question is whether the unit is running at all. A host with no
 //! systemd, or with the unit not installed, has no shell lane and no opinion
-//! is formed. A loaded unit that is `inactive` or `failed` is
-//! [`HealthOutcome::NotRunning`]: reported and never restarted, because
-//! `Restart=always` keeps a unit up on its own, so one that is down was
-//! stopped on purpose or parked `failed` by `StartLimit*`, and a restart from
-//! here would undo that decision. Transient states (`activating`,
-//! `reloading`) are not judged.
+//! is formed. An installed unit that is `inactive` or `failed` — including
+//! one whose load state is `bad-setting`, `error` or `masked` — is
+//! [`HealthOutcome::NotRunning`]: reported and never restarted. A unit that is
+//! down despite `Restart=always` was stopped, parked `failed` by
+//! `StartLimit*`, never started, or refused by a failed condition, and this
+//! watchdog cannot tell a deliberate stop from the others, so a restart from
+//! here could undo a decision. Transient states (`activating`, `reloading`,
+//! `deactivating`) are not judged.
 //!
 //! Two signals, asked in the order below, because they answer different
 //! questions. `hyprctl layers` missing the surfaces the shell is supposed to
@@ -127,7 +129,8 @@ pub enum HealthOutcome {
     /// No lockup detected (including: no opinion to form — no systemd, the
     /// unit not installed, or a transient state).
     Healthy,
-    /// The unit is installed and `inactive` or `failed`. Reported, never
+    /// The unit is installed (any load state but `not-found`) and `inactive`
+    /// or `failed`. Reported, never
     /// restarted: see the module header.
     NotRunning { state: String },
     /// The shell isn't painting the desktop it should be, and this watchdog
@@ -554,10 +557,9 @@ fn now_epoch() -> i64 {
 /// --value` — a systemd timestamp string, passed straight through to
 /// `journalctl --since` rather than parsed to an epoch here: journalctl
 /// already understands systemd's own timestamp format, so there is nothing
-/// to convert. `None` when the unit isn't running or has never been active
-/// (both `journal_shows_placeholder` and the `hyprctl` cross-check are
-/// skipped in that case — an absent service is [`HealthOutcome::Healthy`],
-/// nothing to watch).
+/// to convert. `None` when the unit has never been active or the call
+/// fails (both `journal_shows_placeholder` and the `hyprctl` cross-check are
+/// skipped in that case — [`HealthOutcome::Healthy`], nothing to watch).
 fn active_enter_timestamp() -> Option<String> {
     let out = Command::new("systemctl")
         .args(["--user", "show", "aoide-quickshell.service", "--property=ActiveEnterTimestamp", "--value"])
@@ -585,17 +587,29 @@ fn unit_properties() -> String {
         .unwrap_or_default()
 }
 
+fn unit_property<'a>(show: &'a str, key: &str) -> Option<&'a str> {
+    show.lines().find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
+}
+
+/// Pure: is the unit on its way down? A restart now would race the stop.
+pub(crate) fn unit_is_deactivating(show: &str) -> bool {
+    unit_property(show, "ActiveState") == Some("deactivating")
+}
+
 /// Pure: `systemctl show --property=LoadState,ActiveState,SubState` output
-/// for a loaded unit that is `inactive` or `failed`, as `"<active>/<sub>"`.
-/// `None` is no opinion: unparseable output, a unit that is not installed,
-/// or a state that is running or still changing.
+/// for an installed unit that is `inactive` or `failed`, as
+/// `"<active>/<sub>"`, led by the load state when the unit did not load
+/// cleanly (`bad-setting`, `error`, `masked`). `None` is no opinion:
+/// unparseable output, a unit that is not installed, or a state that is
+/// running or still changing.
 pub(crate) fn not_running_state(show: &str) -> Option<String> {
-    let property = |key: &str| {
-        show.lines().find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
-    };
-    let active = property("ActiveState")?;
-    (property("LoadState")? == "loaded" && matches!(active, "inactive" | "failed"))
-        .then(|| format!("{active}/{}", property("SubState").unwrap_or("unknown")))
+    let load = unit_property(show, "LoadState")?;
+    let active = unit_property(show, "ActiveState")?;
+    if load == "not-found" || !matches!(active, "inactive" | "failed") {
+        return None;
+    }
+    let sub = unit_property(show, "SubState").unwrap_or("unknown");
+    Some(if load == "loaded" { format!("{active}/{sub}") } else { format!("{load}/{active}/{sub}") })
 }
 
 fn journal_tail_since(since: &str) -> String {
@@ -685,7 +699,11 @@ fn notify_still_flapping() {
 /// both, which is deliberate: which surfaces should be mapped is a
 /// declaration, but what to DO about a desktop that lost them is not.
 pub fn run_healthcheck() -> HealthOutcome {
-    if let Some(state) = not_running_state(&unit_properties()) {
+    let show = unit_properties();
+    if unit_is_deactivating(&show) {
+        return HealthOutcome::Healthy;
+    }
+    if let Some(state) = not_running_state(&show) {
         return HealthOutcome::NotRunning { state };
     }
     if crate::reap::quickshell_service_main_pid().is_none() {
@@ -1464,6 +1482,25 @@ mod tests {
         assert_eq!(outcome.tag(), "not-running");
         assert!(outcome.message().contains("not running (inactive/dead)"), "{}", outcome.message());
         assert!(!outcome.message().contains("healthy"), "{}", outcome.message());
+    }
+
+    #[test]
+    fn unit_that_did_not_load_cleanly_reads_not_running_with_its_load_state() {
+        for load in ["bad-setting", "masked", "error"] {
+            assert_eq!(
+                not_running_state(&show(load, "inactive", "dead")),
+                Some(format!("{load}/inactive/dead"))
+            );
+        }
+    }
+
+    #[test]
+    fn deactivating_unit_is_not_judged() {
+        let stopping = show("loaded", "deactivating", "stop-sigterm");
+        assert!(unit_is_deactivating(&stopping));
+        assert_eq!(not_running_state(&stopping), None);
+        assert!(!unit_is_deactivating(&show("loaded", "active", "running")));
+        assert!(!unit_is_deactivating(""));
     }
 
     #[test]

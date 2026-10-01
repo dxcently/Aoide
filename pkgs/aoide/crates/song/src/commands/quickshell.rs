@@ -28,7 +28,7 @@ use serde_json::json;
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["quickshell", "healthcheck"],
-        summary: "Detect and recover the placeholder-screen lockup: aoide-quickshell.service alive but rendered onto Qt's internal placeholder screen after a transient output blip, no longer painting the layer-shell surfaces its song declared. Restarts the service to reattach, spacing repeated attempts along a retry ladder (immediate, then 15s/60s/5m, settling at 15m) that slows down but never stops. With no declaration published (run/qml/songs/surfaces.json absent) it falls back to counting aoide-* surfaces and calling a zero count stuck. An installed unit that is inactive or failed reports 'not-running' and is left alone, since a stop or a StartLimit park is a decision. A desktop falling short for some other reason reports 'blank' and is left alone — named, not restarted, since the placeholder screen is the only mechanism this watchdog knows how to undo. Meant to run off a systemd timer, not interactively.",
+        summary: "Detect and recover the placeholder-screen lockup: aoide-quickshell.service alive but rendered onto Qt's internal placeholder screen after a transient output blip, no longer painting the layer-shell surfaces its song declared. Restarts the service to reattach, spacing repeated attempts along a retry ladder (immediate, then 15s/60s/5m, settling at 15m) that slows down but never stops. With no declaration published (run/qml/songs/surfaces.json absent) it falls back to counting aoide-* surfaces and calling a zero count stuck. An installed unit that is inactive or failed reports 'not-running' and is left alone, since a deliberate stop cannot be told from a StartLimit park or an unmet condition. A desktop falling short for some other reason reports 'blank' and is left alone — named, not restarted, since the placeholder screen is the only mechanism this watchdog knows how to undo. Meant to run off a systemd timer, not interactively.",
         args: [],
         flags: [],
         gated: false,
@@ -39,8 +39,8 @@ pub fn register(r: &mut Registry) {
 
 /// `quickshell healthcheck` — best-effort, always `Outcome::ok`: whether
 /// nothing was wrong, the unit is not running, the desktop is blank for a
-/// reason this watchdog cannot undo, a restart was fired, or a restart was withheld under
-/// backoff are all reported facts, not command failures (same posture as
+/// reason this watchdog cannot undo, a restart was fired, or a restart was
+/// withheld under backoff are all reported facts, not command failures (same posture as
 /// `reload`'s declarative arm, `commands/reload.rs`).
 fn handle_quickshell_healthcheck(_inv: &Invocation) -> Outcome {
     let outcome = crate::health::run_healthcheck();
