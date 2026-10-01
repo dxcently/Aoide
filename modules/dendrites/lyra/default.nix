@@ -661,7 +661,7 @@ let
                 # `aoideRestartRice` (above) only reasserts the paint on a REBUILD.
                 # Nothing caught the SAME failure live, mid-session, with no rebuild in
                 # sight — the incident it documents recurred twice more the next day
-                # (2026-08-29), the last one unnoticed for ~9 hours. `Restart=on-failure`
+                # (2026-08-29), the last one unnoticed for ~9 hours. `Restart=always`
                 # is structurally blind to this lockup: the process never exits, it just
                 # sits `active` painted onto Qt's internal placeholder screen, so
                 # systemd has nothing to restart on. `lyra quickshell healthcheck`
@@ -700,7 +700,7 @@ let
                 # under NixOS's richer default environment.
                 systemd.user.services.aoide-quickshell-healthcheck = lib.mkIf config.aoide.lyra.enable {
                   Unit = {
-                    Description = "Aoide Quickshell healthcheck — detect and recover a placeholder-screen lockup Restart=on-failure cannot catch";
+                    Description = "Aoide Quickshell healthcheck — detect and recover a placeholder-screen lockup Restart=always cannot catch";
                     PartOf = [ "graphical-session.target" ];
                     After = [ "graphical-session.target" ];
                   };

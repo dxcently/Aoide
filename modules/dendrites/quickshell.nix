@@ -77,8 +77,9 @@ let
         # The shell surface (bar/dock/wallpaper/notifications/OSD) is started by
         # a systemd user service rather than a compositor exec-once. A service is
         # the stronger session-assembly seam:
-        #   - Restart=on-failure — a QML crash respawns the whole shell instead
-        #     of leaving the desktop bare until the next login.
+        #   - Restart=always — a QML crash or a clean exit respawns the whole
+        #     shell instead of leaving the desktop bare until the next login.
+        #     `systemctl --user stop` is never fought, so a deliberate stop holds.
         #   - journald — `journalctl --user -u aoide-quickshell` gives real logs
         #     (an exec-once child's stderr is lost).
         #   - graphical-session.target ordering — it starts only once the
@@ -89,9 +90,9 @@ let
         # (not crash-loops) if the config tree has not landed yet. That guard
         # only checks *existence*, though — a shell.qml that exists but fails to
         # load (a QML parse/load error, or an ExecStart pointed elsewhere by a
-        # stray drop-in) still exits 255 and, under Restart=on-failure, would
+        # stray drop-in) still exits 255 and, under Restart=always, would
         # respawn every RestartSec forever. StartLimit* is the backstop: after 5
-        # failures inside 60s systemd stops trying and parks the unit `failed`
+        # starts inside 60s systemd stops trying and parks the unit `failed`
         # instead of thrashing the desktop (and journald) indefinitely. Five tries
         # still absorbs a genuinely transient failure (e.g. Wayland not ready yet).
         # The same condition doubles as the runtime-compose seam: a later phase
@@ -181,7 +182,7 @@ let
                 ++ lib.optionals config.aoide.lyra.enable [
                   "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
                 ];
-                Restart = "on-failure";
+                Restart = "always";
                 RestartSec = 3;
               };
               Install.WantedBy = [ "graphical-session.target" ];
