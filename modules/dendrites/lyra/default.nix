@@ -661,7 +661,7 @@ let
                 # `aoideRestartRice` (above) only reasserts the paint on a REBUILD.
                 # Nothing caught the SAME failure live, mid-session, with no rebuild in
                 # sight — the incident it documents recurred twice more the next day
-                # (2026-08-29), the last one unnoticed for ~9 hours. `Restart=on-failure`
+                # (2026-08-29), the last one unnoticed for ~9 hours. `Restart=always`
                 # is structurally blind to this lockup: the process never exits, it just
                 # sits `active` painted onto Qt's internal placeholder screen, so
                 # systemd has nothing to restart on. `lyra quickshell healthcheck`
@@ -673,7 +673,10 @@ let
                 # the first restart, then 15s/60s/5m, settling at a 15-minute floor it
                 # never drops below — but never gives up either, so a genuinely
                 # flapping output still gets restarted forever instead of eventually
-                # being abandoned.
+                # being abandoned. A unit that is installed but stopped or parked
+                # `failed` (StartLimit) is reported as not running and left alone:
+                # the watchdog cannot tell a deliberate stop from a parked or
+                # never-started unit, and a restart could undo the decision.
                 #
                 # `quickshell` is a lyra-only command family (left core's registry at
                 # P-A5), so this execs `pkgs.aoide.rice` — lyra's own droppable output
@@ -700,7 +703,7 @@ let
                 # under NixOS's richer default environment.
                 systemd.user.services.aoide-quickshell-healthcheck = lib.mkIf config.aoide.lyra.enable {
                   Unit = {
-                    Description = "Aoide Quickshell healthcheck — detect and recover a placeholder-screen lockup Restart=on-failure cannot catch";
+                    Description = "Aoide Quickshell healthcheck — detect and recover a placeholder-screen lockup Restart=always cannot catch";
                     PartOf = [ "graphical-session.target" ];
                     After = [ "graphical-session.target" ];
                   };

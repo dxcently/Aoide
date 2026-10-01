@@ -210,19 +210,20 @@ The shell surface is started by the **`aoide-quickshell`** systemd *user*
 service, defined in `modules/dendrites/quickshell.nix`. The service is
 the session-assembly seam: it orders after `graphical-session.target` (so
 Quickshell inherits a valid Wayland env), logs to journald (`journalctl
---user -u aoide-quickshell`), and respawns on crash. Three layers keep one
+--user -u aoide-quickshell`), and respawns on any exit, a clean one included. Three layers keep one
 bad load from bringing the desktop down for good:
 
 - `ConditionPathExists = <shellQmlEntry>` — if the QML entry hasn't landed, the
   unit *declines to start* rather than crash-looping. **But this checks
   existence, not validity.**
-- `Restart = "on-failure"` / `RestartSec = 3` — a genuine crash respawns the
-  whole shell instead of leaving the desktop bare until next login.
+- `Restart = "always"` / `RestartSec = 3` — a crash or a clean exit respawns
+  the whole shell instead of leaving the desktop bare until next login.
+  `systemctl --user stop` is never fought.
 - `StartLimitIntervalSec = 60` / `StartLimitBurst = 5` — the
   backstop for the gap the `ConditionPathExists` guard can't cover: a
   `shell.qml` that *exists but won't load* (a QML parse error, or an `ExecStart`
   aimed elsewhere by a stray drop-in) exits 255 every respawn, so without a
-  limit `Restart=on-failure` thrashes forever. After 5 failures inside 60s
+  limit `Restart=always` thrashes forever. After 5 starts inside 60s
   systemd parks the unit `failed`. Five tries still absorbs a transient failure
   (e.g. Wayland not ready yet).
 
