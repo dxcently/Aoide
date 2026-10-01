@@ -239,6 +239,12 @@
   core-only `reap`). Don't fold this into `reap` or generalize `reap` to
   cover it — the two mechanisms check unrelated things on unrelated
   subjects, and merging them would only muddy both.
+- **`health.rs` never reads an installed, stopped unit as healthy, and never
+  restarts one.** `not_running_state` is the pure judgement over
+  `systemctl show` text: `loaded` plus `inactive`/`failed` is `NotRunning`;
+  not-found, unparseable and transient states are no opinion and fall through
+  to the surface checks. `NotRunning` is report-only because `Restart=always`
+  makes a down unit a stop or a `StartLimit*` park, both deliberate.
 - **`health.rs`'s bad-state predicate is `surfaces_fall_short` against the
   published `run/qml/songs/surfaces.json`, and `shell_has_zero_layers` is
   only the fallback for a host that published nothing.** The two are not

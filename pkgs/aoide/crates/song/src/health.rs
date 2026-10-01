@@ -1,6 +1,6 @@
 //! Live watchdog for the quickshell placeholder-screen lockup.
 //!
-//! `aoide-quickshell.service`'s `Restart=on-failure` (the quickshell
+//! `aoide-quickshell.service`'s `Restart=always` (the quickshell
 //! lane) is useless against one specific failure mode:
 //! after a transient output blip on the real monitor, Qt's wayland QPA
 //! backend sometimes falls onto an internal placeholder screen and never
@@ -12,6 +12,15 @@
 //! time mitigation already exists (`home.activation.aoideRestartRice`), but
 //! it only fires on a nix switch, not live mid-session — this closes that
 //! gap with a periodic check (`aoide-quickshell-healthcheck.timer`).
+//!
+//! The first question is whether the unit is running at all. A host with no
+//! systemd, or with the unit not installed, has no shell lane and no opinion
+//! is formed. A loaded unit that is `inactive` or `failed` is
+//! [`HealthOutcome::NotRunning`]: reported and never restarted, because
+//! `Restart=always` keeps a unit up on its own, so one that is down was
+//! stopped on purpose or parked `failed` by `StartLimit*`, and a restart from
+//! here would undo that decision. Transient states (`activating`,
+//! `reloading`) are not judged.
 //!
 //! Two signals, asked in the order below, because they answer different
 //! questions. `hyprctl layers` missing the surfaces the shell is supposed to
@@ -115,9 +124,12 @@ const RETRY_LADDER_SECS: [i64; 5] = [0, 15, 60, 300, 900];
 
 /// The result of one `aoide quickshell healthcheck` run.
 pub enum HealthOutcome {
-    /// No lockup detected (including: the service isn't running at all —
-    /// nothing to watch).
+    /// No lockup detected (including: no opinion to form — no systemd, the
+    /// unit not installed, or a transient state).
     Healthy,
+    /// The unit is installed and `inactive` or `failed`. Reported, never
+    /// restarted: see the module header.
+    NotRunning { state: String },
     /// The shell isn't painting the desktop it should be, and this watchdog
     /// cannot say why: either the declared surface set falls short of what
     /// `run/qml/songs/surfaces.json` says should be mapped, or — with no
@@ -149,6 +161,7 @@ impl HealthOutcome {
     pub fn tag(&self) -> &'static str {
         match self {
             HealthOutcome::Healthy => "healthy",
+            HealthOutcome::NotRunning { .. } => "not-running",
             HealthOutcome::Blank => "blank",
             HealthOutcome::Restarted => "restarted",
             HealthOutcome::Deferred { .. } => "deferred",
@@ -158,6 +171,9 @@ impl HealthOutcome {
     pub fn message(&self) -> String {
         match self {
             HealthOutcome::Healthy => "quickshell is healthy".to_string(),
+            HealthOutcome::NotRunning { state } => {
+                format!("quickshell is not running ({state}); not restarting")
+            }
             HealthOutcome::Blank => {
                 "quickshell is not painting what it should be, and no placeholder-screen line \
                  explains it; not restarting"
@@ -554,6 +570,34 @@ fn active_enter_timestamp() -> Option<String> {
     if s.is_empty() { None } else { Some(s) }
 }
 
+fn unit_properties() -> String {
+    Command::new("systemctl")
+        .args([
+            "--user",
+            "show",
+            "aoide-quickshell.service",
+            "--property=LoadState,ActiveState,SubState",
+        ])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+/// Pure: `systemctl show --property=LoadState,ActiveState,SubState` output
+/// for a loaded unit that is `inactive` or `failed`, as `"<active>/<sub>"`.
+/// `None` is no opinion: unparseable output, a unit that is not installed,
+/// or a state that is running or still changing.
+pub(crate) fn not_running_state(show: &str) -> Option<String> {
+    let property = |key: &str| {
+        show.lines().find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
+    };
+    let active = property("ActiveState")?;
+    (property("LoadState")? == "loaded" && matches!(active, "inactive" | "failed"))
+        .then(|| format!("{active}/{}", property("SubState").unwrap_or("unknown")))
+}
+
 fn journal_tail_since(since: &str) -> String {
     Command::new("journalctl")
         .args(["--user", "-u", "aoide-quickshell.service", "--no-pager", "--since"])
@@ -641,6 +685,9 @@ fn notify_still_flapping() {
 /// both, which is deliberate: which surfaces should be mapped is a
 /// declaration, but what to DO about a desktop that lost them is not.
 pub fn run_healthcheck() -> HealthOutcome {
+    if let Some(state) = not_running_state(&unit_properties()) {
+        return HealthOutcome::NotRunning { state };
+    }
     if crate::reap::quickshell_service_main_pid().is_none() {
         return HealthOutcome::Healthy;
     }
@@ -1403,6 +1450,42 @@ mod tests {
 
         let singular = HealthOutcome::Deferred { next_attempt_in_secs: 10, recent_restarts: 1 };
         assert!(singular.message().contains("1 restart "), "{}", singular.message());
+    }
+
+    fn show(load: &str, active: &str, sub: &str) -> String {
+        format!("LoadState={load}\nActiveState={active}\nSubState={sub}\n")
+    }
+
+    #[test]
+    fn loaded_inactive_unit_reads_not_running_never_healthy() {
+        let state = not_running_state(&show("loaded", "inactive", "dead")).unwrap();
+        assert_eq!(state, "inactive/dead");
+        let outcome = HealthOutcome::NotRunning { state };
+        assert_eq!(outcome.tag(), "not-running");
+        assert!(outcome.message().contains("not running (inactive/dead)"), "{}", outcome.message());
+        assert!(!outcome.message().contains("healthy"), "{}", outcome.message());
+    }
+
+    #[test]
+    fn failed_unit_reads_not_running() {
+        assert_eq!(
+            not_running_state(&show("loaded", "failed", "failed")).as_deref(),
+            Some("failed/failed")
+        );
+    }
+
+    #[test]
+    fn not_found_unit_and_unparseable_output_read_no_opinion() {
+        assert_eq!(not_running_state(&show("not-found", "inactive", "dead")), None);
+        assert_eq!(not_running_state(""), None);
+        assert_eq!(not_running_state("Failed to connect to bus"), None);
+    }
+
+    #[test]
+    fn active_and_transient_units_fall_through_to_the_surface_checks() {
+        for (active, sub) in [("active", "running"), ("activating", "auto-restart"), ("reloading", "reload")] {
+            assert_eq!(not_running_state(&show("loaded", active, sub)), None, "{active}");
+        }
     }
 
     // `run_healthcheck()` itself isn't unit-tested here: it reads the REAL

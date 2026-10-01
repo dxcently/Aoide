@@ -245,8 +245,10 @@ lyra quickshell healthcheck [--json]
 ```
 
 - **Reads:** `systemctl --user show aoide-quickshell.service
-  --property=ActiveEnterTimestamp --value` (absent/not-running is
-  `HealthOutcome::Healthy` — nothing to watch); the journal since that
+  --property=LoadState,ActiveState,SubState` (a loaded unit that is
+  `inactive` or `failed` is `not-running`; no systemd or an uninstalled unit
+  is `HealthOutcome::Healthy` — nothing to watch) and `--property=
+  ActiveEnterTimestamp --value`; the journal since that
   timestamp (`journalctl --user -u aoide-quickshell.service --since
   <timestamp>`) for Qt's placeholder-screen line; `hyprctl -j layers` for the
   live surface count. A restart-history marker at
@@ -257,8 +259,9 @@ lyra quickshell healthcheck [--json]
   lockup — restarts `aoide-quickshell.service` via `systemctl --user
   restart`.
 - **Pipes to / output:** always `status: "ok"`; `--json` data `{status:
-  "healthy" | "blank" | "restarted" | "deferred"}` with a matching human
-  message (a `deferred` message names the seconds until the next attempt and
+  "healthy" | "not-running" | "blank" | "restarted" | "deferred"}` with a
+  matching human message (`not-running` names the unit's state and is never
+  restarted: a stop or a StartLimit park is a decision; a `deferred` message names the seconds until the next attempt and
   the restart count in the last hour). Meant to run off
   `aoide-quickshell-healthcheck.timer`, not interactively.
 - **Notes:** not gated; best-effort throughout — a failed

@@ -86,7 +86,9 @@ a config file). Paint-side — ships in `lyra`, not core.
 - `ipc`, `lint`, `reap` — the song IPC surface, `rice lint`, and stale-song
   reaping.
 - `health` — the `quickshell healthcheck` watchdog (`src/health.rs`, whose
-  module header is the argument). Its bad-state predicate is
+  module header is the argument). It first reads the unit's state through
+  `not_running_state`: a loaded unit that is `inactive` or `failed` is
+  `NotRunning`, reported and never restarted. Its bad-state predicate is
   `surfaces_fall_short` against the declaration published to
   `run/qml/songs/surfaces.json` by the lyra lane's build
   (`CONTRACTS.md §5`, `aoide.arrangement.surfaces`), read through

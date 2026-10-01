@@ -673,7 +673,9 @@ let
                 # the first restart, then 15s/60s/5m, settling at a 15-minute floor it
                 # never drops below — but never gives up either, so a genuinely
                 # flapping output still gets restarted forever instead of eventually
-                # being abandoned.
+                # being abandoned. A unit that is installed but stopped or parked
+                # `failed` (StartLimit) is reported as not running and left alone:
+                # restarting it would undo a deliberate stop or a backstop.
                 #
                 # `quickshell` is a lyra-only command family (left core's registry at
                 # P-A5), so this execs `pkgs.aoide.rice` — lyra's own droppable output
