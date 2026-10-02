@@ -9,10 +9,11 @@ name, so a grouping change never moves a dendrite.
 
 `modules/aggregations/default.nix` discovers every immediate child directory
 holding a `default.nix`; the directory's name is the aggregation's name. A body
-is inert DATA — it declares no options and carries no gate, and
-habit's composition wraps it in one, and refuses a body with a top-level key
-other than `description`, `system` or `home`, or a half with a key other than
-`members`, `providers`, `nixos` or `homeManager`. Members are applied with `mkDefault`, so
+is inert DATA — it declares no options and carries no gate. habit's
+composition wraps it in one, and refuses a selected aggregation's body with a
+top-level key other than `description`, `system` or `home`, or a half with a key
+other than `members`, `providers`, `nixos` or `homeManager`. Members are applied
+with `mkDefault`, so
 a host can take a group and drop one member
 (`dendrites.kitty.enable = false`) without giving up the rest.
 

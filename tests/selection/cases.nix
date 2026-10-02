@@ -41,15 +41,14 @@ rec {
   realRegistryLanesImport =
     let
       selection = selectionOf desktopHost;
-    in
-    builtins.length (
-      composition.lanesFor {
+      lanes = composition.lanesFor {
         inherit (selection) catalogue;
         selected = selection.dendrites;
         lane = "nixos";
         scope = "for the system";
-      }
-    ) > 0;
+      };
+    in
+    lanes != [ ] && builtins.all (m: builtins.isAttrs m || builtins.isFunction m || builtins.isPath m) lanes;
 
   # The inventory a reference-shaped host reports.
   realRegistryInventory =
