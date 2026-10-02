@@ -30,11 +30,12 @@ Outputs, all tolerant of empty layers so eval stays robust:
   mneme}` plus `default` (= aoide), `aoide` being a self-flaked path input.
   Adding a package is one folder —
   this file never changes.
-- `nixosModules` / `overlays.default` / `lib` / `aoideOptions` — the export
-  surface a consuming flake builds against: one `nixosModules.<name>` per
-  catalogue entry plus `nucleus` (the module that closes over Aoide's own
-  inputs), the base package overlay, the constructor files
-  (`lib.composition`, `lib.livery`, `lib.songbook`, `lib.catalogue`), and the
+- `nixosModules` / `overlays.default` / `lib` / `songbookRoot` / `aoideOptions`
+  — the export surface a consuming flake builds against: one
+  `nixosModules.<name>` per catalogue entry plus `nucleus` (the module that
+  closes over Aoide's own inputs), the base package overlay, the constructor
+  files (`lib.composition`, `lib.livery`, `lib.songbook`, `lib.catalogue`),
+  Aoide's own songbook directory for a host that performs Aoide's songs, and the
   derived `aoide.*` option list `lyra onboard` reads.
 - `checks` — the contractual coupling discipline from `lib/checks.nix`
   (`surface-ownership`, `song-runtime-untracked`, `song-shape`, `fmt`,

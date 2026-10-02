@@ -3,7 +3,8 @@
 # The point of this file is what it does NOT contain: no path concatenated onto
 # Aoide's source tree anywhere, and no threading of Aoide's own inputs. Everything AoideOS offers a stranger
 # arrives through the root flake's exports — `nixosModules.nucleus`,
-# `lib.{composition,livery,songbook,catalogue}` and `overlays.default` — and
+# `lib.{composition,livery,songbook,catalogue}`, `songbookRoot` and
+# `overlays.default` — and
 # the flake inputs Aoide's own lanes need (quickshell, stylix, nvf, hyprland,
 # the core itself) are closed over by `nixosModules.nucleus`, which is why this
 # file declares only nixpkgs, home-manager and aoide. It does not declare
@@ -40,12 +41,8 @@
 
       # The exported library values are each their file's own function, still
       # unapplied: a consumer applies them with ITS lib (the constructor runs on
-      # the consumer's lib, not on Aoide's) and its own songbook.
+      # the consumer's lib, not on Aoide's) and the songbook a host performs from.
       composition = aoide.lib.composition { inherit lib; };
-      songbook = aoide.lib.songbook {
-        inherit lib;
-        songbook = ./songs;
-      };
 
       registry = {
         # `lib.catalogue` is the bulk view of the same paths
@@ -56,8 +53,16 @@
         overrides = { };
       };
 
+      # One songbook per host: the consumer's own (`./songs`), or Aoide's
+      # through the `songbookRoot` export.
       mkHost =
-        name:
+        name: songbookDir:
+        let
+          songbook = aoide.lib.songbook {
+            inherit lib;
+            songbook = songbookDir;
+          };
+        in
         composition.mkNixosHost {
           inherit nixpkgs system;
           hostName = name;
@@ -85,10 +90,9 @@
               {
                 _module.args = {
                   inherit (songbook) song borrow;
-                  # The directory the selection was validated against: a
-                  # consumer's songs live in the CONSUMER's tree, and the lyra
+                  # The directory the selection was validated against: the lyra
                   # lane reads the root from here rather than naming one.
-                  songbook = ./songs;
+                  songbook = songbookDir;
                 };
                 aoide.song = song.declared;
                 aoide.songbook.builtIn = songbook.builtIn song;
@@ -100,6 +104,9 @@
         };
     in
     {
-      nixosConfigurations.consumer = (mkHost "consumer").system;
+      nixosConfigurations = {
+        consumer = (mkHost "consumer" ./songs).system;
+        aoide-songs = (mkHost "aoide-songs" aoide.songbookRoot).system;
+      };
     };
 }

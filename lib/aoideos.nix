@@ -40,8 +40,10 @@ let
   # as the caller's answer to `lib/songbook.nix`'s own default (`songbook ?
   # ../song/songbook` — the same directory): the selection validates a host
   # against it, the hook below hands the same value to the lane that paints the
-  # built-in songs, and a consumer's own songbook arrives through that same
-  # argument. `lib/songbook.nix` itself is deliberately NOT touched for this:
+  # built-in songs, and the flake exports this same value as `songbookRoot`, so
+  # a consumer performing Aoide's songs hands it to that same argument instead
+  # of building a path into this tree (a consumer's own songbook arrives there
+  # too). `lib/songbook.nix` itself is deliberately NOT touched for this:
   # it is COPIED into `pkgs/lyra-songbook` (`share/lyra/nix/songbook.nix`, the
   # shipped generator), so a single added line there moves every host's
   # templates path — and every session variable and unit `Environment` that
@@ -126,7 +128,7 @@ let
     };
 in
 {
-  inherit hostNames;
+  inherit hostNames songbookRoot;
 
   # The nucleus lane as a consumer takes it — the same module value
   # `nixosModules.nucleus` exports (see the let-block above).
@@ -179,9 +181,10 @@ in
             _module.args = {
               inherit (songbook) song borrow;
               # …and the directory they were discovered in, for the lane that
-              # paints a host's built-in songs: a consumer's songs live in the
-              # CONSUMER's tree, so the lyra lane reads this instead of naming a
-              # repository path of Aoide's own (`lib/songbook.nix`'s own root).
+              # paints a host's built-in songs: a consumer's songbook may be its
+              # own tree's or this one's, so the lyra lane reads this instead of
+              # naming a repository path of Aoide's own (`lib/songbook.nix`'s own
+              # root).
               songbook = songbookRoot;
             };
             aoide.song = song.declared;
