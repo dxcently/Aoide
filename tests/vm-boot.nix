@@ -5,7 +5,7 @@
 # aoideos.nix, pkgs.nix, songbook.nix); this is test content. See tests/README.md.
 #
 # Exercises the module tree through the SAME assembly a real host gets — the
-# constructor (`lib/composition.nix` driving `composition.mkNixosModules`, as
+# constructor (habit's `composition.mkNixosModules`, as
 # lib/aoideos.nix does) over the record below — plus the aoide package, greeter
 # wiring, the aoided user service, and the graph commands, without real hardware
 # or external network access. shellbridge is NOT exercised: its module gates on
@@ -65,7 +65,7 @@ let
   # `hosts/<name>/`. `lib/mkHost.nix` used to hand-assemble this list; that file
   # is gone, so the test that exists to exercise the real assembly goes through
   # the real assembly.
-  composition = import ../lib/composition.nix { inherit lib; };
+  composition = inputs.habit.lib.composition { inherit lib; };
 
   # The pkgs overlay injecting the discovered packages — literally the same
   # source `lib/aoideos.nix` hands a real host: both import lib/pkgs.nix's

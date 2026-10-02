@@ -1,6 +1,6 @@
 # modules/nucleus/assertions.nix — the platform's invariant surface.
 #
-# The twin of the constructor's gate pass: `lib/composition.nix` checks a host
+# The twin of the constructor's gate pass: habit's composition checks a host
 # RECORD before any module graph exists, and this file checks the graph that
 # graph produced. Both exist because neither can see the other's failure — a
 # hand-set `aoide.song` with no lane to paint it gets past the record (the

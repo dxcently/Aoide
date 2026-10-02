@@ -62,7 +62,7 @@ only, by their own directories' discovery files:
 `nixosConfigurations.<name>` and `inventory.<name>` from that same list. Adding a
 machine is a new directory; no file is edited to add one. A host record's shape is
 `hosts/README.md`; the constructor that assembles it is `lib/aoideos.nix`, over
-`lib/composition.nix`. `nix eval --json .#inventory.<host>` is the review surface
+habit's composition (`inputs.habit`). `nix eval --json .#inventory.<host>` is the review surface
 for what a host selected.
 
 ---
@@ -331,7 +331,7 @@ session records) are contract §4.
 
 ## Non-cargo tests (`tests/`)
 
-`lib/` holds build/eval machinery (`checks.nix`, `aoideos.nix`, `composition.nix`,
+`lib/` holds build/eval machinery (`checks.nix`, `aoideos.nix`,
 `pkgs.nix`, `songbook.nix`); `tests/` holds what those checks actually test — the headless VM
 boot (`vm-boot.nix`) and the static-artifact portability assertions
 (`portability.nix`), plus the manual container suite (`distrobox.md`).

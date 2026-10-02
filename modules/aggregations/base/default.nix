@@ -2,7 +2,7 @@
 #
 # An aggregation body is DATA: the members it selects, the provider choices it
 # exposes, and any preference that rides along into the platform pass. It
-# declares no options and carries no gate of its own; `lib/composition.nix`
+# declares no options and carries no gate of its own; habit's composition
 # wraps it in one. Members are named by CATALOGUE NAME.
 #
 # `base` is a membership, not a brand: these are the capabilities every host

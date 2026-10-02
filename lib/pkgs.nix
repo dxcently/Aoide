@@ -177,7 +177,7 @@ in
           # overlays writing one attribute in one order is otherwise a race whose
           # winner depends on how `nixpkgs.overlays` happened to compose — and
           # `prev` inside a lane's own overlay is NOT guaranteed to carry the
-          # base's attributes (see lib/composition.nix's `overlays` argument),
+          # base's attributes (see habit's composition `overlays` argument),
           # which is why a lane cannot simply `.override` what this supplies.
           #
           # The yield is not automatic: only a name in `intentionalOverrides`

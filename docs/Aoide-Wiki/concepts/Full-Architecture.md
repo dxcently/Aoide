@@ -444,7 +444,7 @@ for the layer anatomy, [[Codebase]] for file-level detail):
 │                    outputs: nixosConfigurations.<host> · hosts · inventory ·
 │                    packages · nixosModules · overlays · lib · aoideOptions ·
 │                    checks · devShells · formatter
-├── lib/             aoideos.nix (the constructor) · composition.nix (selection) ·
+├── lib/             aoideos.nix (the constructor, over habit's composition) ·
 │                    pkgs.nix / songbook.nix (discovery) · options.nix (aoideOptions) ·
 │                    checks.nix (surface-ownership · song-runtime-untracked · song-shape …)
 ├── tests/           non-cargo tests: vm-boot.nix (headless QEMU boot check) ·

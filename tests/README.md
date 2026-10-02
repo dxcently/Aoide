@@ -3,7 +3,7 @@
 Test content that isn't cargo's: whole-system and whole-artifact checks that
 need Nix — a build, or an evaluation of the whole configuration — to even
 exist. `lib/` holds build/eval machinery
-(`checks.nix`, `aoideos.nix`, `composition.nix`, `pkgs.nix`, `songbook.nix`);
+(`checks.nix`, `aoideos.nix`, `pkgs.nix`, `songbook.nix`);
 this directory holds
 what those checks actually test.
 
@@ -22,25 +22,26 @@ what those checks actually test.
   phase-5 slice runs it at its parent commit and at HEAD and puts both columns
   in the commit body; a slice that predicts a drvPath delta names it, because
   G5 is opaque and the named measures are the only ones that say what moved.
-- `selection/` — `tests/selection/run.sh` executes the constructor's schema
-  (`lib/composition.nix`) case by case: `cases.nix` holds one attribute per
-  case, the runner evaluates each on its own, and a negative case has to fail
-  with a message the runner greps for, so a vague error is a failing test
-  rather than a passing one. The fixture registry, aggregations, users and
-  override records sit beside it; several of them `throw` on import, which is
-  how "an unselected file stays unread" is proved instead of asserted. Its last
-  two cases cover the composition's other half, the packages walker's overlay
-  (`lib/pkgs.nix`): a name in `intentionalOverrides` yields to the overlay that
-  replaced it, and any other walker name another overlay provides is refused by
-  name. `lib` comes from this flake's own lock, so the schema is tested against
-  the lib every host evaluates with. Portable: `nix eval` plus bash, no VM, no
-  host path.
+- `selection/` — `tests/selection/run.sh` executes what is Aoide's own, case by
+  case: `cases.nix` holds one attribute per case, the runner evaluates each on
+  its own, and a negative case has to fail with a message the runner greps for,
+  so a vague error is a failing test rather than a passing one. Composition
+  itself is habit's and is tested in habit; three cases only show Aoide's real
+  registry still composes through it. The rest are the songbook's
+  (`lib/songbook.nix`) over the fixture songbooks beside it, one of which
+  `throw`s on import, which is how "an unselected song stays unread" is proved
+  instead of asserted, and the packages walker's overlay (`lib/pkgs.nix`): a
+  name in `intentionalOverrides` yields to the overlay that replaced it, and any
+  other walker name another overlay provides is refused by name. `lib` and
+  habit come from this flake's own lock, so the cases run against the lib every
+  host evaluates with and the habit every host is built by. Portable: `nix
+  eval` plus bash, no VM, no host path.
 - `templates/` — `tests/templates/run.sh` assembles a whole tree out of
   `templates/`, parses every template, resolves two hosts against the real
   constructor, and checks that the files nobody selected stayed unread. It
   keeps `templates/` from drifting away from the constructor.
 - `quickshell-seam/` — `tests/quickshell-seam/run.sh` evaluates three fixture
-  hosts through the real constructor (`lib/composition.nix`) with the real
+  hosts through the real constructor (habit's composition) with the real
   catalogue and nucleus, and checks the quickshell/lyra seam: a host with its
   own `quickshell.config` runs the `aoide-quickshell` service on that directory
   and owes lyra nothing (no rice binary, no `songs/`, no shellbridge, no

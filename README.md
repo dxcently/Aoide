@@ -21,7 +21,7 @@ This README explains what Aoide/AoideOS *is* — architecture, features, the Mel
 
 ## 1. Architecture
 
-The repo is a **snowflake**: a capability enters by one file plus one line — a dendrite by its line in `modules/default.nix`'s catalogue, an aggregation or an override by its directory's own scan, a core module by its line in `modules/nucleus/default.nix`. `lib/aoideos.nix`'s constructor builds a host from its record and `lib/composition.nix` resolves selection before any module graph exists, importing only what was kept. Drop a `.nix` file in the right directory, add its one line, done. A `/_`-prefixed path (`_wip.nix`, `_scratch/`) is never catalogued and never listed, so it is shelved without being deleted.
+The repo is a **snowflake**: a capability enters by one file plus one line — a dendrite by its line in `modules/default.nix`'s catalogue, an aggregation or an override by its directory's own scan, a core module by its line in `modules/nucleus/default.nix`. `lib/aoideos.nix`'s constructor builds a host from its record and habit's composition (`inputs.habit`, re-exported as `lib.composition`) resolves selection before any module graph exists, importing only what was kept. Drop a `.nix` file in the right directory, add its one line, done. A `/_`-prefixed path (`_wip.nix`, `_scratch/`) is never catalogued and never listed, so it is shelved without being deleted.
 
 ```
 ~/Aoide/

@@ -5,7 +5,7 @@
 # Landing a mac host needs the class seam first:
 #   1. flake.nix: a nix-darwin input (follows nixpkgs), `aarch64-darwin` in
 #      `systems`, a `darwinConfigurations` output
-#   2. lib/composition.nix / lib/aoideos.nix: a `class` arg — darwinSystem plus
+#   2. habit's composition / lib/aoideos.nix: a `class` arg — darwinSystem plus
 #      home-manager's and stylix's *darwinModules* instead of the nixosModules
 #      sets (`composition.laneNames` already carries `darwin`)
 #   3. modules/nucleus: a launchd twin for the aoided/shellbridge user services

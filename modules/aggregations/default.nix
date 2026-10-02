@@ -2,7 +2,7 @@
 #
 # Every immediate child directory holding a `default.nix` is an aggregation,
 # named by its directory. This produces `name = path` and NEVER imports a body:
-# `lib/composition.nix` imports only the bodies a host, or one of its users,
+# habit's composition imports only the bodies a host, or one of its users,
 # selected — an aggregation nobody selects is never read, and a body that
 # throws on import is how tests/selection proves it.
 #

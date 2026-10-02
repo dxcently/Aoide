@@ -15,7 +15,7 @@ the catalogue that names what can be selected.
   and points at the file (or directory) that answers it. It is the ONE place a
   dendrite file is named. `aggregations` and `overrides` are the sibling
   discovery records, read one level deep beside it — names and paths only, no
-  body imported at catalogue time. `lib/composition.nix`
+  body imported at catalogue time. Habit's composition
   reads this record before any module graph exists and imports only what
   selection kept.
 - `dendrites/default.nix`, `nucleus/default.nix` —
@@ -24,7 +24,7 @@ the catalogue that names what can be selected.
   (`builtins.attrValues (import ../default.nix).catalogue`, and a provider
   registry entry contributes every alternative). `nucleus/default.nix` names only
   the files inside its own directory — it is the unconditional core, so it has no
-  catalogue name to be found by. `lib/composition.nix` imports the two
+  catalogue name to be found by. Habit's composition imports the two
   aggregates for a host that took the whole tree, and `tests/vm-boot.nix`
   imports them directly as a consumer would;
   nothing imports the catalogue as a module.

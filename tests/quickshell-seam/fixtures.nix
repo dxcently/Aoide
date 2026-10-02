@@ -20,7 +20,7 @@ let
   # (the runner's default) sees exactly what is on disk.
   src = flake.outPath;
 
-  composition = import (src + "/lib/composition.nix") { inherit lib; };
+  composition = inputs.habit.lib.composition { inherit lib; };
 
   # The nucleus lane as the ref itself builds it (`lib/aoideos.nix`) — the same
   # value the flake exports as `nixosModules.nucleus`, and the ONE module that

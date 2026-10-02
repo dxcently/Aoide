@@ -23,7 +23,7 @@ never touch it. Inputs: `nixpkgs` (unstable), `home-manager`, `stylix`,
 Outputs, all tolerant of empty layers so eval stays robust:
 
 - `nixosConfigurations.yomi-strix` — assembled by the constructor,
-  `lib/aoideos.nix` over `lib/composition.nix`, from the host's own record.
+  `lib/aoideos.nix` over habit's composition (`inputs.habit`), from the host's own record.
 - `packages` — **auto-discovered** by `lib/pkgs.nix` from `pkgs/<name>/default.nix`
   (`callPackage`, `_`-shelving); currently `{aoide, chatgpt-linux, eidolon,
   hyprglass, iconify-data, kimi-code, lyra-shell, lyra-songbook, melete,
@@ -59,7 +59,7 @@ records, found one level deep by their own directories' `default.nix`. This is
 [[dxflake]]'s pattern, implemented in-house, and
 the concrete case of [[Plugin-Architecture]]'s discovery-by-existing rule.
 
-**`lib/composition.nix`** is the selection engine: the host record is evaluated
+**habit's composition** (`inputs.habit`, re-exported as `lib.composition`) is the selection engine: the host record is evaluated
 in an ordinary `evalModules` pass that knows nothing about NixOS, and the
 platform module list is assembled from the result — only what selection kept is
 imported. It resolves the aggregations a host (or one of its users) took, the
@@ -131,7 +131,7 @@ package (from `lib/pkgs.nix`) so every package builds under `nix flake check`.
 **`tests/vm-boot.nix`** wires `checks.<system>.vm-boot` — a
 headless QEMU boot of the whole stack via `pkgs.testers.runNixOSTest`
 (4 GiB / 4 vCPU, KVM). Its node is assembled from the **same** parts
-the constructor uses — `lib/composition.nix`'s `mkNixosModules` over an inline
+the constructor uses — habit's composition `mkNixosModules` over an inline
 host record, the nucleus lane, the
 home-manager modules, the pkgs overlay, and mirrored `specialArgs`
 (`host = "vm-test"`, inputs, username, system; `node.pkgsReadOnly = false`
