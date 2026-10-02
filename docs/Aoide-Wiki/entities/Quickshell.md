@@ -227,6 +227,17 @@ bad load from bringing the desktop down for good:
   systemd parks the unit `failed`. Five tries still absorbs a transient failure
   (e.g. Wayland not ready yet).
 
+The unit also records how it ended. `-v` copies quickshell's INFO lines, the
+level of its lifecycle lines (`Exiting due to IPC request.`), into the journal;
+its own `log.qslog` under `$XDG_RUNTIME_DIR/quickshell/` holds them too but
+does not survive a reboot. `ExecStopPost` writes one journal line on every
+ending, a stop job included: `aoide-quickshell ended: result=<$SERVICE_RESULT>
+code=<$EXIT_CODE> status=<$EXIT_STATUS>`. Quickshell installs no SIGTERM
+handler and systemd counts TERM as a clean stop, so `code=exited status=0` is
+quickshell leaving on its own, and `code=killed status=TERM` is either a stop
+job or a `kill` from outside: systemd's own `Stopping`/`Stopped` lines beside it
+mean a stop job, and their absence means an outside signal.
+
 None of the three catch the placeholder-screen lockup: after a transient
 output blip, Qt's wayland QPA backend can fall onto an internal placeholder
 screen and never reattach even once the real output returns. The process

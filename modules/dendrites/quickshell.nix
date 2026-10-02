@@ -81,7 +81,9 @@ let
         #     shell instead of leaving the desktop bare until the next login.
         #     `systemctl --user stop` is never fought, so a deliberate stop holds.
         #   - journald — `journalctl --user -u aoide-quickshell` gives real logs
-        #     (an exec-once child's stderr is lost).
+        #     (an exec-once child's stderr is lost), at quickshell's INFO level,
+        #     and ExecStopPost closes every run with an `aoide-quickshell ended:
+        #     result= code= status=` line, so a stop names its cause.
         #   - graphical-session.target ordering — it starts only once the
         #     compositor lane's env handoff (hyprland-session.target →
         #     graphical-session.target, WAYLAND_DISPLAY/HYPRLAND_INSTANCE_SIGNATURE
@@ -123,7 +125,10 @@ let
                 # `-p <path>` loads a config by PATH; `-c <name>` (used previously)
                 # treats the argument as a config NAME and fails on a path in
                 # quickshell 0.3.0.
-                ExecStart = "${quickshellPkg}/bin/quickshell -p ${shellEntry}";
+                ExecStart = "${quickshellPkg}/bin/quickshell -v -p ${shellEntry}";
+                # The shell, not systemd, expands these from ExecStopPost's
+                # environment, so the words stay inside one quoted argument.
+                ExecStopPost = "${pkgs.bash}/bin/sh -c 'echo \"aoide-quickshell ended: result=$SERVICE_RESULT code=$EXIT_CODE status=$EXIT_STATUS\"'";
                 # Qt6's qtbase ships only jpeg/png/gif/ico imageformats plugins (plus
                 # qtsvg); webp/tiff/etc. live in a SEPARATE qtimageformats plugin the
                 # quickshell wrapper does not carry. A song cover may be any of those
