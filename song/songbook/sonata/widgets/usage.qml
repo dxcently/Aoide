@@ -478,7 +478,7 @@ Item {
                         interval: baseIntervalMs
                         repeat: true
                         triggeredOnStart: true
-                        running: clef.activeSpin
+                        running: clef.activeSpin && clef.visible
                         property int frame: -1
                         // Matches Conductor's hookSpin exactly (the User: "it
                         // should use the conductors claude animation") —
@@ -553,7 +553,7 @@ Item {
                     // On spin end `running` flips true again and the loop
                     // eases from 1.0 back into its cycle — no snap.
                     SequentialAnimation on opacity {
-                        running: !clef.activeSpin
+                        running: !clef.activeSpin && clef.visible
                         loops: Animation.Infinite
                         NumberAnimation { to: 0.72; duration: 1800; easing.type: Easing.InOutSine }
                         NumberAnimation { to: 1.0;  duration: 1800; easing.type: Easing.InOutSine }

@@ -465,7 +465,7 @@ Item {
         onFileChanged: reload()
     }
 
-    Timer { interval: 1000; running: true; repeat: true; onTriggered: gadget.nowMs = Date.now() }
+    Timer { interval: 1000; running: gadget.visible; repeat: true; triggeredOnStart: true; onTriggered: gadget.nowMs = Date.now() }
     Component.onCompleted: parseStage()
 
     // cast shadow — lifts the temple off any marble wallpaper ────────────────────
@@ -1068,7 +1068,7 @@ Item {
                                         // working — the metronome pulse, confined
                                         // to the box (the anchoring law)
                                         SequentialAnimation on scale {
-                                            running: row.working
+                                            running: row.working && row.visible
                                             loops: Animation.Infinite
                                             alwaysRunToEnd: true
                                             NumberAnimation { to: 1.35; duration: 520; easing.type: Easing.InOutSine }
@@ -1079,7 +1079,7 @@ Item {
                                         // ping ("your password" beats faster than
                                         // "an agent question").
                                         SequentialAnimation on opacity {
-                                            running: row.rowAwaiting
+                                            running: row.rowAwaiting && row.visible
                                             loops: Animation.Infinite
                                             alwaysRunToEnd: true
                                             NumberAnimation { to: 0.35; duration: row.needsSudo ? 380 : 700; easing.type: Easing.InOutSine }
@@ -1369,7 +1369,7 @@ Item {
                                         color: row.emph ? livery.paletteHot
                                                         : gadget.withA(row.accent, 0.85)
                                         Timer {
-                                            running: row.working
+                                            running: row.working && kao.visible
                                             repeat: true; interval: 300
                                             onTriggered: kao.frame = (kao.frame + 1) % kao.frames.length
                                         }

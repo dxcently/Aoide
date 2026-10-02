@@ -316,6 +316,7 @@ PanelWindow {
         width: root.bookW
         height: root.panelH
         focus: true
+        visible: root.reveal > 0
 
         // The slide: translate X across the full travel — fully off-screen at
         // reveal 0, spine at the edge at reveal 1, a bare sliver at peekReveal.

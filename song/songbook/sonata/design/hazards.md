@@ -366,3 +366,28 @@ can remain in the launcher/parent cgroup and die when that parent is stopped or
 restarted. This split can trigger `SIGTRAP` in the app main on desktop reloads.
 Parent/self scope migration is not isolation by itself; children inherit the
 parent until the process creation chain is born in an independent scope.
+
+## 9. A mapped window renders every frame while anything in it animates
+
+A running animation or short timer dirties its item, and Qt Quick then syncs and
+renders the WHOLE window at the output's refresh rate. It does not matter that
+the changed pixels are clipped, translated off the window, or behind a shut
+codex. Measured on this rig with the dock's five gadgets in one 442x993 window
+at 60 Hz: 18-22 % of a core on-screen, the same with the whole column shifted
+to x = -2000, and 4.5 % with the column `visible: false` while the animations
+still ticked (60 fps swaps, nothing drawn). The live dock sits on DP-1 at
+144 Hz, where the same stack cost about 78 % of a core in the render threads.
+
+- **`Item.visible` is effective visibility.** `visible: root.reveal > 0` on the
+  codex (`dock.qml`) makes every descendant's `visible` false once it is shut,
+  so a gate written as `running: <state> && <item>.visible` stops with it.
+- **A bare `visible: false` stops the drawing but not the ticking.** An
+  `Animation.Infinite` or a repeating `Timer` must carry its own `visible`
+  term; the hidden-codex cost is then 0.2 % and 0.5 fps (the 2 s meter samples).
+- **The gate is the rule for any new widget in a mapped surface:** every
+  infinite animation and every timer shorter than a minute reads its item's
+  `visible`. The gadgets gated this way: `usage.qml` clef shimmer and spin
+  frame, `conductor.qml` card pulses, pi pen and hook spinner, `terminals.qml`
+  row pulses, kaomoji frame and the 1 s clock.
+- A window that follows the focused monitor (the dock) is rebuilt on a focus
+  move, so its first frame cost depends on that output's refresh rate.
