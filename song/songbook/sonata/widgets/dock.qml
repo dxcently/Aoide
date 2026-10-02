@@ -112,6 +112,7 @@ PanelWindow {
 
     // The reveal at which exactly the fore-edge sliver shows (the alert peek).
     readonly property real peekReveal: root.sliverW / root.bookW
+    readonly property bool bodyShown: root.reveal > root.peekReveal
 
     // ── Awaiting-alert gating ───────────────────────────────────────────────
     // The PASSIVE peek is an alert: it slides the fore-edge sliver out ONLY when
@@ -316,6 +317,7 @@ PanelWindow {
         width: root.bookW
         height: root.panelH
         focus: true
+        visible: root.reveal > 0
 
         // The slide: translate X across the full travel — fully off-screen at
         // reveal 0, spine at the edge at reveal 1, a bare sliver at peekReveal.
@@ -481,6 +483,7 @@ PanelWindow {
                 // ── HEADER: a clef cartouche naming the codex ────────────────
                 Item {
                     id: header
+                    visible: root.bodyShown
                     anchors.top: parent.top
                     anchors.left: spine.right; anchors.leftMargin: root.bandPad
                     anchors.right: foreEdge.left; anchors.rightMargin: root.bandPad
@@ -529,6 +532,7 @@ PanelWindow {
                 // ── BODY: the four gadgets, scrolling in their natural sizes ─
                 Flickable {
                     id: flick
+                    visible: root.bodyShown
                     anchors.top: header.bottom; anchors.topMargin: 8
                     anchors.bottom: parent.bottom
                     anchors.left: spine.right; anchors.leftMargin: root.bandPad
@@ -670,6 +674,7 @@ PanelWindow {
                 // meant for a gadget's right edge still reaches the gadget. ───
                 ScrollRail {
                     id: bodyRail
+                    visible: root.bodyShown
                     flick: flick
                     railW: 4
                     minThumb: 28
@@ -691,7 +696,7 @@ PanelWindow {
                     text: "▽ more"
                     font.family: root.faceMono; font.pixelSize: 11
                     color: root.withA(root.livery.paletteAccent, 0.9)
-                    visible: flick.visibleArea.heightRatio < 0.999
+                    visible: root.bodyShown && flick.visibleArea.heightRatio < 0.999
                     opacity: (flick.visibleArea.yPosition
                               + flick.visibleArea.heightRatio) < 0.995 ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 180 } }

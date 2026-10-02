@@ -818,7 +818,7 @@ Item {
 
     // elapsed tallies tick without a file change
     property real nowMs: Date.now()
-    Timer { interval: 10000; running: temple.visible; repeat: true
+    Timer { interval: 10000; running: temple.visible; repeat: true; triggeredOnStart: true
             onTriggered: temple.nowMs = Date.now() }
 
     // ── Stage files (QS_STAGE override — the preview-harness seam) ──────────
@@ -2199,7 +2199,7 @@ Item {
 
                         // working — a metronome pulse, confined to the box
                         SequentialAnimation on scale {
-                            running: card.cardWorking
+                            running: card.cardWorking && card.visible
                             loops: Animation.Infinite
                             alwaysRunToEnd: true
                             NumberAnimation { to: 1.35; duration: 520; easing.type: Easing.InOutSine }
@@ -2210,7 +2210,7 @@ Item {
                         // (one urgency cadence across both temples: "your
                         // password" beats faster than "an agent question").
                         SequentialAnimation on opacity {
-                            running: card.cardAwaiting
+                            running: card.cardAwaiting && card.visible
                             loops: Animation.Infinite
                             alwaysRunToEnd: true
                             NumberAnimation { to: 0.35; duration: card.sudoHeld ? 380 : 700; easing.type: Easing.InOutSine }
@@ -2324,7 +2324,7 @@ Item {
                         interval: baseIntervalMs
                         repeat: true
                         triggeredOnStart: true
-                        running: hookTag.spinning
+                        running: hookTag.spinning && hookTag.visible
                         property int frame: -1
                         readonly property int baseIntervalMs: 170
                         readonly property int holdIntervalMs: 300
@@ -2361,7 +2361,7 @@ Item {
                     // at 0 so a fresh card writes itself in on appearance.
                     property real drawProgress: 0
                     SequentialAnimation on drawProgress {
-                        running: card.piLive
+                        running: piTag.visible
                         loops: Animation.Infinite
                         alwaysRunToEnd: true
                         NumberAnimation { to: 1; duration: 1500; easing.type: Easing.InOutQuad }
