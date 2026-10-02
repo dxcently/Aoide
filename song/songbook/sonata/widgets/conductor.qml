@@ -818,7 +818,7 @@ Item {
 
     // elapsed tallies tick without a file change
     property real nowMs: Date.now()
-    Timer { interval: 10000; running: temple.visible; repeat: true
+    Timer { interval: 10000; running: temple.visible; repeat: true; triggeredOnStart: true
             onTriggered: temple.nowMs = Date.now() }
 
     // ── Stage files (QS_STAGE override — the preview-harness seam) ──────────

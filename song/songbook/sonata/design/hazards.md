@@ -372,11 +372,12 @@ parent until the process creation chain is born in an independent scope.
 A running animation or short timer dirties its item, and Qt Quick then syncs and
 renders the WHOLE window at the output's refresh rate. It does not matter that
 the changed pixels are clipped, translated off the window, or behind a shut
-codex. Measured on this rig with the dock's five gadgets in one 442x993 window
+codex. Measured on osaka with the dock's five gadgets in one 442x993 window
 at 60 Hz: 18-22 % of a core on-screen, the same with the whole column shifted
 to x = -2000, and 4.5 % with the column `visible: false` while the animations
-still ticked (60 fps swaps, nothing drawn). The live dock sits on DP-1 at
-144 Hz, where the same stack cost about 78 % of a core in the render threads.
+still ticked (60 fps swaps, nothing drawn). On a 144 Hz output (DP-1) the same
+stack costs about 47 % of a core, and the live dock there reached 78 % in the
+render threads.
 
 - **`Item.visible` is effective visibility.** `visible: root.reveal > 0` on the
   codex (`dock.qml`) makes every descendant's `visible` false once it is shut,
@@ -388,6 +389,13 @@ still ticked (60 fps swaps, nothing drawn). The live dock sits on DP-1 at
   infinite animation and every timer shorter than a minute reads its item's
   `visible`. The gadgets gated this way: `usage.qml` clef shimmer and spin
   frame, `conductor.qml` card pulses, pi pen and hook spinner, `terminals.qml`
-  row pulses, kaomoji frame and the 1 s clock.
+  row pulses, kaomoji frame and the 1 s clock; `herald-center.qml` critical
+  breath.
+- **The peek is a mapped codex too.** While any session awaits, the dock rests
+  at `peekReveal` with the whole book visible and only the fore-edge sliver on
+  screen. `dock.qml`'s `bodyShown` (`reveal > peekReveal`) hides the header,
+  body flickable, rail and more-hint there; the sliver lives outside them and
+  stays live. Peek cost on DP-1 with an awaiting session: 47 % before, 0.3 %
+  after.
 - A window that follows the focused monitor (the dock) is rebuilt on a focus
   move, so its first frame cost depends on that output's refresh rate.

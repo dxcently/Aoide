@@ -321,7 +321,7 @@ Item {
 
                         // critical breathes (the bar's urgent-pulse idiom)
                         SequentialAnimation on opacity {
-                            running: row.critical
+                            running: row.critical && row.visible
                             loops: Animation.Infinite
                             alwaysRunToEnd: true
                             NumberAnimation { to: 0.55; duration: 700; easing.type: Easing.InOutQuad }
