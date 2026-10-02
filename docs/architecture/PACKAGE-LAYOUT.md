@@ -581,9 +581,9 @@ The stability contract:
   them with ITS lib (and the songbook its host performs from), so selection runs
   on the consumer's evaluation and not on this flake's.
 - `songbookRoot` is a PATH, the same value this flake's own hosts are built
-  from. It is a top-level output because it is neither a function (`lib.*`) nor
-  a module (`nixosModules.*`), and `lib.songbook`'s own default is not a
-  substitute: a consumer needs the directory itself to hand the lyra lane.
+  from, a top-level output beside `songbookManifest`. `lib.songbook`'s own
+  default is not a substitute: a consumer needs the directory itself to hand the
+  lyra lane.
 - `overlays.default` is the base package set. A lane's replacement of a name the
   walker also supplies stands only for a name listed in `lib/pkgs.nix`'s
   `intentionalOverrides`; any other replacement is an evaluation error naming

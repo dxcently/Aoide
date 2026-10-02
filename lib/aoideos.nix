@@ -41,9 +41,8 @@ let
   # ../song/songbook` — the same directory): the selection validates a host
   # against it, the hook below hands the same value to the lane that paints the
   # built-in songs, and the flake exports this same value as `songbookRoot`, so
-  # a consumer performing Aoide's songs hands it to that same argument instead
-  # of building a path into this tree (a consumer's own songbook arrives there
-  # too). `lib/songbook.nix` itself is deliberately NOT touched for this:
+  # a consumer performing Aoide's songs hands it to that same argument, where a
+  # consumer with its own songbook hands its own directory. `lib/songbook.nix` itself is deliberately NOT touched for this:
   # it is COPIED into `pkgs/lyra-songbook` (`share/lyra/nix/songbook.nix`, the
   # shipped generator), so a single added line there moves every host's
   # templates path — and every session variable and unit `Environment` that

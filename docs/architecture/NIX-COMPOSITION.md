@@ -683,8 +683,9 @@ options" is checked rather than claimed. The override mechanism costs nothing
 where no record exists: all four hosts stay byte-identical with it in place.
 This is evaluation evidence, not runtime activation proof; phases 4 and 5 still
 owe that. Phase 2's "no private upstream paths" clause is
-also still open: dxflake reaches into the Aoide input's own tree for modules and
-songs until the matching public exports exist, and names that seam in its
+also still open: the public exports exist, but dxflake's pin still reaches into
+the Aoide input's own tree for modules and songs until it migrates onto them, and
+names that seam in its
 `flake.nix`.
 
 Prototype tests also cover conflicting aggregation defaults, false overriding

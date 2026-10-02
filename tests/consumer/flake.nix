@@ -1,11 +1,10 @@
 # tests/consumer/flake.nix — a consumer flake, in the shape dxflake migrates to.
 #
 # The point of this file is what it does NOT contain: no path concatenated onto
-# Aoide's source tree anywhere, and no threading of Aoide's own inputs. Everything AoideOS offers a stranger
-# arrives through the root flake's exports — `nixosModules.nucleus`,
-# `lib.{composition,livery,songbook,catalogue}`, `songbookRoot` and
-# `overlays.default` — and
-# the flake inputs Aoide's own lanes need (quickshell, stylix, nvf, hyprland,
+# Aoide's source tree anywhere, and no threading of Aoide's own inputs.
+# Everything AoideOS offers a stranger arrives through the root flake's exports
+# — `nixosModules.nucleus`, `lib.{composition,livery,songbook,catalogue}`,
+# `songbookRoot` and `overlays.default` — and the flake inputs Aoide's own lanes need (quickshell, stylix, nvf, hyprland,
 # the core itself) are closed over by `nixosModules.nucleus`, which is why this
 # file declares only nixpkgs, home-manager and aoide. It does not declare
 # `stylix` on purpose: selecting the `stylix` lane imports stylix's module from

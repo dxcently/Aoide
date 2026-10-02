@@ -224,12 +224,6 @@
         catalogue = registry.catalogue;
       };
 
-      # Aoide's own songbook DIRECTORY, for a consumer whose hosts perform
-      # Aoide's songs: the value it hands `lib.songbook` and its songs hook's
-      # `_module.args.songbook`, where it would otherwise build a path into this
-      # tree. The same value this flake's own hosts are built from.
-      songbookRoot = aoideos.songbookRoot;
-
       # ── The export surface a consumer builds against ───────────────────────
       # Everything here is for a flake that consumes AoideOS as a stranger
       # (PACKAGE-LAYOUT's "AoideOS's export surface"): it names no path inside
@@ -259,6 +253,11 @@
         // {
           aoide = inputs.aoide.packages.${prev.stdenv.hostPlatform.system}.default;
         };
+
+      # Aoide's songbook directory, for a consumer whose hosts perform Aoide's
+      # songs: what it hands `lib.songbook` and its songs hook's
+      # `_module.args.songbook`.
+      songbookRoot = aoideos.songbookRoot;
 
       # ── Checks ─────────────────────────────────────────────────────────────
       # The contractual coupling discipline (lib/checks.nix). They pass
