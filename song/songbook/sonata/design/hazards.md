@@ -395,7 +395,8 @@ render threads.
   at `peekReveal` with the whole book visible and only the fore-edge sliver on
   screen. `dock.qml`'s `bodyShown` (`reveal > peekReveal`) hides the header,
   body flickable, rail and more-hint there; the sliver lives outside them and
-  stays live. Peek cost on DP-1 with an awaiting session: 47 % before, 0.3 %
-  after.
+  stays live. Peek cost on DP-1 with an awaiting session, measured on a
+  plain-window harness holding the dock's gadget stack (not the layer-shell
+  dock itself): 47 % before, 0.3 % after.
 - A window that follows the focused monitor (the dock) is rebuilt on a focus
   move, so its first frame cost depends on that output's refresh rate.
