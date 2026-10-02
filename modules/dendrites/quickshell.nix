@@ -125,20 +125,9 @@ let
                 # `-p <path>` loads a config by PATH; `-c <name>` (used previously)
                 # treats the argument as a config NAME and fails on a path in
                 # quickshell 0.3.0.
-                #
-                # `-v` raises quickshell's own log to INFO, the level its lifecycle
-                # lines are written at ("Exiting due to IPC request." is a
-                # `qInfo`), so a deliberate exit leaves its last words in the
-                # journal; the default level keeps only warnings and worse.
                 ExecStart = "${quickshellPkg}/bin/quickshell -v -p ${shellEntry}";
-                # One journal line per ending, whatever the ending: systemd
-                # exports the outcome to ExecStopPost as `$SERVICE_RESULT`,
-                # `$EXIT_CODE` (exited/killed/dumped) and `$EXIT_STATUS` (the
-                # code, or the signal name). The shell is the one that expands
-                # them, from the environment, so the words stay single-quoted.
-                # Quickshell installs no SIGTERM handler and systemd counts TERM
-                # as a clean stop, so without this line an exit 0 and a stray
-                # `kill` leave the same silence.
+                # The shell, not systemd, expands these from ExecStopPost's
+                # environment, so the words stay inside one quoted argument.
                 ExecStopPost = "${pkgs.bash}/bin/sh -c 'echo \"aoide-quickshell ended: result=$SERVICE_RESULT code=$EXIT_CODE status=$EXIT_STATUS\"'";
                 # Qt6's qtbase ships only jpeg/png/gif/ico imageformats plugins (plus
                 # qtsvg); webp/tiff/etc. live in a SEPARATE qtimageformats plugin the
