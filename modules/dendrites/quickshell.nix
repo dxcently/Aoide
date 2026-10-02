@@ -81,7 +81,9 @@ let
         #     shell instead of leaving the desktop bare until the next login.
         #     `systemctl --user stop` is never fought, so a deliberate stop holds.
         #   - journald — `journalctl --user -u aoide-quickshell` gives real logs
-        #     (an exec-once child's stderr is lost).
+        #     (an exec-once child's stderr is lost), at quickshell's INFO level,
+        #     and ExecStopPost closes every run with an `aoide-quickshell ended:
+        #     result= code= status=` line, so a stop names its cause.
         #   - graphical-session.target ordering — it starts only once the
         #     compositor lane's env handoff (hyprland-session.target →
         #     graphical-session.target, WAYLAND_DISPLAY/HYPRLAND_INSTANCE_SIGNATURE
@@ -123,7 +125,21 @@ let
                 # `-p <path>` loads a config by PATH; `-c <name>` (used previously)
                 # treats the argument as a config NAME and fails on a path in
                 # quickshell 0.3.0.
-                ExecStart = "${quickshellPkg}/bin/quickshell -p ${shellEntry}";
+                #
+                # `-v` raises quickshell's own log to INFO, the level its lifecycle
+                # lines are written at ("Exiting due to IPC request." is a
+                # `qInfo`), so a deliberate exit leaves its last words in the
+                # journal; the default level keeps only warnings and worse.
+                ExecStart = "${quickshellPkg}/bin/quickshell -v -p ${shellEntry}";
+                # One journal line per ending, whatever the ending: systemd
+                # exports the outcome to ExecStopPost as `$SERVICE_RESULT`,
+                # `$EXIT_CODE` (exited/killed/dumped) and `$EXIT_STATUS` (the
+                # code, or the signal name). The shell is the one that expands
+                # them, from the environment, so the words stay single-quoted.
+                # Quickshell installs no SIGTERM handler and systemd counts TERM
+                # as a clean stop, so without this line an exit 0 and a stray
+                # `kill` leave the same silence.
+                ExecStopPost = "${pkgs.bash}/bin/sh -c 'echo \"aoide-quickshell ended: result=$SERVICE_RESULT code=$EXIT_CODE status=$EXIT_STATUS\"'";
                 # Qt6's qtbase ships only jpeg/png/gif/ico imageformats plugins (plus
                 # qtsvg); webp/tiff/etc. live in a SEPARATE qtimageformats plugin the
                 # quickshell wrapper does not carry. A song cover may be any of those
