@@ -1,5 +1,5 @@
 # modules/dendrites/claude-code.nix — the Claude Code CLI (agentic AI coding
-# assistant, nixpkgs' claude-code).
+# assistant, pkgs/claude-code: nixpkgs' recipe pinned ahead).
 #
 # Dendrite shape v1 (CONTRACTS.md §2):
 #   - Guarded on aoide.claude-code.enable (default false — shipped but off).

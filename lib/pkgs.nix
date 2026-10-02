@@ -31,7 +31,10 @@
 # Intentional shadows — `intentionalShadows`: a package MAY deliberately shadow
 # an unrelated nixpkgs attribute (Aoide's `melete` AI harness shadows nixpkgs'
 # `melete` font — the muse-named package is the one the modules mean by
-# `pkgs.melete`). Listing a name here exempts it from the guard: the shadow is a
+# `pkgs.melete`), or the same tool pinned ahead of nixpkgs (`claude-code`,
+# `codex`: every consumer of the overlay gets the newer build, and the shadow is
+# deleted once nixpkgs catches up). Listing a name here exempts it from the
+# guard: the shadow is a
 # reviewed, documented decision, not the silent accident the guard exists to
 # catch. Add a name here ONLY with that intent; the default for a new package is
 # to pick a non-colliding name.
@@ -79,6 +82,8 @@ let
   intentionalShadows = [
     "melete" # Aoide's AI harness vs nixpkgs' `melete` headline font — unrelated.
     "eidolon" # Aoide's coding harness vs nixpkgs' `eidolon` — a dead alias, throws "removed as unmaintained upstream".
+    "claude-code" # the same CLI, pinned ahead of nixpkgs (pkgs/claude-code/README.md).
+    "codex" # the same CLI, from OpenAI's release bundle ahead of nixpkgs (pkgs/codex/README.md).
   ];
 
   # Names another overlay in the same `nixpkgs.overlays` list is allowed to
