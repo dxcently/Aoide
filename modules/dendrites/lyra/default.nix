@@ -42,8 +42,9 @@ let
       #
       # Handed in as a module argument by the same hook that sets
       # `aoide.songbook.builtIn` (lib/aoideos.nix, and every consumer's copy of
-      # that wiring): a consumer's songs live in the CONSUMER's tree, so this
-      # lane must not name a path inside Aoide's.
+      # that wiring): a consumer's songbook may be its own tree's or Aoide's
+      # exported `songbookRoot`, so this lane must not name a path inside
+      # Aoide's.
 
       # ── What this host BUILDS IN ────────────────────────────────────────────
       # `song.declared ∪ song.available` on its record, derived by the

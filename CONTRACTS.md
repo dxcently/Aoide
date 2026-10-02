@@ -5372,9 +5372,11 @@ arrive as ARGUMENTS, injected at the two sites that evaluate a song:
   same way (`_module.args.songbook`, set by the same hook that sets `song` and
   `borrow`). It exists so the lane that PAINTS a host's built-in songs — which
   copies their folders, resolves their `packages` and builds the shipped
-  templates — never names a repository path: a consumer's songs live in the
-  consumer's tree (`lib/songbook.nix` takes the directory, `pkgs/lyra-songbook`
-  takes it as an argument). A `rice.nix` itself never reads it.
+  templates — never names a repository path: a consumer's host performs from
+  its own songbook or from Aoide's, which the root flake exports as the path
+  `songbookRoot` (`lib/songbook.nix` takes the directory, `pkgs/lyra-songbook`
+  takes it as an argument). One directory per host; there is no union of two.
+  A `rice.nix` itself never reads it.
 - **A borrow JOINS the built-in set.** The songs a host builds in are closed
   under the owners its records name: a host that declares quodlibet alone builds
   in `fugue` and `sonata` as well, because quodlibet's records borrow slots from

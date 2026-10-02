@@ -534,7 +534,8 @@ assumption:
 consumed ONLY through these outputs — never through a path into this tree, which
 is the reach-in the table below retires. `tests/consumer/` is the fixture that
 proves it: a stranger's flake selecting the nucleus lane, the shell, the songs and
-the theme, whose only inputs besides nixpkgs are home-manager and Aoide.
+the theme, whose only inputs besides nixpkgs are home-manager and Aoide, with one
+host performing from its own songbook and one performing Aoide's `sonata`.
 
 ```
 flake.nix
@@ -551,6 +552,9 @@ flake.nix
 │                             a function of `{ lib, songbook ? … }`
 ├── lib.catalogue             the whole catalogue as DATA — the bulk form of
 │                             `nixosModules.<name>`
+├── songbookRoot              Aoide's own songbook DIRECTORY (`song/songbook`),
+│                             the value `lib/aoideos.nix` builds this flake's
+│                             hosts from — a PATH, not a function
 └── overlays.default          every `pkgs/<name>` this tree discovers plus
                               `aoide` (never `lyra`: nixpkgs owns that name)
 ```
@@ -560,7 +564,7 @@ What a consumer's flake writes, in the shapes the outputs are:
 | consumer's reach-in (before) | replacement export | produced by |
 |---|---|---|
 | `inputs.aoide + "/modules/default.nix"` | `nixosModules.nucleus` + `nixosModules.<name>` per catalogue entry; `lib.catalogue` for bulk use | S10 |
-| five `song/songbook/*/rice.nix` | `lib.songbook.{discover,selectionModule,songModules}` passed to `lib.composition`'s `selectionModules` / `extraModulesFor` | S8 (exported S10) |
+| five `song/songbook/*/rice.nix` | `lib.songbook.{discover,selectionModule,songModules}` passed to `lib.composition`'s `selectionModules` / `extraModulesFor`, over `songbookRoot` when the host performs Aoide's songs | S8 (exported S10) |
 | an `import` of `lib/pkgs.nix` for the overlay | `overlays.default` | S10 |
 | `inputs.aoide.packages.<sys>.default` | `packages.<sys>.aoide` (and `.lyra`, `.lyra-shell`, `.lyra-songbook`) | exists / S3 |
 | `import … "/lib/livery.nix"` `.resolve` | `lib.livery.resolve` | S10 |
@@ -574,8 +578,12 @@ The stability contract:
   is a PATH a consumer's own `registry.catalogue` takes unchanged, because a
   catalogue's values ARE paths (`lib/composition.nix` imports them).
 - `lib.*` are their files' own functions, still UNAPPLIED: a consumer applies
-  them with ITS lib (and its own songbook), so selection runs on the consumer's
-  evaluation and not on this flake's.
+  them with ITS lib (and the songbook its host performs from), so selection runs
+  on the consumer's evaluation and not on this flake's.
+- `songbookRoot` is a PATH, the same value this flake's own hosts are built
+  from, a top-level output beside `songbookManifest`. `lib.songbook`'s own
+  default is not a substitute: a consumer needs the directory itself to hand the
+  lyra lane.
 - `overlays.default` is the base package set. A lane's replacement of a name the
   walker also supplies stands only for a name listed in `lib/pkgs.nix`'s
   `intentionalOverrides`; any other replacement is an evaluation error naming
@@ -614,13 +622,21 @@ evaluation, not a style choice:
 
 ### Songs, from a consumer's side
 
-A consumer's songs live in the CONSUMER's tree. `lib.songbook` takes the
-directory (`songbook ? …`); the consumer passes it, once, into the songs hook it
-writes for `extraModulesFor` (`_module.args.songbook`, beside `song` and
-`borrow`); and the lane that paints the built-in songs and `pkgs/lyra-songbook`
-take it as an argument instead of naming a path in this repo. A host says what it
+A consumer performs from one songbook DIRECTORY per host: Aoide's own, exported
+as `songbookRoot`, or one in the CONSUMER's tree. `lib.songbook` takes the
+directory (`songbook ? …`); the consumer passes the same value, once, into the
+songs hook it writes for `extraModulesFor` (`_module.args.songbook`, beside
+`song` and `borrow`); and the lane that paints the built-in songs and
+`pkgs/lyra-songbook` take it as an argument instead of naming a path in this
+repo. A host that performs Aoide's `sonata` therefore writes
+`songbook = aoide.songbookRoot` in both places and `song.declared = "sonata"` on
+its record — never `inputs.aoide + "/song/songbook/…"`. A host says what it
 performs (`song.declared`) and what it merely builds in (`song.available`), with
 the borrow closure and the machine-owned songbook unchanged from §5.
+
+Discovery, selection and `borrow` all read that one directory, so a host's songs
+come from Aoide's songbook or from the consumer's, not from both: there is no
+union of two songbooks, and a `borrow` across them has nothing to resolve.
 
 **Stylix.** A consumer must NOT import the stylix module itself once it selects
 the `stylix` lane: the lane's module comes from Aoide's own inputs, and two

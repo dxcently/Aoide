@@ -254,6 +254,11 @@
           aoide = inputs.aoide.packages.${prev.stdenv.hostPlatform.system}.default;
         };
 
+      # Aoide's songbook directory, for a consumer whose hosts perform Aoide's
+      # songs: what it hands `lib.songbook` and its songs hook's
+      # `_module.args.songbook`.
+      songbookRoot = aoideos.songbookRoot;
+
       # ── Checks ─────────────────────────────────────────────────────────────
       # The contractual coupling discipline (lib/checks.nix). They pass
       # trivially now (no lane declares surface owners yet) and become real as

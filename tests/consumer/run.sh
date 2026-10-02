@@ -13,11 +13,13 @@
 #      consumer consumes Aoide ONLY through public flake outputs.
 #   2. The evaluation. `flake.nix`'s `outputs` is applied to the REF's own
 #      inputs (so a commit ref really freezes the tree under test, the same
-#      discipline tests/quickshell-seam uses), and the resulting host is read:
-#      it selects the nucleus lane, lyra, the shell and stylix; it performs one
-#      song and builds in a second that BORROWS the first's widgets; and the
-#      song machinery a real host gets (deployed config, seeded stage, seeded
-#      machine songbook, templates on the units) is there.
+#      discipline tests/quickshell-seam uses), and the resulting hosts are read.
+#      `consumer` performs from its OWN songbook: it selects the nucleus lane,
+#      lyra, the shell and stylix; it performs one song and builds in a second
+#      that BORROWS the first's widgets; and the song machinery a real host gets
+#      (deployed config, seeded stage, seeded machine songbook, templates on the
+#      units) is there. `aoide-songs` performs Aoide's own `sonata` through the
+#      `songbookRoot` export, and its lyra lane is handed that same directory.
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
 root=$(cd ../.. && pwd)
@@ -94,7 +96,15 @@ expr="
     cfg = out.nixosConfigurations.consumer.config;
     home = cfg.home-manager.users.\${cfg.aoide.user};
     envOf = units: unit: let u = units.\${unit} or { }; in u.serviceConfig.Environment or u.Service.Environment or [ ];
+    aoideSongs = out.nixosConfigurations.aoide-songs.config;
   in {
+    aoideSongs = {
+      drv = aoideSongs.system.build.toplevel.drvPath;
+      song = aoideSongs.aoide.song;
+      builtIn = aoideSongs.aoide.songbook.builtIn;
+      bg = aoideSongs.aoide.livery.palette.bg;
+      songbookIsExport = toString out.nixosConfigurations.aoide-songs._module.args.songbook == toString flake.songbookRoot;
+    };
     drv = out.nixosConfigurations.consumer.config.system.build.toplevel.drvPath;
     song = cfg.aoide.song;
     builtIn = cfg.aoide.songbook.builtIn;
@@ -144,6 +154,13 @@ check "…and both name one directory"          "true" \
   "$(o '(.templates | unique | length) == 1 and (.templates[0] | endswith("-lyra-songbook-templates/share/lyra/songbook"))')"
 
 printf '%-52s %s\n' "consumer toplevel drvPath" "$(o .drv)"
+
+check "aoide-songs performs Aoide's sonata"           "sonata" "$(o .aoideSongs.song)"
+check "…and builds in sonata alone"                 "sonata" "$(o '.aoideSongs.builtIn | join(" ")')"
+check "…and wears sonata's livery"                  "#f2ebde" "$(o .aoideSongs.bg)"
+check "…its lyra lane reads the exported songbook"  "true" "$(o .aoideSongs.songbookIsExport)"
+
+printf '%-52s %s\n' "aoide-songs toplevel drvPath" "$(o .aoideSongs.drv)"
 
 printf '%s\n' "--------------------------------------------------------------------"
 printf '%d passed, %d failed\n' "$pass" "$fail"

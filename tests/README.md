@@ -55,16 +55,18 @@ what those checks actually test.
   have, so an absence check that could never fail is not one.
 - `distrobox.md` — manual container-based portability suite; not a gate.
 - `consumer/` — `tests/consumer/run.sh`, the export-surface fixture: a
-  stranger's flake (`flake.nix`, its own host record, user, aggregation, songs
+  stranger's flake (`flake.nix`, its own host records, user, aggregation, songs
   and songbook) that reaches AoideOS ONLY through the root flake's public
   outputs. The runner greps the fixture for any path into Aoide's tree (and
   proves that grep can fire), then applies the fixture's `outputs` to the ref
   under test's own inputs — so a commit ref really freezes the tree the consumer
-  is built against — and reads the resulting host: nucleus, the shell, the
-  theme, one performed song plus one built in that BORROWS the performer's
-  widgets, the deployed config, the seeded songbook, and the templates on the
-  units. The contract it exercises is PACKAGE-LAYOUT's "The root flake —
-  AoideOS's export surface".
+  is built against — and reads the resulting hosts. `consumer` performs from the
+  fixture's own songbook: nucleus, the shell, the theme, one performed song plus
+  one built in that BORROWS the performer's widgets, the deployed config, the
+  seeded songbook, and the templates on the units. `aoide-songs` performs
+  Aoide's own `sonata` through the `songbookRoot` export, and its lyra lane is
+  handed that same directory. The contract it exercises is PACKAGE-LAYOUT's
+  "The root flake — AoideOS's export surface".
 
 `selection/`, `templates/` and `quickshell-seam/` shell out to `nix eval` (and
 `getFlake` a nixpkgs rev), so they run where an evaluation can: a developer's

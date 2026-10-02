@@ -70,10 +70,10 @@
   # The host's selection as lyra records it: `{ declared, songs, packages }`.
   # `null` = none, and no `builtin.json` is written.
   builtin ? null,
-  # The songbook those names live in. A consumer's songs are in the CONSUMER's
-  # tree, so this is an argument and not a path literal into Aoide's own
-  # (`lib/songbook.nix`'s `root` is what the lanes pass; the flake's own
-  # `packages` output keeps its default).
+  # The songbook those names live in. A consumer's host may perform from its
+  # own tree's songbook, so this is an argument and not a path literal into
+  # Aoide's own (the lyra lane passes the host's `_module.args.songbook`; the
+  # flake's own `packages` output keeps its default).
   songbook ? ../../song/songbook,
 }:
 let
