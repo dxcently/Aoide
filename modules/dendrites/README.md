@@ -31,7 +31,7 @@ modules/dendrites/kitty.nix
 
 Why both: a host that takes the whole tree merges every `body` (through
 `modules/dendrites/default.nix`), and a host the constructor assembles
-(`lib/composition.nix`) imports only the `nixos` lane of what it selected.
+(habit's composition) imports only the `nixos` lane of what it selected.
 The two are MUTUALLY EXCLUSIVE in one module list — both import the same
 `body`, so `aoide.<name>.enable` would be declared twice and nixpkgs throws
 `already declared` rather than merging. Take the aggregate and select

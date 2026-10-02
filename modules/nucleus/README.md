@@ -37,7 +37,7 @@ module builds against what nucleus declares.
   exists for: its `settings` type comes from `pkgs.formats.toml`, so the
   option and the generator are one unit.
 - `assertions.nix` — the platform's invariant surface: the twin of the
-  constructor's gate pass (`lib/composition.nix`), for the failures only an
+  constructor's gate pass (habit's composition), for the failures only an
   evaluated module graph can see. It reads the identity scalar `aoide.song`
   and the lane facts and declares nothing, so it adds no option, no unit and
   no package. Today: a song named with no `lyra` lane to paint it fails the

@@ -14,7 +14,7 @@ modules/dendrites/wallpaper/
 ## Named seams (what it exposes)
 
 - **The registry** names each alternative once. The constructor
-  (`lib/composition.nix`) reads it before any module graph exists and imports
+  (habit's composition) reads it before any module graph exists and imports
   only the provider the selecting host named; the whole-tree aggregate
   contributes every provider's `body`. Adding an alternative is one file plus
   one line here; removing it is deleting both, with no other edit in the tree.

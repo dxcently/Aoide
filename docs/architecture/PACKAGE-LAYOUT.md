@@ -569,14 +569,14 @@ What a consumer's flake writes, in the shapes the outputs are:
 | `inputs.aoide.packages.<sys>.default` | `packages.<sys>.aoide` (and `.lyra`, `.lyra-shell`, `.lyra-songbook`) | exists / S3 |
 | `import … "/lib/livery.nix"` `.resolve` | `lib.livery.resolve` | S10 |
 | `inputs.aoide = inputs.aoide.inputs.aoide` | none: `nixosModules.nucleus` closes over Aoide's own inputs | S10 |
-| a private copy of `lib/composition.nix` | `lib.composition` | S1 (exported S10) |
+| a private copy of the composition library | `lib.composition` (habit's, re-exported) | S1 (exported S10) |
 | six `aoide.facets.*` reads | the facts `aoide.{quickshell,lyra,stylix,compositor,greeter}.enable` | S2/S5 |
 
 The stability contract:
 
 - `nixosModules.nucleus` is a module a NixOS host imports; `nixosModules.<name>`
   is a PATH a consumer's own `registry.catalogue` takes unchanged, because a
-  catalogue's values ARE paths (`lib/composition.nix` imports them).
+  catalogue's values ARE paths (habit's composition imports them).
 - `lib.*` are their files' own functions, still UNAPPLIED: a consumer applies
   them with ITS lib (and the songbook its host performs from), so selection runs
   on the consumer's evaluation and not on this flake's.

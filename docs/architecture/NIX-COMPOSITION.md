@@ -2,9 +2,10 @@
 
 This is the architecture for dxflake and, after external-consumer proof,
 AoideOS. It specifies the agreed configuration interface and the implementation
-plan. dxflake implements the interface below: `lib/composition.nix` is the
-constructor, its four hosts select through it, and its selection and template
-suites test it. AoideOS has not migrated; for that tree the examples here are
+plan. dxflake implements the interface below: `lib/composition.nix` of habit
+(`github:dxcently/habit`, consumed here as `inputs.habit`) is the constructor,
+its four hosts select through it, and habit's selection suite and this tree's
+selection and template suites test it. AoideOS has not migrated; for that tree the examples here are
 still target contracts, not drop-in modules.
 
 ## Scope and rollout
@@ -187,9 +188,10 @@ would reintroduce a circular import decision. Platform settings are deferred
 modules until selection is complete. Constructors are small explicit functions
 using Nix module APIs; they are not a second module language or custom loader.
 
-The constructor is `lib/composition.nix`, a function of `{ lib }`, exported by
-the flake as `lib.composition` — a consumer assembles hosts through it by name
-instead of reaching into this tree for a file. It knows no vocabulary of its
+The constructor is habit's `lib/composition.nix`, a function of `{ lib }`,
+consumed here as `inputs.habit` and re-exported by the flake as
+`lib.composition` — a consumer assembles hosts through it by name instead of
+reaching into this tree for a file. It knows no vocabulary of its
 own: a host record's fields ride in through two hooks, both identity by default.
 `selectionModules` are extra modules for the selection passes, which is how a
 field the constructor has never heard of — a song selection is the first — is

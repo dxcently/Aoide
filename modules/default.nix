@@ -8,7 +8,7 @@
 # full tree — a name with no line is unreachable, and a capability is shelved by
 # dropping its line without deleting its file.
 #
-# Nothing here joins a module graph: `lib/composition.nix` reads this record
+# Nothing here joins a module graph: habit's composition reads this record
 # before any module graph exists and imports only what selection kept.
 #
 # `aggregations` and `overrides` are read one level deep beside the catalogue —

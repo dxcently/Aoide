@@ -7,9 +7,10 @@ the capability was selected).
 ## A record's fields are closed
 
 `dendrites`, `hosts`, `overlay`, `nixos`, `homeManager` — that is the whole set
-(`overrideFields` in `lib/composition.nix`). An unknown field is an error, not
-an extension point: adding a field means amending the constructor and this list
-in the same commit, and saying why in the record's own comment.
+(`overrideFields` in habit's composition). An unknown field is an error, not
+an extension point: adding a field means amending habit's constructor, then this
+list in the commit that takes the new habit, and saying why in the record's own
+comment.
 
 `dendrites` is required and must name catalogue names. A record with no target,
 or a target the catalogue does not hold, fails by name — a fix that applies to

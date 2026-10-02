@@ -8,7 +8,7 @@
 # A dendrite file is a lane record (`{ body; nixos; }`, CONTRACTS.md §2).
 # Taking this aggregate merges every `body`, so a host that takes the whole tree
 # still sees each `aoide.<name>.*` option and its own guard; a host the
-# constructor (`lib/composition.nix`) assembles imports only the `nixos` lane of
+# constructor (habit's composition) assembles imports only the `nixos` lane of
 # what it selected. The two are mutually exclusive in one module list — an
 # aggregate `body` and a selected lane's own `body` are the same declarations
 # twice, which nixpkgs throws on rather than merging.

@@ -39,6 +39,14 @@
 
     hyprland.url = "github:hyprwm/Hyprland";
 
+    # habit — host composition, the constructor every host here is built by.
+    # Its nixpkgs only feeds habit's own checks; the library takes `lib` from
+    # whoever applies it.
+    habit = {
+      url = "github:dxcently/habit/v1";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # nvf (Neovim-Flake) — the neovim dendrite's config framework (dxflake
     # form, verbatim). Inputs can only live here; the dendrite reaches it via
     # specialArgs (lib/aoideos.nix threads `inputs` into home-manager too).
@@ -123,7 +131,7 @@
       # What each host actually resolved: its aggregations, every dendrite it
       # selected with the provider answering it and the file that answered, its
       # users, and which override records matched. Derived from selection in
-      # `lib/composition.nix`, never maintained by hand — this is the review
+      # habit's composition, never maintained by hand — this is the review
       # surface for "no accidental all-dendrite loading":
       # `nix eval --json .#inventory.yomi-strix`.
       inventory = lib.mapAttrs (_: h: h.inventory) hosts;
@@ -198,18 +206,15 @@
 
       # ── Library ────────────────────────────────────────────────────────────
       # The one public seam for assembling a host's module list. A consumer
-      # that wants the constructor imports it from here by name instead of
-      # reaching into `lib/composition.nix` through the source tree.
+      # that wants the constructor takes it from here by name.
       #
-      # The selection constructor (docs/architecture/NIX-COMPOSITION.md
-      # "Selection before platform evaluation"): selection resolves in an
-      # ordinary `evalModules` pass that knows nothing about NixOS, and the
-      # platform import list is assembled from the result. The exported thing is
-      # the FILE, still a function of `{ lib }`: a consumer applies it with the
-      # `lib` its own host evaluation uses, so the selection pass runs on the
-      # consumer's lib and not on this flake's, and dxflake migrates onto it
-      # rather than onto a copy of its own. `tests/selection` imports the file
-      # by path — the file is what the suites exercise, not this output.
+      # `composition` is habit's (`inputs.habit`), re-exported unchanged: the
+      # selection constructor (docs/architecture/NIX-COMPOSITION.md "Selection
+      # before platform evaluation"), a function of `{ lib }` still UNAPPLIED, so
+      # a consumer applies it with the `lib` its own host evaluation uses and the
+      # selection pass runs on the consumer's lib and not on this flake's.
+      # `habit.lib.catalogues` is not re-exported: a consumer that merges
+      # registries takes habit directly.
       #
       # Each entry is its file's own function, still UNAPPLIED (so a consumer
       # applies it with its own `lib`), except `catalogue`, which is data: the
@@ -218,7 +223,7 @@
       # is NOT here: it reads this tree's modules, which a consumer neither has
       # nor should name.
       lib = {
-        composition = import ./lib/composition.nix;
+        composition = inputs.habit.lib.composition;
         livery = import ./lib/livery.nix;
         songbook = import ./lib/songbook.nix;
         catalogue = registry.catalogue;

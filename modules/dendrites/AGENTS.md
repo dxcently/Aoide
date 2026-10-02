@@ -27,7 +27,7 @@ covers only what's specific to dendrites.
   `body`, so one of them is a second copy of the same declarations and nixpkgs
   throws `already declared` rather than merging. Taking the whole tree means
   selecting nothing; selecting through the catalogue means not importing the
-  aggregate. `lib/composition.nix`'s `mkNixosModules` refuses the pair by name.
+  aggregate. Habit's composition `mkNixosModules` refuses the pair by name.
 - **One enable toggle, default off.** `aoide.<name>.enable = false` is the
   shape every dendrite follows — shipped but inert until a host opts in.
 - **Carries its own dependencies; reads no other module.** Not another

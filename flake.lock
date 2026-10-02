@@ -221,6 +221,27 @@
         "type": "gitlab"
       }
     },
+    "habit": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1790931473,
+        "narHash": "sha256-K74sky0svkG2c7b78CImXzic2l+aeOVgUTjOiPZ/pHA=",
+        "owner": "dxcently",
+        "repo": "habit",
+        "rev": "fb29fb0ddcd87fb3335a9a5de31a065090a438e3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "dxcently",
+        "ref": "v1",
+        "repo": "habit",
+        "type": "github"
+      }
+    },
     "home-manager": {
       "inputs": {
         "nixpkgs": [
@@ -720,6 +741,7 @@
     "root": {
       "inputs": {
         "aoide": "aoide",
+        "habit": "habit",
         "home-manager": "home-manager",
         "hyprland": "hyprland",
         "nixpkgs": "nixpkgs_2",

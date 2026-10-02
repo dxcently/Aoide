@@ -31,7 +31,7 @@ darwin constructor to answer it.
 ```
 
 - **Selection first.** `aggregation.*`, `dendrites.*` and each user's own
-  selection are resolved by `lib/composition.nix` in an ordinary `evalModules`
+  selection are resolved by habit's composition in an ordinary `evalModules`
   pass that knows nothing about NixOS; the platform import list is assembled from
   the result. A capability the host did not select is never imported.
 - **`nixos` is deferred**, and nothing in it can influence selection — that is
@@ -60,5 +60,5 @@ another module, and never patches a dendrite — that is what an override record
 `nix eval --json .#inventory.<host>` answers what that host actually resolved:
 its aggregations, every dendrite it selected with the provider answering it and
 the file that answered, its users, and which override records matched. Derived
-from selection in `lib/composition.nix`, never maintained by hand, so it cannot
+from selection in habit's composition, never maintained by hand, so it cannot
 drift from what `nixosConfigurations.<host>` builds.

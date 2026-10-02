@@ -15,7 +15,7 @@
 # answers that disagree.
 #
 # Selection happens before this file is reached, inside `mkNixosHost`
-# (`lib/composition.nix`): the host record is evaluated in an ordinary
+# (habit's composition, `inputs.habit`): the host record is evaluated in an ordinary
 # `evalModules` pass that knows nothing about NixOS, and the platform import list
 # is assembled from the result. Nothing below imports a dendrite file, and a
 # capability the host did not select is never read.
@@ -25,7 +25,7 @@
 # constructor has never heard of; `extraModulesFor` turns that selection into
 # the platform modules — the built-in songs' `rice.nix` files, and the
 # `aoide.song` / `aoide.songbook.builtIn` facts the paint lanes read. Both are
-# generic hooks (`lib/composition.nix` names no song), and this is the only site
+# generic hooks (habit's composition names no song), and this is the only site
 # that wires them; `lib/songbook.nix` is the only site that says what they mean.
 {
   inputs,
@@ -34,7 +34,7 @@
   username ? "khoa",
 }:
 let
-  composition = import ./composition.nix { inherit lib; };
+  composition = inputs.habit.lib.composition { inherit lib; };
 
   # The committed songbook this flake's hosts' songs live in. Named ONCE here,
   # as the caller's answer to `lib/songbook.nix`'s own default (`songbook ?

@@ -36,7 +36,7 @@ slot *name*, falling back to sonata — so no surface ever imports a concrete
 widget (§5). Paint dendrites read only the closed namespace whitelist house
 rule 5 enumerates (`AGENTS.md` owns the list): named services, never another
 module's internals. The catalogue is also what the selection constructor reads:
-`lib/composition.nix` (exported as `lib.composition`) resolves a host's
+habit's composition (`inputs.habit`, exported as `lib.composition`) resolves a host's
 selection in a pass that runs before any module graph exists and imports only
 what that pass kept — a provider registry resolves to the alternative the host
 named, and a file nothing selected is never read.
@@ -425,7 +425,7 @@ in
 `body` is the module: it declares the options and guards the config. The
 `nixos` lane imports `body` and sets the flag `mkDefault true`, so selecting
 the dendrite for the system is what turns the capability on. The constructor
-(`lib/composition.nix`) imports the lane of what a host selected and nothing
+(habit's composition) imports the lane of what a host selected and nothing
 else; `modules/dendrites/default.nix` imports every `body`, which is how a
 host taking the whole tree still sees each `aoide.<name>.*` option.
 
