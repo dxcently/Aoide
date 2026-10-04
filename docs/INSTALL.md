@@ -262,6 +262,13 @@ StandardError=journal
 WantedBy=aoided.service
 ```
 
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now aoide-mail-adapter
+systemctl --user is-active aoide-mail-adapter
+curl -sS http://127.0.0.1:8712/.well-known/agent-card.json     # name, protocolVersion, url
+```
+
 The front's ingress targets `127.0.0.1:8712`, never the door's `8710`.
 `openssh` and `curl` must resolve on the unit's `PATH`: a transit deposit
 drains toward its next hop from inside this process.

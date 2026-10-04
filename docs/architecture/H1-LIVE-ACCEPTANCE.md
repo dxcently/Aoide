@@ -12,7 +12,10 @@ osaka (operator, LAN) ---ssh, admin only---> sakaki (relay)
 yomi-strix (other network, HTTPS 443 only) ---HTTPS---> https://aoide.necoconeco.net
 ```
 
-Node names are what `aoide mesh` prints on each box: `osaka`, `sakaki`,
+`$AOIDE_ROOT` is each box's Aoide root (default `~/.aoide`). Steps that run
+on sakaki are run over ssh from osaka; `~/.local/bin` is not on the ssh `PATH`,
+so where `aoide` does not resolve there, call it by its full path
+(`~/.local/bin/aoide`). Node names are what `aoide mesh` prints on each box: `osaka`, `sakaki`,
 `yomi-strix`. Mesh `home` is a charter mesh. Every command is run as the box's
 Aoide user. `$M` is a marker word chosen per run, never a word a mailbox or
 a node already uses:
@@ -37,6 +40,20 @@ nothing else (CONTRACTS.md §6: the stripped card). From any machine:
 ```sh
 curl -sS https://aoide.necoconeco.net/.well-known/agent-card.json     # the same three keys
 ```
+
+sakaki's A2A door (8710) must be bearer-gated, or off, before any public
+ingress goes live: a caller behind cloudflared or a proxy arrives from loopback
+and loopback is otherwise trusted (CONTRACTS.md §6, the bearer-token amendment).
+Either:
+
+```sh
+systemctl --user is-active aoide-a2a                      # inactive: the door is off
+systemctl --user cat aoide-a2a | grep -E 'AOIDE_A2A_(BEARER_SECRET|TOKEN_FILE)='
+```
+
+prints a non-empty `AOIDE_A2A_BEARER_SECRET=` (preferred; `aoide.a2a.bearerSecret`)
+or `AOIDE_A2A_TOKEN_FILE=` (`aoide.a2a.tokenFile`). If the door is active and
+both are empty, set one and rebuild before going further.
 
 The reverse proxy's route for the hostname targets `127.0.0.1:8712` with the
 path forwarded unchanged. `grep -rn 8710` over the proxy and tunnel config
@@ -101,7 +118,7 @@ and state, and `aoide.config.settings` is whole-file-or-nothing
    pre-P-CHARTER binary refuses `operator` as an unknown field):
 
    ```toml
-   # ~/.aoide/config.toml on yomi-strix, only if the join above is refused as unreadable
+   # $AOIDE_ROOT/config.toml on yomi-strix, only if the join above is refused as unreadable
    [mesh.home]
    operator = "ed25519:<64 lowercase hex>"
    ```
@@ -175,7 +192,7 @@ sakaki (over ssh from osaka):
 
 ```sh
 aoide mail outbox yomi-strix --json     # the sealed container, held for yomi's own ask
-aoide mail read --transit --json | tail -n 3   # a transit line for the msgid, no mailbox, no text
+grep '"type":"transit"' $AOIDE_ROOT/state/mail/base.jsonl | tail -n 3   # a transit line for the msgid, no mailbox, no text
 ```
 
 yomi (wait for the timer or ask now):
@@ -240,7 +257,7 @@ Expected: HTTP 200 with a JSON-RPC `error`, code `-32010`, message starting
 sakaki:
 
 ```sh
-grep -c 'unauthorized' ~/.aoide/log        # increased by the attempts above
+grep -c 'unauthorized' $AOIDE_ROOT/log        # increased by the attempts above
 ```
 
 ## 6. T4: a door method through the hostname is refused
@@ -257,7 +274,7 @@ The method is not in the listener's table at all (CONTRACTS.md §6), so no
 `task`, no `spawn`, no pairing state is created. sakaki:
 
 ```sh
-grep 'mail-adapter.refused' ~/.aoide/log | tail -n 5
+grep 'mail-adapter.refused' $AOIDE_ROOT/log | tail -n 5
 ```
 
 Expected: one `a2a.mail-adapter.refused` line per method, each with the detail
@@ -275,7 +292,7 @@ aoide mail send --to yomi-strix/conductor -- "$M plaintext-canary"
 On sakaki, after it is deposited (and again after yomi has taken it):
 
 ```sh
-cd ~/.aoide
+cd $AOIDE_ROOT
 grep -rl "$M" state log 2>/dev/null                      # no output
 journalctl --user -u aoide-mail-adapter --no-pager | grep -c "$M"      # 0
 grep -rl 'conductor' state/outbox state/mail 2>/dev/null # no output: no mailbox name
@@ -322,6 +339,7 @@ refused at the door; yomi still holds the earlier charter and does not know).
 Then remove the `[status]` table, sign, and restart yomi's timer:
 
 ```sh
+systemctl --user start aoide-h1-poll.timer   # on yomi: the timer stopped above runs again
 aoide mail poll sakaki          # on yomi
 aoide mail read --for conductor # on yomi: "$M queued-before-down" arrives, the same msgid, never re-minted
 ```
@@ -353,7 +371,7 @@ this is the specified behaviour, and so the cleanup is by hand. Remove the
 
 ```sh
 aoide mail outbox sakaki
-aoide mail outbox sakaki rm <msgid>      # each held entry
+aoide mail outbox rm <msgid>             # each held entry
 ```
 
 The declaration that no longer holds is read by the next send: a fresh
@@ -367,7 +385,7 @@ yomi:
 systemctl --user stop aoide-h1-poll.timer aoide-h1-poll.service
 ```
 
-Leave `nodes.json` as repointed (it is the working HTTPS record), or restore
-`nodes.json.pre-h1` with aoided stopped. osaka: restore the charter's
+Leave sakaki's record as repointed (it is the working HTTPS record), or point
+it back with `aoide node address sakaki <the former address>`. osaka: restore the charter's
 `address` lines and sign, if the LAN transport is wanted back. Record the run
 in the session ledger with each step's command output.

@@ -8275,7 +8275,7 @@ TLS-terminating front — a Cloudflare Tunnel, a VPS with public 443, a tailnet
   this command as the `aoide-mail-adapter` user unit beside `aoided`;
   `aoide.mail.adapter.port` (default `8712`) becomes `AOIDE_MAIL_ADAPTER_PORT`.
   The unit is ordered and restarted like `aoide-a2a`. There is no bind option,
-  as above. Without nix the same unit is `docs/INSTALL.md`'s second user unit.
+  as above. Without nix the same unit is `docs/INSTALL.md`'s third user unit.
   The front's ingress targets this port; the door's port (`8710`) is never an
   ingress target.
 
