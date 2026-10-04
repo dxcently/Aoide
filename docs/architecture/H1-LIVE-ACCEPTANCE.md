@@ -171,6 +171,10 @@ charter mesh that lists the relay, and no record exists. Do not retry and do
 not edit records around it: report it with `aoide mail outbox --json` from the
 sending box, naming the mesh the entry rides.
 
+A signed request whose key the receiving door's registry and in-force charter do
+not carry is refused `-32007`; an `ssh://` charter hop, which used to go out
+unsigned, meets that rule now.
+
 ## 3. T1: osaka to yomi, delivered, with a receipt back
 
 osaka:

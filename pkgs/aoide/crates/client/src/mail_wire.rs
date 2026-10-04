@@ -783,6 +783,10 @@ impl SendMeshError {
 /// line gives the node's key and the charter is operator-signed, so the dialled
 /// node carries that key ([`aoide_storage::node_store::Node::declared`]) and
 /// the relay's adapter, which admits only signed requests, takes the deposit.
+/// That holds for an `ssh://` hop too, which used to go out unsigned under
+/// loopback treatment: it is signed now, and the receiving door refuses
+/// (`-32007`) a signed request whose key neither its registry nor its in-force
+/// charter carries. A declaration that gives no key leaves the hop unsigned.
 ///
 /// **`mesh` is the mesh the letters in that spool RIDE**, and the declaration
 /// read is that one's alone: one node name may sit in several meshes with a
@@ -2554,6 +2558,38 @@ mod tests {
             aoide_storage::wire_auth::verify_signature_hex(&own_key, canonical.as_bytes(), &header(HEADER_SIGNATURE)),
             "the signature verifies against this box's own key"
         );
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A declaration with no key signs nothing.** A pair mesh's address for a
+    /// node this box holds no record of names where to dial and vouches for no
+    /// key, so the dialled record is unverified and the deposit goes out bare.
+    #[test]
+    fn a_hop_declared_without_a_key_goes_out_unsigned() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("declared-no-key");
+        std::fs::write(
+            aoide_storage::config::source().path,
+            "[mesh.friends.nodes]\nghost = \"ssh://khoa@192.168.1.5\"\n",
+        )
+        .unwrap();
+
+        let (mut hop, dial_only) = dial_node("ghost", Some("friends")).expect("the declared address is a dial target");
+        assert!(dial_only, "this box holds no record for it");
+        assert!(!hop.verified && hop.pubkey.is_none(), "no key was declared, so none is trusted");
+        assert!(!Node::declared("ghost", "https://ghost.example.net/", None, None).verified);
+
+        let (listener, port, seen) = head_door();
+        hop.url = format!("http://127.0.0.1:{port}/");
+        hop.via = None;
+        let envelope = aoide_storage::mail::mint_outbound_letter_in_mesh("alice", "ghost", "bob", "hi", "friends").unwrap();
+        attempt_deposit(&hop, &OutboxEntry::fresh(envelope));
+
+        let request = seen.lock().unwrap().first().cloned().expect("the door saw the deposit");
+        let head = request.split_once("\r\n\r\n").unwrap().0.to_ascii_lowercase();
+        assert!(!head.contains("x-aoide-"), "no mesh, node or signature header goes out:\n{head}");
 
         drop(listener);
         let _ = std::fs::remove_dir_all(&dir);
