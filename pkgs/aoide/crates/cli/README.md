@@ -91,7 +91,7 @@ depends on it.
 The command paths (count: the golden list in `src/registry.rs`, asserted
 as an exact set — core's headless-capable, agent-orchestration surface: the
 project/session graph (including `resurrect`, its ledger-backed
-session revival), A2A, nodes (including the `node hub` designation,
+session revival), A2A, nodes (including the `node hub` designation, `node address <name> <address>`,
 P-D5, the `aoide pair [<name|url|id>]`/`pair reject`/`pair watch`
 one-command pairing ceremony, P-P2/P-P5/P-PV2/task #135 P3', the `node allow <name> <cap> on|off [--mesh <m>]`
 closed-capability grant/revoke command backing the A2A spawn arm's hard

@@ -1,7 +1,11 @@
 # Aoide HTTPS mesh API
 
-Status: proposed design. No charter, per-mesh grant, HTTPS listener, credential or
-cutover exists or is authorized. **The library profile and the canonical
+Status: the mesh API's design and the specification of what is built of it:
+charters, per-mesh grants, sealed letters, signed requests on every call, and the
+mail adapter (`aoide mail serve`), a loopback listener that a TLS-terminating front
+faces. No Aoide process terminates TLS or binds a routable address. State snapshots,
+WSS events, direct HTTPS edges and typed control actions (H2 to H4) are design only.
+**The library profile and the canonical
 encodings are fixed**: the cipher is the `age` crate at 0.12.1 with no features
 ("Cryptographic selection"), and every signed or hashed byte in this design is
 one of the labelled frames in "Encodings". MAIL.md carries the same design for
@@ -119,6 +123,37 @@ predates it refuses a two-entry hop chain, so the declaration comes last and
 | One relay for a mesh, relay compromised | Because letters are sealed and signed, it can drop, delay and observe metadata (who wrote to whom, size, time). It can never read or forge a letter, and never alter a charter. |
 | Several relays (`relays = ["a", "b"]`) | For availability. The sender takes the first relay, in declaration order, that it trusts in the mesh, can reach by address, and is not `down` (MAIL.md routing step 2). A relay that is unreachable but not declared `down` is still chosen, and the letter waits for it. Failing over automatically on unreachability is open. |
 | Relay that is also a node (sakaki) | The hub is a role. Its own mail files locally, like any destination's. |
+
+### The relay's deployment shape
+
+The relay runs `aoide mail serve` as the `aoide-mail-adapter` user unit beside
+`aoided` (`aoide.mail.adapter.enable`, `aoide.mail.adapter.port`, default 8712;
+without nix, `docs/INSTALL.md`). Everything in front of it is a transport hop:
+
+```text
+poll node --HTTPS 443--> TLS front (cloudflared) --> reverse proxy (:8080) --> aoide mail serve 127.0.0.1:8712
+                                                                               aoide a2a serve  127.0.0.1:8710   (never fronted)
+```
+
+- **The ingress target is the adapter's port and no other.** The reverse proxy
+  routes the relay's hostname to `127.0.0.1:<aoide.mail.adapter.port>` and has
+  no route to the door's port. Pointing any hop at the door is the one
+  misconfiguration that turns an unsigned request into conduct.
+- **The path is forwarded unchanged.** A signed request covers the method,
+  path, timestamp, nonce, body and mesh, so a hop that strips or rewrites a
+  prefix makes every call fail `-32007`. The route matches on host alone.
+- **Nothing in the chain is trusted with content.** The front and the proxy see
+  sealed containers and signed headers, never a letter. The relay's spool and
+  its mailbase hold sealed containers and transit records only.
+- **The relay needs no inbound port of its own.** The front dials out to the
+  box, and every node dials out to the front.
+- **A node's side is runtime state, not a unit.** A `poll` node runs no
+  listener. It holds the operator key it trusts, the charter in force, and a
+  verified record of its relay whose URL is the relay's `https://` address;
+  its ask is poll-on-contact after a send, or `aoide mail poll` driven by an OS timer. None of
+  that is a Nix option, because core is configured by `config.toml` and state
+  and not by a rebuild. `docs/architecture/H1-LIVE-ACCEPTANCE.md` is the
+  procedure.
 
 ## Trust per mesh
 

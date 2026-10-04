@@ -779,6 +779,15 @@ impl SendMeshError {
 /// inbound transport, so a drain never dials it (its own ask moves its letters),
 /// and the caller answers "nothing to do here".
 ///
+/// **A charter-addressed hop is SIGNED for like a paired one**: the charter's
+/// line gives the node's key and the charter is operator-signed, so the dialled
+/// node carries that key ([`aoide_storage::node_store::Node::declared`]) and
+/// the relay's adapter, which admits only signed requests, takes the deposit.
+/// That holds for an `ssh://` hop too, which used to go out unsigned under
+/// loopback treatment: it is signed now, and the receiving door refuses
+/// (`-32007`) a signed request whose key neither its registry nor its in-force
+/// charter carries. A declaration that gives no key leaves the hop unsigned.
+///
 /// **`mesh` is the mesh the letters in that spool RIDE**, and the declaration
 /// read is that one's alone: one node name may sit in several meshes with a
 /// different address in each, so dialling "the first declaration that names it"
@@ -804,16 +813,16 @@ fn dial_node(node_name: &str, mesh: Option<&str>) -> Option<(aoide_storage::node
     // is dialled through its tunnel at the far side's own door
     // (`http://127.0.0.1:<AOIDE_A2A_PORT or 8710>/`, the same loopback form a
     // paired ssh node's record holds), and an `https://` hop at the URL itself.
-    let address = declared?
-        .address_of(node_name)
-        .map(str::to_string)?;
+    let declaration = declared?;
+    let key = declaration.key_of(node_name);
+    let address = declaration.address_of(node_name).map(str::to_string)?;
     match aoide_storage::charter::dial_of(&address).ok()? {
         aoide_storage::charter::Dial::Https(url) => {
-            Some((aoide_storage::node_store::Node::dial_only(node_name, &url, None), true))
+            Some((aoide_storage::node_store::Node::declared(node_name, &url, None, key), true))
         }
         aoide_storage::charter::Dial::Ssh(via) => {
             let url = format!("http://127.0.0.1:{}/", crate::commands::default_a2a_port());
-            Some((aoide_storage::node_store::Node::dial_only(node_name, &url, Some(&via.to_string())), true))
+            Some((aoide_storage::node_store::Node::declared(node_name, &url, Some(&via.to_string()), key), true))
         }
         aoide_storage::charter::Dial::Poll => None,
     }
@@ -2432,6 +2441,157 @@ mod tests {
         );
         assert!(after.contains(&"friend".to_string()), "while the pair mesh still routes: {after:?}");
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A door that keeps each request it is sent, whole, and answers a
+    /// deposit as accepted: what a test needs to read the signature headers
+    /// off the wire.
+    fn head_door() -> (std::net::TcpListener, u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        let accepter = listener.try_clone().unwrap();
+        std::thread::spawn(move || {
+            while let Ok((mut stream, _)) = accepter.accept() {
+                let mut buf: Vec<u8> = Vec::new();
+                let mut chunk = [0u8; 4096];
+                loop {
+                    let n = stream.read(&mut chunk).unwrap_or(0);
+                    buf.extend_from_slice(&chunk[..n]);
+                    let text = String::from_utf8_lossy(&buf).to_string();
+                    let Some(head) = text.find("\r\n\r\n") else {
+                        if n == 0 { break } else { continue }
+                    };
+                    let len: usize = text[..head]
+                        .lines()
+                        .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").and_then(|v| v.trim().parse().ok()))
+                        .unwrap_or(0);
+                    if n == 0 || buf.len() >= head + 4 + len {
+                        break;
+                    }
+                }
+                log.lock().unwrap().push(String::from_utf8_lossy(&buf).to_string());
+                let answer = r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted","msgid":"00"}}"#;
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+                        answer.len()
+                    )
+                    .as_bytes(),
+                );
+            }
+        });
+        (listener, port, seen)
+    }
+
+    /// **A deposit to a charter-addressed hop is SIGNED.** The relay of a
+    /// charter mesh is dialled off the charter's line, with no `nodes.json`
+    /// record behind it, and the relay's mail adapter admits only a signed
+    /// request: a hop that goes out bare is refused at the far door. The
+    /// request must carry this box's signature over the mesh the letter rides,
+    /// and it must verify against this box's own key. (`https://` cannot be
+    /// listened on without TLS in a test, so the dialled node's URL is pointed
+    /// at a plain loopback door standing in for the TLS front.)
+    #[test]
+    fn a_deposit_to_a_charter_addressed_hop_goes_out_signed() {
+        use aoide_storage::wire_auth::{HEADER_MESH, HEADER_NONCE, HEADER_SIGNATURE, HEADER_TIMESTAMP};
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("charter-https-signed");
+        let _name = aoide_test_support::EnvSaver::capture(&["AOIDE_A2A_NODE_NAME"]);
+
+        let own_root = std::env::var("AOIDE_ROOT").unwrap();
+        let relay_root = dir.join("relay-box");
+        std::fs::create_dir_all(&relay_root).unwrap();
+        std::env::set_var("AOIDE_ROOT", &relay_root);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "relay");
+        let relay_line = aoide_storage::charter::node_line().unwrap();
+        std::env::set_var("AOIDE_ROOT", &own_root);
+        std::env::set_var("AOIDE_A2A_NODE_NAME", "opbox");
+
+        let (kp, _) = aoide_storage::identity::load_or_mint().unwrap();
+        let own_key = kp.info().pubkey_hex;
+        aoide_storage::charter::init("home").unwrap();
+        let own_line = aoide_storage::charter::node_line().unwrap();
+        let relay_line = relay_line.replacen(" }", ", address = \"https://relay.example.net/\" }", 1);
+        std::fs::write(
+            aoide_storage::charter::source_path("home"),
+            format!("mesh = \"home\"\nversion = 0\nrelays = [\"relay\"]\n\n[nodes]\n{own_line}\n{relay_line}\n"),
+        )
+        .unwrap();
+        aoide_storage::charter::sign("home", None).unwrap();
+
+        let (mut hop, dial_only) = dial_node("relay", Some("home")).expect("the charter's line is a dial target");
+        assert!(dial_only, "this box holds no record for the relay");
+        assert_eq!(hop.url, "https://relay.example.net/");
+        let (listener, port, seen) = head_door();
+        hop.url = format!("http://127.0.0.1:{port}/");
+
+        let envelope = aoide_storage::mail::mint_outbound_letter_in_mesh("alice", "relay", "bob", "hi", "home").unwrap();
+        match attempt_deposit(&hop, &OutboxEntry::fresh(envelope)) {
+            DepositAttempt::Delivered { .. } => {}
+            other => panic!("the stand-in door accepts the deposit, got {other:?}"),
+        }
+
+        let request = seen.lock().unwrap().first().cloned().expect("the door saw the deposit");
+        let (head, body) = request.split_once("\r\n\r\n").unwrap();
+        let header = |name: &str| {
+            head.lines()
+                .find_map(|l| {
+                    let (k, v) = l.split_once(':')?;
+                    k.eq_ignore_ascii_case(name).then(|| v.trim().to_string())
+                })
+                .unwrap_or_else(|| panic!("the deposit carries no `{name}` header:\n{head}"))
+        };
+        assert_eq!(header(HEADER_MESH), "home", "signed for the mesh the letter rides");
+        let canonical = aoide_storage::wire_auth::canonical_string(
+            "POST",
+            "/",
+            &header(HEADER_TIMESTAMP),
+            &header(HEADER_NONCE),
+            body.as_bytes(),
+            Some("home"),
+        );
+        assert!(
+            aoide_storage::wire_auth::verify_signature_hex(&own_key, canonical.as_bytes(), &header(HEADER_SIGNATURE)),
+            "the signature verifies against this box's own key"
+        );
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A declaration with no key signs nothing.** A pair mesh's address for a
+    /// node this box holds no record of names where to dial and vouches for no
+    /// key, so the dialled record is unverified and the deposit goes out bare.
+    #[test]
+    fn a_hop_declared_without_a_key_goes_out_unsigned() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("declared-no-key");
+        std::fs::write(
+            aoide_storage::config::source().path,
+            "[mesh.friends.nodes]\nghost = \"ssh://khoa@192.168.1.5\"\n",
+        )
+        .unwrap();
+
+        let (mut hop, dial_only) = dial_node("ghost", Some("friends")).expect("the declared address is a dial target");
+        assert!(dial_only, "this box holds no record for it");
+        assert!(!hop.verified && hop.pubkey.is_none(), "no key was declared, so none is trusted");
+        assert!(!Node::declared("ghost", "https://ghost.example.net/", None, None).verified);
+
+        let (listener, port, seen) = head_door();
+        hop.url = format!("http://127.0.0.1:{port}/");
+        hop.via = None;
+        let envelope = aoide_storage::mail::mint_outbound_letter_in_mesh("alice", "ghost", "bob", "hi", "friends").unwrap();
+        attempt_deposit(&hop, &OutboxEntry::fresh(envelope));
+
+        let request = seen.lock().unwrap().first().cloned().expect("the door saw the deposit");
+        let head = request.split_once("\r\n\r\n").unwrap().0.to_ascii_lowercase();
+        assert!(!head.contains("x-aoide-"), "no mesh, node or signature header goes out:\n{head}");
+
+        drop(listener);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

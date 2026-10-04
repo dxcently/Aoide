@@ -250,13 +250,18 @@ pub fn valid_capability(cap: &str) -> bool {
 impl Node {
     /// The record a node this box has never PAIRED with is dialled as: its name,
     /// the dial target a DECLARATION gives it, its transport marker, and nothing
-    /// else. A charter node is not a paired record — no key is learned from it,
-    /// no grant is read from it, no bearer is held for it — but a drain must be
-    /// able to open a link to it, and "we have no record of it" is exactly the
-    /// silent no-op this exists to remove. `verified`/`pubkey` stay empty:
-    /// nothing here claims a pairing, so every trust question keeps its own
-    /// answer (`grant_in_mesh` reads a declaration or a record, never this).
-    pub fn dial_only(name: &str, url: &str, via: Option<&str>) -> Node {
+    /// else. No grant is read from it and no bearer is held for it, but a drain
+    /// must be able to open a link to it, and "we have no record of it" is
+    /// exactly the silent no-op this exists to remove.
+    ///
+    /// **`key` is the identity key the declaration gives the node** — a charter
+    /// line carries one, and the charter is operator-signed, so that key is
+    /// trusted exactly as a pairing's is and the record is `verified` with it:
+    /// requests to it are signed. A declaration that gives no key (a pair mesh's
+    /// address for a node this box holds no record of) leaves `verified`/`pubkey`
+    /// empty: nothing claims a trust, so an uncharted node is never signed for
+    /// (`grant_in_mesh` reads a declaration or a record, never this).
+    pub fn declared(name: &str, url: &str, via: Option<&str>, key: Option<&str>) -> Node {
         Node {
             name: name.to_string(),
             url: url.to_string(),
@@ -264,8 +269,8 @@ impl Node {
             token_file: None,
             bearer_secret: None,
             hub: false,
-            pubkey: None,
-            verified: false,
+            pubkey: key.map(str::to_string),
+            verified: key.is_some(),
             grants: Grants::new(),
             narrowed: Grants::new(),
             via: via.map(str::to_string),
@@ -739,6 +744,28 @@ pub fn set_node_via(nodes: &mut [Node], name: &str, via: Option<&str>) -> Result
     }
     p.via = via.map(|s| s.to_string());
     Ok(())
+}
+
+/// Point the record `name` at a new address: its dial `url` and its `via`
+/// marker together, because the two are one address (`aoide node address`,
+/// `docs/architecture/HTTPS-MESH-API.md` "Transports and relays"). `Ok(true)`
+/// when the record changed, `Ok(false)` when it already held exactly this pair
+/// (never an error, nothing to write). `Err` for a name that is no registered
+/// node, and for a pair [`transport_conflict`] refuses; a refused call leaves
+/// the record as it was.
+pub fn set_node_address(nodes: &mut [Node], name: &str, url: &str, via: Option<&str>) -> Result<bool, String> {
+    let Some(p) = nodes.iter_mut().find(|p| p.name == name) else {
+        return Err(format!("no node named `{name}`"));
+    };
+    if let Some(conflict) = transport_conflict(&p.name, url, via) {
+        return Err(conflict);
+    }
+    if p.url == url && p.via.as_deref() == via {
+        return Ok(false);
+    }
+    p.url = url.to_string();
+    p.via = via.map(str::to_string);
+    Ok(true)
 }
 
 /// The transport pair H1 makes unreachable: a record carrying BOTH an

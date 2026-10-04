@@ -418,7 +418,11 @@ by decision — no embedded database yet
   ONLY writer — a SIBLING to `upsert_paired_node` rather than a new
   parameter on it, since that function's signature is also called from
   `aoide-server`'s own pairing integration tests, outside this field's
-  blast radius.
+  blast radius. `set_node_address` writes `url` and `via` together (`aoide node
+  address`), refusing the `https`+`via` pair `transport_conflict` names.
+  `Node::declared` is the in-memory record a drain dials for a node a
+  declaration addresses and this box holds no record for: verified, with the
+  charter line's key, when the declaration gives one; unsigned when it does not.
 - `pairing` — the pairing ceremony's own park-and-approve state (P-P2,
   `docs/architecture/PAIRING.md`, CONTRACTS.md §4's `state/node-pairing-
   inbound.json`/`-outbound.json` subsection): two disk-persisted queues,

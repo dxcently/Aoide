@@ -11,7 +11,7 @@ module builds against what nucleus declares.
   `aoide.arrangement`, `aoide.surfaces` — the enumerated, closed set a paint
   are allowed to read (root `AGENTS.md` house rule 5). Versioned in
   CONTRACTS.md (livery schema v0). Also carries the non-paint-read option
-  namespaces (`aoide.mcp`, `aoide.a2a`, `aoide.usage`, `aoide.lyra`,
+  namespaces (`aoide.mcp`, `aoide.a2a`, `aoide.mail.adapter`, `aoide.usage`, `aoide.lyra`,
   `aoide.secrets`, `aoide.pairing` — deployment/door toggles, not part of
   the paint whitelist). And it declares the ENABLE FACTS — the seam between
   this layer and the paint lanes (CONTRACTS.md §0): `aoide.quickshell.enable`
@@ -51,7 +51,9 @@ module builds against what nucleus declares.
   has a shell config to run), so this file reads no
   lane's option either. Below that, still here: every door (mcp, a2a,
   pair-watch) the daemon's event stream
-  serves, the discovery-advertisement firewall carve, and the usage
+  serves, the mail adapter (`aoide-mail-adapter`, H1: `aoide mail serve` on
+  `127.0.0.1:aoide.mail.adapter.port`, off by default, the one unit a relay
+  turns on and the port its TLS-terminating front targets), the discovery-advertisement firewall carve, and the usage
   poller — core *binaries* in a still-AoideOS *deployment*, migrating
   them is a later slice's work, not this one's. Also opens the LAN
   discovery advertisement's inbound UDP port

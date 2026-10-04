@@ -641,7 +641,8 @@
   `commands::confirm_repair_if_verified` already gates that behind a human
   y/N, and writing `via` outside a ceremony commit would make this module a
   second writer of a field `node_store::set_node_via` reserves to that
-  commit. The payoff is idempotence by construction — a second run is
+  commit. (`node address` is the operator's own write of `via` beside `url`,
+  through `node_store::set_node_address`; it never runs inside a ceremony.) The payoff is idempotence by construction — a second run is
   all-`skipped` — and a test pins it. Do not widen the selection to "repair
   what drifted".
   - **Zero ceremony logic lives in `mesh.rs`.** Every selected node goes
@@ -968,3 +969,5 @@
 - `CONTRACTS.md §6`/`§7` when an A2A or node-federation wire shape changes.
 - `pkgs/aoide/crates/AGENTS.md` for cross-crate invariants — not restated
   here.
+
+- **`mail_wire::dial_node` signs a hop whose declaration carries a key** (`Node::declared`), `ssh://` charter hops included: the receiving door refuses (`-32007`) a signed request whose key neither its registry nor its in-force charter carries, where such a hop used to go out unsigned under loopback treatment. A declaration with no key stays unsigned.

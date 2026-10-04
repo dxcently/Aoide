@@ -543,6 +543,11 @@
   leaves a previously-recorded `via` (e.g. one `aoide pair`'s hostname arm set) exactly
   as it was, the same untouched-unless-named stance `upsert_paired_node`
   itself holds for `autogate`/`tokenFile`/`bearerSecret`/`hub`/`grants`.
+- **`node_store::set_node_address` is the ONE write site for `Node.url` after
+  registration, and writes `via` with it** (the two are one address). It is never
+  called from a ceremony. `Node::declared` is never saved: a declaration's key
+  makes the dialled record verified in memory only, and a declaration with no
+  key must leave it unverified.
 - **`pairing`'s request ids are deliberately NOT `state/stage/pending.json`'s
   array-position ids.** A pairing correlation must survive the requester's
   CLI process exiting and an async `aoide/pairPoll` (Design A, task #119 —

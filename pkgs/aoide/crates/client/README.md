@@ -971,6 +971,10 @@ never the inbound/serve half (that's `aoide-server`).
   y/N rides on top) and goes straight through `pair_with_heard`; hearing
   nothing and nothing pending teaches `node advertise on` and the manual
   `aoide pair <url>` path.
+  `node address <name> <address>` (`handle_node_address`, a thin wire around
+  `node_store::set_node_address` over `charter::dial_of`'s grammar: it moves an
+  existing record to an `https://`, `ssh://` or `poll` address and touches
+  nothing else);
   `adapter melete` (`node hub
   <name> [--clear]`, P-D5, designates at most one registered node as the
   hub `aoide_storage::addr::resolve_with_hub` prefers as a last-resort

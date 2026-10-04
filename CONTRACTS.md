@@ -8271,6 +8271,13 @@ TLS-terminating front — a Cloudflare Tunnel, a VPS with public 443, a tailnet
   origin (`HTTP 200 from loopback via mail-adapter`) — a front dials from
   loopback, so the origin alone cannot separate tunnel traffic from door
   traffic.
+- **Deployment (nix)**: `aoide.mail.adapter.enable` (default `false`) runs
+  this command as the `aoide-mail-adapter` user unit beside `aoided`;
+  `aoide.mail.adapter.port` (default `8712`) becomes `AOIDE_MAIL_ADAPTER_PORT`.
+  The unit is ordered and restarted like `aoide-a2a`. There is no bind option,
+  as above. Without nix the same unit is `docs/INSTALL.md`'s third user unit.
+  The front's ingress targets this port; the door's port (`8710`) is never an
+  ingress target.
 
 ---
 
@@ -8753,6 +8760,14 @@ single declared target — refused outright as a usage error (naming the
 fold) rather than silently reading only the first token and burning a
 full sweep window hunting a host named "request" while quietly
 discarding the url.
+
+`aoide node address <name> <https://…|ssh://…|poll>` points an existing node
+record at another address (`node_store::set_node_address`, over
+`charter::dial_of`'s grammar): `https://` and `poll` are the record's `url`
+and clear its `via`; `ssh://` is its `via`. Key, grants and trust are
+untouched; an address in the same place is a no-op; an unknown node and an
+address outside the grammar are refused (`unknown-node`, `invalid-address`)
+and write nothing. `--json` carries `{name, address, url, via, changed}`.
 
 `aoide node allow <name> <cap> on|off` (P-P3, `docs/architecture/
 PAIRING.md` decision 5, appended newest directly after the pairing

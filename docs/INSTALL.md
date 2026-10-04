@@ -232,6 +232,47 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 - On a host running two nodes (native + WSL, § 7.3), this unit is where one
   node's identity and port differ from the other's.
 
+### The mail adapter beside it (a relay only)
+
+A relay that faces a TLS-terminating front runs `aoide mail serve` as a third
+unit, `~/.config/systemd/user/aoide-mail-adapter.service`. It is the A2A
+door's unit with two changes: the command, and the port variable. There is no
+bind variable, because the adapter binds `127.0.0.1` and nothing else.
+
+```ini
+[Unit]
+Description=Aoide mail adapter (H1: loopback, mail-only, behind a TLS-terminating front)
+After=aoided.service
+BindsTo=aoided.service
+
+[Service]
+Type=simple
+ExecStart=%h/.cargo/bin/aoide mail serve
+Restart=on-failure
+RestartSec=5s
+Environment=AOIDE_MAIL_ADAPTER_PORT=8712
+Environment=AOIDE_AUDIT_LOG=%h/.aoide/log
+Environment=AOIDE_USER=%u
+Environment=AOIDE_ROOT=%h/.aoide
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=aoided.service
+```
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now aoide-mail-adapter
+systemctl --user is-active aoide-mail-adapter
+curl -sS http://127.0.0.1:8712/.well-known/agent-card.json     # name, protocolVersion, url
+```
+
+The front's ingress targets `127.0.0.1:8712`, never the door's `8710`.
+`openssh` and `curl` must resolve on the unit's `PATH`: a transit deposit
+drains toward its next hop from inside this process.
+
 ### Without systemd
 
 There is no supervisor to write the unit into, so run the same binary under
