@@ -152,6 +152,45 @@ lib.mkIf config.aoide.enable {
     };
   };
 
+  # ── Mail adapter (H1, opt-in, off by default per house policy) ───────────
+  # When aoide.mail.adapter.enable is true, run `aoide mail serve`: the
+  # loopback, mail-only listener a TLS-terminating front (cloudflared, a
+  # reverse proxy) points at on the relay of a mesh. Ordered and restarted
+  # like aoide-a2a, whose sibling it is. There is no bind setting to pass:
+  # the binary binds 127.0.0.1 and nothing else (CONTRACTS.md §6), and the
+  # front's ingress targets `aoide.mail.adapter.port`, never `aoide.a2a.port`.
+  # `openssh` and `curl` ride the unit's `path` because a transit deposit
+  # drains toward the next hop from inside this process, the same gap the
+  # aoided unit closed.
+  systemd.user.services.aoide-mail-adapter = lib.mkIf config.aoide.mail.adapter.enable {
+    description = "Aoide mail adapter (H1: loopback, mail-only, behind a TLS-terminating front)";
+
+    wantedBy = [ "aoided.service" ];
+    after = [ "aoided.service" ];
+    bindsTo = [ "aoided.service" ];
+
+    path = [
+      pkgs.openssh
+      pkgs.curl
+    ];
+
+    serviceConfig = {
+      ExecStart = "${pkgs.aoide}/bin/aoide mail serve";
+      Restart = "on-failure";
+      RestartSec = "5s";
+      Environment = [
+        "AOIDE_MAIL_ADAPTER_PORT=${toString config.aoide.mail.adapter.port}"
+        "AOIDE_AUDIT_LOG=${config.aoide.auditLog}"
+        "AOIDE_USER=${config.aoide.user}"
+        "AOIDE_ROOT=${config.aoide.root}"
+        "AOIDE_FLAKE_ROOT=${config.aoide.checkout}"
+      ];
+      NoNewPrivileges = true;
+      StandardOutput = "journal";
+      StandardError = "journal";
+    };
+  };
+
   # ── Pairing events watcher (P-P5; popup upgraded to a typed-code entry
   # dialog + lyra/zenity feature-detection, and gated behind its own opt-in
   # flag, at P-PV3 task #132) ────────────────────────────────────────────────

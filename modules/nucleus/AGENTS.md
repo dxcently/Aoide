@@ -52,6 +52,13 @@ covers only what's specific to nucleus.
   ordered, with that lane's scope named). A rice agent proposing a nucleus
   change writes the diff and gets it reviewed/merged the normal way, same as
   any other core-structure change.
+- **`aoide.mail.adapter` has `enable` and `port` and must never grow a bind
+  option.** `aoide mail serve` binds `127.0.0.1` as a constant
+  (`pkgs/aoide/crates/server/AGENTS.md`), so the unit passes only the port.
+  The unit is ordered and restarted like `aoide-a2a` (`wantedBy`/`after`/
+  `bindsTo` `aoided.service`, `Restart=on-failure`, `RestartSec=5s`). A relay's
+  front targets `aoide.mail.adapter.port` and never `aoide.a2a.port`: an
+  unsigned loopback request that reaches the door is conduct.
 - **A user unit gets no polkit session.** Anything spawned from a
   `systemd.user.services.*` here lands outside `session-N.scope`, so polkit
   resolves no session for it and `allow_active` never fires — the action

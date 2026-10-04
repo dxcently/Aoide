@@ -954,6 +954,30 @@ in
       };
     };
 
+    # ── Mail adapter (H1, CONTRACTS.md §6 "aoide mail serve") ────────────────
+    mail.adapter = {
+      enable = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Run `aoide mail serve` as the `aoide-mail-adapter` user unit: the
+          mail-only listener (`aoide/mailDeposit`, `aoide/mailPoll`,
+          `aoide/binding` and the stripped AgentCard, no other method) a
+          TLS-terminating front points at. Off by default, same house policy
+          as the A2A door. Turn it on only on the relay of a mesh. It binds
+          127.0.0.1 and nothing else, and there is deliberately no bind
+          option beside `port`: the front (a Cloudflare Tunnel, a reverse
+          proxy) is a transport hop, and the A2A door is never fronted by one.
+        '';
+      };
+
+      port = mkOption {
+        type = types.port;
+        default = 8712;
+        description = "The adapter's loopback port: the one the front's ingress targets.";
+      };
+    };
+
     # ── Usage widget + poller (opt-in, off by default) ───────────────────────
     usage = {
       enable = mkOption {

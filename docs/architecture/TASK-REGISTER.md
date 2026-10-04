@@ -2288,6 +2288,12 @@ project/parent inheritance across local/remote/app/subagents;
   plaintext fallback. Existing
   SSH delivery remains in service until parity and recovery are
   demonstrated.
+  H1 deployment (2026-10-03): `aoide.mail.adapter.{enable,port}` runs
+  `aoide mail serve` as the `aoide-mail-adapter` user unit; the live procedure
+  for the first HTTPS run is `H1-LIVE-ACCEPTANCE.md`. A poll node's side is
+  runtime state, not a Nix option. Known gap, to be settled by the live run: a
+  drain to a charter-declared `https://` relay dials an unverified dial-only
+  record and signs nothing.
 - Open (the docs' "Open design decisions"): where the relay runs (an
   always-on host with a public 443 that is not a home machine); forward
   secrecy; padding; charter expiry; a pre-committed successor operator key;
