@@ -282,6 +282,9 @@ mod tests {
         // loops), sorting in the mail family between `mail.send` and
         // `mail.show`.
         //
+        // `node address` (+1) — the one command that moves an existing node
+        // record to another address; sorts after `node.add`.
+        //
         // Bumped by 1 for `project.edit` (multi-root projects) — the
         // exact-replacement editor for a project's root list, the
         // `project edit` that `records.rs`'s `Project.auto_resume` doc
@@ -326,7 +329,7 @@ mod tests {
         // LAN ceremony) — reached 88.
         //
         // **The running total above is the CHAIN's history, not this list's
-        // **The vec below holds 111 paths** (counted, review F7). This line is
+        // **The vec below holds 112 paths** (counted, review F7). This line is
         // the authority for how many; the chain above is the history of how it
         // got there and is never the answer.
         let mut expected: Vec<&str> = vec![
@@ -376,6 +379,7 @@ mod tests {
             "mesh.join",
             "mesh.pair",
             "node.add",
+            "node.address",
             "node.advertise",
             "node.allow",
             "node.discover",

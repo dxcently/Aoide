@@ -447,6 +447,26 @@ aoide node status [--json]
 - **Notes:** read-only. TTL constant: `NODE_CACHE_TTL_SECS` in
   `pkgs/aoide/crates/storage/src/node_store.rs`.
 
+### aoide node address
+
+```
+aoide node address <name> <https://…|ssh://[user@]host[:port]|poll>
+```
+
+- **Reads:** `state/nodes.json`.
+- **Writes:** points the existing record `name` at the new address, in one
+  write. The address grammar is a charter line's (`charter::dial_of`):
+  `https://…` and `poll` become the record's `url` and clear its `via`;
+  `ssh://…` becomes its `via` and dials the far door's loopback form (the
+  record's own `http://` url is kept when it has one). The record's key,
+  grants and trust are untouched. Idempotent: the address it already holds
+  is a no-op that writes nothing.
+- **Output:** `data: {name, address, url, via, changed}`. Refusals carry a
+  `reason`: `invalid-address` (none of the three), `unknown-node`.
+- **Notes:** audited through the dispatcher like every node mutation. It is
+  how a LAN-paired record moves to a relay's `https://` address without a hand
+  edit of `nodes.json`.
+
 ### aoide node hub
 
 ```

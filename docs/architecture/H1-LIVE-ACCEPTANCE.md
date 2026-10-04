@@ -106,27 +106,23 @@ and state, and `aoide.config.settings` is whole-file-or-nothing
    operator = "ed25519:<64 lowercase hex>"
    ```
 
-4. yomi: give the relay a VERIFIED record at its HTTPS address. A poll node
+4. yomi: repoint the relay's VERIFIED record at its HTTPS address. A poll node
    dials a record (`mail_wire::poll_node`), a request is signed only for a
    verified record (`commands::sign_headers_for_node`), and the pairing that
    verifies is LAN-only. yomi was paired with sakaki on the LAN, so the
-   existing record is repointed, once, with aoided stopped:
+   existing record is moved, once, keeping its key and grants:
 
    ```sh
-   systemctl --user stop aoided
-   cd ~/.aoide/state
-   cp nodes.json nodes.json.pre-h1
-   jq '(.nodes[] | select(.name=="sakaki")) |= (.url="https://aoide.necoconeco.net" | del(.via))' nodes.json.pre-h1 > nodes.json.new
-   mv nodes.json.new nodes.json
-   systemctl --user start aoided
-   jq '.nodes[] | select(.name=="sakaki") | {name,url,verified,grants}' nodes.json
+   aoide node address sakaki https://aoide.necoconeco.net
+   jq '.nodes[] | select(.name=="sakaki") | {name,url,verified,grants}' $AOIDE_ROOT/state/nodes.json
    ```
 
-   Expected last line: `url` is the HTTPS address, `verified` is `true`, `grants.home`
-   contains `message`. An `https://` url together with a `via` is refused at
-   the dial seam (`node_store::transport_conflict`), which is why `via` is
-   deleted. If `verified` is `false` there is no record to repoint: stop and
-   report; pairing cannot be done across this network.
+   Expected: `url` is the HTTPS address, `verified` is `true`, `grants.home`
+   contains `message`. The command clears `via`: an `https://` url together
+   with a `via` is refused at the dial seam (`node_store::transport_conflict`).
+   If `node address` answers `unknown-node`, or `verified` is `false`, there is
+   no paired record to repoint: stop and report; pairing cannot be done across
+   this network.
 5. yomi: the ask is a timer, because a node with nothing to send never dials
    (MAIL.md Wire). A transient user timer, removed in section 9:
 
@@ -150,13 +146,13 @@ Expected: the path `yomi-strix -> sakaki -> osaka`, step 1 failing with
 
 ## 2. A refusal that means the sender cannot sign (stop on it)
 
-The first deposit through the relay is T1 below. If it parks with a reason
-containing "SIGNED request from a paired node", the drain dialled the relay
-from the charter's declared address, which is an unverified dial-only record
-and signs nothing (`mail_wire::dial_node`, `Node::dial_only`,
-`commands::sign_headers_for_node`). That is a client defect, not a deployment
-fault: do not retry, do not edit records around it, and report it with
-`aoide mail outbox sakaki --json` from the sending box.
+The first deposit through the relay is T1 below. A hop reached off a charter
+line is signed with this box's key (`mail_wire::dial_node`, `Node::declared`).
+If a deposit still parks with a reason containing "SIGNED request from a paired
+node", the hop was dialled with no key behind it: the letters' mesh is not a
+charter mesh that lists the relay, and no record exists. Do not retry and do
+not edit records around it: report it with `aoide mail outbox --json` from the
+sending box, naming the mesh the entry rides.
 
 ## 3. T1: osaka to yomi, delivered, with a receipt back
 

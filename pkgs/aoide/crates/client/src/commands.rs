@@ -1144,6 +1144,71 @@ fn handle_node_allow(inv: &Invocation) -> Outcome {
         .with_data(data)
 }
 
+/// `node address <name> <address>` — point a registered node at a new address:
+/// `https://…`, `ssh://[user@]host[:port]` or `poll`, the grammar every charter
+/// line speaks ([`aoide_storage::charter::dial_of`] is the one parse). `https://`
+/// and `poll` are the record's `url` and clear its `via`; `ssh://` is its `via`,
+/// dialled at the far door's loopback form (the url `mail_wire::dial_node` gives
+/// the same hop), kept where the record already holds a plain `http://` url.
+/// The record's key, grants and trust are untouched: only where it is reached
+/// changes. Idempotent; an unknown node and an address outside the grammar are
+/// refused and write nothing.
+fn handle_node_address(inv: &Invocation) -> Outcome {
+    let cmd = "node.address";
+    const USAGE: &str = "usage: aoide node address <name> <https://…|ssh://[user@]host[:port]|poll> [--json]";
+    let name = match inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        Some(n) => n.to_string(),
+        None => return Outcome::usage(cmd, USAGE),
+    };
+    let address = match inv.args.get(1).map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        Some(a) => a.to_string(),
+        None => return Outcome::usage(cmd, USAGE),
+    };
+    let dial = match aoide_storage::charter::dial_of(&address) {
+        Ok(d) => d,
+        Err(e) => {
+            return Outcome::error(cmd, format!("address {e}"))
+                .with_data(json!({ "reason": "invalid-address", "name": name, "address": address }))
+        }
+    };
+    let mut nodes = aoide_storage::node_store::load_nodes();
+    let Some(record) = nodes.iter().find(|p| p.name == name) else {
+        return Outcome::error(cmd, format!("no node named `{name}`"))
+            .with_data(json!({ "reason": "unknown-node", "name": name }));
+    };
+    use aoide_storage::charter::Dial;
+    let (url, via) = match dial {
+        Dial::Https(url) => (url, None),
+        Dial::Poll => (aoide_storage::charter::DEFAULT_ADDRESS.to_string(), None),
+        Dial::Ssh(via) => {
+            let url = if record.url.starts_with("http://") {
+                record.url.clone()
+            } else {
+                format!("http://127.0.0.1:{}/", default_a2a_port())
+            };
+            (url, Some(via.to_string()))
+        }
+    };
+    let changed = match aoide_storage::node_store::set_node_address(&mut nodes, &name, &url, via.as_deref()) {
+        Ok(c) => c,
+        Err(e) => {
+            return Outcome::error(cmd, e)
+                .with_data(json!({ "reason": "transport-conflict", "name": name, "address": address }))
+        }
+    };
+    let data = json!({ "name": name, "address": address, "url": url, "via": via, "changed": changed });
+    if !changed {
+        return Outcome::ok(cmd, format!("`{name}` is already at `{address}`")).with_data(data);
+    }
+    if let Err(e) = aoide_storage::node_store::save_nodes(&nodes) {
+        return Outcome::error(cmd, format!("writing the node registry: {e}"))
+            .with_data(json!({ "reason": "registry-write-failed" }));
+    }
+    Outcome::ok(cmd, format!("node `{name}` is now at `{address}`"))
+        .changed(vec![aoide_storage::node_store::nodes_path().to_string_lossy().into_owned()])
+        .with_data(data)
+}
+
 fn handle_node_hub(inv: &Invocation) -> Outcome {
     let cmd = "node.hub";
     let name = match inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()) {
@@ -2026,6 +2091,19 @@ pub fn register_nodes(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_node_status,
+    ));
+    r.insert(cmd!(
+        path: ["node", "address"],
+        summary: "Point a registered node at a new address — https://…, ssh://[user@]host[:port] or poll — leaving its key, grants and trust untouched; idempotent.",
+        args: [
+            arg!("name", "string", true, "The registered node's name."),
+            arg!("address", "string", true, "`https://host[/…]`, `ssh://[user@]host[:port]` or `poll`."),
+        ],
+        flags: [],
+        gated: false,
+        implemented: true,
+        handler: handle_node_address,
+        examples: ["node address sakaki https://aoide.necoconeco.net", "node address laptop poll"],
     ));
     r.insert(cmd!(
         path: ["node", "hub"],

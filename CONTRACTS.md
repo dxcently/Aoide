@@ -8761,6 +8761,14 @@ fold) rather than silently reading only the first token and burning a
 full sweep window hunting a host named "request" while quietly
 discarding the url.
 
+`aoide node address <name> <https://…|ssh://…|poll>` points an existing node
+record at another address (`node_store::set_node_address`, over
+`charter::dial_of`'s grammar): `https://` and `poll` are the record's `url`
+and clear its `via`; `ssh://` is its `via`. Key, grants and trust are
+untouched; an address in the same place is a no-op; an unknown node and an
+address outside the grammar are refused (`unknown-node`, `invalid-address`)
+and write nothing. `--json` carries `{name, address, url, via, changed}`.
+
 `aoide node allow <name> <cap> on|off` (P-P3, `docs/architecture/
 PAIRING.md` decision 5, appended newest directly after the pairing
 ceremony's own reject command — §6's P-P3 amendment above and this

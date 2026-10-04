@@ -1,7 +1,11 @@
 # Aoide HTTPS mesh API
 
-Status: proposed design. No charter, per-mesh grant, HTTPS listener, credential or
-cutover exists or is authorized. **The library profile and the canonical
+Status: the mesh API's design and the specification of what is built of it:
+charters, per-mesh grants, sealed letters, signed requests on every call, and the
+mail adapter (`aoide mail serve`), a loopback listener that a TLS-terminating front
+faces. No Aoide process terminates TLS or binds a routable address. State snapshots,
+WSS events, direct HTTPS edges and typed control actions (H2 to H4) are design only.
+**The library profile and the canonical
 encodings are fixed**: the cipher is the `age` crate at 0.12.1 with no features
 ("Cryptographic selection"), and every signed or hashed byte in this design is
 one of the labelled frames in "Encodings". MAIL.md carries the same design for

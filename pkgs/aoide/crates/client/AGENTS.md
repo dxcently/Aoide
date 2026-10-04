@@ -641,7 +641,8 @@
   `commands::confirm_repair_if_verified` already gates that behind a human
   y/N, and writing `via` outside a ceremony commit would make this module a
   second writer of a field `node_store::set_node_via` reserves to that
-  commit. The payoff is idempotence by construction — a second run is
+  commit. (`node address` is the operator's own write of `via` beside `url`,
+  through `node_store::set_node_address`; it never runs inside a ceremony.) The payoff is idempotence by construction — a second run is
   all-`skipped` — and a test pins it. Do not widen the selection to "repair
   what drifted".
   - **Zero ceremony logic lives in `mesh.rs`.** Every selected node goes

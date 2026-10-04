@@ -746,6 +746,28 @@ pub fn set_node_via(nodes: &mut [Node], name: &str, via: Option<&str>) -> Result
     Ok(())
 }
 
+/// Point the record `name` at a new address: its dial `url` and its `via`
+/// marker together, because the two are one address (`aoide node address`,
+/// `docs/architecture/HTTPS-MESH-API.md` "Transports and relays"). `Ok(true)`
+/// when the record changed, `Ok(false)` when it already held exactly this pair
+/// (never an error, nothing to write). `Err` for a name that is no registered
+/// node, and for a pair [`transport_conflict`] refuses; a refused call leaves
+/// the record as it was.
+pub fn set_node_address(nodes: &mut [Node], name: &str, url: &str, via: Option<&str>) -> Result<bool, String> {
+    let Some(p) = nodes.iter_mut().find(|p| p.name == name) else {
+        return Err(format!("no node named `{name}`"));
+    };
+    if let Some(conflict) = transport_conflict(&p.name, url, via) {
+        return Err(conflict);
+    }
+    if p.url == url && p.via.as_deref() == via {
+        return Ok(false);
+    }
+    p.url = url.to_string();
+    p.via = via.map(str::to_string);
+    Ok(true)
+}
+
 /// The transport pair H1 makes unreachable: a record carrying BOTH an
 /// `https://` url and a `via`, `Some(<taught refusal>)` when it does.
 ///
