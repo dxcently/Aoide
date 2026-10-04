@@ -91,8 +91,11 @@
       # constructor's hook — none of the three is a line here.
       aoide.user = "khoa";
 
-      aoide.hyprland.monitors = [ "HDMI-A-1,1920x1080@60,0x0,1,transform,3" ];
-      aoide.hyprland.scrollingMonitor = "HDMI-A-1";
+      # Monitors: none declared, so Hyprland autodetects whatever is plugged in
+      # (DP-1 landscape today) and every workspace stays on the global dwindle.
+      # A rotated or scrolling panel is a host value, not a module edit:
+      #   aoide.hyprland.monitors = [ "HDMI-A-1,1920x1080@60,0x0,1,transform,3" ];
+      #   aoide.hyprland.scrollingMonitor = "HDMI-A-1";
 
       aoide.usage.enable = true;
 

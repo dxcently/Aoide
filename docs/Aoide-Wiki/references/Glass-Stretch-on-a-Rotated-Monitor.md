@@ -12,8 +12,8 @@ them.
 
 ## Symptom
 
-`hosts/yomi-strix/default.nix` declares `HDMI-A-1,1920x1080@60,0x0,1,transform,3`
-— a panel hung in portrait, effective 1080x1920. Three layer-shell surfaces
+`hosts/yomi-strix/default.nix` declared `HDMI-A-1,1920x1080@60,0x0,1,transform,3`
+(now a comment there) — a panel hung in portrait, effective 1080x1920. Three layer-shell surfaces
 render visibly stretched and smeared: `aoide-dock`, `aoide-launcher`,
 `aoide-powermenu`. Every other aoide surface, and every window, draws
 correctly.
