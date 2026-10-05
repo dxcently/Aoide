@@ -27,6 +27,11 @@ of those exists as a copy per crate.
 - **The delivery rig**: `DELIVERY_BUDGET`, `accept_one`, `read_delivery`,
   `expect_delivery` — a fixture that expects a delivery waits for it, bounded,
   in one place.
+- `registry_walk` — assertions that take one binary's `Registry` and check
+  every command against what it declares (`every_example_parses`,
+  `required_is_enforced` with a sentinel handler, `defaults_applied`,
+  `brief_fits`, `suggestion_or_list`); `aoide-cli` and `aoide-lyra` each call
+  all of them.
 - The fixture note payloads (`VALID_NOTES`, `NOTES_WITH_WINDOW`,
   `NOTES_WITH_GEOMETRY`, `NOTES_WITH_INTERPOLATION`), `inv`,
   `isolated_mail_root`.

@@ -17,9 +17,17 @@ other crate in this workspace sits above.
   `Registry::insert` panics on a duplicate path), so it is structurally
   excluded from the MCP tool list and the A2A `AgentCard` the same way it
   never enters the golden.
+  `Flag` also declares `value` (placeholder), `required`, `default`,
+  `values` and `conflicts`, `Command` declares `one_of` and `brief`;
+  `Command::check` enforces them (defaults applied first) and
+  `Command::invoke` is check-then-handler, the entry every `dispatch()` uses.
+- `suggest` — the one edit-distance matcher (`closest`) behind every
+  did-you-mean, and `lead` (the first clause of a description).
 - `invocation` — `Invocation`, the parsed call handed to a dispatcher.
 - `output` — `Outcome` + exit codes, the generic envelope every command
-  returns. `Outcome`/`Status` derive `Deserialize` as well as `Serialize`
+  returns; also the taught-error shape (`Outcome::refuse`, `Kind`, `Fix`,
+  `io_cause`/`serde_cause`) and the text render of `why`/`fix` and of an
+  error outcome's `data` lists of strings. `Outcome`/`Status` derive `Deserialize` as well as `Serialize`
   (P-D6, `docs/architecture/AOIDED.md`'s "L4"): the daemon door's client
   half (`aoide-client`'s `daemon_dispatch`) parses a real `Outcome` back
   out of the wire's `{"outcome": ...}` reply rather than re-deriving a

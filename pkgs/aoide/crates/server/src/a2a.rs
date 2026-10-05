@@ -7090,6 +7090,7 @@ mod tests {
             examples: &[],
             handler: fake_handler,
             available: || true,
+            ..aoide_protocol::registry::Command::BLANK
         });
         r.insert(Command {
             path: &["foo", "stub"],
@@ -7103,6 +7104,7 @@ mod tests {
             examples: &[],
             handler: fake_handler,
             available: || true,
+            ..aoide_protocol::registry::Command::BLANK
         });
 
         let card = agent_card_from_commands(r.commands(), "127.0.0.1", 8710);
@@ -18293,6 +18295,7 @@ mod tests {
                 examples: &[],
                 available: || true,
                 handler: fake_handler,
+                ..aoide_protocol::registry::Command::BLANK
             });
         }
         r

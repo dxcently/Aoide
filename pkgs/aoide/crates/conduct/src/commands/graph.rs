@@ -556,7 +556,6 @@ pub fn register_mail_ring(r: &mut Registry) {
         examples: [
             "workspace root 3",
             "workspace root",
-            r#"kitty --directory "$(aoide workspace root 2>/dev/null || echo "$HOME")""#,
         ],
     ));
 }

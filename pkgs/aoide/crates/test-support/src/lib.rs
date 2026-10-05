@@ -9,6 +9,8 @@
 //! `commands` tests use the SAME rig — pulled in as a **dev-dependency**
 //! only; nothing in a production build may edge on this crate.
 
+pub mod registry_walk;
+
 use aoide_protocol::{Door, Invocation};
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};

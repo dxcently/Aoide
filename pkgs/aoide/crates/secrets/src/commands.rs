@@ -292,9 +292,9 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_secrets_put,
         examples: [
-            "printf %s hunter2 | aoide secrets put db-prod",
-            "aoide secrets put db-prod",
-            "printf %s hunter2 | aoide secrets put db-prod --force"
+            "secrets put db-prod",
+            "secrets put db-prod < ./value.txt",
+            "secrets put db-prod --force < ./value.txt"
         ],
     ));
     r.insert(cmd!(

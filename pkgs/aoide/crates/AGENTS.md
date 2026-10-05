@@ -66,6 +66,51 @@ code under test withholds then FAILS that one test inside `DELIVERY_BUDGET`
 instead of parking it, and with it every test queued behind the crate's
 `env_lock`. The rig's own contract lives in that crate's `AGENTS.md`.
 
+## Declared validation, and the taught error
+
+A command's argument rules are DECLARED on its registry entry and checked once,
+by `Command::check` (`aoide-protocol::registry`), which `door::parse` and every
+`dispatch()` (CLI, MCP, A2A, the aoided socket) run before the handler:
+`Arg::required`, `Flag::{required, default, values, conflicts, value}`,
+`Command::one_of`, `Command::brief`. A handler never re-checks what is
+declared, and never writes its own `missing --x` / `requires --x` /
+`usage: aoide …` line: `protocol/tests/no_hand_enforcement.rs` scans every
+crate's production source for those spellings and fails when a file holds more
+than its `ALLOWED` count. The list only ratchets down — a slice that migrates a
+command deletes its hand check and lowers that file's number.
+`aoide-test-support::registry_walk` runs the same assertions over both
+binaries' registries (`every_example_parses`, `required_is_enforced`,
+`defaults_applied`, `brief_fits`, `suggestion_or_list`), so a command is held
+to its declarations the day it is registered.
+
+**Taught error** — the one shape every refusal takes, defined here once:
+
+```text
+[error] secrets.exec: secret `db-prod` is not registered     what  — the thing refused, named
+  why: the broker holds no policy by that name               why   — the cause, in words
+  fix: aoide secrets add db-prod                             fix   — what to do next
+```
+
+- Built with `Outcome::refuse(cmd, Kind, what, why, Fix)`. `Kind::Usage`
+  exits 2, `Kind::Refused` and `Kind::Failed` exit 1; `Fix` is `Run` (a
+  command), `Set` (a setting), `Wait` (a duration) or `None(reason)` — a
+  refusal with nothing to do says so instead of omitting the line.
+- `--json` carries the same three under `data.refusal` plus the raw OS/serde
+  text under `data.detail`; the text render never prints `detail`.
+- An I/O or parse failure becomes `why` through `io_cause(op, path, &err)` /
+  `serde_cause(path, &err)`; `os error N` and serde internals live in
+  `detail` only.
+- The exit rule: 2 when the invocation can never be valid (missing, unknown or
+  ill-typed argument, flag or value; a command typed at the wrong binary),
+  1 when a valid invocation was refused by the world (not found, unreachable,
+  locked, not paired), 64 for a stub.
+- A typed name that is not valid (command, flag, enum value, and — in the
+  handlers that own them — node, secret, session, mesh) carries the closest
+  match via `aoide_protocol::suggest::closest`, else the list of valid names.
+  There is one matcher; never write a second edit distance.
+- `Outcome::usage`/`Outcome::error` remain for callers not yet migrated; new
+  refusals use `refuse`.
+
 ## Extension points, cross-crate
 
 - **A new domain crate**: add it to `pkgs/aoide/Cargo.toml`'s `[workspace]
@@ -75,7 +120,11 @@ instead of parking it, and with it every test queued behind the crate's
 - **A new command on an existing crate**: add a `cmd!`/`arg!`/`flag!` entry
   (`aoide-protocol::registry`) inside that crate's own `commands` module;
   the two app crates never need an edit for a command that isn't moving
-  binaries.
+  binaries. Declare what it requires (`flag!(…, required: true)`,
+  `one_of: &[&["id", "to"]]`) rather than checking in the handler.
+- **A head moving between `aoide` and `lyra`** updates
+  `door::{AOIDE_ONLY,LYRA_ONLY,SHARED}_HEADS` in the same commit; each app
+  crate's `cross_binary_heads_match_the_registry` test pins its half.
 
 ## What needs a docs update in the same commit
 
