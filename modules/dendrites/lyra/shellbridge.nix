@@ -98,7 +98,10 @@ lib.mkIf (config.aoide.enable && config.aoide.lyra.enable) {
     #                `aoide usage`, whose live claude.ai fetch spawns `curl`;
     #                without it every daemon-routed refresh degraded to
     #                {error: "curl failed"} while a shell-run succeeded.
-    #   hyprlock   — the powermenu's `lock` (PowerAction::Lock).
+    #   hyprland   — `hyprctl`: the powermenu's `lock` (PowerAction::Lock) asks
+    #                the compositor to exec hyprlock, since a hyprlock started
+    #                under this unit's NoNewPrivileges cannot run the setuid
+    #                unix_chkpwd and refuses every password.
     #   libnotify  — `notify-send`: the rice-mode toggle's success toast.
     #   procps     — `kill`: the stray-process sweep `rice mode stage` opens
     #                with (reap_stray_processes); systemctl is already covered
