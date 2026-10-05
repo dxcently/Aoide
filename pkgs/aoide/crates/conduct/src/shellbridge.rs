@@ -293,12 +293,14 @@ impl PowerAction {
         }
     }
 
-    /// The program + args this action spawns. `lock` matches the existing
-    /// `lock` shell alias (hyprlock); `logout` exits the compositor; the rest
-    /// are systemd commands.
+    /// The program + args this action spawns. `lock` asks the compositor to
+    /// start hyprlock rather than spawning it here: this unit runs with
+    /// NoNewPrivileges, which a child inherits, and hyprlock's PAM check needs
+    /// the setuid `unix_chkpwd`, so a hyprlock spawned here refuses every
+    /// password. `logout` exits the compositor; the rest are systemd commands.
     fn command(self) -> (&'static str, &'static [&'static str]) {
         match self {
-            Self::Lock => ("hyprlock", &[]),
+            Self::Lock => ("hyprctl", &["dispatch", "exec", "hyprlock"]),
             Self::Logout => ("hyprctl", &["dispatch", "exit"]),
             Self::Suspend => ("systemctl", &["suspend"]),
             Self::Hibernate => ("systemctl", &["hibernate"]),
@@ -2608,6 +2610,12 @@ mod tests {
                 action: PowerAction::Lock
             })
         );
+    }
+
+    #[test]
+    fn lock_is_started_by_the_compositor_never_as_this_units_child() {
+        let (prog, args) = PowerAction::Lock.command();
+        assert_eq!((prog, args), ("hyprctl", &["dispatch", "exec", "hyprlock"][..]));
     }
 
     #[test]
