@@ -222,8 +222,8 @@ pub fn register(r: &mut Registry) {
         summary: "Register a new secret's policy: backend + key, never a value (the secrets broker never stores one). No consumers/sharing/TOTP unless given. --backend defaults to `age` (the built-in age-encrypted store) when omitted.",
         args: [arg!("name", "string", true, "The secret's nickname.")],
         flags: [
-            flag!("backend", "string", "The named backend (backends.json) that fetches this secret's value. Defaults to `age` (the built-in age-encrypted store) when omitted."),
-            flag!("key", "string", "The backend-specific key/identifier substituted into that backend's fetch-command template."),
+            flag!("backend", "string", "The named backend (backends.json) that fetches this secret's value. Defaults to `age` (the built-in age-encrypted store) when omitted.", value: "backend", default: DEFAULT_BACKEND),
+            flag!("key", "string", "The backend-specific key/identifier substituted into that backend's fetch-command template.", value: "key", required: true),
             flag!("require-totp", "bool", "Require a fresh TOTP code to resolve — the policy is born gated. Unresolvable until this host has run `secrets enroll`; once enrolled, verified live against the enrolled TOTP secret on every resolve (`secrets set-totp` flips this later without re-adding)."),
             flag!("consumers", "string", "Comma-separated consumer names allowed to resolve this secret (empty/omitted = any consumer).")
         ],
@@ -231,6 +231,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_secrets_add,
         examples: ["secrets add db-prod --backend pass --key prod/db --consumers m"],
+        brief: "Register a secret's policy: a backend and a key, never a value.",
     ));
     r.insert(cmd!(
         path: ["secrets", "rm"],
@@ -292,9 +293,9 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_secrets_put,
         examples: [
-            "printf %s hunter2 | aoide secrets put db-prod",
-            "aoide secrets put db-prod",
-            "printf %s hunter2 | aoide secrets put db-prod --force"
+            "secrets put db-prod",
+            "secrets put db-prod < ./value.txt",
+            "secrets put db-prod --force < ./value.txt"
         ],
     ));
     r.insert(cmd!(

@@ -9152,8 +9152,9 @@ mod tests {
         register_pair(&mut r);
         register_node_discovery(&mut r);
 
-        for sub in ["reject", "watch"] {
-            let argv = vec!["pair".to_string(), sub.to_string()];
+        for (sub, target) in [("reject", Some("x")), ("watch", None)] {
+            let mut argv = vec!["pair".to_string(), sub.to_string()];
+            argv.extend(target.map(str::to_string));
             let (inv, _json) = aoide_protocol::door::parse(&argv, aoide_protocol::Door::Cli, "aoide", &r)
                 .unwrap_or_else(|e| panic!("`pair {sub}` must parse as the subcommand: {e:?}"));
             assert_eq!(inv.path, vec!["pair".to_string(), sub.to_string()], "{sub} must resolve to the subcommand, not a target");

@@ -230,19 +230,25 @@ mod tests {
     }
 
     // No CLI-internal aliases (khoa, 2026-08-14): each command has exactly one
-    // spelling. Retired names are plain unknown commands, same as a typo.
+    // spelling. The rice family lives in lyra, so `aoide rice …` says so and
+    // names the command to run there; a retired spelling is never resolved.
     #[test]
-    fn rice_new_is_not_an_alias_it_is_an_unknown_command() {
-        let err = parse(&argv(&["rice", "new", "dusk"]), Door::Cli).unwrap_err();
-        assert_eq!(err.status, Status::Usage);
-        assert!(err.message.contains("unknown command"), "{}", err.message);
+    fn rice_is_a_lyra_command_and_aoide_says_where_to_run_it() {
+        for retired in ["new", "preview"] {
+            let err = parse(&argv(&["rice", retired, "dusk"]), Door::Cli).unwrap_err();
+            assert_eq!(err.status, Status::Usage);
+            let text = err.render(false).0;
+            assert!(text.contains("`rice` is a lyra command, not an aoide one"), "{text}");
+            assert!(text.contains(&format!("fix: lyra rice {retired} dusk")), "{text}");
+        }
     }
 
     #[test]
-    fn rice_preview_is_not_an_alias_it_is_an_unknown_command() {
-        let err = parse(&argv(&["rice", "preview", "dusk"]), Door::Cli).unwrap_err();
+    fn a_bare_session_grant_still_teaches_the_grantable_kinds() {
+        let err = parse(&argv(&["session", "grant"]), Door::Cli).unwrap_err();
         assert_eq!(err.status, Status::Usage);
-        assert!(err.message.contains("unknown command"), "{}", err.message);
+        let text = err.render(false).0;
+        assert!(text.contains("undying, exempt"), "{text}");
     }
 
     #[test]
@@ -257,7 +263,7 @@ mod tests {
         let err = parse(&argv(&["--help"]), Door::Cli).unwrap_err();
         // Grouped by first path segment, each line carrying its summary.
         // `project` promoted out from under `graph` at R1 — its own group now.
-        assert!(err.message.contains("project —"), "grouped with a blurb: {}", err.message);
+        assert!(err.message.contains("\nproject\n  project add"), "grouped under its head: {}", err.message);
         assert!(
             err.message.contains("project add <name> [<path>]"),
             "arg signature on the line: {}",

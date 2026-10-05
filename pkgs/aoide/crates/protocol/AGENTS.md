@@ -52,6 +52,15 @@
   "missing field." A future field on `Outcome`/`Status` that skips
   serializing when absent/default needs the same pairing, or a daemon
   reply that omitted it stops parsing.
+- **`Command::check` is the one place argument rules are enforced**, run by
+  `door::parse` (so before any `special` hook) and by `Command::invoke`
+  (which every `dispatch()` uses). New `Flag`/`Command` fields are additive:
+  skipped from `schema --json` at their default, so an undeclared command
+  serializes byte-identical. A stub is never checked (it answers 64). The
+  taught-error shape (`Outcome::refuse`, `Fix`, `io_cause`) is defined in
+  `pkgs/aoide/crates/AGENTS.md`; `suggest` holds the only edit-distance
+  matcher. `door::{AOIDE_ONLY,LYRA_ONLY,SHARED}_HEADS` is a static copy of
+  the two registries' heads — update it with them.
 - **`door::run`'s `special` hook is the only sanctioned one-shot escape.**
   A binary that needs to bypass the generic `Outcome` envelope (raw stdout,
   a long-running server) adds a case to its own `special` closure — never a

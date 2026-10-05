@@ -53,7 +53,7 @@ pub fn dispatch(inv: &Invocation) -> Outcome {
     let meta = registry().get(&inv.path);
 
     let outcome = match meta {
-        Some(m) if m.implemented => (m.handler)(inv),
+        Some(m) if m.implemented => m.invoke("aoide", inv),
         Some(m) => Outcome::not_implemented(cmd.clone(), m.gated).with_data(serde_json::json!({
             "path": m.path,
             "args": inv.args,

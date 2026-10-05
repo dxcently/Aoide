@@ -631,6 +631,34 @@ Contract guarantees:
   enumerates internal commands in full; `internal` is not a second
   `implemented`-style capability filter, it is purely a display hint for one
   consumer.
+- Declared validation (all **additive**, same discipline: each key is omitted
+  from `schema --json` at its default, so a command that declares none
+  serializes byte-identical to before). On a flag: `value` (the `<placeholder>`
+  help and synopses show), `required` (bool), `default` (string, applied when
+  the flag is absent), `values` (the closed set of accepted values),
+  `conflicts` (flags that may not accompany it). On a command: `oneOf` (groups
+  of flag names of which at least one must be given, `[["id","to"]]`) and
+  `brief` (a list line, 72 characters at most; absent means the first sentence
+  of `summary`). One validator, `Command::check`, enforces them — and the
+  `Arg.required` positionals — for every door: the CLI parser, then
+  `dispatch()` for the CLI, MCP, A2A and the aoided socket alike. It applies
+  defaults first, then refuses a missing positional, a missing required flag,
+  an empty `oneOf` group, conflicting flags and a value outside `values` (with
+  a did-you-mean), each as a usage refusal naming the item. A stub is never
+  checked. The MCP tool's `inputSchema.required` lists the required
+  positionals and the required flags that have no `default`.
+- **Exit codes and the refusal shape.** `2` means the invocation can never be
+  valid whatever the world looks like: a missing, unknown or ill-typed
+  argument, flag or value, or a command typed at the wrong binary (`aoide rice
+  …` names `lyra rice …`). `1` means a valid invocation the world refused: not
+  found, unreachable, locked, not paired. `64` is a stub. A refusal is
+  `[status] command: what` followed by `why:` and `fix:` lines; `--json`
+  carries `data.refusal` (`kind`, `what`, `why`, `fix`, where `fix` is one of
+  `{"run": …}`, `{"set": …}`, `{"wait": …}`, `{"none": reason}`) and
+  `data.detail` (the raw OS or serde text, for logs; the text render never
+  prints it). The human render of an error or usage outcome also prints each
+  top-level `data` list of strings (`errors`, `problems`) under its key.
+  `pkgs/aoide/crates/AGENTS.md` defines the shape for implementers.
 - `external` (optional array, task #138) — external subcommands: `aoide foo`
   with no registered `foo` falls through to an executable `aoide-foo` on
   `PATH`, the same pattern git/cargo use for their own plugins (`aoide

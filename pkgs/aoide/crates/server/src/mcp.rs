@@ -78,6 +78,9 @@ pub fn tool_list(registry: &Registry) -> Value {
                     f.name.to_string(),
                     ToolProperty { kind: json_type(f.ty).to_string(), description: f.description.to_string() },
                 );
+                if f.required && f.default.is_empty() {
+                    required.push(f.name.to_string());
+                }
             }
 
             Tool {
@@ -419,6 +422,7 @@ mod tests {
             examples: &[],
             handler: fake_handler,
             available: || true,
+            ..Command::BLANK
         });
         r.insert(Command {
             path: &["guide"],
@@ -432,6 +436,7 @@ mod tests {
             examples: &[],
             handler: fake_handler,
             available: || true,
+            ..Command::BLANK
         });
         r
     }
@@ -452,6 +457,36 @@ mod tests {
         }
         let bar = arr.iter().find(|t| t["name"] == "foo.bar").unwrap();
         assert_eq!(bar["annotations"]["gated"], true);
+    }
+
+    /// Ruling 3: a flag declared `required` (and not defaulted) is in the
+    /// tool's `required[]` beside the required positionals, so an MCP client
+    /// is told up front what the validator will refuse.
+    #[test]
+    fn required_flags_join_required_positionals_in_the_tool_schema() {
+        use aoide_protocol::registry::{arg, cmd, flag};
+        let mut r = Registry::new();
+        r.insert(cmd!(
+            path: ["thing", "add"],
+            summary: "Add.",
+            args: [arg!("name", "string", true, "Name.")],
+            flags: [
+                flag!("key", "string", "Key.", required: true),
+                flag!("backend", "string", "Backend.", required: true, default: "age"),
+                flag!("note", "string", "Note.")
+            ],
+            gated: false,
+            implemented: true,
+            handler: fake_handler
+        ));
+        let tools = tool_list(&r);
+        let required: Vec<&str> = tools["tools"][0]["inputSchema"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(required, ["name", "key"]);
     }
 
     #[test]

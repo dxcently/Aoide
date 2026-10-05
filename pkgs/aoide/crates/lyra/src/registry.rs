@@ -188,4 +188,67 @@ mod tests {
 
         assert_eq!(got, expected, "command path set drifted from lyra's golden snapshot");
     }
+
+    #[test]
+    fn every_example_parses() {
+        aoide_test_support::registry_walk::every_example_parses("lyra", &crate::commands::all());
+    }
+
+    #[test]
+    fn required_is_enforced() {
+        aoide_test_support::registry_walk::required_is_enforced("lyra", &crate::commands::all());
+    }
+
+    #[test]
+    fn defaults_applied() {
+        aoide_test_support::registry_walk::defaults_applied("lyra", &crate::commands::all());
+    }
+
+    #[test]
+    fn brief_fits() {
+        aoide_test_support::registry_walk::brief_fits(&crate::commands::all());
+    }
+
+    #[test]
+    fn suggestion_or_list() {
+        aoide_test_support::registry_walk::suggestion_or_list("lyra", &crate::commands::all());
+    }
+
+    /// The cross-binary hint reads a static head list (`door::*_HEADS`); this
+    /// pins this binary's half of it to the registry, so a head moving
+    /// between binaries fails here instead of misdirecting a typo.
+    #[test]
+    fn cross_binary_heads_match_the_registry() {
+        use aoide_protocol::door::{LYRA_ONLY_HEADS, AOIDE_ONLY_HEADS, SHARED_HEADS};
+        let r = crate::commands::all();
+        let mut heads: Vec<&str> = r.commands().map(|c| c.path[0]).collect();
+        heads.sort();
+        heads.dedup();
+        let mut expected: Vec<&str> = LYRA_ONLY_HEADS.iter().chain(SHARED_HEADS).copied().collect();
+        expected.sort();
+        assert_eq!(heads, expected, "LYRA_ONLY_HEADS + SHARED_HEADS must be exactly this binary's heads");
+        assert!(AOIDE_ONLY_HEADS.iter().all(|h| !heads.contains(h)), "AOIDE_ONLY_HEADS must not appear here");
+    }
+
+    /// The declarative fields are additive (CONTRACTS.md §3): the migrated
+    /// `preview shot --what` carries its closed value set and default, and an
+    /// unmigrated flag grows no key.
+    #[test]
+    fn migrated_declarations_serialize_and_the_rest_stay_byte_identical() {
+        let r = crate::commands::all();
+        let find = |p: &str| serde_json::to_value(r.commands().find(|c| c.dotted() == p).unwrap()).unwrap();
+
+        let shot = find("preview.shot");
+        let what = shot["flags"].as_array().unwrap().iter().find(|f| f["name"] == "what").unwrap();
+        assert_eq!(what["values"], serde_json::json!(["screen", "canvas", "widget", "element"]));
+        assert_eq!(what["default"], "widget");
+
+        let tree = find("preview.tree");
+        assert!(tree.get("brief").is_none());
+        for f in tree["flags"].as_array().unwrap() {
+            for k in ["value", "required", "default", "values", "conflicts"] {
+                assert!(f.get(k).is_none(), "an unmigrated flag grows no `{k}` key: {f}");
+            }
+        }
+    }
 }

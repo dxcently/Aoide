@@ -195,7 +195,7 @@ fn a_cli_only_secrets_admin_command_refuses_with_the_door_hint_and_mutates_nothi
         &mut reader,
         &["secrets", "add"],
         &["daemon-door-test-secret"],
-        &[("backend", "age")],
+        &[("backend", "age"), ("key", "k")],
     );
 
     assert_eq!(outcome["status"], "usage", "{outcome}");

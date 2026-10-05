@@ -215,11 +215,11 @@ pub fn register(r: &mut Registry) {
         summary: "Inject text into a conducted session's control socket (the one gated injection door). Held pending approval by default; --yes (or an autogate policy) delivers and auto-renames the node to a one-line form of the text — except for a bare keystroke answer (text with no letters, e.g. a permission verdict digit), which is not a task and leaves the node's name alone. Siblings (sharing a live parent) autogate each other by default too — opt out with AOIDE_CONDUCT_SIBLING_AUTOGATE={0,false,no}. The reciprocal also holds: a parent automatically hears the children it spawned — the daemon delivers ONE line off a child's own trace (settled, cancelled, died mid-turn, asking, wrapping up, failing, silent) straight to the parent's transport, never prompted, never pending, and never through this door. Every outcome is audited. --to resolves a name (local id/tail4/petname, or node/<query> for a remote session over A2A) instead of a raw --id; mutually exclusive with --id — a remote send is always attempted (the receiving node gates its own delivery) and never queues locally.",
         args: [arg!("text", "string", true, "The text to inject — put it after `--` so its own words/flags pass through verbatim.")],
         flags: [
-            flag!("id", "string", "Target session id (required unless --to is given); its socket is resolved from sessions.json."),
+            flag!("id", "string", "Target session id (required unless --to is given); its socket is resolved from sessions.json.", value: "session-id", conflicts: &["to"]),
             flag!("submit", "bool", "Append the target harness's own submit keystroke (Enter for most agents, \\r for kimi — resolved from the target session's agent profile at delivery time). No-op for a --to remote send (the receiving node always submits its own way)."),
             flag!("yes", "bool", "Authorise delivery now (else the send is held pending approval). No-op for a --to remote send — the receiving node gates its own delivery."),
             flag!("from", "string", "Sender attribution override for the delivered provenance prefix (default: AOIDE_SESSION_ID). ATTRIBUTION ONLY, not authentication — unauthenticated and as spoofable as the env var it defaults from."),
-            flag!("to", "string", "Target by name instead of --id: a local session id/tail4/petname/host-role-petname line, or node/<query> to resolve against a registered node's CACHED graph and deliver over A2A message/send. Mutually exclusive with --id."),
+            flag!("to", "string", "Target by name instead of --id: a local session id/tail4/petname/host-role-petname line, or node/<query> to resolve against a registered node's CACHED graph and deliver over A2A message/send. Mutually exclusive with --id.", value: "target", conflicts: &["id"]),
             flag!("mesh", "string", "For a `node/<query>` target: the mesh this request acts in (P-CHARTER) — the far door reads the caller's grant in it. Absent = the node's sole granted mesh, else `[pairing] homeMesh`; required when that node is trusted in more than one mesh. Unused by a local send."),
         ],
         gated: false,
@@ -231,6 +231,8 @@ pub fn register(r: &mut Registry) {
             "send --to brave-otter --yes --submit -- status?",
             "send --to yomi-strix/brave-otter -- ping",
         ],
+        one_of: &[&["id", "to"]],
+        brief: "Inject text into a conducted session (held for approval unless --yes).",
     ));
     r.insert(cmd!(
         path: ["session", "pending", "list"],
@@ -392,9 +394,9 @@ pub fn register(r: &mut Registry) {
     // picker). Registered last — landed after every entry above it.
     r.insert(cmd!(
         path: ["session", "grant"],
-        summary: "Grant (or open a picker to grant) a session capability. Bare (no <kind>) teaches the grantable set; an unknown kind is a taught refusal. `undying`: with no state, opens the interactive PICKER on a real CLI terminal — a multi-select over this box's own sessions plus every registered node's CACHED sessions (no live pulls), each row pre-checked by its current undying state, confirmed in one Enter (non-tty/non-CLI/--json steers to the scripted form below instead); with on|off, marks or unmarks a session as durable in state/undying.json directly, so a project's whole undying set can later be resurrected together — --id targets any session id directly, including one already gone from the roster. `exempt`: no picker (bare `exempt` is a taught refusal naming the scripted form); on|off vetoes the reaper's staleness judgments for a LIVE session only (never its window-gone/pid-gone/ghost/orphan signals, and never `--now`, which waives only the abandoned-shell band) — --id must name a session currently on the roster, since an exemption has nothing to mean once the record is gone. Bare and --self both resolve the target from $AOIDE_SESSION_ID for either kind.",
+        summary: "Grant (or open a picker to grant) a session capability. Bare (no <kind>) is refused naming the grantable kinds; an unknown kind is a taught refusal. `undying`: with no state, opens the interactive PICKER on a real CLI terminal — a multi-select over this box's own sessions plus every registered node's CACHED sessions (no live pulls), each row pre-checked by its current undying state, confirmed in one Enter (non-tty/non-CLI/--json steers to the scripted form below instead); with on|off, marks or unmarks a session as durable in state/undying.json directly, so a project's whole undying set can later be resurrected together — --id targets any session id directly, including one already gone from the roster. `exempt`: no picker (bare `exempt` is a taught refusal naming the scripted form); on|off vetoes the reaper's staleness judgments for a LIVE session only (never its window-gone/pid-gone/ghost/orphan signals, and never `--now`, which waives only the abandoned-shell band) — --id must name a session currently on the roster, since an exemption has nothing to mean once the record is gone. Bare and --self both resolve the target from $AOIDE_SESSION_ID for either kind.",
         args: [
-            arg!("kind", "string", true, "The grant kind — `undying` or `exempt`."),
+            arg!("kind", "string", true, "The grant kind, one of undying, exempt."),
             arg!("state", "string", false, "The state to set, `on` or `off`. For `undying` only, omit to open the interactive picker instead — `exempt` has none."),
         ],
         flags: [
@@ -556,7 +558,6 @@ pub fn register_mail_ring(r: &mut Registry) {
         examples: [
             "workspace root 3",
             "workspace root",
-            r#"kitty --directory "$(aoide workspace root 2>/dev/null || echo "$HOME")""#,
         ],
     ));
 }

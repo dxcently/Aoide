@@ -117,7 +117,7 @@ pub fn register(r: &mut Registry) {
         args: [],
         flags: [
             flag!("root", "string", "Preview root directory (default $XDG_RUNTIME_DIR/aoide-preview)."),
-            flag!("what", "string", "screen|canvas|widget|element (default widget)."),
+            flag!("what", "string", "What to capture: the whole screen, the canvas window, the previewed widget, or one element inside it.", value: "what", values: &["screen", "canvas", "widget", "element"], default: "widget"),
             flag!("element", "string", "Element path (Type[i]/Type[i]#objectName), required for --what element."),
             flag!("annotated", "bool", "Ask the canvas to draw its own note/shape overlay into the capture."),
             flag!("out", "string", "Output PNG path (default ROOT/shots/<what>-<utc-compact>.png).")
@@ -125,6 +125,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_preview_shot,
+        brief: "Capture the screen, canvas, widget or one element to a PNG.",
     ));
     r.insert(cmd!(
         path: ["preview", "tree"],
