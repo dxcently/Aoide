@@ -540,6 +540,17 @@ fn token_authorized(token_configured: bool, token_state: TokenState) -> bool {
     !token_configured || token_state == TokenState::Valid
 }
 
+/// May this caller use a READ arm? The bearer gate ([`token_authorized`]) OR a
+/// verified signature whose grant in the request's mesh holds `read`. The
+/// bearer exists to strip the loopback free pass from UNSIGNED callers, who
+/// behind a tunnel or proxy all look loopback; a verified signature plus a
+/// grant is a stronger credential than the bearer, so it is governed by the
+/// grant alone. Writes never reach this predicate: spawn and inject keep their
+/// own signature and grant gates. Pure.
+fn read_admitted(bearer_ok: bool, caller: Option<SignedCaller<'_>>) -> bool {
+    bearer_ok || caller_grant(caller).holds("read")
+}
+
 /// The `-32005` unauthorized error every token-gated arm returns, so the code
 /// and message never drift between the spawn gate and the read gates.
 fn unauthorized() -> (i64, String) {
@@ -1301,9 +1312,9 @@ fn caller_grant(caller: Option<SignedCaller<'_>>) -> Grant {
 
 /// The output-read gate (CONTRACTS.md §6, P-RSA S6). True only when both
 /// hold:
-/// - `read_ok` — the door's own bearer gate ([`token_authorized`]), the same
-///   one every other read arm carries. With no token configured it is true
-///   for everyone; that is exactly why this predicate exists;
+/// - `read_ok` — the door's read gate ([`read_admitted`]), the same one every
+///   other read arm carries. With no token configured it is true for
+///   everyone; that is exactly why this predicate exists;
 /// - the caller's grant IN THE MESH ITS REQUEST NAMES holds `read` — read
 ///   through [`grant_in_mesh`], the door's one lookup, and reached only
 ///   through a [`SignedCaller`], which exists for the SIGNATURE rung and for
@@ -5140,9 +5151,9 @@ fn handle_jsonrpc(req: &Value, ctx: &RequestCtx) -> Value {
     // token is configured (off-path unchanged). `message/send` runs its own
     // classify internally (it needs the full TokenState for effective_origin),
     // so it is not re-gated here.
-    let read_ok = token_authorized(
-        !ctx.expected_token.is_empty(),
-        classify_token(ctx.expected_token, ctx.presented_token),
+    let read_ok = read_admitted(
+        token_authorized(!ctx.expected_token.is_empty(), classify_token(ctx.expected_token, ctx.presented_token)),
+        ctx.signed_caller,
     );
 
     let result: Result<Value, (i64, String)> = match mail_rpc(method, &params, ctx) {
@@ -5455,24 +5466,24 @@ fn stream_task<W: Write>(
     // `-32005` SSE error event below. `tasks/resubscribe`'s own `task_get`
     // would otherwise be an ungated session-state read (the SSE sibling of
     // `tasks/get`). Off-path (no token) is byte-identical to before.
-    let stream_ok = token_authorized(
+    //
+    // Only the READ (`tasks/resubscribe`) also admits a signed caller holding
+    // `read` ([`read_admitted`]); `message/stream` injects or spawns, so it
+    // stays bearer-gated and `message_send` applies its own grant gates.
+    let bearer_ok = token_authorized(
         !expected_token.is_empty(),
         classify_token(expected_token, presented_token),
     );
-    let resolved: Result<Value, (i64, String)> = if !stream_ok {
-        Err(unauthorized())
-    } else {
-        match method {
-            "message/stream" => {
-                message_send(&params, audit_log, spawn_agent, spawn_cwd, origin, expected_token, presented_token, signed_caller)
-            }
-            _ /* tasks/resubscribe */ => {
-                match params.get("id").and_then(Value::as_str).filter(|s| !s.is_empty()) {
-                    Some(id) => task_get(id),
-                    None => Err((-32001, "task not found".to_string())),
-                }
-            }
+    let resolved: Result<Value, (i64, String)> = match method {
+        "message/stream" if !bearer_ok => Err(unauthorized()),
+        "message/stream" => {
+            message_send(&params, audit_log, spawn_agent, spawn_cwd, origin, expected_token, presented_token, signed_caller)
         }
+        _ /* tasks/resubscribe */ if !read_admitted(bearer_ok, signed_caller) => Err(unauthorized()),
+        _ => match params.get("id").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+            Some(id) => task_get(id),
+            None => Err((-32001, "task not found".to_string())),
+        },
     };
 
     // SSE response headers — written exactly once, before any event.
@@ -8385,6 +8396,103 @@ mod tests {
             None => std::env::remove_var("AOIDE_STAGE_DIR"),
         }
         let _ = std::fs::remove_dir_all(&stage);
+    }
+
+    /// A bearer-gated door's two reads, a stage holding one session, and the
+    /// registry a signed caller resolves through. `allows` is what the paired
+    /// node `box-b` holds in the home mesh; `bearer` is what the request
+    /// presents; `signed` is whether the request carries a verified signature.
+    fn bearer_door_reads(allows: &[&str], signed: bool, bearer: Option<&'static str>, expected: &'static str) -> (Value, Value) {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("door-read");
+        act_as(&root, "here");
+        setup_signed_node_with_allows("box-b", allows);
+        let sf = SessionsFile { schema_version: "0".to_string(), sessions: vec![fixture_session("s1", "stopped", None)] };
+        write_stage(&sessions_path(), &sf).unwrap();
+
+        let audit_log = root.join("log");
+        let mut ctx = mail_deposit_ctx(&audit_log, signed.then_some("box-b"));
+        ctx.expected_token = expected;
+        ctx.presented_token = bearer;
+        let get = handle_jsonrpc(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/get", "params": { "id": "s1" } }), &ctx);
+        let sum = handle_jsonrpc(&json!({ "jsonrpc": "2.0", "id": 2, "method": "aoide/graphSummary" }), &ctx);
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+        (get, sum)
+    }
+
+    #[test]
+    fn a_signed_caller_holding_read_reads_through_a_bearer_gated_door() {
+        let (get, sum) = bearer_door_reads(&["read"], true, None, "s3cr3t");
+        assert_eq!(get["result"]["status"]["state"], "completed", "{get}");
+        assert!(sum["result"]["graph"]["nodes"].is_array(), "{sum}");
+    }
+
+    #[test]
+    fn a_signed_caller_without_read_is_refused_by_a_bearer_gated_door() {
+        let (get, sum) = bearer_door_reads(&["message"], true, None, "s3cr3t");
+        assert_eq!(get["error"]["code"], -32005, "{get}");
+        assert_eq!(sum["error"]["code"], -32005, "{sum}");
+    }
+
+    #[test]
+    fn an_unsigned_loopback_caller_without_the_bearer_is_refused_by_a_bearer_gated_door() {
+        let (get, sum) = bearer_door_reads(&["read"], false, None, "s3cr3t");
+        assert_eq!(get["error"]["code"], -32005, "{get}");
+        assert_eq!(sum["error"]["code"], -32005, "{sum}");
+    }
+
+    #[test]
+    fn an_unsigned_caller_with_the_bearer_reads_through_a_bearer_gated_door() {
+        let (get, sum) = bearer_door_reads(&[], false, Some("s3cr3t"), "s3cr3t");
+        assert_eq!(get["result"]["status"]["state"], "completed", "{get}");
+        assert!(sum["result"]["graph"]["nodes"].is_array(), "{sum}");
+    }
+
+    #[test]
+    fn an_unsigned_loopback_caller_reads_a_door_with_no_bearer_configured() {
+        let (get, sum) = bearer_door_reads(&[], false, None, "");
+        assert_eq!(get["result"]["status"]["state"], "completed", "{get}");
+        assert!(sum["result"]["graph"]["nodes"].is_array(), "{sum}");
+    }
+
+    #[test]
+    fn a_signed_caller_holding_read_resubscribes_through_a_bearer_gated_door() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("door-resubscribe");
+        act_as(&root, "here");
+        setup_signed_node_with_allows("box-b", &["read"]);
+        let sf = SessionsFile { schema_version: "0".to_string(), sessions: vec![fixture_session("s1", "stopped", None)] };
+        write_stage(&sessions_path(), &sf).unwrap();
+
+        let audit_log = root.join("log");
+        let body = serde_json::to_vec(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tasks/resubscribe", "params": { "id": "s1" } })).unwrap();
+        let req = HttpRequest {
+            method: "POST".to_string(),
+            path: "/".to_string(),
+            body,
+            bearer: None,
+            signed_node: None,
+            signed_timestamp: None,
+            signed_nonce: None,
+            signed_signature: None,
+            signed_mesh: None,
+        };
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+        let stream = |signed_caller| {
+            let mut out = Vec::new();
+            stream_task(&mut out, &req, "tasks/resubscribe", &audit_log, "", "", ConnOrigin::Loopback, "s3cr3t", None, signed_caller).unwrap();
+            first_sse_data_json(&out)
+        };
+        let signed = stream(ctx.signed_caller);
+        let unsigned = stream(None);
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+
+        assert_eq!(signed["result"]["status"]["state"], "completed", "{signed}");
+        assert_eq!(unsigned["error"]["code"], -32005, "{unsigned}");
     }
 
     /// Pull the JSON payload out of the FIRST `data: <json>\n\n` SSE frame in

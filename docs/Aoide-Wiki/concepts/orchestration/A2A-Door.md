@@ -181,7 +181,7 @@ to **rebuild time** instead.
   This is the one interactive per-request gate the wire otherwise lacks —
   added for [[Node-Federation|node federation]]'s non-loopback case, which
   the original loopback-only design didn't need to cover.
-- **Pairing gates Spawn; the door-wide bearer gates only the read arms.**
+- **Pairing gates Spawn; the door-wide bearer gates only unsigned reads.**
   A spawn runs only for an identified, paired node: `spawn_admitted`
   requires a request resolved on the Signature rung (a verified per-request
   ed25519 signature against some `verified` node's stored pubkey —
@@ -195,7 +195,14 @@ to **rebuild time** instead.
   it authenticates the read arms (`tasks/get`, the AgentCard GET,
   `aoide/graphSummary`), still `-32005`-gating them, and answers Inject's
   autogate question — it never reaches Spawn. Empty (the default) leaves
-  the read arms open exactly as an untokenized server always was.
+  the read arms open exactly as an untokenized server always was. The
+  bearer gates UNSIGNED callers only: its job is to strip the loopback free
+  pass from callers a tunnel or proxy makes look local. A signed caller is
+  governed by its grants instead — a verified signature whose grant in the
+  request's mesh includes `read` reads `tasks/get`, `tasks/resubscribe` and
+  `aoide/graphSummary` with no bearer, so a paired peer's `node pull` works
+  against a bearer-gated door; a signed caller without `read` is refused like
+  an unsigned one. The AgentCard GET and `message/stream` stay bearer-only.
 - **Where the grant comes from.** Every gated arm asks one lookup,
   `a2a::grant_in_mesh`, and it has two sources: the caller's PAIRED RECORD in
   the mesh its signed request names, and — when a charter governs that mesh at
