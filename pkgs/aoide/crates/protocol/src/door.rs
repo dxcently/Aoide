@@ -336,7 +336,7 @@ fn unknown_command_outcome(positionals: &[String], registry: &Registry, bin_name
         .collect();
     if let Some(other) = other_binary(&positionals[0], bin_name, registry) {
         return Outcome::refuse(
-            positionals.join("."),
+            positionals[0].clone(),
             Kind::Usage,
             format!("`{}` is {} command, not {} one", positionals[0], article_for(other), article_for(bin_name)),
             format!("{other} owns it; `{bin_name}` does not register it"),
@@ -482,7 +482,7 @@ fn unknown_flag_outcome(
     let near = closest(bad, taken.iter().copied(), 1);
     let (why, fix) = match near.first() {
         Some(n) => {
-            let mut fix = format!("{me}");
+            let mut fix = me.clone();
             for a in args {
                 fix.push_str(&format!(" {a}"));
             }
@@ -557,7 +557,7 @@ fn command_usage(path: &[String], registry: &Registry, bin_name: &str) -> String
     if !c.one_of.is_empty() {
         for group in c.one_of {
             let names: Vec<String> = group.iter().map(|n| format!("--{n}")).collect();
-            s.push_str(&format!("\n  one of {} is required", names.join(" / ")));
+            s.push_str(&format!("\n\none of {} is required", names.join(" / ")));
         }
     }
     let subs = children_listing(path, registry);
@@ -1788,6 +1788,7 @@ mod tests {
         let reg = test_registry();
         let err = parse(&argv(&["rice", "stage", "dusk"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert_eq!(err.status, Status::Usage);
+        assert_eq!(err.command, "rice", "typed arguments never leak into the command id");
         let text = err.render(false).0;
         assert!(text.contains("`rice` is a lyra command, not an aoide one"), "{text}");
         assert!(text.contains("fix: lyra rice stage dusk"), "{text}");

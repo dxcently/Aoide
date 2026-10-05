@@ -244,6 +244,14 @@ mod tests {
     }
 
     #[test]
+    fn a_bare_session_grant_still_teaches_the_grantable_kinds() {
+        let err = parse(&argv(&["session", "grant"]), Door::Cli).unwrap_err();
+        assert_eq!(err.status, Status::Usage);
+        let text = err.render(false).0;
+        assert!(text.contains("undying, exempt"), "{text}");
+    }
+
+    #[test]
     fn root_help_lists_commands_at_exit_zero() {
         let err = parse(&argv(&["--help"]), Door::Cli).unwrap_err();
         assert_eq!(err.status, Status::Ok);
