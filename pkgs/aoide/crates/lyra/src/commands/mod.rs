@@ -76,7 +76,43 @@ pub mod preview_tools;
 pub mod secrets;
 pub mod stubs;
 
-use crate::registry::Registry;
+use crate::registry::{Layout, Registry};
+
+/// How `lyra` lists its commands (see core's `LAYOUT` for the contract).
+const LAYOUT: Layout = Layout {
+    tagline: "paint AoideOS: songs, liveries and the desktop surfaces",
+    sections: &[
+        ("Start here", &[("guide", ""), ("onboard", "")]),
+        (
+            "Songs & liveries",
+            &[
+                ("rice", "Compose, stage, declare and take snapshots of a song"),
+                ("livery", "Resolve, lint and emit a livery"),
+                ("cover", "Set and sync the live wallpaper"),
+                ("reload", ""),
+                ("element", ""),
+            ],
+        ),
+        (
+            "Widgets & icons",
+            &[
+                ("preview", "An isolated canvas for one widget: set, shoot, inspect, declare"),
+                ("icon", "The pinned Iconify collections, resolved offline"),
+            ],
+        ),
+        ("Screen control", &[("screen", "See and drive the desktop: info, shots, pointer, OCR, diff")]),
+        (
+            "Dialogs & notices",
+            &[
+                ("secrets", ""),
+                ("pair", "Quickshell dialogs for a pairing request and its reply code"),
+                ("herald", ""),
+            ],
+        ),
+        ("Agent interfaces", &[("mcp", ""), ("schema", "")]),
+        ("System", &[("shellbridge", ""), ("quickshell", "")]),
+    ],
+};
 
 pub fn all() -> Registry {
     let mut r = Registry::new();
@@ -103,5 +139,6 @@ pub fn all() -> Registry {
     preview_tools::register(&mut r); // preview.shot + preview.tree + preview.notes — shell-first agent tools over that same canvas (P6): screenshots, the live/static-joined item tree, and scaffolding notes
     icon::register(&mut r); // icon.collections + icon.list + icon.resolve — the pinned icon collections (Iconify data) resolved into the lane's own SVG tree, no network at render (I1)
 
+    r.arrange(LAYOUT);
     r
 }

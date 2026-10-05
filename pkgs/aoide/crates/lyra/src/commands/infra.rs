@@ -23,6 +23,7 @@ pub fn register_mcp(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_mcp_serve,
+        brief: "Serve lyra's registry as a stdio MCP server.",
     ));
 }
 

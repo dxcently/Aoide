@@ -5,6 +5,7 @@
 //! This is the "every command emits `--json`, structured errors, meaningful
 //! exit codes, reports exactly what changed" contract (CONTRACTS.md §3).
 
+use crate::style::Style;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io;
@@ -258,14 +259,26 @@ impl Outcome {
 
     /// Render + exit-code, honouring `--json`.
     pub fn render(&self, json: bool) -> (String, i32) {
+        self.render_styled(json, Style::OFF)
+    }
+
+    /// [`Outcome::render`] with the text form dressed in `st`'s palette; the
+    /// JSON form is data and never styled.
+    pub fn render_styled(&self, json: bool, st: Style) -> (String, i32) {
         let code = self.status.exit_code();
         if json {
             let body = serde_json::to_string_pretty(self)
                 .unwrap_or_else(|e| format!("{{\"status\":\"error\",\"message\":\"{e}\"}}"));
             (body, code)
         } else {
-            let mut line = format!("[{}] {}: {}", tag(self.status), self.command, self.message);
-            line.push_str(&self.refusal_lines());
+            let tag = format!("[{}]", tag(self.status));
+            let tag = match self.status {
+                Status::Error => st.error(&tag),
+                Status::Usage => st.usage(&tag),
+                Status::Ok | Status::NotImplemented => tag,
+            };
+            let mut line = format!("{tag} {}: {}", self.command, self.message);
+            line.push_str(&self.refusal_lines(st));
             line.push_str(&self.detail_lines());
             if !self.changed.is_empty() {
                 line.push_str(&format!("\n  changed: {}", self.changed.join(", ")));
@@ -281,13 +294,13 @@ impl Outcome {
 impl Outcome {
     /// `why:`/`fix:` lines read back from `data.refusal` (so a refusal that
     /// crossed the daemon socket renders the same).
-    fn refusal_lines(&self) -> String {
+    fn refusal_lines(&self, st: Style) -> String {
         let Some(r) = self.data.as_ref().and_then(|d| d.get("refusal")) else {
             return String::new();
         };
         let mut out = String::new();
         if let Some(why) = r.get("why").and_then(Value::as_str) {
-            out.push_str(&format!("\n  why: {why}"));
+            out.push_str(&format!("\n  {} {why}", st.why("why:")));
         }
         if let Some((kind, v)) = r.get("fix").and_then(Value::as_object).and_then(|m| m.iter().next()) {
             let v = v.as_str().unwrap_or_default();
@@ -297,7 +310,7 @@ impl Outcome {
                 "none" => format!("none: {v}"),
                 _ => v.to_string(),
             };
-            out.push_str(&format!("\n  fix: {fix}"));
+            out.push_str(&format!("\n  {} {fix}", st.fix("fix:")));
         }
         out
     }
@@ -417,5 +430,18 @@ mod tests {
         assert_eq!(good.render(false).0, "[ok] x: fine");
         let objects = Outcome::error("x", "m").with_data(json!({ "findings": [{ "a": 1 }] }));
         assert_eq!(objects.render(false).0, "[error] x: m");
+    }
+
+    #[test]
+    fn styled_text_colors_the_tag_and_the_labels_and_json_never() {
+        let o = Outcome::refuse("x", Kind::Usage, "w", "y", Fix::Run("z".into()));
+        let (text, code) = o.render_styled(false, Style::ON);
+        assert_eq!(code, exit::USAGE);
+        assert!(text.starts_with("\x1b[33m[usage]\x1b[0m x: w"), "{text:?}");
+        assert!(text.contains("\x1b[2mwhy:\x1b[0m y") && text.contains("\x1b[32mfix:\x1b[0m z"), "{text:?}");
+        let failed = Outcome::error("x", "m");
+        assert!(failed.render_styled(false, Style::ON).0.starts_with("\x1b[31m[error]\x1b[0m"));
+        assert_eq!(o.render_styled(true, Style::ON), o.render(true), "json is data");
+        assert_eq!(o.render_styled(false, Style::OFF), o.render(false));
     }
 }

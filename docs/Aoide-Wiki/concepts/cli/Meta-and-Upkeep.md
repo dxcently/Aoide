@@ -44,7 +44,8 @@ aoide guide [--json]
   `docs/`, so the seam is the pointer, not an `include_str!` — while the
   table (per group: command count, stub tally where nonzero; one total line)
   is derived at print time from the registry the binary assembled at boot,
-  in registry order. It restates no rule body and hand-lists no command;
+  under the same topic sections, in the same order, as the bare `aoide`
+  overview (`aoide_protocol::help::inventory`). It restates no rule body and hand-lists no command;
   `schema --json` owns the command surface, and the table reads the same
   `Registry` instance it emits. Message `"printed the four-tier
   onboarding"`; `--json` data `{text: <full guide>}`.

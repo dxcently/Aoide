@@ -111,6 +111,18 @@ to its declarations the day it is registered.
 - `Outcome::usage`/`Outcome::error` remain for callers not yet migrated; new
   refusals use `refuse`.
 
+## Listing layout
+
+Each app crate declares how its binary lists its commands once, as a `Layout`
+const beside `all()` (`cli/src/commands/mod.rs`, `lyra/src/commands/mod.rs`):
+a tagline, then topic sections of heads, each multi-command head with a
+one-line blurb (or a bare command whose `brief` says it). It is what the
+overview, a group page, the unknown-command lists, did-you-mean ties,
+`guide`'s table and the schema's `sections` all read. Never order or section a
+listing anywhere else. Stubs are left out of it on purpose and list
+themselves last; `registry_walk::{every_head_is_sectioned,
+listings_fit_and_hang}` hold both binaries to it.
+
 ## Extension points, cross-crate
 
 - **A new domain crate**: add it to `pkgs/aoide/Cargo.toml`'s `[workspace]
@@ -121,7 +133,10 @@ to its declarations the day it is registered.
   (`aoide-protocol::registry`) inside that crate's own `commands` module;
   the two app crates never need an edit for a command that isn't moving
   binaries. Declare what it requires (`flag!(…, required: true)`,
-  `one_of: &[&["id", "to"]]`) rather than checking in the handler.
+  `one_of: &[&["id", "to"]]`) rather than checking in the handler. A command
+  that is the first of a NEW head also adds that head to its binary's `Layout`
+  (a section, and a blurb when the head has several commands) in the same
+  commit; a `brief` keeps its list line from being cut mid-sentence.
 - **A head moving between `aoide` and `lyra`** updates
   `door::{AOIDE_ONLY,LYRA_ONLY,SHARED}_HEADS` in the same commit; each app
   crate's `cross_binary_heads_match_the_registry` test pins its half.

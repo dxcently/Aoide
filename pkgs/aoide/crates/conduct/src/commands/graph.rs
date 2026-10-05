@@ -191,6 +191,7 @@ pub fn register(r: &mut Registry) {
             "spawn --agent codex -- codex --model x",
             "spawn --task fix-flaky --instructions @brief.md -- claude",
         ],
+        brief: "Spawn an agent command as a detached, conducted session.",
     ));
     r.insert(cmd!(
         path: ["resurrect"],
@@ -209,6 +210,7 @@ pub fn register(r: &mut Registry) {
             "resurrect --project aoide",
             "resurrect --project aoide --all",
         ],
+        brief: "Revive sessions from the project's record.",
     ));
     r.insert(cmd!(
         path: ["send"],
@@ -360,6 +362,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: crate::graph::session_conduct,
+        brief: "Run an agent command on its own PTY as a conductable session.",
     ));
     // ── bare `session`: the ROSTER (session-surface redesign, command-defrag
     // lane X, 2026-08-28 — supersedes both the U3 undying picker that used

@@ -43,5 +43,6 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_conductor,
+        brief: "The interactive terminal UI to conduct agent sessions.",
     ));
 }

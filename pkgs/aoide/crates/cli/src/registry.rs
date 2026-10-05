@@ -472,6 +472,16 @@ mod tests {
     }
 
     #[test]
+    fn every_head_is_sectioned() {
+        aoide_test_support::registry_walk::every_head_is_sectioned(&crate::commands::all());
+    }
+
+    #[test]
+    fn listings_fit_and_hang() {
+        aoide_test_support::registry_walk::listings_fit_and_hang("aoide", &crate::commands::all());
+    }
+
+    #[test]
     fn suggestion_or_list() {
         aoide_test_support::registry_walk::suggestion_or_list("aoide", &crate::commands::all());
     }
@@ -514,7 +524,7 @@ mod tests {
         let to = send["flags"].as_array().unwrap().iter().find(|f| f["name"] == "to").unwrap();
         assert_eq!(to["conflicts"], serde_json::json!(["id"]));
 
-        let rm = find("secrets.rm");
+        let rm = find("project.list");
         for k in ["oneOf", "brief"] {
             assert!(rm.get(k).is_none(), "an unmigrated command grows no `{k}` key: {rm}");
         }

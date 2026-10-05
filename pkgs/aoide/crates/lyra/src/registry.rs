@@ -210,6 +210,16 @@ mod tests {
     }
 
     #[test]
+    fn every_head_is_sectioned() {
+        aoide_test_support::registry_walk::every_head_is_sectioned(&crate::commands::all());
+    }
+
+    #[test]
+    fn listings_fit_and_hang() {
+        aoide_test_support::registry_walk::listings_fit_and_hang("lyra", &crate::commands::all());
+    }
+
+    #[test]
     fn suggestion_or_list() {
         aoide_test_support::registry_walk::suggestion_or_list("lyra", &crate::commands::all());
     }

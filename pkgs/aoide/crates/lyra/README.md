@@ -13,6 +13,10 @@ are core `aoide` identity, root `AGENTS.md`).
 - `bin/lyra` — the binary entry point.
 - `dispatch`/`registry` — lyra's own argv parsing, dispatch, and golden
   command-path snapshot (54 paths), independent of core's.
+- `commands::LAYOUT` — how `lyra` lists itself (Start here · Songs &
+  liveries · Widgets & icons · Screen control · Dialogs & notices · Agent
+  interfaces · System), adopted by `all()` through `Registry::arrange`; bare
+  `lyra`, `--help`, group pages and `guide` read it.
 - `guide` — `lyra guide`.
 - `commands` — lyra's `commands::all()`, pulling in `song`, `screen`, and
   `conduct`'s `shellbridge`/`herald` registration lines (the files stay in

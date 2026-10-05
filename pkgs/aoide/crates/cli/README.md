@@ -43,10 +43,19 @@ correspondence").
   thing the operator walks away with), `infra` (`mcp
   serve`'s tool-count reporting). Every other command group lives in its
   domain crate and is pulled in here by `commands::all()`.
+- `commands::LAYOUT` — how `aoide` lists itself: a tagline and six topic
+  sections of heads (Start here · Sessions & conducting · Mesh & mail ·
+  Secrets · Agent interfaces · System), adopted by `all()` through
+  `Registry::arrange`. Bare `aoide`, `--help`, `help`, every group page and
+  `guide`'s table read it; stubs list themselves last.
 - `a2a`/`mcp`/`daemon`/`graph`/`output` — thin root-level wiring over the
   matching domain crate for the two binaries' entry points.
 
 ## Test fixtures
+
+`help_screen.rs` drives the real binary for the help screens: streams and exit
+codes (overview and group pages on stdout at 0, a typo on stderr at 2), width
+from `COLUMNS`, and `--color` / `NO_COLOR` / `--json`.
 
 The graph-residency integration tests run the resident daemon in an owned
 child process with a fixed environment. Fixture teardown kills and waits for

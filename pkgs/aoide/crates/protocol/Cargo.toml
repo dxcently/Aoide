@@ -20,6 +20,10 @@ serde_json = { workspace = true }
 # prompt! macros), so they stay off.
 inquire = { version = "0.9.4", default-features = false, features = ["crossterm"] }
 
+# The terminal's column count (`TIOCGWINSZ`), asked once by `style::width`.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 # Native feed permissions, file identity and EOF writes; only Windows needs these APIs.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [

@@ -4,6 +4,7 @@ pub mod bin;
 pub mod dialog;
 pub mod door;
 pub mod feed;
+pub mod help;
 /// The one place a stored command LINE is handed to this host's own
 /// interpreter (`sh -c`, or `cmd /C` on native Windows) — one seam for the
 /// two crates that run operator-authored command text.
@@ -34,6 +35,7 @@ pub mod pick;
 pub mod policy;
 pub mod registry;
 pub mod state;
+pub mod style;
 pub mod suggest;
 pub mod wire;
 

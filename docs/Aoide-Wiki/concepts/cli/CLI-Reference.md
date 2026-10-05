@@ -18,6 +18,17 @@ start at [[aoide-cli]] and the group pages linked below.
 
 - **Exit codes:** `0` ok · `1` error · `2` usage · `64` not-implemented.
   A stub returns a structured `not-implemented` envelope, never a crash.
+- **Help screens:** bare `aoide`/`lyra`, `--help` and `help` print the overview
+  (tagline, one line per head under its topic section, `(N commands)` for a
+  group) on stdout at exit `0`; `aoide <group>`, `aoide help <group>` and
+  `<group> --help` list that group the same way. A mistake in the invocation
+  exits `2` on stderr in the `[usage] … why: … fix: …` shape. Lines wrap to
+  `COLUMNS` (else the tty width, else 80) with the text hanging under its own
+  column. Color is the ANSI 16 base colors, on only for a tty and off for
+  `NO_COLOR`, `TERM=dumb` and `--json`; `--color=auto|always|never` is global.
+  The section order is declared once per binary (`commands::LAYOUT` in
+  `pkgs/aoide/crates/cli` and `lyra`) and ships in `schema --json` as
+  `sections`.
 - **`--json` everywhere:** every command takes and emits a structured JSON
   envelope; without it, a human line goes to stdout.
 - **Audit:** every dispatch — CLI, MCP, or A2A door — appends a JSON-lines

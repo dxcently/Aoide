@@ -6,6 +6,8 @@
 //! nothing passes, so a rule tightens exactly as commands migrate onto it.
 
 use aoide_protocol::door::{list_description, parse, BRIEF_MAX};
+use aoide_protocol::help;
+use aoide_protocol::style::{Style, Term};
 use aoide_protocol::registry::{Command, Registry};
 use aoide_protocol::{Door, Invocation};
 use aoide_protocol::output::{Outcome, Status};
@@ -240,6 +242,64 @@ pub fn brief_fits(registry: &Registry) {
         assert!(c.brief.chars().count() <= BRIEF_MAX, "`{}`: brief is {} chars (max {BRIEF_MAX})", c.dotted(), c.brief.chars().count());
         let shown = list_description(c);
         assert!(shown.chars().count() <= BRIEF_MAX + 1, "`{}`: list description is too long: {shown}", c.dotted());
+    }
+}
+
+/// Every head that lists itself sits in a section (a stub head lists itself
+/// last, automatically), and a group of several commands says in one line what
+/// it is — its layout blurb, else its bare command's brief.
+pub fn every_head_is_sectioned(registry: &Registry) {
+    let layout = registry.layout();
+    let mut heads: Vec<&str> = registry.commands().filter(|c| !c.internal).map(|c| c.path[0]).collect();
+    heads.dedup();
+    heads.sort();
+    heads.dedup();
+    for head in heads {
+        let mine: Vec<&Command> = registry.commands().filter(|c| c.path[0] == head && !c.internal).collect();
+        if mine.iter().all(|c| !c.implemented) {
+            continue;
+        }
+        assert!(mine.iter().all(|c| !c.section.is_empty()), "head `{head}` has no section: list it in the layout");
+        if mine.len() > 1 {
+            let blurb = layout.sections.iter().flat_map(|(_, hs)| hs.iter()).find(|(h, _)| *h == head).map(|(_, b)| *b).unwrap_or_default();
+            let bare = mine.iter().any(|c| c.path.len() == 1 && !c.brief.is_empty());
+            assert!(!blurb.is_empty() || bare, "group `{head}` has {} commands and no one-line blurb in the layout", mine.len());
+        }
+    }
+}
+
+/// Every listing — the overview, each group's page, the unknown-name lists —
+/// fits the width, and a wrapped line hangs under its column rather than
+/// starting at column 0.
+pub fn listings_fit_and_hang(bin: &str, registry: &Registry) {
+    for width in [60, 80, 105, 120] {
+        let t = Term { style: Style::OFF, width };
+        let over = help::overview(registry, bin, &t);
+        let paragraphs: Vec<&str> = over.split("\n\n").collect();
+        for body in &paragraphs[1..paragraphs.len() - 1] {
+            for line in body.lines().skip(1) {
+                assert!(line.starts_with("  "), "{bin} overview at {width}: `{line}` is at column 0");
+            }
+        }
+        let mut heads: Vec<&str> = registry.commands().map(|c| c.path[0]).collect();
+        heads.dedup();
+        heads.sort();
+        heads.dedup();
+        let mut pages = vec![over, help::choices(&["zzqq".to_string()], registry, &t)];
+        for head in heads {
+            if let Some(page) = help::group(&[head.to_string()], registry, bin, &t) {
+                for line in page.lines().skip_while(|l| !l.starts_with("commands:")).skip(1).take_while(|l| !l.is_empty()) {
+                    assert!(line.starts_with("  "), "{bin} {head} at {width}: `{line}` is at column 0");
+                }
+                pages.push(page);
+            }
+        }
+        for page in pages {
+            for line in page.lines() {
+                let longest_word = line.split(' ').map(|w| w.chars().count()).max().unwrap_or(0);
+                assert!(line.chars().count() <= width.max(longest_word + 4), "{bin} at {width}: line is too wide: `{line}`");
+            }
+        }
     }
 }
 
