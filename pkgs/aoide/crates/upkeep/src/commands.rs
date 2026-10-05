@@ -41,6 +41,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_soundcheck,
+        brief: "Report-only integrity sweep of the working tree.",
     ));
 }
 

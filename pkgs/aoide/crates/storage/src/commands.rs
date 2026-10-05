@@ -50,6 +50,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_usage,
+        brief: "Token and cost rollup from this machine's transcripts.",
     ));
 }
 
@@ -634,6 +635,7 @@ pub fn register_identity(r: &mut Registry) {
         implemented: true,
         handler: handle_identity,
         examples: ["identity"],
+        brief: "Show this instance's ed25519 identity and node fingerprint.",
     ));
 }
 

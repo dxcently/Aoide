@@ -18,5 +18,6 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: crate::herald::herald_push,
+        brief: "File one notification into the herald ledger.",
     ));
 }

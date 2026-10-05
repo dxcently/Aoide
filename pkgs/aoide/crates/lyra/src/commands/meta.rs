@@ -25,6 +25,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_schema,
+        brief: "Print every lyra command and state shape as JSON, for machines.",
     ));
 }
 

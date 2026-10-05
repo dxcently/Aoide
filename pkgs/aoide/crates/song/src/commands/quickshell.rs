@@ -34,6 +34,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_quickshell_healthcheck,
+        brief: "Detect and recover the placeholder-screen lockup.",
     ));
 }
 

@@ -49,6 +49,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_onboard,
+        brief: "First boot: register the clone, wire harness hooks, print the guide.",
     ));
 }
 

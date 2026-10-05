@@ -113,6 +113,7 @@ pub fn register_infra(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_daemon,
+        brief: "Run aoided: policy, lint, gate and the single audit log.",
     ));
 }
 
@@ -132,6 +133,7 @@ pub fn register_events(r: &mut Registry) {
         implemented: true,
         handler: handle_events_tail,
         examples: ["events tail", "events tail --class secret", "events tail --class secret,audit --json"],
+        brief: "Follow aoided's own events feed.",
     ));
 }
 
@@ -154,6 +156,7 @@ pub fn register_a2a_serve(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_a2a_serve,
+        brief: "Serve conducted sessions over A2A (Agent2Agent).",
     ));
 }
 

@@ -54,6 +54,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: hooks_install,
+        brief: "Wire an agent harness's hooks into `session hook`.",
     ));
 }
 

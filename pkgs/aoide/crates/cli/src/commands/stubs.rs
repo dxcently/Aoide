@@ -81,6 +81,7 @@ pub fn register_make(r: &mut Registry) {
         gated: false,
         implemented: false,
         handler: unimplemented,
+        brief: "Generate a dendrite, widget and adapter from an intent.",
     ));
 }
 
@@ -94,5 +95,6 @@ pub fn register_update(r: &mut Registry) {
         gated: true,
         implemented: false,
         handler: unimplemented,
+        brief: "Fetch upstream, merge framework paths, propose the rebuild.",
     ));
 }

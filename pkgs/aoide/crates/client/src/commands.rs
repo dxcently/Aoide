@@ -4604,6 +4604,7 @@ pub fn register_post_graph(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_adapter_melete,
+        brief: "Feed the neutral event stream to Melete (default-deny per class).",
     ));
 }
 

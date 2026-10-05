@@ -51,6 +51,7 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_secrets_ask,
+        brief: "Show the code-entry dialog for one parked TOTP ask.",
     ));
 }
 

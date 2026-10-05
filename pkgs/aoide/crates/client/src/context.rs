@@ -124,6 +124,7 @@ pub fn register(r: &mut aoide_protocol::registry::Registry) {
         implemented: true,
         handler: session_context,
         examples: ["context --id executor-1 --json"],
+        brief: "Fetch a bound executor's persona and memory from Mneme.",
     ));
 }
 

@@ -31,5 +31,6 @@ pub fn register(r: &mut Registry) {
         gated: false,
         implemented: true,
         handler: handle_shellbridge,
+        brief: "Publish session and hook state for the shell surfaces.",
     ));
 }
