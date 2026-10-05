@@ -5639,11 +5639,14 @@ fn extract_bearer(header_value: &str) -> Option<String> {
 struct ParseError {
     status: u16,
     message: String,
+    /// The peer connected and closed without sending a byte (a reachability
+    /// probe): nothing to answer and nothing to audit.
+    idle: bool,
 }
 
 impl ParseError {
     fn new(status: u16, message: impl Into<String>) -> Self {
-        Self { status, message: message.into() }
+        Self { status, message: message.into(), idle: false }
     }
 }
 
@@ -5699,10 +5702,10 @@ fn parse_http_request<R: BufRead>(r: &mut R, start: Instant) -> Result<HttpReque
     let request_line = match read_bounded_line(r, "request line")? {
         Some(l) => l,
         None => {
-            return Err(ParseError::new(
-                400,
-                "connection closed before a request line arrived",
-            ))
+            return Err(ParseError {
+                idle: true,
+                ..ParseError::new(400, "connection closed before a request line arrived")
+            })
         }
     };
     check_deadline("after request line")?;
@@ -6819,6 +6822,9 @@ fn handle_connection(
     let start = Instant::now();
     let req = match parse_http_request(&mut reader, start) {
         Ok(req) => req,
+        // A peer that connected and closed without a byte (the client's
+        // tunnel-reuse probe) asked nothing: no response, no audit line.
+        Err(e) if e.idle => return Ok(()),
         Err(e) => {
             let b = jsonrpc_error_value(-32700, format!("bad request: {}", e.message));
             let body = serde_json::to_vec(&b).unwrap_or_default();
@@ -19117,6 +19123,52 @@ mod tests {
             Listener::Mail.audit_detail_with("boom", ConnOrigin::Unknown),
             "boom (from unknown via mail-adapter)"
         );
+
+        adapter_cleanup(&root, saved);
+    }
+
+    fn bad_request_lines(audit_log: &Path) -> usize {
+        std::fs::read_to_string(audit_log).unwrap_or_default().lines().filter(|l| l.contains("a2a.bad-request")).count()
+    }
+
+    #[test]
+    fn a_connection_that_closes_before_sending_a_byte_is_idle_not_a_bad_request() {
+        let empty = parse_http_request(&mut std::io::Cursor::new(Vec::<u8>::new()), Instant::now()).unwrap_err();
+        assert!(empty.idle, "EOF before the request line is an idle probe: {empty:?}");
+        let garbage = parse_http_request(&mut std::io::Cursor::new(b"NOT-HTTP\r\n\r\n".to_vec()), Instant::now()).unwrap_err();
+        assert!(!garbage.idle, "{garbage:?}");
+        let partial = parse_http_request(&mut std::io::Cursor::new(b"GET".to_vec()), Instant::now()).unwrap_err();
+        assert!(!partial.idle, "bytes arrived, so it is a malformed request: {partial:?}");
+    }
+
+    #[test]
+    fn a_connect_and_drop_probe_writes_no_response_and_no_audit_line() {
+        use std::io::{Read, Write};
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("idle-probe");
+        let audit_log = root.join("log");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, &audit_log);
+
+        // The reuse probe of a client's ssh-tunnel: connect, send nothing, close.
+        for _ in 0..3 {
+            drop(std::net::TcpStream::connect(("127.0.0.1", port)).unwrap());
+        }
+        // A later, valid request orders the probes before the read of the log.
+        let ok = send_raw(port, b"GET /nothing HTTP/1.1\r\nHost: x\r\n\r\n");
+        assert!(!ok.starts_with("HTTP/1.1 400"), "{ok}");
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(bad_request_lines(&audit_log), 0, "a probe that sent nothing is not a bad request");
+
+        // Control: bytes that stop mid request line are still a 400 and one audit line.
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.write_all(b"GET").unwrap();
+        stream.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut out = Vec::new();
+        stream.read_to_end(&mut out).unwrap();
+        assert!(String::from_utf8_lossy(&out).starts_with("HTTP/1.1 400"), "{}", String::from_utf8_lossy(&out));
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(bad_request_lines(&audit_log), 1);
 
         adapter_cleanup(&root, saved);
     }
