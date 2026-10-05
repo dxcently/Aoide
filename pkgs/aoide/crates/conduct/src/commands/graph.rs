@@ -215,11 +215,11 @@ pub fn register(r: &mut Registry) {
         summary: "Inject text into a conducted session's control socket (the one gated injection door). Held pending approval by default; --yes (or an autogate policy) delivers and auto-renames the node to a one-line form of the text — except for a bare keystroke answer (text with no letters, e.g. a permission verdict digit), which is not a task and leaves the node's name alone. Siblings (sharing a live parent) autogate each other by default too — opt out with AOIDE_CONDUCT_SIBLING_AUTOGATE={0,false,no}. The reciprocal also holds: a parent automatically hears the children it spawned — the daemon delivers ONE line off a child's own trace (settled, cancelled, died mid-turn, asking, wrapping up, failing, silent) straight to the parent's transport, never prompted, never pending, and never through this door. Every outcome is audited. --to resolves a name (local id/tail4/petname, or node/<query> for a remote session over A2A) instead of a raw --id; mutually exclusive with --id — a remote send is always attempted (the receiving node gates its own delivery) and never queues locally.",
         args: [arg!("text", "string", true, "The text to inject — put it after `--` so its own words/flags pass through verbatim.")],
         flags: [
-            flag!("id", "string", "Target session id (required unless --to is given); its socket is resolved from sessions.json."),
+            flag!("id", "string", "Target session id (required unless --to is given); its socket is resolved from sessions.json.", value: "session-id", conflicts: &["to"]),
             flag!("submit", "bool", "Append the target harness's own submit keystroke (Enter for most agents, \\r for kimi — resolved from the target session's agent profile at delivery time). No-op for a --to remote send (the receiving node always submits its own way)."),
             flag!("yes", "bool", "Authorise delivery now (else the send is held pending approval). No-op for a --to remote send — the receiving node gates its own delivery."),
             flag!("from", "string", "Sender attribution override for the delivered provenance prefix (default: AOIDE_SESSION_ID). ATTRIBUTION ONLY, not authentication — unauthenticated and as spoofable as the env var it defaults from."),
-            flag!("to", "string", "Target by name instead of --id: a local session id/tail4/petname/host-role-petname line, or node/<query> to resolve against a registered node's CACHED graph and deliver over A2A message/send. Mutually exclusive with --id."),
+            flag!("to", "string", "Target by name instead of --id: a local session id/tail4/petname/host-role-petname line, or node/<query> to resolve against a registered node's CACHED graph and deliver over A2A message/send. Mutually exclusive with --id.", value: "target", conflicts: &["id"]),
             flag!("mesh", "string", "For a `node/<query>` target: the mesh this request acts in (P-CHARTER) — the far door reads the caller's grant in it. Absent = the node's sole granted mesh, else `[pairing] homeMesh`; required when that node is trusted in more than one mesh. Unused by a local send."),
         ],
         gated: false,
@@ -231,6 +231,8 @@ pub fn register(r: &mut Registry) {
             "send --to brave-otter --yes --submit -- status?",
             "send --to yomi-strix/brave-otter -- ping",
         ],
+        one_of: &[&["id", "to"]],
+        brief: "Inject text into a conducted session (held for approval unless --yes).",
     ));
     r.insert(cmd!(
         path: ["session", "pending", "list"],

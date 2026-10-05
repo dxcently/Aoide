@@ -229,4 +229,26 @@ mod tests {
         assert_eq!(heads, expected, "LYRA_ONLY_HEADS + SHARED_HEADS must be exactly this binary's heads");
         assert!(AOIDE_ONLY_HEADS.iter().all(|h| !heads.contains(h)), "AOIDE_ONLY_HEADS must not appear here");
     }
+
+    /// The declarative fields are additive (CONTRACTS.md §3): the migrated
+    /// `preview shot --what` carries its closed value set and default, and an
+    /// unmigrated flag grows no key.
+    #[test]
+    fn migrated_declarations_serialize_and_the_rest_stay_byte_identical() {
+        let r = crate::commands::all();
+        let find = |p: &str| serde_json::to_value(r.commands().find(|c| c.dotted() == p).unwrap()).unwrap();
+
+        let shot = find("preview.shot");
+        let what = shot["flags"].as_array().unwrap().iter().find(|f| f["name"] == "what").unwrap();
+        assert_eq!(what["values"], serde_json::json!(["screen", "canvas", "widget", "element"]));
+        assert_eq!(what["default"], "widget");
+
+        let tree = find("preview.tree");
+        assert!(tree.get("brief").is_none());
+        for f in tree["flags"].as_array().unwrap() {
+            for k in ["value", "required", "default", "values", "conflicts"] {
+                assert!(f.get(k).is_none(), "an unmigrated flag grows no `{k}` key: {f}");
+            }
+        }
+    }
 }

@@ -491,4 +491,37 @@ mod tests {
         assert_eq!(heads, expected, "AOIDE_ONLY_HEADS + SHARED_HEADS must be exactly this binary's heads");
         assert!(LYRA_ONLY_HEADS.iter().all(|h| !heads.contains(h)), "LYRA_ONLY_HEADS must not appear here");
     }
+
+    /// The declarative fields are additive (CONTRACTS.md §3): a command that
+    /// declares none serializes without their keys, and the three migrated
+    /// commands carry exactly what they declare.
+    #[test]
+    fn migrated_declarations_serialize_and_the_rest_stay_byte_identical() {
+        let r = crate::commands::all();
+        let find = |p: &str| serde_json::to_value(r.commands().find(|c| c.dotted() == p).unwrap()).unwrap();
+
+        let add = find("secrets.add");
+        let flags = add["flags"].as_array().unwrap();
+        let key = flags.iter().find(|f| f["name"] == "key").unwrap();
+        assert_eq!(key["required"], true);
+        assert_eq!(key["value"], "key");
+        let backend = flags.iter().find(|f| f["name"] == "backend").unwrap();
+        assert_eq!(backend["default"], "age");
+        assert!(backend.get("required").is_none());
+
+        let send = find("send");
+        assert_eq!(send["oneOf"], serde_json::json!([["id", "to"]]));
+        let to = send["flags"].as_array().unwrap().iter().find(|f| f["name"] == "to").unwrap();
+        assert_eq!(to["conflicts"], serde_json::json!(["id"]));
+
+        let rm = find("secrets.rm");
+        for k in ["oneOf", "brief"] {
+            assert!(rm.get(k).is_none(), "an unmigrated command grows no `{k}` key: {rm}");
+        }
+        for f in rm["flags"].as_array().unwrap() {
+            for k in ["value", "required", "default", "values", "conflicts"] {
+                assert!(f.get(k).is_none(), "an unmigrated flag grows no `{k}` key: {f}");
+            }
+        }
+    }
 }
