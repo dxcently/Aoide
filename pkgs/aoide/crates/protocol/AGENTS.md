@@ -61,6 +61,20 @@
   `pkgs/aoide/crates/AGENTS.md`; `suggest` holds the only edit-distance
   matcher. `door::{AOIDE_ONLY,LYRA_ONLY,SHARED}_HEADS` is a static copy of
   the two registries' heads — update it with them.
+- **Listings, color and width live in `help` and `style` and nowhere else.**
+  A formatter says what text IS (`style.name(..)`, `style.why(..)`), never an
+  escape code; no other module writes `\x1b`, reads `COLUMNS` or asks whether
+  a stream is a tty. Color is the ANSI 16 base colors, so the terminal theme
+  decides shades. `door::run` is the only place that resolves `--color`, picks
+  the stream's `Style` and prints; `parse`/`parse_with` build message text
+  with the `Term` they are handed and `Outcome::render` (plain) stays the
+  form every other door uses, so an MCP, A2A or aoided-socket outcome can
+  never carry an escape. A new listing calls `help::table`/`Row` instead of
+  padding by hand, and takes its order from the layout (`help::inventory` for
+  prose), so the overview, a group, the did-you-mean lists and `guide` can
+  never disagree. `Registry::arrange` panics on a head nobody registers or one
+  listed twice; a head left out of the layout is a failing test in the app
+  crate (`registry_walk::every_head_is_sectioned`), not a silent "Other".
 - **`door::run`'s `special` hook is the only sanctioned one-shot escape.**
   A binary that needs to bypass the generic `Outcome` envelope (raw stdout,
   a long-running server) adds a case to its own `special` closure — never a

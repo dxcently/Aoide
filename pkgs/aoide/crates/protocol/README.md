@@ -17,10 +17,27 @@ other crate in this workspace sits above.
   `Registry::insert` panics on a duplicate path), so it is structurally
   excluded from the MCP tool list and the A2A `AgentCard` the same way it
   never enters the golden.
+  A binary's `Layout` (tagline, then sections of heads) is adopted with
+  `Registry::arrange`, which stamps each command's `section` and serializes as
+  `Schema::sections`; a head the layout does not name lists under "Other", a
+  stub head under "Not yet implemented".
   `Flag` also declares `value` (placeholder), `required`, `default`,
   `values` and `conflicts`, `Command` declares `one_of` and `brief`;
   `Command::check` enforces them (defaults applied first) and
   `Command::invoke` is check-then-handler, the entry every `dispatch()` uses.
+- `style` — terminal manners, decided in one place: `Style` (the role
+  vocabulary — `heading`, `name`, `args`, `required`, `error`, `usage`, `why`,
+  `fix`, `suggest`, `stub` — over the ANSI 16 base colors, or plain), `Color`
+  (`--color=auto|always|never`) with `take_color` (the flag, read once from
+  argv), `Style::decide`/`for_stream` (tty, `NO_COLOR`, `TERM=dumb`, `--json`),
+  `width` (`COLUMNS`, else the tty's `TIOCGWINSZ`, else 80), `wrap`, and `Term`
+  (a style plus a width, passed to every formatter).
+- `help` — every listing of commands: `overview` (bare `aoide`, `--help`,
+  `help`), `group` (a group's page), `children` (a command's `subcommands:`),
+  `choices` (the name lists of an unknown-command refusal), `inventory` (the
+  same order as data, for `guide`), over one sectioned order and one table
+  (`Row`, `table`) sized to its content and wrapped with a hanging indent.
+  `BRIEF_MAX`/`list_description` live here.
 - `suggest` — the one edit-distance matcher (`closest`) behind every
   did-you-mean, and `lead` (the first clause of a description).
 - `invocation` — `Invocation`, the parsed call handed to a dispatcher.

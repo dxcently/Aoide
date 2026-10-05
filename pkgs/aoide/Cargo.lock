@@ -197,6 +197,7 @@ name = "aoide-protocol"
 version = "0.0.26"
 dependencies = [
  "inquire",
+ "libc",
  "serde",
  "serde_json",
  "windows-sys",

@@ -647,6 +647,37 @@ Contract guarantees:
   a did-you-mean), each as a usage refusal naming the item. A stub is never
   checked. The MCP tool's `inputSchema.required` lists the required
   positionals and the required flags that have no `default`.
+- `section` (optional string on a command) and `sections` (optional top-level
+  array) — the listing order, declared once per binary in its `Layout`
+  (`crates/cli/src/commands/mod.rs`, `crates/lyra/src/commands/mod.rs`) and
+  never on a `cmd!`. Every command of a listed head carries its head's
+  `section`; `sections` is `[{"name": "Secrets", "heads": [{"name":
+  "secrets", "brief": "…"}]}]`, in listing order, where a head's `brief` is the
+  one-liner of a multi-command group. **Additive**, same discipline: both keys
+  are omitted when the registry was never arranged, and a stub head carries no
+  `section` (it lists itself last, under "Not yet implemented"). `aoide`'s
+  sections, in order: Start here · Sessions & conducting · Mesh & mail ·
+  Secrets · Agent interfaces · System. `lyra`'s: Start here · Songs &
+  liveries · Widgets & icons · Screen control · Dialogs & notices · Agent
+  interfaces · System.
+- **Help screens, streams and color.** Bare `aoide`/`lyra`, `--help` and `help`
+  print the overview — a tagline, one line per head under its section (a
+  multi-command head shows `(N commands)`), a footer — on stdout at exit `0`.
+  `<group>`, `help <group>` and `<group> --help` print that group's commands
+  the same way (internal commands are never listed). Every listing — the
+  overview, a group, the name lists of an unknown-command refusal, did-you-mean
+  candidates, `guide`'s table — follows the layout's order, with stubs last.
+  Columns are sized to their content and wrapped to the terminal (`COLUMNS`,
+  else the tty width, else 80) with the text hanging under its own column.
+  A genuine usage mistake exits `2` on stderr in the refusal shape. Color is
+  the ANSI 16 base colors only (headings bold, command names cyan, `<args>`
+  dim, `(required)` yellow, `[error]` red, `[usage]` yellow, `why:` dim, `fix:`
+  green, suggestions bold, the stub section dim). It is on only when the
+  stream written is a tty, never for `NO_COLOR`, `TERM=dumb` or `--json`, and
+  never at the MCP, A2A or aoided-socket doors, where an outcome is data;
+  the global `--color=auto|always|never` (also `--color <mode>`), read once by
+  the CLI door before parsing and ignored after a bare `--`, overrides the
+  environment but never `--json`.
 - **Exit codes and the refusal shape.** `2` means the invocation can never be
   valid whatever the world looks like: a missing, unknown or ill-typed
   argument, flag or value, or a command typed at the wrong binary (`aoide rice

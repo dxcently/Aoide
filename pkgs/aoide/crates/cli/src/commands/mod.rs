@@ -16,7 +16,65 @@ mod meta;
 mod onboard;
 mod stubs;
 
-use crate::registry::Registry;
+use crate::registry::{Layout, Registry};
+
+/// How `aoide` lists its commands: topic sections in order, each head with the
+/// one-liner of a multi-command group. A head left out lists itself under
+/// "Other" (a test forbids it); a stub head is left out on purpose and lists
+/// itself last under "Not yet implemented".
+const LAYOUT: Layout = Layout {
+    tagline: "conduct agents, terminals and machines from any shell",
+    sections: &[
+        ("Start here", &[("guide", ""), ("onboard", "")]),
+        (
+            "Sessions & conducting",
+            &[
+                ("session", "Roster, grants, traces and cleanup of conducted sessions"),
+                ("conductor", ""),
+                ("conduct", ""),
+                ("spawn", ""),
+                ("send", ""),
+                ("resurrect", ""),
+                ("graph", "The project/session graph and its parent links"),
+                ("project", "Projects: the anchor roots sessions belong to"),
+                ("workspace", "Bind compositor workspaces to projects"),
+            ],
+        ),
+        (
+            "Mesh & mail",
+            &[
+                ("mail", "Letters between nodes: send, read, outbox, polling"),
+                ("node", "Registered nodes: add, pull, discover, spawn remotely"),
+                ("pair", "Pair this instance with another, or refuse a request"),
+                ("mesh", "Declared meshes and their operator charters"),
+                ("identity", ""),
+            ],
+        ),
+        ("Secrets", &[("secrets", "Broker-held secrets: policies, grants, TOTP approvals")]),
+        (
+            "Agent interfaces",
+            &[
+                ("mcp", ""),
+                ("a2a", ""),
+                ("schema", ""),
+                ("melete", "The Melete MCP connector: status, graph, passthrough call"),
+                ("adapter", ""),
+                ("hooks", ""),
+                ("context", ""),
+            ],
+        ),
+        (
+            "System",
+            &[
+                ("daemon", ""),
+                ("events", ""),
+                ("config", "Show or set the runtime config"),
+                ("usage", ""),
+                ("soundcheck", ""),
+            ],
+        ),
+    ],
+};
 
 /// Build the full command registry, in the historical `schema --json` order:
 /// guide, schema, content(stub), make(stub), update(stub), onboard (P-I2:
@@ -100,5 +158,6 @@ pub fn all() -> Registry {
     aoide_conduct::commands::graph::register_mail_ring(&mut r); // the local doorbell (MAIL.md "Delivery and the doorbell", P-M5a-2)
     aoide_client::charter::register(&mut r); // mesh charter init/sign/accept/reroot — one operator's machines, signed and carried (P-CHARTER, appended newest)
 
+    r.arrange(LAYOUT);
     r
 }

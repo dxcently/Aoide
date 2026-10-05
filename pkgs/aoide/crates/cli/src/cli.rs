@@ -252,56 +252,36 @@ mod tests {
     }
 
     #[test]
-    fn root_help_lists_commands_at_exit_zero() {
-        let err = parse(&argv(&["--help"]), Door::Cli).unwrap_err();
-        assert_eq!(err.status, Status::Ok);
-        assert!(err.message.contains("commands:"));
+    fn bare_aoide_is_the_overview_at_exit_zero_not_a_usage_error() {
+        for args in [&[][..], &["--help"][..], &["help"][..]] {
+            let err = parse(&argv(args), Door::Cli).unwrap_err();
+            assert_eq!(err.status, Status::Ok, "{args:?}");
+            assert_eq!(err.render(false).1, exit::OK);
+            assert!(err.message.contains("Start here"), "{}", err.message);
+        }
     }
 
     #[test]
-    fn root_help_groups_commands_and_carries_summaries() {
-        let err = parse(&argv(&["--help"]), Door::Cli).unwrap_err();
-        // Grouped by first path segment, each line carrying its summary.
-        // `project` promoted out from under `graph` at R1 — its own group now.
-        assert!(err.message.contains("\nproject\n  project add"), "grouped under its head: {}", err.message);
-        assert!(
-            err.message.contains("project add <name> [<path>]"),
-            "arg signature on the line: {}",
-            err.message
-        );
-        assert!(
-            err.message.contains("Register a project in state/stage/projects.json"),
-            "the summary rides along: {}",
-            err.message
-        );
-        assert!(
-            err.message.contains("aoide guide' prints the tier map"),
-            "the guide pointer is the footer: {}",
-            err.message
-        );
+    fn the_overview_has_a_line_per_head_under_its_section_and_the_stubs_last() {
+        let text = parse(&argv(&[]), Door::Cli).unwrap_err().message;
+        let at = |needle: &str| text.find(needle).unwrap_or_else(|| panic!("{needle}: {text}"));
+        let order = ["Start here", "Sessions & conducting", "Mesh & mail", "Secrets", "Agent interfaces", "System", "Not yet implemented"];
+        assert!(order.windows(2).all(|w| at(&format!("\n{}\n", w[0])) < at(&format!("\n{}\n", w[1]))), "{text}");
+        assert!(text.contains("  secrets ") && text.contains("(18 commands) Broker-held secrets"), "a group is one line with its count: {text}");
+        assert!(!text.contains("\nsecrets\n"), "no group header repeating a head: {text}");
+        assert!(at("content") > at("Not yet implemented"), "stubs sit last: {text}");
+        assert!(text.contains("<group> lists its commands"), "{text}");
     }
 
     #[test]
-    fn a_partial_path_lists_its_subgroup_instead_of_crying_unknown() {
-        // `project` (ex-`graph project`) has no bare command of its own, only
-        // the five children below — `project` alone must list the group.
+    fn a_group_named_alone_lists_its_commands_at_exit_zero() {
+        // `project` has no bare command of its own, only its children.
         let err = parse(&argv(&["project"]), Door::Cli).unwrap_err();
-        assert_eq!(err.status, Status::Usage);
-        assert!(
-            err.message.contains("is a command group"),
-            "names it a group: {}",
-            err.message
-        );
-        for command in [
-            "project add",
-            "project edit",
-            "project remove",
-            "project list",
-            "project lead",
-        ] {
+        assert_eq!((err.status, err.render(false).1), (Status::Ok, exit::OK));
+        for command in ["add <name> [<path>]", "edit <name> <path>", "remove <name> [<path>]", "list", "lead <name> [<session>]"] {
             assert!(err.message.contains(command), "lists {command}: {}", err.message);
         }
-        assert!(err.message.contains("aoide --help"), "{}", err.message);
+        assert!(err.message.contains("aoide project <command> --help"), "{}", err.message);
     }
 
     #[test]

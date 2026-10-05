@@ -142,6 +142,11 @@ pub struct Command {
     /// the first sentence of `summary`. Additive, skipped when empty.
     #[serde(skip_serializing_if = "is_blank")]
     pub brief: &'static str,
+    /// The topic section this command's head is listed under, set once per
+    /// head by [`Registry::arrange`] (never written on a `cmd!`). Additive,
+    /// skipped when the head is unassigned (a stub head lists itself last).
+    #[serde(skip_serializing_if = "is_blank")]
+    pub section: &'static str,
     /// The handler `dispatch()` calls when `implemented` is true. Unused
     /// (never invoked) for stub commands — see `commands/stubs.rs`.
     #[serde(skip)]
@@ -170,6 +175,7 @@ impl Command {
         examples: &[],
         one_of: &[],
         brief: "",
+        section: "",
         handler: blank_handler,
         available: || true,
     };
@@ -360,6 +366,39 @@ pub struct Schema {
     /// this is the ONLY place it appears in this document.
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     pub external: Vec<ExternalCommand>,
+    /// The listing order: sections in order, each with its heads in order.
+    /// **Additive**, omitted when the registry was never arranged.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    pub sections: Vec<SchemaSection>,
+}
+
+/// One section of the listing order in [`Schema::sections`].
+#[derive(Debug, Clone, Serialize)]
+pub struct SchemaSection {
+    pub name: &'static str,
+    pub heads: Vec<SchemaHead>,
+}
+
+/// One head of a [`SchemaSection`]; `brief` is the group's one-liner.
+#[derive(Debug, Clone, Serialize)]
+pub struct SchemaHead {
+    pub name: &'static str,
+    #[serde(skip_serializing_if = "is_blank")]
+    pub brief: &'static str,
+}
+
+/// How a binary lists its commands: a tagline, then topic sections in order,
+/// each naming its heads in order with the one-line brief of a multi-command
+/// head (a single-command head lists its own command's brief). A stub head
+/// is left out; it lists itself last, under "Not yet implemented".
+#[derive(Debug, Clone, Copy)]
+pub struct Layout {
+    pub tagline: &'static str,
+    pub sections: &'static [(&'static str, &'static [(&'static str, &'static str)])],
+}
+
+impl Layout {
+    pub const EMPTY: Layout = Layout { tagline: "", sections: &[] };
 }
 
 /// One entry in [`Schema::external`] — a name, the resolved command spelling,
@@ -408,11 +447,18 @@ pub const JSON_FLAG: Flag = Flag {
 #[derive(Default)]
 pub struct Registry {
     entries: Vec<Command>,
+    layout: Layout,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Layout::EMPTY
+    }
 }
 
 impl Registry {
     pub fn new() -> Self {
-        Registry { entries: Vec::new() }
+        Registry { entries: Vec::new(), layout: Layout::EMPTY }
     }
 
     /// Append one command. Panics on a duplicate path — a self-registering
@@ -425,6 +471,28 @@ impl Registry {
             cmd.dotted()
         );
         self.entries.push(cmd);
+    }
+
+    /// Adopt the listing `layout`: every command of a listed head takes its
+    /// section. Panics on a head no command has or one listed twice, so a
+    /// layout can never name what is not there.
+    pub fn arrange(&mut self, layout: Layout) {
+        for (section, heads) in layout.sections {
+            for (head, _) in *heads {
+                let mut found = false;
+                for c in self.entries.iter_mut().filter(|c| c.path[0] == *head) {
+                    assert!(c.section.is_empty(), "head `{head}` is listed in two sections");
+                    c.section = section;
+                    found = true;
+                }
+                assert!(found, "layout lists `{head}`, which no command has");
+            }
+        }
+        self.layout = layout;
+    }
+
+    pub fn layout(&self) -> Layout {
+        self.layout
     }
 
     /// Look up the command entry for a parsed invocation path.
@@ -459,6 +527,15 @@ impl Registry {
             stage_notes_version: STAGE_NOTES_VERSION,
             commands: self.entries.clone(),
             external,
+            sections: self
+                .layout
+                .sections
+                .iter()
+                .map(|(name, heads)| SchemaSection {
+                    name,
+                    heads: heads.iter().map(|(name, brief)| SchemaHead { name, brief }).collect(),
+                })
+                .collect(),
         }
     }
 }
@@ -685,5 +762,34 @@ mod tests {
             fixture().synopsis("aoide", true),
             "aoide thing add <name> --key <key> (--id <value> | --to <value>) [options] [--json]"
         );
+    }
+
+    #[test]
+    fn the_layout_is_additive_data_a_registry_without_one_serializes_as_before() {
+        let mut r = Registry::new();
+        r.insert(cmd!(path: ["a"], summary: "A.", args: [], flags: [], gated: false, implemented: true, handler: noop));
+        r.insert(cmd!(path: ["b", "go"], summary: "B.", args: [], flags: [], gated: false, implemented: true, handler: noop));
+        let before = serde_json::to_value(r.schema("aoide")).unwrap();
+        assert!(before.get("sections").is_none());
+        assert!(before["commands"].as_array().unwrap().iter().all(|c| c.get("section").is_none()));
+
+        r.arrange(Layout { tagline: "t", sections: &[("First", &[("b", "The b group")]), ("Second", &[("a", "")])] });
+        let after = serde_json::to_value(r.schema("aoide")).unwrap();
+        assert_eq!(after["commands"][0]["section"], "Second");
+        assert_eq!(after["commands"][1]["section"], "First");
+        assert_eq!(
+            after["sections"],
+            serde_json::json!([
+                { "name": "First", "heads": [{ "name": "b", "brief": "The b group" }] },
+                { "name": "Second", "heads": [{ "name": "a" }] }
+            ])
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "which no command has")]
+    fn a_layout_naming_a_head_nobody_registers_is_refused() {
+        let mut r = Registry::new();
+        r.arrange(Layout { tagline: "", sections: &[("S", &[("ghost", "")])] });
     }
 }

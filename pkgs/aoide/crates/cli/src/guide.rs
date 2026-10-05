@@ -107,36 +107,29 @@ forms: conducting, agent hooking, the rice loop). With no repo in view,
 
 /// Render the full guide: the compiled-in prose around a command table
 /// derived from `r` — in the binary, always `dispatch::registry()`, the
-/// instance assembled at boot. Group = first path segment; rows keep
-/// registry order (the byte-stable order `schema --json` and the MCP tool
-/// list contract on). `internal` commands (task #101 R1: hook-plumbing a
+/// instance assembled at boot. Group = first path segment, listed under its
+/// section in the overview's own order (`aoide_protocol::help::inventory`).
+/// `internal` commands (task #101 R1: hook-plumbing a
 /// harness drives, never a human typing it — `session start/phase/end/
 /// hook`) are skipped from this HUMAN listing entirely — they still appear
 /// in `schema --json`/the MCP tool list/the A2A AgentCard, since `internal`
 /// hides noise from a person, not capability from another door.
 pub fn render(r: &Registry) -> String {
-    let mut groups: Vec<(&str, usize, usize)> = Vec::new();
-    for c in r.commands().filter(|c| !c.internal) {
-        let name = c.path[0];
-        match groups.iter_mut().find(|(g, _, _)| *g == name) {
-            Some(entry) => {
-                entry.1 += 1;
-                entry.2 += usize::from(!c.implemented);
-            }
-            None => groups.push((name, 1, usize::from(!c.implemented))),
-        }
-    }
-    let total: usize = groups.iter().map(|(_, n, _)| n).sum();
-    let stubs: usize = groups.iter().map(|(_, _, s)| s).sum();
+    let sections = aoide_protocol::help::inventory(r);
+    let total: usize = sections.iter().flat_map(|(_, heads)| heads).map(|(_, n, _)| n).sum();
+    let stubs: usize = sections.iter().flat_map(|(_, heads)| heads).map(|(_, _, s)| s).sum();
 
     let mut table = String::new();
-    for (name, count, stub) in &groups {
-        table.push_str(&format!("  {name:<12} {count:>3}"));
-        if *stub > 0 {
-            let s = if *stub == 1 { "" } else { "s" };
-            table.push_str(&format!("  ({stub} stub{s})"));
+    for (section, heads) in &sections {
+        table.push_str(&format!("  {section}\n"));
+        for (name, count, stub) in heads {
+            table.push_str(&format!("    {name:<12} {count:>3}"));
+            if *stub > 0 {
+                let s = if *stub == 1 { "" } else { "s" };
+                table.push_str(&format!("  ({stub} stub{s})"));
+            }
+            table.push('\n');
         }
-        table.push('\n');
     }
     let s = if stubs == 1 { "" } else { "s" };
     table.push_str(&format!("  Total: {total} commands ({stubs} stub{s}).\n"));

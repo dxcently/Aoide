@@ -19,6 +19,13 @@
 //! how one parser + one run loop serves binaries with different special-case
 //! command sets without duplicating either.
 //!
+//! **Streams, color and width.** [`run`] is the only place output is styled:
+//! it strips the global `--color` flag, resolves a `Style` for the stream the
+//! outcome is written to (`style`), and hands `parse_with` a `Term` so every
+//! listing it builds (`help`) follows the same order, width and palette. An
+//! informational parse result (the overview, a group page, `--help`) prints on
+//! stdout at exit 0; a refusal prints on stderr at its own code.
+//!
 //! **External subcommands (task #138, the git/cargo pattern).** Immediately
 //! BEFORE `parse` runs, `run` probes raw argv for a fallthrough to an
 //! executable `<bin_name>-<name>` on `PATH` — `aoide deploy` becomes
@@ -59,12 +66,16 @@
 
 use crate::audit::{audit, default_audit_log, Door, EventClass};
 use crate::invocation::Invocation;
-use crate::output::{exit, Fix, Kind, Outcome};
+use crate::help::{self, Row};
+use crate::output::{exit, Fix, Kind, Outcome, Status};
 use crate::registry::{Command, Registry};
+use crate::style::{self, Color, Stream, Style, Term};
 use crate::suggest::closest;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::{Command as Process, Stdio};
+
+pub use crate::help::{list_description, BRIEF_MAX};
 
 /// CLI-only ergonomic shorthands for a canonical command path, resolved HERE
 /// — before the greedy path match below — so a shorthand never becomes a
@@ -104,6 +115,17 @@ fn known_paths(registry: &Registry) -> Vec<Vec<String>> {
 /// Returns `Err(Outcome)` for a usage error (`--help`, unknown command) so the
 /// caller can render it as JSON or text uniformly.
 pub fn parse(argv: &[String], door: Door, bin_name: &str, registry: &Registry) -> Result<(Invocation, bool), Outcome> {
+    parse_with(argv, door, bin_name, registry, &Term::plain())
+}
+
+/// [`parse`] writing its listings and refusals the way `t` says.
+fn parse_with(
+    argv: &[String],
+    door: Door,
+    bin_name: &str,
+    registry: &Registry,
+    t: &Term,
+) -> Result<(Invocation, bool), Outcome> {
     // First split off flags anywhere; positionals keep order.
     let mut positionals: Vec<String> = Vec::new();
     let mut flags: BTreeMap<String, String> = BTreeMap::new();
@@ -200,13 +222,7 @@ pub fn parse(argv: &[String], door: Door, bin_name: &str, registry: &Registry) -
     }
 
     if positionals.is_empty() {
-        // `aoide --help` (no command) → the root usage at exit 0; bare `aoide`
-        // is still the usage error (exit 2).
-        return if help {
-            Err(help_outcome(bin_name, usage_root(registry, bin_name).message))
-        } else {
-            Err(usage_root(registry, bin_name))
-        };
+        return Err(help_outcome(bin_name, help::overview(registry, bin_name, t)));
     }
 
     resolve_aliases(&mut positionals);
@@ -214,7 +230,7 @@ pub fn parse(argv: &[String], door: Door, bin_name: &str, registry: &Registry) -
     // `--help` on a group (`secrets`, `graph project`) lists the group, even
     // when a shorter registered command (`graph`) is a prefix of it.
     if help && registry.get(&positionals).is_none() {
-        if let Some(message) = group_usage(&positionals, registry, bin_name) {
+        if let Some(message) = help::group(&positionals, registry, bin_name, t) {
             return Err(help_outcome(&positionals.join("."), message));
         }
     }
@@ -232,22 +248,22 @@ pub fn parse(argv: &[String], door: Door, bin_name: &str, registry: &Registry) -
             // A `--help` on an unknown path still surfaces the command list
             // rather than a bare "unknown command".
             if help {
-                return Err(help_outcome(&positionals.join("."), usage_root(registry, bin_name).message));
+                return Err(help_outcome(&positionals.join("."), help::overview(registry, bin_name, t)));
             }
-            return Err(unknown_command_outcome(&positionals, registry, bin_name));
+            return Err(unknown_command_outcome(&positionals, registry, bin_name, t));
         }
     };
 
     // `--help`/`-h` on a known subcommand → that subcommand's usage (exit 0).
     if help {
-        return Err(help_outcome(&path.join("."), command_usage(&path, registry, bin_name)));
+        return Err(help_outcome(&path.join("."), command_usage(&path, registry, bin_name, t)));
     }
 
     // Reject an unrecognised flag by name (exit 2) — never silently swallow it.
     let args = positionals[path.len()..].to_vec();
 
     if let Some(bad) = unknown_flag(&path, &flags, registry) {
-        return Err(unknown_flag_outcome(&bad, &path, &args, &flags, registry, bin_name));
+        return Err(unknown_flag_outcome(&bad, &path, &args, &flags, registry, bin_name, t));
     }
 
     // A matched command that declares NO positional args of its own must not
@@ -263,7 +279,7 @@ pub fn parse(argv: &[String], door: Door, bin_name: &str, registry: &Registry) -
     if !args.is_empty() {
         if let Some(c) = command_for(&path, registry) {
             if c.args.is_empty() {
-                return Err(unknown_command_outcome(&positionals, registry, bin_name));
+                return Err(unknown_command_outcome(&positionals, registry, bin_name, t));
             }
         }
     }
@@ -314,26 +330,21 @@ fn other_binary(head: &str, bin_name: &str, registry: &Registry) -> Option<&'sta
     }
 }
 
-/// The usage error for an unresolvable invocation. Four shapes, by intent:
+/// The answer to an unresolvable invocation. Four shapes, by intent:
 ///
-/// * The input is a strict PREFIX of ≥1 known paths (`graph project`) — the
-///   caller found a real group, just not a leaf: list the subgroup's commands
-///   instead of crying "unknown command".
+/// * The input is exactly a GROUP (`secrets`, `graph project`) — the caller
+///   asked what is there: its listing, informational (exit 0).
 /// * The head belongs to the other binary (`aoide rice stage`): say so and
 ///   give the command to run there.
 /// * A typo of a command, group or leaf — each typed segment matched against
 ///   the registered paths by edit distance (`nodee lst` → `node list`).
 /// * Neither close nor a group: list what IS valid at the point it went wrong.
 ///
-/// Either way the message ends with the `aoide --help` pointer.
-fn unknown_command_outcome(positionals: &[String], registry: &Registry, bin_name: &str) -> Outcome {
-    let sub: Vec<&Command> = registry
-        .commands()
-        .filter(|c| {
-            c.path.len() > positionals.len()
-                && c.path.iter().zip(positionals).all(|(a, b)| *a == b)
-        })
-        .collect();
+/// The refusals end with the `aoide --help` pointer.
+fn unknown_command_outcome(positionals: &[String], registry: &Registry, bin_name: &str, t: &Term) -> Outcome {
+    if let Some(listing) = help::group(positionals, registry, bin_name, t) {
+        return help_outcome(&positionals.join("."), listing);
+    }
     if let Some(other) = other_binary(&positionals[0], bin_name, registry) {
         return Outcome::refuse(
             positionals[0].clone(),
@@ -343,34 +354,16 @@ fn unknown_command_outcome(positionals: &[String], registry: &Registry, bin_name
             Fix::Run(format!("{other} {}", positionals.join(" "))),
         );
     }
-    let message = if !sub.is_empty() {
-        let width = sub
-            .iter()
-            .map(|c| c.path.join(" ").len() + signature(c).len())
-            .max()
-            .unwrap_or(0);
-        let mut m = format!("`{}` is a command group, not a command:\n", positionals.join(" "));
-        for c in &sub {
-            m.push_str(&command_line(c, width));
-            m.push('\n');
-        }
-        m.pop();
-        m
+    let mut message = format!("unknown command: `{}`", positionals.join(" "));
+    let suggestions = did_you_mean(positionals, registry);
+    if suggestions.is_empty() {
+        message.push_str(&format!("\n\n{}", help::choices(positionals, registry, t)));
     } else {
-        let mut m = format!("unknown command: `{}`", positionals.join(" "));
-        let suggestions = did_you_mean(positionals, registry);
-        if !suggestions.is_empty() {
-            m.push_str("\n\ndid you mean:");
-            for s in suggestions {
-                m.push_str(&format!("\n  {bin_name} {s}"));
-            }
-        } else {
-            let (at, choices) = valid_choices(positionals, registry);
-            let scope = if at.is_empty() { String::new() } else { format!("`{at}` has: ") };
-            m.push_str(&format!("\n\n{scope}{}", choices.join(", ")));
+        message.push_str("\n\ndid you mean:");
+        for s in suggestions {
+            message.push_str(&format!("\n  {}", t.style.suggest(&format!("{bin_name} {s}"))));
         }
-        m
-    };
+    }
     Outcome::usage(
         positionals.join("."),
         format!("{message}\n\nrun '{bin_name} --help' for the full command list"),
@@ -381,29 +374,6 @@ fn article_for(bin_name: &str) -> String {
     format!("{} {bin_name}", if bin_name.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" })
 }
 
-/// The next-segment names valid after the longest exactly-matching prefix of
-/// what was typed, and that prefix spelled out (empty at the root).
-fn valid_choices(positionals: &[String], registry: &Registry) -> (String, Vec<String>) {
-    let mut depth = 0;
-    while depth < positionals.len()
-        && registry
-            .commands()
-            .any(|c| c.path.len() > depth && c.path[..=depth].iter().zip(positionals).all(|(a, b)| a == b))
-    {
-        depth += 1;
-    }
-    let mut next: Vec<String> = Vec::new();
-    for c in registry.commands() {
-        if c.path.len() > depth && c.path[..depth].iter().zip(positionals).all(|(a, b)| a == b) {
-            let seg = c.path[depth].to_string();
-            if !next.contains(&seg) {
-                next.push(seg);
-            }
-        }
-    }
-    (positionals[..depth].join(" "), next)
-}
-
 /// The closest registered paths to a typo'd input, nearest first, at most
 /// two. Each typed segment is matched against the same segment of a path by
 /// edit distance, so a typo in a group (`nodee list`), a leaf (`node lst`) or
@@ -411,8 +381,8 @@ fn valid_choices(positionals: &[String], registry: &Registry) -> (String, Vec<St
 /// end (the arguments) are carried over verbatim. A path the input already
 /// matches exactly is never a suggestion — that input is not a typo.
 fn did_you_mean(positionals: &[String], registry: &Registry) -> Vec<String> {
-    let mut scored: Vec<(usize, String)> = Vec::new();
-    for c in registry.commands() {
+    let mut scored: Vec<(usize, usize, String)> = Vec::new();
+    for c in registry.commands().filter(|c| !c.internal) {
         let k = c.path.len().min(positionals.len());
         let mut total = 0;
         let mut ok = true;
@@ -432,13 +402,13 @@ fn did_you_mean(positionals: &[String], registry: &Registry) -> Vec<String> {
         let mut words: Vec<&str> = c.path[..k].to_vec();
         words.extend(positionals[k..].iter().map(String::as_str));
         let line = words.join(" ");
-        if !scored.iter().any(|(_, l)| *l == line) {
-            scored.push((total, line));
+        if !scored.iter().any(|(_, _, l)| *l == line) {
+            scored.push((total, help::rank(registry, c.path[0]), line));
         }
     }
-    // Stable sort: ties keep registration order (the schema's own order).
-    scored.sort_by_key(|(d, _)| *d);
-    scored.into_iter().take(2).map(|(_, p)| p).collect()
+    // Nearest first; a tie goes to the head listed first, then registration order.
+    scored.sort_by_key(|(d, r, _)| (*d, *r));
+    scored.into_iter().take(2).map(|(_, _, p)| p).collect()
 }
 
 /// Flags accepted for a command: the schema-declared ones (which already
@@ -471,10 +441,11 @@ fn unknown_flag_outcome(
     flags: &BTreeMap<String, String>,
     registry: &Registry,
     bin_name: &str,
+    t: &Term,
 ) -> Outcome {
     let me = format!("{bin_name} {}", path.join(" "));
     let Some(c) = command_for(path, registry) else {
-        return unknown_command_outcome(path, registry, bin_name);
+        return unknown_command_outcome(path, registry, bin_name, t);
     };
     let mut taken: Vec<&str> = c.flags.iter().map(|f| f.name).collect();
     taken.push("audit-log");
@@ -518,54 +489,59 @@ fn help_outcome(cmd: &str, message: String) -> Outcome {
 
 /// The per-subcommand usage block printed for `--help`/`-h`, built from the
 /// registry so it can never drift from the real arg/flag set.
-fn command_usage(path: &[String], registry: &Registry, bin_name: &str) -> String {
+fn command_usage(path: &[String], registry: &Registry, bin_name: &str, t: &Term) -> String {
     let Some(c) = command_for(path, registry) else {
-        return usage_root(registry, bin_name).message;
+        return help::overview(registry, bin_name, t);
     };
-    let mut s = format!("usage: {}\n\n{}", c.synopsis(bin_name, true), c.summary);
+    let st = t.style;
+    let summary = style::wrap(c.summary, t.width).join("\n");
+    let mut s = format!("{}\n\n{summary}", help::usage_line(&c.synopsis(bin_name, true), t));
     if !c.implemented {
-        s.push_str("\n\n(not yet implemented)");
+        s.push_str(&format!("\n\n{}", st.stub("(not yet implemented)")));
     }
     if !c.args.is_empty() {
-        s.push_str("\n\nargs:");
-        for a in c.args {
-            let req = if a.required { "required" } else { "optional" };
-            s.push_str(&format!("\n  <{}>  ({req}) {}", a.name, a.description));
-        }
+        let rows: Vec<Row> = c
+            .args
+            .iter()
+            .map(|a| Row {
+                note: format!("({})", if a.required { "required" } else { "optional" }),
+                ..Row::new(format!("<{}>", a.name), "", a.description)
+            })
+            .collect();
+        s.push_str(&format!("\n\n{}\n{}", st.heading("args:"), help::table(&rows, t)));
     }
-    let lefts: Vec<String> = c
+    let rows: Vec<Row> = c
         .flags
         .iter()
-        .map(|f| if f.takes_value() { format!("--{} <{}>", f.name, f.placeholder()) } else { format!("--{}", f.name) })
+        .map(|f| {
+            let mut notes: Vec<String> = Vec::new();
+            if f.required && f.default.is_empty() {
+                notes.push("required".into());
+            }
+            if !f.values.is_empty() {
+                notes.push(format!("one of: {}", f.values.join(", ")));
+            }
+            if !f.default.is_empty() {
+                notes.push(format!("default: {}", f.default));
+            }
+            let args = if f.takes_value() { format!("<{}>", f.placeholder()) } else { String::new() };
+            Row {
+                note: if notes.is_empty() { String::new() } else { format!("({})", notes.join("; ")) },
+                ..Row::new(format!("--{}", f.name), args, f.description)
+            }
+        })
         .collect();
-    let width = lefts.iter().map(|l| l.chars().count()).max().unwrap_or(0);
-    s.push_str("\n\nflags:");
-    for (f, left) in c.flags.iter().zip(&lefts) {
-        let mut notes: Vec<String> = Vec::new();
-        if f.required && f.default.is_empty() {
-            notes.push("required".into());
-        }
-        if !f.values.is_empty() {
-            notes.push(format!("one of: {}", f.values.join(", ")));
-        }
-        if !f.default.is_empty() {
-            notes.push(format!("default: {}", f.default));
-        }
-        let note = if notes.is_empty() { String::new() } else { format!("({}) ", notes.join("; ")) };
-        s.push_str(&format!("\n  {left:<width$}  {note}{}", f.description));
+    s.push_str(&format!("\n\n{}\n{}", st.heading("flags:"), help::table(&rows, t)));
+    for group in c.one_of {
+        let names: Vec<String> = group.iter().map(|n| format!("--{n}")).collect();
+        s.push_str(&format!("\n\none of {} is required", names.join(" / ")));
     }
-    if !c.one_of.is_empty() {
-        for group in c.one_of {
-            let names: Vec<String> = group.iter().map(|n| format!("--{n}")).collect();
-            s.push_str(&format!("\n\none of {} is required", names.join(" / ")));
-        }
-    }
-    let subs = children_listing(path, registry);
+    let subs = help::children(path, registry, t);
     if !subs.is_empty() {
-        s.push_str(&format!("\n\nsubcommands:\n{subs}"));
+        s.push_str(&format!("\n\n{}\n{subs}", st.heading("subcommands:")));
     }
     if !c.examples.is_empty() {
-        s.push_str("\n\nexamples:");
+        s.push_str(&format!("\n\n{}", st.heading("examples:")));
         for ex in c.examples {
             s.push_str(&format!("\n  {}", example_line(ex, bin_name, registry)));
         }
@@ -583,45 +559,6 @@ fn example_line(example: &str, bin_name: &str, registry: &Registry) -> String {
     } else {
         example.to_string()
     }
-}
-
-/// The commands strictly below `path`, aligned, for a group's `--help`.
-fn children_listing(path: &[String], registry: &Registry) -> String {
-    let kids: Vec<&Command> = registry
-        .commands()
-        .filter(|c| c.path.len() > path.len() && c.path.iter().zip(path).all(|(a, b)| *a == b))
-        .collect();
-    let width = kids.iter().map(|c| c.path.join(" ").len() + signature(c).len()).max().unwrap_or(0);
-    kids.iter().map(|c| command_line(c, width)).collect::<Vec<_>>().join("\n")
-}
-
-/// `--help` on a group that is not itself a command (`secrets` has none of
-/// its own): its commands, not the root list. `None` when `path` is no group.
-fn group_usage(path: &[String], registry: &Registry, bin_name: &str) -> Option<String> {
-    let listing = children_listing(path, registry);
-    if listing.is_empty() {
-        return None;
-    }
-    Some(format!(
-        "usage: {bin_name} {} <command> [args] [--json]\n\ncommands:\n{listing}\n\n\
-         Run '{bin_name} {} <command> --help' for args, flags, and examples.",
-        path.join(" "),
-        path.join(" ")
-    ))
-}
-
-/// The arg signature shared by `command_usage` and the root help's per-command
-/// lines — one builder, so both can never disagree about `<req>`/`[<opt>]`.
-fn signature(c: &Command) -> String {
-    let mut sig = String::new();
-    for a in c.args {
-        if a.required {
-            sig.push_str(&format!(" <{}>", a.name));
-        } else {
-            sig.push_str(&format!(" [<{}>]", a.name));
-        }
-    }
-    sig
 }
 
 /// What the registry declares `--name` to be at this point in the parse —
@@ -775,105 +712,6 @@ fn ambiguous_flag_outcome(
     Outcome::usage(continued.join("."), m)
 }
 
-/// The longest a list description runs; `Command::brief` is held to it.
-pub const BRIEF_MAX: usize = 72;
-
-/// GNU-style terseness for list output: the first sentence of a command's
-/// summary, cut at the last clause or word boundary inside the cap so it never
-/// ends mid-word. The registry summaries are deliberate multi-sentence prose;
-/// that prose still lives behind `aoide <cmd> --help` — the root list is a
-/// list, not the docs. A command that sets `brief` skips all of this.
-fn short_desc(summary: &str) -> String {
-    let end = summary
-        .find(". ")
-        .map(|i| i + 1) // keep the period
-        .or_else(|| summary.find('\n'))
-        .unwrap_or(summary.len());
-    let s = summary[..end].trim_end();
-    if s.chars().count() <= BRIEF_MAX {
-        return s.to_string();
-    }
-    let prefix: String = s.chars().take(BRIEF_MAX).collect();
-    let clause = prefix.rfind(['—', ';', ':', ',']).filter(|i| prefix[..*i].chars().count() >= BRIEF_MAX / 2);
-    let cut = clause.or_else(|| prefix.rfind(char::is_whitespace)).unwrap_or(prefix.len());
-    format!("{}…", prefix[..cut].trim_end())
-}
-
-/// What a list shows beside a command: its `brief`, else the first sentence
-/// of its summary cut to fit.
-pub fn list_description(c: &Command) -> String {
-    if c.brief.is_empty() {
-        short_desc(c.summary)
-    } else {
-        c.brief.to_string()
-    }
-}
-
-/// The aligned `  <path + signature>  <short description>` line used by both
-/// the root help and the partial-path subgroup listing.
-fn command_line(c: &Command, width: usize) -> String {
-    let lhs = format!("{}{}", c.path.join(" "), signature(c));
-    let stub = if c.implemented { "" } else { " (not yet implemented)" };
-    format!("  {lhs:<width$}  {}{stub}", list_description(c))
-}
-
-fn usage_root(registry: &Registry, bin_name: &str) -> Outcome {
-    // Group by first path segment, preserving registration order inside each
-    // group (the registry's own order is load-bearing — registry.rs module
-    // docs). Group order is first-appearance order: no sorting, so a newly
-    // appended group lands at the bottom rather than reshuffling the list.
-    let mut groups: Vec<(&str, Vec<&Command>)> = Vec::new();
-    for c in registry.commands() {
-        let head = c.path[0];
-        match groups.iter_mut().find(|(g, _)| *g == head) {
-            Some((_, cs)) => cs.push(c),
-            None => groups.push((head, vec![c])),
-        }
-    }
-    let width = registry
-        .commands()
-        .map(|c| c.path.join(" ").len() + signature(c).len())
-        .max()
-        .unwrap_or(0);
-
-    let mut s = format!("usage: {bin_name} <command> [args] [--json]\n\ncommands:");
-    for (group, cmds) in &groups {
-        s.push('\n');
-        s.push_str(&format!("{group}\n"));
-        for c in cmds {
-            s.push_str(&command_line(c, width));
-            s.push('\n');
-        }
-    }
-    // Drop the trailing newline of the last group before the footer.
-    s.pop();
-    s.push_str(&format!(
-        "\n\nRun '{bin_name} <command> --help' for args, flags, and examples. \
-         '{bin_name} guide' prints the tier map."
-    ));
-
-    // A SEPARATE trailing section for external subcommands (task #138,
-    // Fork C) — never interleaved with the built-in groups above, since
-    // interleaving would imply a contract (`--json`, an exit-code map,
-    // `gated`) aoide cannot make for a foreign binary. Deliberately absent
-    // from `aoide guide` (tier-0 onboarding is a fixed narrative about
-    // aoide's own four tiers, not a host-dependent plugin list); `schema
-    // --json`'s own `external` key is the machine-readable form of the same
-    // PATH probe. Empty when nothing is installed, so `--help` on a host
-    // with no plugins is unchanged from before this existed — same
-    // discipline as `schema --json`'s additive `external` key.
-    let external = crate::bin::discover_external(bin_name);
-    if !external.is_empty() {
-        let ext_width = external.iter().map(|(name, _)| name.len()).max().unwrap_or(0);
-        s.push_str(&format!("\n\nexternal ({bin_name}-* on PATH, not part of this schema):"));
-        for (name, path) in &external {
-            s.push_str(&format!("\n  {name:<ext_width$}  {}", path.display()));
-        }
-    }
-
-    Outcome::usage(bin_name, s)
-}
-
 /// Every first path segment a registered command begins with, plus every
 /// [`ALIASES`] entry's own first segment — the set an external-command probe
 /// must never shadow (module doc's step 3). A built-in always wins, and a
@@ -979,24 +817,29 @@ pub fn run(
         return run_external(&path, &argv[1..], bin_name, &argv[0]);
     }
 
-    let (inv, json) = match parse(argv, door, bin_name, registry) {
+    let json = wants_json(argv);
+    let (rest, mode) = match style::take_color(argv) {
+        Ok(v) => v,
+        Err(bad) => {
+            let refusal = Outcome::refuse(
+                "color",
+                Kind::Usage,
+                format!("`--color {bad}` is not a color mode"),
+                format!("the modes are {}", Color::VALUES.join(", ")),
+                Fix::Run(format!("{bin_name} --color={}", Color::VALUES[0])),
+            );
+            return print(&refusal, json, Style::for_stream(Color::Auto, json, Stream::Err), false);
+        }
+    };
+    let width = style::width();
+    let for_stream = |stream| Term { style: Style::for_stream(mode, json, stream), width };
+
+    let (inv, json) = match parse_with(&rest, door, bin_name, registry, &Term { style: Style::OFF, width }) {
         Ok(v) => v,
         Err(o) => {
-            let json = wants_json(argv);
-            let (body, code) = o.render(json);
-            if code == exit::OK {
-                // Informational (a `--help`/`-h` usage block): to stdout, exit 0.
-                // Text mode prints the raw usage; `--json` still emits the
-                // envelope so a tool reading `--help --json` gets structure.
-                if json {
-                    println!("{body}");
-                } else {
-                    println!("{}", o.message);
-                }
-            } else {
-                eprintln!("{body}");
-            }
-            return code;
+            let t = for_stream(if o.status == Status::Ok { Stream::Out } else { Stream::Err });
+            let o = if t.style == Style::OFF { o } else { parse_with(&rest, door, bin_name, registry, &t).err().unwrap_or(o) };
+            return print(&o, json, t.style, true);
         }
     };
 
@@ -1005,9 +848,18 @@ pub fn run(
     }
 
     let outcome = dispatch(&inv);
-    let (body, code) = outcome.render(json);
+    let stream = if outcome.status == Status::Ok { Stream::Out } else { Stream::Err };
+    print(&outcome, json, Style::for_stream(mode, json, stream), false)
+}
+
+/// Write an outcome where its status says (ok on stdout, the rest on stderr)
+/// and return its exit code. A parse result that is informational (`--help`,
+/// a group's page) prints its message raw in text mode; `--json` always
+/// prints the envelope.
+fn print(o: &Outcome, json: bool, st: Style, raw_ok: bool) -> i32 {
+    let (body, code) = o.render_styled(json, st);
     if code == exit::OK {
-        println!("{body}");
+        println!("{}", if raw_ok && !json { &o.message } else { &body });
     } else {
         eprintln!("{body}");
     }
@@ -1677,40 +1529,6 @@ mod tests {
         assert_eq!(code, exit::NOT_IMPLEMENTED);
     }
 
-    #[test]
-    fn short_desc_keeps_the_first_sentence_only() {
-        assert_eq!(short_desc("One sentence. Two sentences."), "One sentence.");
-        // A newline also ends the "sentence"; no dangling whitespace.
-        assert_eq!(short_desc("First line\nsecond line"), "First line");
-        // Short summaries pass through whole.
-        assert_eq!(short_desc("Terse."), "Terse.");
-    }
-
-    #[test]
-    fn short_desc_truncates_a_chatty_opener_at_a_word_boundary() {
-        let long = "This opener runs on and on well past the cap without a single period to stop it anywhere at all.";
-        let out = short_desc(long);
-        assert!(out.ends_with('…'), "ellipsis marks the cut: {out}");
-        assert!(out.chars().count() <= BRIEF_MAX + 1, "cap + ellipsis: {}", out.len());
-        let body = out.trim_end_matches('…');
-        assert!(long.starts_with(body), "never invents text: {out}");
-        // Word-boundary cut: the next char in the source after the kept body
-        // is whitespace (nothing half-swallowed).
-        let next = long[body.len()..].chars().next();
-        assert!(next.is_none_or(|ch| ch.is_whitespace()), "mid-word cut: {out}");
-    }
-
-    #[test]
-    fn short_desc_is_multibyte_safe_at_the_cap() {
-        // ▶ is 3 bytes — byte-naive truncation at the cap would panic; the
-        // char-based cut must not.
-        let s = format!("{} watch the ▶ marker glide past the truncation cap without a panic.", "x".repeat(50));
-        let out = short_desc(&s);
-        assert!(out.ends_with('…'));
-        // And a short string containing ▶ passes through untouched.
-        assert_eq!(short_desc("Highlight ▶ node."), "Highlight ▶ node.");
-    }
-
     // ── help + typo behaviour ───────────────────────────────────────────────
 
     #[test]
@@ -1724,7 +1542,7 @@ mod tests {
         assert_eq!(via_word.message, via_flag.message);
         let root = parse(&argv(&["help"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert_eq!(root.status, Status::Ok);
-        assert!(root.message.starts_with("usage: aoide <command>"), "{}", root.message);
+        assert!(root.message.contains("usage: aoide <command>"), "{}", root.message);
         restore_path(dir, saved);
     }
 
@@ -1734,7 +1552,7 @@ mod tests {
         let err = parse(&argv(&["graph", "project", "--help"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert_eq!(err.status, Status::Ok);
         assert!(err.message.starts_with("usage: aoide graph project <command>"), "{}", err.message);
-        assert!(err.message.contains("graph project add"));
+        assert!(err.message.contains("\n  add <name>"), "{}", err.message);
         assert!(!err.message.contains("node remove"), "only the group's own commands: {}", err.message);
     }
 
@@ -1743,7 +1561,7 @@ mod tests {
         let reg = test_registry();
         let err = parse(&argv(&["graph", "--help"]), Door::Cli, "aoide", &reg).unwrap_err();
         assert!(err.message.starts_with("usage: aoide graph"), "{}", err.message);
-        assert!(err.message.contains("subcommands:\n  graph view"), "{}", err.message);
+        assert!(err.message.contains("subcommands:\n  view"), "{}", err.message);
     }
 
     #[test]
@@ -1784,6 +1602,53 @@ mod tests {
     }
 
     #[test]
+    fn bare_help_and_dash_dash_help_are_one_overview_at_exit_zero() {
+        let _guard = crate::bin::path_test_lock().lock().unwrap();
+        let (dir, saved) = scoped_empty_path("bare_overview");
+        let reg = test_registry();
+        let bare = parse(&argv(&[]), Door::Cli, "aoide", &reg).unwrap_err();
+        let word = parse(&argv(&["help"]), Door::Cli, "aoide", &reg).unwrap_err();
+        let flag = parse(&argv(&["--help"]), Door::Cli, "aoide", &reg).unwrap_err();
+        for o in [&bare, &word, &flag] {
+            assert_eq!((o.status, o.render(false).1), (Status::Ok, exit::OK));
+        }
+        assert_eq!(bare.message, word.message);
+        assert_eq!(bare.message, flag.message);
+        restore_path(dir, saved);
+    }
+
+    #[test]
+    fn a_group_named_exactly_lists_itself_at_exit_zero_and_a_longer_miss_stays_a_usage_error() {
+        let reg = test_registry();
+        let group = parse(&argv(&["graph", "project"]), Door::Cli, "aoide", &reg).unwrap_err();
+        assert_eq!((group.status, group.render(false).1), (Status::Ok, exit::OK));
+        assert!(group.message.starts_with("usage: aoide graph project <command>"), "{}", group.message);
+        let miss = parse(&argv(&["graph", "projet"]), Door::Cli, "aoide", &reg).unwrap_err();
+        assert_eq!(miss.render(false).1, exit::USAGE);
+    }
+
+    #[test]
+    fn suggestions_are_bold_only_when_the_term_is_styled() {
+        let reg = test_registry();
+        let styled = Term { style: Style::ON, width: 80 };
+        let plain = parse_with(&argv(&["grap", "view"]), Door::Cli, "aoide", &reg, &Term { style: Style::OFF, width: 80 }).unwrap_err();
+        let bold = parse_with(&argv(&["grap", "view"]), Door::Cli, "aoide", &reg, &styled).unwrap_err();
+        assert!(bold.message.contains("\x1b[1maoide graph view\x1b[0m"), "{:?}", bold.message);
+        assert!(!plain.message.contains('\x1b'));
+    }
+
+    #[test]
+    fn a_tie_between_equally_near_commands_goes_to_the_head_listed_first() {
+        let mut r = Registry::new();
+        for path in [&["beta", "go"][..], &["alpha", "go"][..]] {
+            r.insert(Command { path, summary: "Go.", flags: &[JSON_FLAG], ..Command::BLANK });
+        }
+        r.arrange(crate::registry::Layout { tagline: "", sections: &[("All", &[("alpha", ""), ("beta", "")])] });
+        let tie = did_you_mean(&["alphx".to_string(), "go".to_string()], &r);
+        assert_eq!(tie, vec!["alpha go"]);
+    }
+
+    #[test]
     fn a_head_the_other_binary_owns_says_where_to_run_it() {
         let reg = test_registry();
         let err = parse(&argv(&["rice", "stage", "dusk"]), Door::Cli, "aoide", &reg).unwrap_err();
@@ -1808,17 +1673,16 @@ mod tests {
     #[test]
     fn a_stub_is_marked_in_every_list() {
         let mut r = Registry::new();
-        r.insert(Command {
-            path: &["later"],
-            summary: "Not built yet.",
-            implemented: false,
-            flags: &[JSON_FLAG],
-            ..Command::BLANK
-        });
+        r.insert(Command { path: &["later"], summary: "Not built yet.", implemented: false, flags: &[JSON_FLAG], ..Command::BLANK });
+        r.insert(Command { path: &["mixed", "now"], summary: "Works.", flags: &[JSON_FLAG], ..Command::BLANK });
+        r.insert(Command { path: &["mixed", "soon"], summary: "Will work.", implemented: false, flags: &[JSON_FLAG], ..Command::BLANK });
         let _guard = crate::bin::path_test_lock().lock().unwrap();
         let (dir, saved) = scoped_empty_path("stub_marker");
-        let root = usage_root(&r, "aoide").message;
-        assert!(root.contains("later") && root.contains("Not built yet. (not yet implemented)"), "{root}");
+        let t = Term { style: Style::OFF, width: 80 };
+        let root = help::overview(&r, "aoide", &t);
+        assert!(root.contains("Not yet implemented\n  later  Not built yet."), "{root}");
+        let group = help::group(&["mixed".to_string()], &r, "aoide", &t).unwrap();
+        assert!(group.contains("soon  Will work. (not yet implemented)"), "{group}");
         restore_path(dir, saved);
     }
 
