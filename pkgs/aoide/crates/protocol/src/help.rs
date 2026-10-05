@@ -103,15 +103,13 @@ fn render_rows(rows: &[Row], indent: usize, col: usize, t: &Term) -> Vec<String>
         let left = if r.args.is_empty() { name } else { format!("{name} {}", st.args(&r.args)) };
         let full = [r.note.as_str(), r.text.as_str()].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" ");
         let mut lines = wrap(&full, avail).into_iter().enumerate().map(|(i, l)| {
-            let l = match l.strip_prefix(&r.note).filter(|_| i == 0 && !r.note.is_empty()) {
+            if r.stub {
+                return st.stub(&l);
+            }
+            match l.strip_prefix(&r.note).filter(|_| i == 0 && !r.note.is_empty()) {
                 Some(rest) if r.note.starts_with("(required") => format!("{}{rest}", st.required(&r.note)),
                 Some(rest) => format!("{}{rest}", st.args(&r.note)),
                 None => l,
-            };
-            if r.stub {
-                st.stub(&l)
-            } else {
-                l
             }
         });
         let first = lines.next().unwrap_or_default();
