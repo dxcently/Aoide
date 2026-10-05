@@ -375,7 +375,9 @@
   `Invocation::command_line`, whole, never `...`. A new admin command's handler
   calls `require_admin_identity(inv, cmd)` and routes its errors through
   `admin_dispatch`; it never formats a failure itself.
-- **`secrets put` refuses a value that is empty or only whitespace, and the
+- **`secrets put` refuses a value that is empty or only whitespace, at the
+  client (`run_put`) AND in the broker's `put_gate` (so a wire caller that skips
+  the client cannot store one; the reply is `client::EMPTY_VALUE`), and the
   A2A door treats an empty resolved bearer as a resolve failure.** The first
   keeps a failed producer before the pipe from storing "no secret"; the second
   keeps one that was stored anyway from reading as "no token configured" at

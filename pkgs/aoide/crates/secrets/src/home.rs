@@ -58,6 +58,9 @@ use std::path::{Path, PathBuf};
 
 use crate::peercred::PeerUser;
 
+/// The words every refusal for a wrong identity carries; `teach` classifies on them.
+pub const MUST_RUN_AS_BROKER: &str = "must run as the broker user";
+
 /// Resolve the secrets home: `$AOIDE_SECRETS_HOME` when set to a non-blank
 /// value, else the placeholder default (see module doc).
 pub fn secrets_home() -> PathBuf {
@@ -207,7 +210,7 @@ pub fn admin_identity_error(euid: &PeerUser, home_owner: &PeerUser, home: &Path,
         describe(euid)
     };
     Some(format!(
-        "secrets {subcommand} must run as the broker user ({}, the owner of {}) — this process is running as {running_as}",
+        "secrets {subcommand} {MUST_RUN_AS_BROKER} ({}, the owner of {}) — this process is running as {running_as}",
         describe(home_owner),
         home.display()
     ))
@@ -235,7 +238,7 @@ pub fn admin_identity_error_for_missing_home(euid: &PeerUser, home: &Path, subco
         return None;
     }
     Some(format!(
-        "secrets {subcommand} must run as the broker user, not root — {} does not exist yet, and root creating it \
+        "secrets {subcommand} {MUST_RUN_AS_BROKER}, not root — {} does not exist yet, and root creating it \
          would leave policy.json/totp.secret owned root:root, bricking the broker before it even starts. \
          First-time provisioning belongs to the broker's own service (systemd's StateDirectory) or an explicit \
          `sudo -u aoide-secrets` run",
@@ -262,7 +265,7 @@ pub fn admin_identity_check(home: &Path, subcommand: &str) -> Option<String> {
     // gets, rather than a pass.
     let Some(me) = effective_user() else {
         return Some(format!(
-            "secrets {subcommand} must run as the broker user, and this process's own identity could not be \
+            "secrets {subcommand} {MUST_RUN_AS_BROKER}, and this process's own identity could not be \
              read on this host — refusing rather than assuming"
         ));
     };

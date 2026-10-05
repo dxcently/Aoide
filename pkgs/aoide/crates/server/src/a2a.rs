@@ -299,7 +299,8 @@ pub fn launch_token(token_file: &str) -> String {
     }
     read_expected_token(token_file).unwrap_or_else(|| {
         eprintln!(
-            "aoide a2a: token file `{token_file}` holds no token — refusing every bearer check (fail closed)"
+            "aoide a2a: token file `{token_file}` holds no token — refusing every bearer check (fail closed); \
+             create the file with the token, then restart aoide-a2a"
         );
         resolve_failure_sentinel()
     })
@@ -15340,8 +15341,10 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         assert!(connected, "broker did not bind {} in time", socket_path.display());
-        let stored = aoide_secrets::client::put(&socket_path, "empty-door-token", "", true);
-        assert!(stored.is_ok(), "the fixture must store the empty value: {stored:?}");
+        // The broker's put refuses an empty value, so the fixture writes the
+        // `file` backend's store directly, the way a stale empty value got there.
+        std::fs::create_dir_all(home.join("store")).unwrap();
+        std::fs::write(home.join("store").join("k"), "").unwrap();
 
         let cfg = bearer_cfg("empty-door-token", &socket_path, "");
         let expected = resolve_inbound_bearer(&cfg);

@@ -168,8 +168,9 @@ the gate, not the transport.
 
 ## The write flow (`secrets put`, P-V4c; warn-before-overwrite, P-67)
 
-A value that is empty or only whitespace never reaches the broker:
-`client::run_put` returns `PutFailure::Empty` and the command refuses with
+A value that is empty or only whitespace is refused twice, so neither path stores it:
+the broker's `put_gate` answers `client::EMPTY_VALUE` on the wire, and
+`client::run_put` returns `PutFailure::Empty` before asking and the command refuses with
 what/why/fix ("nothing arrived on stdin" — the command before the pipe
 printed nothing or failed — and a generator that works). A stored empty value
 reads as no secret to every check built on it.

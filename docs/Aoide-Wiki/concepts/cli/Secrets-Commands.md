@@ -220,7 +220,7 @@ aoide secrets put <name> [--force] [--json]
   text — which a tty turns into a `y/N` confirmation and a piped stdin
   turns into a taught `--force` hint.
 - **Notes:** a value that is empty or only whitespace is refused before the
-  broker is asked ("nothing arrived on stdin": the command before the pipe
+  broker is asked, and the broker's own put refuses it again for any wire caller ("nothing arrived on stdin": the command before the pipe
   printed nothing or failed), because a stored empty value reads as no secret
   to every check built on it, the A2A door's bearer included. CLI-only,
   admin-side — no `consumer` field, never TOTP-gated. `secrets add` must register the policy first; `put` never

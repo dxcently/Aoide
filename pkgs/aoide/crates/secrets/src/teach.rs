@@ -34,11 +34,12 @@ enum Fail {
     NotAdmitted,
     NoAccess,
     NotRunning,
+    EmptyValue,
     Other,
 }
 
 fn classify(err: &str) -> Fail {
-    if err.contains("must run as the broker user") {
+    if err.contains(home::MUST_RUN_AS_BROKER) {
         Fail::BrokerUser
     } else if err == client::NOT_REGISTERED || err.starts_with(admin::NO_POLICY) {
         Fail::NotRegistered
@@ -48,6 +49,8 @@ fn classify(err: &str) -> Fail {
         Fail::NoAccess
     } else if err.contains(client::NOT_RUNNING) {
         Fail::NotRunning
+    } else if err == client::EMPTY_VALUE {
+        Fail::EmptyValue
     } else {
         Fail::Other
     }
@@ -68,6 +71,7 @@ pub fn from_broker(w: &Where, err: &str) -> Refusal {
         Fail::NotRegistered => not_registered(w),
         Fail::NotAdmitted => not_admitted(w, err),
         Fail::NoAccess => no_access(w),
+        Fail::EmptyValue => empty_value(w.secret.unwrap_or("?"), false),
         Fail::NotRunning => Refusal::new(
             Kind::Refused,
             format!("the secrets broker is not running at {}", w.socket.display()),
@@ -81,6 +85,26 @@ pub fn from_broker(w: &Where, err: &str) -> Refusal {
             Fix::None("nothing to change in this command; the cause is in the line above"),
         ),
     }
+}
+
+/// A value that is empty or only whitespace: refused by `put` at the client
+/// (`typed` says a person was at the prompt) and again by the broker's own
+/// put gate, so a caller that skips the client cannot store one either.
+pub fn empty_value(name: &str, typed: bool) -> Refusal {
+    if typed {
+        return Refusal::new(
+            Kind::Refused,
+            "nothing was typed at the prompt",
+            "an empty value stored under a secret reads as no secret at all to every check built on it",
+            Fix::Run(format!("aoide secrets put {name}")),
+        );
+    }
+    Refusal::new(
+        Kind::Refused,
+        "nothing arrived on stdin",
+        "the command before the pipe printed nothing or failed (e.g. `openssl: command not found`)",
+        Fix::Run(format!("head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \\n' | aoide secrets put {name} --force")),
+    )
 }
 
 /// An admin command run by someone other than the broker user.
@@ -246,6 +270,7 @@ mod tests {
             "aoide secrets status",
         );
         assert_eq!(classify(&down), Fail::NotRunning);
+        assert_eq!(classify(client::EMPTY_VALUE), Fail::EmptyValue);
         assert_eq!(classify("something else"), Fail::Other);
     }
 

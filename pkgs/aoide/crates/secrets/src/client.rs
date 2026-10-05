@@ -97,6 +97,10 @@ use std::time::Duration;
 /// The broker's reply for a secret no policy names.
 pub const NOT_REGISTERED: &str = "secret not found";
 
+/// The refusal text for a value that is empty or only whitespace, from the
+/// broker's `put` and echoed by the command layer.
+pub const EMPTY_VALUE: &str = "nothing arrived on stdin: the value is empty or only whitespace";
+
 /// Markers [`describe_connect_error`]'s messages carry, read by `teach::classify`.
 pub(crate) const NO_ACCESS: &str = "`aoide-secrets-access` group yet";
 pub(crate) const NOT_RUNNING: &str = "doesn't look like it's running";

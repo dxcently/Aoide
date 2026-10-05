@@ -703,22 +703,7 @@ fn handle_secrets_put(inv: &Invocation) -> Outcome {
     let socket = crate::socket::socket_path();
     match crate::client::run_put(&name, &socket, force) {
         Ok(message) => Outcome::ok(cmd, message),
-        Err(PutFailure::Empty { typed: false }) => Refusal::new(
-            Kind::Refused,
-            "nothing arrived on stdin",
-            "the command before the pipe printed nothing or failed (e.g. `openssl: command not found`)",
-            Fix::Run(format!(
-                "head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \\n' | aoide secrets put {name} --force"
-            )),
-        )
-        .into_outcome(cmd),
-        Err(PutFailure::Empty { typed: true }) => Refusal::new(
-            Kind::Refused,
-            "nothing was typed at the prompt",
-            "an empty value stored under a secret reads as no secret at all to every check built on it",
-            Fix::Run(format!("aoide secrets put {name}")),
-        )
-        .into_outcome(cmd),
+        Err(PutFailure::Empty { typed }) => teach::empty_value(&name, typed).into_outcome(cmd),
         Err(PutFailure::NeedsForce) => Refusal::new(
             Kind::Refused,
             format!("secret `{name}` already has a stored value"),
