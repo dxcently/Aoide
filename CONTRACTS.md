@@ -636,13 +636,17 @@ Contract guarantees:
   serializes byte-identical to before). On a flag: `value` (the `<placeholder>`
   help and synopses show), `required` (bool), `default` (string, applied when
   the flag is absent), `values` (the closed set of accepted values),
-  `conflicts` (flags that may not accompany it). On a command: `oneOf` (groups
+  `conflicts` (flags that may not accompany it). On a positional: `values`
+  (the closed set of accepted values) and `requiredAfter` (an optional
+  positional that is required when the one before it holds one of these
+  values, `automate <name> grant <consumer>`). On a command: `oneOf` (groups
   of flag names of which at least one must be given, `[["id","to"]]`) and
   `brief` (a list line, 72 characters at most; absent means the first sentence
   of `summary`). One validator, `Command::check`, enforces them — and the
   `Arg.required` positionals — for every door: the CLI parser, then
   `dispatch()` for the CLI, MCP, A2A and the aoided socket alike. It applies
-  defaults first, then refuses a missing positional, a missing required flag,
+  defaults first, then refuses a missing positional, a positional outside its
+  `values`, a `requiredAfter` positional left out, a missing required flag,
   an empty `oneOf` group, conflicting flags and a value outside `values` (with
   a did-you-mean), each as a usage refusal naming the item. A stub is never
   checked. The MCP tool's `inputSchema.required` lists the required

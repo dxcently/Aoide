@@ -71,7 +71,7 @@ instead of parking it, and with it every test queued behind the crate's
 A command's argument rules are DECLARED on its registry entry and checked once,
 by `Command::check` (`aoide-protocol::registry`), which `door::parse` and every
 `dispatch()` (CLI, MCP, A2A, the aoided socket) run before the handler:
-`Arg::required`, `Flag::{required, default, values, conflicts, value}`,
+`Arg::{required, values, required_after}`, `Flag::{required, default, values, conflicts, value}`,
 `Command::one_of`, `Command::brief`. A handler never re-checks what is
 declared, and never writes its own `missing --x` / `requires --x` /
 `usage: aoide …` line: `protocol/tests/no_hand_enforcement.rs` scans every

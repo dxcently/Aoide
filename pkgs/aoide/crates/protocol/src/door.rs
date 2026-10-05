@@ -503,9 +503,18 @@ fn command_usage(path: &[String], registry: &Registry, bin_name: &str, t: &Term)
         let rows: Vec<Row> = c
             .args
             .iter()
-            .map(|a| Row {
-                note: format!("({})", if a.required { "required" } else { "optional" }),
-                ..Row::new(format!("<{}>", a.name), "", a.description)
+            .map(|a| {
+                let mut notes = vec![if a.required { "required" } else { "optional" }.to_string()];
+                if !a.values.is_empty() {
+                    notes.push(format!("one of: {}", a.values.join(", ")));
+                }
+                if !a.required_after.is_empty() {
+                    notes.push(format!("required after: {}", a.required_after.join(", ")));
+                }
+                Row {
+                    note: format!("({})", notes.join("; ")),
+                    ..Row::new(format!("<{}>", a.name), "", a.description)
+                }
             })
             .collect();
         s.push_str(&format!("\n\n{}\n{}", st.heading("args:"), help::table(&rows, t)));
@@ -976,8 +985,8 @@ mod tests {
             path: &["graph", "link"],
             summary: "Record a spawned-by edge.",
             args: &[
-                Arg { name: "child", ty: "string", required: true, description: "Child session id." },
-                Arg { name: "parent", ty: "string", required: true, description: "Parent session id." },
+                Arg { name: "child", ty: "string", required: true, description: "Child session id.", ..Arg::NONE },
+                Arg { name: "parent", ty: "string", required: true, description: "Parent session id.", ..Arg::NONE },
             ],
             flags: &[JSON_FLAG],
             gated: false,
@@ -992,7 +1001,7 @@ mod tests {
         r.insert(Command {
             path: &["graph", "project", "add"],
             summary: "Register a project anchor root.",
-            args: &[Arg { name: "name", ty: "string", required: true, description: "Anchor name." }],
+            args: &[Arg { name: "name", ty: "string", required: true, description: "Anchor name.", ..Arg::NONE }],
             flags: &[JSON_FLAG],
             gated: false,
             implemented: true,
@@ -1020,7 +1029,7 @@ mod tests {
         r.insert(Command {
             path: &["node", "remove"],
             summary: "Deregister a node.",
-            args: &[Arg { name: "name", ty: "string", required: true, description: "Node name." }],
+            args: &[Arg { name: "name", ty: "string", required: true, description: "Node name.", ..Arg::NONE }],
             flags: &[JSON_FLAG],
             gated: false,
             implemented: true,
@@ -1038,8 +1047,8 @@ mod tests {
             path: &["node", "add"],
             summary: "Register a node.",
             args: &[
-                Arg { name: "name", ty: "string", required: true, description: "Node name." },
-                Arg { name: "url", ty: "string", required: true, description: "Node URL." },
+                Arg { name: "name", ty: "string", required: true, description: "Node name.", ..Arg::NONE },
+                Arg { name: "url", ty: "string", required: true, description: "Node URL.", ..Arg::NONE },
             ],
             flags: &[
                 JSON_FLAG,
@@ -1284,7 +1293,7 @@ mod tests {
         let mk = |path: &'static [&'static str], ty: &'static str| Command {
             path,
             summary: "Test.",
-            args: &[Arg { name: "x", ty: "string", required: false, description: "X." }],
+            args: &[Arg { name: "x", ty: "string", required: false, description: "X.", ..Arg::NONE }],
             flags: if ty == "bool" {
                 &[JSON_FLAG, Flag { name: "force", ty: "bool", description: "F.", ..Flag::NONE }]
             } else {

@@ -23,4 +23,60 @@ impl Invocation {
     pub fn dotted(&self) -> String {
         self.path.join(".")
     }
+
+    /// The invocation as a shell line to paste: `bin`, the path, the
+    /// positionals, then each flag (a bare `--name` for those in `bools`,
+    /// `--name value` otherwise), every word quoted for a POSIX shell.
+    pub fn command_line(&self, bin: &str, bools: &[&str]) -> String {
+        let mut words: Vec<String> = vec![bin.to_string()];
+        words.extend(self.path.iter().cloned());
+        let tail = self.args.iter().any(|a| a.starts_with('-'));
+        if !tail {
+            words.extend(self.args.iter().cloned());
+        }
+        for (k, v) in self.flags.iter().filter(|(k, _)| k.as_str() != "json") {
+            words.push(format!("--{k}"));
+            if !bools.contains(&k.as_str()) {
+                words.push(v.clone());
+            }
+        }
+        if tail {
+            words.push("--".to_string());
+            words.extend(self.args.iter().cloned());
+        }
+        words.iter().map(|w| shell_word(w)).collect::<Vec<_>>().join(" ")
+    }
+}
+
+fn shell_word(w: &str) -> String {
+    let plain = !w.is_empty() && w.chars().all(|c| c.is_ascii_alphanumeric() || "-_./:=,@%+".contains(c));
+    if plain {
+        w.to_string()
+    } else {
+        format!("'{}'", w.replace('\'', "'\\''"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn inv(path: &[&str], args: &[&str], flags: &[(&str, &str)]) -> Invocation {
+        Invocation {
+            path: path.iter().map(|s| s.to_string()).collect(),
+            args: args.iter().map(|s| s.to_string()).collect(),
+            flags: flags.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            door: Door::Cli,
+        }
+    }
+
+    #[test]
+    fn the_command_line_is_pasteable_with_words_quoted() {
+        let i = inv(&["secrets", "automate"], &["sudo-pass", "grant", "orchestrator"], &[]);
+        assert_eq!(i.command_line("aoide", &[]), "aoide secrets automate sudo-pass grant orchestrator");
+        let i = inv(&["secrets", "add"], &["db"], &[("key", "a b"), ("require-totp", "true"), ("json", "true")]);
+        assert_eq!(i.command_line("aoide", &["require-totp"]), "aoide secrets add db --key 'a b' --require-totp");
+        let i = inv(&["secrets", "add"], &["it's", "-x"], &[]);
+        assert_eq!(i.command_line("aoide", &[]), "aoide secrets add -- 'it'\\''s' -x");
+    }
 }

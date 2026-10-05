@@ -39,6 +39,25 @@ pub struct Arg {
     pub ty: &'static str,
     pub required: bool,
     pub description: &'static str,
+    /// The closed set of accepted values; empty means any value.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    pub values: &'static [&'static str],
+    /// An optional positional that becomes required when the positional before
+    /// it holds one of these values (`automate <name> grant <consumer>`).
+    #[serde(rename = "requiredAfter", skip_serializing_if = "<[_]>::is_empty")]
+    pub required_after: &'static [&'static str],
+}
+
+impl Arg {
+    /// All-default declarations; `arg!` spreads it under the fields a call names.
+    pub const NONE: Arg = Arg {
+        name: "",
+        ty: "",
+        required: false,
+        description: "",
+        values: &[],
+        required_after: &[],
+    };
 }
 
 /// A `--flag` of a command.
@@ -281,6 +300,31 @@ impl Command {
                 lead(a.description),
                 self.fix_line(bin, inv),
             ));
+        }
+        for (i, a) in self.args.iter().enumerate().filter(|(_, a)| !a.values.is_empty()) {
+            let Some(v) = inv.args.get(i) else { continue };
+            if a.values.contains(&v.as_str()) {
+                continue;
+            }
+            let near = closest(v, a.values.iter().copied(), 1);
+            let accepted = a.values.join(", ");
+            let (why, pick) = match near.first() {
+                Some(n) => (format!("did you mean `{n}`? the accepted values are {accepted}"), *n),
+                None => (format!("the accepted values are {accepted}"), a.values[0]),
+            };
+            let mut fixed = inv.clone();
+            fixed.args[i] = pick.to_string();
+            return Err(usage(format!("`{me}` does not accept `{v}` for <{}>", a.name), why, self.fix_line(bin, &fixed)));
+        }
+        for (i, a) in self.args.iter().enumerate().filter(|(i, a)| *i > 0 && !a.required_after.is_empty() && *i >= inv.args.len()) {
+            let Some(prev) = inv.args.get(i - 1) else { continue };
+            if a.required_after.contains(&prev.as_str()) {
+                return Err(usage(
+                    format!("`{me} … {prev}` needs <{}>", a.name),
+                    lead(a.description),
+                    format!("{} <{}>", self.fix_line(bin, inv), a.name),
+                ));
+            }
         }
         if let Some(f) = self.flags.iter().find(|f| f.required && !inv.flags.contains_key(f.name)) {
             return Err(usage(
@@ -607,12 +651,15 @@ macro_rules! cmd {
 
 #[macro_export]
 macro_rules! arg {
-    ($name:literal, $ty:literal, $req:expr, $desc:literal) => {
+    // Named extras (`values:`, `required_after:`) are `Arg` fields.
+    ($name:literal, $ty:literal, $req:expr, $desc:literal $(, $extra:ident : $val:expr)* $(,)?) => {
         $crate::registry::Arg {
             name: $name,
             ty: $ty,
             required: $req,
             description: $desc,
+            $($extra: $val,)*
+            ..$crate::registry::Arg::NONE
         }
     };
 }
@@ -713,6 +760,49 @@ mod tests {
     fn conflicting_flags_are_refused_together() {
         let (head, _, _) = refusal(&["x"], &[("key", "k"), ("id", "a"), ("to", "b")]);
         assert_eq!(head, "[usage] thing.add: `aoide thing add` takes --id or --to, not both");
+    }
+
+    fn toggle() -> Command {
+        cmd!(
+            path: ["thing", "set"],
+            summary: "Set a thing.",
+            args: [
+                arg!("name", "string", true, "The thing's name."),
+                arg!("action", "string", true, "What to do.", values: &["on", "off", "grant"]),
+                arg!("who", "string", false, "Who to grant.", required_after: &["grant"])
+            ],
+            flags: [],
+            gated: false,
+            implemented: true,
+            handler: noop
+        )
+    }
+
+    fn toggle_refusal(args: &[&str]) -> Option<(String, String, String)> {
+        let r = toggle().check("aoide", &mut inv(args, &[])).err()?;
+        let text = r.into_outcome("thing.set").render(false).0;
+        let mut lines = text.lines();
+        Some((lines.next()?.to_string(), lines.next()?.to_string(), lines.next()?.to_string()))
+    }
+
+    #[test]
+    fn a_positional_outside_its_values_gets_a_did_you_mean_or_the_list() {
+        let (head, why, fix) = toggle_refusal(&["x", "gant"]).unwrap();
+        assert_eq!(head, "[usage] thing.set: `aoide thing set` does not accept `gant` for <action>");
+        assert_eq!(why, "  why: did you mean `grant`? the accepted values are on, off, grant");
+        assert_eq!(fix, "  fix: aoide thing set x grant");
+        let (_, why, _) = toggle_refusal(&["x", "maybe"]).unwrap();
+        assert_eq!(why, "  why: the accepted values are on, off, grant");
+    }
+
+    #[test]
+    fn a_conditional_positional_is_required_only_after_its_trigger() {
+        assert!(toggle_refusal(&["x", "on"]).is_none());
+        assert!(toggle_refusal(&["x", "grant", "m"]).is_none());
+        let (head, why, fix) = toggle_refusal(&["x", "grant"]).unwrap();
+        assert_eq!(head, "[usage] thing.set: `aoide thing set … grant` needs <who>");
+        assert_eq!(why, "  why: who to grant");
+        assert_eq!(fix, "  fix: aoide thing set x grant <who>");
     }
 
     #[test]
