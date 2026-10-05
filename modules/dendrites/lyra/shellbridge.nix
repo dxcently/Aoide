@@ -116,7 +116,6 @@ lib.mkIf (config.aoide.enable && config.aoide.lyra.enable) {
     path = [
       pkgs.curl
       pkgs.hyprland
-      pkgs.hyprlock
       pkgs.libnotify
       config.nix.package
       pkgs.procps
