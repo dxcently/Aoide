@@ -168,6 +168,13 @@ the gate, not the transport.
 
 ## The write flow (`secrets put`, P-V4c; warn-before-overwrite, P-67)
 
+A value that is empty or only whitespace is refused twice, so neither path stores it:
+the broker's `put_gate` answers `client::EMPTY_VALUE` on the wire, and
+`client::run_put` returns `PutFailure::Empty` before asking and the command refuses with
+what/why/fix ("nothing arrived on stdin" — the command before the pipe
+printed nothing or failed — and a generator that works). A stored empty value
+reads as no secret to every check built on it.
+
 The write-side mirror of the flow above, and it goes the OTHER direction —
 a value flows CLIENT-to-broker, never released back:
 
@@ -1697,8 +1704,8 @@ its operator here. No sudo rule is shipped; admin commands run as the secrets
 user by hand (below). The service's `path` also carries `bash`+`coreutils`
 (sh/cat/mkdir/install for the built-in `file` backend's own templates — a
 systemd unit's default `PATH` carries no `sh`, so an un-hardened unit can
-bind the socket fine and still fail every resolve with "spawning backend
-`file`: No such file or directory", found live on the first deployment) and
+bind the socket fine and still fail every resolve with "backend `file` (get):
+`file` was not found", found live on the first deployment) and
 `environment.systemPackages` gains `qrencode` (so `secrets enroll`'s QR
 render succeeds — the first live enrollment attempt found it absent).
 **A regular agent-side consumer (`secrets exec`/`secrets put`) needs NO env
@@ -1915,12 +1922,17 @@ the invariant it exists to enforce once one lands.
 command ever touches `policy.json`/`totp.secret` (P-V4f).** A mismatched
 effective uid — root included, from a plain `sudo` — gets a message
 naming the actual home path, the actual owning uid, and the corrective
-spelling, e.g.:
+command, e.g.:
 
 ```
 $ sudo aoide secrets add db-prod --backend file --key db-prod
-secrets add must run as the broker user (uid 999, the owner of /var/lib/aoide-secrets) — this process is running as root (uid 0) — plain `sudo` runs as root, and root CAN write here regardless of file ownership, which is exactly what silently corrupts it. Run: sudo -u aoide-secrets aoide secrets add ...
+[error] secrets.add: secrets add must run as the broker user (uid 999, the owner of /var/lib/aoide-secrets) — this process is running as root (uid 0) — plain `sudo` runs as root, and root CAN write here regardless of file ownership, which is exactly what silently corrupts it
+  why: an admin command writes the broker's policy file, and only the broker user may: a write by anyone else, root included, re-owns it and bricks the broker
+  fix: sudo -u aoide-secrets aoide secrets add db-prod --backend file --key db-prod
 ```
+
+The fix repeats the user's own command line, whole, behind `sudo -u
+aoide-secrets` (`teach::broker_user`); the identity producers never spell it.
 
 This is the fix for the incident above: root COULD always write
 `policy.json` regardless of ownership, which is exactly what silently
@@ -2318,6 +2330,17 @@ Daemon/socket/CLI (P-V2, extended P-V3):
   direct-write fallback and `broker::handle_admin`'s socket path, never two
   copies. Makes no admin-identity decision of its own; the euid/peer-cred
   gate belongs entirely to whichever caller invokes it.
+- `teach` — failures said as taught refusals (`Refusal`: what, why, fix).
+  `from_broker(Where, line)` turns a client, broker or admin failure line
+  into a refusal by the markers the producers share (not registered — with a
+  did-you-mean among the registered secrets —, no access to the socket,
+  broker not running, a grant the secret does not admit, not the broker
+  user); `broker_user` renders the whole `sudo -u aoide-secrets <the user's
+  command>` line; `invalid_name` and `cli_only` are the other two shapes
+  every handler needs. The argument rules themselves (required flags, the
+  `on|off` and `on|off|grant|revoke` values, `<consumer>` after
+  `grant|revoke`, `--force`/`--show` and `--popup`/`--json` conflicts) are
+  declared on the registry entries in `commands.rs`, not checked here.
 
 ## What it consumes
 

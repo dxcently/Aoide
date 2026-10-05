@@ -289,6 +289,23 @@ pub fn read_expected_token(token_file: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// The expected token `a2a serve` carries from launch: empty only when NO
+/// token file is configured. A configured file that is missing, unreadable or
+/// empty yields [`resolve_failure_sentinel`], so the door stays closed rather
+/// than reading as "no token configured".
+pub fn launch_token(token_file: &str) -> String {
+    if token_file.is_empty() {
+        return String::new();
+    }
+    read_expected_token(token_file).unwrap_or_else(|| {
+        eprintln!(
+            "aoide a2a: token file `{token_file}` holds no token — refusing every bearer check (fail closed); \
+             create the file with the token, then restart aoide-a2a"
+        );
+        resolve_failure_sentinel()
+    })
+}
+
 /// Resolve `aoide.a2a.bearerSecret`: the NAME of a secret this door resolves
 /// through the LOCAL secrets broker, fresh on every request, as its own
 /// expected inbound bearer (task #84) — the first real machine consumer of
@@ -5622,11 +5639,14 @@ fn extract_bearer(header_value: &str) -> Option<String> {
 struct ParseError {
     status: u16,
     message: String,
+    /// The peer connected and closed without sending a byte (a reachability
+    /// probe): nothing to answer and nothing to audit.
+    idle: bool,
 }
 
 impl ParseError {
     fn new(status: u16, message: impl Into<String>) -> Self {
-        Self { status, message: message.into() }
+        Self { status, message: message.into(), idle: false }
     }
 }
 
@@ -5682,10 +5702,10 @@ fn parse_http_request<R: BufRead>(r: &mut R, start: Instant) -> Result<HttpReque
     let request_line = match read_bounded_line(r, "request line")? {
         Some(l) => l,
         None => {
-            return Err(ParseError::new(
-                400,
-                "connection closed before a request line arrived",
-            ))
+            return Err(ParseError {
+                idle: true,
+                ..ParseError::new(400, "connection closed before a request line arrived")
+            })
         }
     };
     check_deadline("after request line")?;
@@ -6492,6 +6512,14 @@ fn resolve_inbound_bearer(cfg: &InboundBearerConfig) -> String {
         BEARER_CONSUMER_DOOR,
         BEARER_RESOLVE_TIMEOUT,
     ) {
+        Ok(value) if value.trim().is_empty() => {
+            eprintln!(
+                "aoide a2a: inbound bearer secret `{}` resolved to an empty value — \
+                 refusing every bearer check on this connection (fail closed)",
+                cfg.bearer_secret,
+            );
+            resolve_failure_sentinel()
+        }
         Ok(value) => value,
         Err(e) => {
             // `e` is one of the resolve wire's own error strings
@@ -6794,6 +6822,9 @@ fn handle_connection(
     let start = Instant::now();
     let req = match parse_http_request(&mut reader, start) {
         Ok(req) => req,
+        // A peer that connected and closed without a byte (the client's
+        // tunnel-reuse probe) asked nothing: no response, no audit line.
+        Err(e) if e.idle => return Ok(()),
         Err(e) => {
             let b = jsonrpc_error_value(-32700, format!("bad request: {}", e.message));
             let body = serde_json::to_vec(&b).unwrap_or_default();
@@ -15283,6 +15314,71 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    /// A broker secret whose stored value is EMPTY must read as a resolve
+    /// failure: an empty expected bearer is the "no token configured" signal,
+    /// and treating it so would restore the loopback free pass.
+    #[cfg_attr(windows, ignore = "the fixture stores through the built-in `file` backend, whose template is the POSIX preset `cat ...`")]
+    #[test]
+    fn resolve_inbound_bearer_fails_closed_on_an_empty_resolved_secret() {
+        let stamp = format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        );
+        let home = std::env::temp_dir().join(format!("aoide-a2a-bearer-empty-{stamp}"));
+        std::fs::create_dir_all(&home).unwrap();
+        aoide_secrets::store::save_policies(
+            &home,
+            &[aoide_secrets::policy::Policy::new("empty-door-token", "file", "k")],
+        )
+        .unwrap();
+        let socket_path = aoide_test_support::short_tmp(&format!("bearer-empty-{stamp}")).join("b.sock");
+        let home_for_thread = home.clone();
+        let sock_for_thread = socket_path.clone();
+        let broker_thread = std::thread::spawn(move || {
+            let _ = aoide_secrets::broker::serve(&home_for_thread, &sock_for_thread);
+        });
+        let mut connected = false;
+        for _ in 0..50 {
+            if UnixStream::connect(&socket_path).is_ok() {
+                connected = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(connected, "broker did not bind {} in time", socket_path.display());
+        // The broker's put refuses an empty value, so the fixture writes the
+        // `file` backend's store directly, the way a stale empty value got there.
+        std::fs::create_dir_all(home.join("store")).unwrap();
+        std::fs::write(home.join("store").join("k"), "").unwrap();
+
+        let cfg = bearer_cfg("empty-door-token", &socket_path, "");
+        let expected = resolve_inbound_bearer(&cfg);
+        assert!(!expected.is_empty(), "an empty resolved bearer must never read as 'not configured'");
+        assert!(!token_authorized(!expected.is_empty(), classify_token(&expected, None)));
+
+        drop(broker_thread);
+        std::fs::remove_file(&socket_path).ok();
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn launch_token_fails_closed_on_a_configured_file_that_yields_no_token() {
+        assert_eq!(launch_token(""), "", "no file configured is the off path");
+        let dir = std::env::temp_dir().join(format!("aoide-a2a-launch-token-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("token");
+        std::fs::write(&path, "\n").unwrap();
+        for file in [path.to_str().unwrap(), "/nonexistent/aoide-a2a-token-file"] {
+            let expected = launch_token(file);
+            assert!(!expected.is_empty(), "a configured token file with no token must not read as 'not configured': {file}");
+            assert!(!token_authorized(true, classify_token(&expected, None)));
+        }
+        std::fs::write(&path, "real\n").unwrap();
+        assert_eq!(launch_token(path.to_str().unwrap()), "real");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // ── NO-CACHE / no-log grep gate (task #84 PINNED CONSTRAINT) ────────────
 
     /// A resolved/expected bearer value must NEVER reach an `audit(...)`
@@ -19027,6 +19123,52 @@ mod tests {
             Listener::Mail.audit_detail_with("boom", ConnOrigin::Unknown),
             "boom (from unknown via mail-adapter)"
         );
+
+        adapter_cleanup(&root, saved);
+    }
+
+    fn bad_request_lines(audit_log: &Path) -> usize {
+        std::fs::read_to_string(audit_log).unwrap_or_default().lines().filter(|l| l.contains("a2a.bad-request")).count()
+    }
+
+    #[test]
+    fn a_connection_that_closes_before_sending_a_byte_is_idle_not_a_bad_request() {
+        let empty = parse_http_request(&mut std::io::Cursor::new(Vec::<u8>::new()), Instant::now()).unwrap_err();
+        assert!(empty.idle, "EOF before the request line is an idle probe: {empty:?}");
+        let garbage = parse_http_request(&mut std::io::Cursor::new(b"NOT-HTTP\r\n\r\n".to_vec()), Instant::now()).unwrap_err();
+        assert!(!garbage.idle, "{garbage:?}");
+        let partial = parse_http_request(&mut std::io::Cursor::new(b"GET".to_vec()), Instant::now()).unwrap_err();
+        assert!(!partial.idle, "bytes arrived, so it is a malformed request: {partial:?}");
+    }
+
+    #[test]
+    fn a_connect_and_drop_probe_writes_no_response_and_no_audit_line() {
+        use std::io::{Read, Write};
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (root, saved) = adapter_root("idle-probe");
+        let audit_log = root.join("log");
+        let port = free_loopback_port();
+        raise_mail_adapter(port, &audit_log);
+
+        // The reuse probe of a client's ssh-tunnel: connect, send nothing, close.
+        for _ in 0..3 {
+            drop(std::net::TcpStream::connect(("127.0.0.1", port)).unwrap());
+        }
+        // A later, valid request orders the probes before the read of the log.
+        let ok = send_raw(port, b"GET /nothing HTTP/1.1\r\nHost: x\r\n\r\n");
+        assert!(!ok.starts_with("HTTP/1.1 400"), "{ok}");
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(bad_request_lines(&audit_log), 0, "a probe that sent nothing is not a bad request");
+
+        // Control: bytes that stop mid request line are still a 400 and one audit line.
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.write_all(b"GET").unwrap();
+        stream.shutdown(std::net::Shutdown::Write).unwrap();
+        let mut out = Vec::new();
+        stream.read_to_end(&mut out).unwrap();
+        assert!(String::from_utf8_lossy(&out).starts_with("HTTP/1.1 400"), "{}", String::from_utf8_lossy(&out));
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(bad_request_lines(&audit_log), 1);
 
         adapter_cleanup(&root, saved);
     }

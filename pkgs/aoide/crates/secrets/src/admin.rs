@@ -57,6 +57,24 @@ impl AdminOutcome {
     }
 }
 
+/// The error text for a name no policy carries. [`NO_POLICY`] is the marker
+/// the command layer reads to turn it into a taught "not registered" refusal.
+pub const NO_POLICY: &str = "no policy for secret";
+
+/// The marker of [`not_admitted`], read the same way.
+pub const NOT_ADMITTED: &str = "does not admit consumer";
+
+fn no_policy(name: &str) -> String {
+    format!("{NO_POLICY} `{name}`")
+}
+
+fn not_admitted(name: &str, consumer: &str, admitted: &[String]) -> String {
+    format!(
+        "secret `{name}` {NOT_ADMITTED} `{consumer}` (it admits {}) — automation only skips the code for a consumer the secret already admits",
+        admitted.join(", ")
+    )
+}
+
 fn policy_io_error(home: &Path, err: std::io::Error) -> String {
     home::describe_home_file_error(home, &store::policy_path(home), &err)
 }
@@ -90,7 +108,7 @@ pub fn rm(home: &Path, name: &str) -> Result<AdminOutcome, String> {
     let before = policies.len();
     policies.retain(|p| p.name != name);
     if policies.len() == before {
-        return Err(format!("no policy for secret `{name}`"));
+        return Err(no_policy(name));
     }
     store::save_policies(home, &policies).map_err(|e| policy_io_error(home, e))?;
     Ok(AdminOutcome::changed(format!("removed secret `{name}`"), format!("policy:{name}")))
@@ -101,7 +119,7 @@ pub fn rm(home: &Path, name: &str) -> Result<AdminOutcome, String> {
 fn edit_consumer(home: &Path, name: &str, consumer: &str, edit: impl FnOnce(&mut Vec<String>, &str)) -> Result<AdminOutcome, String> {
     let mut policies = store::load_policies(home).map_err(|e| policy_io_error(home, e))?;
     let Some(policy) = policies.iter_mut().find(|p| p.name == name) else {
-        return Err(format!("no policy for secret `{name}`"));
+        return Err(no_policy(name));
     };
     edit(&mut policy.consumers, consumer);
     store::save_policies(home, &policies).map_err(|e| policy_io_error(home, e))?;
@@ -128,7 +146,7 @@ pub fn set_totp(home: &Path, name: &str, want: bool) -> Result<AdminOutcome, Str
     let state = if want { "on" } else { "off" };
     let mut policies = store::load_policies(home).map_err(|e| policy_io_error(home, e))?;
     let Some(policy) = policies.iter_mut().find(|p| p.name == name) else {
-        return Err(format!("no policy for secret `{name}`"));
+        return Err(no_policy(name));
     };
     if policy.require_totp == want {
         return Ok(AdminOutcome::unchanged(format!("secret `{name}` requireTotp already `{state}` — unchanged")));
@@ -143,7 +161,7 @@ pub fn expose(home: &Path, name: &str, want: bool) -> Result<AdminOutcome, Strin
     let state = if want { "on" } else { "off" };
     let mut policies = store::load_policies(home).map_err(|e| policy_io_error(home, e))?;
     let Some(policy) = policies.iter_mut().find(|p| p.name == name) else {
-        return Err(format!("no policy for secret `{name}`"));
+        return Err(no_policy(name));
     };
     if policy.remote == want {
         return Ok(AdminOutcome::unchanged(format!("secret `{name}` remote already `{state}` — unchanged")));
@@ -162,7 +180,7 @@ pub fn allow_remote_origin(home: &Path, name: &str, want: bool) -> Result<AdminO
     let state = if want { "on" } else { "off" };
     let mut policies = store::load_policies(home).map_err(|e| policy_io_error(home, e))?;
     let Some(policy) = policies.iter_mut().find(|p| p.name == name) else {
-        return Err(format!("no policy for secret `{name}`"));
+        return Err(no_policy(name));
     };
     if policy.allow_remote_origin == want {
         return Ok(AdminOutcome::unchanged(format!(
@@ -182,7 +200,7 @@ pub fn automate_toggle(home: &Path, name: &str, want: bool) -> Result<AdminOutco
     let state = if want { "on" } else { "off" };
     let mut policies = store::load_policies(home).map_err(|e| policy_io_error(home, e))?;
     let Some(policy) = policies.iter_mut().find(|p| p.name == name) else {
-        return Err(format!("no policy for secret `{name}`"));
+        return Err(no_policy(name));
     };
     if policy.automation.enabled == want {
         return Ok(AdminOutcome::unchanged(format!("secret `{name}` automation already `{state}` — unchanged")));
@@ -193,14 +211,20 @@ pub fn automate_toggle(home: &Path, name: &str, want: bool) -> Result<AdminOutco
 }
 
 /// `secrets automate <name> grant|revoke <consumer>` — edits
-/// `Policy::automation.consumers`. `want_listed` is `true` for `grant`,
+/// `Policy::automation.consumers`. A grant is refused for a consumer the
+/// secret's own `consumers` does not admit (a non-empty list; an empty one
+/// admits everyone): the broker checks `consumers` first, so that grant could
+/// never open anything. `want_listed` is `true` for `grant`,
 /// `false` for `revoke` — caller already validated `consumer`'s shape
 /// (`valid_secret_name`, `commands.rs`'s own job, never duplicated here).
 pub fn automate_consumer(home: &Path, name: &str, consumer: &str, want_listed: bool) -> Result<AdminOutcome, String> {
     let mut policies = store::load_policies(home).map_err(|e| policy_io_error(home, e))?;
     let Some(policy) = policies.iter_mut().find(|p| p.name == name) else {
-        return Err(format!("no policy for secret `{name}`"));
+        return Err(no_policy(name));
     };
+    if want_listed && !policy.consumers.is_empty() && !policy.consumers.iter().any(|c| c == consumer) {
+        return Err(not_admitted(name, consumer, &policy.consumers));
+    }
     let already_listed = policy.automation.consumers.iter().any(|c| c == consumer);
     if want_listed == already_listed {
         let phrase = if want_listed { "already lists" } else { "does not list" };
@@ -262,7 +286,7 @@ impl MigrateError {
 pub fn migrate(home: &Path, door: Door, name: &str, target: &str) -> Result<(AdminOutcome, String, String), MigrateError> {
     let mut policies = store::load_policies(home).map_err(|e| MigrateError::unknown_source(policy_io_error(home, e)))?;
     let Some(policy) = policies.iter_mut().find(|p| p.name == name) else {
-        return Err(MigrateError::unknown_source(format!("no policy for secret `{name}`")));
+        return Err(MigrateError::unknown_source(no_policy(name)));
     };
     let source = policy.backend.clone();
     let key = policy.key.clone();

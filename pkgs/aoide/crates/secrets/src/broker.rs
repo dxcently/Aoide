@@ -944,7 +944,7 @@ fn status_load_error(secrets_home: &Path, err: &std::io::Error) -> String {
 fn authorize_release(secrets_home: &Path, secret: &str, consumer: &str) -> Result<(), String> {
     let policies = crate::store::load_policies(secrets_home)
         .map_err(|e| crate::home::describe_home_file_error(secrets_home, &crate::store::policy_path(secrets_home), &e))?;
-    let policy = policies.iter().find(|p| p.name == secret).ok_or_else(|| "secret not found".to_string())?;
+    let policy = policies.iter().find(|p| p.name == secret).ok_or_else(|| crate::client::NOT_REGISTERED.to_string())?;
     let authorized = policy.consumers.is_empty() || policy.consumers.iter().any(|c| c == consumer);
     if !authorized {
         return Err("consumer not authorized for this secret".to_string());
@@ -1060,7 +1060,7 @@ fn handle_approve(
 fn fetch_secret_value(secrets_home: &Path, secret: &str) -> Result<String, String> {
     let policies = crate::store::load_policies(secrets_home)
         .map_err(|e| crate::home::describe_home_file_error(secrets_home, &crate::store::policy_path(secrets_home), &e))?;
-    let policy = policies.iter().find(|p| p.name == secret).ok_or_else(|| "secret not found".to_string())?;
+    let policy = policies.iter().find(|p| p.name == secret).ok_or_else(|| crate::client::NOT_REGISTERED.to_string())?;
     crate::backend::fetch_value(secrets_home, &policy.backend, &policy.key)
 }
 
@@ -1237,6 +1237,7 @@ fn handle_put(secrets_home: &Path, events_path: &Path, req: &Value, peer: Option
 /// fail-closed default [`dismiss_authorized`] holds: there is no uid to
 /// compare, so the safe answer is refusal, never a permissive fallback.
 fn admin_gate(peer_uid: Option<&PeerUser>, secrets_home: &Path, subcommand: &str) -> Option<String> {
+    use crate::home::MUST_RUN_AS_BROKER;
     let broker_identity = crate::home::effective_user();
     let broker_euid = broker_identity.as_ref();
     match (peer_uid, broker_euid) {
@@ -1248,14 +1249,14 @@ fn admin_gate(peer_uid: Option<&PeerUser>, secrets_home: &Path, subcommand: &str
         // blaming the peer for a broker that cannot read its own token would
         // send an operator looking in the wrong place.
         (_, None) => Some(format!(
-            "secrets {subcommand} over the broker socket must come from an IDENTIFIED connection, and this broker \
+            "secrets {subcommand} {MUST_RUN_AS_BROKER} over an identified connection, and this broker \
              cannot read its OWN user identity, so nothing can be compared — refused the same way a mismatched \
-             identity would be. Run: sudo -u aoide-secrets aoide secrets {subcommand} ..."
+             identity would be"
         )),
         _ => Some(format!(
-            "secrets {subcommand} over the broker socket must come from an IDENTIFIED connection — this connection's \
+            "secrets {subcommand} {MUST_RUN_AS_BROKER} over an identified connection — this connection's \
              peer identity could not be determined (no kernel-truth peer credential on this host), so it is refused \
-             the same way a mismatched identity would be. Run: sudo -u aoide-secrets aoide secrets {subcommand} ..."
+             the same way a mismatched identity would be"
         )),
     }
 }
@@ -1470,6 +1471,9 @@ fn put_lock() -> &'static std::sync::Mutex<()> {
 /// (or an operator raising `AOIDE_SECRETS_BACKEND_TIMEOUT`) should size
 /// around the worst case, not the per-call one.
 fn put_gate(secrets_home: &Path, secret: &str, value: &str, overwrite: bool) -> PutOutcome {
+    if value.trim().is_empty() {
+        return PutOutcome::Denied(crate::client::EMPTY_VALUE.to_string());
+    }
     let policies = match crate::store::load_policies(secrets_home) {
         Ok(p) => p,
         Err(e) => {
@@ -1481,7 +1485,7 @@ fn put_gate(secrets_home: &Path, secret: &str, value: &str, overwrite: bool) -> 
         }
     };
     let Some(policy) = policies.iter().find(|p| p.name == secret) else {
-        return PutOutcome::Denied("secret not found".to_string());
+        return PutOutcome::Denied(crate::client::NOT_REGISTERED.to_string());
     };
 
     let _guard = put_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1572,7 +1576,7 @@ fn resolve_gate(
         }
     };
     let Some(policy) = policies.iter().find(|p| p.name == secret) else {
-        return GateOutcome::Denied("secret not found".to_string());
+        return GateOutcome::Denied(crate::client::NOT_REGISTERED.to_string());
     };
     let authorized = policy.consumers.is_empty() || policy.consumers.iter().any(|c| c == consumer);
     if !authorized {
@@ -3435,6 +3439,39 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    /// The broker refuses an empty or whitespace-only value itself, so a
+    /// caller that skips `run_put` cannot store "no secret" either; the reply
+    /// carries the same words the CLI's refusal does.
+    #[test]
+    fn a_wire_put_of_an_empty_or_blank_value_is_refused_and_stores_nothing() {
+        let home = tmp_home("put-empty");
+        crate::store::save_policies(&home, &[Policy::new("t", "scratch", "k")]).unwrap();
+        for blank in ["", "\n", "  \t\n"] {
+            let line = json!({"op": "put", "secret": "t", "value": blank}).to_string();
+            let reply = handle_line(&home, &home.join("events.jsonl"), &line, &ParkRegistry::new(), &mut Vec::new(), None);
+            assert_eq!(reply["ok"], false, "{reply}");
+            assert_eq!(reply["error"], crate::client::EMPTY_VALUE, "{reply}");
+        }
+        assert_eq!(
+            crate::teach::from_broker(
+                &crate::teach::Where {
+                    inv: &aoide_protocol::Invocation {
+                        path: vec!["secrets".into(), "put".into()],
+                        args: vec!["t".into()],
+                        flags: Default::default(),
+                        door: aoide_protocol::Door::Cli
+                    },
+                    socket: &home,
+                    secret: Some("t"),
+                },
+                crate::client::EMPTY_VALUE
+            )
+            .what,
+            "nothing arrived on stdin"
+        );
+        std::fs::remove_dir_all(&home).ok();
+    }
+
     #[test]
     fn put_with_a_missing_secret_field_is_malformed() {
         let home = tmp_home("put-missingfields");
@@ -5016,7 +5053,7 @@ mod tests {
             let req = json!({"op": "admin", "command": "add", "name": "t", "backend": "scratch", "key": "k"});
             let reply = handle_admin(&home, &req, None);
             assert_eq!(reply["ok"], false, "{reply}");
-            assert!(reply["error"].as_str().unwrap().contains("IDENTIFIED"), "{reply}");
+            assert!(reply["error"].as_str().unwrap().contains("identified connection"), "{reply}");
         });
         std::fs::remove_dir_all(&home).ok();
     }

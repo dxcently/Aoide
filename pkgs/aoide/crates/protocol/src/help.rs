@@ -579,9 +579,9 @@ Run 'shop job <command> --help' for args, flags, and examples."
         let mut r = Registry::new();
         r.insert(Command {
             args: &[
-                crate::registry::Arg { name: "alpha", ty: "string", required: true, description: "" },
-                crate::registry::Arg { name: "bravo", ty: "string", required: true, description: "" },
-                crate::registry::Arg { name: "charlie", ty: "string", required: false, description: "" },
+                crate::registry::Arg { name: "alpha", ty: "string", required: true, description: "", ..crate::registry::Arg::NONE },
+                crate::registry::Arg { name: "bravo", ty: "string", required: true, description: "", ..crate::registry::Arg::NONE },
+                crate::registry::Arg { name: "charlie", ty: "string", required: false, description: "", ..crate::registry::Arg::NONE },
             ],
             ..leaf(&["g", "long"], "x", "Takes many words to say.")
         });

@@ -129,6 +129,7 @@ pub mod replay;
 pub mod sha1;
 pub mod socket;
 pub mod store;
+pub mod teach;
 pub mod totp;
 pub mod uri;
 pub mod watch;

@@ -879,7 +879,9 @@ in
         description = ''
           Path to a file holding the shared secret an inbound `message/send`
           must present (`Authorization: Bearer <token>`) to be trusted
-          (CONTRACTS.md §6 amendment, 2026-08-18). Empty (the default) is
+          (CONTRACTS.md §6 amendment, 2026-08-18). A configured file that is
+          missing, unreadable or empty refuses every bearer check (the door
+          fails closed; it never reads as "no token"). Empty (the default) is
           the fully-open behavior every prior release shipped: loopback
           auto-delivers, Spawn is gated only by `spawnAgent` being set. Once
           non-empty, TWO things change together, with no separate opt-out:

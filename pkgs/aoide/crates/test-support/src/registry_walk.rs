@@ -89,7 +89,7 @@ fn filled(c: &Command) -> Invocation {
     }
     Invocation {
         path: c.path.iter().map(|s| s.to_string()).collect(),
-        args: (0..required_args).map(|i| format!("arg{i}")).collect(),
+        args: c.args.iter().take(required_args).enumerate().map(|(i, a)| a.values.first().map_or(format!("arg{i}"), |v| v.to_string())).collect(),
         flags,
         door: Door::Cli,
     }
@@ -146,6 +146,28 @@ pub fn required_is_enforced(bin: &str, registry: &Registry) {
             let mut inv = full.clone();
             inv.args.truncate(i);
             expect_refusal(c, bin, &inv, &format!("<{}>", a.name));
+        }
+        for (i, a) in c.args.iter().enumerate().filter(|(i, a)| a.required && !a.values.is_empty() && *i < full.args.len()) {
+            let mut inv = full.clone();
+            inv.args[i] = "no-such-value-zz".into();
+            expect_refusal(c, bin, &inv, &format!("<{}>", a.name));
+            for v in a.values {
+                let mut ok = full.clone();
+                ok.args[i] = v.to_string();
+                if c.args.iter().all(|x| x.required_after.is_empty()) {
+                    let (out, reached) = run_sentinel(c, bin, &ok);
+                    assert!(reached, "`{}`: <{}> {v} is declared allowed but was refused: {}", c.dotted(), a.name, out.message);
+                }
+            }
+        }
+        for (i, a) in c.args.iter().enumerate().filter(|(i, a)| *i > 0 && !a.required_after.is_empty()) {
+            let mut inv = full.clone();
+            inv.args.truncate(i);
+            inv.args[i - 1] = a.required_after[0].to_string();
+            expect_refusal(c, bin, &inv, &format!("<{}>", a.name));
+            inv.args.push("m".into());
+            let (out, reached) = run_sentinel(c, bin, &inv);
+            assert!(reached, "`{}`: <{}> given after `{}` was refused: {}", c.dotted(), a.name, a.required_after[0], out.message);
         }
         for f in c.flags.iter().filter(|f| f.required && f.default.is_empty()) {
             let mut inv = full.clone();

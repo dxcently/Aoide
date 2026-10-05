@@ -271,7 +271,11 @@ the inbound half of the two-door contract (the outbound half is
   stays the pre-existing token-file behavior exactly; set takes
   precedence over `--token-file`. A broker-unreachable or denied resolve
   fails CLOSED — the connection is refused the same way a wrong bearer
-  is, never held open and never treated as "unconfigured." The resolved
+  is, never held open and never treated as "unconfigured." A secret that
+  resolves EMPTY (or only whitespace) counts as a resolve failure, and so does
+  a configured `--token-file` that is missing or empty (`launch_token`): an
+  empty expected token would read as "no token configured" and restore the
+  loopback free pass. The resolved
   value is never cached, logged, or placed in any audit line — see
   `CONTRACTS.md`'s "Secrets wire"/§6 sections for the wire contract and
   the resolve-consumer honesty note.

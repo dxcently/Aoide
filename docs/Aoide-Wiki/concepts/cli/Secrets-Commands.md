@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-25
-updated: 2026-08-28
+updated: 2026-10-05
 tags: [aoide, cli, secrets, totp, security]
 ---
 
@@ -61,6 +61,28 @@ released; a secret's value never appears on a `Serialize` type in the
 crate, so it can never reach an `Outcome`, a JSON field, argv, or a log
 line.
 
+**Refusals are taught.** Every refusal of a `secrets` command is the same
+three lines (`pkgs/aoide/crates/AGENTS.md`, "Taught errors"): what was refused,
+why, and the command or setting that fixes it; `--json` carries the same in
+`data.refusal`. The ones a first run meets:
+
+- **Not the broker user** (an admin command run as anyone else, root included):
+  the fix is the user's own command line behind `sudo -u aoide-secrets`, whole
+  and pasteable (`sudo -u aoide-secrets aoide secrets automate sudo-pass grant
+  orchestrator`), never an elided `...`.
+- **Not in the `aoide-secrets-access` group** (the socket refuses the connect):
+  add the user to the host's `aoide.secrets.members`, rebuild, log in again;
+  `sg aoide-secrets-access -c '…'` borrows the group for one command.
+- **Secret not registered** (`exec`, `put` and every admin command naming a
+  secret): names the secret, offers the close match among the registered ones
+  (else lists them), and the fix is that command with the matching name, or
+  `aoide secrets add <name>`.
+- **Broker not running:** `systemctl status aoide-secrets-serve`.
+
+A declared argument rule (a required flag, a value outside `on|off`, a missing
+`<consumer>`) is refused by the registry before any handler runs, exit 2; a
+valid command the world refused exits 1.
+
 ## aoide secrets serve
 
 ```
@@ -82,7 +104,7 @@ aoide secrets serve [--json]
 ## aoide secrets exec
 
 ```
-aoide secrets exec [--as <consumer>] [--secret <name[:VAR]>] [--totp <code>] [--json] -- <cmd>
+aoide secrets exec --as <consumer> --secret <name[:VAR]> [--totp <code>] [--reason <text>] [--json] -- <cmd>
 ```
 
 - **Reads:** `--secret <name>` (optionally `name:VAR` to name the injected
@@ -94,7 +116,9 @@ aoide secrets exec [--as <consumer>] [--secret <name[:VAR]>] [--totp <code>] [--
   command execs, returning the child's own exit code. The value exists only
   inside this client process's own environment, from the socket reply to
   the exec — never argv, never an `Outcome`/JSON field, never either audit
-  log.
+  log. A refusal before the child runs (unregistered secret, no access to the
+  socket, a spawn failure) goes through the envelope and honours `--json`;
+  once the child runs, its exit code is the command's.
 - **Notes:** CLI-only — the value would otherwise have to cross a door
   that isn't this process's own stdio. `--totp` is verified live against
   this host's enrollment (`±1`-timestep window, single-use). Omitted (or
@@ -117,7 +141,11 @@ aoide secrets add <name> [--backend <name>] [--key <key>] [--require-totp] [--co
 - **Notes:** `--backend` defaults to `age` (the built-in age-encrypted
   store) when omitted — an already-recorded policy's backend field is
   never touched by this default; only a brand-new `add` with the flag
-  omitted is affected. Direct-home admin command (see "Shared facts").
+  omitted is affected. `--key` is what the backend fetches by: for `age` it
+  is only the file name under `values/`, so it defaults to the secret's name;
+  for a command-template backend it is substituted into that backend's
+  template and has no default, so omitting it is refused with that
+  explanation. Direct-home admin command (see "Shared facts").
 
 ## aoide secrets rm
 
@@ -191,8 +219,11 @@ aoide secrets put <name> [--force] [--json]
   machine-readable `{"exists":true}` reply — never inferred from error
   text — which a tty turns into a `y/N` confirmation and a piped stdin
   turns into a taught `--force` hint.
-- **Notes:** CLI-only, admin-side — no `consumer` field, never
-  TOTP-gated. `secrets add` must register the policy first; `put` never
+- **Notes:** a value that is empty or only whitespace is refused before the
+  broker is asked, and the broker's own put refuses it again for any wire caller ("nothing arrived on stdin": the command before the pipe
+  printed nothing or failed), because a stored empty value reads as no secret
+  to every check built on it, the A2A door's bearer included. CLI-only,
+  admin-side — no `consumer` field, never TOTP-gated. `secrets add` must register the policy first; `put` never
   auto-creates one.
 
 ## aoide secrets set-totp
@@ -210,7 +241,8 @@ aoide secrets set-totp <name> on|off [--json]
 ## aoide secrets automate
 
 ```
-aoide secrets automate <name> on|off|grant|revoke [<consumer>] [--json]
+aoide secrets automate <name> on|off [--json]
+aoide secrets automate <name> grant|revoke <consumer> [--json]
 ```
 
 - **Reads/Writes:** the named policy's `automation: {enabled,
@@ -219,7 +251,11 @@ aoide secrets automate <name> on|off|grant|revoke [<consumer>] [--json]
 - **Output:** idempotent — re-flipping the same state, or granting/revoking
   a consumer already in/out of the list, reports "unchanged" and writes
   nothing.
-- **Notes:** direct-home admin command. Can only ever relax `requireTotp` for
+- **Notes:** direct-home admin command. `grant` is refused for a consumer the
+  secret's own `consumers[]` does not admit (the broker checks that list
+  first, so the grant could never open anything); the fix is `aoide secrets
+  grant <name> <consumer>`. An empty `consumers[]` admits every consumer, so
+  nothing is refused there. Can only ever relax `requireTotp` for
   the listed consumers, never impose it on a policy that doesn't already
   carry it. Checked against the same self-asserted `consumer` wire field
   every other gate trusts — an automation-open secret is effectively
@@ -272,7 +308,7 @@ aoide secrets pending [--json]
 ## aoide secrets approve
 
 ```
-aoide secrets approve <id> [--totp <code>] [--json]
+aoide secrets approve <id> --totp <code> [--json]
 ```
 
 - **Reads:** the parked ask named `<id>` (from `secrets pending`).
@@ -325,7 +361,7 @@ aoide secrets watch [--json] [--popup]
   `AOIDE_SECRETS_LOCKER`-named `/proc` scan, default `hyprlock`); a code
   prompt refuses to open below 10 seconds remaining and force-closes at
   15 seconds without reopening. `--json` and `--popup` are mutually
-  exclusive.
+  exclusive (declared on the registry entry).
 
 ## aoide secrets migrate
 
@@ -356,8 +392,11 @@ connection/call, self-asserted consumers `a2a-door`/`a2a-client`
 respectively, via `aoide_secrets::client::resolve_bounded` — a short
 bounded read (`wait:false` on the wire, so a misconfigured `requireTotp`
 secret refuses immediately rather than parking the door) with no caching.
-A broker resolve failure fails closed: every bearer check on that
-connection is denied. See [[Doors-and-Nodes]] for the two flags'
+A broker resolve failure fails closed, and so does a secret that resolves
+empty (or only whitespace): every bearer check on that connection is denied,
+because an empty expected token would read as "no token configured" and
+restore the loopback free pass. The same holds for a configured `tokenFile`
+that is missing or empty. See [[Doors-and-Nodes]] for the two flags'
 per-command detail.
 
 ## Related

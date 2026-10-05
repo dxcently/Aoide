@@ -513,8 +513,16 @@ mod tests {
         let add = find("secrets.add");
         let flags = add["flags"].as_array().unwrap();
         let key = flags.iter().find(|f| f["name"] == "key").unwrap();
-        assert_eq!(key["required"], true);
+        assert!(key.get("required").is_none(), "age defaults the key, so the registry cannot require it");
         assert_eq!(key["value"], "key");
+        assert!(key["description"].as_str().unwrap().contains("(default for age: the secret's name)"));
+        let exec = find("secrets.exec");
+        let required: Vec<&str> =
+            exec["flags"].as_array().unwrap().iter().filter(|f| f["required"] == true).map(|f| f["name"].as_str().unwrap()).collect();
+        assert_eq!(required, ["as", "secret"]);
+        let automate = find("secrets.automate");
+        assert_eq!(automate["args"][1]["values"], serde_json::json!(["on", "off", "grant", "revoke"]));
+        assert_eq!(automate["args"][2]["requiredAfter"], serde_json::json!(["grant", "revoke"]));
         let backend = flags.iter().find(|f| f["name"] == "backend").unwrap();
         assert_eq!(backend["default"], "age");
         assert!(backend.get("required").is_none());

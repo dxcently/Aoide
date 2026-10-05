@@ -22,7 +22,8 @@ other crate in this workspace sits above.
   `Schema::sections`; a head the layout does not name lists under "Other", a
   stub head under "Not yet implemented".
   `Flag` also declares `value` (placeholder), `required`, `default`,
-  `values` and `conflicts`, `Command` declares `one_of` and `brief`;
+  `values` and `conflicts`, `Arg` declares `values` and `required_after`,
+  `Command` declares `one_of` and `brief`;
   `Command::check` enforces them (defaults applied first) and
   `Command::invoke` is check-then-handler, the entry every `dispatch()` uses.
 - `style` — terminal manners, decided in one place: `Style` (the role
