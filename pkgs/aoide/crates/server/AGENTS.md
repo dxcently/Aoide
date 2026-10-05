@@ -54,7 +54,7 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   audit lines a minute per box. Bytes followed by a close, or any malformed
   request, still get the 400 and the audit line. It is the same
   `handle_connection` for the mail adapter.
- is the MCP subprocess's own,
+- **`mcp::serve_stdio`'s channel socket is the MCP subprocess's own,
   never `aoided`'s** (P-M5c-2, `docs/architecture/CLAUDE-CHANNEL-PROOF.md`):
   bound only when `AOIDE_SESSION_ID` is set and non-empty, for the lifetime
   of that one stdio session — no record, no command, no flag (house rule
