@@ -374,7 +374,13 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   other shape gets the original "pair first, then allow" message, now
   naming the signature requirement too. The door-wide bearer that gates
   every OTHER arm (read commands, the uniform-response guard, Inject's
-  `effective_origin` coupling) is not consulted here at all. Signing
+  `effective_origin` coupling) is not consulted here at all. **The bearer
+  gates unsigned callers only**: the read arms (`tasks/get`,
+  `aoide/graphSummary`, `tasks/resubscribe`) go through `read_admitted`, so a
+  signed caller whose grant holds `read` reads on a bearer-gated door and a
+  signed caller without it is refused like an unsigned one. A new read arm
+  uses `read_admitted`, never a bare `token_authorized`; a write arm (spawn,
+  inject, `message/stream`) never does. Signing
   itself never touches this crate — `aoide_storage::wire_auth` holds the
   canonical-string/verify logic, `aoide-client` holds the signer; this
   crate is verify-only, consistent with "inbound/serve only" above. No
@@ -806,8 +812,8 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
   because this is a request about a session rather than a message — and the
   answer is the SAME status read plus the frame as one `data` artifact, so a
   request without the key stays byte-identical. The gate is three clauses at
-  once: `read_ok` (the door-wide bearer rule every read arm carries —
-  `token_authorized`), a caller resolved through the SIGNATURE rung, and that
+  once: `read_ok` (the door's read gate every read arm carries —
+  `read_admitted`: the bearer OR a signed caller holding `read`), a caller resolved through the SIGNATURE rung, and that
   record `verified` with `read` among its grants in the request's mesh
   (`output_read_admitted`, `may_spawn`'s twin one capability over). Resolution goes through
   `caller_grant`/`grant_in_mesh`, which take the rung from the PROOF rather than a second

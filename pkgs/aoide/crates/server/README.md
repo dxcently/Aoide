@@ -275,6 +275,10 @@ the inbound half of the two-door contract (the outbound half is
   value is never cached, logged, or placed in any audit line — see
   `CONTRACTS.md`'s "Secrets wire"/§6 sections for the wire contract and
   the resolve-consumer honesty note.
+  The bearer gates UNSIGNED callers only (it strips the loopback free pass
+  a tunnel or proxy confers): the read arms go through `read_admitted`, which
+  also admits a verified signed caller whose grant in the request's mesh
+  holds `read`, so a paired peer's `node pull` works on a bearer-gated door.
   **The pairing ceremony's three methods (P-P2, Design A/task #119,
   CONTRACTS.md §6's "Pairing wire" subsection)** — `pair_request`
   (`aoide/pairRequest`), `pair_reveal` (`aoide/pairReveal`), and `pair_poll`

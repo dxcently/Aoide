@@ -6038,8 +6038,8 @@ anything. The instruction block is never shed — it is the text the frame exist
 to show — and is bound only by its own block caps, so a frame may exceed 256 KiB
 by that block alone.
 
-**The output-read gate is `output_read_admitted`: `read_ok` (the door-wide
-bearer rule every read arm already carries) AND a caller resolved through the
+**The output-read gate is `output_read_admitted`: `read_ok` (the door's read
+gate, `read_admitted`, which every read arm already carries) AND a caller resolved through the
 SIGNATURE rung AND that node record `verified` with `read` in its `allows`
 (`node_may_read`, [`node_may_spawn`]'s twin one capability over).** The
 remote-parent key match is deliberately NOT required to read: a signed,
@@ -6424,16 +6424,32 @@ Closed by the same predicate that gates Spawn, now named `token_authorized`
 (the old `spawn_authorized`; one predicate, since the question is identical —
 does the caller hold a valid token when one is required):
 
-- `handle_jsonrpc` computes the gate once and short-circuits `tasks/get` and
-  `aoide/graphSummary` to `-32005` (the shared `unauthorized()` value) when a
-  token is configured and no valid bearer is presented — *before* the read
-  runs, so a real session id still returns the error, never its state.
+- `handle_jsonrpc` computes the gate once (`read_admitted`) and short-circuits
+  `tasks/get` and `aoide/graphSummary` to `-32005` (the shared
+  `unauthorized()` value) when a token is configured and the caller holds
+  neither a valid bearer nor a verified signature whose grant in the request's
+  mesh includes `read` — *before* the read runs, so a real session id still
+  returns the error, never its state.
+- **The bearer gates unsigned callers only; signed callers are governed by
+  their grants.** Its purpose is to strip loopback's free pass from callers a
+  tunnel or proxy makes look local, and an unsigned caller proves nothing
+  else. A request signed by a verified caller is a stronger credential than
+  the bearer, and its `read` grant (`caller_grant`, the lookup every other
+  gated arm uses) admits it to the read arms with no bearer. A signed caller
+  without `read`, and an unsigned caller without the bearer, are refused
+  `-32005`.
 - `stream_task` gates BOTH SSE reads at the top, before `message_send` runs,
   so an unauthenticated `message/stream` neither injects nor spawns; the
-  `-32005` arrives as the stream's single SSE error event.
+  `-32005` arrives as the stream's single SSE error event. Only
+  `tasks/resubscribe`, a read, also admits a signed caller holding `read`;
+  `message/stream` injects or spawns, so it stays bearer-gated and
+  `message_send` applies its own grant gates. The AgentCard GET keeps the
+  bearer-only choice between the full and the stripped card.
 - Off-path (no token, today's default) is byte-identical to before — pinned
   by `read_commands_stay_open_when_no_token_is_configured`; the gate itself by
-  `read_commands_are_token_gated_when_a_token_is_configured`. `message/send` is
+  `read_commands_are_token_gated_when_a_token_is_configured`; the signed-read
+  rule by `a_signed_caller_holding_read_reads_through_a_bearer_gated_door` and
+  its siblings. `message/send` is
   unchanged (it still runs its own `classify_token` internally for
   `effective_origin`, so it is not re-gated in the dispatcher).
 
