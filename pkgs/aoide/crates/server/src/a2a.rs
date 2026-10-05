@@ -289,6 +289,22 @@ pub fn read_expected_token(token_file: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// The expected token `a2a serve` carries from launch: empty only when NO
+/// token file is configured. A configured file that is missing, unreadable or
+/// empty yields [`resolve_failure_sentinel`], so the door stays closed rather
+/// than reading as "no token configured".
+pub fn launch_token(token_file: &str) -> String {
+    if token_file.is_empty() {
+        return String::new();
+    }
+    read_expected_token(token_file).unwrap_or_else(|| {
+        eprintln!(
+            "aoide a2a: token file `{token_file}` holds no token — refusing every bearer check (fail closed)"
+        );
+        resolve_failure_sentinel()
+    })
+}
+
 /// Resolve `aoide.a2a.bearerSecret`: the NAME of a secret this door resolves
 /// through the LOCAL secrets broker, fresh on every request, as its own
 /// expected inbound bearer (task #84) — the first real machine consumer of
@@ -6492,6 +6508,14 @@ fn resolve_inbound_bearer(cfg: &InboundBearerConfig) -> String {
         BEARER_CONSUMER_DOOR,
         BEARER_RESOLVE_TIMEOUT,
     ) {
+        Ok(value) if value.trim().is_empty() => {
+            eprintln!(
+                "aoide a2a: inbound bearer secret `{}` resolved to an empty value — \
+                 refusing every bearer check on this connection (fail closed)",
+                cfg.bearer_secret,
+            );
+            resolve_failure_sentinel()
+        }
         Ok(value) => value,
         Err(e) => {
             // `e` is one of the resolve wire's own error strings
@@ -15281,6 +15305,69 @@ mod tests {
         drop(broker_thread);
         std::fs::remove_file(&socket_path).ok();
         std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// A broker secret whose stored value is EMPTY must read as a resolve
+    /// failure: an empty expected bearer is the "no token configured" signal,
+    /// and treating it so would restore the loopback free pass.
+    #[cfg_attr(windows, ignore = "the fixture stores through the built-in `file` backend, whose template is the POSIX preset `cat ...`")]
+    #[test]
+    fn resolve_inbound_bearer_fails_closed_on_an_empty_resolved_secret() {
+        let stamp = format!(
+            "{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        );
+        let home = std::env::temp_dir().join(format!("aoide-a2a-bearer-empty-{stamp}"));
+        std::fs::create_dir_all(&home).unwrap();
+        aoide_secrets::store::save_policies(
+            &home,
+            &[aoide_secrets::policy::Policy::new("empty-door-token", "file", "k")],
+        )
+        .unwrap();
+        let socket_path = aoide_test_support::short_tmp(&format!("bearer-empty-{stamp}")).join("b.sock");
+        let home_for_thread = home.clone();
+        let sock_for_thread = socket_path.clone();
+        let broker_thread = std::thread::spawn(move || {
+            let _ = aoide_secrets::broker::serve(&home_for_thread, &sock_for_thread);
+        });
+        let mut connected = false;
+        for _ in 0..50 {
+            if UnixStream::connect(&socket_path).is_ok() {
+                connected = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(connected, "broker did not bind {} in time", socket_path.display());
+        let stored = aoide_secrets::client::put(&socket_path, "empty-door-token", "", true);
+        assert!(stored.is_ok(), "the fixture must store the empty value: {stored:?}");
+
+        let cfg = bearer_cfg("empty-door-token", &socket_path, "");
+        let expected = resolve_inbound_bearer(&cfg);
+        assert!(!expected.is_empty(), "an empty resolved bearer must never read as 'not configured'");
+        assert!(!token_authorized(!expected.is_empty(), classify_token(&expected, None)));
+
+        drop(broker_thread);
+        std::fs::remove_file(&socket_path).ok();
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn launch_token_fails_closed_on_a_configured_file_that_yields_no_token() {
+        assert_eq!(launch_token(""), "", "no file configured is the off path");
+        let dir = std::env::temp_dir().join(format!("aoide-a2a-launch-token-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("token");
+        std::fs::write(&path, "\n").unwrap();
+        for file in [path.to_str().unwrap(), "/nonexistent/aoide-a2a-token-file"] {
+            let expected = launch_token(file);
+            assert!(!expected.is_empty(), "a configured token file with no token must not read as 'not configured': {file}");
+            assert!(!token_authorized(true, classify_token(&expected, None)));
+        }
+        std::fs::write(&path, "real\n").unwrap();
+        assert_eq!(launch_token(path.to_str().unwrap()), "real");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // ── NO-CACHE / no-log grep gate (task #84 PINNED CONSTRAINT) ────────────

@@ -39,6 +39,13 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
 - **Untrusted input stops here.** Every door-facing parse/validate boundary
   in this crate is the last line before dispatch; don't push validation
   downstream into `conduct`/`storage` handlers that assume a trusted caller.
+- **An empty expected bearer means "no token configured", so a value that
+  comes back empty is a resolve FAILURE, never the off path.**
+  `resolve_inbound_bearer` returns `resolve_failure_sentinel()` for a broker
+  secret that resolves empty or whitespace-only, and `launch_token` does the
+  same for a configured `tokenFile` that is missing, unreadable or empty;
+  only an unset secret name and an unset file path leave the door open. A new
+  way to obtain the expected token takes the same rule.
 - **`mcp::serve_stdio`'s channel socket is the MCP subprocess's own,
   never `aoided`'s** (P-M5c-2, `docs/architecture/CLAUDE-CHANNEL-PROOF.md`):
   bound only when `AOIDE_SESSION_ID` is set and non-empty, for the lifetime

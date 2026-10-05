@@ -6420,7 +6420,9 @@ that command being non-empty. Fixed in `a2a.rs`:
   mechanisms. A broker resolve failure — unreachable, denied, or a bounded
   ~2s socket-read timeout (the wire's own `wait:false` keeps a
   misconfigured `requireTotp` secret from ever parking this door's
-  connection the way a human-facing `secrets exec` might tolerate) — FAILS
+  connection the way a human-facing `secrets exec` might tolerate), or a
+  resolved value that is EMPTY or only whitespace, or a configured
+  `tokenFile` that is missing, unreadable or empty (`launch_token`) — FAILS
   CLOSED: every bearer check on that connection denies, the identical
   `-32005`/stripped-card shape a wrong token gets, never a silent fallback
   to the file mechanism or to the pre-token open behavior. Neither source

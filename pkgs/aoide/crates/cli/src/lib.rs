@@ -99,7 +99,7 @@ pub fn run_cli(argv: &[String]) -> i32 {
             let spawn_cwd = a2a::resolve_spawn_cwd(inv);
             let node_name = a2a::resolve_node_name(inv);
             let token_file = a2a::resolve_token_file(inv);
-            let expected_token = a2a::read_expected_token(&token_file).unwrap_or_default();
+            let expected_token = a2a::launch_token(&token_file);
             let bearer_secret = a2a::resolve_bearer_secret(inv);
             let secrets_socket = aoide_secrets::socket::socket_path();
             let audit_log = dispatch::audit_log_path(inv);
