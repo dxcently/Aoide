@@ -6429,7 +6429,8 @@ does the caller hold a valid token when one is required):
   `unauthorized()` value) when a token is configured and the caller holds
   neither a valid bearer nor a verified signature whose grant in the request's
   mesh includes `read` — *before* the read runs, so a real session id still
-  returns the error, never its state.
+  returns the error, never its state. The graph is host-wide, not scoped to a
+  mesh: `read` in ANY mesh a signed caller names reads this host's whole graph.
 - **The bearer gates unsigned callers only; signed callers are governed by
   their grants.** Its purpose is to strip loopback's free pass from callers a
   tunnel or proxy makes look local, and an unsigned caller proves nothing
