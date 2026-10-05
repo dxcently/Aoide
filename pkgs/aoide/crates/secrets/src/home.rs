@@ -207,8 +207,7 @@ pub fn admin_identity_error(euid: &PeerUser, home_owner: &PeerUser, home: &Path,
         describe(euid)
     };
     Some(format!(
-        "secrets {subcommand} must run as the broker user ({}, the owner of {}) — this process is running as {running_as}. \
-         Run: sudo -u aoide-secrets aoide secrets {subcommand} ...",
+        "secrets {subcommand} must run as the broker user ({}, the owner of {}) — this process is running as {running_as}",
         describe(home_owner),
         home.display()
     ))
@@ -239,7 +238,7 @@ pub fn admin_identity_error_for_missing_home(euid: &PeerUser, home: &Path, subco
         "secrets {subcommand} must run as the broker user, not root — {} does not exist yet, and root creating it \
          would leave policy.json/totp.secret owned root:root, bricking the broker before it even starts. \
          First-time provisioning belongs to the broker's own service (systemd's StateDirectory) or an explicit \
-         `sudo -u aoide-secrets` run. Run: sudo -u aoide-secrets aoide secrets {subcommand} ...",
+         `sudo -u aoide-secrets` run",
         home.display()
     ))
 }
@@ -264,7 +263,7 @@ pub fn admin_identity_check(home: &Path, subcommand: &str) -> Option<String> {
     let Some(me) = effective_user() else {
         return Some(format!(
             "secrets {subcommand} must run as the broker user, and this process's own identity could not be \
-             read on this host — refusing rather than assuming. Run: sudo -u aoide-secrets aoide secrets {subcommand} ..."
+             read on this host — refusing rather than assuming"
         ));
     };
     match owner_of(home) {
@@ -298,7 +297,7 @@ pub fn admin_identity_check(home: &Path, subcommand: &str) -> Option<String> {
 /// without this crate ever resolving one.
 pub fn describe_home_file_error(home: &Path, file: &Path, err: &io::Error) -> String {
     if err.kind() != io::ErrorKind::PermissionDenied {
-        return format!("{}: {err}", file.display());
+        return aoide_protocol::output::io_cause("read", file, err).why;
     }
     let home_owner = owner_of(home);
     let file_owner = owner_of(file);
@@ -429,7 +428,8 @@ mod tests {
         assert!(msg.contains("/var/lib/aoide-secrets"), "{msg}");
         assert!(msg.contains("uid 1000"), "{msg}");
         assert!(msg.to_lowercase().contains("root"), "{msg}");
-        assert!(msg.contains("sudo -u aoide-secrets aoide secrets add"), "{msg}");
+        assert!(msg.contains("must run as the broker user"), "{msg}");
+        assert!(!msg.contains("Run:"), "the command to run is the caller's to spell: {msg}");
     }
 
     #[test]
@@ -437,7 +437,7 @@ mod tests {
         let msg = admin_identity_error(&PeerUser::Uid(1001), &PeerUser::Uid(1000), Path::new("/var/lib/aoide-secrets"), "grant").unwrap();
         assert!(msg.contains("uid 1001"), "{msg}");
         assert!(msg.contains("uid 1000"), "{msg}");
-        assert!(msg.contains("sudo -u aoide-secrets aoide secrets grant"), "{msg}");
+        assert!(msg.contains("must run as the broker user"), "{msg}");
         // Not root, so no plain-sudo digression.
         assert!(!msg.to_lowercase().contains("plain `sudo`"), "{msg}");
     }
@@ -456,7 +456,7 @@ mod tests {
         assert!(msg.contains("secrets add"), "{msg}");
         assert!(msg.contains("/var/lib/aoide-secrets"), "{msg}");
         assert!(msg.to_lowercase().contains("root"), "{msg}");
-        assert!(msg.contains("sudo -u aoide-secrets aoide secrets add"), "{msg}");
+        assert!(msg.contains("must run as the broker user"), "{msg}");
     }
 
     #[test]
@@ -509,12 +509,12 @@ mod tests {
     // ── describe_home_file_error (the poisoned-file diagnosis) ─────────────
 
     #[test]
-    fn non_permission_denied_errors_pass_through_with_just_the_path_prefixed() {
+    fn a_non_permission_error_names_the_file_in_words_without_the_chown_hint() {
         let home = Path::new("/var/lib/aoide-secrets");
         let file = Path::new("/var/lib/aoide-secrets/policy.json");
         let err = io::Error::new(io::ErrorKind::InvalidData, "not valid json");
         let msg = describe_home_file_error(home, file, &err);
-        assert_eq!(msg, format!("{}: {err}", file.display()));
+        assert!(msg.contains(&file.display().to_string()), "{msg}");
         assert!(!msg.contains("chown"), "{msg}");
     }
 

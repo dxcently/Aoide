@@ -184,9 +184,10 @@
 //! and neither does `put`/`exec`: those are the socket-side operator commands
 //! this guard was never meant to cover (`home.rs`'s module doc).
 
-use crate::home;
+use crate::client::PutFailure;
 use crate::policy::valid_secret_name;
-use aoide_protocol::output::Outcome;
+use crate::{home, teach};
+use aoide_protocol::output::{Fix, Kind, Outcome, Refusal};
 use aoide_protocol::registry::{arg, cmd, flag, Registry};
 use aoide_protocol::{Door, Invocation};
 use serde_json::json;
@@ -208,10 +209,10 @@ pub fn register(r: &mut Registry) {
         summary: "Resolve a secret and exec a command with it injected as an env var (Stdio::inherit throughout — never argv, never logged, never an Outcome/JSON field). CLI-only: the value would otherwise have to cross a door that isn't this process's own stdio.",
         args: [arg!("command", "string", true, "The command to exec with the secret injected — put it after `--` so its own flags pass through verbatim (the same declaration `conduct` carries for its wrapped command; an undeclared tail would trip the parser's zero-arg overflow guard).")],
         flags: [
-            flag!("as", "string", "The consumer name to present to the broker (self-asserted — the policy's consumers[] list is the real gate, not caller identity)."),
-            flag!("secret", "string", "The secret's policy name, optionally `name:VAR` to name the injected env var explicitly (default: the name, uppercased, `-` -> `_`)."),
-            flag!("totp", "string", "A TOTP code for a requireTotp-gated secret — verified live against this host's enrolled secret (±1-timestep window, single-use: a wrong or already-used code is a plain denial). Omitted (or wrong) on a requireTotp secret PARKS the resolve instead of refusing outright — complete it with `secrets pending`/`secrets approve <id> --totp <code>` from another terminal, or wait out the timeout. Unresolvable only when no TOTP enrollment exists yet on this host (`secrets enroll`)."),
-            flag!("reason", "string", "Free-text context for a popup/prompt surface to show alongside a parked ask -- what this ask is FOR, never a value. Defaults to the wrapped command's own argv, space-joined and truncated to ~60 chars, when omitted.")
+            flag!("as", "string", "The consumer name to present to the broker (self-asserted — the policy's consumers[] list is the real gate, not caller identity).", value: "consumer", required: true),
+            flag!("secret", "string", "The secret's policy name, optionally `name:VAR` to name the injected env var explicitly (default: the name, uppercased, `-` -> `_`).", value: "name[:VAR]", required: true),
+            flag!("totp", "string", "A TOTP code for a requireTotp-gated secret — verified live against this host's enrolled secret (±1-timestep window, single-use: a wrong or already-used code is a plain denial). Omitted (or wrong) on a requireTotp secret PARKS the resolve instead of refusing outright — complete it with `secrets pending`/`secrets approve <id> --totp <code>` from another terminal, or wait out the timeout. Unresolvable only when no TOTP enrollment exists yet on this host (`secrets enroll`).", value: "code"),
+            flag!("reason", "string", "Free-text context for a popup/prompt surface to show alongside a parked ask -- what this ask is FOR, never a value. Defaults to the wrapped command's own argv, space-joined and truncated to ~60 chars, when omitted.", value: "text")
         ],
         gated: false,
         implemented: true,
@@ -221,18 +222,18 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["secrets", "add"],
-        summary: "Register a new secret's policy: backend + key, never a value (the secrets broker never stores one). No consumers/sharing/TOTP unless given. --backend defaults to `age` (the built-in age-encrypted store) when omitted.",
+        summary: "Register a new secret's policy: backend + key, never a value (the secrets broker never stores one). No consumers/sharing/TOTP unless given. --backend defaults to `age` (the built-in age-encrypted store) when omitted, and for `age` --key defaults to the secret's name.",
         args: [arg!("name", "string", true, "The secret's nickname.")],
         flags: [
             flag!("backend", "string", "The named backend (backends.json) that fetches this secret's value. Defaults to `age` (the built-in age-encrypted store) when omitted.", value: "backend", default: DEFAULT_BACKEND),
-            flag!("key", "string", "The backend-specific key/identifier substituted into that backend's fetch-command template.", value: "key", required: true),
+            flag!("key", "string", "The backend-specific key/identifier substituted into that backend's fetch-command template (default for age: the secret's name). A command-template backend has no default: the key is whatever that backend's command fetches by.", value: "key"),
             flag!("require-totp", "bool", "Require a fresh TOTP code to resolve — the policy is born gated. Unresolvable until this host has run `secrets enroll`; once enrolled, verified live against the enrolled TOTP secret on every resolve (`secrets set-totp` flips this later without re-adding)."),
             flag!("consumers", "string", "Comma-separated consumer names allowed to resolve this secret (empty/omitted = any consumer).")
         ],
         gated: false,
         implemented: true,
         handler: handle_secrets_add,
-        examples: ["secrets add db-prod --backend pass --key prod/db --consumers m"],
+        examples: ["secrets add db-prod", "secrets add db-prod --backend pass --key prod/db --consumers m"],
         brief: "Register a secret's policy: a backend and a key, never a value.",
     ));
     r.insert(cmd!(
@@ -279,8 +280,8 @@ pub fn register(r: &mut Registry) {
         summary: "Enroll this host for TOTP: generate a fresh secret and print its otpauth:// URI + base32 form (plus a QR code when `qrencode` is on PATH). ONE enrollment per host — pass --force to regenerate (old codes stop working immediately), or --show to reprint the EXISTING enrollment's URI/QR without rotating anything. --force and --show are mutually exclusive. CLI-only: the secret is printed directly to stdout, never through this envelope.",
         args: [],
         flags: [
-            flag!("force", "bool", "Regenerate the secret even if one is already enrolled on this host. Invalidates every previously issued code."),
-            flag!("show", "bool", "Reprint the existing enrollment's otpauth:// URI + base32 + QR without generating or rotating anything. Errors if no enrollment exists yet.")
+            flag!("force", "bool", "Regenerate the secret even if one is already enrolled on this host. Invalidates every previously issued code.", conflicts: &["show"]),
+            flag!("show", "bool", "Reprint the existing enrollment's otpauth:// URI + base32 + QR without generating or rotating anything. Errors if no enrollment exists yet.", conflicts: &["force"])
         ],
         gated: false,
         implemented: true,
@@ -310,7 +311,7 @@ pub fn register(r: &mut Registry) {
         summary: "Flip an EXISTING secret's requireTotp bit on or off, without hand-editing policy.json. Idempotent: re-setting the same state reports \"unchanged\" and writes nothing.",
         args: [
             arg!("name", "string", true, "The secret's nickname — must already have a policy (`secrets add` first)."),
-            arg!("state", "string", true, "`on` or `off`.")
+            arg!("state", "string", true, "`on` or `off`.", values: &["on", "off"])
         ],
         flags: [],
         gated: false,
@@ -324,8 +325,8 @@ pub fn register(r: &mut Registry) {
         summary: "Manage an EXISTING secret's automation gate. `on`/`off` flips whether the LISTED consumers resolve without a TOTP code (every other caller stays gated by requireTotp as before); `grant`/`revoke <consumer>` edits which consumers are listed. Idempotent: re-setting a state, or granting/revoking a consumer already in/out of the list, reports \"unchanged\" and writes nothing.",
         args: [
             arg!("name", "string", true, "The secret's nickname — must already have a policy (`secrets add` first)."),
-            arg!("action", "string", true, "`on` | `off` | `grant` | `revoke`."),
-            arg!("consumer", "string", false, "Consumer name — required for `grant`/`revoke`, ignored for `on`/`off`.")
+            arg!("action", "string", true, "`on` | `off` | `grant` | `revoke`.", values: &["on", "off", "grant", "revoke"]),
+            arg!("consumer", "string", false, "Consumer name — required for `grant`/`revoke`, ignored for `on`/`off`. A grant needs a consumer the secret already admits (see `secrets grant`).", required_after: &["grant", "revoke"])
         ],
         flags: [],
         gated: false,
@@ -344,7 +345,7 @@ pub fn register(r: &mut Registry) {
         summary: "Flip an EXISTING secret's remote-reachability bit on or off. No behavior change today — no non-local entry point exists yet — but every non-local path added later (mesh replication, a network door) must refuse a secret whose remote bit is off. Idempotent: re-setting the same state reports \"unchanged\" and writes nothing.",
         args: [
             arg!("name", "string", true, "The secret's nickname — must already have a policy (`secrets add` first)."),
-            arg!("state", "string", true, "`on` or `off`.")
+            arg!("state", "string", true, "`on` or `off`.", values: &["on", "off"])
         ],
         flags: [],
         gated: false,
@@ -368,7 +369,7 @@ pub fn register(r: &mut Registry) {
         path: ["secrets", "approve"],
         summary: "Complete a parked resolve with a TOTP code, releasing the value down the ORIGINAL requesting connection (never into this command's own reply). Invalid/expired code: the ask stays parked and the replay ledger is unburned.",
         args: [arg!("id", "string", true, "The parked ask's id, from `secrets pending`.")],
-        flags: [flag!("totp", "string", "The TOTP code to validate against this host's enrollment.")],
+        flags: [flag!("totp", "string", "The TOTP code to validate against this host's enrollment.", value: "code", required: true)],
         gated: false,
         implemented: true,
         handler: handle_secrets_approve,
@@ -393,7 +394,8 @@ pub fn register(r: &mut Registry) {
         flags: [flag!(
             "popup",
             "bool",
-            "Surface each parked ask as a zenity --entry --hide-text dialog instead of the terminal's [a]/[d]/[i] prompt. Unlock-gated (holds the dialog while the session is locked, via loginctl LockedHint OR'd with an AOIDE_SECRETS_LOCKER /proc scan, default `hyprlock`) and parked-only (released/completed/dismissed/expired still narrate, never popup). Requires zenity on PATH. Mutually exclusive with --json."
+            "Surface each parked ask as a zenity --entry --hide-text dialog instead of the terminal's [a]/[d]/[i] prompt. Unlock-gated (holds the dialog while the session is locked, via loginctl LockedHint OR'd with an AOIDE_SECRETS_LOCKER /proc scan, default `hyprlock`) and parked-only (released/completed/dismissed/expired still narrate, never popup). Requires zenity on PATH. Mutually exclusive with --json.",
+            conflicts: &["json"]
         )],
         gated: false,
         implemented: true,
@@ -405,7 +407,7 @@ pub fn register(r: &mut Registry) {
         path: ["secrets", "migrate"],
         summary: "Move an EXISTING secret's stored value from its policy's current backend to a target backend (default `age`), then flip the policy's backend field. Admin command, direct-home (mirrors add/rm/grant, not put/exec's socket round trip). Fetches via the current backend, stores via the target first, flips policy.json only after the new value is durably stored, then removes the old value LAST — only when the source backend is a built-in (file/age) whose value path this crate can derive on its own.",
         args: [arg!("name", "string", true, "The secret's nickname — must already have a policy (`secrets add` first).")],
-        flags: [flag!("backend", "string", "The target backend to migrate onto. Defaults to `age` (the built-in age-encrypted store) when omitted.")],
+        flags: [flag!("backend", "string", "The target backend to migrate onto. Defaults to `age` (the built-in age-encrypted store) when omitted.", value: "backend", default: DEFAULT_BACKEND)],
         gated: false,
         implemented: true,
         handler: handle_secrets_migrate,
@@ -417,7 +419,7 @@ pub fn register(r: &mut Registry) {
         summary: "Flip an EXISTING secret's remote-origin admission bit on or off (LANE IDENTITY P-ID4). Off (the default) refuses a resolve whose CALLER SESSION is positively attested as remote-origin (a sealed `node:*` originClass — a session a remote node created); on admits it. Distinct from `expose` (remote = may the secret be served through a non-local entry point) and `automate` (may listed consumers skip TOTP) — this gates WHO locally asks, by kernel-attested provenance. Unidentified callers are untouched by this gate. Idempotent: re-setting the same state reports \"unchanged\" and writes nothing.",
         args: [
             arg!("name", "string", true, "The secret's nickname — must already have a policy (`secrets add` first)."),
-            arg!("state", "string", true, "`on` or `off`.")
+            arg!("state", "string", true, "`on` or `off`.", values: &["on", "off"])
         ],
         flags: [],
         gated: false,
@@ -469,17 +471,21 @@ fn handle_secrets_exec(inv: &Invocation) -> Outcome {
 /// See `crate::enroll`'s module doc for the secret-generation/persistence/
 /// printing flow this hands off to (in the owning app crate's `special`
 /// hook, not here — same split as `handle_secrets_serve`/`handle_secrets_exec`
-/// above). This handler itself does no secrets-home I/O: it only gates the
-/// door (reusing [`require_cli`], same as the CRUD quartet below) and
-/// returns a plain confirmation `Outcome` with no secret content — the
-/// `secretsHome` field mirrors `handle_secrets_serve`'s own `with_data`.
+/// above). This handler itself does no secrets-home I/O: it gates the door
+/// (reusing [`require_cli`]) and, unless `--show` (which rotates nothing),
+/// the broker-user identity — the one place that refusal can print the whole
+/// command, since `enroll::run` has no invocation — then returns a plain
+/// confirmation `Outcome` with no secret content; the `secretsHome` field
+/// mirrors `handle_secrets_serve`'s own `with_data`.
 fn handle_secrets_enroll(inv: &Invocation) -> Outcome {
     let cmd = "secrets.enroll";
     if let Some(hint) = require_cli(inv, cmd) {
         return hint;
     }
-    if inv.flag_present("force") && inv.flag_present("show") {
-        return Outcome::usage(cmd, "secrets enroll: --force and --show are mutually exclusive");
+    if !inv.flag_present("show") {
+        if let Some(refusal) = require_admin_identity(inv, cmd) {
+            return refusal;
+        }
     }
     let message = if inv.flag_present("show") { "reprinting enrollment" } else { "enrolling TOTP on this host" };
     Outcome::ok(cmd, message).with_data(json!({
@@ -487,19 +493,22 @@ fn handle_secrets_enroll(inv: &Invocation) -> Outcome {
     }))
 }
 
-/// Shared door gate for the admin quartet (`add`/`rm`/`grant`/`revoke`):
-/// CLI-only, same shape as `handle_secrets_serve`/`handle_secrets_exec`'s own
-/// door check (bounce-fix item 2, P-V2 review). Returns `Some(hint)` on any
+/// Shared door gate for the admin commands and the operator-side socket
+/// commands: CLI-only, same shape as `handle_secrets_serve`/
+/// `handle_secrets_exec`'s own door check. Returns `Some(refusal)` on any
 /// non-`Cli` door — the caller must return it immediately, before touching
 /// `store::load_policies`/`store::save_policies`, so a gated call never
 /// mutates `policy.json`.
 fn require_cli(inv: &Invocation, cmd: &str) -> Option<Outcome> {
     match inv.door {
         Door::Cli => None,
-        _ => Some(Outcome::usage(
-            cmd,
-            "secrets policy admin commands (add/rm/grant/revoke) are CLI-only; run this from a terminal (not over this door)",
-        )),
+        _ => Some(
+            teach::cli_only(
+                inv,
+                "secrets commands change or release what the broker guards, so they take a person at a terminal, never another door",
+            )
+            .into_outcome(cmd),
+        ),
     }
 }
 
@@ -512,12 +521,11 @@ fn require_cli(inv: &Invocation, cmd: &str) -> Option<Outcome> {
 /// `policy.json` to `root:root` and bricked the broker (and every
 /// subsequent admin command, including the correctly-spelled `sudo -u
 /// aoide-secrets` retry) in the field. Called immediately after
-/// [`require_cli`] in every handler below. `subcommand` is the bare
-/// command word (`"add"`, not `"secrets.add"`) — it lands in the
-/// corrective `sudo -u aoide-secrets aoide secrets <subcommand> ...`
-/// spelling the refusal teaches.
-fn require_admin_identity(cmd: &str, subcommand: &str) -> Option<Outcome> {
-    home::admin_identity_check(&home::secrets_home(), subcommand).map(|msg| Outcome::error(cmd, msg))
+/// [`require_cli`] in every handler below. The refusal's fix is the user's
+/// own command line behind `sudo -u aoide-secrets`, whole.
+fn require_admin_identity(inv: &Invocation, cmd: &str) -> Option<Outcome> {
+    home::admin_identity_check(&home::secrets_home(), &inv.path[1])
+        .map(|msg| teach::broker_user(inv, &msg).into_outcome(cmd))
 }
 
 /// `secrets add`'s backend when `--backend` is omitted (P-G1, task #70 —
@@ -540,16 +548,19 @@ const DEFAULT_BACKEND: &str = "age";
 /// race against a direct write landing underneath it. Reports which path
 /// executed via `Outcome::with_data({"path":"broker"|"direct"})` — the
 /// message/changed-keys shape is otherwise identical either way, since both
-/// paths report through the same [`crate::admin::AdminOutcome`] fields.
+/// paths report through the same [`crate::admin::AdminOutcome`] fields. A
+/// failure from either path becomes a taught refusal ([`teach`]).
 fn admin_dispatch(
     cmd: &str,
-    subcommand: &str,
+    inv: &Invocation,
     mut fields: serde_json::Map<String, serde_json::Value>,
     direct: impl FnOnce() -> Result<crate::admin::AdminOutcome, String>,
 ) -> Outcome {
     fields.insert("op".to_string(), json!("admin"));
-    fields.insert("command".to_string(), json!(subcommand));
-    match crate::client::admin_request(&crate::socket::socket_path(), serde_json::Value::Object(fields)) {
+    fields.insert("command".to_string(), json!(inv.path[1]));
+    let socket = crate::socket::socket_path();
+    let at = teach::Where { inv, socket: &socket, secret: inv.args.first().map(String::as_str) };
+    match crate::client::admin_request(&socket, serde_json::Value::Object(fields)) {
         Ok(reply) => {
             let message = reply.get("message").and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
             let changed: Vec<String> = reply
@@ -564,7 +575,7 @@ fn admin_dispatch(
             outcome
         }
         Err(crate::client::AdminError::NoSocket) => {
-            if let Some(hint) = require_admin_identity(cmd, subcommand) {
+            if let Some(hint) = require_admin_identity(inv, cmd) {
                 return hint;
             }
             match direct() {
@@ -575,34 +586,37 @@ fn admin_dispatch(
                     }
                     outcome
                 }
-                Err(e) => Outcome::error(cmd, e),
+                Err(e) => teach::from_broker(&at, &e).into_outcome(cmd),
             }
         }
-        Err(crate::client::AdminError::Other(e)) => Outcome::error(cmd, e),
+        Err(crate::client::AdminError::Other(e)) => teach::from_broker(&at, &e).into_outcome(cmd),
     }
 }
 
 fn handle_secrets_add(inv: &Invocation) -> Outcome {
     let cmd = "secrets.add";
-    const USAGE: &str = "usage: secrets add <name> --key <key> [--backend <backend>]";
     if let Some(hint) = require_cli(inv, cmd) {
         return hint;
     }
-    let Some(name) = inv.args.first().cloned() else {
-        return Outcome::usage(cmd, USAGE);
-    };
+    let name = inv.args[0].clone();
     if !valid_secret_name(&name) {
-        return Outcome::usage(
-            cmd,
-            format!(
-                "invalid secret name `{name}` (must be lowercase [a-z0-9-], no leading/trailing/doubled \
-                 hyphen) — {USAGE}"
-            ),
-        );
+        return teach::invalid_name(inv, "secret", &name).into_outcome(cmd);
     }
-    let backend = inv.flags.get("backend").cloned().unwrap_or_else(|| DEFAULT_BACKEND.to_string());
-    let Some(key) = inv.flags.get("key").cloned() else {
-        return Outcome::usage(cmd, format!("secrets add: missing --key <key> — {USAGE}"));
+    let backend = inv.flags["backend"].clone();
+    let key = match inv.flags.get("key") {
+        Some(key) => key.clone(),
+        None if backend == DEFAULT_BACKEND => name.clone(),
+        None => {
+            return Refusal::new(
+                Kind::Usage,
+                format!("`aoide secrets add` needs --key <key> for backend `{backend}`"),
+                format!(
+                    "the key is what backend `{backend}` fetches by: it is substituted into that backend's command template (only `{DEFAULT_BACKEND}` can default it, to the secret's name)"
+                ),
+                Fix::Run(format!("{} --key <key>", inv.command_line("aoide", &["require-totp"], false))),
+            )
+            .into_outcome(cmd);
+        }
     };
     let require_totp = inv.flag_present("require-totp");
     let consumers: Vec<String> = inv
@@ -618,44 +632,35 @@ fn handle_secrets_add(inv: &Invocation) -> Outcome {
         ("requireTotp".to_string(), json!(require_totp)),
         ("consumers".to_string(), json!(consumers.clone())),
     ]);
-    admin_dispatch(cmd, "add", fields, || {
+    admin_dispatch(cmd, inv, fields, || {
         crate::admin::add(&home::secrets_home(), &name, &backend, &key, require_totp, consumers)
     })
 }
 
 fn handle_secrets_rm(inv: &Invocation) -> Outcome {
     let cmd = "secrets.rm";
-    const USAGE: &str = "usage: secrets rm <name>";
     if let Some(hint) = require_cli(inv, cmd) {
         return hint;
     }
-    let Some(name) = inv.args.first().cloned() else {
-        return Outcome::usage(cmd, USAGE);
-    };
+    let name = inv.args[0].clone();
     let fields = serde_json::Map::from_iter([("name".to_string(), json!(name.clone()))]);
-    admin_dispatch(cmd, "rm", fields, || crate::admin::rm(&home::secrets_home(), &name))
+    admin_dispatch(cmd, inv, fields, || crate::admin::rm(&home::secrets_home(), &name))
 }
 
 /// Shared shape behind `grant`/`revoke`: both take `<name> <consumer>` and
 /// differ only in `want_listed` (`true` pushes the consumer if absent,
 /// `false` removes it if present — [`crate::admin::grant`]/[`crate::admin::
-/// revoke`]'s own job). `subcommand` names the bare word for the wire
-/// request and [`require_admin_identity`]'s corrective spelling.
-fn edit_consumer(inv: &Invocation, cmd: &str, subcommand: &str, usage: &str, want_listed: bool) -> Outcome {
+/// revoke`]'s own job).
+fn edit_consumer(inv: &Invocation, cmd: &str, want_listed: bool) -> Outcome {
     if let Some(hint) = require_cli(inv, cmd) {
         return hint;
     }
-    let Some(name) = inv.args.first().cloned() else {
-        return Outcome::usage(cmd, format!("secrets {subcommand}: missing <name> — {usage}"));
-    };
-    let Some(consumer) = inv.args.get(1).cloned() else {
-        return Outcome::usage(cmd, format!("secrets {subcommand}: missing <consumer> — {usage}"));
-    };
+    let (name, consumer) = (inv.args[0].clone(), inv.args[1].clone());
     let fields = serde_json::Map::from_iter([
         ("name".to_string(), json!(name.clone())),
         ("consumer".to_string(), json!(consumer.clone())),
     ]);
-    admin_dispatch(cmd, subcommand, fields, || {
+    admin_dispatch(cmd, inv, fields, || {
         let home = home::secrets_home();
         if want_listed {
             crate::admin::grant(&home, &name, &consumer)
@@ -666,11 +671,11 @@ fn edit_consumer(inv: &Invocation, cmd: &str, subcommand: &str, usage: &str, wan
 }
 
 fn handle_secrets_grant(inv: &Invocation) -> Outcome {
-    edit_consumer(inv, "secrets.grant", "grant", "usage: secrets grant <name> <consumer>", true)
+    edit_consumer(inv, "secrets.grant", true)
 }
 
 fn handle_secrets_revoke(inv: &Invocation) -> Outcome {
-    edit_consumer(inv, "secrets.revoke", "revoke", "usage: secrets revoke <name> <consumer>", false)
+    edit_consumer(inv, "secrets.revoke", false)
 }
 
 /// `secrets put <name>` (P-V4c, `--force` P-67) — CLI-only via the SAME
@@ -678,64 +683,84 @@ fn handle_secrets_revoke(inv: &Invocation) -> Outcome {
 /// values is exactly what the design forbids), then a PLAIN delegation to
 /// `crate::client::run_put`, which reads the value from stdin, warns +
 /// confirms before an overwrite (module doc), and does the socket round
-/// trip(s). The returned [`Outcome`]'s message is exactly what `run_put`
-/// reports ("stored" vs. "replaced" on success) — `crate::client::
-/// run_put`'s `Result<String, String>` carries no VALUE on either arm
-/// (put's own wire reply never has one either), so there is nothing here
-/// that could put the secret's value on this envelope even by accident.
+/// trip(s). A value that is empty or only whitespace is refused before it
+/// reaches the broker: it is what a failed producer before the pipe leaves
+/// behind, and a stored empty value reads as "no secret" to every check
+/// built on it. `crate::client::run_put`'s `Result<String, PutFailure>`
+/// carries no VALUE on either arm (put's own wire reply never has one
+/// either), so there is nothing here that could put the secret's value on
+/// this envelope even by accident.
 fn handle_secrets_put(inv: &Invocation) -> Outcome {
     let cmd = "secrets.put";
-    const USAGE: &str = "usage: secrets put <name> [--force] (value read from stdin)";
     if let Some(hint) = require_cli(inv, cmd) {
         return hint;
     }
-    let Some(name) = inv.args.first().cloned() else {
-        return Outcome::usage(cmd, USAGE);
-    };
+    let name = inv.args[0].clone();
     if !valid_secret_name(&name) {
-        return Outcome::usage(
-            cmd,
-            format!(
-                "invalid secret name `{name}` (must be lowercase [a-z0-9-], no leading/trailing/doubled \
-                 hyphen) — {USAGE}"
-            ),
-        );
+        return teach::invalid_name(inv, "secret", &name).into_outcome(cmd);
     }
     let force = inv.flag_present("force");
-    match crate::client::run_put(&name, &crate::socket::socket_path(), force) {
+    let socket = crate::socket::socket_path();
+    match crate::client::run_put(&name, &socket, force) {
         Ok(message) => Outcome::ok(cmd, message),
-        Err(e) => Outcome::error(cmd, e),
+        Err(PutFailure::Empty { typed: false }) => Refusal::new(
+            Kind::Refused,
+            "nothing arrived on stdin",
+            "the command before the pipe printed nothing or failed (e.g. `openssl: command not found`)",
+            Fix::Run(format!(
+                "head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \\n' | aoide secrets put {name} --force"
+            )),
+        )
+        .into_outcome(cmd),
+        Err(PutFailure::Empty { typed: true }) => Refusal::new(
+            Kind::Refused,
+            "nothing was typed at the prompt",
+            "an empty value stored under a secret reads as no secret at all to every check built on it",
+            Fix::Run(format!("aoide secrets put {name}")),
+        )
+        .into_outcome(cmd),
+        Err(PutFailure::NeedsForce) => Refusal::new(
+            Kind::Refused,
+            format!("secret `{name}` already has a stored value"),
+            "stdin is not a terminal, so there is no one to confirm the overwrite",
+            Fix::Run(format!("printf %s <value> | aoide secrets put {name} --force")),
+        )
+        .into_outcome(cmd),
+        Err(PutFailure::Declined) => Refusal::new(
+            Kind::Refused,
+            format!("secret `{name}` left unchanged"),
+            "the overwrite prompt was answered no",
+            Fix::None("nothing was changed"),
+        )
+        .into_outcome(cmd),
+        Err(PutFailure::Broker(e)) => {
+            teach::from_broker(&teach::Where { inv, socket: &socket, secret: Some(&name) }, &e).into_outcome(cmd)
+        }
     }
+}
+
+/// `on`/`off` as the bool it names; `Command::check` admits nothing else.
+fn switch(state: &str) -> bool {
+    state == "on"
 }
 
 /// `secrets set-totp <name> on|off` — the direct replacement for the
 /// hand-edited `jq` one-liner against `policy.json` this command exists to
 /// retire. Same `require_cli` gate as the rest of the admin surface; an
-/// unknown secret name is a clean [`Outcome::error`], never a silent
-/// no-op. Idempotent (house rule 2 — "report exactly what changed"):
-/// re-setting the state a policy already has writes NOTHING and reports
-/// "unchanged" rather than calling `.changed(...)` on a write that never
-/// happened.
+/// unknown secret name is a taught refusal, never a silent no-op. Idempotent
+/// (house rule 2 — "report exactly what changed"): re-setting the state a
+/// policy already has writes NOTHING and reports "unchanged" rather than
+/// calling `.changed(...)` on a write that never happened.
 fn handle_secrets_set_totp(inv: &Invocation) -> Outcome {
     let cmd = "secrets.set-totp";
-    const USAGE: &str = "usage: secrets set-totp <name> on|off";
     if let Some(hint) = require_cli(inv, cmd) {
         return hint;
     }
-    let Some(name) = inv.args.first().cloned() else {
-        return Outcome::usage(cmd, format!("secrets set-totp: missing <name> — {USAGE}"));
-    };
-    let Some(state) = inv.args.get(1).cloned() else {
-        return Outcome::usage(cmd, format!("secrets set-totp: missing on|off — {USAGE}"));
-    };
-    let want = match state.as_str() {
-        "on" => true,
-        "off" => false,
-        _ => return Outcome::usage(cmd, format!("secrets set-totp expects `on` or `off`, got `{state}` — {USAGE}")),
-    };
+    let (name, state) = (inv.args[0].clone(), inv.args[1].clone());
+    let want = switch(&state);
     let fields =
         serde_json::Map::from_iter([("name".to_string(), json!(name.clone())), ("state".to_string(), json!(state))]);
-    admin_dispatch(cmd, "set-totp", fields, || crate::admin::set_totp(&home::secrets_home(), &name, want))
+    admin_dispatch(cmd, inv, fields, || crate::admin::set_totp(&home::secrets_home(), &name, want))
 }
 
 /// `secrets automate <name> on|off | grant|revoke <consumer>` (P-N1) — the
@@ -746,41 +771,28 @@ fn handle_secrets_set_totp(inv: &Invocation) -> Outcome {
 /// rewrites `policy.json`. `grant`/`revoke`'s `<consumer>` is checked with
 /// the SAME [`valid_secret_name`] validation this crate already holds
 /// every other name to — a malformed consumer name is a usage error, not
-/// a silently-accepted string.
+/// a silently-accepted string. A grant for a consumer the secret does not
+/// admit is refused by [`crate::admin::automate_consumer`], on both paths.
 fn handle_secrets_automate(inv: &Invocation) -> Outcome {
     let cmd = "secrets.automate";
-    const USAGE: &str = "usage: secrets automate <name> on|off | secrets automate <name> grant|revoke <consumer>";
     if let Some(hint) = require_cli(inv, cmd) {
         return hint;
     }
-    let Some(name) = inv.args.first().cloned() else {
-        return Outcome::usage(cmd, format!("secrets automate: missing <name> — {USAGE}"));
-    };
-    let Some(action) = inv.args.get(1).cloned() else {
-        return Outcome::usage(cmd, format!("secrets automate: missing on|off|grant|revoke — {USAGE}"));
-    };
+    let (name, action) = (inv.args[0].clone(), inv.args[1].clone());
 
     match action.as_str() {
         "on" | "off" => {
-            let want = action == "on";
+            let want = switch(&action);
             let fields = serde_json::Map::from_iter([
                 ("name".to_string(), json!(name.clone())),
                 ("action".to_string(), json!(action.clone())),
             ]);
-            admin_dispatch(cmd, "automate", fields, || crate::admin::automate_toggle(&home::secrets_home(), &name, want))
+            admin_dispatch(cmd, inv, fields, || crate::admin::automate_toggle(&home::secrets_home(), &name, want))
         }
-        "grant" | "revoke" => {
-            let Some(consumer) = inv.args.get(2).cloned() else {
-                return Outcome::usage(cmd, format!("secrets automate {name} {action}: missing <consumer> — {USAGE}"));
-            };
+        _ => {
+            let consumer = inv.args[2].clone();
             if !valid_secret_name(&consumer) {
-                return Outcome::usage(
-                    cmd,
-                    format!(
-                        "invalid consumer name `{consumer}` (must be lowercase [a-z0-9-], no leading/trailing/doubled \
-                         hyphen) — {USAGE}"
-                    ),
-                );
+                return teach::invalid_name(inv, "consumer", &consumer).into_outcome(cmd);
             }
             let want_listed = action == "grant";
             let fields = serde_json::Map::from_iter([
@@ -788,11 +800,10 @@ fn handle_secrets_automate(inv: &Invocation) -> Outcome {
                 ("action".to_string(), json!(action.clone())),
                 ("consumer".to_string(), json!(consumer.clone())),
             ]);
-            admin_dispatch(cmd, "automate", fields, || {
+            admin_dispatch(cmd, inv, fields, || {
                 crate::admin::automate_consumer(&home::secrets_home(), &name, &consumer, want_listed)
             })
         }
-        _ => Outcome::usage(cmd, format!("secrets automate expects on|off|grant|revoke, got `{action}` — {USAGE}")),
     }
 }
 
@@ -801,24 +812,14 @@ fn handle_secrets_automate(inv: &Invocation) -> Outcome {
 /// same admin gate, same idempotent "unchanged" reporting.
 fn handle_secrets_expose(inv: &Invocation) -> Outcome {
     let cmd = "secrets.expose";
-    const USAGE: &str = "usage: secrets expose <name> on|off";
     if let Some(hint) = require_cli(inv, cmd) {
         return hint;
     }
-    let Some(name) = inv.args.first().cloned() else {
-        return Outcome::usage(cmd, format!("secrets expose: missing <name> — {USAGE}"));
-    };
-    let Some(state) = inv.args.get(1).cloned() else {
-        return Outcome::usage(cmd, format!("secrets expose: missing on|off — {USAGE}"));
-    };
-    let want = match state.as_str() {
-        "on" => true,
-        "off" => false,
-        _ => return Outcome::usage(cmd, format!("secrets expose expects `on` or `off`, got `{state}` — {USAGE}")),
-    };
+    let (name, state) = (inv.args[0].clone(), inv.args[1].clone());
+    let want = switch(&state);
     let fields =
         serde_json::Map::from_iter([("name".to_string(), json!(name.clone())), ("state".to_string(), json!(state))]);
-    admin_dispatch(cmd, "expose", fields, || crate::admin::expose(&home::secrets_home(), &name, want))
+    admin_dispatch(cmd, inv, fields, || crate::admin::expose(&home::secrets_home(), &name, want))
 }
 
 /// `secrets allow-remote-origin <name> on|off` (LANE IDENTITY P-ID4) —
@@ -831,31 +832,22 @@ fn handle_secrets_expose(inv: &Invocation) -> Outcome {
 /// re-setting the current state reports "unchanged" and writes nothing.
 fn handle_secrets_allow_remote_origin(inv: &Invocation) -> Outcome {
     let cmd = "secrets.allow-remote-origin";
-    const USAGE: &str = "usage: secrets allow-remote-origin <name> on|off";
     if let Some(hint) = require_cli(inv, cmd) {
         return hint;
     }
-    let Some(name) = inv.args.first().cloned() else {
-        return Outcome::usage(cmd, format!("secrets allow-remote-origin: missing <name> — {USAGE}"));
-    };
-    let Some(state) = inv.args.get(1).cloned() else {
-        return Outcome::usage(cmd, format!("secrets allow-remote-origin: missing on|off — {USAGE}"));
-    };
-    let want = match state.as_str() {
-        "on" => true,
-        "off" => false,
-        _ => {
-            return Outcome::usage(
-                cmd,
-                format!("secrets allow-remote-origin expects `on` or `off`, got `{state}` — {USAGE}"),
-            )
-        }
-    };
+    let (name, state) = (inv.args[0].clone(), inv.args[1].clone());
+    let want = switch(&state);
     let fields =
         serde_json::Map::from_iter([("name".to_string(), json!(name.clone())), ("state".to_string(), json!(state))]);
-    admin_dispatch(cmd, "allow-remote-origin", fields, || {
-        crate::admin::allow_remote_origin(&home::secrets_home(), &name, want)
-    })
+    admin_dispatch(cmd, inv, fields, || crate::admin::allow_remote_origin(&home::secrets_home(), &name, want))
+}
+
+/// A refusal's `data` keeps its `refusal` and gains `fields`' keys.
+fn with_fields(mut outcome: Outcome, fields: serde_json::Value) -> Outcome {
+    if let (Some(serde_json::Value::Object(data)), serde_json::Value::Object(extra)) = (outcome.data.as_mut(), fields) {
+        data.extend(extra);
+    }
+    outcome
 }
 
 /// `secrets status` — the value-free inventory READ, over the socket, by the
@@ -919,15 +911,18 @@ fn handle_secrets_status(inv: &Invocation) -> Outcome {
                 "secrets": rows,
             }))
         }
-        Err(e) => Outcome::error(cmd, e).with_data(json!({
-            "broker": "unreachable",
-            // No inventory was read, so this is THIS process's own resolved
-            // home — the path the answer would have been about — and never a
-            // claim about the broker's.
-            "home": home::secrets_home().to_string_lossy(),
-            "socket": socket.to_string_lossy(),
-            "secrets": [],
-        })),
+        Err(e) => with_fields(
+            teach::from_broker(&teach::Where { inv, socket: &socket, secret: None }, &e).into_outcome(cmd),
+            json!({
+                "broker": "unreachable",
+                // No inventory was read, so this is THIS process's own resolved
+                // home — the path the answer would have been about — and never a
+                // claim about the broker's.
+                "home": home::secrets_home().to_string_lossy(),
+                "socket": socket.to_string_lossy(),
+                "secrets": [],
+            }),
+        ),
     }
 }
 
@@ -961,7 +956,8 @@ fn handle_secrets_pending(inv: &Invocation) -> Outcome {
                 .collect();
             Outcome::ok(cmd, format!("{} pending ask(s)", asks.len())).with_data(json!({ "pending": data }))
         }
-        Err(e) => Outcome::error(cmd, e),
+        Err(e) => teach::from_broker(&teach::Where { inv, socket: &crate::socket::socket_path(), secret: None }, &e)
+            .into_outcome(cmd),
     }
 }
 
@@ -973,19 +969,14 @@ fn handle_secrets_pending(inv: &Invocation) -> Outcome {
 /// parked connection, never this reply).
 fn handle_secrets_approve(inv: &Invocation) -> Outcome {
     let cmd = "secrets.approve";
-    const USAGE: &str = "usage: secrets approve <id> --totp <code>";
     if let Some(hint) = require_cli(inv, cmd) {
         return hint;
     }
-    let Some(id) = inv.args.first().cloned() else {
-        return Outcome::usage(cmd, format!("secrets approve: missing <id> — {USAGE}"));
-    };
-    let Some(totp) = inv.flags.get("totp").cloned() else {
-        return Outcome::usage(cmd, format!("secrets approve: missing --totp <code> — {USAGE}"));
-    };
-    match crate::client::approve(&crate::socket::socket_path(), &id, &totp) {
+    let (id, totp) = (inv.args[0].clone(), inv.flags["totp"].clone());
+    let socket = crate::socket::socket_path();
+    match crate::client::approve(&socket, &id, &totp) {
         Ok(()) => Outcome::ok(cmd, format!("approved pending ask `{id}`")).changed(vec![format!("pending:{id}")]),
-        Err(e) => Outcome::error(cmd, e),
+        Err(e) => teach::from_broker(&teach::Where { inv, socket: &socket, secret: None }, &e).into_outcome(cmd),
     }
 }
 
@@ -995,16 +986,14 @@ fn handle_secrets_approve(inv: &Invocation) -> Outcome {
 /// dismissal happened, no value ever exists on this path at all.
 fn handle_secrets_dismiss(inv: &Invocation) -> Outcome {
     let cmd = "secrets.dismiss";
-    const USAGE: &str = "usage: secrets dismiss <id>";
     if let Some(hint) = require_cli(inv, cmd) {
         return hint;
     }
-    let Some(id) = inv.args.first().cloned() else {
-        return Outcome::usage(cmd, format!("secrets dismiss: missing <id> — {USAGE}"));
-    };
-    match crate::client::dismiss(&crate::socket::socket_path(), &id) {
+    let id = inv.args[0].clone();
+    let socket = crate::socket::socket_path();
+    match crate::client::dismiss(&socket, &id) {
         Ok(()) => Outcome::ok(cmd, format!("dismissed pending ask `{id}`")).changed(vec![format!("pending:{id}")]),
-        Err(e) => Outcome::error(cmd, e),
+        Err(e) => teach::from_broker(&teach::Where { inv, socket: &socket, secret: None }, &e).into_outcome(cmd),
     }
 }
 
@@ -1014,11 +1003,10 @@ fn handle_secrets_dismiss(inv: &Invocation) -> Outcome {
 /// [`require_admin_identity`], since watch touches no `policy.json` either,
 /// only the broker-owned events feed (P-G4, task #77 — corrected from the
 /// mirrored aoide log, `watch.rs`'s own module doc) and the broker's
-/// in-memory registry over the socket), refuses the `--popup`+`--json`
-/// combination as a usage error
-/// (tracker #71 Part 2 — the two modes both own "how a parked ask gets
-/// completed" and can't both drive it), and records the launch through the
-/// single audit log; the actual foreground loop (`crate::watch::run`) is
+/// in-memory registry over the socket), and records the launch through the
+/// single audit log (the `--popup`+`--json` combination is refused by the
+/// registry's declared `conflicts`: the two modes both own "how a parked ask
+/// gets completed" and can't both drive it); the actual foreground loop (`crate::watch::run`) is
 /// dispatched from `cli`'s `special` hook, blocking forever until Ctrl-C —
 /// see that crate's `run_cli` doc comment and `crate::watch`'s own module
 /// doc.
@@ -1026,13 +1014,6 @@ fn handle_secrets_watch(inv: &Invocation) -> Outcome {
     let cmd = "secrets.watch";
     if let Some(hint) = require_cli(inv, cmd) {
         return hint;
-    }
-    if inv.flag_present("popup") && inv.flag_present("json") {
-        return Outcome::usage(
-            cmd,
-            "secrets watch: --popup and --json are mutually exclusive — --popup replaces the terminal prompt \
-             with a zenity dialog, --json emits narration-only machine-readable lines; pick one",
-        );
     }
     Outcome::ok(cmd, "watching secret events")
 }
@@ -1089,14 +1070,11 @@ fn audit_migrate(door: Door, name: &str, source: &str, target: &str, status: &st
 /// backend's own store untouched.
 fn handle_secrets_migrate(inv: &Invocation) -> Outcome {
     let cmd = "secrets.migrate";
-    const USAGE: &str = "usage: secrets migrate <name> [--backend <target>]";
     if let Some(hint) = require_cli(inv, cmd) {
         return hint;
     }
-    let Some(name) = inv.args.first().cloned() else {
-        return Outcome::usage(cmd, USAGE);
-    };
-    let target = inv.flags.get("backend").cloned().unwrap_or_else(|| DEFAULT_BACKEND.to_string());
+    let name = inv.args[0].clone();
+    let target = inv.flags["backend"].clone();
     let door = inv.door;
 
     let fields = serde_json::Map::from_iter([
@@ -1112,7 +1090,7 @@ fn handle_secrets_migrate(inv: &Invocation) -> Outcome {
     // (`commands.rs`'s own audit mechanism, distinct from — and in
     // addition to — `broker::audit_admin`'s generic line on the broker
     // path).
-    admin_dispatch(cmd, "migrate", fields, || match crate::admin::migrate(&home::secrets_home(), door, &name, &target) {
+    admin_dispatch(cmd, inv, fields, || match crate::admin::migrate(&home::secrets_home(), door, &name, &target) {
         Ok((outcome, source, target)) => {
             let status = if outcome.changed.is_empty() { "unchanged" } else { "migrated" };
             audit_migrate(door, &name, &source, &target, status, None);
@@ -1209,6 +1187,12 @@ mod tests {
         result
     }
 
+    fn run(inv: &Invocation) -> Outcome {
+        let mut r = Registry::new();
+        register(&mut r);
+        r.get(&inv.path).expect("registered").invoke("aoide", inv)
+    }
+
     fn inv(door: Door, path: &[&str], args: &[&str], flags: &[(&str, &str)]) -> Invocation {
         let mut flag_map = BTreeMap::new();
         for (k, v) in flags {
@@ -1258,18 +1242,20 @@ mod tests {
     #[test]
     fn serve_exec_and_enroll_are_cli_only_elsewhere_a_door_hint() {
         let serve = inv(Door::Mcp, &["secrets", "serve"], &[], &[]);
-        assert_eq!(handle_secrets_serve(&serve).status, Status::Usage);
-        let exec = inv(Door::A2a, &["secrets", "exec"], &[], &[]);
-        assert_eq!(handle_secrets_exec(&exec).status, Status::Usage);
+        assert_eq!(run(&serve).status, Status::Usage);
+        let exec = inv(Door::A2a, &["secrets", "exec"], &["true"], &[("as", "m"), ("secret", "t")]);
+        assert_eq!(run(&exec).status, Status::Usage);
         let enroll = inv(Door::Daemon, &["secrets", "enroll"], &[], &[]);
-        assert_eq!(handle_secrets_enroll(&enroll).status, Status::Usage);
+        assert_eq!(run(&enroll).status, Status::Usage);
 
         let serve_cli = inv(Door::Cli, &["secrets", "serve"], &[], &[]);
-        assert_eq!(handle_secrets_serve(&serve_cli).status, Status::Ok);
-        let exec_cli = inv(Door::Cli, &["secrets", "exec"], &[], &[]);
-        assert_eq!(handle_secrets_exec(&exec_cli).status, Status::Ok);
-        let enroll_cli = inv(Door::Cli, &["secrets", "enroll"], &[], &[]);
-        assert_eq!(handle_secrets_enroll(&enroll_cli).status, Status::Ok);
+        assert_eq!(run(&serve_cli).status, Status::Ok);
+        let exec_cli = inv(Door::Cli, &["secrets", "exec"], &["true"], &[("as", "m"), ("secret", "t")]);
+        assert_eq!(run(&exec_cli).status, Status::Ok);
+        with_secrets_home("enroll-cli", |_home| {
+            let enroll_cli = inv(Door::Cli, &["secrets", "enroll"], &[], &[]);
+            assert_eq!(run(&enroll_cli).status, Status::Ok);
+        });
     }
 
     /// `watch` (this commit) is special-cased the same way — CLI-only, same
@@ -1279,9 +1265,9 @@ mod tests {
     #[test]
     fn watch_is_cli_only_elsewhere_a_door_hint() {
         let watch = inv(Door::Mcp, &["secrets", "watch"], &[], &[]);
-        assert_eq!(handle_secrets_watch(&watch).status, Status::Usage);
+        assert_eq!(run(&watch).status, Status::Usage);
         let watch_cli = inv(Door::Cli, &["secrets", "watch"], &[], &[]);
-        assert_eq!(handle_secrets_watch(&watch_cli).status, Status::Ok);
+        assert_eq!(run(&watch_cli).status, Status::Ok);
     }
 
     /// `--popup`+`--json` (tracker #71 Part 2, this commit): the two modes
@@ -1291,36 +1277,36 @@ mod tests {
     #[test]
     fn watch_refuses_popup_and_json_together_as_a_usage_error() {
         let both = inv(Door::Cli, &["secrets", "watch"], &[], &[("popup", "true"), ("json", "true")]);
-        let out = handle_secrets_watch(&both);
+        let out = run(&both);
         assert_eq!(out.status, Status::Usage);
         assert!(out.message.contains("--popup") && out.message.contains("--json"), "{}", out.message);
 
         let popup_only = inv(Door::Cli, &["secrets", "watch"], &[], &[("popup", "true")]);
-        assert_eq!(handle_secrets_watch(&popup_only).status, Status::Ok);
+        assert_eq!(run(&popup_only).status, Status::Ok);
 
         let json_only = inv(Door::Cli, &["secrets", "watch"], &[], &[("json", "true")]);
-        assert_eq!(handle_secrets_watch(&json_only).status, Status::Ok);
+        assert_eq!(run(&json_only).status, Status::Ok);
     }
 
     #[test]
     fn add_then_rm_round_trips_through_policy_json() {
         with_secrets_home("add-rm", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            let out = handle_secrets_add(&add);
+            let out = run(&add);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert_eq!(store::load_policies(home).unwrap().len(), 1);
 
             // Duplicate add is an error, not a silent overwrite.
-            let dup = handle_secrets_add(&add);
+            let dup = run(&add);
             assert_eq!(dup.status, Status::Error);
 
             let rm = inv(Door::Cli, &["secrets", "rm"], &["t"], &[]);
-            let out = handle_secrets_rm(&rm);
+            let out = run(&rm);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(store::load_policies(home).unwrap().is_empty());
 
             // Removing again (nothing left) is an error.
-            assert_eq!(handle_secrets_rm(&rm).status, Status::Error);
+            assert_eq!(run(&rm).status, Status::Error);
         });
     }
 
@@ -1328,15 +1314,87 @@ mod tests {
     fn add_rejects_an_invalid_secret_name() {
         with_secrets_home("badname", |_home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["Bad--Name"], &[("backend", "pass"), ("key", "x")]);
-            assert_eq!(handle_secrets_add(&add).status, Status::Usage);
+            assert_eq!(run(&add).status, Status::Usage);
         });
     }
 
     #[test]
-    fn add_requires_key_but_not_backend() {
-        with_secrets_home("missingflags", |_home| {
-            let no_key = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass")]);
-            assert_eq!(handle_secrets_add(&no_key).status, Status::Usage);
+    fn add_defaults_the_key_to_the_secrets_name_for_age() {
+        with_secrets_home("age-key-default", |home| {
+            let out = run(&inv(Door::Cli, &["secrets", "add"], &["db-prod"], &[]));
+            assert_eq!(out.status, Status::Ok, "{out:?}");
+            let policies = store::load_policies(home).unwrap();
+            assert_eq!((policies[0].backend.as_str(), policies[0].key.as_str()), ("age", "db-prod"));
+            let explicit = run(&inv(Door::Cli, &["secrets", "add"], &["other"], &[("key", "elsewhere")]));
+            assert_eq!(explicit.status, Status::Ok, "{explicit:?}");
+            assert_eq!(store::load_policies(home).unwrap()[1].key, "elsewhere");
+        });
+    }
+
+    #[test]
+    fn add_for_a_command_template_backend_says_what_the_key_means() {
+        with_secrets_home("template-key", |home| {
+            let out = run(&inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass")]));
+            assert_eq!(out.status, Status::Usage, "{out:?}");
+            let refusal = &out.data.as_ref().unwrap()["refusal"];
+            assert_eq!(refusal["what"], "`aoide secrets add` needs --key <key> for backend `pass`");
+            assert!(refusal["why"].as_str().unwrap().contains("command template"), "{out:?}");
+            assert_eq!(refusal["fix"]["run"], "aoide secrets add t --backend pass --key <key>");
+            assert!(store::load_policies(home).unwrap().is_empty());
+        });
+    }
+
+    #[test]
+    fn a_grant_for_a_consumer_the_secret_does_not_admit_can_never_open_and_is_refused() {
+        with_secrets_home("automate-not-admitted", |home| {
+            run(&inv(Door::Cli, &["secrets", "add"], &["t"], &[("key", "x"), ("consumers", "m,verba")]));
+            let bytes = std::fs::read(store::policy_path(home)).unwrap();
+            let out = run(&inv(Door::Cli, &["secrets", "automate"], &["t", "grant", "nobody"], &[]));
+            assert_eq!(out.status, Status::Error, "{out:?}");
+            let refusal = &out.data.as_ref().unwrap()["refusal"];
+            assert_eq!(refusal["what"], "secret `t` does not admit consumer `nobody` (it admits m, verba)");
+            assert_eq!(refusal["fix"]["run"], "aoide secrets grant t nobody");
+            assert_eq!(std::fs::read(store::policy_path(home)).unwrap(), bytes, "a refusal writes nothing");
+
+            run(&inv(Door::Cli, &["secrets", "grant"], &["t", "nobody"], &[]));
+            let out = run(&inv(Door::Cli, &["secrets", "automate"], &["t", "grant", "nobody"], &[]));
+            assert_eq!(out.status, Status::Ok, "{out:?}");
+        });
+    }
+
+    #[test]
+    fn an_empty_consumers_list_admits_everyone_so_any_automation_grant_is_fine() {
+        with_secrets_home("automate-open", |home| {
+            run(&inv(Door::Cli, &["secrets", "add"], &["t"], &[("key", "x")]));
+            let out = run(&inv(Door::Cli, &["secrets", "automate"], &["t", "grant", "anyone"], &[]));
+            assert_eq!(out.status, Status::Ok, "{out:?}");
+            assert_eq!(store::load_policies(home).unwrap()[0].automation.consumers, vec!["anyone".to_string()]);
+        });
+    }
+
+    #[test]
+    fn the_declared_enums_and_conditional_consumer_are_enforced_before_any_handler_runs() {
+        with_secrets_home("declared", |home| {
+            run(&inv(Door::Cli, &["secrets", "add"], &["t"], &[("key", "x")]));
+            let bytes = std::fs::read(store::policy_path(home)).unwrap();
+            for (path, args, needle) in [
+                (["secrets", "set-totp"], vec!["t", "maybe"], "does not accept `maybe` for <state>"),
+                (["secrets", "expose"], vec!["t", "oof"], "did you mean `off`?"),
+                (["secrets", "automate"], vec!["t", "gran", "m"], "did you mean `grant`?"),
+                (["secrets", "automate"], vec!["t", "grant"], "needs <consumer>"),
+                (["secrets", "automate"], vec!["t", "revoke"], "needs <consumer>"),
+            ] {
+                let out = run(&inv(Door::Cli, &path, &args, &[]));
+                assert_eq!(out.status, Status::Usage, "{path:?} {args:?}: {out:?}");
+                let text = out.render(false).0;
+                assert!(text.contains(needle), "{needle}: {text}");
+            }
+            assert_eq!(std::fs::read(store::policy_path(home)).unwrap(), bytes);
+            let approve = run(&inv(Door::Cli, &["secrets", "approve"], &["3"], &[]));
+            assert_eq!(approve.status, Status::Usage, "{approve:?}");
+            assert!(approve.message.contains("needs --totp <code>"), "{}", approve.message);
+            let exec = run(&inv(Door::Cli, &["secrets", "exec"], &["true"], &[("as", "m")]));
+            assert!(exec.message.contains("needs --secret <name[:VAR]>"), "{}", exec.message);
         });
     }
 
@@ -1347,7 +1405,7 @@ mod tests {
     fn add_defaults_backend_to_age_when_backend_flag_is_omitted() {
         with_secrets_home("default-backend", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("key", "x")]);
-            let out = handle_secrets_add(&add);
+            let out = run(&add);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             let policies = store::load_policies(home).unwrap();
             assert_eq!(policies[0].backend, "age");
@@ -1360,7 +1418,7 @@ mod tests {
     fn add_still_honors_an_explicit_backend() {
         with_secrets_home("explicit-backend", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            handle_secrets_add(&add);
+            run(&add);
             let policies = store::load_policies(home).unwrap();
             assert_eq!(policies[0].backend, "pass");
         });
@@ -1375,7 +1433,7 @@ mod tests {
                 &["t"],
                 &[("backend", "pass"), ("key", "prod/db"), ("consumers", "m, verba")],
             );
-            handle_secrets_add(&add);
+            run(&add);
             let policies = store::load_policies(home).unwrap();
             assert_eq!(policies[0].backend, "pass");
             assert_eq!(policies[0].key, "prod/db");
@@ -1392,7 +1450,7 @@ mod tests {
                 &["t"],
                 &[("backend", "pass"), ("key", "x"), ("require-totp", "true")],
             );
-            handle_secrets_add(&add);
+            run(&add);
             assert!(store::load_policies(home).unwrap()[0].require_totp);
         });
     }
@@ -1401,18 +1459,18 @@ mod tests {
     fn grant_then_revoke_round_trips_the_consumer_list() {
         with_secrets_home("grant-revoke", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            handle_secrets_add(&add);
+            run(&add);
 
             let grant = inv(Door::Cli, &["secrets", "grant"], &["t", "m"], &[]);
-            assert_eq!(handle_secrets_grant(&grant).status, Status::Ok);
+            assert_eq!(run(&grant).status, Status::Ok);
             assert_eq!(store::load_policies(home).unwrap()[0].consumers, vec!["m".to_string()]);
 
             // Granting the same consumer twice does not duplicate it.
-            handle_secrets_grant(&grant);
+            run(&grant);
             assert_eq!(store::load_policies(home).unwrap()[0].consumers.len(), 1);
 
             let revoke = inv(Door::Cli, &["secrets", "revoke"], &["t", "m"], &[]);
-            assert_eq!(handle_secrets_revoke(&revoke).status, Status::Ok);
+            assert_eq!(run(&revoke).status, Status::Ok);
             assert!(store::load_policies(home).unwrap()[0].consumers.is_empty());
         });
     }
@@ -1421,7 +1479,7 @@ mod tests {
     fn grant_on_an_unknown_secret_is_an_error() {
         with_secrets_home("grant-unknown", |_home| {
             let grant = inv(Door::Cli, &["secrets", "grant"], &["nope", "m"], &[]);
-            assert_eq!(handle_secrets_grant(&grant).status, Status::Error);
+            assert_eq!(run(&grant).status, Status::Error);
         });
     }
 
@@ -1435,21 +1493,21 @@ mod tests {
     fn admin_quartet_is_cli_only_a_non_cli_door_never_mutates_policy_json() {
         with_secrets_home("door-gate", |home| {
             let seed = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            assert_eq!(handle_secrets_add(&seed).status, Status::Ok);
+            assert_eq!(run(&seed).status, Status::Ok);
             let before = store::load_policies(home).unwrap();
 
             for door in [Door::Mcp, Door::A2a, Door::Daemon] {
                 let add = inv(door, &["secrets", "add"], &["other"], &[("backend", "pass"), ("key", "y")]);
-                assert_eq!(handle_secrets_add(&add).status, Status::Usage, "add over {door:?}");
+                assert_eq!(run(&add).status, Status::Usage, "add over {door:?}");
 
                 let rm = inv(door, &["secrets", "rm"], &["t"], &[]);
-                assert_eq!(handle_secrets_rm(&rm).status, Status::Usage, "rm over {door:?}");
+                assert_eq!(run(&rm).status, Status::Usage, "rm over {door:?}");
 
                 let grant = inv(door, &["secrets", "grant"], &["t", "m"], &[]);
-                assert_eq!(handle_secrets_grant(&grant).status, Status::Usage, "grant over {door:?}");
+                assert_eq!(run(&grant).status, Status::Usage, "grant over {door:?}");
 
                 let revoke = inv(door, &["secrets", "revoke"], &["t", "m"], &[]);
-                assert_eq!(handle_secrets_revoke(&revoke).status, Status::Usage, "revoke over {door:?}");
+                assert_eq!(run(&revoke).status, Status::Usage, "revoke over {door:?}");
 
                 assert_eq!(store::load_policies(home).unwrap(), before, "policy.json mutated over {door:?}");
             }
@@ -1465,7 +1523,7 @@ mod tests {
     fn put_is_cli_only_a_non_cli_door_never_mutates_policy_json_or_the_store_dir() {
         with_secrets_home("put-door-gate", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "file"), ("key", "k")]);
-            assert_eq!(handle_secrets_add(&add).status, Status::Ok);
+            assert_eq!(run(&add).status, Status::Ok);
             let policies_before = store::load_policies(home).unwrap();
 
             // A store dir with a pre-existing file, standing in for "a
@@ -1478,7 +1536,7 @@ mod tests {
 
             for door in [Door::Mcp, Door::A2a, Door::Daemon] {
                 let put = inv(door, &["secrets", "put"], &["t"], &[]);
-                assert_eq!(handle_secrets_put(&put).status, Status::Usage, "put over {door:?}");
+                assert_eq!(run(&put).status, Status::Usage, "put over {door:?}");
             }
 
             assert_eq!(store::load_policies(home).unwrap(), policies_before, "policy.json mutated by a gated put");
@@ -1490,7 +1548,7 @@ mod tests {
     fn put_requires_a_secret_name() {
         with_secrets_home("put-noname", |_home| {
             let put = inv(Door::Cli, &["secrets", "put"], &[], &[]);
-            assert_eq!(handle_secrets_put(&put).status, Status::Usage);
+            assert_eq!(run(&put).status, Status::Usage);
         });
     }
 
@@ -1498,7 +1556,7 @@ mod tests {
     fn put_rejects_an_invalid_secret_name() {
         with_secrets_home("put-badname", |_home| {
             let put = inv(Door::Cli, &["secrets", "put"], &["Bad--Name"], &[]);
-            assert_eq!(handle_secrets_put(&put).status, Status::Usage);
+            assert_eq!(run(&put).status, Status::Usage);
         });
     }
 
@@ -1508,11 +1566,11 @@ mod tests {
     fn set_totp_flips_on_and_persists_reload_proves() {
         with_secrets_home("set-totp-on", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            assert_eq!(handle_secrets_add(&add).status, Status::Ok);
+            assert_eq!(run(&add).status, Status::Ok);
             assert!(!store::load_policies(home).unwrap()[0].require_totp);
 
             let on = inv(Door::Cli, &["secrets", "set-totp"], &["t", "on"], &[]);
-            let out = handle_secrets_set_totp(&on);
+            let out = run(&on);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(!out.changed.is_empty());
 
@@ -1531,19 +1589,19 @@ mod tests {
                 &["t"],
                 &[("backend", "pass"), ("key", "x"), ("require-totp", "true")],
             );
-            handle_secrets_add(&add);
+            run(&add);
             assert!(store::load_policies(home).unwrap()[0].require_totp);
 
             let off = inv(Door::Cli, &["secrets", "set-totp"], &["t", "off"], &[]);
-            assert_eq!(handle_secrets_set_totp(&off).status, Status::Ok);
+            assert_eq!(run(&off).status, Status::Ok);
             assert!(!store::load_policies(home).unwrap()[0].require_totp);
 
             let on = inv(Door::Cli, &["secrets", "set-totp"], &["t", "on"], &[]);
-            assert_eq!(handle_secrets_set_totp(&on).status, Status::Ok);
+            assert_eq!(run(&on).status, Status::Ok);
             assert!(store::load_policies(home).unwrap()[0].require_totp);
 
             let off_again = inv(Door::Cli, &["secrets", "set-totp"], &["t", "off"], &[]);
-            assert_eq!(handle_secrets_set_totp(&off_again).status, Status::Ok);
+            assert_eq!(run(&off_again).status, Status::Ok);
             assert!(!store::load_policies(home).unwrap()[0].require_totp);
         });
     }
@@ -1557,11 +1615,11 @@ mod tests {
     fn set_totp_re_setting_the_same_state_is_a_reported_no_op() {
         with_secrets_home("set-totp-idempotent", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            handle_secrets_add(&add);
+            run(&add);
             let bytes_before = std::fs::read(store::policy_path(home)).unwrap();
 
             let off = inv(Door::Cli, &["secrets", "set-totp"], &["t", "off"], &[]);
-            let out = handle_secrets_set_totp(&off);
+            let out = run(&off);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(out.changed.is_empty(), "a no-op set-totp must report nothing changed");
             assert!(out.message.contains("unchanged"), "{}", out.message);
@@ -1575,9 +1633,9 @@ mod tests {
     fn set_totp_on_an_unknown_secret_is_a_clean_error() {
         with_secrets_home("set-totp-unknown", |_home| {
             let set = inv(Door::Cli, &["secrets", "set-totp"], &["nope", "on"], &[]);
-            let out = handle_secrets_set_totp(&set);
+            let out = run(&set);
             assert_eq!(out.status, Status::Error);
-            assert!(out.message.contains("no policy"), "{}", out.message);
+            assert!(out.message.contains("secret `nope` is not registered"), "{}", out.message);
         });
     }
 
@@ -1585,9 +1643,9 @@ mod tests {
     fn set_totp_rejects_a_state_that_is_not_on_or_off() {
         with_secrets_home("set-totp-badstate", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            handle_secrets_add(&add);
+            run(&add);
             let bogus = inv(Door::Cli, &["secrets", "set-totp"], &["t", "maybe"], &[]);
-            assert_eq!(handle_secrets_set_totp(&bogus).status, Status::Usage);
+            assert_eq!(run(&bogus).status, Status::Usage);
             // A rejected state must not touch the file either.
             assert!(!store::load_policies(home).unwrap()[0].require_totp);
         });
@@ -1601,12 +1659,12 @@ mod tests {
     fn set_totp_is_cli_only_a_non_cli_door_never_mutates_policy_json() {
         with_secrets_home("set-totp-door-gate", |home| {
             let seed = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            assert_eq!(handle_secrets_add(&seed).status, Status::Ok);
+            assert_eq!(run(&seed).status, Status::Ok);
             let before = std::fs::read(store::policy_path(home)).unwrap();
 
             for door in [Door::Mcp, Door::A2a, Door::Daemon] {
                 let set = inv(door, &["secrets", "set-totp"], &["t", "on"], &[]);
-                assert_eq!(handle_secrets_set_totp(&set).status, Status::Usage, "set-totp over {door:?}");
+                assert_eq!(run(&set).status, Status::Usage, "set-totp over {door:?}");
             }
 
             let after = std::fs::read(store::policy_path(home)).unwrap();
@@ -1635,7 +1693,7 @@ mod tests {
                 &["locked"],
                 &[("backend", "pass"), ("key", "x"), ("require-totp", "true")],
             );
-            assert_eq!(handle_secrets_add(&add).status, Status::Ok);
+            assert_eq!(run(&add).status, Status::Ok);
             assert!(store::load_policies(home).unwrap()[0].require_totp);
 
             // A short /tmp-direct socket path — sockaddr_un's ~108-byte
@@ -1693,12 +1751,12 @@ mod tests {
         }
         with_secrets_home("poisoned", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            assert_eq!(handle_secrets_add(&add).status, Status::Ok);
+            assert_eq!(run(&add).status, Status::Ok);
             let path = store::policy_path(home);
             crate::home::set_mode(&path, 0o000).unwrap();
 
             let rm = inv(Door::Cli, &["secrets", "rm"], &["t"], &[]);
-            let out = handle_secrets_rm(&rm);
+            let out = run(&rm);
 
             // Restore before any assertion could early-return and leave the
             // tempdir's cleanup unable to remove an unreadable file.
@@ -1716,13 +1774,15 @@ mod tests {
     #[test]
     fn enroll_show_and_force_together_is_a_usage_error() {
         let both = inv(Door::Cli, &["secrets", "enroll"], &[], &[("force", "true"), ("show", "true")]);
-        assert_eq!(handle_secrets_enroll(&both).status, Status::Usage);
+        assert_eq!(run(&both).status, Status::Usage);
 
         let show_only = inv(Door::Cli, &["secrets", "enroll"], &[], &[("show", "true")]);
-        assert_eq!(handle_secrets_enroll(&show_only).status, Status::Ok);
+        assert_eq!(run(&show_only).status, Status::Ok);
 
-        let force_only = inv(Door::Cli, &["secrets", "enroll"], &[], &[("force", "true")]);
-        assert_eq!(handle_secrets_enroll(&force_only).status, Status::Ok);
+        with_secrets_home("enroll-force", |_home| {
+            let force_only = inv(Door::Cli, &["secrets", "enroll"], &[], &[("force", "true")]);
+            assert_eq!(run(&force_only).status, Status::Ok);
+        });
     }
 
     // ── automate (P-N1) ──────────────────────────────────────────────────
@@ -1731,17 +1791,17 @@ mod tests {
     fn automate_on_off_flips_automation_enabled_and_persists_reload_proves() {
         with_secrets_home("automate-on-off", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            assert_eq!(handle_secrets_add(&add).status, Status::Ok);
+            assert_eq!(run(&add).status, Status::Ok);
             assert!(!store::load_policies(home).unwrap()[0].automation.enabled);
 
             let on = inv(Door::Cli, &["secrets", "automate"], &["t", "on"], &[]);
-            let out = handle_secrets_automate(&on);
+            let out = run(&on);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(!out.changed.is_empty());
             assert!(store::load_policies(home).unwrap()[0].automation.enabled);
 
             let off = inv(Door::Cli, &["secrets", "automate"], &["t", "off"], &[]);
-            assert_eq!(handle_secrets_automate(&off).status, Status::Ok);
+            assert_eq!(run(&off).status, Status::Ok);
             assert!(!store::load_policies(home).unwrap()[0].automation.enabled);
         });
     }
@@ -1752,21 +1812,21 @@ mod tests {
     fn allow_remote_origin_on_off_flips_the_bit_and_persists_reload_proves() {
         with_secrets_home("aro-on-off", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            assert_eq!(handle_secrets_add(&add).status, Status::Ok);
+            assert_eq!(run(&add).status, Status::Ok);
             assert!(
                 !store::load_policies(home).unwrap()[0].allow_remote_origin,
                 "a fresh policy denies remote-origin callers — the default"
             );
 
             let on = inv(Door::Cli, &["secrets", "allow-remote-origin"], &["t", "on"], &[]);
-            let out = handle_secrets_allow_remote_origin(&on);
+            let out = run(&on);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(!out.changed.is_empty());
             assert!(out.message.contains("allowRemoteOrigin"), "{}", out.message);
             assert!(store::load_policies(home).unwrap()[0].allow_remote_origin);
 
             let off = inv(Door::Cli, &["secrets", "allow-remote-origin"], &["t", "off"], &[]);
-            assert_eq!(handle_secrets_allow_remote_origin(&off).status, Status::Ok);
+            assert_eq!(run(&off).status, Status::Ok);
             assert!(!store::load_policies(home).unwrap()[0].allow_remote_origin);
         });
     }
@@ -1775,12 +1835,12 @@ mod tests {
     fn allow_remote_origin_re_set_is_a_reported_no_op() {
         with_secrets_home("aro-idempotent", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            handle_secrets_add(&add);
+            run(&add);
             let on = inv(Door::Cli, &["secrets", "allow-remote-origin"], &["t", "on"], &[]);
-            handle_secrets_allow_remote_origin(&on);
+            run(&on);
             let bytes_before = std::fs::read(store::policy_path(home)).unwrap();
 
-            let out = handle_secrets_allow_remote_origin(&on);
+            let out = run(&on);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(out.changed.is_empty(), "a no-op allow-remote-origin must report nothing changed");
             assert!(out.message.contains("unchanged"), "{}", out.message);
@@ -1796,19 +1856,19 @@ mod tests {
     fn allow_remote_origin_usage_errors_teach_the_exact_spelling() {
         with_secrets_home("aro-usage", |_home| {
             let missing_state = inv(Door::Cli, &["secrets", "allow-remote-origin"], &["t"], &[]);
-            let out = handle_secrets_allow_remote_origin(&missing_state);
+            let out = run(&missing_state);
             assert_eq!(out.status, Status::Usage);
-            assert!(out.message.contains("on|off"), "{}", out.message);
+            assert!(out.message.contains("needs <state>"), "{}", out.message);
 
             let bad_state = inv(Door::Cli, &["secrets", "allow-remote-origin"], &["t", "maybe"], &[]);
-            let out = handle_secrets_allow_remote_origin(&bad_state);
+            let out = run(&bad_state);
             assert_eq!(out.status, Status::Usage);
             assert!(out.message.contains("`maybe`"), "{}", out.message);
 
             let unknown = inv(Door::Cli, &["secrets", "allow-remote-origin"], &["nope", "on"], &[]);
-            let out = handle_secrets_allow_remote_origin(&unknown);
+            let out = run(&unknown);
             assert_eq!(out.status, Status::Error);
-            assert!(out.message.contains("no policy for secret `nope`"), "{}", out.message);
+            assert!(out.message.contains("secret `nope` is not registered"), "{}", out.message);
         });
     }
 
@@ -1816,12 +1876,12 @@ mod tests {
     fn automate_on_re_set_is_a_reported_no_op() {
         with_secrets_home("automate-idempotent", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            handle_secrets_add(&add);
+            run(&add);
             let on = inv(Door::Cli, &["secrets", "automate"], &["t", "on"], &[]);
-            handle_secrets_automate(&on);
+            run(&on);
             let bytes_before = std::fs::read(store::policy_path(home)).unwrap();
 
-            let out = handle_secrets_automate(&on);
+            let out = run(&on);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(out.changed.is_empty(), "a no-op automate on|off must report nothing changed");
             assert!(out.message.contains("unchanged"), "{}", out.message);
@@ -1835,16 +1895,16 @@ mod tests {
     fn automate_grant_then_revoke_round_trips_automation_consumers() {
         with_secrets_home("automate-grant-revoke", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            handle_secrets_add(&add);
+            run(&add);
 
             let grant = inv(Door::Cli, &["secrets", "automate"], &["t", "grant", "m"], &[]);
-            let out = handle_secrets_automate(&grant);
+            let out = run(&grant);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(!out.changed.is_empty());
             assert_eq!(store::load_policies(home).unwrap()[0].automation.consumers, vec!["m".to_string()]);
 
             let revoke = inv(Door::Cli, &["secrets", "automate"], &["t", "revoke", "m"], &[]);
-            assert_eq!(handle_secrets_automate(&revoke).status, Status::Ok);
+            assert_eq!(run(&revoke).status, Status::Ok);
             assert!(store::load_policies(home).unwrap()[0].automation.consumers.is_empty());
         });
     }
@@ -1853,12 +1913,12 @@ mod tests {
     fn automate_grant_on_an_already_listed_consumer_is_a_reported_no_op() {
         with_secrets_home("automate-grant-idempotent", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            handle_secrets_add(&add);
+            run(&add);
             let grant = inv(Door::Cli, &["secrets", "automate"], &["t", "grant", "m"], &[]);
-            handle_secrets_automate(&grant);
+            run(&grant);
             let bytes_before = std::fs::read(store::policy_path(home)).unwrap();
 
-            let out = handle_secrets_automate(&grant);
+            let out = run(&grant);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(out.changed.is_empty(), "granting an already-listed consumer must report nothing changed");
             assert!(out.message.contains("unchanged"), "{}", out.message);
@@ -1872,11 +1932,11 @@ mod tests {
     fn automate_revoke_on_an_absent_consumer_is_a_reported_no_op() {
         with_secrets_home("automate-revoke-idempotent", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            handle_secrets_add(&add);
+            run(&add);
             let bytes_before = std::fs::read(store::policy_path(home)).unwrap();
 
             let revoke = inv(Door::Cli, &["secrets", "automate"], &["t", "revoke", "m"], &[]);
-            let out = handle_secrets_automate(&revoke);
+            let out = run(&revoke);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(out.changed.is_empty(), "revoking an absent consumer must report nothing changed");
             assert!(out.message.contains("unchanged"), "{}", out.message);
@@ -1890,9 +1950,9 @@ mod tests {
     fn automate_grant_rejects_an_invalid_consumer_name() {
         with_secrets_home("automate-grant-badname", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            handle_secrets_add(&add);
+            run(&add);
             let grant = inv(Door::Cli, &["secrets", "automate"], &["t", "grant", "Bad--Name"], &[]);
-            assert_eq!(handle_secrets_automate(&grant).status, Status::Usage);
+            assert_eq!(run(&grant).status, Status::Usage);
             assert!(store::load_policies(home).unwrap()[0].automation.consumers.is_empty());
         });
     }
@@ -1901,9 +1961,9 @@ mod tests {
     fn automate_rejects_an_action_that_is_not_on_off_grant_or_revoke() {
         with_secrets_home("automate-badaction", |_home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            handle_secrets_add(&add);
+            run(&add);
             let bogus = inv(Door::Cli, &["secrets", "automate"], &["t", "maybe"], &[]);
-            assert_eq!(handle_secrets_automate(&bogus).status, Status::Usage);
+            assert_eq!(run(&bogus).status, Status::Usage);
         });
     }
 
@@ -1911,9 +1971,9 @@ mod tests {
     fn automate_grant_without_a_consumer_is_a_usage_error() {
         with_secrets_home("automate-grant-noconsumer", |_home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            handle_secrets_add(&add);
+            run(&add);
             let grant = inv(Door::Cli, &["secrets", "automate"], &["t", "grant"], &[]);
-            assert_eq!(handle_secrets_automate(&grant).status, Status::Usage);
+            assert_eq!(run(&grant).status, Status::Usage);
         });
     }
 
@@ -1921,7 +1981,7 @@ mod tests {
     fn automate_on_an_unknown_secret_is_a_clean_error() {
         with_secrets_home("automate-unknown", |_home| {
             let on = inv(Door::Cli, &["secrets", "automate"], &["nope", "on"], &[]);
-            assert_eq!(handle_secrets_automate(&on).status, Status::Error);
+            assert_eq!(run(&on).status, Status::Error);
         });
     }
 
@@ -1929,12 +1989,12 @@ mod tests {
     fn automate_is_cli_only_a_non_cli_door_never_mutates_policy_json() {
         with_secrets_home("automate-door-gate", |home| {
             let seed = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            assert_eq!(handle_secrets_add(&seed).status, Status::Ok);
+            assert_eq!(run(&seed).status, Status::Ok);
             let before = std::fs::read(store::policy_path(home)).unwrap();
 
             for door in [Door::Mcp, Door::A2a, Door::Daemon] {
                 let on = inv(door, &["secrets", "automate"], &["t", "on"], &[]);
-                assert_eq!(handle_secrets_automate(&on).status, Status::Usage, "automate over {door:?}");
+                assert_eq!(run(&on).status, Status::Usage, "automate over {door:?}");
             }
 
             let after = std::fs::read(store::policy_path(home)).unwrap();
@@ -1948,17 +2008,17 @@ mod tests {
     fn expose_on_off_flips_remote_and_persists_reload_proves() {
         with_secrets_home("expose-on-off", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            assert_eq!(handle_secrets_add(&add).status, Status::Ok);
+            assert_eq!(run(&add).status, Status::Ok);
             assert!(!store::load_policies(home).unwrap()[0].remote);
 
             let on = inv(Door::Cli, &["secrets", "expose"], &["t", "on"], &[]);
-            let out = handle_secrets_expose(&on);
+            let out = run(&on);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(!out.changed.is_empty());
             assert!(store::load_policies(home).unwrap()[0].remote);
 
             let off = inv(Door::Cli, &["secrets", "expose"], &["t", "off"], &[]);
-            assert_eq!(handle_secrets_expose(&off).status, Status::Ok);
+            assert_eq!(run(&off).status, Status::Ok);
             assert!(!store::load_policies(home).unwrap()[0].remote);
         });
     }
@@ -1967,11 +2027,11 @@ mod tests {
     fn expose_re_setting_the_same_state_is_a_reported_no_op() {
         with_secrets_home("expose-idempotent", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            handle_secrets_add(&add);
+            run(&add);
             let bytes_before = std::fs::read(store::policy_path(home)).unwrap();
 
             let off = inv(Door::Cli, &["secrets", "expose"], &["t", "off"], &[]);
-            let out = handle_secrets_expose(&off);
+            let out = run(&off);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(out.changed.is_empty(), "a no-op expose must report nothing changed");
             assert!(out.message.contains("unchanged"), "{}", out.message);
@@ -1985,7 +2045,7 @@ mod tests {
     fn expose_on_an_unknown_secret_is_a_clean_error() {
         with_secrets_home("expose-unknown", |_home| {
             let on = inv(Door::Cli, &["secrets", "expose"], &["nope", "on"], &[]);
-            assert_eq!(handle_secrets_expose(&on).status, Status::Error);
+            assert_eq!(run(&on).status, Status::Error);
         });
     }
 
@@ -1993,9 +2053,9 @@ mod tests {
     fn expose_rejects_a_state_that_is_not_on_or_off() {
         with_secrets_home("expose-badstate", |home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            handle_secrets_add(&add);
+            run(&add);
             let bogus = inv(Door::Cli, &["secrets", "expose"], &["t", "maybe"], &[]);
-            assert_eq!(handle_secrets_expose(&bogus).status, Status::Usage);
+            assert_eq!(run(&bogus).status, Status::Usage);
             assert!(!store::load_policies(home).unwrap()[0].remote);
         });
     }
@@ -2004,12 +2064,12 @@ mod tests {
     fn expose_is_cli_only_a_non_cli_door_never_mutates_policy_json() {
         with_secrets_home("expose-door-gate", |home| {
             let seed = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            assert_eq!(handle_secrets_add(&seed).status, Status::Ok);
+            assert_eq!(run(&seed).status, Status::Ok);
             let before = std::fs::read(store::policy_path(home)).unwrap();
 
             for door in [Door::Mcp, Door::A2a, Door::Daemon] {
                 let on = inv(door, &["secrets", "expose"], &["t", "on"], &[]);
-                assert_eq!(handle_secrets_expose(&on).status, Status::Usage, "expose over {door:?}");
+                assert_eq!(run(&on).status, Status::Usage, "expose over {door:?}");
             }
 
             let after = std::fs::read(store::policy_path(home)).unwrap();
@@ -2047,13 +2107,18 @@ mod tests {
         let saved_socket = std::env::var("AOIDE_SECRETS_SOCKET").ok();
         std::env::set_var("AOIDE_SECRETS_SOCKET", "/nonexistent/aoide-secrets-test/no-such-broker.sock");
 
-        let automate = inv(Door::Cli, &["secrets", "automate"], &["t", "on"], &[]);
-        let out = handle_secrets_automate(&automate);
+        let automate = inv(Door::Cli, &["secrets", "automate"], &["t", "grant", "orch"], &[]);
+        let out = run(&automate);
         assert_eq!(out.status, Status::Error, "{out:?}");
         assert!(out.message.contains("must run as the broker user"), "{}", out.message);
+        assert_eq!(
+            out.data.as_ref().unwrap()["refusal"]["fix"]["run"],
+            "sudo -u aoide-secrets aoide secrets automate t grant orch",
+            "{out:?}"
+        );
 
         let expose = inv(Door::Cli, &["secrets", "expose"], &["t", "on"], &[]);
-        let out = handle_secrets_expose(&expose);
+        let out = run(&expose);
         assert_eq!(out.status, Status::Error, "{out:?}");
         assert!(out.message.contains("must run as the broker user"), "{}", out.message);
 
@@ -2092,12 +2157,12 @@ mod tests {
         with_secrets_home("migrate-happy-path", |home| {
             crate::backend::seed_default_backends(home).unwrap();
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "file"), ("key", "k")]);
-            assert_eq!(handle_secrets_add(&add).status, Status::Ok);
+            assert_eq!(run(&add).status, Status::Ok);
             crate::backend::store_value(home, "file", "k", "the-value").unwrap();
             assert!(home.join("store").join("k").exists());
 
             let migrate = inv(Door::Cli, &["secrets", "migrate"], &["t"], &[]);
-            let out = handle_secrets_migrate(&migrate);
+            let out = run(&migrate);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(out.message.contains("old value removed"), "{}", out.message);
 
@@ -2126,11 +2191,11 @@ mod tests {
         with_secrets_home("migrate-key-lifecycle-onto-age", |home| {
             crate::backend::seed_default_backends(home).unwrap();
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "file"), ("key", "k")]);
-            assert_eq!(handle_secrets_add(&add).status, Status::Ok);
+            assert_eq!(run(&add).status, Status::Ok);
             crate::backend::store_value(home, "file", "k", "the-value").unwrap();
 
             let migrate = inv(Door::Cli, &["secrets", "migrate"], &["t"], &[("backend", "age")]);
-            let out = handle_secrets_migrate(&migrate);
+            let out = run(&migrate);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(
                 out.message.contains("age.key is now the ONLY decryptor"),
@@ -2142,12 +2207,12 @@ mod tests {
         with_secrets_home("migrate-key-lifecycle-off-age", |home| {
             crate::backend::seed_default_backends(home).unwrap();
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "age"), ("key", "k")]);
-            assert_eq!(handle_secrets_add(&add).status, Status::Ok);
+            assert_eq!(run(&add).status, Status::Ok);
             crate::backend::mint_age_identity_if_needed(home).unwrap();
             crate::backend::store_value(home, "age", "k", "the-value").unwrap();
 
             let migrate = inv(Door::Cli, &["secrets", "migrate"], &["t"], &[("backend", "file")]);
-            let out = handle_secrets_migrate(&migrate);
+            let out = run(&migrate);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(
                 !out.message.contains("age.key is now the ONLY decryptor"),
@@ -2165,11 +2230,11 @@ mod tests {
         with_secrets_home("migrate-noop", |home| {
             crate::backend::seed_default_backends(home).unwrap();
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "age"), ("key", "k")]);
-            assert_eq!(handle_secrets_add(&add).status, Status::Ok);
+            assert_eq!(run(&add).status, Status::Ok);
             let before = store::load_policies(home).unwrap();
 
             let migrate = inv(Door::Cli, &["secrets", "migrate"], &["t"], &[("backend", "age")]);
-            let out = handle_secrets_migrate(&migrate);
+            let out = run(&migrate);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(out.message.contains("unchanged"), "{}", out.message);
             assert!(out.changed.is_empty(), "a same-backend migrate must not report anything changed");
@@ -2186,12 +2251,12 @@ mod tests {
         with_secrets_home("migrate-missing-value", |home| {
             crate::backend::seed_default_backends(home).unwrap();
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "file"), ("key", "k")]);
-            assert_eq!(handle_secrets_add(&add).status, Status::Ok);
+            assert_eq!(run(&add).status, Status::Ok);
             let before = store::load_policies(home).unwrap();
 
             // No `store_value` call — the source backend has nothing stored.
             let migrate = inv(Door::Cli, &["secrets", "migrate"], &["t"], &[("backend", "age")]);
-            let out = handle_secrets_migrate(&migrate);
+            let out = run(&migrate);
             assert_eq!(out.status, Status::Error, "{out:?}");
 
             assert_eq!(store::load_policies(home).unwrap(), before, "a refused migrate must not touch policy.json");
@@ -2203,7 +2268,7 @@ mod tests {
     fn migrate_on_an_unknown_secret_is_an_error() {
         with_secrets_home("migrate-unknown", |_home| {
             let migrate = inv(Door::Cli, &["secrets", "migrate"], &["nope"], &[]);
-            assert_eq!(handle_secrets_migrate(&migrate).status, Status::Error);
+            assert_eq!(run(&migrate).status, Status::Error);
         });
     }
 
@@ -2231,10 +2296,10 @@ mod tests {
             crate::backend::store_value(home, "scratch", "k", "scratch-value").unwrap();
 
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "scratch"), ("key", "k")]);
-            assert_eq!(handle_secrets_add(&add).status, Status::Ok);
+            assert_eq!(run(&add).status, Status::Ok);
 
             let migrate = inv(Door::Cli, &["secrets", "migrate"], &["t"], &[("backend", "age")]);
-            let out = handle_secrets_migrate(&migrate);
+            let out = run(&migrate);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert!(out.message.contains("not a built-in backend"), "{}", out.message);
 
@@ -2264,7 +2329,7 @@ mod tests {
         std::env::set_var("AOIDE_SECRETS_SOCKET", "/nonexistent/aoide-secrets-test/no-such-broker.sock");
 
         let migrate = inv(Door::Cli, &["secrets", "migrate"], &["t"], &[]);
-        let out = handle_secrets_migrate(&migrate);
+        let out = run(&migrate);
         assert_eq!(out.status, Status::Error, "{out:?}");
         assert!(out.message.contains("must run as the broker user"), "{}", out.message);
 
@@ -2293,7 +2358,7 @@ mod tests {
     fn add_falls_back_to_the_direct_write_path_and_reports_it_when_no_socket_is_listening() {
         with_secrets_home("fallback-reports-direct", |_home| {
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "pass"), ("key", "x")]);
-            let out = handle_secrets_add(&add);
+            let out = run(&add);
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert_eq!(out.data, Some(json!({"path": "direct"})), "{out:?}");
         });
@@ -2340,7 +2405,7 @@ mod tests {
         std::env::remove_var("AOIDE_SECRETS_HOME");
 
         let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "scratch"), ("key", "k")]);
-        let out = handle_secrets_add(&add);
+        let out = run(&add);
         assert_eq!(out.status, Status::Ok, "{out:?}");
         assert_eq!(out.data, Some(json!({"path": "broker"})), "{out:?}");
 
@@ -2471,9 +2536,9 @@ mod tests {
     fn status_is_cli_only_and_every_other_door_gets_the_usage_hint() {
         with_scratch_paths("status-door", |_home, _socket| {
             for door in [Door::Mcp, Door::A2a, Door::Daemon] {
-                let out = handle_secrets_status(&inv(door, &["secrets", "status"], &[], &[]));
+                let out = run(&inv(door, &["secrets", "status"], &[], &[]));
                 assert_eq!(out.status, Status::Usage, "status over {door:?}: {out:?}");
-                assert!(out.data.is_none(), "a refused door must carry no data: {out:?}");
+                assert!(out.data.as_ref().is_some_and(|d| d.get("secrets").is_none()), "a refused door must carry no inventory: {out:?}");
             }
         });
     }
@@ -2490,19 +2555,15 @@ mod tests {
         with_scratch_paths("status-nosocket", |home, socket| {
             crate::store::save_policies(home, &[crate::policy::Policy::new("local-not-the-brokers", "file", "k")]).unwrap();
 
-            let out = handle_secrets_status(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
+            let out = run(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
             assert_eq!(out.status, Status::Error, "{out:?}");
-            assert!(out.message.contains("broker doesn't look like it's running"), "{}", out.message);
-            assert_eq!(
-                out.data,
-                Some(json!({
-                    "broker": "unreachable",
-                    "home": home.to_string_lossy(),
-                    "socket": socket.to_string_lossy(),
-                    "secrets": [],
-                })),
-                "{out:?}"
-            );
+            assert!(out.message.contains("the secrets broker is not running at"), "{}", out.message);
+            let data = out.data.as_ref().unwrap();
+            assert_eq!(data["broker"], "unreachable", "{out:?}");
+            assert_eq!(data["home"], home.to_string_lossy().as_ref(), "{out:?}");
+            assert_eq!(data["socket"], socket.to_string_lossy().as_ref(), "{out:?}");
+            assert_eq!(data["secrets"], json!([]), "{out:?}");
+            assert_eq!(data["refusal"]["fix"]["run"], "systemctl status aoide-secrets-serve", "{out:?}");
         });
     }
 
@@ -2525,10 +2586,13 @@ mod tests {
             // half of it.
             crate::home::set_mode(socket, 0o000).unwrap();
 
-            let out = handle_secrets_status(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
+            let out = run(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
             assert_eq!(out.status, Status::Error, "{out:?}");
-            assert!(out.message.contains("aoide-secrets-access"), "{}", out.message);
-            assert_eq!(out.data.as_ref().unwrap()["broker"], "unreachable", "{out:?}");
+            assert!(out.message.contains("may not open the secrets broker's socket"), "{}", out.message);
+            let data = out.data.as_ref().unwrap();
+            assert_eq!(data["broker"], "unreachable", "{out:?}");
+            assert!(data["refusal"]["why"].as_str().unwrap().contains("aoide-secrets-access"), "{out:?}");
+            assert!(data["refusal"]["fix"]["set"].as_str().unwrap().contains("aoide.secrets.members"), "{out:?}");
         });
     }
 
@@ -2552,7 +2616,7 @@ mod tests {
                 }
             });
 
-            let out = handle_secrets_status(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
+            let out = run(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
             assert_eq!(out.status, Status::Error, "{out:?}");
             assert!(out.message.contains("unknown op"), "{}", out.message);
             assert_eq!(out.data.as_ref().unwrap()["broker"], "unreachable", "{out:?}");
@@ -2567,7 +2631,7 @@ mod tests {
     #[test]
     fn status_over_a_fresh_broker_reports_an_empty_inventory() {
         with_real_broker("status-empty", |broker_home| {
-            let out = handle_secrets_status(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
+            let out = run(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert_eq!(out.message, "0 secret(s)");
             let data = out.data.unwrap();
@@ -2595,7 +2659,7 @@ mod tests {
             policy.allow_remote_origin = true;
             crate::store::save_policies(broker_home, &[policy]).unwrap();
 
-            let out = handle_secrets_status(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
+            let out = run(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
             assert_eq!(out.status, Status::Ok, "{out:?}");
             assert_eq!(out.message, "1 secret(s)");
 
@@ -2655,7 +2719,7 @@ mod tests {
             )
             .unwrap();
 
-            let out = handle_secrets_status(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
+            let out = run(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
             assert_eq!(out.status, Status::Error, "{out:?}");
             assert!(!out.message.contains("SENTINEL-CREDENTIAL"), "{}", out.message);
             assert!(out.message.contains("policy.json"), "{}", out.message);
@@ -2676,13 +2740,13 @@ mod tests {
         with_secrets_home("migrate-door-gate", |home| {
             crate::backend::seed_default_backends(home).unwrap();
             let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "file"), ("key", "k")]);
-            assert_eq!(handle_secrets_add(&add).status, Status::Ok);
+            assert_eq!(run(&add).status, Status::Ok);
             crate::backend::store_value(home, "file", "k", "the-value").unwrap();
             let before = store::load_policies(home).unwrap();
 
             for door in [Door::Mcp, Door::A2a, Door::Daemon] {
                 let migrate = inv(door, &["secrets", "migrate"], &["t"], &[]);
-                assert_eq!(handle_secrets_migrate(&migrate).status, Status::Usage, "migrate over {door:?}");
+                assert_eq!(run(&migrate).status, Status::Usage, "migrate over {door:?}");
                 assert_eq!(store::load_policies(home).unwrap(), before, "policy.json mutated over {door:?}");
             }
         });

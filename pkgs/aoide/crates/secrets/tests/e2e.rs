@@ -178,7 +178,7 @@ fn end_to_end_resolve_denies_and_grants_env_round_trip() {
         },
         door: aoide_protocol::Door::Cli,
     };
-    let code = client::run_exec(&inv, &socket_path);
+    let code = client::run_exec(&inv, &socket_path).expect("exec should run");
     assert_eq!(code, 0, "run_exec should exit with the child's own (successful) status");
     assert_eq!(read_to_string(&out_file).trim_end(), "stored-value");
 

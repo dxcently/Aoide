@@ -944,7 +944,7 @@ fn status_load_error(secrets_home: &Path, err: &std::io::Error) -> String {
 fn authorize_release(secrets_home: &Path, secret: &str, consumer: &str) -> Result<(), String> {
     let policies = crate::store::load_policies(secrets_home)
         .map_err(|e| crate::home::describe_home_file_error(secrets_home, &crate::store::policy_path(secrets_home), &e))?;
-    let policy = policies.iter().find(|p| p.name == secret).ok_or_else(|| "secret not found".to_string())?;
+    let policy = policies.iter().find(|p| p.name == secret).ok_or_else(|| crate::client::NOT_REGISTERED.to_string())?;
     let authorized = policy.consumers.is_empty() || policy.consumers.iter().any(|c| c == consumer);
     if !authorized {
         return Err("consumer not authorized for this secret".to_string());
@@ -1060,7 +1060,7 @@ fn handle_approve(
 fn fetch_secret_value(secrets_home: &Path, secret: &str) -> Result<String, String> {
     let policies = crate::store::load_policies(secrets_home)
         .map_err(|e| crate::home::describe_home_file_error(secrets_home, &crate::store::policy_path(secrets_home), &e))?;
-    let policy = policies.iter().find(|p| p.name == secret).ok_or_else(|| "secret not found".to_string())?;
+    let policy = policies.iter().find(|p| p.name == secret).ok_or_else(|| crate::client::NOT_REGISTERED.to_string())?;
     crate::backend::fetch_value(secrets_home, &policy.backend, &policy.key)
 }
 
@@ -1248,14 +1248,14 @@ fn admin_gate(peer_uid: Option<&PeerUser>, secrets_home: &Path, subcommand: &str
         // blaming the peer for a broker that cannot read its own token would
         // send an operator looking in the wrong place.
         (_, None) => Some(format!(
-            "secrets {subcommand} over the broker socket must come from an IDENTIFIED connection, and this broker \
+            "secrets {subcommand} must run as the broker user over an identified connection, and this broker \
              cannot read its OWN user identity, so nothing can be compared — refused the same way a mismatched \
-             identity would be. Run: sudo -u aoide-secrets aoide secrets {subcommand} ..."
+             identity would be"
         )),
         _ => Some(format!(
-            "secrets {subcommand} over the broker socket must come from an IDENTIFIED connection — this connection's \
+            "secrets {subcommand} must run as the broker user over an identified connection — this connection's \
              peer identity could not be determined (no kernel-truth peer credential on this host), so it is refused \
-             the same way a mismatched identity would be. Run: sudo -u aoide-secrets aoide secrets {subcommand} ..."
+             the same way a mismatched identity would be"
         )),
     }
 }
@@ -1481,7 +1481,7 @@ fn put_gate(secrets_home: &Path, secret: &str, value: &str, overwrite: bool) -> 
         }
     };
     let Some(policy) = policies.iter().find(|p| p.name == secret) else {
-        return PutOutcome::Denied("secret not found".to_string());
+        return PutOutcome::Denied(crate::client::NOT_REGISTERED.to_string());
     };
 
     let _guard = put_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -1572,7 +1572,7 @@ fn resolve_gate(
         }
     };
     let Some(policy) = policies.iter().find(|p| p.name == secret) else {
-        return GateOutcome::Denied("secret not found".to_string());
+        return GateOutcome::Denied(crate::client::NOT_REGISTERED.to_string());
     };
     let authorized = policy.consumers.is_empty() || policy.consumers.iter().any(|c| c == consumer);
     if !authorized {
@@ -5016,7 +5016,7 @@ mod tests {
             let req = json!({"op": "admin", "command": "add", "name": "t", "backend": "scratch", "key": "k"});
             let reply = handle_admin(&home, &req, None);
             assert_eq!(reply["ok"], false, "{reply}");
-            assert!(reply["error"].as_str().unwrap().contains("IDENTIFIED"), "{reply}");
+            assert!(reply["error"].as_str().unwrap().contains("identified connection"), "{reply}");
         });
         std::fs::remove_dir_all(&home).ok();
     }

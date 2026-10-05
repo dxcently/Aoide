@@ -26,11 +26,13 @@ impl Invocation {
 
     /// The invocation as a shell line to paste: `bin`, the path, the
     /// positionals, then each flag (a bare `--name` for those in `bools`,
-    /// `--name value` otherwise), every word quoted for a POSIX shell.
-    pub fn command_line(&self, bin: &str, bools: &[&str]) -> String {
+    /// `--name value` otherwise), every word quoted for a POSIX shell. With
+    /// `wrapped` the positionals are a command line of their own and follow
+    /// the flags after `--`.
+    pub fn command_line(&self, bin: &str, bools: &[&str], wrapped: bool) -> String {
         let mut words: Vec<String> = vec![bin.to_string()];
         words.extend(self.path.iter().cloned());
-        let tail = self.args.iter().any(|a| a.starts_with('-'));
+        let tail = wrapped || self.args.iter().any(|a| a.starts_with('-'));
         if !tail {
             words.extend(self.args.iter().cloned());
         }
@@ -73,10 +75,12 @@ mod tests {
     #[test]
     fn the_command_line_is_pasteable_with_words_quoted() {
         let i = inv(&["secrets", "automate"], &["sudo-pass", "grant", "orchestrator"], &[]);
-        assert_eq!(i.command_line("aoide", &[]), "aoide secrets automate sudo-pass grant orchestrator");
+        assert_eq!(i.command_line("aoide", &[], false), "aoide secrets automate sudo-pass grant orchestrator");
         let i = inv(&["secrets", "add"], &["db"], &[("key", "a b"), ("require-totp", "true"), ("json", "true")]);
-        assert_eq!(i.command_line("aoide", &["require-totp"]), "aoide secrets add db --key 'a b' --require-totp");
+        assert_eq!(i.command_line("aoide", &["require-totp"], false), "aoide secrets add db --key 'a b' --require-totp");
         let i = inv(&["secrets", "add"], &["it's", "-x"], &[]);
-        assert_eq!(i.command_line("aoide", &[]), "aoide secrets add -- 'it'\\''s' -x");
+        assert_eq!(i.command_line("aoide", &[], false), "aoide secrets add -- 'it'\\''s' -x");
+        let i = inv(&["secrets", "exec"], &["psql", "db"], &[("as", "m"), ("secret", "db-prod")]);
+        assert_eq!(i.command_line("aoide", &[], true), "aoide secrets exec --as m --secret db-prod -- psql db");
     }
 }

@@ -69,15 +69,15 @@
 //!   re-sends the SAME in-memory value with `overwrite: true` (the caller
 //!   is never asked to retype it), anything else — including EOF, `read_line`
 //!   returning `Ok(0)` — aborts with an "unchanged" message. On a non-tty
-//!   stdin, there is no one to ask, so it refuses outright and teaches the
-//!   `--force` spelling ([`non_tty_exists_message`], a plain pure function
-//!   so this refusal is testable without faking a tty — module doc's own
-//!   "pure-testable" requirement).
+//!   stdin, there is no one to ask, so it refuses outright
+//!   ([`PutFailure::NeedsForce`]; the command layer teaches the `--force`
+//!   spelling).
 //! - The value NEVER touches argv, a log line, or a cache at any point in
 //!   this flow — it exists only as `run_put`'s own local `String`, exactly
 //!   as before this feature, just potentially handed to [`put`] TWICE
 //!   instead of once.
 
+use aoide_protocol::output::{io_cause, Fix, Kind, Refusal};
 use aoide_protocol::Invocation;
 use serde_json::{json, Value};
 use std::io;
@@ -93,6 +93,13 @@ use aoide_protocol::win_unix::UnixStream;
 use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
+
+/// The broker's reply for a secret no policy names.
+pub const NOT_REGISTERED: &str = "secret not found";
+
+/// Markers [`describe_connect_error`]'s messages carry, read by `teach::classify`.
+pub(crate) const NO_ACCESS: &str = "`aoide-secrets-access` group yet";
+pub(crate) const NOT_RUNNING: &str = "doesn't look like it's running";
 
 /// Map a `UnixStream::connect` failure against the broker socket into an
 /// actionable message — pure (an injected [`io::Error`], no real socket),
@@ -120,7 +127,7 @@ use std::time::Duration;
 /// destination directory, ...) rides through with just the socket path
 /// prefixed — unchanged from before this function existed — rather than
 /// guessing at a fix this function has no evidence for.
-fn describe_connect_error(socket_path: &Path, err: &io::Error, reinvoke: &str) -> String {
+pub(crate) fn describe_connect_error(socket_path: &Path, err: &io::Error, reinvoke: &str) -> String {
     match err.kind() {
         io::ErrorKind::PermissionDenied => format!(
             "connecting to the secrets broker at {}: permission denied — this session isn't in the \
@@ -472,22 +479,16 @@ pub fn default_var_name(secret: &str) -> String {
 /// the wrapped command + its args — `aoide_protocol::door::parse` already
 /// treats a bare `--` as ending flag parsing, so everything after it
 /// arrives here verbatim as positionals (that module's own doc).
-/// `secrets exec`'s own usage line — printed alongside every specific
-/// missing/malformed-argument message below, never a generic usage dump on
-/// its own (task: name WHICH flag is wrong AND show this command's usage).
-pub const EXEC_USAGE: &str = "usage: secrets exec --as <consumer> --secret <name>[:VAR] [--totp NNNNNN] -- <cmd>";
-
-pub fn parse_exec_args(inv: &Invocation) -> Result<ExecArgs, String> {
-    let consumer = inv
-        .flags
-        .get("as")
-        .cloned()
-        .ok_or_else(|| format!("secrets exec: missing --as <consumer> — {EXEC_USAGE}"))?;
-    let secret_flag = inv
-        .flags
-        .get("secret")
-        .cloned()
-        .ok_or_else(|| format!("secrets exec: missing --secret <name>[:VAR] — {EXEC_USAGE}"))?;
+/// Parse `aoide secrets exec --as <consumer> --secret <name>[:VAR] [--totp N]
+/// -- <cmd>` out of an already-parsed [`Invocation`]. `inv.args` is exactly
+/// the wrapped command + its args — `aoide_protocol::door::parse` already
+/// treats a bare `--` as ending flag parsing, so everything after it
+/// arrives here verbatim as positionals (that module's own doc). The
+/// registry entry declares `--as`, `--secret` and the command required, so
+/// `Command::check` has already refused their absence.
+pub fn parse_exec_args(inv: &Invocation) -> Result<ExecArgs, Refusal> {
+    let consumer = inv.flags["as"].clone();
+    let secret_flag = inv.flags["secret"].clone();
     let (secret, var) = match secret_flag.split_once(':') {
         Some((n, v)) if !v.is_empty() => (n.to_string(), v.to_string()),
         _ => {
@@ -497,16 +498,10 @@ pub fn parse_exec_args(inv: &Invocation) -> Result<ExecArgs, String> {
         }
     };
     if !crate::policy::valid_secret_name(&secret) {
-        return Err(format!(
-            "invalid secret name `{secret}` (must be lowercase [a-z0-9-], no leading/trailing/doubled \
-             hyphen) — {EXEC_USAGE}"
-        ));
+        return Err(crate::teach::invalid_name(inv, "secret", &secret));
     }
     let totp = inv.flags.get("totp").cloned();
     let cmd = inv.args.clone();
-    if cmd.is_empty() {
-        return Err(format!("secrets exec: missing a command after `--` — {EXEC_USAGE}"));
-    }
     let reason = inv.flags.get("reason").cloned().or_else(|| derive_reason(&cmd));
     Ok(ExecArgs { consumer, secret, var, totp, cmd, reason })
 }
@@ -570,7 +565,7 @@ pub fn resolve(
     line.push('\n');
     stream
         .write_all(line.as_bytes())
-        .map_err(|e| format!("writing to the secrets broker: {e}"))?;
+        .map_err(|e| io_cause("write to", socket_path, &e).why)?;
 
     let mut reader = BufReader::new(stream);
     let reply = read_final_reply(&mut reader)?;
@@ -604,7 +599,9 @@ pub fn resolve(
 fn read_final_reply(reader: &mut impl BufRead) -> Result<Value, String> {
     loop {
         let mut line = String::new();
-        reader.read_line(&mut line).map_err(|e| format!("reading from the secrets broker: {e}"))?;
+        reader
+            .read_line(&mut line)
+            .map_err(|e| io_cause("read from", Path::new("the secrets broker connection"), &e).why)?;
         if line.trim().is_empty() {
             return Err("the secrets broker closed the connection with no reply".to_string());
         }
@@ -656,14 +653,14 @@ pub fn resolve_bounded(
     })?;
     stream
         .set_read_timeout(Some(timeout))
-        .map_err(|e| format!("setting a read timeout on the secrets broker connection at {}: {e}", socket_path.display()))?;
+        .map_err(|e| io_cause("set a read timeout on", socket_path, &e).why)?;
 
     let req = json!({ "op": "resolve", "secret": secret, "consumer": consumer, "wait": false });
     let mut line = req.to_string();
     line.push('\n');
     stream
         .write_all(line.as_bytes())
-        .map_err(|e| format!("writing to the secrets broker: {e}"))?;
+        .map_err(|e| io_cause("write to", socket_path, &e).why)?;
 
     let mut reader = BufReader::new(stream);
     let reply = read_final_reply(&mut reader)?;
@@ -744,13 +741,13 @@ pub fn put(socket_path: &Path, secret: &str, value: &str, overwrite: bool) -> Re
     line.push('\n');
     stream
         .write_all(line.as_bytes())
-        .map_err(|e| PutError::Other(format!("writing to the secrets broker: {e}")))?;
+        .map_err(|e| PutError::Other(io_cause("write to", socket_path, &e).why))?;
 
     let mut reader = BufReader::new(stream);
     let mut reply_line = String::new();
     reader
         .read_line(&mut reply_line)
-        .map_err(|e| PutError::Other(format!("reading from the secrets broker: {e}")))?;
+        .map_err(|e| PutError::Other(io_cause("read from", socket_path, &e).why))?;
     if reply_line.trim().is_empty() {
         return Err(PutError::Other("the secrets broker closed the connection with no reply".to_string()));
     }
@@ -818,13 +815,13 @@ pub fn admin_request(socket_path: &Path, req: Value) -> Result<Value, AdminError
 
     let mut line = req.to_string();
     line.push('\n');
-    stream.write_all(line.as_bytes()).map_err(|e| AdminError::Other(format!("writing to the secrets broker: {e}")))?;
+    stream.write_all(line.as_bytes()).map_err(|e| AdminError::Other(io_cause("write to", socket_path, &e).why))?;
 
     let mut reader = BufReader::new(stream);
     let mut reply_line = String::new();
     reader
         .read_line(&mut reply_line)
-        .map_err(|e| AdminError::Other(format!("reading from the secrets broker: {e}")))?;
+        .map_err(|e| AdminError::Other(io_cause("read from", socket_path, &e).why))?;
     if reply_line.trim().is_empty() {
         return Err(AdminError::Other("the secrets broker closed the connection with no reply".to_string()));
     }
@@ -891,11 +888,11 @@ pub fn pending(socket_path: &Path) -> Result<Vec<PendingAsk>, String> {
         .map_err(|e| describe_connect_error(socket_path, &e, "aoide secrets pending"))?;
 
     let line = json!({ "op": "pending" }).to_string() + "\n";
-    stream.write_all(line.as_bytes()).map_err(|e| format!("writing to the secrets broker: {e}"))?;
+    stream.write_all(line.as_bytes()).map_err(|e| io_cause("write to", socket_path, &e).why)?;
 
     let mut reader = BufReader::new(stream);
     let mut reply_line = String::new();
-    reader.read_line(&mut reply_line).map_err(|e| format!("reading from the secrets broker: {e}"))?;
+    reader.read_line(&mut reply_line).map_err(|e| io_cause("read from", socket_path, &e).why)?;
     if reply_line.trim().is_empty() {
         return Err("the secrets broker closed the connection with no reply".to_string());
     }
@@ -963,11 +960,11 @@ pub fn approve(socket_path: &Path, id: &str, totp: &str) -> Result<(), String> {
         .map_err(|e| describe_connect_error(socket_path, &e, &format!("aoide secrets approve {id} --totp ...")))?;
 
     let line = json!({ "op": "approve", "id": id, "totp": totp }).to_string() + "\n";
-    stream.write_all(line.as_bytes()).map_err(|e| format!("writing to the secrets broker: {e}"))?;
+    stream.write_all(line.as_bytes()).map_err(|e| io_cause("write to", socket_path, &e).why)?;
 
     let mut reader = BufReader::new(stream);
     let mut reply_line = String::new();
-    reader.read_line(&mut reply_line).map_err(|e| format!("reading from the secrets broker: {e}"))?;
+    reader.read_line(&mut reply_line).map_err(|e| io_cause("read from", socket_path, &e).why)?;
     if reply_line.trim().is_empty() {
         return Err("the secrets broker closed the connection with no reply".to_string());
     }
@@ -993,11 +990,11 @@ pub fn dismiss(socket_path: &Path, id: &str) -> Result<(), String> {
         .map_err(|e| describe_connect_error(socket_path, &e, &format!("aoide secrets dismiss {id}")))?;
 
     let line = json!({ "op": "dismiss", "id": id }).to_string() + "\n";
-    stream.write_all(line.as_bytes()).map_err(|e| format!("writing to the secrets broker: {e}"))?;
+    stream.write_all(line.as_bytes()).map_err(|e| io_cause("write to", socket_path, &e).why)?;
 
     let mut reader = BufReader::new(stream);
     let mut reply_line = String::new();
-    reader.read_line(&mut reply_line).map_err(|e| format!("reading from the secrets broker: {e}"))?;
+    reader.read_line(&mut reply_line).map_err(|e| io_cause("read from", socket_path, &e).why)?;
     if reply_line.trim().is_empty() {
         return Err("the secrets broker closed the connection with no reply".to_string());
     }
@@ -1147,15 +1144,13 @@ pub fn status(socket_path: &Path) -> Result<StatusReport, String> {
         .map_err(|e| describe_connect_error(socket_path, &e, "aoide secrets status"))?;
     stream
         .set_read_timeout(Some(STATUS_TIMEOUT))
-        .map_err(|e| format!("setting a read timeout on the secrets broker connection at {}: {e}", socket_path.display()))?;
-    stream.set_write_timeout(Some(STATUS_TIMEOUT)).map_err(|e| {
-        format!("setting a write timeout on the secrets broker connection at {}: {e}", socket_path.display())
-    })?;
+        .map_err(|e| io_cause("set a read timeout on", socket_path, &e).why)?;
+    stream.set_write_timeout(Some(STATUS_TIMEOUT)).map_err(|e| io_cause("set a write timeout on", socket_path, &e).why)?;
 
     let line = json!({ "op": "status" }).to_string() + "\n";
     stream
         .write_all(line.as_bytes())
-        .map_err(|e| format!("writing to the secrets broker: {e}"))?;
+        .map_err(|e| io_cause("write to", socket_path, &e).why)?;
 
     let mut reader = BufReader::new(stream);
     let mut reply_line = String::new();
@@ -1165,7 +1160,7 @@ pub fn status(socket_path: &Path) -> Result<StatusReport, String> {
             socket_path.display(),
             STATUS_TIMEOUT
         ),
-        _ => format!("reading from the secrets broker: {e}"),
+        _ => io_cause("read from", socket_path, &e).why,
     })?;
     if reply_line.trim().is_empty() {
         return Err("the secrets broker closed the connection with no reply".to_string());
@@ -1240,18 +1235,6 @@ pub(crate) fn read_hidden_line(prompt: &str) -> Result<String, String> {
     aoide_protocol::pick::hidden_input(prompt)
 }
 
-/// The non-tty "exists" refusal message (P-67) — a plain pure function so
-/// it's testable without faking a tty (module doc). Teaches the exact
-/// `--force` spelling: there is no one to ask for a `y/N` confirmation
-/// when stdin is a pipe, so this refuses outright rather than guessing.
-fn non_tty_exists_message(secret: &str) -> String {
-    format!(
-        "secret `{secret}` already has a stored value — refusing to overwrite it from a non-interactive \
-         stdin without confirmation. Re-run with --force to overwrite: printf %s <value> | aoide secrets put \
-         {secret} --force"
-    )
-}
-
 /// Prompt `y/N` on stderr and read ONE line from stdin, unhidden (a yes/no
 /// answer isn't sensitive, unlike the value itself). `true` only for
 /// `y`/`yes` (case-insensitive, surrounding whitespace trimmed); EOF
@@ -1261,7 +1244,7 @@ fn confirm_overwrite(secret: &str) -> Result<bool, String> {
     eprint!("secret `{secret}` already has a stored value — overwrite? [y/N] ");
     let _ = std::io::stderr().flush();
     let mut line = String::new();
-    let read = std::io::stdin().lock().read_line(&mut line).map_err(|e| format!("reading confirmation from stdin: {e}"))?;
+    let read = std::io::stdin().lock().read_line(&mut line).map_err(|e| io_cause("read", Path::new("stdin"), &e).why)?;
     Ok(read > 0 && matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes"))
 }
 
@@ -1279,43 +1262,62 @@ fn confirm_overwrite(secret: &str) -> Result<bool, String> {
 /// [`PutError::Exists`] does this branch on [`stdin_is_tty`] a second time:
 /// a tty gets [`confirm_overwrite`]'s `y/N` prompt and, on yes, a SECOND
 /// `put` with the SAME value and `overwrite: true` — the caller is never
-/// asked to retype it; a non-tty stdin gets [`non_tty_exists_message`] and
-/// aborts. Returns the human-facing success message ("stored" vs.
+/// asked to retype it; a non-tty stdin gets [`PutFailure::NeedsForce`]. An
+/// empty or whitespace-only value is [`PutFailure::Empty`], refused before the
+/// broker is asked. Returns the human-facing success message ("stored" vs.
 /// "replaced", so the CLI's own `Outcome` can say which happened) or a
-/// value-free error string.
-pub fn run_put(secret: &str, socket_path: &Path, force: bool) -> Result<String, String> {
-    let value = if stdin_is_tty() {
-        read_hidden_line(&format!("value for `{secret}` (input hidden): "))?
+/// value-free [`PutFailure`].
+pub fn run_put(secret: &str, socket_path: &Path, force: bool) -> Result<String, PutFailure> {
+    let typed = stdin_is_tty();
+    let value = if typed {
+        read_hidden_line(&format!("value for `{secret}` (input hidden): ")).map_err(PutFailure::Broker)?
     } else {
         use std::io::Read;
         let mut value = String::new();
         std::io::stdin()
             .read_to_string(&mut value)
-            .map_err(|e| format!("reading value from stdin: {e}"))?;
+            .map_err(|e| PutFailure::Broker(io_cause("read", Path::new("stdin"), &e).why))?;
         value
     };
+    if value.trim().is_empty() {
+        return Err(PutFailure::Empty { typed });
+    }
 
     match put(socket_path, secret, &value, force) {
         Ok(true) => Ok(format!("replaced secret `{secret}`'s stored value")),
         Ok(false) => Ok(format!("stored secret `{secret}`")),
-        Err(PutError::Other(e)) => Err(e),
+        Err(PutError::Other(e)) => Err(PutFailure::Broker(e)),
         Err(PutError::Exists) => {
             if !stdin_is_tty() {
-                return Err(non_tty_exists_message(secret));
+                return Err(PutFailure::NeedsForce);
             }
-            if !confirm_overwrite(secret)? {
-                return Err(format!("secret `{secret}` left unchanged"));
+            if !confirm_overwrite(secret).map_err(PutFailure::Broker)? {
+                return Err(PutFailure::Declined);
             }
             match put(socket_path, secret, &value, true) {
                 Ok(true) => Ok(format!("replaced secret `{secret}`'s stored value")),
                 Ok(false) => Ok(format!("stored secret `{secret}`")),
-                Err(PutError::Other(e)) => Err(e),
-                Err(PutError::Exists) => {
-                    Err(format!("secret `{secret}`: the broker refused the confirmed overwrite unexpectedly"))
-                }
+                Err(PutError::Other(e)) => Err(PutFailure::Broker(e)),
+                Err(PutError::Exists) => Err(PutFailure::Broker(format!(
+                    "secret `{secret}`: the broker refused the confirmed overwrite unexpectedly"
+                ))),
             }
         }
     }
+}
+
+/// Why [`run_put`] stored nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PutFailure {
+    /// The value was empty or only whitespace; `typed` is whether a person
+    /// was at the prompt (as against a pipe).
+    Empty { typed: bool },
+    /// The secret has a value, stdin is not a terminal, and `--force` was not given.
+    NeedsForce,
+    /// The person answered no to the overwrite prompt.
+    Declined,
+    /// The broker or the terminal said no, in its own words.
+    Broker(String),
 }
 
 /// Spawn `cmd`, `var`=`value` injected, `Stdio::inherit()` throughout
@@ -1331,43 +1333,35 @@ fn spawn_with_secret(cmd: &[String], var: &str, value: &str) -> Result<i32, Stri
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
-        .map_err(|e| format!("spawning `{}`: {e}", cmd[0]))?;
+        .map_err(|e| io_cause("run", Path::new(&cmd[0]), &e).why)?;
     Ok(status.code().unwrap_or(1))
 }
 
 /// The full `secrets exec` client flow — parse, resolve over `socket_path`,
-/// spawn with the value injected. Returns the process exit code to hand
-/// back from `main`: `2` (usage) for a bad invocation, `1` (error) for a
-/// denied resolve or a spawn failure, else the CHILD's own exit code.
-pub fn run_exec(inv: &Invocation, socket_path: &Path) -> i32 {
-    let args = match parse_exec_args(inv) {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("aoide secrets exec: {e}");
-            return 2;
-        }
-    };
-    let value = match resolve(
+/// spawn with the value injected. `Ok` is the process exit code to hand
+/// back from `main`: the CHILD's own exit code, never aoide's own
+/// vocabulary. `Err` is a taught refusal for a bad invocation, a denied
+/// resolve or a spawn failure; the caller renders it through the envelope.
+pub fn run_exec(inv: &Invocation, socket_path: &Path) -> Result<i32, Refusal> {
+    let args = parse_exec_args(inv)?;
+    let at = crate::teach::Where { inv, socket: socket_path, secret: Some(&args.secret) };
+    let value = resolve(
         socket_path,
         &args.secret,
         &args.consumer,
         args.totp.as_deref(),
         args.cmd.first().map(String::as_str),
         args.reason.as_deref(),
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("aoide secrets exec: {e}");
-            return 1;
-        }
-    };
-    match spawn_with_secret(&args.cmd, &args.var, &value) {
-        Ok(code) => code,
-        Err(e) => {
-            eprintln!("aoide secrets exec: {e}");
-            1
-        }
-    }
+    )
+    .map_err(|e| crate::teach::from_broker(&at, &e))?;
+    spawn_with_secret(&args.cmd, &args.var, &value).map_err(|e| {
+        Refusal::new(
+            Kind::Failed,
+            format!("could not start `{}` with the secret injected", args.cmd[0]),
+            e,
+            Fix::Set("check that the command exists and is executable on PATH".to_string()),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -1826,27 +1820,9 @@ mod tests {
     }
 
     #[test]
-    fn missing_as_is_a_clear_error() {
-        let i = inv(&[("secret", "t")], &["cmd"]);
-        assert!(parse_exec_args(&i).unwrap_err().contains("--as"));
-    }
-
-    #[test]
-    fn missing_secret_is_a_clear_error() {
-        let i = inv(&[("as", "m")], &["cmd"]);
-        assert!(parse_exec_args(&i).unwrap_err().contains("--secret"));
-    }
-
-    #[test]
-    fn missing_command_is_a_clear_error() {
-        let i = inv(&[("as", "m"), ("secret", "t")], &[]);
-        assert!(parse_exec_args(&i).unwrap_err().contains("command after"));
-    }
-
-    #[test]
     fn invalid_secret_name_is_rejected() {
         let i = inv(&[("as", "m"), ("secret", "Bad Name")], &["cmd"]);
-        assert!(parse_exec_args(&i).unwrap_err().contains("invalid secret name"));
+        assert!(parse_exec_args(&i).unwrap_err().what.contains("not a valid secret name"));
     }
 
     // ── describe_connect_error (pure — injected io::Error, no real socket) ──
@@ -1918,17 +1894,6 @@ mod tests {
     // implicitly relies on.
 
     // ── P-67: warn-before-overwrite ─────────────────────────────────────
-
-    #[test]
-    fn non_tty_exists_message_teaches_the_force_spelling() {
-        let msg = non_tty_exists_message("db-prod");
-        assert!(msg.contains("already has a stored value"), "{msg}");
-        assert!(msg.contains("--force"), "{msg}");
-        assert!(
-            msg.contains("printf %s <value> | aoide secrets put db-prod --force"),
-            "must spell out the exact fix: {msg}"
-        );
-    }
 
     /// End-to-end proof that [`put`] surfaces the wire's `exists` flag as
     /// [`PutError::Exists`] (never inferred by matching `error` prose) and

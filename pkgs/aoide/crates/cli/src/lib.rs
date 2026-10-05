@@ -239,7 +239,14 @@ pub fn run_cli(argv: &[String]) -> i32 {
                 eprintln!("{body}");
                 return Some(code);
             }
-            return Some(secrets::client::run_exec(inv, &secrets::socket::socket_path()));
+            return Some(match secrets::client::run_exec(inv, &secrets::socket::socket_path()) {
+                Ok(code) => code,
+                Err(refusal) => {
+                    let (body, code) = refusal.into_outcome(inv.dotted()).render(json);
+                    eprintln!("{body}");
+                    code
+                }
+            });
         }
 
         // `secrets enroll` (P-V3) is special-cased the SAME way as `secrets

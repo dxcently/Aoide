@@ -361,6 +361,29 @@
   `admin_identity_check`'s dispatch between them are the one gate, and a
   new admin command that touches `policy.json`/`totp.secret` calls it the
   same way.
+- **Refusals are taught, and the text a producer emits and the text `teach`
+  reads are one contract.** A client, broker or admin failure travels as one
+  line of text (the wire's `error` string); `teach::classify` reads the markers
+  that line carries (`client::NOT_REGISTERED`, `client::NO_ACCESS`,
+  `client::NOT_RUNNING`, `admin::NO_POLICY`, `admin::NOT_ADMITTED`, and "must
+  run as the broker user") and `teach::from_broker` turns it into a `Refusal`
+  with its fix. A producer that rewords a marker breaks
+  `every_producer_of_a_classified_failure_reads_back_as_its_kind`, not a
+  user's terminal. The identity producers (`home::admin_identity_*`, the
+  broker's `admin_gate`) never spell the command to run: only the caller knows
+  the user's argv, so `teach::broker_user` renders `sudo -u aoide-secrets` +
+  `Invocation::command_line`, whole, never `...`. A new admin command's handler
+  calls `require_admin_identity(inv, cmd)` and routes its errors through
+  `admin_dispatch`; it never formats a failure itself.
+- **`secrets put` refuses a value that is empty or only whitespace, and the
+  A2A door treats an empty resolved bearer as a resolve failure.** The first
+  keeps a failed producer before the pipe from storing "no secret"; the second
+  keeps one that was stored anyway from reading as "no token configured" at
+  the door (`crates/server/AGENTS.md`).
+- **`automate <name> grant <consumer>` is refused for a consumer the secret's
+  non-empty `consumers[]` does not admit** (`admin::automate_consumer`, so
+  both paths): `broker::resolve_gate` checks `consumers[]` first, so the
+  grant could never open. An empty list admits everyone and is never refused.
 - **The automation gate can only ever RELAX `requireTotp`, never tighten
   it** (P-N1). `policy::totp_required(policy, consumer)` is the ONE
   decision point `broker::resolve_gate` routes through — it is `requireTotp

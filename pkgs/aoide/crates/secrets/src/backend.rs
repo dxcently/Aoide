@@ -753,7 +753,7 @@ fn run_backend_command(backend_name: &str, op: &str, command: &str, stdin_data: 
 
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("spawning backend `{backend_name}` ({op}): {e}"))?;
+        .map_err(|e| format!("backend `{backend_name}` ({op}): {}", aoide_protocol::output::io_cause("run", Path::new(backend_name), &e).why))?;
 
     if let Some(data) = stdin_data {
         let mut stdin = child
@@ -768,7 +768,7 @@ fn run_backend_command(backend_name: &str, op: &str, command: &str, stdin_data: 
         // SECRET" invariant keeps values small in the first place).
         stdin
             .write_all(data.as_bytes())
-            .map_err(|e| format!("writing to backend `{backend_name}` ({op})'s stdin: {e}"))?;
+            .map_err(|e| format!("backend `{backend_name}` ({op}): {}", aoide_protocol::output::io_cause("write to", Path::new(backend_name), &e).why))?;
         // `stdin` drops here, closing the write end (EOF) before the wait
         // loop starts — same "close stdin before waiting" discipline
         // `store_value` held before this function existed.
@@ -779,7 +779,9 @@ fn run_backend_command(backend_name: &str, op: &str, command: &str, stdin_data: 
     let (status, stdout_buf, stderr_buf) = match wait_bounded(&mut child, stdout_pipe, stderr_pipe) {
         Ok(v) => v,
         Err(WaitOutcome::TimedOut) => return Err(backend_timeout_error(backend_name, op)),
-        Err(WaitOutcome::WaitFailed(e)) => return Err(format!("waiting on backend `{backend_name}` ({op}): {e}")),
+        Err(WaitOutcome::WaitFailed(e)) => {
+            return Err(format!("backend `{backend_name}` ({op}): {}", aoide_protocol::output::io_cause("wait on", Path::new(backend_name), &e).why))
+        }
     };
 
     if !status.success() {
@@ -1087,7 +1089,7 @@ fn describe_missing_age_keygen(err: &std::io::Error) -> String {
     if err.kind() == std::io::ErrorKind::NotFound {
         missing_age_binary_hint()
     } else {
-        format!("spawning age-keygen: {err}")
+        aoide_protocol::output::io_cause("run", Path::new("age-keygen"), err).why
     }
 }
 
@@ -1258,7 +1260,7 @@ pub fn mint_age_identity_if_needed(secrets_home: &Path) -> Result<bool, String> 
     if has_orphaned_age_ciphertext(secrets_home) {
         return Err(orphaned_age_ciphertext_refusal());
     }
-    std::fs::create_dir_all(secrets_home).map_err(|e| format!("creating {}: {e}", secrets_home.display()))?;
+    std::fs::create_dir_all(secrets_home).map_err(|e| aoide_protocol::output::io_cause("create", secrets_home, &e).why)?;
 
     let key_path_str = key_path.to_string_lossy();
     let keygen = run_age_keygen(&["-o", &key_path_str])?;
@@ -1270,7 +1272,7 @@ pub fn mint_age_identity_if_needed(secrets_home: &Path) -> Result<bool, String> 
         );
         return Err(format!("age-keygen exited {}", keygen.status));
     }
-    crate::home::secure_file(&key_path).map_err(|e| format!("securing {}: {e}", key_path.display()))?;
+    crate::home::secure_file(&key_path).map_err(|e| aoide_protocol::output::io_cause("secure", &key_path, &e).why)?;
 
     let recipient_path = secrets_home.join("age.recipient");
     let recipient_path_str = recipient_path.to_string_lossy();
@@ -1283,7 +1285,7 @@ pub fn mint_age_identity_if_needed(secrets_home: &Path) -> Result<bool, String> 
         );
         return Err(format!("age-keygen -y exited {}", show.status));
     }
-    crate::home::secure_file(&recipient_path).map_err(|e| format!("securing {}: {e}", recipient_path.display()))?;
+    crate::home::secure_file(&recipient_path).map_err(|e| aoide_protocol::output::io_cause("secure", &recipient_path, &e).why)?;
 
     Ok(true)
 }

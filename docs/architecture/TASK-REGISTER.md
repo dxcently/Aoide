@@ -2973,18 +2973,40 @@ project/parent inheritance across local/remote/app/subagents;
 ## 34. Secrets setup error handling (User, 2026-09-26, osaka enrollment)
 
 - Requirement (User): improve the error handling of the first-time secrets
-  setup on a fresh host — later, not now.
-- Found on osaka: `secrets add <name>` refuses with `missing --key <key>`
-  although `Secrets-Commands.md` documents `--key` as optional; nothing says
-  what a key is (for `age` it is only the file name under `values/`, so the
-  secret's own name is the obvious default). Before that, `secrets status`
-  on a host whose broker has no `members` answers "not in the
-  `aoide-secrets-access` group" without naming the fix (the host's
-  `aoide.secrets.members`, a switch, a fresh login).
-- Fix, open (core, `crates/secrets`): default `--key` to the name where the
-  backend allows it, else say what the key means for that backend; make each
-  first-run refusal name its next command; code and `Secrets-Commands.md`
-  agree.
+  setup on a fresh host.
+- Found on osaka: `secrets add <name>` refused with `missing --key <key>`
+  although `Secrets-Commands.md` documents `--key` as optional; nothing said
+  what a key is. Before that, `secrets status` on a host whose broker has no
+  `members` answered "not in the `aoide-secrets-access` group" without naming
+  the fix.
+- Found on sakaki (2026-10-05): `secrets put` stored an EMPTY value when the
+  producer before the pipe failed; and an empty resolved bearer read as "no
+  token configured" at the A2A door, restoring the loopback free pass.
+- **Settled** (CLI slice S1, branch `cli/s1-secrets`):
+  - `secrets add --key` defaults to the secret's name for `age`; for a
+    command-template backend the refusal says what the key means.
+  - `secrets put` refuses empty or whitespace-only stdin with what/why/fix and
+    a working generator.
+  - The A2A door fails closed on an empty resolved bearer (broker secret) and
+    on a configured `tokenFile` that is missing or empty (own commit).
+  - `secrets automate <name> grant <consumer>` is refused when the secret's
+    non-empty `consumers[]` does not admit the consumer; an empty list admits
+    everyone.
+  - The broker-user refusal prints the user's whole command behind `sudo -u
+    aoide-secrets`, for every admin command and `enroll`.
+  - `secrets exec` refusals go through the envelope and honour `--json`;
+    "secret not found" names the secret with a did-you-mean among the
+    registered ones; the not-in-group refusal names `aoide.secrets.members`,
+    a rebuild and a fresh login.
+  - Argument rules are declared on the registry (`approve --totp` and `exec
+    --as/--secret` required, `on|off` and `on|off|grant|revoke` values,
+    `<consumer>` after `grant|revoke`, `enroll` and `watch` conflicts); the
+    hand-written checks and `usage:` lines are gone, and `secrets` is off the
+    `no_hand_enforcement` allow-list (client.rs 2 -> 0, commands.rs 2 -> 0).
+    Raw I/O errors in the crate's client, backend and enroll paths go through
+    `io_cause`.
+  - Still open: the rest of the audit's slices (S2 onward) and lyra's secrets
+    dialog, which keeps its own checks.
 
 ## 35. Corrections of record (S11 docs lane, 2026-09-27)
 
