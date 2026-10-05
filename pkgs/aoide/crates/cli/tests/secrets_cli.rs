@@ -170,10 +170,14 @@ fn the_broker_user_refusal_prints_the_whole_command_to_paste() {
     use std::os::unix::fs::MetadataExt;
     let rig = Rig::new("broker-user");
     let mine = std::fs::metadata(&rig.root).unwrap().uid();
-    let foreign = std::path::Path::new("/usr");
-    if std::fs::metadata(foreign).unwrap().uid() == mine {
+    // The nix build sandbox has no /usr, and inside it everything may be ours.
+    let Some(foreign) = ["/usr", "/etc", "/"]
+        .into_iter()
+        .map(std::path::Path::new)
+        .find(|p| std::fs::metadata(p).is_ok_and(|m| m.uid() != mine))
+    else {
         return;
-    }
+    };
     let nowhere = rig.root.join("no-broker").join("s.sock");
     let out = rig.aoide_in(foreign, &nowhere, &["secrets", "automate", "sudo-pass", "grant", "orchestrator"], None);
     assert_eq!(out.code, 1, "{}", out.stderr);
