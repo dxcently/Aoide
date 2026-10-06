@@ -250,6 +250,12 @@ impl Command {
         s
     }
 
+    /// Is `name` given with something in it? A flag typed with an empty or
+    /// whitespace-only value is as absent as one never typed.
+    fn given(inv: &Invocation, name: &str) -> bool {
+        inv.flags.get(name).is_some_and(|v| !v.trim().is_empty())
+    }
+
     /// The runnable shape of this command for a fix: what was already given
     /// stays, what is missing shows as its placeholder.
     fn fix_line(&self, bin: &str, inv: &Invocation) -> String {
@@ -257,19 +263,19 @@ impl Command {
         let mut given = inv.args.iter();
         for a in self.args {
             match given.next() {
-                Some(v) => s.push_str(&format!(" {v}")),
-                None if a.required => s.push_str(&format!(" <{}>", a.name)),
-                None => {}
+                Some(v) if !v.trim().is_empty() => s.push_str(&format!(" {v}")),
+                Some(_) | None if a.required => s.push_str(&format!(" <{}>", a.name)),
+                Some(_) | None => {}
             }
         }
         for f in self.flags.iter().filter(|f| f.required && f.default.is_empty()) {
-            if !inv.flags.contains_key(f.name) {
+            if !Self::given(inv, f.name) {
                 s.push(' ');
                 s.push_str(&self.flag_form(f.name));
             }
         }
         for group in self.one_of {
-            if !group.iter().any(|n| inv.flags.contains_key(*n)) {
+            if !group.iter().any(|n| Self::given(inv, n)) {
                 s.push(' ');
                 s.push_str(&self.flag_form(group[0]));
             }
@@ -293,7 +299,8 @@ impl Command {
         let usage = |what: String, why: String, fix: String| Refusal::new(Kind::Usage, what, why, Fix::Run(fix));
         let me = format!("{bin} {}", self.path.join(" "));
 
-        let missing = self.args.iter().filter(|a| a.required).nth(inv.args.len());
+        let blank = |i: usize| inv.args.get(i).is_none_or(|v| v.trim().is_empty());
+        let missing = self.args.iter().enumerate().filter(|(_, a)| a.required).find(|(i, _)| blank(*i)).map(|(_, a)| a);
         if let Some(a) = missing {
             return Err(usage(
                 format!("`{me}` needs <{}>", a.name),
@@ -326,7 +333,7 @@ impl Command {
                 ));
             }
         }
-        if let Some(f) = self.flags.iter().find(|f| f.required && !inv.flags.contains_key(f.name)) {
+        if let Some(f) = self.flags.iter().find(|f| f.required && !Self::given(inv, f.name)) {
             return Err(usage(
                 format!("`{me}` needs {}", self.flag_form(f.name)),
                 lead(f.description),
@@ -334,7 +341,7 @@ impl Command {
             ));
         }
         for group in self.one_of {
-            if !group.iter().any(|n| inv.flags.contains_key(*n)) {
+            if !group.iter().any(|n| Self::given(inv, n)) {
                 let names: Vec<String> = group.iter().map(|n| format!("--{n}")).collect();
                 let parts: Vec<String> = group
                     .iter()
@@ -352,10 +359,13 @@ impl Command {
         }
         for f in self.flags.iter().filter(|f| inv.flags.contains_key(f.name)) {
             if let Some(other) = f.conflicts.iter().find(|c| inv.flags.contains_key(**c)) {
+                let bools: Vec<&str> = self.flags.iter().filter(|x| !x.takes_value()).map(|x| x.name).collect();
+                let mut kept = inv.clone();
+                kept.flags.remove(*other);
                 return Err(usage(
                     format!("`{me}` takes --{} or --{other}, not both", f.name),
-                    "they are alternatives for the same thing".to_string(),
-                    format!("{me} …  (drop --{} or --{other})", f.name),
+                    format!("they are alternatives for the same thing; the line without --{other} keeps --{}", f.name),
+                    kept.command_line(bin, &bools, false),
                 ));
             }
         }
@@ -731,6 +741,64 @@ mod tests {
         let text = o.render(false).0;
         let mut lines = text.lines();
         (lines.next().unwrap().to_string(), lines.next().unwrap_or_default().to_string(), lines.next().unwrap_or_default().to_string())
+    }
+
+    #[test]
+    fn a_blank_value_is_as_missing_as_an_absent_one() {
+        let c = cmd!(
+            path: ["box", "go"],
+            summary: "Go.",
+            args: [arg!("name", "string", true, "The name.")],
+            flags: [
+                flag!("to", "string", "Where.", value: "to", required: true),
+                flag!("id", "string", "By id."),
+                flag!("who", "string", "By who.")
+            ],
+            gated: false,
+            implemented: true,
+            handler: noop,
+            one_of: &[&["id", "who"]]
+        );
+        let inv = |args: &[&str], flags: &[(&str, &str)]| Invocation {
+            path: vec!["box".into(), "go".into()],
+            args: args.iter().map(|s| s.to_string()).collect(),
+            flags: flags.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            door: crate::audit::Door::Cli,
+        };
+        assert!(c.check("aoide", &mut inv(&["n"], &[("to", "x"), ("id", "1")])).is_ok());
+        for bad in [
+            inv(&[" "], &[("to", "x"), ("id", "1")]),
+            inv(&["n"], &[("to", ""), ("id", "1")]),
+            inv(&["n"], &[("to", "x"), ("id", "  ")]),
+        ] {
+            let r = c.check("aoide", &mut bad.clone()).expect_err("blank is missing");
+            assert_eq!(r.kind, Kind::Usage);
+        }
+        let r = c.check("aoide", &mut inv(&["n"], &[("to", " "), ("id", "1")])).unwrap_err();
+        assert!(r.what.contains("--to"), "{r:?}");
+    }
+
+    #[test]
+    fn a_conflict_fix_is_one_whole_valid_line() {
+        let c = cmd!(
+            path: ["box", "read"],
+            summary: "Read.",
+            args: [],
+            flags: [flag!("for", "string", "One.", conflicts: &["all"]), flag!("all", "bool", "All.", conflicts: &["for"])],
+            gated: false,
+            implemented: true,
+            handler: noop
+        );
+        let mut i = Invocation {
+            path: vec!["box".into(), "read".into()],
+            args: vec![],
+            flags: [("for", "a"), ("all", "true")].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            door: crate::audit::Door::Cli,
+        };
+        let r = c.check("aoide", &mut i).unwrap_err();
+        let fix = match r.fix { Fix::Run(s) => s, _ => String::new() };
+        assert!(!fix.contains('…') && !fix.contains("..."), "{fix}");
+        assert!(fix == "aoide box read --all" || fix == "aoide box read --for a", "{fix}");
     }
 
     #[test]
