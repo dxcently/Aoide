@@ -15,11 +15,8 @@ const SPELLINGS: [&str; 3] = ["missing --", "requires --", "usage: aoide"];
 
 /// (path under `crates/`, number of hand-enforcement lines it may hold).
 const ALLOWED: &[(&str, usize)] = &[
-    ("client/src/charter.rs", 5),
-    ("client/src/commands.rs", 21),
     ("client/src/context.rs", 1),
     ("client/src/mcp_client.rs", 1),
-    ("client/src/mesh.rs", 1),
     ("conduct/src/commands/hooks.rs", 1),
     ("conduct/src/graph/common.rs", 2),
     ("conduct/src/graph/conduct.rs", 1),

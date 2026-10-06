@@ -101,7 +101,8 @@
 //! saying the flag was seen and not acted on — a note, never a row, never a
 //! status, never a refusal.
 
-use aoide_protocol::output::Outcome;
+use crate::teach;
+use aoide_protocol::output::{Fix, Kind, Outcome};
 use aoide_protocol::registry::{arg, cmd, flag, Registry};
 use aoide_protocol::Invocation;
 use aoide_storage::config::Mesh;
@@ -840,6 +841,19 @@ fn render_undeclared(names: &[String]) -> String {
     format!("undeclared (paired, named in no mesh — reported, not accused): {}", names.join(", "))
 }
 
+/// `config.toml` failed to load (exit 1): the error is the loader's own words
+/// and the fix opens the file it names.
+fn config_unreadable(cmd: &str, e: &aoide_storage::config::LoadError) -> Outcome {
+    Outcome::refuse(
+        cmd,
+        Kind::Failed,
+        "config.toml could not be loaded",
+        e.to_string(),
+        Fix::Run(format!("$EDITOR {}", e.path().to_string_lossy())),
+    )
+    .with_fields(json!({ "reason": "config-unreadable", "path": e.path().to_string_lossy() }))
+}
+
 /// `aoide mesh [--json]` — `Outcome::ok` whenever the config loads;
 /// `Outcome::error` (never a panic, never a swallowed failure) when it does
 /// not. See the module doc.
@@ -847,10 +861,7 @@ fn handle_mesh(_inv: &Invocation) -> Outcome {
     let cmd = "mesh";
     let loaded = match aoide_storage::config::load() {
         Ok(l) => l,
-        Err(e) => {
-            return Outcome::error(cmd, e.to_string())
-                .with_data(json!({ "reason": "config-unreadable", "path": e.path().to_string_lossy() }));
-        }
+        Err(e) => return config_unreadable(cmd, &e),
     };
     let nodes = aoide_storage::node_store::load_nodes();
     // As a NODE, not as a host: every mesh key and every node record's `name`
@@ -1046,30 +1057,39 @@ pub fn classify(out: &Outcome, parked_id: Option<String>) -> ConvergeOutcome {
 /// Which declared mesh a converge runs over. A bare `mesh pair` with
 /// exactly one declared mesh is unambiguous and takes it; anything else
 /// names what it found rather than guessing.
-fn resolve_section<'a>(cmd: &str, report: &'a MeshReport, arg: Option<&str>) -> Result<&'a MeshSection, Outcome> {
-    let declared: Vec<&str> = report.sections.iter().map(|s| s.name.as_str()).collect();
+fn resolve_section<'a>(cmd: &str, inv: &Invocation, report: &'a MeshReport, arg: Option<&str>) -> Result<&'a MeshSection, Outcome> {
+    let declared: Vec<String> = report.sections.iter().map(|s| s.name.clone()).collect();
     match arg {
         Some(name) => report.sections.iter().find(|s| s.name == name).ok_or_else(|| {
-            Outcome::usage(
+            teach::unknown_name(
+                inv,
                 cmd,
-                format!(
-                    "no `[mesh.{name}]` in config.toml — declared: {}",
-                    if declared.is_empty() { "(none)".to_string() } else { declared.join(", ") }
-                ),
+                "mesh",
+                teach::Slot::Arg(0),
+                name,
+                &declared,
+                "declared meshes",
+                "aoide mesh",
+                Fix::Set("a `[mesh.<name>]` section in config.toml, then run `aoide mesh` to see the drift".to_string()),
             )
-            .with_data(json!({ "reason": "unknown-mesh", "mesh": name, "declared": declared }))
         }),
-        None if declared.is_empty() => Err(Outcome::error(
+        None if declared.is_empty() => Err(Outcome::refuse(
             cmd,
-            "no mesh declared — add a `[mesh.<name>]` section to config.toml, then `aoide mesh` to see the drift this would converge",
+            Kind::Refused,
+            "no mesh is declared",
+            "there is nothing to converge until config.toml declares a `[mesh.<name>]` section",
+            Fix::Set("a `[mesh.<name>]` section in config.toml, then run `aoide mesh` to see the drift this would converge".to_string()),
         )
-        .with_data(json!({ "reason": "no-mesh-declared" }))),
+        .with_fields(json!({ "reason": "no-mesh-declared" }))),
         None if declared.len() == 1 => Ok(&report.sections[0]),
-        None => Err(Outcome::usage(
+        None => Err(Outcome::refuse(
             cmd,
-            format!("more than one mesh is declared — name the one to converge: {}", declared.join(", ")),
+            Kind::Refused,
+            "more than one mesh is declared",
+            format!("a converge runs over one mesh and guessing would pair the wrong nodes; the declared meshes are {}", declared.join(", ")),
+            Fix::Run(teach::line_with_new_arg(inv, &declared[0])),
         )
-        .with_data(json!({ "reason": "ambiguous-mesh", "declared": declared }))),
+        .with_fields(json!({ "reason": "ambiguous-mesh", "declared": declared }))),
     }
 }
 
@@ -1083,7 +1103,7 @@ fn resolve_section<'a>(cmd: &str, report: &'a MeshReport, arg: Option<&str>) -> 
 /// defaultGrant`. Never `Some(vec![])` for an absent declaration — the
 /// empty list is the distinct, real "grant nothing" intent and must stay
 /// distinguishable from "declared no override".
-fn converge_finish(inv: &Invocation, mesh: &Mesh) -> Result<crate::commands::PairFinish, String> {
+fn converge_finish(inv: &Invocation, mesh: &Mesh) -> Result<crate::commands::PairFinish, crate::commands::BadFlag> {
     let mut finish = crate::commands::pair_finish_from(inv)?;
     finish.grant = mesh.grant.clone();
     // `--yes` here buys the ONE pre-flight confirm below, never a code gate.
@@ -1153,18 +1173,23 @@ fn confirm_preflight(
     }
     let listing = render_preflight(mesh_name, mesh, plan, wait_secs);
     if !aoide_protocol::pick::interactive(inv.door) {
-        return Err(Outcome::error(
+        return Err(Outcome::refuse(
             cmd,
-            format!("{listing}\n— no terminal to confirm this on; re-run with --yes to proceed"),
+            Kind::Refused,
+            format!("converging mesh.{mesh_name} needs a yes, and there is no terminal to ask on"),
+            format!("it would pair {to_pair} node(s):\n{listing}"),
+            Fix::Run(teach::edited(inv, |i| {
+                i.flags.insert("yes".to_string(), "true".to_string());
+            })),
         )
-        .with_data(json!({ "reason": "no-preflight-confirm", "mesh": mesh_name, "toPair": to_pair })));
+        .with_fields(json!({ "reason": "no-preflight-confirm", "mesh": mesh_name, "toPair": to_pair })));
     }
     eprintln!("{listing}");
     match aoide_protocol::pick::confirm(&format!("proceed — pair {to_pair} node(s) in mesh.{mesh_name}?")) {
         Ok(true) => Ok(()),
         Ok(false) => Err(Outcome::ok(cmd, "not confirmed — nothing sent")
             .with_data(json!({ "confirmed": false, "mesh": mesh_name }))),
-        Err(e) => Err(Outcome::error(cmd, e)),
+        Err(e) => Err(teach::prompt_failed(inv, cmd, &e)),
     }
 }
 
@@ -1267,16 +1292,12 @@ fn render_converge_outcome(outcome: &ConvergeOutcome) -> String {
 /// mesh true, one ordinary pairwise ceremony at a time. See the module doc.
 fn handle_mesh_pair(inv: &Invocation) -> Outcome {
     let cmd = "mesh.pair";
-    const USAGE: &str = "usage: aoide mesh pair [<mesh>] [--wait SECS] [--yes] [--json] — pairs every declared node this box has no verified record of; the mesh may be omitted when exactly one is declared";
-    if inv.args.len() > 1 {
-        return Outcome::usage(cmd, USAGE);
+    if let Some(out) = teach::extra_args(inv, cmd, 1) {
+        return out;
     }
     let loaded = match aoide_storage::config::load() {
         Ok(l) => l,
-        Err(e) => {
-            return Outcome::error(cmd, e.to_string())
-                .with_data(json!({ "reason": "config-unreadable", "path": e.path().to_string_lossy() }));
-        }
+        Err(e) => return config_unreadable(cmd, &e),
     };
     let nodes = aoide_storage::node_store::load_nodes();
     // As a NODE (folded), for the same reason `handle_mesh`'s own call site is:
@@ -1286,20 +1307,26 @@ fn handle_mesh_pair(inv: &Invocation) -> Outcome {
     let report = drift(&loaded.config.mesh, &nodes, &local_name);
 
     let arg = inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty());
-    let section = match resolve_section(cmd, &report, arg) {
+    let section = match resolve_section(cmd, inv, &report, arg) {
         Ok(s) => s,
         Err(out) => return out,
     };
     let Some(mesh) = loaded.config.mesh.get(&section.name) else {
         // `drift` builds a section per declared mesh, keyed by that same
         // map — the total-match arm, not a guard.
-        return Outcome::error(cmd, format!("mesh.{} vanished between the read and the converge", section.name));
+        return Outcome::refuse(
+            cmd,
+            Kind::Failed,
+            format!("mesh.{} vanished between the read and the converge", section.name),
+            "config.toml changed while this ran",
+            Fix::Run(teach::line(inv)),
+        );
     };
 
     let plan = plan(section, mesh);
     let finish = match converge_finish(inv, mesh) {
         Ok(f) => f,
-        Err(e) => return Outcome::usage(cmd, format!("{USAGE} — {e}")),
+        Err(e) => return e.refusal(inv, cmd),
     };
     // The same refusal `pair --allow --wait 0` already gives, by the SAME
     // rule — `commands::refuse_detached_grant` is asked, so if `pair` ever
@@ -1313,17 +1340,17 @@ fn handle_mesh_pair(inv: &Invocation) -> Outcome {
     // grant to detach and nothing to refuse — an all-`skipped` run stays Ok
     // whatever flags it carries, which is what makes the second run over a
     // converged mesh a usable scripted check.
-    if pairs_planned(&plan) > 0 && crate::commands::refuse_detached_grant(cmd, &finish).is_some() {
-        return Outcome::usage(
+    if pairs_planned(&plan) > 0 && crate::commands::refuse_detached_grant(cmd, inv, &finish).is_some() {
+        return Outcome::refuse(
             cmd,
-            format!(
-                "mesh.{} declares a grant, and `--wait 0` parks every request before anything commits — \
-                 a grant is never persisted on a parked entry, so this one would be silently dropped. \
-                 Drop `--wait 0` so each pair finishes while its grant is still in hand.",
-                section.name
-            ),
+            Kind::Refused,
+            format!("mesh.{} declares a grant, and `--wait 0` parks every request before it can land", section.name),
+            "a grant is never persisted on a parked entry, so the declared one would be silently dropped; each pair has to finish while its grant is still in hand",
+            Fix::Run(teach::edited(inv, |i| {
+                i.flags.remove("wait");
+            })),
         )
-        .with_data(json!({ "reason": "detached-grant", "mesh": section.name }));
+        .with_fields(json!({ "reason": "detached-grant", "mesh": section.name }));
     }
     if let Err(out) = confirm_preflight(cmd, inv, &section.name, mesh, &plan, finish.wait_secs) {
         return out;
@@ -1374,19 +1401,21 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_mesh,
         examples: ["mesh", "mesh --json"],
+        brief: "Show where declared meshes and the node registry disagree.",
     ));
     r.insert(cmd!(
         path: ["mesh", "pair"],
         summary: "Converge a declared [mesh.<name>]: run the ordinary pairing ceremony against every declared node this box has no verified record of (missing or unverified), in declared-name order, through each one's declared ssh hop, stamping the mesh's own grant. A verified node is NEVER modified — a via-mismatch is reported as skipped and fixed by a human re-pair — so a second run is all-skipped. One pre-flight confirm for the whole converge (--yes skips it); every far operator still types a pairing code and reads a reply code back.",
         args: [arg!("mesh", "string", false, "Which declared mesh to converge. Omitted: the one declared mesh, when exactly one is declared.")],
         flags: [
-            flag!("wait", "int", "Seconds to block per node for the far operator (default 600). --wait 0 parks every request and returns immediately, to be finished later with `aoide pair <id>` or `aoide pair watch`. Refused when the mesh declares a grant and there is anything to pair: a parked entry carries no grant, so the declared one would be silently dropped."),
+            flag!("wait", "int", "Seconds to block per node for the far operator (default 600). --wait 0 parks every request and returns immediately, to be finished later with `aoide pair <id>` or `aoide pair watch`. Refused when the mesh declares a grant and there is anything to pair: a parked entry carries no grant, so the declared one would be silently dropped.", value: "secs"),
             flag!("yes", "bool", "Skip the pre-flight confirm. Never a bypass of the pairing codes: each node's commit still needs a typed code on both sides."),
         ],
         gated: false,
         implemented: true,
         handler: handle_mesh_pair,
         examples: ["mesh pair", "mesh pair home", "mesh pair home --wait 0", "mesh pair home --yes --json"],
+        brief: "Pair every declared node this box has no verified record of.",
     ));
 }
 
@@ -2174,28 +2203,40 @@ mod tests {
     #[test]
     fn a_bare_converge_takes_the_one_declared_mesh_and_names_them_when_there_are_several() {
         let one = drift(&BTreeMap::from([("home".to_string(), mesh(&[]))]), &[], "this-box");
-        assert_eq!(resolve_section("mesh.pair", &one, None).unwrap().name, "home");
+        let any = cli_inv(&["mesh", "pair"]);
+        assert_eq!(resolve_section("mesh.pair", &any, &one, None).unwrap().name, "home");
 
         let two = drift(
             &BTreeMap::from([("home".to_string(), mesh(&[])), ("lab".to_string(), mesh(&[]))]),
             &[],
             "this-box",
         );
-        let err = resolve_section("mesh.pair", &two, None).unwrap_err();
-        assert_eq!(err.status, aoide_protocol::output::Status::Usage, "{err:?}");
-        assert!(err.message.contains("home, lab"), "{}", err.message);
+        let err = resolve_section("mesh.pair", &any, &two, None).unwrap_err();
+        assert_eq!(err.status, aoide_protocol::output::Status::Error, "a world state, not a usage mistake: {err:?}");
+        assert!(err.message.contains("more than one mesh"), "{}", err.message);
+        assert!(err.data.as_ref().unwrap()["refusal"]["why"].as_str().unwrap().contains("home, lab"), "{err:?}");
+        assert_eq!(err.data.as_ref().unwrap()["refusal"]["fix"]["run"], "aoide mesh pair home");
 
         let none = drift(&BTreeMap::new(), &[], "this-box");
-        let err = resolve_section("mesh.pair", &none, None).unwrap_err();
+        let err = resolve_section("mesh.pair", &any, &none, None).unwrap_err();
         assert_eq!(err.data.unwrap().get("reason").and_then(|v| v.as_str()), Some("no-mesh-declared"));
     }
 
     #[test]
     fn naming_a_mesh_that_is_not_declared_lists_the_ones_that_are() {
         let one = drift(&BTreeMap::from([("home".to_string(), mesh(&[]))]), &[], "this-box");
-        let err = resolve_section("mesh.pair", &one, Some("lab")).unwrap_err();
-        assert!(err.message.contains("no `[mesh.lab]`"), "{}", err.message);
-        assert!(err.message.contains("declared: home"), "{}", err.message);
+        let mut typed = cli_inv(&["mesh", "pair"]);
+        typed.args = vec!["lab".to_string()];
+        let err = resolve_section("mesh.pair", &typed, &one, Some("lab")).unwrap_err();
+        assert!(err.message.contains("no mesh named `lab`"), "{}", err.message);
+        let why = err.data.as_ref().unwrap()["refusal"]["why"].as_str().unwrap().to_string();
+        assert!(why.contains("declared meshes are home"), "{why}");
+
+        let mut near = cli_inv(&["mesh", "pair"]);
+        near.args = vec!["hom".to_string()];
+        let err = resolve_section("mesh.pair", &near, &one, Some("hom")).unwrap_err();
+        assert!(err.data.as_ref().unwrap()["refusal"]["why"].as_str().unwrap().contains("did you mean `home`"), "{err:?}");
+        assert_eq!(err.data.as_ref().unwrap()["refusal"]["fix"]["run"], "aoide mesh pair home");
     }
 
     #[test]
@@ -2223,7 +2264,7 @@ mod tests {
         let mut inv = cli_inv(&["mesh", "pair"]);
         inv.door = Door::A2a; // never interactive
         let err = confirm_preflight("mesh.pair", &inv, "home", m, &plan, 600).unwrap_err();
-        assert!(err.message.contains("re-run with --yes"), "{}", err.message);
+        assert!(err.render(false).0.contains("--yes"), "{}", err.render(false).0);
         assert_eq!(err.data.unwrap().get("reason").and_then(|v| v.as_str()), Some("no-preflight-confirm"));
 
         inv.flags.insert("yes".to_string(), "true".to_string());
@@ -2307,10 +2348,12 @@ mod tests {
             inv.flags.insert("yes".to_string(), "true".to_string());
             handle_mesh_pair(&inv)
         });
-        assert_eq!(out.status, aoide_protocol::output::Status::Usage, "{out:?}");
-        assert!(out.message.contains("mesh.home declares a grant"), "{}", out.message);
-        assert!(out.message.contains("never persisted on a parked entry"), "{}", out.message);
-        assert!(!out.message.contains("retype --allow"), "no flag was typed here: {}", out.message);
+        assert_eq!(out.status, aoide_protocol::output::Status::Error, "the declaration is the world's: {out:?}");
+        let said = out.render(false).0;
+        assert!(said.contains("mesh.home declares a grant"), "{said}");
+        assert!(said.contains("never persisted on a parked entry"), "{said}");
+        assert!(!said.contains("retype --allow"), "no flag was typed here: {said}");
+        assert_eq!(out.data.as_ref().unwrap()["refusal"]["fix"]["run"], "aoide mesh pair --yes");
         let data = out.data.as_ref().expect("usage envelope carries data");
         assert_eq!(data.get("reason").and_then(|v| v.as_str()), Some("detached-grant"), "{data:?}");
     }

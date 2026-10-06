@@ -811,17 +811,11 @@ fn commit_approval(p: &Pending, code: &str, now_epoch: i64) -> aoide_protocol::o
     match p.direction.as_str() {
         "inbound" => match aoide_storage::pairing::list_inbound(now_epoch).into_iter().find(|e| e.id == p.id) {
             Some(entry) => crate::commands::approve_inbound(crate::commands::CodeGate::Code(code.to_string()), "pair", &p.id, entry, &now, now_epoch, None),
-            None => aoide_protocol::output::Outcome::error(
-                "pair",
-                format!("pairing request `{}` is no longer pending — nothing to confirm", p.id),
-            ),
+            None => crate::commands::unknown_request("pair", &p.id),
         },
         _ => match aoide_storage::pairing::list_outbound(now_epoch).into_iter().find(|e| e.id == p.id) {
             Some(entry) => crate::commands::approve_outbound(crate::commands::CodeGate::Code(code.to_string()), "pair", &p.id, entry, &now, now_epoch, None),
-            None => aoide_protocol::output::Outcome::error(
-                "pair",
-                format!("pairing request `{}` is no longer pending — nothing to confirm", p.id),
-            ),
+            None => crate::commands::unknown_request("pair", &p.id),
         },
     }
 }

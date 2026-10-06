@@ -686,7 +686,7 @@ aoide node discover [--secs N] [--json]
 ```
 
 - **Reads:** one bounded on-demand sweep of the LAN advertisement wire —
-  binds UDP 8711 and listens `N` seconds (default ~4). Every line heard
+  binds UDP 8711 and listens `N` seconds (default 35 — past one advertiser cadence, ~30s plus up to 10s of jitter, so a shorter window can hear nothing while peers are advertising; broadcast stays on one subnet). Every line heard
   is validated before display (size cap on the raw bytes, JSON parse,
   `v == 2`, name/host/user shape checks); a line failing any check is
   dropped and counted, never partially rendered. Survivors dedupe by

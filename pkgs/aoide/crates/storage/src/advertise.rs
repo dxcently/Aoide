@@ -64,6 +64,15 @@ pub const BROADCAST_ADDR: &str = "255.255.255.255";
 /// mnemonic pairing, not because `8710` itself was unavailable.
 pub const PORT: u16 = 8711;
 
+/// Seconds between one advertisement and the next (PAIRING.md: "~30s"), plus a
+/// random span of up to [`JITTER_SECS`] added each tick. The advertiser sleeps
+/// by these and the listener's default window is built from them, so a listener
+/// can never default to a window shorter than a cadence.
+pub const INTERVAL_SECS: u64 = 30;
+
+/// The jitter span added on top of [`INTERVAL_SECS`] each tick.
+pub const JITTER_SECS: u64 = 10;
+
 /// Hard cap on one advertisement LINE (raw bytes), checked BEFORE any JSON
 /// parse is attempted, on BOTH ends: a sender that would exceed this
 /// refuses to emit rather than truncate ([`encode`]); a listener drops and
@@ -214,7 +223,7 @@ struct SwitchFile {
     enabled: bool,
 }
 
-fn switch_path() -> std::path::PathBuf {
+pub fn switch_path() -> std::path::PathBuf {
     crate::fs::state_dir().join("advertise.json")
 }
 

@@ -1,6 +1,7 @@
 //! Structured content fanout; transport and filing remain the scalar handler's job.
+use crate::teach;
 use aoide_protocol::{
-    output::{Outcome, Status},
+    output::{Fix, Kind, Outcome, Status},
     Invocation,
 };
 use aoide_storage::{
@@ -18,11 +19,11 @@ fn addresses(raw: &str, local: &str) -> Result<Vec<Address>, String> {
             let (node, name) = part
                 .trim()
                 .split_once('/')
-                .ok_or("Recipients must be node/mailbox, separated by commas")?;
+                .ok_or("recipients are `<node>/<mailbox>`, separated by commas")?;
             if !aoide_storage::node_store::valid_node_name(node)
                 || !aoide_storage::node_store::valid_node_name(name)
             {
-                return Err("Recipient node and mailbox must match ^[a-z0-9][a-z0-9-]*$".into());
+                return Err("a recipient's node and mailbox are lowercase letters, digits and hyphens (`^[a-z0-9][a-z0-9-]*$`)".into());
             }
             Ok(Address {
                 node: if node == "self" {
@@ -44,15 +45,18 @@ pub(crate) fn send(inv: &Invocation, mut scalar: impl FnMut(&Invocation) -> Outc
     // name is not an address on every host. `self/x` is what a caller writes;
     // this is what the node it resolves to is called.
     let local = aoide_storage::display::local_node_name();
-    let prepare = || -> Result<LetterContent, String> {
-        let to = addresses(
-            inv.flags.get("to").map(String::as_str).unwrap_or(""),
-            &local,
-        )?;
-        let cc = addresses(
-            inv.flags.get("cc").map(String::as_str).unwrap_or(""),
-            &local,
-        )?;
+    let usage = |what: &str, why: String, fix: String| {
+        Outcome::refuse("mail.send", Kind::Usage, what.to_string(), why, Fix::Run(fix))
+    };
+    let prepare = || -> Result<LetterContent, Outcome> {
+        let to = addresses(inv.flags.get("to").map(String::as_str).unwrap_or(""), &local).map_err(|why| {
+            usage("`--to` holds an address that is not valid", why, teach::line_with(inv, teach::Slot::Flag("to"), "self/conductor"))
+        })?;
+        let cc = addresses(inv.flags.get("cc").map(String::as_str).unwrap_or(""), &local).map_err(|why| {
+            usage("`--cc` holds an address that is not valid", why, teach::edited(inv, |i| {
+                i.flags.remove("cc");
+            }))
+        })?;
         let (to, cc) = deduplicate_recipients(&to, &cc);
         let content = LetterContent {
             subject: inv.flags.get("subject").cloned().unwrap_or_default(),
@@ -62,32 +66,52 @@ pub(crate) fn send(inv: &Invocation, mut scalar: impl FnMut(&Invocation) -> Outc
             thread_id: inv.flags.get("thread").cloned(),
             reply_to: inv.flags.get("reply-to").cloned(),
         };
-        content.validate()?;
-        if inv.args.is_empty() {
-            return Err("A letter needs message text".into());
-        }
+        content.validate().map_err(|why| {
+            usage("the letter's thread or reply is not valid", why, teach::edited(inv, |i| {
+                i.flags.remove("reply-to");
+            }))
+        })?;
         let nodes = aoide_storage::node_store::load_nodes();
         for address in content.to.iter().chain(&content.cc) {
-            if address.node != local && !nodes.iter().any(|n| n.name == address.node && n.verified)
-            {
-                return Err(format!(
-                    "Recipient {}/{} requires a registered, paired node",
-                    address.node, address.name
-                ));
+            if address.node == local {
+                continue;
+            }
+            match nodes.iter().find(|n| n.name == address.node) {
+                Some(n) if n.verified => {}
+                Some(n) => return Err(teach::not_paired("mail.send", &n.name, &n.url)),
+                None => {
+                    let mut only = inv.clone();
+                    only.flags.insert("to".into(), format!("{}/{}", address.node, address.name));
+                    only.flags.remove("cc");
+                    let valid: Vec<String> = nodes.iter().map(|n| n.name.clone()).collect();
+                    return Err(teach::unknown_name(
+                        &only,
+                        "mail.send",
+                        "node",
+                        teach::Slot::ToNode,
+                        &address.node,
+                        &valid,
+                        "registered nodes",
+                        "aoide node status",
+                        Fix::Run("aoide pair".to_string()),
+                    ));
+                }
             }
         }
         Ok(content)
     };
     let mut content = match prepare() {
         Ok(v) => v,
-        Err(e) => return Outcome::usage("mail.send", e),
+        Err(out) => return out,
     };
     if content.thread_id.is_none() {
         content.thread_id = Some(aoide_storage::pairing::random_hex(32));
     }
     let encoded = match content.encode() {
         Ok(v) => v,
-        Err(e) => return Outcome::usage("mail.send", e),
+        Err(why) => return usage("the letter cannot be encoded", why, teach::edited(inv, |i| {
+            i.flags.remove("subject");
+        })),
     };
     let mut results = Vec::new();
     let mut changes = Vec::new();
@@ -139,9 +163,20 @@ pub(crate) fn send(inv: &Invocation, mut scalar: impl FnMut(&Invocation) -> Outc
     let outcome = if complete {
         Outcome::ok("mail.send", message)
     } else {
-        Outcome::error("mail.send", message)
+        let failed: Vec<String> = results
+            .iter()
+            .filter(|r| r["accepted"] == false)
+            .map(|r| format!("{}/{}: {}", r["address"]["node"].as_str().unwrap_or("?"), r["address"]["name"].as_str().unwrap_or("?"), r["error"].as_str().unwrap_or("refused")))
+            .collect();
+        Outcome::refuse(
+            "mail.send",
+            Kind::Failed,
+            format!("{accepted} of {} recipient copies were filed or spooled", results.len()),
+            format!("the others were refused: {}; a retry would duplicate the copies that went", failed.join("; ")),
+            Fix::Run("aoide mail outbox".to_string()),
+        )
     };
-    outcome.changed(changes).with_data(json!({"complete": complete, "accepted": accepted, "recipients": results, "subject": content.subject, "threadId": content.thread_id, "replyTo": content.reply_to}))
+    outcome.changed(changes).with_fields(json!({"complete": complete, "accepted": accepted, "recipients": results, "subject": content.subject, "threadId": content.thread_id, "replyTo": content.reply_to}))
 }
 
 #[cfg(test)]

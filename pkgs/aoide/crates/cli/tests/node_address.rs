@@ -82,7 +82,7 @@ fn a_scheme_outside_the_grammar_and_an_unknown_node_are_refused_and_write_nothin
     node_store::save_nodes(&[paired("sakaki", "http://192.168.1.10:8710/", None)]).unwrap();
 
     let bad = address("sakaki", "http://aoide.necoconeco.net", &log);
-    assert_eq!(bad.status, Status::Error, "{}", bad.message);
+    assert_eq!(bad.status, Status::Usage, "an address outside the grammar can never be valid: {}", bad.message);
     assert_eq!(bad.data.as_ref().unwrap()["reason"], "invalid-address");
     assert_eq!(only_node().url, "http://192.168.1.10:8710/", "a refused address leaves the record as it was");
 

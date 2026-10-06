@@ -891,6 +891,11 @@ pub struct PollOutcome {
     pub filed: usize,
     pub refused: Vec<String>,
     pub withheld: Vec<String>,
+    /// The far door ANSWERED the poll itself with a refusal (a result whose
+    /// `status` is `refused`: the caller is declared `down`, its mesh is
+    /// unreadable there). Nothing was handed over, and "0 filed" must not
+    /// read as an empty mailbox.
+    pub node_refused: Option<String>,
 }
 
 pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, String> {
@@ -942,6 +947,14 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
         SignedCall::Refused(detail) => return Err(detail),
         SignedCall::TransportFailed(reason) => return Err(reason),
     };
+    if result.get("status").and_then(Value::as_str) == Some("refused") {
+        let detail = result
+            .get("detail")
+            .or_else(|| result.get("reason"))
+            .and_then(Value::as_str)
+            .unwrap_or("the node refused the poll");
+        return Ok(PollOutcome { node_refused: Some(detail.to_string()), ..PollOutcome::default() });
+    }
     let mut filed = 0usize;
     // The acknowledgements the hub has just been told are cleared, by the list
     // that was SENT; anything filed from THIS answer is recorded below for the
@@ -1173,7 +1186,7 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
             &format!("{msgid} from `{node_name}` withheld: {reason}"),
         );
     }
-    Ok(PollOutcome { filed, refused, withheld })
+    Ok(PollOutcome { filed, refused, withheld, node_refused: None })
 }
 
 /// Publish this node's binding to `node` and store the one it answers with,

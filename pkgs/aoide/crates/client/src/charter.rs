@@ -22,7 +22,8 @@
 //! trust-per-mesh slice's.
 
 use aoide_protocol::audit::{audit, default_audit_log, Door, EventClass};
-use aoide_protocol::output::Outcome;
+use crate::teach;
+use aoide_protocol::output::{Fix, Kind, Outcome};
 use aoide_protocol::registry::{arg, cmd, flag, Registry};
 use aoide_protocol::Invocation;
 use aoide_storage::charter;
@@ -40,16 +41,18 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_charter_init,
         examples: ["mesh charter init home"],
+        brief: "Root a mesh here: mint its operator key and an empty charter.",
     ));
     r.insert(cmd!(
         path: ["mesh", "charter", "sign"],
         summary: "Validate the charter source (name grammar, capability vocabulary, addresses, relays, and every node's age binding under the key on its own line), write the next version into it IN PLACE, sign those exact bytes with the mesh's operator key, write <file>.sig beside it, apply it here, and spool the signed pair to every node on the charter. This is the last write to a charter file: any later edit invalidates the signature.",
         args: [arg!("mesh", "string", true, "The mesh whose source to sign.")],
-        flags: [flag!("file", "string", "Sign this source instead of $AOIDE_ROOT/charters/<mesh>.toml; its signature goes to <file>.sig. Use it for a source kept in a Nix repository, which holds public keys only.")],
+        flags: [flag!("file", "string", "Sign this source instead of $AOIDE_ROOT/charters/<mesh>.toml; its signature goes to <file>.sig. Use it for a source kept in a Nix repository, which holds public keys only.", value: "path")],
         gated: false,
         implemented: true,
         handler: handle_charter_sign,
         examples: ["mesh charter sign home", "mesh charter sign home --file ./home.toml"],
+        brief: "Sign the charter source, apply it here and spool it to every node.",
     ));
     r.insert(cmd!(
         path: ["mesh", "charter", "accept"],
@@ -60,6 +63,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_charter_accept,
         examples: ["mesh charter accept ./home.toml"],
+        brief: "Apply a signed charter file carried by hand.",
     ));
     r.insert(cmd!(
         path: ["mesh", "charter", "reroot"],
@@ -70,6 +74,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_charter_reroot,
         examples: ["mesh charter reroot home"],
+        brief: "Replace a lost or leaked operator key and re-sign the charter.",
     ));
     r.insert(cmd!(
         path: ["mesh", "charter", "show"],
@@ -80,6 +85,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_charter_show,
         examples: ["mesh charter show", "mesh charter show home", "mesh charter show home --json"],
+        brief: "Print the charter in force here, its operator and its status.",
     ));
     r.insert(cmd!(
         path: ["mesh", "join"],
@@ -89,7 +95,7 @@ pub fn register(r: &mut Registry) {
             arg!("host", "string", false, "The operator's machine on the local network — a bare host/IP (`sakaki`, `192.168.1.158`), or host:port; the door port defaults to AOIDE_A2A_PORT, else 8710. Omitted: --operator is required instead."),
         ],
         flags: [
-            flag!("operator", "string", "The operator line the operator's machine printed (`ed25519:<hex>`) — the non-LAN path, no dial at all. Refused when the machine already trusts a different key for this mesh, unless --replace says the change is the operator's."),
+            flag!("operator", "string", "The operator line the operator's machine printed (`ed25519:<hex>`) — the non-LAN path, no dial at all. Refused when the machine already trusts a different key for this mesh, unless --replace says the change is the operator's.", value: "ed25519-key"),
             flag!("replace", "bool", "The key this mesh's operator key is CHANGING to, deliberately: a re-root (`aoide mesh charter reroot`) on the operator's machine plus this flag on every other machine is the whole recovery from a leaked or lost operator key. It records the new key and CARRIES THE VERSION HIGH-WATER ACROSS, so the first charter the new key signs must still beat every version this mesh has applied — a replaced node cannot be walked back to an older version by a fresh key. Never a default: without it, a different key is refused, because replacing a mesh's root is the operator's decision and never a typo's. On the LAN arm a replacement ALWAYS asks for the fingerprint comparison, --yes included: that flag skips a first-time confirm, never a destructive one."),
             flag!("yes", "bool", "Skip the fingerprint confirm on the LAN arm. The fingerprint is the whole trust step there (this is a first-use ceremony), so skipping it commits to a key nobody compared — the same stance `pair --yes` takes on pairing's codes."),
         ],
@@ -97,6 +103,7 @@ pub fn register(r: &mut Registry) {
         implemented: true,
         handler: handle_charter_join,
         examples: ["mesh join home --operator ed25519:…", "mesh join home sakaki", "mesh join home 192.168.1.158 --yes --json"],
+        brief: "Trust a mesh's operator key, by key or from the operator over the LAN.",
     ));
 }
 
@@ -108,16 +115,25 @@ pub fn register(r: &mut Registry) {
 /// pairwise record").
 fn handle_charter_join(inv: &Invocation) -> Outcome {
     let cmd = "mesh.join";
-    const USAGE: &str = "usage: aoide mesh join <mesh> (--operator ed25519:<hex> | <host>[:port]) [--replace] [--yes] [--json]";
-    let Some(mesh) = inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()) else {
-        return Outcome::usage(cmd, USAGE);
-    };
+    let mesh = inv.args[0].trim();
     let host_arg = inv.args.get(1).map(|s| s.trim()).filter(|s| !s.is_empty());
     let operator_flag = inv.flags.get("operator").cloned().filter(|s| !s.is_empty());
     if host_arg.is_some() == operator_flag.is_some() {
-        return Outcome::usage(
+        let both = host_arg.is_some();
+        return Outcome::refuse(
             cmd,
-            format!("{USAGE} — name exactly one source of trust: `--operator <key>` or the operator's LAN address"),
+            Kind::Usage,
+            if both { "a join takes a LAN address or `--operator`, not both" } else { "a join needs a source of trust" },
+            "trust enters a mesh one of two ways: the operator's key typed with `--operator`, or fetched from the operator's machine on the local network",
+            Fix::Run(if both {
+                teach::edited(inv, |i| {
+                    i.args.truncate(1);
+                })
+            } else {
+                teach::edited(inv, |i| {
+                    i.flags.insert("operator".to_string(), "ed25519:<hex>".to_string());
+                })
+            }),
         );
     }
 
@@ -132,7 +148,7 @@ fn handle_charter_join(inv: &Invocation) -> Outcome {
         // write is still locked, so two joins cannot interleave).
         (Some(field), _) => match charter::trust_operator_with(mesh, field, replace) {
             Ok((key, replaced)) => (key, replaced, None, None),
-            Err(e) => return Outcome::error(cmd, e).with_data(json!({ "reason": "trust-refused", "mesh": mesh })),
+            Err(e) => return trust_refused(cmd, mesh, e),
         },
         (None, Some(host)) => {
             let (addr, port) = split_host_port(host);
@@ -141,58 +157,68 @@ fn handle_charter_join(inv: &Invocation) -> Outcome {
                 Err(_) => match resolve_host_to_ip(&addr) {
                     Some(ip) => ip.to_string(),
                     None => {
-                        return Outcome::error(
+                        return Outcome::refuse(
                             cmd,
-                            format!("`{host}` does not resolve to an address — name the operator's machine by IP, or use `--operator <key>`"),
+                            Kind::Refused,
+                            format!("`{host}` does not resolve to an address"),
+                            "the LAN join checks the address before dialling, and this name has none here",
+                            Fix::Run(teach::edited(inv, |i| {
+                                i.args.truncate(1);
+                                i.flags.insert("operator".to_string(), "ed25519:<hex>".to_string());
+                            })),
                         )
-                        .with_data(json!({ "reason": "unresolved-host", "host": host }))
+                        .with_fields(json!({ "reason": "unresolved-host", "host": host }))
                     }
                 },
             };
             if !charter::is_local_network(&resolved) {
-                return Outcome::error(
+                return Outcome::refuse(
                     cmd,
-                    format!(
-                        "`{host}` resolves to {resolved}, which is not a local-network address — a LAN join is admitted only over a private or link-local one \
-                         (never loopback: a relayed or tunneled request arrives from loopback). Take the mesh without a LAN: `aoide mesh join {mesh} --operator <key>`, \
-                         or `aoide mesh charter accept <file>` with the file the operator hands you"
-                    ),
+                    Kind::Refused,
+                    format!("`{host}` resolves to {resolved}, which is not a local-network address"),
+                    "a LAN join is admitted only over a private or link-local address, never loopback, because a relayed or tunneled request arrives from loopback; take the mesh without a LAN with `--operator`, or `aoide mesh charter accept <file>` with the file the operator hands you",
+                    Fix::Run(teach::edited(inv, |i| {
+                        i.args.truncate(1);
+                        i.flags.insert("operator".to_string(), "ed25519:<hex>".to_string());
+                    })),
                 )
-                .with_data(json!({ "reason": "not-local-network", "host": host, "address": resolved }));
+                .with_fields(json!({ "reason": "not-local-network", "host": host, "address": resolved }));
             }
             let url = format!("http://{resolved}:{port}/");
             let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "aoide/charterFetch", "params": { "mesh": mesh } });
+            teach::progress(inv, &format!("asking {url} for mesh `{mesh}` (up to 15s)…"));
+            let rerun = teach::line(inv);
             let (code, body_text) = match crate::commands::post_json_via(&url, None, "", &body.to_string(), None, &[], 15) {
                 Ok(v) => v,
-                Err(e) => {
-                    return Outcome::error(cmd, format!("asking {url} for mesh `{mesh}`: {e}"))
-                        .with_data(json!({ "reason": "unreachable", "url": url }))
-                }
+                Err(e) => return teach::far_door(cmd, &format!("asking for mesh `{mesh}`"), &url, &e, "unreachable", &rerun),
             };
             if code != 200 {
-                return Outcome::error(cmd, format!("asking {url} for mesh `{mesh}`: HTTP {code} with body {body_text}"))
-                    .with_data(json!({ "reason": "fetch-http-error", "url": url, "httpCode": code }));
+                return teach::far_door(cmd, &format!("asking for mesh `{mesh}`"), &url, &format!("HTTP {code} with body {body_text}"), "fetch-http-error", &rerun)
+                    .with_fields(json!({ "httpCode": code }));
             }
             let parsed: serde_json::Value = match serde_json::from_str(&body_text) {
                 Ok(v) => v,
-                Err(e) => {
-                    return Outcome::error(cmd, format!("asking {url} for mesh `{mesh}`: unparseable response: {e}"))
-                        .with_data(json!({ "reason": "unparseable", "url": url }))
-                }
+                Err(e) => return teach::far_door(cmd, &format!("reading the answer for mesh `{mesh}`"), &url, &e.to_string(), "unparseable", &rerun),
             };
             if let Some(err) = parsed.get("error") {
-                return Outcome::error(cmd, format!("`{}` refused the join: {err}", host))
-                    .with_data(json!({ "reason": "refused", "host": host, "error": err }));
+                return Outcome::refuse(
+                    cmd,
+                    Kind::Refused,
+                    format!("`{host}` refused the join"),
+                    err.get("message").and_then(|m| m.as_str()).map(str::to_string).unwrap_or_else(|| err.to_string()),
+                    Fix::Run(format!("aoide mesh charter show {mesh}")),
+                )
+                .with_fields(json!({ "reason": "refused", "host": host, "error": err }));
             }
             let result = &parsed["result"];
             let key = result["operator"].as_str().unwrap_or_default().to_string();
             let bytes = match base64_decode(result["charter"].as_str().unwrap_or_default()) {
                 Ok(b) => b,
-                Err(e) => return Outcome::error(cmd, format!("the charter body from `{host}` is not decodable: {e}")),
+                Err(e) => return teach::far_door(cmd, "reading the charter body", &url, &e, "undecodable", &rerun),
             };
             let sig = match base64_decode(result["sig"].as_str().unwrap_or_default()) {
                 Ok(b) => b,
-                Err(e) => return Outcome::error(cmd, format!("the charter signature from `{host}` is not decodable: {e}")),
+                Err(e) => return teach::far_door(cmd, "reading the charter signature", &url, &e, "undecodable", &rerun),
             };
             let version = result["version"].as_u64().unwrap_or(0);
             // The fingerprint is the trust step: printed for the operator to
@@ -225,31 +251,28 @@ fn handle_charter_join(inv: &Invocation) -> Outcome {
                         // non-zero, with what it means. An optional one keeps
                         // the old "nothing recorded" success.
                         if will_replace {
-                            return Outcome::error(
+                            return Outcome::refuse(
                                 cmd,
-                                format!(
-                                    "refused: joining mesh `{mesh}` with `--replace` REPLACES the operator key this machine \
-                                     already trusts, so the fingerprint comparison is required and was declined. Nothing was \
-                                     written"
-                                ),
+                                Kind::Refused,
+                                format!("joining mesh `{mesh}` with `--replace` was declined"),
+                                "it REPLACES the operator key this machine already trusts, so the fingerprint comparison is required and was declined; nothing was written",
+                                Fix::Run(teach::line(inv)),
                             )
-                            .with_data(json!({ "reason": "confirm-declined", "mesh": mesh, "willReplace": will_replace }));
+                            .with_fields(json!({ "reason": "confirm-declined", "mesh": mesh, "willReplace": will_replace }));
                         }
                         return Outcome::ok(cmd, "not confirmed — nothing recorded".to_string())
                             .with_data(json!({ "confirmed": false, "mesh": mesh }));
                     }
                     JoinConfirm::NoTty => {
                         if will_replace {
-                            return Outcome::error(
+                            return Outcome::refuse(
                                 cmd,
-                                format!(
-                                    "refused: joining mesh `{mesh}` with `--replace` needs the fingerprint compared by a person, \
-                                     and this is not an interactive terminal. Run it where you can compare {fingerprint} with the \
-                                     operator's machine — or, where the config IS hand-editable, use `aoide mesh join {mesh} \
-                                     --operator <new key> --replace`. Nothing was written"
-                                ),
+                                Kind::Refused,
+                                format!("joining mesh `{mesh}` with `--replace` needs the fingerprint compared by a person"),
+                                format!("this is not an interactive terminal; compare {fingerprint} with the operator's machine where you can, or name the new key outright; nothing was written"),
+                                Fix::Run(format!("aoide mesh join {mesh} --operator ed25519:<hex> --replace")),
                             )
-                            .with_data(json!({ "reason": "confirm-needs-tty", "mesh": mesh, "willReplace": true }));
+                            .with_fields(json!({ "reason": "confirm-needs-tty", "mesh": mesh, "willReplace": true }));
                         }
                         return Outcome::ok(cmd, "not confirmed — nothing interactive, nothing recorded".to_string())
                             .with_data(json!({ "confirmed": false, "mesh": mesh }));
@@ -258,7 +281,7 @@ fn handle_charter_join(inv: &Invocation) -> Outcome {
             }
             (key, None, Some(seen), Some((bytes, sig)))
         }
-        (None, None) => return Outcome::usage(cmd, USAGE),
+        (None, None) => unreachable!("a join names exactly one source of trust, checked above"),
     };
 
     // Record the trust FIRST and only then apply: `accept` reads the operator
@@ -272,7 +295,7 @@ fn handle_charter_join(inv: &Invocation) -> Outcome {
     let field = format!("ed25519:{operator_key}");
     let (trusted, replaced_here) = match charter::trust_operator_confirmed(mesh, &field, replace, seen.as_deref()) {
         Ok((k, replaced)) => (k, replaced),
-        Err(e) => return Outcome::error(cmd, e).with_data(json!({ "reason": "trust-refused", "mesh": mesh })),
+        Err(e) => return trust_refused(cmd, mesh, e),
     };
     let replaced = replaced.or(replaced_here);
 
@@ -334,6 +357,19 @@ fn handle_charter_join(inv: &Invocation) -> Outcome {
         "fingerprint": charter::fingerprint_of_key(&trusted),
         "charter": applied,
     }))
+}
+
+/// The trust record refused the key (exit 1): a different key is already trusted
+/// for the mesh, or the key is no key. `why` is the record's own words.
+fn trust_refused(cmd: &str, mesh: &str, why: String) -> Outcome {
+    Outcome::refuse(
+        cmd,
+        Kind::Refused,
+        format!("this machine did not take the operator key for mesh `{mesh}`"),
+        why,
+        Fix::Run(format!("aoide mesh charter show {mesh}")),
+    )
+    .with_fields(json!({ "reason": "trust-refused", "mesh": mesh }))
 }
 
 /// **Does this join need the operator's own comparison?** `--yes` skips it for
@@ -513,15 +549,11 @@ fn handle_charter_show(inv: &Invocation) -> Outcome {
                 }));
                 continue;
             }
-            return Outcome::error(
-                cmd,
-                format!(
-                    "no charter in force for mesh `{mesh}` at this node — its state is {}/charter.toml, \
-                     written by `aoide mesh charter accept <file>` or by a charter letter",
-                    charter::mesh_state_dir(mesh).display()
-                ),
-            )
-            .with_data(json!({ "reason": "no-charter", "mesh": mesh }));
+            let held = charter::meshes_with_state();
+            if !held.is_empty() && aoide_protocol::suggest::closest(mesh, held.iter().map(String::as_str), 1).first().is_some() {
+                return teach::unknown_name(inv, cmd, "mesh", teach::Slot::Arg(0), mesh, &held, "meshes with a charter here", "aoide mesh charter show", Fix::Run("aoide mesh charter show".to_string()));
+            }
+            return no_charter(cmd, mesh, Some(charter::mesh_state_dir(mesh).display().to_string()));
         };
         let trust = charter::load_trust(mesh).ok().flatten().unwrap_or_default();
         let declared = charter::config_operator(mesh).ok().flatten();
@@ -561,11 +593,7 @@ fn handle_charter_show(inv: &Invocation) -> Outcome {
         }));
     }
     if rows.is_empty() {
-        return Outcome::ok(
-            cmd,
-            "no charter in force at this node — root one with `aoide mesh charter init <mesh>`, or take one with `aoide mesh charter accept <file>`",
-        )
-        .with_data(json!({ "meshes": [] }));
+        return no_charter(cmd, &charter_mesh_hint(), None);
     }
     let mut lines = Vec::new();
     for row in &rows {
@@ -618,11 +646,32 @@ fn handle_charter_show(inv: &Invocation) -> Outcome {
     Outcome::ok(cmd, lines.join("\n")).with_data(json!({ "meshes": rows }))
 }
 
+/// No charter is in force here (exit 1): a world state, not a usage mistake.
+/// The fix takes a charter by hand; joining the mesh is the other way in.
+fn no_charter(cmd: &str, mesh: &str, state_dir: Option<String>) -> Outcome {
+    let where_ = match &state_dir {
+        Some(dir) => format!("its state would be `{dir}/charter.toml`, written by `charter accept` or by a charter letter"),
+        None => "no mesh has a charter in force at this node".to_string(),
+    };
+    Outcome::refuse(
+        cmd,
+        Kind::Refused,
+        format!("no charter in force for mesh `{mesh}` at this node"),
+        format!("{where_}; a machine takes one from the operator's signed file, or joins the mesh with `aoide mesh join {mesh} --operator ed25519:<hex>`"),
+        Fix::Run(format!("aoide mesh charter accept ./{mesh}.toml")),
+    )
+    .with_fields(json!({ "reason": "no-charter", "mesh": mesh, "meshes": [] }))
+}
+
+/// The mesh name a bare `charter show` with nothing to show names in its fix:
+/// the home mesh.
+fn charter_mesh_hint() -> String {
+    aoide_storage::config::home_mesh()
+}
+
 fn handle_charter_init(inv: &Invocation) -> Outcome {
     let cmd = "mesh.charter.init";
-    let Some(mesh) = mesh_arg(inv) else {
-        return Outcome::usage(cmd, "usage: aoide mesh charter init <mesh>");
-    };
+    let mesh = inv.args[0].trim();
     match charter::init(mesh) {
         Ok(init) => Outcome::ok(
             cmd,
@@ -647,15 +696,35 @@ fn handle_charter_init(inv: &Invocation) -> Outcome {
             "fingerprint": init.fingerprint,
             "file": init.path.to_string_lossy(),
         })),
-        Err(e) => Outcome::error(cmd, e).with_data(json!({ "reason": "init-failed" })),
+        Err(e) => Outcome::refuse(
+            cmd,
+            Kind::Refused,
+            format!("could not root mesh `{mesh}`"),
+            e,
+            Fix::Run(format!("aoide mesh charter show {mesh}")),
+        )
+        .with_fields(json!({ "reason": "init-failed" })),
     }
+}
+
+/// A mesh named for `sign`/`reroot` that this machine holds no state for, when one
+/// that does is a typo away (exit 1). A mesh with no state and no near name is
+/// left to the operation's own refusal, which says what is missing.
+fn near_mesh(inv: &Invocation, cmd: &str, typed: &str) -> Option<Outcome> {
+    let held = charter::meshes_with_state();
+    if held.iter().any(|m| m == typed) {
+        return None;
+    }
+    aoide_protocol::suggest::closest(typed, held.iter().map(String::as_str), 1).first()?;
+    Some(teach::unknown_name(inv, cmd, "mesh", teach::Slot::Arg(0), typed, &held, "meshes with state here", "aoide mesh charter show", Fix::Run("aoide mesh charter show".to_string())))
 }
 
 fn handle_charter_sign(inv: &Invocation) -> Outcome {
     let cmd = "mesh.charter.sign";
-    let Some(mesh) = mesh_arg(inv) else {
-        return Outcome::usage(cmd, "usage: aoide mesh charter sign <mesh> [--file <path>]");
-    };
+    let mesh = inv.args[0].trim();
+    if let Some(out) = near_mesh(inv, cmd, mesh) {
+        return out;
+    }
     let file = inv
         .flags
         .get("file")
@@ -694,35 +763,50 @@ fn handle_charter_sign(inv: &Invocation) -> Outcome {
                 "rekeyed": signed.rekeyed,
             }))
         }
-        Err(e) => Outcome::error(cmd, e).with_data(json!({ "reason": "sign-failed" })),
+        Err(e) => Outcome::refuse(
+            cmd,
+            Kind::Refused,
+            format!("could not sign the charter for mesh `{mesh}`"),
+            e,
+            Fix::Run(format!("aoide mesh charter show {mesh}")),
+        )
+        .with_fields(json!({ "reason": "sign-failed" })),
     }
 }
 
 fn handle_charter_accept(inv: &Invocation) -> Outcome {
     let cmd = "mesh.charter.accept";
-    let Some(file) = inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty()) else {
-        return Outcome::usage(cmd, "usage: aoide mesh charter accept <file>");
-    };
+    let file = inv.args[0].trim();
     let path = Path::new(file);
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(e) => {
-            return Outcome::error(cmd, format!("{}: {e}", path.display()))
-                .with_data(json!({ "reason": "unreadable-charter" }));
+            let c = aoide_protocol::output::io_cause("read", path, &e);
+            return Outcome::refuse(
+                cmd,
+                Kind::Refused,
+                "the charter file cannot be read",
+                c.why,
+                Fix::Set("the path of the charter file the operator handed you".to_string()),
+            )
+            .with_fields(json!({ "reason": "unreadable-charter" }))
+            .with_detail(c.detail);
         }
     };
     let sig_path = charter::sig_path_for(path);
     let sig = match std::fs::read(&sig_path) {
         Ok(sig) => sig,
         Err(e) => {
-            return Outcome::error(
+            let c = aoide_protocol::output::io_cause("read", &sig_path, &e);
+            return Outcome::refuse(
                 cmd,
-                format!(
-                    "{}: {e} — a signed charter travels as a PAIR; the detached signature must sit beside it",
-                    sig_path.display()
-                ),
+                Kind::Refused,
+                "the charter's signature cannot be read",
+                format!("{}; a signed charter travels as a pair, and the detached signature must sit beside it", c.why),
+                Fix::Set(format!("`{}` beside the charter file", sig_path.display())),
             )
-            .with_data(json!({ "reason": "unreadable-signature" }));
+            .with_fields(json!({ "reason": "unreadable-signature" }))
+            .with_detail(c.detail);
         }
     };
     match charter::accept(&bytes, &sig) {
@@ -764,18 +848,24 @@ fn handle_charter_accept(inv: &Invocation) -> Outcome {
                 "rekeyed": accepted.rekeyed,
             }))
         }
-        Err(r) => Outcome::error(cmd, format!("{}: {}", r.reason, r.detail)).with_data(json!({
-            "reason": r.reason,
-            "detail": r.detail,
-        })),
+        Err(r) => {
+            let fix = match r.reason.as_str() {
+                "stale-charter" => Fix::Wait("for the operator to sign a newer version of the charter".to_string()),
+                "charter-tampered" => Fix::Wait("for the operator to send the charter and its signature again".to_string()),
+                _ => Fix::Run("aoide mesh charter show".to_string()),
+            };
+            Outcome::refuse(cmd, Kind::Refused, format!("the charter was refused: {}", r.reason), r.detail.clone(), fix)
+                .with_fields(json!({ "reason": r.reason, "detail": r.detail }))
+        }
     }
 }
 
 fn handle_charter_reroot(inv: &Invocation) -> Outcome {
     let cmd = "mesh.charter.reroot";
-    let Some(mesh) = mesh_arg(inv) else {
-        return Outcome::usage(cmd, "usage: aoide mesh charter reroot <mesh>");
-    };
+    let mesh = inv.args[0].trim();
+    if let Some(out) = near_mesh(inv, cmd, mesh) {
+        return out;
+    }
     match charter::reroot(mesh) {
         Ok(signed) => {
             let delivery = drain_spooled(&signed.mesh, &signed.spooled);
@@ -807,13 +897,15 @@ fn handle_charter_reroot(inv: &Invocation) -> Outcome {
                 "delivery": delivery,
             }))
         }
-        Err(e) => Outcome::error(cmd, e).with_data(json!({ "reason": "reroot-failed" })),
+        Err(e) => Outcome::refuse(
+            cmd,
+            Kind::Refused,
+            format!("could not re-root mesh `{mesh}`"),
+            e,
+            Fix::Run(format!("aoide mesh charter show {mesh}")),
+        )
+        .with_fields(json!({ "reason": "reroot-failed" })),
     }
-}
-
-/// The mesh positional, or `None` for a usage answer.
-fn mesh_arg(inv: &Invocation) -> Option<&str> {
-    inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty())
 }
 
 /// Drain what `sign`/`reroot` spooled, one node at a time, best-effort, and
@@ -1023,6 +1115,36 @@ mod tests {
             let missing = handle_charter_show(&inv(&["away"]));
             assert_eq!(missing.status, aoide_protocol::output::Status::Error, "{missing:?}");
             assert_eq!(missing.data.as_ref().unwrap()["reason"], "no-charter");
+        });
+    }
+
+    /// **No charter here is the world's answer, not a usage mistake**: exit 1,
+    /// with a fix that takes one by hand, for a named mesh and for a bare `show`.
+    #[test]
+    fn show_with_no_charter_is_a_refused_world_state_with_a_fix_that_runs() {
+        with_root("show-none", |_dir| {
+            for args in [&["home"][..], &[][..]] {
+                let out = handle_charter_show(&inv(args));
+                assert_eq!(out.status, aoide_protocol::output::Status::Error, "{out:?}");
+                assert_eq!(out.render(false).1, 1);
+                let refusal = &out.data.as_ref().unwrap()["refusal"];
+                assert_eq!(refusal["kind"], "refused");
+                assert_eq!(refusal["fix"]["run"], "aoide mesh charter accept ./home.toml");
+                assert!(refusal["why"].as_str().unwrap().contains("aoide mesh join home --operator"), "{refusal:?}");
+            }
+        });
+    }
+
+    /// A mesh typed a letter off a mesh this machine holds is named, not guessed.
+    #[test]
+    fn a_mistyped_mesh_for_sign_names_the_one_that_exists() {
+        with_root("sign-typo", |_dir| {
+            charter::init("home").unwrap();
+            let mut typed = inv(&["hom"]);
+            typed.path = ["mesh", "charter", "sign"].iter().map(|s| s.to_string()).collect();
+            let out = handle_charter_sign(&typed);
+            assert_eq!(out.status, aoide_protocol::output::Status::Error, "{out:?}");
+            assert_eq!(out.data.as_ref().unwrap()["refusal"]["fix"]["run"], "aoide mesh charter sign home");
         });
     }
 

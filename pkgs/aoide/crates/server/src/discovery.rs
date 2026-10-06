@@ -53,11 +53,11 @@ use std::net::UdpSocket;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Base cadence between advertisements (PAIRING.md: "~30s").
-const INTERVAL: Duration = Duration::from_secs(30);
+const INTERVAL: Duration = Duration::from_secs(aoide_storage::advertise::INTERVAL_SECS);
 
 /// Jitter span ADDED on top of [`INTERVAL`] each tick, so a fleet of
 /// advertisers on the same LAN don't all key up in lockstep.
-const JITTER: Duration = Duration::from_secs(10);
+const JITTER: Duration = Duration::from_secs(aoide_storage::advertise::JITTER_SECS);
 
 /// A jitter source with no new dependency (the brief: "zero new deps —
 /// std::net UdpSocket... is the whole toolbox") — the low bits of the wall

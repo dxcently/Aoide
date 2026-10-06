@@ -505,7 +505,7 @@ the full count-site checklist (git show 9c2d05c).
   (hard cutover, no aliases) and fold into ONE smart-target `aoide node
   pair <target>`: a URL-shaped target (`"://"`) dials directly; anything
   else resolves by discovery sweep (default 45s, not the 4s
-  `node discover`/`node invite` used to share — task #129's known miss).
+  `node discover`/`node invite` used to share — task #129's known miss; `node discover` itself now defaults to 35s, past one ~30s advertiser cadence plus jitter).
   Both arms reuse the SAME `run_pair_request` core the pre-P-PV2 commands
   called (golden −1: two dead paths, one new). `node pair pending`
   RENAMES to `node pending` (golden net 0) and its rows drop the SAS —

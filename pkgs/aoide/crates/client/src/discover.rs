@@ -41,9 +41,11 @@ use std::time::{Duration, Instant};
 use aoide_storage::advertise::{self, Advertisement};
 
 /// The default `--secs` window for `node discover`/`node invite` when the
-/// caller doesn't override it (PAIRING.md: "listens briefly (default a few
-/// seconds)"; the brief: "default ~4").
-pub const DEFAULT_SWEEP_SECS: u64 = 4;
+/// caller doesn't override it: past one advertiser cadence (the interval plus
+/// half its jitter span), because a shorter window usually hears nothing even
+/// when peers are advertising (PAIRING.md, "Discovery").
+pub const DEFAULT_SWEEP_SECS: u64 =
+    aoide_storage::advertise::INTERVAL_SECS + aoide_storage::advertise::JITTER_SECS / 2;
 
 /// Hard cap on DISTINCT entries one sweep will hold — the bounded cache
 /// (task #120): a hostile LAN box spraying advertisements under endless

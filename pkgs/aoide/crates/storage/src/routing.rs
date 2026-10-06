@@ -520,6 +520,15 @@ impl Declaration {
         self.address_of(node).is_some() || self.key_of(node).is_some()
     }
 
+    /// Every node name this declaration carries, for a "did you mean" over the
+    /// names a typed destination could have been.
+    pub fn node_names(&self) -> Vec<&str> {
+        match &self.kind {
+            Kind::Charter(c) => c.nodes.keys().map(String::as_str).collect(),
+            Kind::Pair(p) => p.addresses.keys().map(String::as_str).collect(),
+        }
+    }
+
     /// The declared NAME the identity key `key` belongs to — what a policy,
     /// routing or audit lookup starting from a verifying key resolves to. Bare
     /// hex, case-insensitive, the same comparison [`Charter::grant_for_key`]

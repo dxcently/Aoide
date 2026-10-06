@@ -343,7 +343,7 @@ fn node_add_rejects_a_path_traversal_name_without_touching_the_network_or_regist
     // would also assert Error but for the WRONG reason; asserting
     // `invalid-name` specifically proves the traversal guard fired first.
     let out = dispatch(&cli_invocation(&["node", "add"], &["../../evil", "http://127.0.0.1:1/"], &[]));
-    assert_eq!(out.status, Status::Error);
+    assert_eq!(out.status, Status::Usage, "a name that can never be valid is exit 2");
     assert_eq!(out.data.unwrap()["reason"], "invalid-name");
     assert!(aoide_storage::node_store::load_nodes().is_empty(), "nothing registered");
 
@@ -361,7 +361,7 @@ fn node_remove_rejects_a_path_traversal_name_before_touching_the_cache_file() {
     let _stage = setup_env(&root);
 
     let out = dispatch(&cli_invocation(&["node", "remove"], &["../../evil"], &[]));
-    assert_eq!(out.status, Status::Error);
+    assert_eq!(out.status, Status::Usage, "a name that can never be valid is exit 2");
     assert_eq!(out.data.unwrap()["reason"], "invalid-name");
 
     let _ = std::fs::remove_dir_all(&root);
@@ -430,7 +430,7 @@ fn node_pair_url_target_rejects_an_invalid_name_without_touching_the_network_or_
         &["http://127.0.0.1:1/"],
         &[("name", "../../evil")],
     ));
-    assert_eq!(out.status, Status::Error);
+    assert_eq!(out.status, Status::Usage, "a name that can never be valid is exit 2");
     assert_eq!(out.data.unwrap()["reason"], "invalid-name");
     assert!(aoide_storage::node_store::load_nodes().is_empty(), "nothing registered");
 
@@ -485,8 +485,8 @@ fn pair_with_a_second_positional_is_a_fast_taught_usage_error_never_a_silent_swe
     let out = dispatch(&inv);
     assert!(Instant::now() < deadline, "must refuse fast, never burn a sweep window on the discarded url");
     assert_eq!(out.status, Status::Usage, "{out:?}");
-    assert!(out.data.is_none(), "no `reason` field — this refusal fires before either arm ever runs: {out:?}");
-    assert!(out.message.contains("usage: aoide pair"), "{}", out.message);
+    assert!(out.data.as_ref().unwrap().get("reason").is_none(), "no `reason` field — this refusal fires before either arm ever runs: {out:?}");
+    assert!(out.message.contains("takes 1 argument(s), not 2"), "{}", out.message);
 
     let _ = std::fs::remove_dir_all(&root);
     std::env::remove_var("AOIDE_STAGE_DIR");
@@ -828,7 +828,7 @@ fn node_pair_approve_on_an_outbound_entry_awaiting_confirm_with_yes_alone_is_the
     let out = dispatch(&cli_invocation(&["pair"], &["ijkl5678"], &[("yes", "true"), ("wait", "0")]));
     assert_eq!(out.status, Status::Usage, "{}", out.message);
     assert!(
-        out.message.contains("does not bypass"),
+        out.render(false).0.contains("never bypasses"),
         "the refusal must teach why --yes alone isn't enough here: {}",
         out.message
     );

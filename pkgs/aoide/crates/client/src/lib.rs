@@ -66,6 +66,7 @@ pub mod mcp_client;
 pub mod mesh;
 pub mod pair_watch;
 pub mod node;
+pub(crate) mod teach;
 pub mod tunnel;
 pub mod wire;
 

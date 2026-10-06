@@ -971,3 +971,12 @@
   here.
 
 - **`mail_wire::dial_node` signs a hop whose declaration carries a key** (`Node::declared`), `ssh://` charter hops included: the receiving door refuses (`-32007`) a signed request whose key neither its registry nor its in-force charter carries, where such a hop used to go out unsigned under loopback treatment. A declaration with no key stays unsigned.
+
+## Refusals of the pair, node, mesh and mail commands
+
+- **Every refusal is `Outcome::refuse`** (what / why / a full command line as the fix); `teach.rs` holds the ones more than one command says (`unknown_name`, `bad_nickname`, `not_paired`, `far_door`, `registry_write`, `store_failed`, `mesh_choice`, `extra_args`, `progress`). A handler never writes `Outcome::error`/`Outcome::usage`, and never re-checks what its registry entry declares (`required`, `values`, `one_of`, `conflicts`); what the registry cannot declare (a value's shape: `--secs`, `--wait`, `--via`, a name's grammar) is refused as `Kind::Usage` with the retyped line as the fix.
+- **Exit rule**: a name or value that can never be valid (grammar, an address outside the grammar, two transports at once) is `Kind::Usage`; a name the world lacks (unknown node, mesh, mailbox, msgid, pending request), a node not paired, no charter, a far door that refused is `Kind::Refused`/`Failed`.
+- **Live names get a suggestion**: `teach::unknown_name` takes the typed name, the valid names, and the command that lists them; a close match or a prefix becomes the fix, else the list. A name that is implicitly created (a mailbox with no mail yet, an outbox node never used) refuses only when a real one is a typo away, so `mail read --for <own mailbox>` stays a valid empty read.
+- **A far door's refusal is not an empty answer**: `mail_wire::PollOutcome::node_refused` carries a poll the node refused outright (`status: refused`), and `mail poll` reports each node's own outcome (`data.results`) and exits 1 when any refused.
+- **Progress**: `teach::progress` prints one stderr line before a long wait (pair dial and sweep, `mesh join` over the LAN, `node discover`), never under `--json`; `PairFinish::quiet` carries that for the wait loop.
+- `node discover`'s default window is `discover::DEFAULT_SWEEP_SECS`, built from `aoide_storage::advertise::{INTERVAL_SECS, JITTER_SECS}`, which `aoide-server`'s advertiser also sleeps by: a listener cannot default to less than one cadence.
