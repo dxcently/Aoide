@@ -753,7 +753,7 @@ pub fn send_mesh(node: &str, asked: Option<&str>) -> Result<String, SendMeshErro
             if asked.is_some_and(|m| !aoide_storage::node_store::valid_node_name(m)) {
                 SendMeshError::new(format!("--mesh: {e}"), json!({ "reason": "invalid-mesh", "mesh": asked }))
             } else {
-                SendMeshError::new(format!("--mesh: {e}"), json!({ "reason": "mesh-ambiguous", "node": node }))
+                SendMeshError::new(format!("--mesh: {e}"), json!({ "reason": "mesh-ambiguous", "node": node, "meshes": named }))
             }
         })
 }

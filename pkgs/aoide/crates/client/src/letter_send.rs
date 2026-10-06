@@ -172,7 +172,11 @@ pub(crate) fn send(inv: &Invocation, mut scalar: impl FnMut(&Invocation) -> Outc
             "mail.send",
             Kind::Failed,
             format!("{accepted} of {} recipient copies were filed or spooled", results.len()),
-            format!("the others were refused: {}; a retry would duplicate the copies that went", failed.join("; ")),
+            format!(
+                "the others were refused: {}{}",
+                failed.join("; "),
+                if accepted > 0 { "; a retry would duplicate the copies that went" } else { "" }
+            ),
             Fix::Run("aoide mail outbox".to_string()),
         )
     };

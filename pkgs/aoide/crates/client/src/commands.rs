@@ -3001,7 +3001,7 @@ pub(crate) fn pair_finish_from(inv: &Invocation) -> Result<PairFinish, BadFlag> 
         grant: parse_allow_flag(inv)?,
         code: inv.flags.get("code").cloned().filter(|c| !c.trim().is_empty()),
         door: inv.door,
-        quiet: inv.flag_present("json"),
+        quiet: teach::quiet(inv),
     })
 }
 
@@ -3947,7 +3947,7 @@ fn handle_pair_watch(inv: &Invocation) -> Outcome {
 /// `node discover [--secs N] [--json]` (P-P6 + task #120,
 /// `docs/architecture/PAIRING.md`'s "Discovery (advertise-but-locked)"
 /// section): listens on the fixed UDP port for `--secs` seconds (default
-/// `discover::DEFAULT_SWEEP_SECS`, ~4) and prints every DISTINCT
+/// `discover::DEFAULT_SWEEP_SECS`, 35: past one advertiser cadence) and prints every DISTINCT
 /// (name, source) heard — name, the claimed ssh hop (`user`@`host`),
 /// `srcAddr`, first/last heard, and how many times
 /// (`discover::run_sweep`'s own bounded fold). `host`/`user` are the
@@ -3998,12 +3998,18 @@ fn handle_node_discover(inv: &Invocation) -> Outcome {
         .collect();
 
     let message = if swept.heard.is_empty() {
+        let cadence = aoide_storage::advertise::INTERVAL_SECS;
+        let short = if secs < cadence {
+            format!(
+                "\n  an advertiser speaks about every {cadence}s (plus up to {}s of jitter), so a {secs}s window can miss it",
+                aoide_storage::advertise::JITTER_SECS
+            )
+        } else {
+            String::new()
+        };
         format!(
-            "heard no discovery advertisements in {secs}s ({} malformed dropped)\n  an advertiser speaks about every {}s (plus up to {}s of jitter), so a window shorter than that can miss it; \
-             broadcast stays on one subnet: it does not cross routers, VPNs or Wi-Fi client isolation. Advertisers are off until `aoide node advertise on` runs there",
-            swept.dropped,
-            aoide_storage::advertise::INTERVAL_SECS,
-            aoide_storage::advertise::JITTER_SECS
+            "heard no discovery advertisements in {secs}s ({} malformed dropped){short}\n  broadcast stays on one subnet: it does not cross routers, VPNs or Wi-Fi client isolation. Advertisers are off until `aoide node advertise on` runs there",
+            swept.dropped
         )
     } else {
         format!(
@@ -4033,8 +4039,8 @@ fn parse_secs_flag_with_default(inv: &Invocation, default: u64) -> Result<u64, (
 }
 
 /// `node discover`'s own default window ([`crate::discover::DEFAULT_SWEEP_SECS`],
-/// ~4s) — unrelated to and unchanged by P-PV2; [`pair_via_hostname`] holds
-/// its own, much longer, default instead ([`PAIR_TARGET_SWEEP_SECS`]).
+/// 35s, past one advertiser cadence); [`pair_via_hostname`] holds its own,
+/// longer, default instead ([`PAIR_TARGET_SWEEP_SECS`]).
 fn parse_secs_flag(inv: &Invocation) -> Result<u64, ()> {
     parse_secs_flag_with_default(inv, crate::discover::DEFAULT_SWEEP_SECS)
 }
@@ -4062,10 +4068,9 @@ fn confirm_invite(name: &str, host: &str, user: &str, src_addr: &str) -> Result<
 
 /// [`handle_node_pair`]'s own default sweep window when `<target>` reads as
 /// a hostname (P-PV2, the User's locked spec) — deliberately NOT
-/// [`crate::discover::DEFAULT_SWEEP_SECS`] (`node discover`'s own ~4s,
-/// unrelated and unchanged): a real LAN's advertise cadence is a ~30-40s
-/// tick (`handle_node_advertise`'s own doc), so 4s reliably missed it in
-/// practice — task #129's known miss. 45s comfortably spans one tick.
+/// [`crate::discover::DEFAULT_SWEEP_SECS`] (`node discover`'s own 35s):
+/// a real LAN's advertise cadence is a ~30-40s tick
+/// (`handle_node_advertise`'s own doc), and 45s comfortably spans one tick.
 const PAIR_TARGET_SWEEP_SECS: u64 = 45;
 
 /// `pair <target>`'s HOSTNAME arm (`target` is not a URL) — the old
@@ -4135,9 +4140,13 @@ fn pair_via_hostname(cmd: &str, inv: &Invocation, target: &str) -> Outcome {
                 &heard,
                 "instances heard",
                 "aoide node discover",
-                Fix::Run(format!("aoide node advertise on")),
+                Fix::Run("aoide node advertise on".to_string()),
             );
-            out.message = format!("heard no advertisement named `{target}` in {secs}s");
+            let what = format!("heard no advertisement named `{target}` in {secs}s");
+            out.message = what.clone();
+            if let Some(refusal) = out.data.as_mut().and_then(|d| d.get_mut("refusal")) {
+                refusal["what"] = json!(what);
+            }
             return out.with_fields(json!({ "reason": "no-match", "name": target, "heard": heard }));
         }
         Err(crate::discover::InviteResolveError::Ambiguous { heard }) => {
@@ -5418,7 +5427,13 @@ fn send_mesh_refusal(inv: &Invocation, cmd: &str, node: &str, e: crate::mail_wir
             let valid: Vec<String> = aoide_storage::node_store::load_nodes().into_iter().map(|n| n.name).collect();
             teach::unknown_name(inv, cmd, "node", teach::Slot::ToNode, node, &valid, "registered nodes", "aoide node status", Fix::Run("aoide pair".to_string()))
         }
-        "invalid-mesh" | "mesh-ambiguous" => teach::mesh_choice(inv, cmd, &[]),
+        "invalid-mesh" | "mesh-ambiguous" => {
+            let meshes: Vec<String> = e.data["meshes"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|m| m.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            teach::mesh_choice(inv, cmd, &meshes).with_fields(json!({ "node": node, "meshes": meshes }))
+        }
         _ => Outcome::refuse(
             cmd,
             Kind::Refused,
@@ -5618,14 +5633,9 @@ fn handle_mail_read(inv: &Invocation) -> Outcome {
     let cmd = "mail.read";
     let reread = inv.flag_present("reread");
     let all_names = inv.flag_present("all-names");
-    let for_name = inv.flags.get("for").map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let for_name = inv.flags.get("for").map(|s| s.trim().to_string());
     let reader = mail_reader_session();
-
-    if let Some(name) = &for_name {
-        if let Some(out) = near_mailbox(inv, cmd, name) {
-            return out;
-        }
-    }
+    let near = for_name.as_deref().and_then(near_mailbox);
     let result = match (&for_name, all_names) {
         (Some(name), false) => aoide_storage::mail::read_for(name, reread, reader.as_deref()),
         _ => aoide_storage::mail::read_all_names(reread, reader.as_deref()),
@@ -5639,18 +5649,22 @@ fn handle_mail_read(inv: &Invocation) -> Outcome {
             } else {
                 entries.iter().map(render_entry).collect::<Vec<_>>().join("\n\n")
             };
-            Outcome::ok(cmd, format!("{n} entr{}\n{body}", if n == 1 { "y" } else { "ies" }))
-                .with_data(json!({ "entries": entries }))
+            let out = Outcome::ok(cmd, format!("{n} entr{}\n{body}", if n == 1 { "y" } else { "ies" }))
+                .with_data(json!({ "entries": entries }));
+            if n == 0 {
+                with_suggestion(out, for_name.as_deref().unwrap_or_default(), near)
+            } else {
+                out
+            }
         }
         Err(e) => teach::store_failed(cmd, "state/mail", &e),
     }
 }
 
-/// A mailbox a person mistyped: the one close to a name that already holds mail
-/// while the typed one holds none. A mailbox with no mail is otherwise a valid,
-/// empty mailbox (a reader polls its own before anything arrives), so only a
-/// near miss refuses.
-fn near_mailbox(inv: &Invocation, cmd: &str, typed: &str) -> Option<Outcome> {
+/// The mailbox that already holds mail and is a typo away from `typed`, when
+/// `typed` holds none. A mailbox with no mail is a valid, empty mailbox (a
+/// reader polls its own before anything arrives), so this is only ever a hint.
+fn near_mailbox(typed: &str) -> Option<String> {
     let base = aoide_storage::mail::read_base().ok()?;
     let mut names: Vec<String> = base.iter().map(|e| e.envelope.header.to.name.clone()).filter(|n| !n.is_empty()).collect();
     names.sort();
@@ -5658,9 +5672,16 @@ fn near_mailbox(inv: &Invocation, cmd: &str, typed: &str) -> Option<Outcome> {
     if names.iter().any(|n| n == typed) {
         return None;
     }
-    let near = aoide_protocol::suggest::closest(typed, names.iter().map(String::as_str), 1);
-    near.first()?;
-    Some(teach::unknown_name(inv, cmd, "mailbox", teach::Slot::Flag("for"), typed, &names, "mailboxes holding mail", "aoide mail", Fix::Run("aoide mail".to_string())))
+    aoide_protocol::suggest::closest(typed, names.iter().map(String::as_str), 1).first().map(|n| n.to_string())
+}
+
+/// An ok outcome whose empty result may be a typo: the suggestion rides the
+/// text as a note and `data.suggestion`, and the exit stays 0.
+fn with_suggestion(out: Outcome, typed: &str, near: Option<String>) -> Outcome {
+    let Some(near) = near else { return out };
+    let mut out = out;
+    out.message.push_str(&format!("\nnothing for {typed} — did you mean {near}?"));
+    out.with_fields(json!({ "suggestion": near }))
 }
 
 /// `aoide mail show <msgid> [--json]`.
@@ -5689,13 +5710,15 @@ fn handle_mail_show(inv: &Invocation) -> Outcome {
 fn handle_mail_mark(inv: &Invocation) -> Outcome {
     let cmd = "mail.mark";
     let name = inv.flags["for"].trim();
-    if let Some(out) = near_mailbox(inv, cmd, name) {
-        return out;
-    }
+    let near = near_mailbox(name);
     match aoide_storage::mail::mark(name, mail_reader_session().as_deref()) {
-        Ok(seq) => Outcome::ok(cmd, format!("{name}: cursor marked through seq {seq}"))
-            .changed(vec![format!("state/mail/cursors.json: {name} -> {seq}")])
-            .with_data(json!({ "name": name, "seq": seq })),
+        Ok(seq) => with_suggestion(
+            Outcome::ok(cmd, format!("{name}: cursor marked through seq {seq}"))
+                .changed(vec![format!("state/mail/cursors.json: {name} -> {seq}")])
+                .with_data(json!({ "name": name, "seq": seq })),
+            name,
+            near,
+        ),
         Err(e) => teach::store_failed(cmd, "state/mail", &e),
     }
 }
@@ -5825,11 +5848,7 @@ fn outbox_node_summary(entries: &[aoide_storage::outbox::OutboxEntry]) -> Value 
 fn handle_mail_outbox(inv: &Invocation) -> Outcome {
     let cmd = "mail.outbox";
     let target = inv.args.first().map(|s| s.trim()).filter(|s| !s.is_empty());
-    if let Some(typed) = target {
-        if let Some(out) = near_outbox_node(inv, cmd, typed) {
-            return out;
-        }
-    }
+    let near = target.and_then(near_outbox_node);
     let nodes = match target {
         Some(n) => vec![n.to_string()],
         None => match aoide_storage::outbox::nodes_with_outbox() {
@@ -5908,15 +5927,19 @@ fn handle_mail_outbox(inv: &Invocation) -> Outcome {
             .collect::<Vec<_>>()
             .join("\n")
     };
-    Outcome::ok(cmd, format!("{n} entr{} waiting\n{body}", if n == 1 { "y" } else { "ies" }))
-        .with_data(json!({ "entries": rows, "summary": Value::Object(summary) }))
+    let out = Outcome::ok(cmd, format!("{n} entr{} waiting\n{body}", if n == 1 { "y" } else { "ies" }))
+        .with_data(json!({ "entries": rows, "summary": Value::Object(summary) }));
+    if n == 0 {
+        with_suggestion(out, target.unwrap_or_default(), near)
+    } else {
+        out
+    }
 }
 
-/// A node a person mistyped for an outbox command: the one close to a node
-/// this box knows (registered, or holding an outbox) when the typed one is
-/// neither. An unused or unknown name is otherwise an empty list, as the
-/// outbox always answered, so only a near miss refuses.
-fn near_outbox_node(inv: &Invocation, cmd: &str, typed: &str) -> Option<Outcome> {
+/// The node this box knows (registered, or holding an outbox) that is a typo
+/// away from `typed`, when `typed` is neither. An unused name is otherwise an
+/// empty list, as the outbox always answered, so this is only ever a hint.
+fn near_outbox_node(typed: &str) -> Option<String> {
     let mut known: Vec<String> = aoide_storage::node_store::load_nodes().into_iter().map(|n| n.name).collect();
     known.extend(aoide_storage::outbox::nodes_with_outbox().unwrap_or_default());
     known.sort();
@@ -5924,13 +5947,7 @@ fn near_outbox_node(inv: &Invocation, cmd: &str, typed: &str) -> Option<Outcome>
     if known.iter().any(|n| n == typed) {
         return None;
     }
-    aoide_protocol::suggest::closest(typed, known.iter().map(String::as_str), 1).first()?;
-    Some(unknown_node_from(inv, cmd, typed, &known))
-}
-
-/// [`unknown_node`] over bare names.
-fn unknown_node_from(inv: &Invocation, cmd: &str, typed: &str, known: &[String]) -> Outcome {
-    teach::unknown_name(inv, cmd, "node", teach::Slot::Arg(0), typed, known, "known nodes", "aoide mail outbox", Fix::Run("aoide pair".to_string()))
+    aoide_protocol::suggest::closest(typed, known.iter().map(String::as_str), 1).first().map(|n| n.to_string())
 }
 
 /// The msgids spooled in any outbox, for naming a mistyped one.
@@ -6155,14 +6172,15 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
             _ => format!("{} of {} polled node(s) refused the poll", refused_by.len(), targets.len()),
         };
         let first = refused_by[0]["node"].as_str().unwrap_or_default();
-        return Outcome::refuse(
+        let refusal = Outcome::refuse(
             cmd,
             Kind::Refused,
             what,
-            "the far door answered the poll itself with a refusal, so nothing was handed over; its declaration for this box has to change before a poll can succeed",
-            Fix::Run(format!("aoide mesh charter show")),
+            "the far door answered the poll itself with a refusal, so nothing was handed over by it; its declaration for this box has to change before a poll can succeed",
+            Fix::Run("aoide mesh charter show".to_string()),
         )
-        .with_fields(json!({ "reason": "poll-refused", "node": first, "nodes": rows, "results": results, "filed": filed }));
+        .with_fields(json!({ "reason": "poll-refused", "node": first, "nodes": rows, "results": results, "filed": filed, "withheld": withheld_total }));
+        return if filed > 0 { refusal.changed(vec![format!("state/mail/base.jsonl: +{filed} on poll")]) } else { refusal };
     }
     let message = if targets.is_empty() {
         "no paired node holds `message` — nothing to poll".to_string()
@@ -6183,7 +6201,7 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
     };
     Outcome::ok(cmd, message)
         .changed(vec![format!("state/mail/base.jsonl: +{filed} on poll")])
-        .with_data(json!({ "nodes": rows, "filed": filed, "withheld": withheld_total }))
+        .with_data(json!({ "nodes": rows, "results": results, "filed": filed, "withheld": withheld_total }))
 }
 
 /// One line per polled node: what became of it, so a several-node poll never
@@ -9779,7 +9797,10 @@ mod tests {
         let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "self/Bob")]));
         assert_eq!(out.status, aoide_protocol::output::Status::Usage, "msg: {}", said(&out));
         assert!(!said(&out).contains("Bob"), "the offending bytes must never be echoed");
-        assert_eq!(fix_run(&out), "aoide mail send hi --to self/bob");
+        assert_eq!(fix_run(&out), "aoide mail send --to self/bob -- <text>", "a fix never repeats the letter");
+        let secret = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["secret text"], &[("to", "self/Bad_Name")]));
+        assert!(!said(&secret).contains("secret text"), "{}", said(&secret));
+        assert_eq!(fix_run(&secret), "aoide mail send --to self/bad-name -- <text>");
         assert_eq!(out.data.unwrap()["reason"], "invalid-name");
 
         let names = handle_mail_names(&mail_inv(&["mail"], &[]));
@@ -10036,6 +10057,8 @@ mod tests {
         assert_eq!(refusal["fix"]["run"], "aoide mesh charter show");
         assert_eq!(out.data.as_ref().unwrap()["nodes"][0]["status"], "refused");
         assert_eq!(out.data.as_ref().unwrap()["filed"], 0);
+        assert_eq!(out.data.as_ref().unwrap()["withheld"], 0, "the refusal path carries the same keys as the ok one");
+        assert!(out.data.as_ref().unwrap()["results"].is_array());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -10099,25 +10122,19 @@ mod tests {
         handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "self/conductor")]));
 
         let out = handle_mail_read(&mail_inv_with_flags(&["mail", "read"], &[], &[("for", "conductr")]));
-        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{out:?}");
-        assert_eq!(fix_run(&out), "aoide mail read --for conductor");
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "an empty read stays a valid read: {out:?}");
+        assert!(said(&out).contains("nothing for conductr — did you mean conductor?"), "{}", said(&out));
+        assert_eq!(out.data.as_ref().unwrap()["suggestion"], "conductor");
+        // A blank --for never reaches the handler: the declaration refuses it.
+        assert_eq!(checked(&["mail", "read"], &[], &[("for", "")]).unwrap_err().kind, Kind::Usage);
         assert!(handle_mail_read(&mail_inv_with_flags(&["mail", "read"], &[], &[("for", "someone-new")])).status == aoide_protocol::output::Status::Ok,
             "an empty mailbox no one is near is still a valid, empty mailbox");
 
         aoide_storage::node_store::save_nodes(&[verified_node("sakaki", "http://127.0.0.1:1/")]).unwrap();
         let out = handle_mail_outbox(&mail_inv(&["mail", "outbox"], &["sakak"]));
-        assert_eq!(out.status, aoide_protocol::output::Status::Error, "{out:?}");
-        assert_eq!(fix_run(&out), "aoide mail outbox sakaki");
+        assert_eq!(out.status, aoide_protocol::output::Status::Ok, "{out:?}");
+        assert_eq!(out.data.as_ref().unwrap()["suggestion"], "sakaki");
         let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn a_mesh_that_is_not_in_the_graph_is_named_by_its_close_neighbour() {
-        let mut inv = aoide_test_support::inv(&["mail", "route"], &["sakak/conductor"]);
-        inv.flags.insert("mesh".into(), "home".into());
-        let valid = vec!["sakaki".to_string()];
-        let out = teach::unknown_name(&inv, "mail.route", "node", teach::Slot::Arg(0), "sakak", &valid, "nodes this box can route to", "aoide mesh", Fix::None("x"));
-        assert!(said(&out).contains("did you mean `sakaki`"), "{}", said(&out));
     }
 
     fn poll_answer_for(envelope: &aoide_storage::mail::Envelope) -> String {

@@ -25,8 +25,23 @@ pub(crate) enum Slot<'a> {
 }
 
 /// The invocation as a line to paste.
+///
+/// What a person typed as a letter or a first turn is theirs and may be secret,
+/// so a fix never repeats it: `mail send` and `node spawn` show `-- <text>`.
 pub(crate) fn line(inv: &Invocation) -> String {
-    inv.command_line("aoide", BOOLS, false)
+    let keep = match inv.path.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        ["mail", "send"] => Some(0),
+        ["node", "spawn"] => Some(1),
+        _ => None,
+    };
+    match keep {
+        Some(n) => {
+            let mut head = inv.clone();
+            head.args.truncate(n);
+            format!("{} -- <text>", head.command_line("aoide", BOOLS, false))
+        }
+        None => inv.command_line("aoide", BOOLS, false),
+    }
 }
 
 /// The invocation after `edit`, as a line to paste.
@@ -89,7 +104,13 @@ pub(crate) fn unknown_name(
     } else {
         valid.join(", ")
     };
-    let prefixed = valid.iter().find(|v| typed.chars().count() >= 4 && v.starts_with(typed)).map(String::as_str);
+    // A prefix names a candidate only when it is the one name it begins: the fix
+    // may remove or rewrite something, so a prefix two names share guesses nothing.
+    let mut starting = valid.iter().filter(|v| typed.chars().count() >= 4 && v.starts_with(typed));
+    let prefixed = match (starting.next(), starting.next()) {
+        (Some(only), None) => Some(only.as_str()),
+        _ => None,
+    };
     let near = prefixed.or_else(|| closest(typed, valid.iter().map(String::as_str), 1).first().copied());
     let (why, fix) = match near.as_ref() {
         Some(near) => (
@@ -163,11 +184,12 @@ pub(crate) fn bad_nickname(inv: &Invocation, cmd: &str, noun: &str, slot: Slot, 
 /// that is no mesh name can never be valid (exit 2); no `--mesh` where `known`
 /// holds several is the world's ambiguity (exit 1), fixed by naming one.
 pub(crate) fn mesh_choice(inv: &Invocation, cmd: &str, known: &[String]) -> Outcome {
-    if let Some(typed) = inv.flags.get("mesh") {
+    if let Some(typed) = inv.flags.get("mesh").filter(|m| !m.trim().is_empty()) {
         return bad_nickname(inv, cmd, "mesh name", Slot::Flag("mesh"), typed)
             .with_fields(json!({ "reason": "invalid-mesh", "mesh": typed }));
     }
-    let pick = known.first().map(String::as_str).unwrap_or("home");
+    let home = aoide_storage::config::home_mesh();
+    let pick = if known.is_empty() || known.contains(&home) { home.as_str() } else { known[0].as_str() };
     Outcome::refuse(
         cmd,
         Kind::Refused,
@@ -225,10 +247,15 @@ pub(crate) fn bad_secs(inv: &Invocation, cmd: &str, default: u64) -> Outcome {
     )
 }
 
+/// Is stderr left alone? Under `--json`, and on any door but a terminal's CLI.
+pub(crate) fn quiet(inv: &Invocation) -> bool {
+    inv.flag_present("json") || inv.door != aoide_protocol::Door::Cli
+}
+
 /// One line on stderr before a long wait, so a person is not left at a silent
 /// prompt. Never in `--json` mode, where stderr stays quiet for the machine.
 pub(crate) fn progress(inv: &Invocation, note: &str) {
-    if !inv.flag_present("json") {
+    if !quiet(inv) {
         eprintln!("{note}");
     }
 }
@@ -292,6 +319,17 @@ mod tests {
         assert!(o.message.contains("no node named `sakak`"), "{}", o.message);
         assert!(o.data.as_ref().unwrap()["refusal"]["why"].as_str().unwrap().contains("did you mean `sakaki`"));
         assert_eq!(fix_of(&o), "aoide node pull sakaki --mesh home");
+    }
+
+    #[test]
+    fn a_prefix_two_names_share_guesses_nothing() {
+        let i = inv(&["mail", "outbox", "rm"], &["abcd"], &[]);
+        let both = names(&["abcd1111", "abcd2222"]);
+        let o = unknown_name(&i, "mail.outbox.rm", "msgid", Slot::Arg(0), "abcd", &both, "msgids", "aoide mail outbox", Fix::None("x"));
+        assert_eq!(fix_of(&o), "aoide mail outbox", "{o:?}");
+        let one = names(&["abcd1111", "zzzz"]);
+        let o = unknown_name(&i, "mail.outbox.rm", "msgid", Slot::Arg(0), "abcd", &one, "msgids", "aoide mail outbox", Fix::None("x"));
+        assert_eq!(fix_of(&o), "aoide mail outbox rm abcd1111");
     }
 
     #[test]

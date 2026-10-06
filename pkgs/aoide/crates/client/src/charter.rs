@@ -593,7 +593,7 @@ fn handle_charter_show(inv: &Invocation) -> Outcome {
         }));
     }
     if rows.is_empty() {
-        return no_charter(cmd, &charter_mesh_hint(), None);
+        return no_charter(cmd, &aoide_storage::config::home_mesh(), None);
     }
     let mut lines = Vec::new();
     for row in &rows {
@@ -661,12 +661,6 @@ fn no_charter(cmd: &str, mesh: &str, state_dir: Option<String>) -> Outcome {
         Fix::Run(format!("aoide mesh charter accept ./{mesh}.toml")),
     )
     .with_fields(json!({ "reason": "no-charter", "mesh": mesh, "meshes": [] }))
-}
-
-/// The mesh name a bare `charter show` with nothing to show names in its fix:
-/// the home mesh.
-fn charter_mesh_hint() -> String {
-    aoide_storage::config::home_mesh()
 }
 
 fn handle_charter_init(inv: &Invocation) -> Outcome {

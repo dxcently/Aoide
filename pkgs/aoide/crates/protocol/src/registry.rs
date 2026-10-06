@@ -299,8 +299,10 @@ impl Command {
         let usage = |what: String, why: String, fix: String| Refusal::new(Kind::Usage, what, why, Fix::Run(fix));
         let me = format!("{bin} {}", self.path.join(" "));
 
-        let blank = |i: usize| inv.args.get(i).is_none_or(|v| v.trim().is_empty());
-        let missing = self.args.iter().enumerate().filter(|(_, a)| a.required).find(|(i, _)| blank(*i)).map(|(_, a)| a);
+        // A blank positional is no positional: required arguments are satisfied
+        // by the words that say something (an optional one may come first).
+        let said = inv.args.iter().filter(|v| !v.trim().is_empty()).count();
+        let missing = self.args.iter().filter(|a| a.required).nth(said);
         if let Some(a) = missing {
             return Err(usage(
                 format!("`{me}` needs <{}>", a.name),

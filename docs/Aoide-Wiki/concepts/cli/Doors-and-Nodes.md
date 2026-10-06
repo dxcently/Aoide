@@ -849,7 +849,7 @@ aoide mesh charter show [<mesh>]
 ```
 
 The operator's side of a charter mesh — one operator key signs a machine list
-([[HTTPS-Mesh-API]] "Charters"). `init` roots a mesh on the operator's machine
+([[HTTPS-Mesh-API]] "Charters"). `show` with no charter in force exits 1 (a world state, with `mesh charter accept` as its fix). `mail poll` exits 1 when any polled node refused the poll, with each node's outcome listed; `mail send --hold` to `self/…` exits 2, since a local filing has nothing to hold. `init` roots a mesh on the operator's machine
 (mints `state/operator/<mesh>.key`, 0600, never printed, never in the nix
 store) and writes an empty source at `$AOIDE_ROOT/charters/<mesh>.toml`;
 `sign` validates the source, writes the next version into it, signs those exact
