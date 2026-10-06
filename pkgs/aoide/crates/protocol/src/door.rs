@@ -248,7 +248,7 @@ fn parse_with(
             // A `--help` on an unknown path still surfaces the command list
             // rather than a bare "unknown command".
             if help {
-                return Err(help_outcome(&positionals.join("."), help::overview(registry, bin_name, t)));
+                return Err(help_outcome(&known_label(&positionals, registry), help::overview(registry, bin_name, t)));
             }
             return Err(unknown_command_outcome(&positionals, registry, bin_name, t));
         }
@@ -365,9 +365,25 @@ fn unknown_command_outcome(positionals: &[String], registry: &Registry, bin_name
         }
     }
     Outcome::usage(
-        positionals.join("."),
+        known_label(positionals, registry),
         format!("{message}\n\nrun '{bin_name} --help' for the full command list"),
     )
+}
+
+/// The dotted label of the part of `positionals` the registry knows: the
+/// longest leading run that is a prefix of some command path, never the
+/// unknown words or stray arguments behind it (`mail status <msgid>` is
+/// labelled `mail`). The first word is kept when nothing matches.
+fn known_label(positionals: &[String], registry: &Registry) -> String {
+    let mut depth = 0;
+    while depth < positionals.len()
+        && registry
+            .commands()
+            .any(|c| c.path.len() > depth && c.path[..=depth].iter().zip(positionals).all(|(a, b)| a == b))
+    {
+        depth += 1;
+    }
+    positionals[..depth.max(1)].join(".")
 }
 
 fn article_for(bin_name: &str) -> String {
@@ -1183,6 +1199,17 @@ mod tests {
             "{}",
             err.message
         );
+    }
+
+    /// The label of an unknown-command refusal is the part the registry
+    /// knows, never the unknown word or the stray argument behind it.
+    #[test]
+    fn an_unknown_command_is_labelled_by_its_known_prefix_only() {
+        let reg = test_registry();
+        let err = parse(&argv(&["graph", "nonsense", &"ab".repeat(32)]), Door::Cli, "aoide", &reg).unwrap_err();
+        assert_eq!(err.command, "graph");
+        let err = parse(&argv(&["zzqq", "x"]), Door::Cli, "aoide", &reg).unwrap_err();
+        assert_eq!(err.command, "zzqq");
     }
 
     /// A command that DOES declare a positional arg (`graph link`, two

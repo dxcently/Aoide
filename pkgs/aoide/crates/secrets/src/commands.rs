@@ -827,14 +827,6 @@ fn handle_secrets_allow_remote_origin(inv: &Invocation) -> Outcome {
     admin_dispatch(cmd, inv, fields, || crate::admin::allow_remote_origin(&home::secrets_home(), &name, want))
 }
 
-/// A refusal's `data` keeps its `refusal` and gains `fields`' keys.
-fn with_fields(mut outcome: Outcome, fields: serde_json::Value) -> Outcome {
-    if let (Some(serde_json::Value::Object(data)), serde_json::Value::Object(extra)) = (outcome.data.as_mut(), fields) {
-        data.extend(extra);
-    }
-    outcome
-}
-
 /// `secrets status` — the value-free inventory READ, over the socket, by the
 /// SAME operator-side gate as `pending`/`approve`/`dismiss`: CLI-only via
 /// [`require_cli`], deliberately NOT [`require_admin_identity`], because
@@ -886,7 +878,7 @@ fn handle_secrets_status(inv: &Invocation) -> Outcome {
                     })
                 })
                 .collect();
-            Outcome::ok(cmd, format!("{} secret(s)", report.secrets.len())).with_data(json!({
+            Outcome::ok(cmd, status_text(&report.secrets)).with_data(json!({
                 "broker": "answered",
                 // The home the BROKER read — echoed back by it, never
                 // re-derived here (a client whose own `AOIDE_SECRETS_HOME`
@@ -896,8 +888,7 @@ fn handle_secrets_status(inv: &Invocation) -> Outcome {
                 "secrets": rows,
             }))
         }
-        Err(e) => with_fields(
-            teach::from_broker(&teach::Where { inv, socket: &socket, secret: None }, &e).into_outcome(cmd),
+        Err(e) => teach::from_broker(&teach::Where { inv, socket: &socket, secret: None }, &e).into_outcome(cmd).with_fields(
             json!({
                 "broker": "unreachable",
                 // No inventory was read, so this is THIS process's own resolved
@@ -909,6 +900,34 @@ fn handle_secrets_status(inv: &Invocation) -> Outcome {
             }),
         ),
     }
+}
+
+/// The human text of `secrets status`: the count, then one value-free policy
+/// row per secret. The rows ride the message because the text render prints
+/// only lists of strings from `data`, and a handler that already speaks in
+/// rows (`mail outbox`, `mail`) says them itself instead of teaching
+/// `output.rs` to walk arbitrary objects.
+fn status_text(secrets: &[crate::client::StatusSecret]) -> String {
+    let width = secrets.iter().map(|s| s.name.chars().count()).max().unwrap_or(0);
+    let list = |names: &[String]| if names.is_empty() { "any".to_string() } else { names.join(",") };
+    let mut out = format!("{} secret(s)", secrets.len());
+    for s in secrets {
+        let automation = if s.automation.enabled {
+            format!("on ({})", list(&s.automation.consumers))
+        } else {
+            "off".to_string()
+        };
+        out.push_str(&format!(
+            "\n  {:<width$}  backend {}  totp {}  consumers {}  automation {}  remote {}",
+            s.name,
+            s.backend,
+            if s.require_totp { "required" } else { "no" },
+            list(&s.consumers),
+            automation,
+            if s.remote { "yes" } else { "no" },
+        ));
+    }
+    out
 }
 
 /// `secrets pending` (P-N2) — CLI-only via the SAME [`require_cli`] gate as
@@ -1096,6 +1115,27 @@ fn handle_secrets_migrate(inv: &Invocation) -> Outcome {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn status_text_says_each_secrets_policy_without_a_value() {
+        use crate::client::{StatusAutomation, StatusSecret};
+        let row = |name: &str, totp: bool, consumers: &[&str], auto: bool, remote: bool| StatusSecret {
+            name: name.to_string(),
+            backend: "age".to_string(),
+            require_totp: totp,
+            consumers: consumers.iter().map(|c| c.to_string()).collect(),
+            automation: StatusAutomation { enabled: auto, consumers: consumers.iter().map(|c| c.to_string()).collect() },
+            shared_with: vec![],
+            remote,
+            allow_remote_origin: false,
+        };
+        let text = super::status_text(&[row("sudo-pass", true, &["orchestrator"], true, false), row("db", false, &[], false, true)]);
+        assert_eq!(
+            text,
+            "2 secret(s)\n  sudo-pass  backend age  totp required  consumers orchestrator  automation on (orchestrator)  remote no\n  db         backend age  totp no  consumers any  automation off  remote yes"
+        );
+        assert_eq!(super::status_text(&[]), "0 secret(s)");
+    }
+
     use super::*;
 
     // ── the POSIX-shell fixture class (gated, with the reason) ───────────
@@ -2646,7 +2686,7 @@ mod tests {
 
             let out = run(&inv(Door::Cli, &["secrets", "status"], &[], &[]));
             assert_eq!(out.status, Status::Ok, "{out:?}");
-            assert_eq!(out.message, "1 secret(s)");
+            assert!(out.message.starts_with("1 secret(s)\n  db-prod  backend age"), "{}", out.message);
 
             let data = out.data.unwrap();
             let mut top_keys: Vec<&String> = data.as_object().unwrap().keys().collect();

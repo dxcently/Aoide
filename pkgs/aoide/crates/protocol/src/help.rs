@@ -565,6 +565,24 @@ Run 'shop job <command> --help' for args, flags, and examples."
     }
 
     #[test]
+    fn a_nested_group_lists_exactly_like_a_top_level_one() {
+        let text = group(&["job".to_string(), "queue".to_string()], &shop(), "shop", &term(80, false)).unwrap();
+        assert_eq!(
+            text,
+            "usage: shop job queue <command> [args] [--json]
+
+commands:
+  add   Queue a job.
+  drop  Drop a queued job.
+
+Run 'shop job queue <command> --help' for args, flags, and examples."
+        );
+        let on = group(&["job".to_string(), "queue".to_string()], &shop(), "shop", &term(80, true)).unwrap();
+        assert_eq!(strip_ansi(&on), text, "color only adds escape codes");
+        assert!(on.contains("\x1b[36madd\x1b[0m"), "{on:?}");
+    }
+
+    #[test]
     fn color_only_adds_escape_codes_the_text_is_otherwise_identical() {
         let on = group(&["job".to_string()], &shop(), "shop", &term(80, true)).unwrap();
         let off = group(&["job".to_string()], &shop(), "shop", &term(80, false)).unwrap();

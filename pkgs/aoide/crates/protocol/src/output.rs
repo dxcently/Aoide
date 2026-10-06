@@ -213,6 +213,16 @@ impl Outcome {
         Outcome::new(command, kind.status(), what).with_data(json!({ "refusal": refusal }))
     }
 
+    /// Add `fields`' keys beside what `data` already holds (a refusal keeps its
+    /// `refusal`); a payload that is not an object is replaced.
+    pub fn with_fields(mut self, fields: Value) -> Self {
+        match (self.data.as_mut(), fields) {
+            (Some(Value::Object(data)), Value::Object(extra)) => data.extend(extra),
+            (_, fields) => self.data = Some(fields),
+        }
+        self
+    }
+
     /// Attach raw text (OS or serde wording) for logs and `--json`; the text
     /// render never prints it.
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
