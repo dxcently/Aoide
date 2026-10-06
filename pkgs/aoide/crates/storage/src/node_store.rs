@@ -499,6 +499,13 @@ pub fn migrate_grants(raw: &str, home: &str) -> Migration {
         skipped.push("state/nodes.json is not readable JSON — read as an empty registry".to_string());
         return Migration { registry: NodeRegistry::default(), skipped };
     };
+    // A pre-rename registry still says `peers` (the serde alias on
+    // `NodeRegistry::nodes`); this raw-JSON pass must honour it too.
+    if let Some(obj) = value.as_object_mut().filter(|o| !o.contains_key("nodes")) {
+        if let Some(peers) = obj.remove("peers") {
+            obj.insert("nodes".to_string(), peers);
+        }
+    }
     let Some(nodes) = value.get_mut("nodes").and_then(Value::as_array_mut) else {
         skipped.push("state/nodes.json has no `nodes` array — read as an empty registry".to_string());
         return Migration { registry: NodeRegistry::default(), skipped };
@@ -1851,6 +1858,27 @@ mod tests {
         assert_eq!(reg.nodes[0].grant("home"), ["spawn".to_string(), "read".to_string()], "every existing paired record lands in the home mesh with its grant byte-identical — same elements, same order");
         assert!(reg.nodes[1].grants.is_empty(), "a keyless, grantless record is untouched");
         assert_eq!(reg.nodes[1].url, "http://p/", "and nothing else about a record moves");
+    }
+
+    /// A registry written before the `peers` -> `nodes` rename (chiyo's, as it
+    /// stood) keeps every record and folds its `allows` into the home mesh,
+    /// instead of reading as empty and being overwritten by the next save.
+    #[test]
+    fn a_pre_rename_peers_registry_migrates_instead_of_reading_empty() {
+        let raw = r#"{
+          "schemaVersion": "0",
+          "peers": [
+            { "name": "yomi-strix", "url": "http://yomi-strix:8710/", "autogate": false,
+              "pubkey": "2706", "verified": true, "allows": ["read", "spawn"],
+              "addedAt": "2026-08-28T05:22:50Z" },
+            { "name": "sakaki", "url": "http://sakaki:8710/", "verified": true, "pubkey": "9316" }
+          ]
+        }"#;
+        let m = migrate_grants(raw, "home");
+        assert!(m.skipped.is_empty(), "{:?}", m.skipped);
+        assert_eq!(m.registry.nodes.len(), 2);
+        assert_eq!(m.registry.nodes[0].grant("home"), ["read".to_string(), "spawn".to_string()]);
+        assert_eq!(m.registry.nodes[1].name, "sakaki");
     }
 
     /// **Review finding 3.** One malformed value must cost ONE record its
