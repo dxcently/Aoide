@@ -275,7 +275,8 @@ impl Outcome {
             let tag = match self.status {
                 Status::Error => st.error(&tag),
                 Status::Usage => st.usage(&tag),
-                Status::Ok | Status::NotImplemented => tag,
+                Status::Ok => st.ok(&tag),
+                Status::NotImplemented => st.stub(&tag),
             };
             let mut line = format!("{tag} {}: {}", self.command, self.message);
             line.push_str(&self.refusal_lines(st));
@@ -441,6 +442,8 @@ mod tests {
         assert!(text.contains("\x1b[2mwhy:\x1b[0m y") && text.contains("\x1b[32mfix:\x1b[0m z"), "{text:?}");
         let failed = Outcome::error("x", "m");
         assert!(failed.render_styled(false, Style::ON).0.starts_with("\x1b[31m[error]\x1b[0m"));
+        let fine = Outcome::ok("x", "fine");
+        assert!(fine.render_styled(false, Style::ON).0.starts_with("\x1b[32m[ok]\x1b[0m x: fine"));
         assert_eq!(o.render_styled(true, Style::ON), o.render(true), "json is data");
         assert_eq!(o.render_styled(false, Style::OFF), o.render(false));
     }

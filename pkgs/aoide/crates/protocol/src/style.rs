@@ -117,6 +117,9 @@ impl Style {
     pub fn required(self, s: &str) -> String {
         self.paint("33", s)
     }
+    pub fn ok(self, s: &str) -> String {
+        self.paint("32", s)
+    }
     pub fn error(self, s: &str) -> String {
         self.paint("31", s)
     }

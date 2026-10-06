@@ -90,9 +90,7 @@ pub fn run_cli(argv: &[String]) -> i32 {
         if inv.path == ["a2a", "serve"] {
             let launch = dispatch::dispatch(inv);
             if launch.status != output::Status::Ok {
-                let (body, code) = launch.render(json);
-                eprintln!("{body}");
-                return Some(code);
+                return Some(protocol::door::emit(&launch, json));
             }
             let (bind, port) = a2a::resolve_bind_port(inv);
             let spawn_agent = a2a::resolve_spawn_agent(inv);
@@ -137,9 +135,7 @@ pub fn run_cli(argv: &[String]) -> i32 {
         if inv.path == ["mail", "serve"] {
             let launch = dispatch::dispatch(inv);
             if launch.status != output::Status::Ok {
-                let (body, code) = launch.render(json);
-                eprintln!("{body}");
-                return Some(code);
+                return Some(protocol::door::emit(&launch, json));
             }
             let port = server::a2a::resolve_mail_adapter_port(inv);
             let audit_log = dispatch::audit_log_path(inv);
@@ -163,9 +159,7 @@ pub fn run_cli(argv: &[String]) -> i32 {
         if inv.path == ["conductor"] {
             let launch = dispatch::dispatch(inv);
             if launch.status != output::Status::Ok {
-                let (body, code) = launch.render(json);
-                eprintln!("{body}");
-                return Some(code);
+                return Some(protocol::door::emit(&launch, json));
             }
             return Some(match conductor::run(dispatch::dispatch) {
                 Ok(()) => output::exit::OK,
@@ -208,9 +202,7 @@ pub fn run_cli(argv: &[String]) -> i32 {
         if inv.path == ["secrets", "serve"] {
             let launch = dispatch::dispatch(inv);
             if launch.status != output::Status::Ok {
-                let (body, code) = launch.render(json);
-                eprintln!("{body}");
-                return Some(code);
+                return Some(protocol::door::emit(&launch, json));
             }
             return Some(
                 match secrets::broker::serve(&secrets::home::secrets_home(), &secrets::socket::socket_path()) {
@@ -235,16 +227,12 @@ pub fn run_cli(argv: &[String]) -> i32 {
         if inv.path == ["secrets", "exec"] {
             let launch = dispatch::dispatch(inv);
             if launch.status != output::Status::Ok {
-                let (body, code) = launch.render(json);
-                eprintln!("{body}");
-                return Some(code);
+                return Some(protocol::door::emit(&launch, json));
             }
             return Some(match secrets::client::run_exec(inv, &secrets::socket::socket_path()) {
                 Ok(code) => code,
                 Err(refusal) => {
-                    let (body, code) = refusal.into_outcome(inv.dotted()).render(json);
-                    eprintln!("{body}");
-                    code
+                    protocol::door::emit(&refusal.into_outcome(inv.dotted()), json)
                 }
             });
         }
@@ -266,9 +254,7 @@ pub fn run_cli(argv: &[String]) -> i32 {
         if inv.path == ["secrets", "enroll"] {
             let launch = dispatch::dispatch(inv);
             if launch.status != output::Status::Ok {
-                let (body, code) = launch.render(json);
-                eprintln!("{body}");
-                return Some(code);
+                return Some(protocol::door::emit(&launch, json));
             }
             let result = if inv.flag_present("show") {
                 secrets::enroll::show(&secrets::home::secrets_home())
@@ -306,9 +292,7 @@ pub fn run_cli(argv: &[String]) -> i32 {
         if inv.path == ["secrets", "watch"] {
             let launch = dispatch::dispatch(inv);
             if launch.status != output::Status::Ok {
-                let (body, code) = launch.render(json);
-                eprintln!("{body}");
-                return Some(code);
+                return Some(protocol::door::emit(&launch, json));
             }
             let socket = secrets::socket::socket_path();
             let events = secrets::socket::events_path(&socket);
@@ -334,9 +318,7 @@ pub fn run_cli(argv: &[String]) -> i32 {
         if inv.path == ["events", "tail"] {
             let launch = dispatch::dispatch(inv);
             if launch.status != output::Status::Ok {
-                let (body, code) = launch.render(json);
-                eprintln!("{body}");
-                return Some(code);
+                return Some(protocol::door::emit(&launch, json));
             }
             let events_path = server::daemon::events_path(&server::daemon::socket_path());
             let classes: Vec<String> = inv
@@ -363,9 +345,7 @@ pub fn run_cli(argv: &[String]) -> i32 {
         if inv.path == ["pair", "watch"] {
             let launch = dispatch::dispatch(inv);
             if launch.status != output::Status::Ok {
-                let (body, code) = launch.render(json);
-                eprintln!("{body}");
-                return Some(code);
+                return Some(protocol::door::emit(&launch, json));
             }
             let events_path = server::daemon::events_path(&server::daemon::socket_path());
             let popup = inv.flag_present("popup");

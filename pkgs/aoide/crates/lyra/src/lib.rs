@@ -194,13 +194,7 @@ pub fn run_lyra(argv: &[String]) -> i32 {
                     return Some(output::exit::OK);
                 }
             }
-            let (body, code) = outcome.render(false);
-            if code == output::exit::OK {
-                println!("{body}");
-            } else {
-                eprintln!("{body}");
-            }
-            return Some(code);
+            return Some(aoide_protocol::door::emit(&outcome, false));
         }
 
         None

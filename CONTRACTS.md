@@ -675,7 +675,7 @@ Contract guarantees:
   else the tty width, else 80) with the text hanging under its own column.
   A genuine usage mistake exits `2` on stderr in the refusal shape. Color is
   the ANSI 16 base colors only (headings bold, command names cyan, `<args>`
-  dim, `(required)` yellow, `[error]` red, `[usage]` yellow, `why:` dim, `fix:`
+  dim, `(required)` yellow, `[ok]` green, `[error]` red, `[usage]` yellow, `[not-implemented]` dim, `why:` dim, `fix:`
   green, suggestions bold, the stub section dim). It is on only when the
   stream written is a tty, never for `NO_COLOR`, `TERM=dumb` or `--json`, and
   never at the MCP, A2A or aoided-socket doors, where an outcome is data;

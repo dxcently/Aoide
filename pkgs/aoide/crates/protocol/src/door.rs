@@ -840,6 +840,7 @@ pub fn run(
             return print(&refusal, json, Style::for_stream(Color::Auto, json, Stream::Err), false);
         }
     };
+    let _ = COLOR.set(mode);
     let width = style::width();
     let for_stream = |stream| Term { style: Style::for_stream(mode, json, stream), width };
 
@@ -859,6 +860,18 @@ pub fn run(
     let outcome = dispatch(&inv);
     let stream = if outcome.status == Status::Ok { Stream::Out } else { Stream::Err };
     print(&outcome, json, Style::for_stream(mode, json, stream), false)
+}
+
+/// The `--color` mode [`run`] read from this process's argv, for [`emit`].
+static COLOR: std::sync::OnceLock<Color> = std::sync::OnceLock::new();
+
+/// [`print`] for the entry-point launches that resolve outside the door's own
+/// dispatch (`a2a serve`, `secrets exec`, …): the same streams and palette,
+/// honouring the `--color` the door already read.
+pub fn emit(o: &Outcome, json: bool) -> i32 {
+    let stream = if o.status == Status::Ok { Stream::Out } else { Stream::Err };
+    let mode = COLOR.get().copied().unwrap_or(Color::Auto);
+    print(o, json, Style::for_stream(mode, json, stream), false)
 }
 
 /// Write an outcome where its status says (ok on stdout, the rest on stderr)
