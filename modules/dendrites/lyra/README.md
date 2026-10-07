@@ -126,7 +126,13 @@ artefact, `song/declared/terminal-opacity.conf`
 deleted when that is null): the kitty dendrite includes it BEFORE the staged
 colours, so a host that has never staged a song still opens its terminal at the
 song's opacity. That read is why THIS lane carries it — a paint dendrite reads
-the dress; the kitty lane names only the path.
+the dress; the kitty lane names only the path. The seed publishes
+`song/declared/hyprlock.conf` the same way: the declared song's lock-screen
+dress, rendered at build time by the lyra binary (`lyra livery emit hyprlock`)
+from the same venue-recoloured notes and the song's own `lockscreen.<ext>`,
+comments only when it ships none. The host's hyprlock lane sources it before
+`song/stage/hyprlock.conf`, so a host that has never staged a song locks in the
+declared one.
 
 ## How it composes
 

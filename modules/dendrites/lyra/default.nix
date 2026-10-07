@@ -129,6 +129,20 @@ let
     builtins.toJSON (livery.venueDelta config.aoide.livery committedLivery)
   );
 
+  # The declared song's lock-screen dress (CONTRACTS.md §4,
+  # `song/declared/hyprlock.conf`), rendered at build time by the lyra binary
+  # from the venue-recoloured notes above: the same bytes a stage of this
+  # song writes, with no second copy of the colour mapping to go stale. The
+  # picture is the shipped songbook's store copy; a song with no
+  # `lockscreen.<ext>` renders comments only.
+  declaredLockscreen = pkgs.runCommand "aoide-declared-hyprlock.conf" { } ''
+    export HOME=$TMPDIR AOIDE_ROOT=$TMPDIR/root
+    ${pkgs.aoide.rice}/bin/lyra livery emit hyprlock ${stageLivery} \
+      --song-dir ${pkgs.lyra-songbook}/share/lyra/songbook/${config.aoide.song} \
+      --out "$TMPDIR/hyprlock.conf"
+    cp "$TMPDIR/hyprlock.conf" "$out"
+  '';
+
   # The active song's terminal opacity (`aoide.livery.geometry.terminalOpacity`,
   # CONTRACTS.md §1): `null` is "no opinion" and leaves the kitty dendrite's
   # baked value standing. The seed below publishes it as the one-line
@@ -260,6 +274,14 @@ let
       printf 'background_opacity %s\n' "$(printf '%g' ${toString opacity})" > "$otmp"
       mv -f "$otmp" "${config.aoide.root}/song/declared/terminal-opacity.conf"
     ''}
+    # The declared song's lock-screen dress (CONTRACTS.md §4), rendered at
+    # build time. The lock sources it BEFORE the staged one, so a host that
+    # never staged anything locks in the declared song. It is always
+    # written, comments only for a song with no lock picture, so no earlier
+    # song's dress can outlive a switch.
+    ltmp=$(mktemp "${config.aoide.root}/song/declared/.hyprlock.conf.XXXXXX")
+    cp ${declaredLockscreen} "$ltmp"
+    mv -f "$ltmp" "${config.aoide.root}/song/declared/hyprlock.conf"
   '';
 
   # ── QML root — the full skeleton config installed into run/qml/ ────────────

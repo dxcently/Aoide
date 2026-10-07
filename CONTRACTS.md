@@ -2296,12 +2296,14 @@ No push: hyprlock reads its config afresh at every lock, so the next lock is
 already dressed.
 
 Reader: a host's hyprlock lane. It defines the ten variables with its own look
-as their values, `source`s this file, and only then writes its widgets, which
-name the variables. hyprlang substitutes the LAST definition for every line
-parsed after it, so a dressed file overrides the defaults and an undressed one
-leaves them. The lane's `$aoide_lock_name_font` default is fully transparent,
-so a lock no song dresses shows no name, and its name label carries a shadow,
-which is what lets the white read over any picture.
+as their values, `source`s `song/declared/hyprlock.conf` (below) and then this
+file, and only then writes its widgets, which name the variables. hyprlang
+substitutes the LAST definition for every line parsed after it, so a dressed
+file overrides the defaults and an undressed one leaves them, and the staged
+song wins over the declared one the moment one is staged. The lane's
+`$aoide_lock_name_font` default is fully transparent, so a lock no song dresses
+shows no name, and its name label carries a shadow, which is what lets the
+white read over any picture.
 
 Includer obligations. A variable appears only in the background's `color` and
 `path`, the input field's `outer_color`, `inner_color`, `font_color`,
@@ -2324,7 +2326,35 @@ bump.
 
 A song with no picture writes no variables, so it cannot undo a dress an
 earlier file set: the stage file clears what an earlier STAGED song left, but
-it does not mask a dress the host's own declared lock carries.
+it does not mask the dress `song/declared/hyprlock.conf` carries.
+
+### `song/declared/hyprlock.conf` — **v0**
+
+The DECLARED song's lock-screen dress, in the format of
+`song/stage/hyprlock.conf` above: `#` comment lines and, when the song ships a
+lock picture (§5), the ten variables.
+
+Writer: `home.activation.aoideSeedStage`'s seed script
+(`modules/dendrites/lyra/default.nix`), the run that publishes the other
+declared files. The content is rendered at BUILD time by the lyra binary, `lyra
+livery emit hyprlock <notes> --song-dir <song folder>`, over the same
+venue-recoloured notes the declared `livery.json` twin carries (`stageLivery`,
+§1's override tier), so the declared lock is recoloured exactly as the declared
+shell is, and the colour mapping lives in the emitter alone, never in a nix
+twin that could go stale. The picture is the build's store copy of the song's
+`lockscreen.<ext>`: a fixed path for as long as that activation lives. The seed
+only copies the store file into place (write-temp-then-rename), so Rust never
+writes `song/declared/`.
+
+Always present on a host that declares a song: comments only when the song
+ships no picture, so no earlier song's dress outlives a switch. Read-only for
+everyone else.
+
+Reader: the host's hyprlock lane, which sources it BEFORE
+`song/stage/hyprlock.conf`. That ordering is the whole contract: the declared
+file dresses the lock of a host that has never staged anything, and a stage
+overrides it the moment one runs. A missing file is a logged config error and
+the lane's defaults stand.
 
 ### `state/stage/sessions.json` / `hooks.json` — **v0**
 
@@ -6920,7 +6950,8 @@ field, nothing in `rice.nix`. Only a song that ships it dresses the lock
 screen, with the picture and colours from tiers it already authors
 (`song/stage/hyprlock.conf`, §4); a song that ships none leaves the lock as the
 venue has it, and deleting the file takes the opinion away with no trace. The
-name is the render surface's, `aoide.surfaces.lockscreen`.
+name is the render surface's, `aoide.surfaces.lockscreen`. The declared song's
+dress is rendered at build time (`song/declared/hyprlock.conf`, §4).
 
 The picture is authored at 16:9 and keeps its subject, the tile and the mark,
 inside the central ±20% of its height. The password field then sits at 26% of
