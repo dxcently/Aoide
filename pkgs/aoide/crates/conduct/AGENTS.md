@@ -508,16 +508,37 @@ in the message.
   connection; never leave a parked caller. `parse_command` refuses a blank
   `sessionId`, a nonsense `lines` and an unknown `clip` (clamping `lines` from
   above only), and `handle_conn` still ANSWERS a line naming that verb which
-  fails its gate (`bad-request`) — silence is not an answer. `run_core_bounded`
-  is the only way this module runs a child: a wall-clock deadline with kill +
-  `wait` (no zombie, no live child past the bound), pipes drained by
-  SLOT-COUNTED reader threads that are NEVER joined (`ReaderSlot`; a descendant
-  that inherited a pipe must cost a slot, never the deadline), and a partial
-  read DISCARDED rather than parsed when EOF does not arrive inside the grace.
-  Don't reintroduce a `join()` on a reader, and don't add a bound that one
-  timed-out tick can outrun. Refusals are audited; a successful poll is not
+  fails its gate (`bad-request`) — silence is not an answer. `run_bin_bounded`
+  (`run_core_bounded` is its core-binary wrapper; the picker's read calls it
+  with `lyra`) is the only way this module runs a READ's child: a wall-clock
+  deadline with kill + `wait` (no zombie, no live child past the bound), pipes
+  drained by SLOT-COUNTED reader threads that are NEVER joined (`ReaderSlot`; a
+  descendant that inherited a pipe must cost a slot, never the deadline), and a
+  partial read DISCARDED rather than parsed when EOF does not arrive inside the
+  grace. Don't reintroduce a `join()` on a reader, and don't add a bound that
+  one timed-out tick can outrun. Refusals are audited; a successful poll is not
   (one line per second per card is not a human gesture), and an audit line never
   carries an argument value.
+- **The picker's two verbs hold no draft rule, and the planner is the one place
+  a mode changes the plan.** `ricedraft` is `RiceDraftAction::from_wire` (the
+  ONE gate: `enter` needs a `safe_session_id`-shaped `name`, `new` and `save`
+  REFUSE one — an ignored field is a caller's mistake read as success — and a
+  line that fails it is dropped with no reply) → `rice_draft_plan(mode,
+  action)` (pure; the unlock step and the Declarative-`save` refusal live there
+  and nowhere else) → `dispatch_rice_draft` (the sequencer; `new`'s entering
+  step takes the `data.name` the save step answered). Never validate the
+  draft-name regex here — `aoide-song` is lyra-only and conduct must not depend
+  on it — and never pre-check that a draft exists: `rice mode draft` creates
+  one, so an `enter` is enter-or-create and a pre-check would only race it. The
+  unlock is a BARE `rice mode stage` (house rule 10); the toggle's lock
+  direction passes `AOIDE_DEFAULT_SONG`, this one must not. `drafts_song` and
+  the plan agree on ONE song per mode: declarative lists `stagingSong` because
+  an unlock lands there, and refuses `save` because the stage there is the
+  declared song — change one and the other moves with it. `ricedrafts` is a
+  READ: it answers on its own connection under `RICE_DRAFTS_TIMEOUT` (below the
+  client's 5 s reply timeout), a child that did not answer is a refusal and
+  never an empty list, and no audit line of either verb carries a draft or a
+  song name.
 
 - **`session bind` assigns continuity, never authority.** Keep the operation
   daemon-owned and local-only; no missing-daemon fallback. It does not load
@@ -2124,14 +2145,12 @@ in the message.
   report is delivered" (the remote-parent paragraph), and `EIDOLON-TRACE.md`'s
   "Second slice" beside the spool half: the two lanes are one conversation,
   and a doc that describes only the sending end is half a page.
-- A change to shellbridge's `sessionaction`/`projectaction`/`workspaceaction`
-  whitelists or reply shape updates `ShellBridge.qml`'s protocol comment
-  (`modules/facets/quickshell/qml/ShellBridge.qml`, which names the verbs it
-  answers) and `concepts/cli/Doors-and-Nodes.md`'s socket-command list, in the
-  same commit. `workspaceaction` (W-P5) is the ONE deliberate debt here: the
-  QML protocol line for it, and the bar's bind click in
-  `song/songbook/cadenza/widgets/`, are the cadenza rice slice's to write
-  (house rule 7 — bridge first), so the next commit touching either owes both.
+- A change to shellbridge's replying verbs — the
+  `sessionaction`/`projectaction`/`workspaceaction` whitelists and reply
+  shapes, the `sessiontrace`/`ricedrafts` reads — or to the fire-and-forget
+  `ricedraft` set updates `ShellBridge.qml`'s protocol comment
+  (`pkgs/lyra-shell/qml/ShellBridge.qml`, which names the verbs it answers) and
+  `concepts/cli/Doors-and-Nodes.md`'s socket-command list, in the same commit.
 - **`graph.json`'s compositor block (`doc::workspace_block`) is ONE seam.**
   `build_graph` publishes it and `aoide workspace list --json` prints it from
   the same function — never a second builder, never a reader re-deriving the

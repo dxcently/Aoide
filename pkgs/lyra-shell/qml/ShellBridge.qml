@@ -238,10 +238,12 @@ QtObject {
     // `riceDraft` is fire-and-forget through the shared queue, like
     // toggleRiceMode: no reply, and the outcome is a toast the daemon fires.
     // `enter` and `new` from the locked declarative mode unlock it first, so a
-    // caller re-reads stage/mode.json and riceDrafts to see what happened. Only
-    // `enter` takes a name, and a missing or empty one is sent as no name at all,
-    // so the daemon drops the line instead of entering a draft called "undefined".
-    // The daemon also refuses `new` and `save` carrying one.
+    // caller re-reads stage/mode.json and riceDrafts to see what happened; `save`
+    // is refused there (toast: unlock first). `enter` is enter-or-create: the CLI
+    // forks the stage into a name that does not exist yet, so a stale row comes
+    // back as a copy, not a refusal. Only `enter` takes a name, and a missing or
+    // empty one is sent as no name at all, so the daemon drops the line instead
+    // of entering a draft called "undefined".
     function riceDrafts(callback) {
         _ask({ cmd: "ricedrafts" }, callback,
              { ok: false, reason: "no-client", message: "shellbridge client unavailable" })

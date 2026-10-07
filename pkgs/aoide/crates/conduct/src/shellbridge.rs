@@ -210,13 +210,16 @@ pub enum BridgeCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RiceDraftAction {
     /// Route the stage into this draft. The name is one argv token and no
-    /// more: whether it is a valid draft name, and whether the draft exists,
-    /// is the CLI's call — `aoide-song` is lyra-only and conduct never
-    /// depends on it, so the regex lives in one place.
+    /// more: whether it is a valid draft name is the CLI's call —
+    /// `aoide-song` is lyra-only and conduct never depends on it, so the
+    /// regex lives in one place. Whether the draft EXISTS is nobody's check
+    /// here: `rice mode draft` forks the current stage into a valid name that
+    /// is not there yet, so an enter is enter-or-create.
     Enter { name: String },
     /// Mint the next free draft name from the staged song, then enter it.
     New,
-    /// Snapshot the stage as a draft, in whatever mode. Never changes mode.
+    /// Snapshot the stage as a draft of the staged song. Never changes mode,
+    /// and is refused while declarative is locked ([`rice_draft_plan`]).
     Save,
 }
 
@@ -686,27 +689,34 @@ fn notify(message: &str) {
 // ── the draft picker (`ricedraft`, `ricedrafts`) ──────────────────────────
 
 /// Pure plan: the `lyra` argv, in order and without `--json`, that one
-/// `ricedraft` action takes in this mode. `enter` and `new` route the stage
-/// into a draft, which `rice mode draft` refuses while declarative is
-/// locked, so from `Declarative` they unlock first — with a BARE
-/// `rice mode stage`, which restores the remembered `stagingSong` (house rule
-/// 10); passing `AOIDE_DEFAULT_SONG` here, as the toggle's lock direction
-/// does, would stage the declared song instead. `save` only reads the stage
-/// and never changes the mode, so it never unlocks. `new` plans only the
-/// save: the draft's name is minted by the CLI and is not known until that
-/// step has answered, so [`dispatch_rice_draft`] appends the entering step
-/// itself.
-fn rice_draft_plan(mode: RiceMode, action: &RiceDraftAction) -> Vec<Vec<String>> {
+/// `ricedraft` action takes in this mode, or the taught refusal that ends it.
+/// `enter` and `new` route the stage into a draft, which `rice mode draft`
+/// refuses while declarative is locked, so from `Declarative` they unlock
+/// first — with a BARE `rice mode stage`, which restores the remembered
+/// `stagingSong` (house rule 10); passing `AOIDE_DEFAULT_SONG` here, as the
+/// toggle's lock direction does, would stage the declared song instead. `save`
+/// never changes the mode, and it is refused while declarative is locked: the
+/// stage there is the DECLARED song (the lock re-pins it), `rice draft save`
+/// nests under the song `stage/livery.json` names, and the listing
+/// ([`drafts_song`]) names `stagingSong` — a save would land under a song the
+/// picker never shows. The unlock is one click away, so the refusal costs one
+/// click. `new` plans only the save: the draft's name is minted by the CLI and
+/// is not known until that step has answered, so [`dispatch_rice_draft`]
+/// appends the entering step itself.
+fn rice_draft_plan(mode: RiceMode, action: &RiceDraftAction) -> Result<Vec<Vec<String>>, &'static str> {
     let step = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<String>>();
     let mut plan = Vec::new();
-    if mode == RiceMode::Declarative && *action != RiceDraftAction::Save {
+    if mode == RiceMode::Declarative {
+        if *action == RiceDraftAction::Save {
+            return Err("declarative mode is locked — unlock first, then save the draft");
+        }
         plan.push(step(&["rice", "mode", "stage"]));
     }
     match action {
         RiceDraftAction::Enter { name } => plan.push(step(&["rice", "mode", "draft", name.as_str()])),
         RiceDraftAction::New | RiceDraftAction::Save => plan.push(step(&["rice", "draft", "save"])),
     }
-    plan
+    Ok(plan)
 }
 
 /// Run ONE planned step: `lyra <argv> --json`, waited for, exactly the toggle's
@@ -744,9 +754,10 @@ fn run_rice_step(argv: &[String]) -> (bool, String, Option<Value>) {
 /// Run ONE `ricedraft` action: [`rice_draft_plan`] for the current mode, each
 /// step through [`run_rice_step`], stopping at the first that fails. `Ok` is
 /// the last step's own CLI `message`; `Err((message, partial))` is the failing
-/// step's, with `partial` true when an earlier step had already succeeded —
-/// the mode may be unlocked, or a draft saved, and nothing here rolls it back:
-/// the toast says so, and the click that follows is one gesture away.
+/// step's (or the planner's refusal, before any step ran), with `partial` true
+/// when an earlier step had already succeeded — the mode may be unlocked, or a
+/// draft saved, and nothing here rolls it back: the toast says so, and the
+/// click that follows is one gesture away.
 ///
 /// `new` is the one action whose second step depends on the first's answer:
 /// the CLI mints the name (`rice draft save` with none), and the entering
@@ -754,7 +765,7 @@ fn run_rice_step(argv: &[String]) -> (bool, String, Option<Value>) {
 /// per human gesture, and killing a half-applied one to tidy up is worse than
 /// waiting.
 fn dispatch_rice_draft(action: &RiceDraftAction) -> Result<String, (String, bool)> {
-    let mut plan = rice_draft_plan(load_mode_marker().mode, action);
+    let mut plan = rice_draft_plan(load_mode_marker().mode, action).map_err(|why| (why.to_string(), false))?;
     let mut said = String::new();
     let mut ran = 0;
     while ran < plan.len() {
@@ -775,11 +786,13 @@ fn dispatch_rice_draft(action: &RiceDraftAction) -> Result<String, (String, bool
 }
 
 /// Pure decision: which song's drafts the picker lists, from the marker. The
-/// picker's `enter` from `Declarative` unlocks through a bare `rice mode
-/// stage`, which lands on the remembered `stagingSong` — so that is the song
-/// a declarative listing must name, ahead of `song` (the declared one the
-/// lock overwrote). Every other mode is already working on `song`;
-/// `stagingSong` is only the fallback for a marker that lacks it.
+/// picker's `enter` and `new` from `Declarative` unlock through a bare `rice
+/// mode stage`, which lands on the remembered `stagingSong` — so that is the
+/// song a declarative listing must name, ahead of `song` (the declared one the
+/// lock overwrote). Its `save` is refused there ([`rice_draft_plan`]), so no
+/// action ever writes under a song this listing does not name. Every other
+/// mode is already working on `song`; `stagingSong` is only the fallback for a
+/// marker that lacks it.
 fn drafts_song(m: &ModeMarker) -> Option<String> {
     match m.mode {
         RiceMode::Declarative => m.staging_song.clone().or_else(|| m.song.clone()),
@@ -3472,24 +3485,27 @@ exit 1
     }
 
     #[test]
-    fn rice_draft_plan_unlocks_only_declarative_and_never_for_a_save() {
+    fn rice_draft_plan_unlocks_declarative_for_enter_and_new_and_refuses_its_save() {
         let enter = RiceDraftAction::Enter { name: "draft-2".to_string() };
         let unlock = sv(&["rice", "mode", "stage"]);
         let save = sv(&["rice", "draft", "save"]);
         let go = sv(&["rice", "mode", "draft", "draft-2"]);
 
         // Declarative: `enter` and `new` unlock FIRST, bare — never a song.
-        assert_eq!(rice_draft_plan(RiceMode::Declarative, &enter), vec![unlock.clone(), go.clone()]);
-        assert_eq!(rice_draft_plan(RiceMode::Declarative, &RiceDraftAction::New), vec![unlock, save.clone()]);
-        // `save` only reads the stage, in every mode, and never unlocks.
-        for mode in [RiceMode::Staging, RiceMode::Declarative, RiceMode::Draft] {
-            assert_eq!(rice_draft_plan(mode, &RiceDraftAction::Save), vec![save.clone()], "{mode:?}");
-        }
+        assert_eq!(rice_draft_plan(RiceMode::Declarative, &enter), Ok(vec![unlock.clone(), go.clone()]));
+        assert_eq!(rice_draft_plan(RiceMode::Declarative, &RiceDraftAction::New), Ok(vec![unlock, save.clone()]));
+        // `save` there would nest under the DECLARED song, which the listing
+        // (the staged one) never shows: a taught refusal, nothing planned.
+        assert_eq!(
+            rice_draft_plan(RiceMode::Declarative, &RiceDraftAction::Save),
+            Err("declarative mode is locked — unlock first, then save the draft")
+        );
         // Staging and Draft are already unlocked: one step. `new` plans the
         // save alone — the entering step needs the name that step mints.
         for mode in [RiceMode::Staging, RiceMode::Draft] {
-            assert_eq!(rice_draft_plan(mode, &enter), vec![go.clone()], "{mode:?}");
-            assert_eq!(rice_draft_plan(mode, &RiceDraftAction::New), vec![save.clone()], "{mode:?}");
+            assert_eq!(rice_draft_plan(mode, &enter), Ok(vec![go.clone()]), "{mode:?}");
+            assert_eq!(rice_draft_plan(mode, &RiceDraftAction::New), Ok(vec![save.clone()]), "{mode:?}");
+            assert_eq!(rice_draft_plan(mode, &RiceDraftAction::Save), Ok(vec![save.clone()]), "{mode:?}");
         }
     }
 
@@ -3546,7 +3562,7 @@ case "$2 $3" in
   printf '{"status":"ok","message":"2 draft(s)","data":{"drafts":[{"song":"%s","name":"draft-1","savedAt":"2026-01-01T00:00:00Z","current":false},{"song":"%s","name":"draft-2","savedAt":null,"current":true}],"scope":"%s"}}\n' "$4" "$4" "$4" ;;
 "mode draft")
   if [ -f "$here/refuse-draft" ]; then
-    printf '{"status":"error","message":"no such draft","data":{"reason":"x"}}\n'; exit 1
+    printf '{"status":"error","message":"no song is currently staged","data":{"reason":"no-resolvable-song"}}\n'; exit 1
   fi
   printf '{"status":"ok","message":"routed %s","data":{}}\n' "$4" ;;
 *)
@@ -3592,7 +3608,7 @@ esac
     /// GATED on Unix with its reason (see [`stub_rice_bin`]).
     #[cfg(unix)]
     #[test]
-    fn an_enter_from_draft_is_one_step_and_a_save_from_declarative_never_unlocks() {
+    fn an_enter_from_draft_is_one_step_and_a_save_from_declarative_is_refused_unrun() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = stub_rice_bin("shellbridge-draft-one", r#"{"mode":"draft","song":"sonata","draft":"draft-1"}"#);
         let enter = RiceDraftAction::Enter { name: "draft-2".to_string() };
@@ -3601,6 +3617,14 @@ esac
 
         std::fs::write(root.join("mode.json"), r#"{"mode":"declarative","song":"sonata"}"#).unwrap();
         std::fs::remove_file(root.join("argv.log")).unwrap();
+        // The refusal is the first thing that happens: not partial, no child.
+        assert_eq!(
+            dispatch_rice_draft(&RiceDraftAction::Save),
+            Err(("declarative mode is locked — unlock first, then save the draft".to_string(), false))
+        );
+        assert!(stub_argv_log(&root).is_empty(), "a refused save starts no child");
+
+        std::fs::write(root.join("mode.json"), r#"{"mode":"staging","song":"sonata"}"#).unwrap();
         assert_eq!(dispatch_rice_draft(&RiceDraftAction::Save), Ok("saved".to_string()));
         assert_eq!(stub_argv_log(&root), ["rice draft save --json"]);
         let _ = std::fs::remove_dir_all(&root);
@@ -3619,12 +3643,12 @@ esac
         let enter = RiceDraftAction::Enter { name: "nope".to_string() };
         // The unlock ran and the entering step refused: the mode is now
         // unlocked, and the answer says so rather than reading as a clean no.
-        assert_eq!(dispatch_rice_draft(&enter), Err(("no such draft".to_string(), true)));
+        assert_eq!(dispatch_rice_draft(&enter), Err(("no song is currently staged".to_string(), true)));
         assert_eq!(stub_argv_log(&root), ["rice mode stage --json", "rice mode draft nope --json"]);
 
         // Already unlocked: the same refusal is the FIRST step, nothing ran.
         std::fs::write(root.join("mode.json"), r#"{"mode":"staging","song":"sonata"}"#).unwrap();
-        assert_eq!(dispatch_rice_draft(&enter), Err(("no such draft".to_string(), false)));
+        assert_eq!(dispatch_rice_draft(&enter), Err(("no song is currently staged".to_string(), false)));
         let _ = std::fs::remove_dir_all(&root);
     }
 

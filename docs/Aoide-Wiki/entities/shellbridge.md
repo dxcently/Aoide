@@ -57,7 +57,8 @@ issues the socket command, never shells out. The command set is narrow (jump
 only; prune remains an open thread, see below).
 
 **The read-only trace query** (`{cmd:"sessiontrace", sessionId, lines, clip}`)
-is the one READ the socket answers: it re-execs the existing CLI —
+is one of the socket's two READs (the draft picker's `ricedrafts`, below, is the
+other): it re-execs the existing CLI —
 `aoide session trace <id> --tail N --clip line|detail --json`,
 [[Eidolon-Trace]] — and replies with one JSON line of STEPS (one object per
 emitted content block: thinking · say · tool · result · settled · user · other),
@@ -81,7 +82,7 @@ re-execs of the sibling `lyra` (`rice` lives there, as `ricemode` does) and
 neither holding a draft rule of its own — the CLI owns the name regex, the
 minting and every refusal, and conduct never depends on the song crate.
 
-`{cmd:"ricedrafts"}` is the socket's second READ. It names the song through
+`{cmd:"ricedrafts"}` is the socket's other READ. It names the song through
 the mode marker — `stagingSong` first while declarative is locked (the song an
 unlock lands on), `song` first in every other mode — and re-execs `lyra rice
 draft list <song> --json` under a 4 s wall clock, below the QML client's own
@@ -94,18 +95,31 @@ audited as `ricedrafts-refused`; a successful read is not.
 `{cmd:"ricedraft", action:"enter"|"new"|"save", name?}` is the gesture, and
 fire-and-forget like `ricemode`: the outcome is a `notify-send` toast carrying
 the CLI's own message, never a reply. `enter` needs a `name` that is one argv
-token (the CLI judges whether it is a valid, existing draft); `new` and `save`
-refuse a `name` outright, so a mistaken caller is dropped instead of misread as
-success. `enter` runs `rice mode draft <name>`; `new` runs `rice draft save`
-with no name, which mints the lowest free `draft-<n>` of the staged song, then
-enters the `data.name` it answered with; `save` runs `rice draft save` and
-never changes the mode. Entering a draft is refused while declarative is
-locked, so `enter` and `new` from there first run a BARE `rice mode stage` —
-which restores the remembered `stagingSong` (house rule 10), where the toggle's
-own lock direction passes the declared song. Steps stop at the first failure.
-A failure after an earlier step succeeded is `partial`: nothing rolls back (the
-unlock stands, a minted draft stays saved), and the toast says so, prefixed
-`partial: `. The audit line is one per action, event `ricedraft`,
+token and nothing more; `new` and `save` refuse a `name` outright, and an
+`enter` with none usable is refused the same way, so a mistaken caller is
+dropped instead of misread as success. Whether the name is a valid draft name
+is the CLI's call, and so is what happens to it: `rice mode draft <name>`
+ENTERS or CREATES, forking the current stage into a valid name that does not
+exist yet. So `enter` is enter-or-create, and the bridge cannot tell the two
+apart: a stale picker row, or a draft dropped elsewhere since the last
+`ricedrafts`, comes back as a fresh copy of the stage rather than a refusal.
+`enter` runs `rice mode draft <name>`; `new` runs `rice draft save` with no
+name, which mints the lowest free `draft-<n>` of the staged song, then enters
+the `data.name` it answered with; `save` runs `rice draft save` and never
+changes the mode.
+
+Entering a draft is refused while declarative is locked, so `enter` and `new`
+from there first run a BARE `rice mode stage` — which restores the remembered
+`stagingSong` (house rule 10), where the toggle's own lock direction passes the
+declared song. `save` has no such step: it is REFUSED while declarative is
+locked, with the toast `declarative mode is locked — unlock first, then save
+the draft`, because the lock re-pins the stage to the declared song and `rice
+draft save` nests under the song the stage names, while `ricedrafts` lists
+`stagingSong`. A save there would land under a song the picker never shows. The
+refusal runs nothing, and is `failed`, not `partial`. Steps stop at the first
+failure. A failure after an earlier step succeeded is `partial`: nothing rolls
+back (the unlock stands, a minted draft stays saved), and the toast says so,
+prefixed `partial: `. The audit line is one per action, event `ricedraft`,
 `ricedraft-partial` or `ricedraft-failed`, detail `ricedraft action <enter|
 new|save>: <ok|partial|failed>` — never a draft or song name, which only the
 toast carries. A malformed line is dropped with the plain `unparseable` audit

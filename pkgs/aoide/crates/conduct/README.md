@@ -781,8 +781,8 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   alone, the same generic path every other harness takes.
 - `shellbridge`, `herald` — files only; their CLI commands (registry lines)
   moved to `lyra` at P-A2, but both stay resident here (see charter smudge
-  below). The socket answers two commands with a reply, run through the
-  same sequencer over either subject those two commands name by: a SESSION
+  below). The socket answers five commands with a reply. Two of them run
+  through the same sequencer over either subject they name by: a SESSION
   id (`sessionaction`) or a PROJECT name (`projectaction`, zero-session — no
   session id anywhere on that wire, in its plan, its reply, or its audit
   line; the reply's identity key is `name` where `sessionaction`'s is
@@ -806,9 +806,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   with no roots for a host uses `add` instead, so a host with nothing to
   replace keeps its existing roots rather than being wiped); `removehost`
   runs `project remove <name> --host <host>` and requires exactly one host.
-  `workspaceaction` is the third replying command, a closed two-action
-  whitelist of its own (`set` / `clear`, `shellbridge.rs::WorkspaceBinding`)
-  for the bar's bind click: zero-session too, and it plans the exact argv the
+  `workspaceaction` is a third closed whitelist of its own, two actions
+  (`set` / `clear`, `shellbridge.rs::WorkspaceBinding`) for the bar's bind
+  click: zero-session too, and it plans the exact argv the
   CLI takes — `aoide workspace set <ws> <project> [--new]` /
   `aoide workspace clear <ws>` — so no second binding exists anywhere. It is
   the one acknowledged action that resolves a field itself: an omitted
@@ -827,7 +827,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   (nothing parsed to echo) — and a malformed line that NAMES this verb is
   ANSWERED with that refusal rather than dropped, the same rule
   `sessiontrace` holds: one rule for every parked caller.
-  Every other socket command stays fire-and-forget.
+  The other two replying commands are the READS, `sessiontrace` and
+  `ricedrafts` (both below); every other socket command, `ricemode` and
+  `ricedraft` among them, stays fire-and-forget.
 - `commands` — this crate's CLI commands, registered from one `register()`
   call (`conduct/src/commands/graph.rs`, still that file's name
   post-cutover) — the `graph` family narrowed at task #101 R1 to the bare
@@ -904,6 +906,37 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   DISCARDED (`no-answer`) rather than answered from partially. Audits refuse,
   never every poll: one line per second per card is not a human gesture, and the
   audit line carries no argument values.
+- **The draft picker's two verbs over the bridge (`shellbridge.rs::RiceDrafts`,
+  `RiceDraft`).** Both re-exec the sibling `lyra` (`daemon::bin::rice_bin()`):
+  `rice` lives there and conduct never depends on the song crate, so the
+  draft-name regex, the minting and every refusal stay the CLI's.
+  `{"cmd":"ricedrafts"}` is the second READ, answered on its own connection and
+  thread like `sessiontrace`: `drafts_song` names the song from the mode
+  marker (`stagingSong` first while declarative is locked, since an unlock
+  lands there; `song` first otherwise), `run_bin_bounded` — the runner
+  `run_core_bounded` wraps — holds `rice draft list <song> --json` to 4 s,
+  under the QML client's 5 s, and the answer is `{ok, mode, song, drafts:
+  [{name, savedAt, current}]}` or `{ok:false, reason: cli-failed|no-answer,
+  message}`: a child that did not answer is never an empty list. With no song
+  the answer is empty and nothing is spawned.
+  `{"cmd":"ricedraft","action":"enter|new|save","name"?}` is fire-and-forget
+  like `ricemode`, its outcome a toast through the shared `notify`. The set is
+  closed (`RiceDraftAction::from_wire`: `enter` takes a `name` that is one argv
+  token, `new` and `save` refuse one, so a mistaken caller is dropped rather
+  than read as success), planned by the pure `rice_draft_plan` and run step by
+  step by `dispatch_rice_draft`, each step `lyra rice … --json`, unbounded,
+  stopping at the first failure — `partial` when an earlier step had
+  succeeded, which nothing rolls back. From declarative, `enter` and `new` first
+  run a BARE `rice mode stage` (house rule 10: it restores `stagingSong`,
+  where the toggle's lock direction passes the declared song), and `save` is a
+  taught refusal, `declarative mode is locked — unlock first, then save the
+  draft`: the stage there is the declared song, `rice draft save` nests under
+  the song the stage names, and the listing names `stagingSong`, so a save
+  would land where the picker never looks. `enter` is enter-or-create: `rice
+  mode draft` forks the stage into a name that does not exist yet, and the
+  bridge cannot tell. The audit line is one per action
+  (`ricedraft action <enter|new|save>: <ok|partial|failed>`) and carries
+  neither a draft nor a song name.
 - **The durable session ledger + resurrect (P-D8, `docs/architecture/
   AOIDED.md`'s "L5"):** `graph/doc.rs::ledger_session_exit` is the ONE
   shared call both `session_store.rs::do_session_end_inner` (a clean

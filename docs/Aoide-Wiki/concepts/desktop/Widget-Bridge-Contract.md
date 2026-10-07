@@ -198,7 +198,7 @@ is not resolved yet. The widget sends only the sessionId it already holds — ne
 a stale or empty address. (The bare `focuswindow` command remains for a window with
 no session id.)
 
-## The trace query — the one READ the bridge answers
+## The trace query — a READ the bridge answers
 
 `{cmd:"sessiontrace", sessionId, lines, clip:"line"|"detail"}` asks for ONE
 session's emitted blocks: what it THOUGHT, SAID, called and got back. The daemon
