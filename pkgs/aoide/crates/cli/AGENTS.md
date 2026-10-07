@@ -55,6 +55,13 @@ Gated with reasons, never stubbed: the two `#!/bin/sh` plugin-shim tests (a
   different. Never redact by mutating `Outcome.message`; only the stored copy
   is withheld.
 
+- **`aoided` starts only on a proven launch.** Its argv is parsed before
+  `migrate_root_once` or any bind; an unknown argument is a refusal, never a
+  start (`tests/aoided_argv.rs` asserts nothing is created). A new `aoided`
+  flag extends `parse` and the usage page together.
+- **SIGPIPE is default in `aoide`, ignored in `aoided`.** The daemon writes to
+  peers that vanish and must see EPIPE as an `io::Error`, never die of a signal.
+
 ## Extension points
 
 - **A new root-coupled command** (one that must read the assembled

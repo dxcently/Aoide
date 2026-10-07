@@ -290,7 +290,9 @@ aoided
 - Without `XDG_RUNTIME_DIR` the resolver falls back to `/run/user/<uid>`, which
   a box with no logind has not created — set it, or point
   `AOIDE_DAEMON_SOCKET` (and `AOIDE_DAEMON_EVENTS`) somewhere short and private.
-- `aoided --audit-log <path>` overrides the log directly.
+- `aoided --audit-log <path>` overrides the log directly. `aoided --version` and
+  `aoided --help` answer and exit; any other argument is refused (exit 2) and
+  starts nothing, so probing a deployed box never launches a second daemon.
 - **Two daemons, one pathname.** A resident `aoided` outlives the shell that
   started it and keeps holding the socket *inode* at that pathname; a second one
   binds the same pathname and the live path silently points at the newer

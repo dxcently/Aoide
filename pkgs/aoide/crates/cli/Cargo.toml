@@ -29,6 +29,9 @@ path = "src/lib.rs"
 serde = { workspace = true }
 serde_json = { workspace = true }
 aoide-protocol = { workspace = true }
+# `bin/aoide.rs` restores SIGPIPE to its default so a closed pipe ends the
+# process quietly; `aoided` never does (a daemon must see EPIPE as an error).
+libc = { workspace = true }
 aoide-storage = { workspace = true }
 aoide-conduct = { workspace = true }
 aoide-client = { workspace = true }

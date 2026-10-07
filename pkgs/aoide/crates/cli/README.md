@@ -10,7 +10,10 @@ correspondence").
 
 ## Named seams (what it exposes)
 
-- `bin/{aoide,aoided}` — the two binary entry points.
+- `bin/{aoide,aoided}` — the two binary entry points. `aoided` parses its argv
+  before it touches the root or binds anything: `--audit-log <path>`,
+  `--version`, `--help`, and a taught exit-2 refusal for the rest. `aoide`
+  restores the default SIGPIPE so `aoide … | head` ends quietly.
 - `cli`/`dispatch` — argv parsing and the dispatcher, over
   `aoide_protocol::door::run`'s shared skeleton with core's own `special`
   hook (`mcp serve --stdio`, `a2a serve`, `mail serve` (the mail adapter,

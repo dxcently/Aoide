@@ -693,7 +693,7 @@ Contract guarantees:
   `data.detail` (the raw OS or serde text, for logs; the text render never
   prints it). The human render of an error or usage outcome also prints each
   top-level `data` list of strings (`errors`, `problems`) under its key.
-  `pkgs/aoide/crates/AGENTS.md` defines the shape for implementers. By that rule `mesh charter show` with no charter in force and a `mail poll` a node refused exit `1`, and `mail send --hold` to `self/…` exits `2`. A blank or whitespace-only value counts as missing for a required argument, a required flag and a `one_of` group.
+  `pkgs/aoide/crates/AGENTS.md` defines the shape for implementers. `aoided` takes only `--audit-log <path>`, `--version` and `--help`; any other argument, or `--audit-log` without a path, is this same exit-`2` refusal (a near flag is the fix) and the daemon is never started. By that rule `mesh charter show` with no charter in force and a `mail poll` a node refused exit `1`, and `mail send --hold` to `self/…` exits `2`. A blank or whitespace-only value counts as missing for a required argument, a required flag and a `one_of` group.
 - `external` (optional array, task #138) — external subcommands: `aoide foo`
   with no registered `foo` falls through to an executable `aoide-foo` on
   `PATH`, the same pattern git/cargo use for their own plugins (`aoide

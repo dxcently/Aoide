@@ -15,27 +15,135 @@
 
 use aoide::daemon;
 use aoide::dispatch;
+use aoide_protocol::output::{Fix, Kind, Outcome};
+use aoide_protocol::registry::AOIDE_VERSION;
+use aoide_protocol::{door, suggest};
+use std::path::PathBuf;
+
+const USAGE: &str = "aoided — the resident Aoide daemon: one policy surface, one gate, one audit log
+usage: aoided [--audit-log <path>]
+       aoided --version
+       aoided --help
+
+  --audit-log <path>  write the audit log there instead of $AOIDE_ROOT/log
+  --version           print the version and exit
+  --help              print this page and exit
+
+aoided takes no other arguments; it runs in the foreground until stopped.";
+
+const FLAGS: [&str; 3] = ["--audit-log", "--version", "--help"];
+
+#[derive(Debug, PartialEq)]
+enum Launch {
+    Help,
+    Version,
+    Run { audit_log: Option<PathBuf> },
+}
+
+fn parse(argv: &[String]) -> Result<Launch, Outcome> {
+    let (mut help, mut version, mut audit_log) = (false, false, None);
+    let mut args = argv.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--help" => help = true,
+            "--version" => version = true,
+            "--audit-log" => match args.next().filter(|v| !v.starts_with("--")) {
+                Some(path) => audit_log = Some(PathBuf::from(path)),
+                None => {
+                    return Err(Outcome::refuse(
+                        "aoided",
+                        Kind::Usage,
+                        "`--audit-log` needs a path",
+                        "it names the file the daemon appends its audit log to",
+                        Fix::Run("aoided --audit-log <path>".into()),
+                    ))
+                }
+            },
+            other => {
+                let fix = match suggest::closest(other, FLAGS, 1).first() {
+                    Some(near) => Fix::Run(format!("aoided {near}")),
+                    None => Fix::Run("aoided --help".into()),
+                };
+                return Err(Outcome::refuse(
+                    "aoided",
+                    Kind::Usage,
+                    format!("`{other}` is not an aoided argument"),
+                    "aoided takes only --audit-log <path>, --version and --help, and starts nothing on anything else",
+                    fix,
+                ));
+            }
+        }
+    }
+    Ok(if help {
+        Launch::Help
+    } else if version {
+        Launch::Version
+    } else {
+        Launch::Run { audit_log }
+    })
+}
 
 fn main() {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let audit_log = match parse(&argv) {
+        Ok(Launch::Help) => return println!("{USAGE}"),
+        Ok(Launch::Version) => return println!("aoided {AOIDE_VERSION}"),
+        Ok(Launch::Run { audit_log }) => audit_log,
+        Err(refusal) => std::process::exit(door::emit(&refusal, false)),
+    };
+
     // One-shot, idempotent `~/Aoide` → `$AOIDE_ROOT` migration (L-C2, task
     // #107) — see `aoide_storage::fs::root`'s own doc for why this runs
-    // here, explicitly, rather than hanging off a path getter.
+    // here, explicitly, rather than hanging off a path getter. It runs only
+    // once the argv has proven this is a launch: a probe touches nothing.
     aoide_storage::fs::migrate_root_once();
 
-    // Allow `aoided --audit-log <path>`; else use the aoide.auditLog default.
-    let argv: Vec<String> = std::env::args().skip(1).collect();
-    let log = argv
-        .iter()
-        .position(|a| a == "--audit-log")
-        .and_then(|i| argv.get(i + 1))
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(daemon::default_audit_log);
-
+    let log = audit_log.unwrap_or_else(daemon::default_audit_log);
     let socket = daemon::socket_path();
     let events = daemon::events_path(&socket);
 
     if let Err(e) = daemon::run_loop(socket, events, log, dispatch::registry(), dispatch::dispatch) {
         eprintln!("aoided: {e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn argv(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn no_arguments_launches_on_the_ambient_log() {
+        assert_eq!(parse(&[]).unwrap(), Launch::Run { audit_log: None });
+    }
+
+    #[test]
+    fn audit_log_takes_its_path() {
+        assert_eq!(parse(&argv(&["--audit-log", "/x/log"])).unwrap(), Launch::Run { audit_log: Some("/x/log".into()) });
+    }
+
+    #[test]
+    fn audit_log_without_a_path_is_usage() {
+        for a in [argv(&["--audit-log"]), argv(&["--audit-log", "--version"])] {
+            assert_eq!(parse(&a).unwrap_err().render(false).1, 2);
+        }
+    }
+
+    #[test]
+    fn a_typo_is_refused_with_the_near_flag() {
+        let (text, code) = parse(&argv(&["--verison"])).unwrap_err().render(false);
+        assert_eq!(code, 2);
+        assert!(text.contains("aoided --version"), "{text}");
+    }
+
+    #[test]
+    fn a_far_argument_points_at_help() {
+        let (text, code) = parse(&argv(&["start"])).unwrap_err().render(false);
+        assert_eq!(code, 2);
+        assert!(text.contains("aoided --help"), "{text}");
     }
 }

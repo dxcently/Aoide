@@ -99,7 +99,7 @@ aoide daemon [--audit-log <path>] [--json]
 - **Notes:** walking skeleton — the audit append and the gate are real code
   paths; the event bus and subscription model are in-memory types, and the
   full event loop is not implemented. The standalone `aoided` binary
-  (`pkgs/aoide/crates/cli/src/bin/aoided.rs`, takes `--audit-log <path>`,
+  (`pkgs/aoide/crates/cli/src/bin/aoided.rs`, takes `--audit-log <path>`, answers `--version`/`--help`, refuses any other argument,
   prints the status JSON to stdout) is the same code path a systemd unit
   launches. See [[Governance]].
 
