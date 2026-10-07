@@ -7,6 +7,9 @@ song/declared/
 # Per-song scratch drafts (song/songbook/<song>/drafts/) — nested under the
 # song they vary, never committed/declared truth (that's the whole point).
 song/songbook/*/drafts/
+# Per-song undo history (song/songbook/<song>/takes/) — the machine's own, and
+# `lyra rice declare` never copies it, so a hand-copied one stays untracked.
+song/songbook/*/takes/
 
 # pi-subagents' runtime artifacts (parent-orchestrator runs):
 .pi-subagents/

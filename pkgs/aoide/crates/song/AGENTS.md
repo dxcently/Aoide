@@ -21,12 +21,22 @@
   survives for `rice declare`'s commit-in step only.
 - **§7.5's three cases, in order, and case 1 must stay nix-free.** Built in
   with no DIFFERING machine copy (absent counts, and so does a match over what
-  the seed SHIPS — `MACHINE_RUNTIME_DIRS`, the machine's own `takes/`/`drafts/`
-  (NOT `elements/`, which is song-authored input) — are NOT differences in the
-  song, or a snapshot would disable
-  staging on a host with no nix and report a built-in song as not built in)
-  stages from the baked baseline; everything else is the generator; no nix makes
-  everything else a refusal.
+  the seed SHIPS — `MACHINE_RUNTIME_DIRS`, the machine's own top-level
+  `takes/`/`drafts/` (NOT `elements/`, which is song-authored input) — are NOT
+  differences in the song, or a snapshot would disable staging on a host with
+  no nix and report a built-in song as not built in) stages from the baked
+  baseline; everything else is the generator; no nix makes everything else a
+  refusal.
+- **`MACHINE_RUNTIME_DIRS` names top-level directories, in both consumers.**
+  `trees_equal` filters the list at the song folder's root call only, and
+  `copy_tree_atomic`'s `skip` matches the root's entries by name only (before
+  the file-type branch, so a symlinked or file-typed `takes` is skipped too)
+  and passes `&[]` down; a song's own `widgets/takes/` is content, never
+  scratch. `lyra rice declare` is the second consumer: the checkout carries
+  the song, not the machine's undo history and scratch, so it copies through
+  `copy_tree_atomic` with the list and keeps no tree copy of its own. A name
+  added to the list changes both §7.5's comparison and what a declare leaves
+  behind.
 - **A staged song's LENDERS come with it.** `widget_owners` reads the owners its
   manifest entry names and `sync_song_widgets` carries each lender's `widgets/`
   into `run/qml/songs/<owner>/` — a borrowed slot resolves to

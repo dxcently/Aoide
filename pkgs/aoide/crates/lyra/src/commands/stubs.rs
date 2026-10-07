@@ -29,7 +29,7 @@ fn unimplemented(_inv: &Invocation) -> Outcome {
 pub fn register_rice_late(r: &mut Registry) {
     r.insert(cmd!(
         path: ["rice", "declare"],
-        summary: "Copy a composed song from $AOIDE_ROOT/songbook/<name> into the checkout's song/songbook/<name>, so it can be committed. The gated rebuild itself is the user's own git commit + nix switch, never this command.",
+        summary: "Copy a composed song from $AOIDE_ROOT/song/songbook/<name> into the checkout's song/songbook/<name>, so it can be committed, less the machine's top-level takes/ and drafts/. The gated rebuild itself is the user's own git commit + nix switch, never this command.",
         args: [arg!("name", "string", true, "Rice/song name to declare.")],
         flags: [],
         gated: true,
@@ -53,15 +53,17 @@ pub fn register_rice_late(r: &mut Registry) {
 
 /// `rice declare <name>` — the copy half of the stage-vs-commit split (house
 /// rule 2: the user gates the rebuild, never this command). Copies the
-/// composed song `$AOIDE_ROOT/songbook/<name>/` into the checkout's
+/// composed song `$AOIDE_ROOT/song/songbook/<name>/` into the checkout's
 /// `song/songbook/<name>/` (`aoide_storage::fs::flake_root()`,
 /// `$AOIDE_FLAKE_ROOT` override, default `<home>/Aoide`) — composing lives
 /// in the runtime root, committing lives in the checkout git tracks, and
-/// this is the seam between them. Nothing beyond the copy: no `git add`, no
-/// rebuild proposal, no `nix eval` — those stay the user's own
-/// git/rebuild-gate steps. Overwrites only files whose bytes actually
-/// differ (never touches a byte-identical destination file), so a repeat
-/// declare with nothing new is a true no-op.
+/// this is the seam between them. The machine's own top-level `takes/` and
+/// `drafts/` (`aoide_song::widgets::MACHINE_RUNTIME_DIRS`) stay behind: the
+/// checkout carries the song, not the machine's undo history and scratch.
+/// Nothing beyond the copy: no `git add`, no rebuild proposal, no `nix eval`
+/// — those stay the user's own git/rebuild-gate steps. Overwrites only files
+/// whose bytes actually differ (never touches a byte-identical destination
+/// file), so a repeat declare with nothing new is a true no-op.
 fn handle_rice_declare(inv: &Invocation) -> Outcome {
     let name = match inv.args.first() {
         Some(n) => n.clone(),
@@ -71,12 +73,11 @@ fn handle_rice_declare(inv: &Invocation) -> Outcome {
         }
     };
 
-    // Review fix (different-Sonnet pass on 07a42a0): `name` is joined
-    // unsanitized into both `songbook_dir` (the runtime root) and the
-    // checkout's `song/songbook/` below — without this check a `..`-shaped
-    // name escapes both roots (arbitrary read from `src`, arbitrary write
-    // to `dst`). Same validator `rice compose`/`rice mode` already gate on
-    // (`aoide_song::compose::valid_song_name`,
+    // `name` is joined unsanitized into both `songbook_dir` (the runtime
+    // root) and the checkout's `song/songbook/` below — without this check a
+    // `..`-shaped name escapes both roots (arbitrary read from `src`,
+    // arbitrary write to `dst`). Same validator `rice compose`/`rice mode`
+    // already gate on (`aoide_song::compose::valid_song_name`,
     // `^[a-z0-9][a-z0-9-]*$` — rejects `..`/`/` by construction), checked
     // BEFORE either path is built, not after.
     if !aoide_song::compose::valid_song_name(&name) {
@@ -117,10 +118,21 @@ fn handle_rice_declare(inv: &Invocation) -> Outcome {
 
     let dst = checkout.join("song").join("songbook").join(&name);
     let mut changed = Vec::new();
-    if let Err(e) = copy_song_tree(&src, &dst, &mut changed) {
+    if let Err(e) = aoide_song::widgets::copy_tree_atomic(
+        &src,
+        &dst,
+        aoide_song::widgets::MACHINE_RUNTIME_DIRS,
+        &mut changed,
+    ) {
         return Outcome::error(
             "rice.declare",
-            format!("copying {} into {} failed: {e}", src.display(), dst.display()),
+            format!(
+                "copying {} into {} failed at {}: {}",
+                src.display(),
+                dst.display(),
+                e.target,
+                e.error
+            ),
         )
         .with_data(json!({ "reason": "copy-failed", "name": name }));
     }
@@ -134,36 +146,6 @@ fn handle_rice_declare(inv: &Invocation) -> Outcome {
         .gated(true)
         .changed(changed)
         .with_data(json!({ "name": name, "checkout": dst.to_string_lossy() }))
-}
-
-/// Recursively copy `src` into `dst`, unfiltered — mirrors `aoide-song`'s
-/// own `widgets.rs::copy_tree_atomic` shape (a destination file whose bytes
-/// already match the source is left untouched, and not counted as changed);
-/// a separate, dozen-line copy rather than a shared helper since that
-/// function is private to its own module and this crate does not otherwise
-/// depend on it.
-fn copy_song_tree(
-    src: &std::path::Path,
-    dst: &std::path::Path,
-    changed: &mut Vec<String>,
-) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let dst_path = dst.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_song_tree(&entry.path(), &dst_path, changed)?;
-            continue;
-        }
-        let bytes = std::fs::read(entry.path())?;
-        if std::fs::read(&dst_path).map(|existing| existing == bytes).unwrap_or(false) {
-            continue;
-        }
-        aoide_storage::fs::atomic_write_bytes(&dst_path, &bytes)?;
-        changed.push(dst_path.to_string_lossy().into_owned());
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -186,9 +168,9 @@ mod tests {
         assert_eq!(out.status, crate::output::Status::Usage);
     }
 
-    /// Review fix (different-Sonnet pass on 07a42a0): a traversal-shaped
-    /// name must be refused BEFORE it ever reaches `songbook_dir`/the
-    /// checkout join — same pattern `song/src/commands/mode.rs`'s
+    /// A traversal-shaped name must be refused BEFORE it ever reaches
+    /// `songbook_dir`/the checkout join — same pattern
+    /// `song/src/commands/mode.rs`'s
     /// `current_staged_song_rejects_a_hand_edited_path_traversal_song_field`
     /// pins for the sibling stage-file case. No env override needed: the
     /// name check runs before any path is even built.
@@ -261,6 +243,75 @@ mod tests {
         let out2 = handle_rice_declare(&inv(&["dusk"]));
         assert_eq!(out2.status, crate::output::Status::Ok);
         assert!(out2.changed.is_empty(), "byte-identical re-declare copies nothing");
+
+        let _ = std::fs::remove_dir_all(&stage_root);
+        let _ = std::fs::remove_dir_all(&checkout);
+    }
+
+    #[test]
+    fn the_machines_takes_and_drafts_never_reach_the_checkout() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
+        let stage_root = unique_tmp("declare-scratch");
+        std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("song").join("stage"));
+        let songbook = stage_root.join("song").join("songbook").join("dusk");
+        std::fs::create_dir_all(songbook.join("takes")).unwrap();
+        std::fs::create_dir_all(songbook.join("drafts").join("neon")).unwrap();
+        std::fs::create_dir_all(songbook.join("widgets").join("takes")).unwrap();
+        std::fs::create_dir_all(songbook.join("elements").join("x")).unwrap();
+        std::fs::write(songbook.join("livery.json"), "{}").unwrap();
+        std::fs::write(songbook.join("takes").join("head.json"), "{}").unwrap();
+        std::fs::write(songbook.join("drafts").join("neon").join("livery.json"), "{}").unwrap();
+        std::fs::write(songbook.join("widgets").join("takes").join("Bar.qml"), "").unwrap();
+        std::fs::write(songbook.join("elements").join("x").join("element.json"), "{}").unwrap();
+
+        let checkout = unique_tmp("declare-scratch-checkout");
+        std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
+
+        let out = handle_rice_declare(&inv(&["dusk"]));
+        assert_eq!(out.status, crate::output::Status::Ok, "{out:?}");
+        let dst = checkout.join("song").join("songbook").join("dusk");
+        assert!(dst.join("livery.json").exists());
+        assert!(!dst.join("takes").exists(), "takes/ is the machine's undo history");
+        assert!(!dst.join("drafts").exists(), "drafts/ is the machine's scratch");
+        assert!(
+            dst.join("widgets").join("takes").join("Bar.qml").exists(),
+            "only the song folder's top-level scratch names are skipped"
+        );
+        assert!(
+            dst.join("elements").join("x").join("element.json").exists(),
+            "elements/ is song-authored input and is carried"
+        );
+
+        let _ = std::fs::remove_dir_all(&stage_root);
+        let _ = std::fs::remove_dir_all(&checkout);
+    }
+
+    #[test]
+    fn a_takes_symlink_is_skipped_and_does_not_fail_the_declare() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_FLAKE_ROOT"]);
+        let stage_root = unique_tmp("declare-takes-link");
+        std::env::set_var("AOIDE_STAGE_DIR", stage_root.join("song").join("stage"));
+        let songbook = stage_root.join("song").join("songbook").join("dusk");
+        let elsewhere = stage_root.join("elsewhere");
+        std::fs::create_dir_all(&songbook).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(songbook.join("livery.json"), "{}").unwrap();
+        std::fs::write(elsewhere.join("head.json"), "{}").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, songbook.join("takes")).unwrap();
+
+        let checkout = unique_tmp("declare-takes-link-checkout");
+        std::env::set_var("AOIDE_FLAKE_ROOT", &checkout);
+
+        let out = handle_rice_declare(&inv(&["dusk"]));
+        assert_eq!(out.status, crate::output::Status::Ok, "{out:?}");
+        let dst = checkout.join("song").join("songbook").join("dusk");
+        assert!(dst.join("livery.json").exists());
+        assert!(
+            std::fs::symlink_metadata(dst.join("takes")).is_err(),
+            "a takes symlink is skipped by name, never followed or copied"
+        );
 
         let _ = std::fs::remove_dir_all(&stage_root);
         let _ = std::fs::remove_dir_all(&checkout);

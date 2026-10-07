@@ -1998,9 +1998,10 @@ song/songbook/sonata/drafts/neon-night/
 No metadata file: the draft name is the directory name, the base song is
 the directory it's nested under, and saved-at is `livery.json`'s mtime.
 Gitignored (`song/songbook/*/drafts/`, same category as `song/stage/`):
-pure flake eval reads only TRACKED files, so a `rice declare` copy landing in
-the checkout never reaches evaluation, and a `.nix` committed there would be a
-stray the `song-shape` check names. A draft is durable scratch,
+`rice declare` never carries a draft into the checkout, and pure flake eval
+reads only TRACKED files, so a draft copied there by hand never reaches
+evaluation, and a `.nix` committed there would be a stray the `song-shape`
+check names. A draft is durable scratch,
 **never committed or declared truth**; that distinction from
 `song/songbook/<name>/`'s own committed files is the entire point.
 

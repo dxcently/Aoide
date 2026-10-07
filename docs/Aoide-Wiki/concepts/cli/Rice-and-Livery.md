@@ -299,9 +299,9 @@ lyra rice mode draft <name> [--json]
   the stage file — `rice stage`, a hand-edit — lands directly in the draft
   via `atomic_write`'s symlink transparency; no save step. Only
   `livery.json` is routed — `cover set`/`stage/cover.json` are not. Drafts
-  sit under the runtime root, outside the git checkout entirely; a
-  `rice declare` copy lands them in the checkout, where `.gitignore`
-  (`song/songbook/*/drafts/`) keeps them untracked, and the
+  sit under the runtime root, outside the git checkout entirely;
+  `rice declare` never carries one into the checkout, `.gitignore`
+  (`song/songbook/*/drafts/`) keeps a hand-copied one untracked, and the
   `song-runtime-untracked` check fails the tree if a runtime dir under `song/`
   is ever committed.
 
@@ -464,17 +464,24 @@ lyra rice declare <name> [--json]
 ```
 
 - **Reads:** the composed song `$AOIDE_ROOT/song/songbook/<name>/`
-  (`fs::songbook_dir`), recursively, byte by byte; and the checkout at
+  (`fs::songbook_dir`) less its top-level `takes/` and `drafts/`,
+  recursively, byte by byte; and the checkout at
   `aoide_storage::fs::flake_root()` (`$AOIDE_FLAKE_ROOT` absolute override,
   default `~/Aoide`), which must exist as a directory.
 - **Writes:** copies the song tree into the checkout's
   `song/songbook/<name>/` (`pkgs/aoide/crates/lyra/src/commands/stubs.rs`
-  `handle_rice_declare` — `implemented: true`, `gated: true`). Byte-diff
-  copy: a destination file whose bytes already match the source is left
-  untouched, so a repeat declare with nothing new is a no-op. Nothing beyond
-  the copy — no `git add`, no rebuild proposal, no `nix eval`; committing
-  and gating the rebuild stay the User's own steps ([[Rebuild-Gate]]): the
-  agent proposes, never admits.
+  `handle_rice_declare` — `implemented: true`, `gated: true`) through
+  `aoide_song::widgets::copy_tree_atomic`, the one tree copy `rice stage`'s
+  widget sync uses too. The checkout carries the song, not the machine's
+  undo history and scratch, so `MACHINE_RUNTIME_DIRS` (`takes/`, `drafts/`)
+  stay behind: matched by name at the song folder's top level only, whatever
+  the entry's file type, so a symlinked `takes` is skipped rather than
+  followed, while `widgets/takes/` and `elements/` are the song's own and
+  arrive. Byte-diff copy: a destination file whose bytes already match the
+  source is left untouched, so a repeat declare with nothing new is a
+  no-op. Nothing beyond the copy — no `git add`, no rebuild proposal, no
+  `nix eval`; committing and gating the rebuild stay the User's own steps
+  ([[Rebuild-Gate]]): the agent proposes, never admits.
 - **Output:** `"copied N file(s) into <dst>"`, or `"`<name>` already
   matches <dst> — nothing to copy"` on a byte-identical re-declare; data
   `{name, checkout}`, plus the changed-file list on the envelope's
@@ -484,7 +491,8 @@ lyra rice declare <name> [--json]
   Errors: usage exit 2 on missing `<name>` (`missing-name`); exit 1 on
   `invalid-name`, `no-composed-song` (nothing at the source — the message
   says to run `lyra rice compose <name>` first), `no-checkout` (no checkout
-  at `$AOIDE_FLAKE_ROOT`), `copy-failed`.
+  at `$AOIDE_FLAKE_ROOT`), `copy-failed` (the message names the path that
+  failed).
 
 ### lyra rice transpose
 

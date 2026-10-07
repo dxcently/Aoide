@@ -707,12 +707,15 @@ fn read_baked(templates: &Path, file: &str) -> Result<serde_json::Value, WidgetS
     Ok(parsed)
 }
 
-/// The directories a MACHINE's song folder carries that the seed NEVER ships —
-/// its runtime scratch, each named where it is written:
+/// The TOP-LEVEL directory names of a MACHINE's song folder that the seed
+/// NEVER ships — its runtime scratch, each named where it is written:
 ///
 ///   `takes/`     the take store (`aoide-storage::takes` — `rice take`,
 ///                `rice back`'s drift snapshot, `cover set`'s archive)
 ///   `drafts/`    `aoide-storage::fs::drafts_dir` — `rice draft save`
+///
+/// Names, matched at the song folder's root only: `widgets/takes/` is a song's
+/// own widget directory, and a difference there is a difference in the song.
 ///
 /// `elements/` is deliberately NOT here, although `rice element seed` writes
 /// into it: that directory is SONG-AUTHORED — `elements::seed_song` READS
@@ -721,15 +724,20 @@ fn read_baked(templates: &Path, file: &str) -> Result<serde_json::Value, WidgetS
 /// real difference. Only a name the seed never ships AND that changes not one
 /// staged byte belongs in this list.
 ///
-/// [`machine_copy_differs`] ignores these and only these. A snapshot is not a
-/// difference in the SONG: comparing them would let `rice take` — an ordinary,
-/// reversible operation — turn a built-in song into a "differing" machine copy,
-/// and on a host with no nix that makes the song unstageable while reporting
-/// `is not built into this system`, which is false on its face. The seed ships
-/// none of them, so every name here is a machine's own scratch rather than
-/// content; a third runtime writer belongs in this list, and a song that ever
-/// SHIPS one of these names needs this list revisited.
-const MACHINE_RUNTIME_DIRS: &[&str] = &["takes", "drafts"];
+/// Two consumers, each for its own reason:
+///
+///   - [`machine_copy_differs`] ignores these: a snapshot is not a difference
+///     in the SONG. Comparing them would let `rice take` — an ordinary,
+///     reversible operation — turn a built-in song into a "differing" machine
+///     copy, and on a host with no nix that makes the song unstageable while
+///     reporting `is not built into this system`, which is false on its face.
+///   - `lyra rice declare` leaves them behind: the checkout carries the song,
+///     not the machine's undo history and scratch.
+///
+/// The seed ships none of them, so every name here is a machine's own scratch
+/// rather than content; a third runtime writer belongs in this list, and a
+/// song that ever SHIPS one of these names needs this list revisited.
+pub const MACHINE_RUNTIME_DIRS: &[&str] = &["takes", "drafts"];
 
 /// §7.5 case 1's "no differing machine copy": the machine's folder for `name`
 /// is absent, or matches the shipped one everywhere the SEED puts content
@@ -746,14 +754,15 @@ fn machine_copy_differs(name: &str, templates: &Path) -> bool {
     if !machine.is_dir() {
         return false;
     }
-    !trees_equal(&machine, &templates.join(name))
+    !trees_equal(&machine, &templates.join(name), MACHINE_RUNTIME_DIRS)
 }
 
 /// Recursive content equality of two directories: same relative file set, same
-/// bytes — [`MACHINE_RUNTIME_DIRS`] excepted on both sides. Directories are
-/// compared by what they hold, not by their mtimes, and symlinks are followed
-/// (a song folder holds none).
-fn trees_equal(a: &Path, b: &Path) -> bool {
+/// bytes — `skip` names excepted at THIS level on both sides, never below it
+/// (callers pass [`MACHINE_RUNTIME_DIRS`], whose names are top-level only).
+/// Directories are compared by what they hold, not by their mtimes, and
+/// symlinks are followed (a song folder holds none).
+fn trees_equal(a: &Path, b: &Path, skip: &[&str]) -> bool {
     let (Ok(a_entries), Ok(b_entries)) = (std::fs::read_dir(a), std::fs::read_dir(b)) else {
         return false;
     };
@@ -761,7 +770,7 @@ fn trees_equal(a: &Path, b: &Path) -> bool {
         let mut names: Vec<String> = entries
             .filter_map(|e| e.ok())
             .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|name| !MACHINE_RUNTIME_DIRS.contains(&name.as_str()))
+            .filter(|name| !skip.contains(&name.as_str()))
             .collect();
         names.sort();
         names
@@ -777,7 +786,7 @@ fn trees_equal(a: &Path, b: &Path) -> bool {
             return false;
         }
         if a_dir {
-            if !trees_equal(&a_path, &b_path) {
+            if !trees_equal(&a_path, &b_path, &[]) {
                 return false;
             }
         } else if std::fs::read(&a_path).ok() != std::fs::read(&b_path).ok() {
@@ -954,7 +963,7 @@ pub fn sync_song_widgets(
     let mut changed: Vec<String> = Vec::new();
     let local_slots = if src.is_dir() {
         let dst = run_qml.join("songs").join(name);
-        copy_tree_atomic(&src, &dst, &mut changed)?;
+        copy_tree_atomic(&src, &dst, &[], &mut changed)?;
         scan_slot_names(&src)?
     } else {
         Vec::new()
@@ -980,7 +989,7 @@ pub fn sync_song_widgets(
                 target: lender_src.to_string_lossy().into_owned(),
             });
         }
-        copy_tree_atomic(&lender_src, &run_qml.join("songs").join(&owner), &mut changed)?;
+        copy_tree_atomic(&lender_src, &run_qml.join("songs").join(&owner), &[], &mut changed)?;
         lenders.push(owner);
     }
 
@@ -1003,16 +1012,19 @@ pub fn sync_song_widgets(
     Ok(WidgetSyncOk { changed, slots: local_slots, bodies_changed, note })
 }
 
-/// Recursively copy `src` into `dst`, unfiltered — every file and subdir,
-/// including `.gitkeep` and uppercase helper components — matching the nix
-/// build's `cp -r "$d/widgets/."`. A destination file whose bytes already
-/// match the source is left untouched (not written, not counted in
-/// `changed`): Quickshell would otherwise reload/reinstantiate every widget
-/// on every palette-only `rice stage` call, causing visible flicker/lost
-/// widget state.
-fn copy_tree_atomic(
+/// Recursively copy `src` into `dst` — every file and subdir, including
+/// `.gitkeep` and uppercase helper components, matching the nix build's
+/// `cp -r "$d/widgets/."` — except the entries of `src` itself named in `skip`
+/// (a directory, a file or a symlink alike; nothing below `src` is skipped).
+/// A destination file whose bytes already match the source is left untouched
+/// (not written, not counted in `changed`): Quickshell would otherwise
+/// reload/reinstantiate every widget on every palette-only `rice stage` call,
+/// causing visible flicker/lost widget state. Public because `lyra rice
+/// declare` copies a song folder through it, skipping [`MACHINE_RUNTIME_DIRS`].
+pub fn copy_tree_atomic(
     src: &Path,
     dst: &Path,
+    skip: &[&str],
     changed: &mut Vec<String>,
 ) -> Result<(), WidgetSyncErr> {
     std::fs::create_dir_all(dst).map_err(|e| WidgetSyncErr {
@@ -1028,13 +1040,16 @@ fn copy_tree_atomic(
             error: e.to_string(),
             target: src.to_string_lossy().into_owned(),
         })?;
+        if skip.iter().any(|name| entry.file_name() == *name) {
+            continue;
+        }
         let file_type = entry.file_type().map_err(|e| WidgetSyncErr {
             error: e.to_string(),
             target: entry.path().to_string_lossy().into_owned(),
         })?;
         let dst_path = dst.join(entry.file_name());
         if file_type.is_dir() {
-            copy_tree_atomic(&entry.path(), &dst_path, changed)?;
+            copy_tree_atomic(&entry.path(), &dst_path, &[], changed)?;
             continue;
         }
         let bytes = std::fs::read(entry.path()).map_err(|e| WidgetSyncErr {
@@ -1173,4 +1188,45 @@ pub fn sync_song_registry(
         "widget-type registry entry already current".to_string()
     };
     Ok(RegistrySyncOk { changed, widgets, note })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aoide_test_support::{env_lock, unique_tmp, EnvSaver};
+
+    fn write(path: &Path, body: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+
+    #[test]
+    fn machine_runtime_dirs_are_scratch_at_the_top_level_only() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("widgets-machine-copy");
+        std::env::set_var("AOIDE_STAGE_DIR", root.join("song").join("stage"));
+        let templates = root.join("templates");
+        let machine = aoide_storage::fs::songbook_dir("dusk");
+        for dir in [templates.join("dusk"), machine.clone()] {
+            write(&dir.join("livery.json"), "{}");
+            write(&dir.join("widgets").join("takes").join("Bar.qml"), "// bar\n");
+        }
+        assert!(!machine_copy_differs("dusk", &templates));
+
+        write(&machine.join("takes").join("0001.json"), "{}");
+        write(&machine.join("drafts").join("neon").join("livery.json"), "{}");
+        assert!(
+            !machine_copy_differs("dusk", &templates),
+            "a take and a draft at the song's top level are not a difference in the song"
+        );
+
+        write(&machine.join("widgets").join("takes").join("Bar.qml"), "// edited\n");
+        assert!(
+            machine_copy_differs("dusk", &templates),
+            "widgets/takes/ is the song's own widget directory, so an edit there is a difference"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

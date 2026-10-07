@@ -118,7 +118,7 @@ Verified current gaps, not claims of implemented target behavior:
 - composeSong returns package metadata, but installation hardcodes packages. Sibling validation and implicit Sonata fallback disagree.
 - Missing slots can fall back instead of staying absent. Fixed shell slots and dynamic surfaces have different instantiation paths.
 - Runtime registries are generated separately from host arrangement overrides; borrowing-composition staging misses modified borrowed owners.
-- Current drafts isolate livery/cover but share widget bodies. Declare recursively copies the runtime song tree without promoting active draft values into Nix, filtering draft/take directories, or removing obsolete destination files.
+- Current drafts isolate livery/cover but share widget bodies. Declare recursively copies the runtime song tree, less its top-level `takes/` and `drafts/`, without promoting active draft values into Nix or removing obsolete destination files.
 - Existing per-user deployment, source authority, reload outcome reporting, and core runtime-directory lifetime need explicit correction.
 
 ## Melete on an AoideOS server

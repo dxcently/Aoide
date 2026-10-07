@@ -117,10 +117,10 @@ mode; it is the take store, not the draft mechanism, that remembers them.
 Outside the git checkout entirely — the runtime root owns
 `song/songbook/*/drafts/`, same as `song/stage/` — and runtime state by
 construction: the `song-runtime-untracked` check
-(`lib/checks.nix`) fails if a `song/` runtime dir is ever committed, and a
-`rice declare` copy of a draft lands under a gitignored
-`song/songbook/*/drafts/`. A draft is durable
-scratch, never committed or declared truth. That distinction from the
+(`lib/checks.nix`) fails if a `song/` runtime dir is ever committed,
+`rice declare` never carries a draft into the checkout, and a draft copied
+there by hand lands under a gitignored `song/songbook/*/drafts/`. A draft is
+durable scratch, never committed or declared truth. That distinction from the
 checkout's committed `song/songbook/<name>/` files is the entire point.
 
 **Reaching a draft is `rice mode draft <name>`'s job — a distinct THIRD
