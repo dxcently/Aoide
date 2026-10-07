@@ -914,7 +914,8 @@ in the message.
   `audit_resurrect` sibling precedent), gate label `autogate-child`, the
   delivered line as `untrusted_data`.
   **At-most-once, claimed before the delivery.** The per-child cursor is
-  `state/stage/pingback.json` (`<child id> → {seen, silentAt?}`): a short
+  `state/stage/pingback.json` (`<child id> → {seen, silentAt?}` for a trace,
+  `{hook: {phase, at, silent?}}` for a hook phase): a short
   `with_stage_lock` critical section reads it, decides, and writes the
   advanced cursor (temp-then-rename) — the socket write happens AFTER, with
   no lock held, bounded by `connect_for_ring`'s own write timeout. A crash
@@ -922,6 +923,27 @@ in the message.
   noise in a parent's composer); a child whose `agent:"eidolon"` record is
   gone drops out of the file on the same pass. Do NOT move the delivery
   inside that critical section, and do not add a second lock.
+  **The hook source is the same lane, as a child module
+  (`graph/pingback/hook.rs`).** A local-parented child of any registered
+  harness that is not an `eidolon` (`hook::tracked`: no `remoteParent`, not a
+  shell, sub-agent node or app thread) is read off its `hooks.json` phase and
+  stamp, never a trace, and its lines (`awaiting · <tool>`, `silent 12 min ·
+  last: …`, `settled`) join the SAME `claims.lines` the eidolon source fills,
+  so `deliver` and its skips are one implementation. Its claim runs inside the
+  SAME `with_stage_lock` section over the cursor `claim_locked` just built
+  (`hook::claim`), writing the entry's `hook` half — `{phase, at, silent?}` —
+  so the two sources never read each other's half and one file write covers
+  both; the hook children's ids join `tracked_ids`, which is what keeps their
+  entries from being pruned by the eidolon pass. Hold: `awaiting` is claimed on
+  ENTERING the phase, not on every restamp of it; `settled` needs the cursor
+  to have seen the child `working`/`awaiting` (a child found stopped, and the
+  hour-later `stopped`→`idle` decay, say nothing); `silent` is `>=` 12 minutes
+  of `updatedAt` age on a `working` phase, latched per stamp. `hooks.json`
+  carries no reason, so `awaiting` names only the session record's `activity`
+  (widened to the `tool` label when it names the same tool — the label is
+  refreshed at other boundaries and can be a previous call's); never invent a
+  reason. The hook source emits no `PingEvent` and never spools: a child that
+  belongs on a ring is `remoteParent`-stamped and so is not its child.
   **The event and the line are two things, and a remote parent gets the
   event (P-RSA S8, `CONTRACTS.md` §4/§6).** `choose_event` decides WHICH
   `PingEvent` a child's new records amount to — a closed enum whose every
@@ -2120,7 +2142,7 @@ in the message.
 - `doorbell.rs` changes update `docs/architecture/MAIL.md`'s "Delivery and
   the doorbell" section — that document is the design's canonical prose
   statement, this file only the invariants an editor must hold.
-- `pingback.rs` changes update `docs/architecture/EIDOLON-TRACE.md`'s
+- `pingback.rs` and `pingback/hook.rs` changes update `docs/architecture/EIDOLON-TRACE.md`'s
   "Second slice" section (the ping-back's canonical prose statement), the
   `state/stage/pingback.json` shape in `CONTRACTS.md` §4, and
   `docs/Aoide-Wiki/concepts/orchestration/Conductor-Channel.md`'s

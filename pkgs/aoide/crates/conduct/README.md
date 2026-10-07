@@ -284,6 +284,15 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   connection but never reads can no longer hold `.ring.lock` open
   forever; a timed-out write is an ordinary `write-failed` skip, latch
   untouched, same as any other write failure.
+- **`graph::pingback::hook`** is the ping-back's second source, for every
+  other registered harness whose hooks write `hooks.json` (claude, kimi, pi):
+  a local-parented child's canonical hook phase and `updatedAt` become
+  `[<agent> <petname>] awaiting · <tool in flight>`, `… silent 12 min · last:
+  …` and `… settled`, claimed in the SAME stage-lock section as the trace
+  source into the entry's `hook` field of `pingback.json`, and delivered by the
+  same `deliver` — it adds a cursor half and three lines, never a second
+  transport. An eidolon, a remote-parented child, a shell and a sub-agent node
+  are not its children.
 - **`graph::pingback`** (P-EIDOLON slice E5b, `docs/architecture/
   EIDOLON-TRACE.md`'s "Second slice") is where a parent hears the children it
   spawned: the reaper tick reads each `agent:"eidolon"` child's trace tail,

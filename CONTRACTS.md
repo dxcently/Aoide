@@ -3368,16 +3368,21 @@ anyone who can already write to the target's control socket.
 
 ### `state/stage/pingback.json` — **v0**
 
-The ping-back's per-child cursor (P-EIDOLON slice E5b,
-`docs/architecture/EIDOLON-TRACE.md`'s "Second slice"): one entry per
-`agent:"eidolon"` child whose trace the reaper tick has examined, keyed by
-that child's own native session id (the eidolon presence id, verbatim —
-the same id `sessions.json` carries).
+The ping-back's per-child cursor, for its two sources. An
+`agent:"eidolon"` child whose trace the reaper tick has examined (P-EIDOLON
+slice E5b, `docs/architecture/EIDOLON-TRACE.md`'s "Second slice") has a
+`seen`/`silentAt` entry; a local-parented child of any other registered
+harness that reports through hooks has a `hook` entry. Either is keyed by the
+child's own native session id (the eidolon presence id, verbatim — the same id
+`sessions.json` carries); a child belongs to exactly one source, so an entry
+carries one half.
 
 ```json
 {
   "user-0001": { "seen": "131", "silentAt": "120" },
-  "user-0002": { "seen": "40" }
+  "user-0002": { "seen": "40" },
+  "6fdc5334-4396-49ec-9208-22345802864d":
+    { "hook": { "phase": "working", "at": "2026-10-07T18:38:30Z", "silent": true } }
 }
 ```
 
@@ -3397,6 +3402,22 @@ the delivery — so a line is delivered at most once, and a crash between the
 claim and the write loses a line rather than duplicating one. A child whose
 eidolon record leaves the roster drops out of this file on the same pass.
 There is no command that reads or edits it: it is a cursor, not a queue.
+
+**`hook` — additive in v0.** A hook-source child's entry is
+`{ "phase", "at", "silent"? }`: `phase` is the canonical phase
+(`canonical_state`) of the child's `hooks.json` record last examined, `at` its
+`updatedAt` verbatim, and `silent` — absent while false — the latch that the
+12-minute silence line was sent for that `at`. A hook event is a `phase` or
+`at` that differs from the cursor's; it re-arms `silent`. The decision over it:
+`awaiting` is claimed on ENTERING that phase (a restamp of it is not another
+entry); `settled` when the cursor last held `working` or `awaiting` and the
+record now reads `stopped` or `idle` (a child first seen already stopped, and
+the later `stopped`→`idle` decay, say nothing); `silent` when the record reads
+`working` and its `at` is at least 12 minutes old. `hooks.json` carries no
+reason for a state, so the `awaiting` line names the session record's own
+`activity` (the tool in flight, widened to the `tool` label when that names
+the same tool), and nothing when none is in flight. A reader that does not know `hook` ignores
+it. A child whose session leaves the roster drops out on the same pass.
 
 ### `state/stage/remote-children.json` — **v0**
 
