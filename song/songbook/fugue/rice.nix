@@ -19,13 +19,14 @@
 }:
 let
   # `_widgets/` is the widget-record shelf (lib/song.nix's header) — one
-  # plain function per slot (`bar`, `herald`), rolled up and bound to owner
-  # "fugue" by `_widgets/default.nix`. `composeSong` validates both records
-  # and folds them into `arrangement.widgets` (empty today: both leave `kind`
-  # unset, so neither is a declared registry entry — see each file for why).
-  # Adding this shelf is what lets another song's composition borrow fugue's
-  # `bar`/`herald` bodies: `mkWidget` binds `owner` from its caller, so an
-  # `owner = "fugue"` record can only be minted from a fugue-owned roll-up.
+  # plain function per slot (`bar`, `herald`, `ricemode`), rolled up and bound
+  # to owner "fugue" by `_widgets/default.nix`. `composeSong` validates the
+  # records and folds them into `arrangement.widgets` (empty today: all three
+  # leave `kind` unset, so none is a declared registry entry — see each file
+  # for why). Adding this shelf is what lets another song's composition
+  # borrow fugue's `bar`/`herald`/`ricemode` bodies: `mkWidget` binds
+  # `owner` from its caller, so an `owner = "fugue"` record can only be minted
+  # from a fugue-owned roll-up.
   # Its OWN shelf, through the name-keyed door any other song would use:
   # `borrow` is the one place a shelf is opened (CONTRACTS.md §5), so the sheet
   # a song hands `composeSong` is the sheet `lib/songbook.nix` rolled up, with

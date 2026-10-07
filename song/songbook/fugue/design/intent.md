@@ -47,14 +47,17 @@ pediments, rounded glass, cast shadow).
 
 ## Slots dressed
 
-Two: `bar` (the always-visible surface, `WidgetSlot`) and `herald` (the
-notification popup, `SurfaceSlot`) — the only two anchors this song's
-minimal set needs to prove both resolution paths. `launcher` and
-`powermenu` are cut as bodies but kept as behaviour: the bar's `[pwr]` cell
-still calls the injected `powermenu` instance, and both slots fall through
-to sonata's marble bodies via the baseline chain. That is not a defect —
-it is the live proof that a minimal song is complete because the fallback
-chain carries it.
+Three: `bar` (the always-visible surface, `WidgetSlot`), `ricemode` (the
+rice-mode control and its draft picker, a `WidgetSlot` the bar embeds as the
+first cell of its right row) and `herald` (the notification popup,
+`SurfaceSlot`). `bar` and `herald` are the two anchors that prove both
+resolution paths; `ricemode` is dressed because the cell belongs to the
+bar's own look, so fugue keeps it on the lattice instead of taking sonata's
+floor. `launcher` and `powermenu` are cut as bodies but kept as behaviour:
+the bar's `[pwr]` cell still calls the injected `powermenu` instance, and
+both slots fall through to sonata's marble bodies via the baseline chain.
+That is not a defect — it is the live proof that a minimal song is complete
+because the fallback chain carries it.
 
 ## Cover
 
