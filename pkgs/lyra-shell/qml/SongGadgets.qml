@@ -31,14 +31,12 @@
 // Delegate: the real `WidgetSlot.qml` component directly (the same one
 // `herald-center` uses in dock.qml) — resolve/load logic is not
 // reimplemented here. Fixed injected-prop contract (CONTRACTS.md §5
-// containment): `livery` + `bridge` only, nothing else — no `extraProps`,
-// and that omission is load-bearing, not a style choice. `WidgetSlot
-// ._rebuild()` has no idempotence guard the way `SurfaceSlot` had to grow
-// one after an `extraProps` object-literal binding caused a destroy/rebuild
-// storm (see `SurfaceSlot.qml`'s `_builtSource`/`_sameExtras` guards) — an
-// `extraProps` binding here would risk the same storm for no reason, since
-// dock gadgets get the same fixed prop contract as everything else declared
-// so far, not the wider `livery+bridge+shared` the shipped lane gadgets get.
+// containment): `livery` + `bridge` only, nothing else. Dock gadgets take
+// that fixed contract by choice, not the wider `livery+bridge+shared` the
+// shipped lane gadgets get, so no `extraProps` is passed. Were one passed,
+// `WidgetSlot` assigns each extra onto the live widget in place and
+// rebuilds only when the resolved source changes (its header states the
+// rebuild key), so an `extraProps` literal could never rebuild a gadget.
 //
 // A declared dock slot whose declaring song has no actual
 // `widgets/<slot>.qml` body (neither the active song nor the sonata
