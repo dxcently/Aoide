@@ -1788,8 +1788,8 @@ pub fn file_transit_hop(hop: &TransitHop, via: &str) -> Result<(), String> {
 
 /// Is this container addressed to THIS box? By name (the OS-derived local name,
 /// or the name the mesh's declaration gives this box's key), or — for a box that
-/// holds no declaration yet, whose charter line may spell it differently from
-/// its hostname — by the age key `to.age` names being one of this box's own
+/// holds no declaration yet, whose FIRST CHARTER's line may spell it differently
+/// from its hostname (a charter container only) — by the age key `to.age` names being one of this box's own
 /// identities, current or still in its grace window. Where the mesh does name
 /// this box, only its name there counts. A pure read of local facts:
 /// the door asks it BEFORE a container it is not the destination of is verified.
@@ -1806,6 +1806,11 @@ pub fn addressed_here(
         // The mesh names this box by its key, so the name decides: a key match
         // under another name is somebody else's address for this box's key.
         return Ok(named == container.to.node);
+    }
+    // The key fallback is the bootstrap first charter's alone: a letter sealed
+    // to this box's key under another name keeps the name rule.
+    if container.purpose != PURPOSE_CHARTER {
+        return Ok(false);
     }
     let (current, _) = load_or_mint_age_identity().map_err(|e| e.to_string())?;
     if current.to_public().to_string() == container.to.age {
@@ -2359,6 +2364,13 @@ mod tests {
 
         container.to.node = crate::display::local_node_name();
         assert!(addressed_here(&container, "home", &[]).unwrap(), "the hostname is still a name");
+
+        // A non-charter container sealed to this box's own key under another
+        // name is NOT for here: the key fallback is the first charter's only.
+        container.to.age = binding.age_pubkey.clone();
+        container.to.node = "a-name-no-hostname-has".to_string();
+        container.purpose = PURPOSE_MAIL.to_string();
+        assert!(!addressed_here(&container, "home", &[]).unwrap(), "mail keeps the name rule");
     }
 
     #[test]

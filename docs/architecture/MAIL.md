@@ -755,9 +755,10 @@ the same keyless checks and the origin's key in the charter it holds. A relay
 admits it on the depositor's `message` grant, decided before anything about the
 container is verified, deduped or routed, since only the destination can open it
 to verify the operator signature. A container is addressed to a box by its name
-there or, where the mesh does not yet name the box by its key (a first charter,
-whose line may spell the box differently from its hostname), by the age key it
-is sealed to being one of the box's own.
+there or — for a CHARTER container only, where the mesh does not yet name the
+box by its key (a first charter, whose line may spell the box differently from
+its hostname) — by the age key it is sealed to being one of the box's own. A
+letter sealed to this box's key under another name is not its own.
 
 `not-correspondence` is the plaintext lane's own: an envelope whose `type`
 is `charter` carries no charter — a charter letter is applied from the
