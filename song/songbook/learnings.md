@@ -142,3 +142,31 @@ in git; `git log --follow -- song/songbook/default/` finds it.
 - **`lyra rice declare` copies; it does not delete.** A file renamed in the
   runtime tree arrives under its new name, and the old name stays in the
   checkout until it is removed there (`CoverPcbWorker.mjs` to `.js`).
+
+## Song widget costs, second pass: the paint in flight (2026-10-07)
+
+- **Correction:** the debounce entry above says the settled burst's last glow
+  was done 8.6 s in; its commit measured 8.7 s.
+- **A debounce spaces paints; it does not bound the backlog.** `settle` makes
+  one request per pause, but a 4 s glow paint outlasts any pause: ten height
+  changes 300 ms apart (each pause just over the 250 ms) still queued eleven
+  paints, the last done 48.1 s in. The gate is the paint in flight: a flag set
+  when a draw starts and cleared in `onPainted`, with `stale` recording a size
+  that settles meanwhile and `onPainted` requesting one more paint. The same
+  burst draws twice (the last done 8.6 s in), and thirty changes over 9 s
+  draw four times. A skipped `onPaint` emits no `painted`, so the flag is
+  never cleared by one. Offscreen, software backend.
+- **A paint that does not draw leaves the last texture, stretched; a paint
+  that draws a stale model draws it at its old coordinates.** CoverPcb's
+  `settle` repainted the old board on the resized canvas, cropped with a bare
+  margin, for the ~3 s the new board took. It now paints only when it posted
+  no request or has no board; while a request is out the canvas keeps its
+  texture, stretched to the new size, and the arriving board paints. The
+  rendered PNG and the board checksums are unchanged at both orientations.
+- **A pane built closed must not queue its glow.** The canvas `Loader` keyed
+  on `innerGlow` alone, so every pane built closed (the launcher, power and
+  board bodies bind `open` to a shown flag) queued its 4 s paint at scene
+  build. `innerGlow` now follows a latch the first open sets: closed from
+  birth, no paint; opened at 3 s, the glow lands 4 s later; close and reopen
+  paint nothing. The trade is a glow that lands late at the first reveal. The
+  GPU path stays unmeasured.
