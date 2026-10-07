@@ -363,6 +363,16 @@ pub fn shorten_cwd(cwd: &str) -> String {
     }
 }
 
+/// How long ago an ISO-8601 stamp was, as [`elapsed_str`] spells it, with
+/// `ago` appended — or the stamp itself when it does not parse, so a cache
+/// whose `fetchedAt` is malformed still says something true.
+pub fn age_label(stamp: &str) -> String {
+    match elapsed_str(stamp) {
+        s if s.is_empty() => stamp.to_string(),
+        s => format!("{s} ago"),
+    }
+}
+
 /// A relative elapsed clock from an ISO-8601 `startedAt`: mm:ss under the hour,
 /// `Hh MMm` under the day, whole days beyond. An unparseable stamp or a start in
 /// the future yields the empty string.

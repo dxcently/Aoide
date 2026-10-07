@@ -475,6 +475,23 @@ pub const SECRETS_STATUS_THROTTLE: std::time::Duration = std::time::Duration::fr
 pub struct RosterSession {
     pub label: String,
     pub state: String,
+    /// The roster core's own per-session word: `online` off a live probe,
+    /// `last-seen` or `unknown` off the cache fallback under an unreachable
+    /// node, `done` for an ended one. A cached row is rendered by this, never
+    /// by `state`, so a session the far node may have long since lost is not
+    /// painted as working.
+    pub presence: String,
+    pub session_id: String,
+    pub petname: Option<String>,
+    pub agent: String,
+    pub cwd: String,
+}
+
+impl RosterSession {
+    /// A row whose facts come from a cache rather than a live reply.
+    pub fn is_cached(&self) -> bool {
+        matches!(self.presence.as_str(), "last-seen" | "unknown")
+    }
 }
 
 /// One node (this box, or a registered node) as `session --hosts --json`
@@ -1556,6 +1573,11 @@ impl App {
                         .map(|s| RosterSession {
                             label: s["label"].as_str().unwrap_or("").to_string(),
                             state: s["state"].as_str().unwrap_or("").to_string(),
+                            presence: s["presence"].as_str().unwrap_or("").to_string(),
+                            session_id: s["sessionId"].as_str().unwrap_or("").to_string(),
+                            petname: s["petname"].as_str().map(String::from),
+                            agent: s["agent"].as_str().unwrap_or("").to_string(),
+                            cwd: s["cwd"].as_str().unwrap_or("").to_string(),
                         })
                         .collect(),
                 }

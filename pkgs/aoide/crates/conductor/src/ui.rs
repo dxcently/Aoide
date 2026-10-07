@@ -867,7 +867,7 @@ fn draw_roster(f: &mut Frame, area: Rect, app: &App) {
     .split(area);
 
     let legend = Line::from(
-        " 🖧 host  ● online  ◐ unreachable  ○ never-pulled    ♪ working  𝄐 awaiting  𝄁 stopped  𝄽 idle  𝄂 done",
+        " 🖧 host  ● online  ◐ unreachable  ○ never-pulled  · last-seen    ♪ working  𝄐 awaiting  𝄁 stopped  𝄽 idle  𝄂 done",
     )
     .style(theme::dim());
     f.render_widget(Paragraph::new(legend), parts[0]);
@@ -926,7 +926,7 @@ fn roster_row_item<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette) -
                 "unreachable" => format!(
                     "{glyph} {} — unreachable (last seen {})",
                     name,
-                    fetched_at.as_deref().unwrap_or("unknown")
+                    fetched_at.as_deref().map(theme::age_label).unwrap_or("unknown".into())
                 ),
                 "never-pulled" => format!("{glyph} {} — never pulled", name),
                 _ if *is_local => format!("{glyph} {} (this host)", name),
@@ -953,6 +953,18 @@ fn roster_row_item<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette) -
             is_last,
         } => {
             let branch = if *is_last { "└─ " } else { "├─ " };
+            // A cached row wears the cache's word and no live glyph: the
+            // state it carries is what the far node last said, not what it
+            // is doing now.
+            if s.is_cached() {
+                return ListItem::new(Line::from(vec![
+                    Span::raw(format!("  {branch}")),
+                    Span::styled(
+                        format!("· {}  {} · was {}", s.label, s.presence, s.state),
+                        theme::dim(),
+                    ),
+                ]));
+            }
             let st = theme::state_style(&s.state, pal);
             let sg = theme::state_glyph(&s.state);
             ListItem::new(Line::from(vec![
@@ -1898,8 +1910,8 @@ mod tests {
                             "label": "yomi-strix/root/misty-comet (…s2)",
                             "petname": "misty-comet",
                             "agent": "claude",
-                            "state": "idle",
-                            "presence": "online",
+                            "state": "working",
+                            "presence": "last-seen",
                             "cwd": "/y",
                         },
                     ],
@@ -1934,8 +1946,10 @@ mod tests {
             "local node: online glyph + (this host): {out}"
         );
         assert!(
-            out.contains("◐ yomi-strix — unreachable (last seen 2026-08-20T23:00:00Z)"),
-            "mesh node: unreachable glyph + staleness stamp: {out}"
+            out.contains("◐ yomi-strix — unreachable (last seen ")
+                && out.contains("d ago)")
+                && !out.contains("2026-08-20T23:00:00Z"),
+            "mesh node: unreachable glyph + the cache's AGE, not its raw stamp: {out}"
         );
         assert!(
             out.contains("○ ghost — never pulled"),
@@ -1945,9 +1959,17 @@ mod tests {
             out.contains("brave-otter") && out.contains('♪'),
             "local session row + its working glyph: {out}"
         );
+        let cached = out
+            .lines()
+            .find(|l| l.contains("misty-comet"))
+            .expect("an unreachable node's last-known session still surfaces");
         assert!(
-            out.contains("misty-comet"),
-            "an unreachable node's last-known session still surfaces: {out}"
+            cached.contains("last-seen") && cached.contains("was working") && !cached.contains('♪'),
+            "a cached row wears the cache's word, never the live working glyph: {cached}"
+        );
+        assert!(
+            out.contains("· last-seen"),
+            "the legend names the cached row's mark: {out}"
         );
 
         // Local box first, then nodes — the roster's own node order, never

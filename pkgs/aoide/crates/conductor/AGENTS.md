@@ -87,7 +87,10 @@
   use `App::stage`; palette notes use `App::rice_stage`. Historical ledger,
   mail and audit paths use their existing owning APIs.
 - Roster probes remain bounded and asynchronous; refresh throttling must
-  not freeze input. Offline cached sessions retain their last-seen status.
+  not freeze input. A cached session row (`presence` of `last-seen` or
+  `unknown`, `RosterSession::is_cached`) renders the cache's word and the
+  node header's age, never the live state glyph or colour; the backend's
+  `presence` is the only source of that fact.
 - Pending IDs are array positions. Relist after every approve/deny before
   using another selection; never recycle those indices as durable mail
   proposal identifiers.

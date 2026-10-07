@@ -140,7 +140,11 @@ Removing a project from Projects or a session group opens a confirmation.
 Type the exact project name and press Enter to unregister it; Escape cancels.
 This removes the registration, not project files.
 Mesh reuses bounded asynchronous `session --hosts` probes with cached
-fallback; a last-seen remote session is not asserted to be currently live.
+fallback. A node the probe could not reach heads its rows with
+`unreachable (last seen <age> ago)`, and every session beneath it wears the
+roster core's own cache word — `· <label>  last-seen · was <state>`, dimmed,
+no live glyph — so a row the far node may have long since lost is never
+painted as working.
 Session steering dispatches `send`; Mail dispatches signed correspondence.
 Review's first queue remains the conductor-input/A2A approval queue, not mail
 editing.
