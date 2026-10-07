@@ -16,7 +16,7 @@
 // declarative, draft) writes stage/mode.json LAST. mode.json is always a real
 // file, atomically replaced, so its watch stays live; on every mode.json
 // change the shell re-reads both files, and reload() re-arms the livery watch
-// on whatever the path resolves to now. Any other writer that replaces the
+// on whatever the path resolves to now. Any other writer that swaps the
 // entry (an activation reseed) restarts the shell.
 //
 // livery schema v0 (CONTRACTS.md §1): palette + bar.* / notif.* / window.*

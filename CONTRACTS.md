@@ -1702,8 +1702,10 @@ song's own colours.
 saved `song/songbook/<song>/drafts/<name>/livery.json`. A one-shot read
 follows a symlink transparently; a WATCH does not — it stays on the inode it
 loaded and sees no event after the entry is swapped (leaving or rerouting a
-draft). So any command that replaces the `stage/livery.json` entry MUST
-write `stage/mode.json` LAST (every successful `rice mode` transition does),
+draft). So any command that SWAPS the file or symlink at `stage/livery.json`
+(changes its type or target) MUST write `stage/mode.json` LAST (every
+successful `rice mode` transition does; content writers going through
+`atomic_write` swap nothing and owe nothing),
 and a watching reader re-reads `livery.json` on every `mode.json` change
 (`mode.json` is always a real file, atomically replaced; the shell's
 `LiveryState.qml` is that reader). A failed transition and the activation
