@@ -269,6 +269,18 @@ pub fn view_label(app: &App) -> &'static str {
     app.graph.view.label()
 }
 
+/// Where the cursor stands in what the view draws — `card 3/20 · rank 1` —
+/// so an operator knows how much forest the pane is not showing. One model
+/// build for both numbers.
+pub fn readout(app: &App) -> String {
+    let model = build_model(app);
+    let depth = model.visible().nth(model.selected).map(|n| n.depth);
+    match depth {
+        Some(depth) => format!("card {}/{} · rank {depth}", model.selected + 1, model.visible_len()),
+        None => "no cards".to_string(),
+    }
+}
+
 /// Build the layout model from the canonical graph document and the roster's
 /// last word on every registered node.
 pub fn build_model(app: &App) -> Model {

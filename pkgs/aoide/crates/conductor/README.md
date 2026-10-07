@@ -88,6 +88,9 @@ the selected session, `s` writes a letter to the selected agent directly
 without opening the actions menu, and `p` prunes ended sessions — the one
 mutation the panel dispatches on its own.
 
+The canvas readout names the zoom, the view and where the cursor stands —
+`card 3/20 · rank 1` — so the forest the pane is not showing has a size.
+
 `a` switches the two views. Focus, the default, draws only the connected graph
 the selected card belongs to; All draws the whole forest. Sessions belonging to
 no project gather under one synthetic root, and that root is not a connection:

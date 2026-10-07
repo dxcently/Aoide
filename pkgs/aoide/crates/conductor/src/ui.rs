@@ -1523,6 +1523,26 @@ mod tests {
     }
 
     #[test]
+    fn graph_readout_names_the_cursor_card_and_its_rank() {
+        let root = session("r", "/home/k/Aoide", "idle", None);
+        let kid = session("k", "/home/k/Aoide", "idle", Some("r"));
+        let mut app = app_with(
+            vec![Project {
+                name: "aoide".into(),
+                path: "/home/k/Aoide".into(),
+                ..Default::default()
+            }],
+            vec![root, kid],
+        );
+        app.sync_graph_scene();
+        let out = render_panel(&app, Panel::Graph, 220, 60);
+        assert!(out.contains("card 1/3 · rank 0"), "the project root opens the view: {out}");
+        app.graph.selected = "session:k".into();
+        let out = render_panel(&app, Panel::Graph, 220, 60);
+        assert!(out.contains("card 3/3 · rank 2"), "the leaf, two ranks down: {out}");
+    }
+
+    #[test]
     fn graph_panel_draws_the_model_tag_on_a_subagent_chip() {
         // Short ids + a short state + a one-char model, so the chip's
         // CHIP_MAX budget survives the display-grammar label (petnames
