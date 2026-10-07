@@ -35,9 +35,9 @@
 // `.item` of another slot, null while that slot rebuilds). Extras are assigned
 // onto the live widget key by key (an identical value signals nothing), so a
 // widget reads an extra at use time and never assumes the value it was
-// created with. The widget is tracked as `_item` before any assignment, and
-// a key the widget cannot take (a type mismatch) warns and is skipped alone:
-// the widget stays tracked and the other keys still land.
+// created with. The widget is tracked as `_item` before any post-creation
+// assignment, and a key the widget cannot take (a type mismatch) warns and is
+// skipped alone: the widget stays tracked and the other keys still land.
 import QtQuick
 
 Item {
@@ -138,14 +138,16 @@ Item {
 
     function _create(comp, props) {
         if (!comp) return
+        var source = root._builtSource
         if (comp.status === Component.Loading) {
-            comp.statusChanged.connect(function () { root._finish(comp, props) })
+            comp.statusChanged.connect(function () { root._finish(comp, props, source) })
             return
         }
-        root._finish(comp, props)
+        root._finish(comp, props, source)
     }
 
-    function _finish(comp, props) {
+    function _finish(comp, props, source) {
+        if (source !== root._builtSource || root._item) return
         if (comp.status === Component.Error) {
             console.warn("[aoide/widgetslot] failed to load slot", root.slot, "-", comp.errorString())
             return
