@@ -56,16 +56,19 @@ spawned whom across nodes — the conductor draws only for the local box.
 **1. It is launched six times in 1.35 million audit records.** `~/.aoide/log`
 holds 6 `conductor` launches (4 in September, 2 in October) against 450
 `send` and 820 `session trace` invocations. The crate received 88 commits in
-the same window. The work went into the tool; the use did not follow.
+the same window. The work went into the tool; the use did not follow. The
+count is of `conductor` records; the roster probe the Mesh pane repeats
+every fifteen seconds used to dispatch `session` through the audited door,
+so a `session` count would have been inflated by every open pane — the
+probe is now a library call and writes nothing.
 
 **2. The graph opens on a blank half-screen.** At 160×48 the default Graph
 view selects the synthetic `Active sessions` root and centres it, so the
 top 15 rows of the canvas are empty pad and only one rank of cards is
 visible below it (capture: 15 blank rows, the group card, then three cards
-of thirteen). Cause: `CANVAS_PAD = (40, 16)` is folded into the extent the
-follow-camera clamps against (`graphview.rs:60`, `origin()` at
-`graphview.rs:615-643`), so the pad is shown whenever the forest is shorter
-than the pane. At 80×24 exactly one card fits (capture below).
+of thirteen). Cause: `CANVAS_PAD` was folded into the extent the follow-camera clamped
+against (`graphview::origin`), so the pad was shown whenever the forest was
+shorter than the pane. At 80×24 exactly one card fits (capture below).
 
 ```
 ┌ GRAPH ───────────────────────────────────────────────┐
@@ -82,11 +85,11 @@ than the pane. At 80×24 exactly one card fits (capture below).
 
 **3. Focus is a trap.** Focus (the default) draws the selected card's
 connected component, and the synthetic root "is not a connection"
-(`graphview.rs:554-590`, `bridged`). After one `j` from that root the
-selection sits on a session whose parent and siblings are no longer in
-`visible`; `k` looks for a shallower node in the visible preorder and finds
-none (`app.rs:4349-4354`), `h`/`l` refuse a sibling the view does not draw
-(`graphview.rs:184`). Captured: from `fond-aspen`, `k` and `l`×4 leave the
+(`graphview::visible_order`, `bridged`). After one `j` from that root the
+selection sat on a session whose parent and siblings were no longer in
+`visible`; `k` looked for a shallower node in the visible preorder and found
+none (`App::handle_graph_key`), `h`/`l` refused a sibling the view did not
+draw (`graphview::select_sibling`). Captured: from `fond-aspen`, `k` and `l`×4 leave the
 screen unchanged. The only way out is `a` (All). Since this box has zero
 registered projects, every session is under the synthetic root, so the
 trap is the normal case here, not an edge.
@@ -94,16 +97,15 @@ trap is the normal case here, not an edge.
 **4. The graph shows the local box only.** `build_graph` folds every
 registered node into the document as a `node:<name>` root, with the node's
 own cached graph nested under `children` when the cache is fresh
-(`conduct/src/graph/doc.rs:273-310`). `build_model` drops them
-(`graphview.rs:323`, `_ => {}`), so yomi's 19 sessions and sakaki never
-appear on the canvas. The one cross-host picture is the Mesh list, which is
+(`conduct::graph::doc::build_graph`). `graphview::build_model` dropped them,
+so yomi's 19 sessions and sakaki never appeared on the canvas. The one cross-host picture is the Mesh list, which is
 an indented roster, not a graph.
 
 **5. Cache rows are drawn as live.** The roster core already classifies a
 cached session under an unreachable node as `last-seen`/`unknown`
-(`conduct/src/graph/who.rs:cached_presence`), but the conductor parses only
-`label` and `state` off each session row (`app.rs:1557-1562`) and renders
-`state` with the live glyph (`ui.rs:947-958`): under
+(`conduct::graph::who::cached_presence`), but the conductor parsed only
+`label` and `state` off each session row (`App::roster_nodes`) and rendered
+`state` with the live glyph (`ui::roster_row_item`): under
 `◐ yomi-strix — unreachable (last seen 2026-08-20T23:00:00Z)` a row still
 reads `♪ … working`. The header carries a raw ISO stamp, not an age.
 
@@ -111,13 +113,14 @@ reads `♪ … working`. The header carries a raw ISO stamp, not an age.
 (30 columns) shows all 18 sessions with lineage indents and titles; the
 graph shows three. A 32×7 card spends five rows on title, petname, harness
 and model, role and state, and activity — most of which the tree row also
-carries. Siblings sit 38 cells apart (`SLOT = CARD_W + 6`), so a rank of 13
+carries. Siblings sit 38 cells apart (`graphview::SLOT`), so a rank of 13
 is 494 cells wide against a 126-cell pane.
 
 **7. The sidebar groups by kind and breaks lineage.** `aoide graph` prints
 `warm-birch (shell) → glossy-antler (claude) → three shells`; the sidebar
 files `glossy-antler` at the root of Agents and the three shells flat under
-Terminals, because it groups by kind before lineage (`board.rs:398`).
+Terminals, because it groups by kind before lineage (`board::draw_tree`'s
+Agents/Terminals groups).
 
 **8. The wiki page describes a different program.** `concepts/cli/
 Conductor-TUI.md` documents seven panels (DAG, SESSION, PROJECTS, LOG,
@@ -127,26 +130,27 @@ STATUS, ROSTER, PENDING) and keys `1`–`7`; the binary has ten tabs and keys
 **9. Every interaction rebuilds the whole model.** `node_order`,
 `selected_index`, `select_index`, `select_sibling`, `hit_node`,
 `graph_extent` and `graph_origin` each call `build_model`, which runs
-`build_graph` (which reads `nodes.json` and every node's cache file) — so
-one `j` costs three to five document builds. Register §23 already recorded
+`build_graph` (which reads `nodes.json` and every node's cache file) and
+reshapes the roster outcome — so one `j` costs three to five document
+builds. Register §23 already recorded
 this ("rebuilds the whole-world grid three times per interaction").
 
 ## The graph feature's gaps, specifically
 
 | Gap | Where | Ruling needed? |
 |---|---|---|
-| Blank pad at the default view; one card at 80×24 | `graphview.rs` `origin()` | no — landed |
-| Focus traps the cursor; `k`/`h`/`l` dead after one `j` | `graphview.rs` `visible_order`, `app.rs` `handle_graph_key` | no — landed |
-| Remote nodes and their sessions absent | `graphview.rs` `build_model_from` | no — landed, flat (lineage: item 7) |
-| No readout of where the cursor is in the forest (n of N, rank) | `board.rs` `draw_actions` | no — landed |
-| Card too large for the information it carries | `graphview.rs:53-57` | yes — §19/§23 designer surface |
-| Model rebuilt per call | `graphview.rs:139-205` | yes — §23 S3 (`GraphScene` state) |
+| Blank pad at the default view; one card at 80×24 | `graphview::origin` | no — done |
+| Focus traps the cursor; `k`/`h`/`l` dead after one `j` | `graphview::visible_order`, `App::handle_graph_key` | no — done |
+| Remote nodes and their sessions absent | `graphview::build_model_from` | no — done, flat (lineage: item 7) |
+| No readout of where the cursor is in the forest (n of N, rank) | `board::draw_actions` | no — done |
+| Card too large for the information it carries | `graphview::CARD_W`/`CARD_H` | yes — §19/§23 designer surface |
+| Model rebuilt per call | `graphview::build_model` callers | yes — §23 S3 (`GraphScene` state) |
 | No typed edges, runs, goals | — | frozen (§22 phase 2) |
 | Mail overlay on the graph (§24 trails) | — | folded into the §22 architect |
 
 ## Ranked improvements
 
-### Landed on `lane/e-conductor`
+### Done
 
 1. **Selection walks the forest; the view follows.** `j`/`k`/`h`/`l` resolve
    parent, child and siblings against the whole forest — a root's siblings
@@ -167,27 +171,25 @@ this ("rebuilds the whole-world grid three times per interaction").
 4. **Cache rows say they are cache.** Mesh rows carry the backend's
    `presence`: a `last-seen`/`unknown` row renders dimmed as `· <label>
    last-seen · was <state>`, and the node header says `last seen 2h21m ago`
-   instead of a raw stamp. The same word is the graph card's state.
+   instead of a raw stamp. The same word is the graph card's state, and the
+   card is dimmed like the row. A probe that fails after a good one keeps
+   the last rows — dimmed, each host card ending `probe failed <age>`, the
+   Mesh fetch line naming the refusal — so the canvas never empties in
+   silence. The probe itself is a library call, not an audited dispatch.
 5. **Canvas readout.** `Canvas 100% · FOCUS · card 3/20 · rank 1`.
 6. **`Conductor-TUI.md` rewritten** to the ten-tab program and its keys.
 
-### Do next (no ruling needed)
+### Next, no ruling needed
 
 7. **Remote lineage.** The roster's session rows carry no spawned edge
    (`who.rs::session_view_json` omits `SessionView::parent`), so remote
    sessions hang flat under their host card. An additive `parentSessionId`
    on the row (conduct crate, one field, one test) lets the graph rank them
-   as it ranks local sessions. Not done here: the conduct crate is another
-   lane's writer this cycle.
-8. **Root spacing.** `place()` advances a full extra slot after each root
-   (`graphview.rs`, `slot += SLOT` after `lay_slots`), so forests sit 76
-   cells apart; one slot of gap would do.
-9. **The hostname-length fixture.** `block_keeps_state_and_identity_on_
-   separate_bounded_lines` asserts a label overflows `CARD_W` and is red on
-   any box whose hostname is short (osaka); the fixture should force the
-   overflow with its own name, not the host's.
+   as it ranks local sessions; it is a conduct-crate change.
+8. **Root spacing.** `graphview::place` advances a full extra slot after
+   each root, so forests sit 76 cells apart; one slot of gap would do.
 
-### Needs ruling
+### Open rulings (recorded, not implemented)
 
 10. **Compact cards.** Question: may the card shrink to a 24×5 preset
     (title · petname+tail · role/state · activity) with a 2-row rank gap?
