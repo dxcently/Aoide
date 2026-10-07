@@ -289,10 +289,11 @@ by decision — no embedded database yet
   `SCHEMA` is a walkable const TABLE of the SETTABLE surface — sections,
   their keys, each key's value vocabulary, and a `read` fn projecting that
   key off a typed `Config` — and `validate`, `set`, and `aoide config`'s own
-  listing all walk it rather than restating it in match arms. v0 carries
-  exactly one section: `[pairing]`'s `defaultGrant`, whose vocabulary IS
+  listing all walk it rather than restating it in match arms. Its closed-list
+  key is `[pairing]`'s `defaultGrant`, whose vocabulary IS
   `node_store::NODE_CAPABILITIES` (the same closed set `node allow`
-  enforces, never a second list). `set` is the only writer: it refuses a
+  enforces, never a second list); `[upkeep]` and `[verba]` (`aoide do`'s
+  `binary` and `weightsDir`) carry free-form scalars. `set` is the only writer: it refuses a
   managed config, an unknown key, a value outside its vocabulary, and a
   config already on disk that does not load — each with a taught error, and
   nothing written in any of them — then edits the file's own text through

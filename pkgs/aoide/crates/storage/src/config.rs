@@ -29,12 +29,13 @@
 //! vocabulary, and how to read that key off a typed [`Config`] all live in
 //! one const table; [`validate`], [`set`], and `aoide config`'s own listing
 //! every walk it rather than restating it. A new key is one table row plus
-//! its struct field. Two sections today, neither aware the other exists:
+//! its struct field. Three sections today, none aware of the others:
 //! `[pairing]`'s `defaultGrant` is a [`ValueKind::ClosedList`] (closed
 //! vocabulary, `node_store::NODE_CAPABILITIES`); `[upkeep]`'s `verifyCommand`
 //! is a [`ValueKind::Scalar`] — the check lane's own verification command
 //! (`aoide session hook`'s SessionStart/Stop wiring), free-form because core
-//! cannot know what "clean" means on every host. A scalar key is the one
+//! cannot know what "clean" means on every host; `[verba]`'s `binary` and
+//! `weightsDir` are scalars too — where `aoide do` finds its classifier. A scalar key is the one
 //! place [`SCHEMA`] gives up checking a vocabulary: there isn't one to check.
 //! **[`Mesh`] is validated but deliberately NOT in [`SCHEMA`] (task #135
 //! P4).** A mesh's keys are an operator's own node names, chosen at write
@@ -92,6 +93,8 @@ pub struct Config {
     pub pairing: Pairing,
     #[serde(default)]
     pub upkeep: Upkeep,
+    #[serde(default)]
+    pub verba: Verba,
     /// `[mesh.<name>]` — zero or more declared meshes (task #135 P4), keyed
     /// by the operator's own mesh name. VALIDATED (see [`validate`]) but
     /// deliberately not in [`SCHEMA`] — see the module doc's own note on
@@ -214,6 +217,32 @@ pub struct Upkeep {
 impl Default for Upkeep {
     fn default() -> Self {
         Upkeep { verify_command: String::new() }
+    }
+}
+
+/// `[verba]` — where `aoide do` finds its classifier. Both keys are inert until
+/// `aoide do` runs; the defaults are the shape the command documents, so a box
+/// that sets nothing is a box with the binary on `PATH` and the kit under the
+/// runtime root.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Verba {
+    /// The classifier binary: a bare name resolved on `PATH`, or a path.
+    #[serde(default = "default_verba_binary")]
+    pub binary: String,
+    /// The kit directory (`meta.json`, `model.safetensors`, optional
+    /// `lexicon.txt`). Empty means `$AOIDE_ROOT/verba/aoide`.
+    #[serde(rename = "weightsDir", default)]
+    pub weights_dir: String,
+}
+
+pub fn default_verba_binary() -> String {
+    "verba-volantia".to_string()
+}
+
+impl Default for Verba {
+    fn default() -> Self {
+        Verba { binary: default_verba_binary(), weights_dir: String::new() }
     }
 }
 
@@ -395,6 +424,24 @@ pub const SCHEMA: &[SectionSpec] = &[
             summary: "Shell command the check lane runs at SessionStart/Stop to verify the working tree. Empty disables the lane.",
             read: |c| vec![c.upkeep.verify_command.clone()],
         }],
+    },
+    SectionSpec {
+        name: "verba",
+        summary: "Where `aoide do` finds its classifier.",
+        keys: &[
+            KeySpec {
+                name: "binary",
+                kind: ValueKind::Scalar,
+                summary: "The verba-volantia binary: a name on PATH, or a path.",
+                read: |c| vec![c.verba.binary.clone()],
+            },
+            KeySpec {
+                name: "weightsDir",
+                kind: ValueKind::Scalar,
+                summary: "The trained kit directory. Empty means $AOIDE_ROOT/verba/aoide.",
+                read: |c| vec![c.verba.weights_dir.clone()],
+            },
+        ],
     },
 ];
 
@@ -1164,7 +1211,13 @@ mod tests {
     fn the_key_listing_and_the_lookup_agree_with_the_table() {
         assert_eq!(
             keys(),
-            vec!["pairing.defaultGrant".to_string(), "pairing.homeMesh".to_string(), "upkeep.verifyCommand".to_string()]
+            vec![
+                "pairing.defaultGrant".to_string(),
+                "pairing.homeMesh".to_string(),
+                "upkeep.verifyCommand".to_string(),
+                "verba.binary".to_string(),
+                "verba.weightsDir".to_string()
+            ]
         );
         for dotted in keys() {
             assert!(lookup(&dotted).is_some(), "{dotted} lists but does not resolve");
@@ -1855,6 +1908,35 @@ mod tests {
         // proves the actual write/read round trip separately).
         let escaped = render_value(&ValueKind::Scalar, &["sh -c \"make check\"".to_string()]);
         assert_eq!(escaped, "\"sh -c \\\"make check\\\"\"");
+    }
+
+    // ── `[verba]`, where `aoide do` finds its classifier ───────────────────
+
+    #[test]
+    fn verba_defaults_to_the_binary_on_path_and_an_unset_kit_directory() {
+        let c = Config::default();
+        assert_eq!((c.verba.binary.as_str(), c.verba.weights_dir.as_str()), ("verba-volantia", ""));
+        assert_eq!(parse("", &probe()).unwrap().verba, c.verba);
+    }
+
+    #[test]
+    fn a_written_verba_section_reads_back_and_a_misspelt_key_is_refused_by_name() {
+        let c = parse("[verba]\nbinary = \"/opt/vv\"\nweightsDir = \"/srv/kit\"\n", &probe()).unwrap();
+        assert_eq!((c.verba.binary.as_str(), c.verba.weights_dir.as_str()), ("/opt/vv", "/srv/kit"));
+        let err = parse("[verba]\nweights_dir = \"/srv/kit\"\n", &probe()).unwrap_err();
+        assert!(err.to_string().contains("weights_dir"), "{err}");
+    }
+
+    #[test]
+    fn set_writes_the_verba_keys_as_bare_strings() {
+        with_temp_root("verba-set", |dir| {
+            set("verba.weightsDir", "/srv/kit").unwrap();
+            set("verba.binary", "/opt/vv").unwrap();
+            let text = std::fs::read_to_string(dir.join(CONFIG_FILE)).unwrap();
+            assert!(text.contains("weightsDir = \"/srv/kit\"") && text.contains("binary = \"/opt/vv\""), "{text}");
+            let loaded = load().unwrap();
+            assert_eq!((loaded.config.verba.binary.as_str(), loaded.config.verba.weights_dir.as_str()), ("/opt/vv", "/srv/kit"));
+        });
     }
 
     // ── The verify command, end to end ─────────────────────────────────────

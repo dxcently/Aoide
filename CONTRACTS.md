@@ -1457,7 +1457,7 @@ house policy as every other door), and partial management (nix owning one
 section while the CLI owns another) is deliberately not offered: two writers
 on one document is the split-brain the design exists to avoid.
 
-Schema v0 — two SETTABLE sections plus one DECLARED family, and a new
+Schema v0 — three SETTABLE sections plus the DECLARED families, and a new
 section lands with the consumer that reads it, never ahead of one:
 
 ```toml
@@ -1468,6 +1468,10 @@ homeMesh = "home"
 
 [upkeep]
 verifyCommand = "nix build --no-link .#checks.x86_64-linux.fmt .#checks.x86_64-linux.nix-lint"
+
+[verba]
+binary = "verba-volantia"
+weightsDir = "/home/me/.aoide/verba/aoide"
 
 [mesh.home]
 grant = ["read", "spawn"]
@@ -1550,6 +1554,14 @@ Upgrading every node is the remedy the fleet's own rollout takes.
   hook timeout. The command is `nix build`, not `nix flake check`: the latter
   takes no attribute fragment, so scoping is only expressible as a build of
   the check derivations.
+- `verba.binary` (string, default `"verba-volantia"`) — the classifier `aoide do`
+  shells out to: a bare name resolved on `PATH`, or a path. A blank value is the
+  default. Free-form, like `upkeep.verifyCommand`: core cannot judge it.
+- `verba.weightsDir` (string, default `""`) — the trained kit directory
+  `aoide do` hands the classifier (`meta.json`, `model.safetensors`, optional
+  `lexicon.txt`). Empty means `$AOIDE_ROOT/verba/aoide`. Neither `verba` key is
+  written by any default path, so a rollback to a binary without the section
+  has nothing to unlearn unless an operator set one.
 - `mesh.<name>` (task #135 P4, zero or more, keyed by the operator's own
   mesh name) — a declared mesh this instance believes it belongs to,
   compared against the live node registry by `aoide mesh`
