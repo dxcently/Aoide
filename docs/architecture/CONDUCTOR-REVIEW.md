@@ -135,10 +135,10 @@ this ("rebuilds the whole-world grid three times per interaction").
 
 | Gap | Where | Ruling needed? |
 |---|---|---|
-| Blank pad at the default view; one card at 80×24 | `graphview.rs:615-643` | no |
-| Focus traps the cursor; `k`/`h`/`l` dead after one `j` | `graphview.rs:554-590`, `app.rs:4335-4357` | no |
-| Remote nodes and their fresh sessions absent | `graphview.rs:323` | no — observational provenance, not §22 phase 2 |
-| No readout of where the cursor is in the forest (n of N, rank) | `board.rs:173` | no |
+| Blank pad at the default view; one card at 80×24 | `graphview.rs` `origin()` | no — landed |
+| Focus traps the cursor; `k`/`h`/`l` dead after one `j` | `graphview.rs` `visible_order`, `app.rs` `handle_graph_key` | no — landed |
+| Remote nodes and their sessions absent | `graphview.rs` `build_model_from` | no — landed, flat (lineage: item 7) |
+| No readout of where the cursor is in the forest (n of N, rank) | `board.rs` `draw_actions` | no — landed |
 | Card too large for the information it carries | `graphview.rs:53-57` | yes — §19/§23 designer surface |
 | Model rebuilt per call | `graphview.rs:139-205` | yes — §23 S3 (`GraphScene` state) |
 | No typed edges, runs, goals | — | frozen (§22 phase 2) |
@@ -146,68 +146,78 @@ this ("rebuilds the whole-world grid three times per interaction").
 
 ## Ranked improvements
 
-### Do now
+### Landed on `lane/e-conductor`
 
-1. **Selection walks the forest; the view follows.** Navigation
-   (`j`/`k`/`h`/`l`) resolves parent and siblings against the whole forest,
-   and Focus then draws the component of wherever the cursor lands. `k` on
-   a component root climbs to the gathering root and shows the forest
-   under it; `l` on a root steps to the next root. No key is a no-op while
-   there is a card in that direction. Keeps the §22 user ruling (Focus
-   defaults to the picked node; never forces a connection).
-2. **The follow-camera clamps to the forest, not the pad.** When no manual
-   pan is set, the origin never shows more pad than it must: a forest
-   shorter than the pane starts at its own top row; the selection is
-   centred only along the axis where the forest overflows. The pad stays
-   for drags and zoom.
-3. **Remote nodes are cards.** A `node:<name>` root per registered node
-   (mark `🖧`), stating `fresh`/`stale`/`never pulled` with the pull age;
-   its nested `children` document, when fresh, renders beneath it with the
-   same session cards, prefixed so ids cannot collide with local ones.
-   Remote cards take no local action (no Enter focus, no prune cascade):
-   §21's "remote rows carry no local pid/window actions". The roster poll
-   that refreshes the node cache also runs while the Graph is the visible
-   panel, so the cards age honestly instead of vanishing after the 5-minute
-   TTL with nobody pulling.
-4. **Cache rows say they are cache.** Roster session rows carry the
-   backend's `presence`; `last-seen` and `unknown` render with their own
-   glyph and word, never the live state colour, and the node header says
-   `last seen 3h ago` (age), with the ISO stamp kept in the detail.
-5. **Canvas readout: cursor position.** The hint row gains `card n of N`
-   and the rank, so an operator knows how much forest the pane is hiding.
-6. **Rewrite `Conductor-TUI.md`** to the ten-tab program and its real keys,
-   organised by panel as before.
+1. **Selection walks the forest; the view follows.** `j`/`k`/`h`/`l` resolve
+   parent, child and siblings against the whole forest — a root's siblings
+   are the other roots — and Focus re-forms around the landing card. `k` on
+   a loose session climbs to the gathering root; `l` on it reaches the
+   first host card. No key is a no-op while a card stands in that direction.
+2. **The follow-camera clamps to the forest, not the pad.** A forest that
+   fits the pane opens at its own top row, centred across; an overflowing
+   axis centres the selected card inside the forest's bounds. The pad stays
+   for drags and zoom. At 80×24 the first rank now shows instead of one
+   centred card under fifteen blank rows.
+3. **Registered nodes are host cards.** One `🖧 NODE` root per node off the
+   roster probe (`online` with its session count, `unreachable · last seen
+   <age> ago`, `never pulled`), its reported sessions flat beneath; the
+   probe keeps ticking while Graph is open and a landed probe folds into the
+   retained scene. A remote card has no local session id, so Enter, `s` and
+   the menu act on nothing (§21's "remote rows carry no local actions").
+4. **Cache rows say they are cache.** Mesh rows carry the backend's
+   `presence`: a `last-seen`/`unknown` row renders dimmed as `· <label>
+   last-seen · was <state>`, and the node header says `last seen 2h21m ago`
+   instead of a raw stamp. The same word is the graph card's state.
+5. **Canvas readout.** `Canvas 100% · FOCUS · card 3/20 · rank 1`.
+6. **`Conductor-TUI.md` rewritten** to the ten-tab program and its keys.
+
+### Do next (no ruling needed)
+
+7. **Remote lineage.** The roster's session rows carry no spawned edge
+   (`who.rs::session_view_json` omits `SessionView::parent`), so remote
+   sessions hang flat under their host card. An additive `parentSessionId`
+   on the row (conduct crate, one field, one test) lets the graph rank them
+   as it ranks local sessions. Not done here: the conduct crate is another
+   lane's writer this cycle.
+8. **Root spacing.** `place()` advances a full extra slot after each root
+   (`graphview.rs`, `slot += SLOT` after `lay_slots`), so forests sit 76
+   cells apart; one slot of gap would do.
+9. **The hostname-length fixture.** `block_keeps_state_and_identity_on_
+   separate_bounded_lines` asserts a label overflows `CARD_W` and is red on
+   any box whose hostname is short (osaka); the fixture should force the
+   overflow with its own name, not the host's.
 
 ### Needs ruling
 
-7. **Compact cards.** Question: may the card shrink to a 24×5 preset
-   (title · petname+tail · role/state · activity) with a 2-row rank gap?
-   Recommendation: yes, one fixed size, no per-zoom presets (the AGENTS
-   invariant stays). Trade-off: harness and model leave the card (they stay
-   in the Details popup and the tree row); a rank of 13 drops from 494 to
-   364 cells, still wider than a pane, so this helps but does not finish
-   the job. Owner: the §19 designer seat, now vacant (§23 question 1).
-8. **Collapse a card's children.** Question: is a per-card fold (like the
-   tree's `h`/`l`) a view choice (UI, allowed now) or a scene mutation
-   (§23 `GraphScene` state)? Recommendation: view choice, keyed on node id
-   in `SceneState`, same as `selected`; it is the one feature that makes a
-   13-wide rank navigable without scrolling. Trade-off: a folded card hides
-   an `awaiting` child; the fold mark must carry the child-state summary.
-9. **One model per frame.** Question: does §23 S3 (`GraphScene` state) own
-   the cache, or may `App` memoise `build_model` on the stage mtimes now?
-   Recommendation: memoise on `App` now (`(mtimes, view, selected)` key),
-   S3 moves it later; the per-interaction cost is measurable on a 40-node
-   forest with three node caches on disk.
-10. **Lineage-first sidebar.** Question: does the tree keep Agents/Terminals
+10. **Compact cards.** Question: may the card shrink to a 24×5 preset
+    (title · petname+tail · role/state · activity) with a 2-row rank gap?
+    Recommendation: yes, one fixed size, no per-zoom presets (the AGENTS
+    invariant stays). Trade-off: harness and model leave the card (they stay
+    in the Details popup and the tree row); a rank of 13 drops from 494 to
+    364 cells, still wider than a pane, so this helps but does not finish
+    the job. Owner: the §19 designer seat, now vacant (§23 question 1).
+11. **Collapse a card's children.** Question: is a per-card fold (like the
+    tree's `h`/`l`) a view choice (UI, allowed now) or a scene mutation
+    (§23 `GraphScene` state)? Recommendation: view choice, keyed on node id
+    in `SceneState`, same as `selected`; it is the one feature that makes a
+    13-wide rank navigable without scrolling. Trade-off: a folded card hides
+    an `awaiting` child; the fold mark must carry the child-state summary.
+12. **One model per frame.** Question: does §23 S3 (`GraphScene` state) own
+    the cache, or may `App` memoise `build_model` on the stage mtimes and the
+    roster's fetch instant now? Recommendation: memoise on `App` now, S3
+    moves it later; one keypress still costs three to five document builds,
+    each re-reading `nodes.json`.
+13. **Lineage-first sidebar.** Question: does the tree keep Agents/Terminals
     as top groups (designer STABLE 1, §19) or nest a spawned terminal under
     its agent? Recommendation: nest — the tree is the only view that shows
     everything at once, and kind is already the mark. Trade-off: the
     Terminals count button no longer equals the Terminals group size.
-11. **Graph actions on remote cards.** Question: should `s` on a remote
-    agent card open the letter composer addressed `node/petname`?
-    Recommendation: yes, it is the same `mail send` the Mesh row offers;
-    nothing else (no focus, no prune) crosses the node line.
-12. **Typed edges, runs, goals, mail trails** — §22 phase 2 and §24, frozen
+14. **Graph actions on remote cards.** Question: should `s` on a remote
+    agent card open the letter composer addressed `node/petname`, and `e`
+    offer Details? Recommendation: yes to both, it is the same `mail send`
+    the Mesh row offers; nothing else (no focus, no prune) crosses the node
+    line.
+15. **Typed edges, runs, goals, mail trails** — §22 phase 2 and §24, frozen
     until the six questions in `p-orch-graph-brief.md` are answered. This
     review adds no question; the recommended default for each stands as
     briefed.
