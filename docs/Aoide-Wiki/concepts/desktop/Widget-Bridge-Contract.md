@@ -256,15 +256,16 @@ for Quickshell: render surfaces only]]) applied to the roster widgets:
    as audit/derived.
 4. **Outbound is a narrow socket.** `focussession`/`focuswindow` jumps,
    `send` injection, acknowledged session actions (the session-menu's
-   `undying`/`project`/`kill`/`createproject`/`editproject` calls), the
-   read-only `sessiontrace` query above, and the draft picker's two verbs —
-   the read `ricedrafts` and the gesture `ricedraft` (`enter`/`new`/`save`) —
-   nothing else leaves QML. A new verb is one of two shapes: a READ answers on
-   its own connection, with the daemon's bound under the client's reply
-   timeout; an ACTION is fire-and-forget, and its outcome is a toast the
-   daemon fires — a widget never parks on it and re-reads the stage files to
-   see what changed. (The acknowledged session, project and workspace actions
-   are the exception: they answer.)
+   `undying`/`project`/`kill`/`createproject`/`editproject` calls), the bar's
+   `workspaceaction` bind and unbind, the read-only `sessiontrace` query
+   above, and the draft picker's two verbs — the read `ricedrafts` and the
+   gesture `ricedraft` (`enter`/`new`/`save`) — nothing else leaves QML. A new
+   verb is one of two shapes: a READ answers on its own connection, with the
+   daemon's bound under the client's reply timeout; an ACTION is
+   fire-and-forget, and its outcome is a toast the daemon fires — a widget
+   never parks on it and re-reads the stage files to see what changed. (The
+   acknowledged session, project and workspace actions are the exception: they
+   answer.)
 5. **Colour only from [[livery]]**; hard corners; the music-glyph state contract
    (♪ working · 𝄐 awaiting · 𝄁 stopped · 𝄽 idle · 𝄂 done) is a hard contract.
 6. **Degrade.** An empty/missing stage file is an empty roster; off-Hyprland the

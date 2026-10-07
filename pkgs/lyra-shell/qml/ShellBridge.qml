@@ -9,8 +9,8 @@
 // "cmd" field and payload fields. The socket path is the shellbridge default:
 // $XDG_RUNTIME_DIR/aoide/shellbridge.sock (falls back to /run/user/<uid>/aoide/shellbridge.sock).
 // Every command is fire-and-forget except "sessionaction", "projectaction",
-// "sessiontrace" and "ricedrafts", which are answered with one JSON line on the
-// same connection, which then closes.
+// "workspaceaction", "sessiontrace" and "ricedrafts", which are answered with
+// one JSON line on the same connection, which then closes.
 //
 // Communication discipline: this is the ONLY outbound channel from QML.
 // No MCP, no HTTP, no shell exec from QML — shellbridge is the gate.
@@ -145,6 +145,33 @@ QtObject {
             return
         }
         conn.start()
+    }
+
+    // ── Workspace actions (bind a workspace to a project) ─────────────────
+    // The same one-shot socket as sessionAction: one `workspaceaction` line
+    // out, one JSON line back, no queue, no replay. `fields` carries the wire
+    // keys verbatim — `action` ("set" | "clear"), and optionally `workspace`
+    // (an id; absent = the focused one), `project`, `new` (create a name-only
+    // project first):
+    //
+    //   bridge.workspaceAction({ action: "set", workspace: 3, project: "aoide" }, cb)
+    //   bridge.workspaceAction({ action: "set", project: "x", new: true },      cb)
+    //   bridge.workspaceAction({ action: "clear", workspace: 3 },               cb)
+    //
+    // `cb` is called EXACTLY ONCE with the daemon's reply { ok, message, action,
+    // workspace, project?, data? } — `reason: "no-compositor"` when there is no
+    // compositor — or { ok: false, message } on a timeout or an unreachable
+    // socket.
+    function workspaceAction(fields, callback) {
+        var f = fields || ({})
+        var wanted = { cmd: "workspaceaction", action: "" + (f.action || "") }
+        if (f.workspace !== undefined && f.workspace !== null)
+            wanted.workspace = f.workspace
+        if (f.project !== undefined && f.project !== null)
+            wanted.project = "" + f.project
+        if (f.new === true)
+            wanted.new = true
+        _ask(wanted, callback, { ok: false, message: "shellbridge client unavailable" })
     }
 
     // ── The read-only trace query ──────────────────────────────────────────
