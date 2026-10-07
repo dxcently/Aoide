@@ -7,6 +7,16 @@
 // file is livery.json, sole source since LIVERY-MERGE Phase 4 dropped the
 // legacy mirror.
 //
+// Watch contract: a FileView watches the inode its path resolved to when it
+// last loaded, and stage/livery.json is a routing entry — a real file, or a
+// symlink to a draft's livery.json. Replacing the symlink (leaving a draft,
+// rerouting draft to draft) leaves the watch on the old draft's inode, which
+// sees no event again, so every transition that changes the entry's type or
+// target writes stage/mode.json LAST. mode.json is always a real file,
+// atomically replaced, so its watch stays live; on every mode.json change
+// the shell re-reads both files, and reload() re-arms the livery watch on
+// whatever the path resolves to now.
+//
 // livery schema v0 (CONTRACTS.md §1): palette + bar.* / notif.* / window.*
 // All values are concrete hex strings (fallbacks already applied by the
 // livery emitter — Quickshell never sees null).
@@ -258,8 +268,9 @@ QtObject {
     // `aoide rice mode {stage,declarative,draft}` (storage::mode, RiceMode)
     // writes this file on every mode change; the background reconciler
     // touches it too. Same FileView-hot-reload idiom as liveryPath above, kept
-    // as a SEPARATE file/watcher since mode.json and livery.json are written
-    // independently by different code paths. Default mirrors Rust's own
+    // as a SEPARATE file/watcher: mode.json is a real file the mode commands
+    // write last, livery.json a routing entry (see the header) — so a change
+    // here also re-reads livery.json. Default mirrors Rust's own
     // `impl Default for RiceMode` (declarative) so an absent/unparseable
     // file reads as the safe, non-mutating mode rather than a false
     // "staging".
@@ -272,7 +283,7 @@ QtObject {
         id: modeFile
         path: root.modePath
         watchChanges: true
-        onFileChanged: modeFile.reload()
+        onFileChanged: { modeFile.reload(); liveryFile.reload() }
         onTextChanged: {
             var txt = modeFile.text()
             if (!txt) return
