@@ -15,8 +15,8 @@
 //! Hyprland 0.56.0, one monitor `DP-1` 1920x1080) — trimmed and embedded, not
 //! invented. [`run_hyprctl_json`], the function that actually spawns
 //! `hyprctl`, is NOT unit-tested (environment-dependent: no compositor in the
-//! build sandbox) — same split `song::ipc::quickshell_ipc_reload` /
-//! `classify_call` and `reap.rs`'s `classify()` already establish.
+//! build sandbox) — the same split `song::ipc::quickshell_ipc_reload` /
+//! `classify_call` already establishes.
 //!
 //! Unlike `song::ipc`'s quirky void-IPC call, `hyprctl -j` has no
 //! silent-success trap: exit 0 means it printed the JSON it was asked for,
