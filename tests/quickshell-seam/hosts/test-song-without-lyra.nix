@@ -8,27 +8,23 @@
 # other lane reads the song), so the platform asserts on it. This fixture is the
 # eval that must FAIL: one host, one selection, and the platform assertion's own
 # bytes as the evidence.
-{
-  dendrites.quickshell.enable = true;
+_: {
+  habit.dendrites.quickshell.enable = true;
 
-  users.khoa = {
+  habit.users.khoa = {
     definition = ../user.nix;
-    homeManager.enable = true;
+    home.enable = true;
   };
 
-  nixos =
-    { ... }:
-    {
-      aoide.enable = true;
-      aoide.song = "sonata";
-      aoide.quickshell.config = toString ../fixture;
+  aoide.enable = true;
+  aoide.song = "sonata";
+  aoide.quickshell.config = toString ../fixture;
 
-      networking.hostName = "test-song-without-lyra";
-      boot.loader.grub.enable = false;
-      fileSystems."/" = {
-        device = "none";
-        fsType = "tmpfs";
-      };
-      system.stateVersion = "25.11";
-    };
+  networking.hostName = "test-song-without-lyra";
+  boot.loader.grub.enable = false;
+  fileSystems."/" = {
+    device = "none";
+    fsType = "tmpfs";
+  };
+  system.stateVersion = "25.11";
 }

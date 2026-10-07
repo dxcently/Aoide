@@ -15,7 +15,9 @@ let
     mod:
     composition.evalSelection {
       inherit registry;
-      modules = [ mod ];
+      host = {
+        habit = mod;
+      };
     };
 
   desktopHost = {
@@ -37,18 +39,22 @@ rec {
       )
     }:${selection.dendrites.compositor.provider}";
 
-  # Every nixos lane file the selection kept imports.
-  realRegistryLanesImport =
+  # Every dendrite file the selection kept imports as a module.
+  realRegistryDendritesImport =
     let
       selection = selectionOf desktopHost;
-      lanes = composition.lanesFor {
-        inherit (selection) catalogue;
-        selected = selection.dendrites;
-        lane = "nixos";
-        scope = "for the system";
-      };
+      impls = lib.mapAttrsToList (name: d: composition.implOf selection.catalogue name d.provider) (
+        lib.filterAttrs (_: d: d.enable) selection.dendrites
+      );
     in
-    lanes != [ ] && builtins.all (m: builtins.isAttrs m || builtins.isFunction m || builtins.isPath m) lanes;
+    impls != [ ]
+    && builtins.all (
+      i:
+      let
+        m = import i.path;
+      in
+      builtins.isAttrs m || builtins.isFunction m
+    ) impls;
 
   # The inventory a reference-shaped host reports.
   realRegistryInventory =

@@ -5,30 +5,26 @@
 # flake hands its constructor: Aoide's, through the `songbookRoot` export, never
 # a path built into Aoide's tree. `sonata` borrows its own `_widgets/` shelf, so
 # the borrow door is exercised over Aoide's songbook too.
-{
-  aggregation.desktop.enable = true;
+_: {
+  habit.aggregation.desktop.enable = true;
 
-  song.declared = "sonata";
+  habit.song.declared = "sonata";
 
-  users.fixture = {
+  habit.users.fixture = {
     definition = ../user.nix;
-    homeManager.enable = true;
+    home.enable = true;
   };
 
-  nixos =
-    { ... }:
-    {
-      aoide.enable = true;
-      aoide.user = "fixture";
-      aoide.root = "/home/fixture/.aoide";
+  aoide.enable = true;
+  aoide.user = "fixture";
+  aoide.root = "/home/fixture/.aoide";
 
-      nixpkgs.hostPlatform = "x86_64-linux";
-      networking.hostName = "aoide-songs";
-      boot.loader.grub.enable = false;
-      fileSystems."/" = {
-        device = "none";
-        fsType = "tmpfs";
-      };
-      system.stateVersion = "25.11";
-    };
+  nixpkgs.hostPlatform = "x86_64-linux";
+  networking.hostName = "aoide-songs";
+  boot.loader.grub.enable = false;
+  fileSystems."/" = {
+    device = "none";
+    fsType = "tmpfs";
+  };
+  system.stateVersion = "25.11";
 }

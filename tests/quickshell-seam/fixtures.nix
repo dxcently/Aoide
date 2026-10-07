@@ -2,7 +2,7 @@
 # run.sh checks them against.
 #
 # Everything under test is read out of `${flake}`: the constructor, the
-# catalogue, nucleus and the three host records all come from the ref's own
+# catalogue, nucleus and the three host modules all come from the ref's own
 # source, so a flakeref really freezes the tree. (A fixture imported from the
 # working directory would keep testing the tree you are standing in, whatever
 # ref was passed — a frozen ref has to name the commit whose files get read, or
@@ -22,7 +22,7 @@ let
 
   composition = inputs.habit.lib.composition { inherit lib; };
 
-  # The nucleus lane as the ref itself builds it (`lib/aoideos.nix`) — the same
+  # The nucleus module as the ref itself builds it (`lib/aoideos.nix`) — the same
   # value the flake exports as `nixosModules.nucleus`, and the ONE module that
   # defines `_module.args.aoideInputs`. Read out of the ref rather than
   # reconstructed here, so the fixtures cannot drift from what a host really
@@ -38,17 +38,19 @@ let
       nixpkgs = inputs.nixpkgs;
       hostName = name;
       registry = import (src + "/modules");
-      hostModules = [ (src + "/tests/quickshell-seam/hosts/${name}.nix") ];
-      nucleus = aoideos.nucleusModule;
+      host = src + "/tests/quickshell-seam/hosts/${name}.nix";
       homeManagerModule = inputs.home-manager.nixosModules.home-manager;
       specialArgs = {
         username = "khoa";
       };
       # `mkNixosHost` hands `system` to the modules but not to `nixosSystem`
-      # itself, so a constructor-built host at this point in the tree states its
-      # platform in its own module — the S7 host record carries it, and this
-      # harness supplies it here rather than inventing one in the fixtures.
-      extraModules = [ { nixpkgs.hostPlatform = system; } ];
+      # itself, so a constructor-built host states its platform in its own
+      # module; this harness supplies it here rather than inventing one in the
+      # fixtures.
+      extraModules = [
+        aoideos.nucleusModule
+        { nixpkgs.hostPlatform = system; }
+      ];
       knownHosts = [ name ];
       inherit system;
     }).system;

@@ -15,14 +15,14 @@
 # answers that disagree.
 #
 # Selection happens before this file is reached, inside `mkNixosHost`
-# (habit's composition, `inputs.habit`): the host record is evaluated in an ordinary
-# `evalModules` pass that knows nothing about NixOS, and the platform import list
-# is assembled from the result. Nothing below imports a dendrite file, and a
-# capability the host did not select is never read.
+# (habit's composition, `inputs.habit`): the host module's `habit.*` keys are read
+# in an ordinary `evalModules` pass that knows nothing about NixOS, and the
+# platform import list is assembled from the result. Nothing below imports a
+# dendrite file, and a capability the host did not select is never read.
 #
-# The songs are the two hooks. `selectionModules` puts `song.declared` /
-# `song.available` on the host record, so the gate pass can read a selection the
-# constructor has never heard of; `extraModulesFor` turns that selection into
+# The songs are the two hooks. `selectionModules` puts `habit.song.declared` /
+# `habit.song.available` on the host module, so the gate pass can read a selection
+# the constructor has never heard of; `extraModulesFor` turns that selection into
 # the platform modules — the built-in songs' `rice.nix` files, and the
 # `aoide.song` / `aoide.songbook.builtIn` facts the paint lanes read. Both are
 # generic hooks (habit's composition names no song), and this is the only site
@@ -69,19 +69,19 @@ let
   # same source `flake.nix`'s `packages` output and the `pkg-<name>` checks
   # read, so there is one build and no second list. It is a BASE, handed to the
   # constructor as an `overlays` entry rather than as an extra module, because
-  # the lanes come after it and a lane may replace a name it provides.
+  # the selected modules come after it and one may replace a name it provides.
   overlay = (import ./pkgs.nix { inherit lib; }).overlay {
     stock = inputs.nixpkgs.legacyPackages.${system};
   };
 
-  # The nucleus lane, as a CONSUMER takes it — and the ONE place Aoide's own
+  # The nucleus module, as a CONSUMER takes it — and the ONE place Aoide's own
   # flake inputs reach a module evaluation.
   #
-  # What a lane reads is the module argument `aoideInputs`, and there are
+  # What a module reads is the module argument `aoideInputs`, and there are
   # exactly two doors for it, because the module system asks for arguments in
   # two different moments:
   #
-  #   - INSIDE `config` (every lane's reads except the imports below), through
+  #   - INSIDE `config` (every module's reads except the imports below), through
   #     `_module.args`, which is `raw`: exactly ONE module defines it, and this
   #     is that module. Both this file's `mkHost` and the flake's
   #     `nixosModules.nucleus` output are that same value.
@@ -91,12 +91,12 @@ let
   #     which is computed FROM that module list. Nixpkgs names the wall itself
   #     when it happens ("argument `x' is not externally provided, so querying
   #     `_module.args` instead, requiring `config`" → infinite recursion). So
-  #     the two upstream modules a lane used to name in its own `imports` are
+  #     the two upstream modules a module used to name in its own `imports` are
   #     imported HERE, by value, where `inputs` is a LEXICAL value of this file
   #     and costs no argument at all: the core's module (was
   #     `modules/nucleus/options.nix`) and stylix's (was
   #     `modules/dendrites/stylix.nix`).
-  #   - The HOME lane gets a third door for the same reason: home-manager
+  #   - The home half gets a third door for the same reason: home-manager
   #     evaluates its own module system, and `extraSpecialArgs` IS its
   #     specialArgs (external, available during its own module collection), so
   #     `aoideInputs.nvf` works in an HM `imports` list the way
@@ -129,7 +129,7 @@ in
 {
   inherit hostNames songbookRoot;
 
-  # The nucleus lane as a consumer takes it — the same module value
+  # The nucleus module as a consumer takes it — the same module value
   # `nixosModules.nucleus` exports (see the let-block above).
   inherit nucleusModule;
 
@@ -146,12 +146,14 @@ in
       knownHosts = hostNames;
 
       registry = import ../modules;
-      nucleus = nucleusModule;
-      hostModules = [ ../hosts/${name} ];
+      host = ../hosts/${name};
       homeManagerModule = inputs.home-manager.nixosModules.home-manager;
       overlays = [ overlay ];
 
-      # The song fields a host record may set, and nothing else about songs.
+      # The nucleus module: core plumbing every host carries, selected by no one.
+      extraModules = [ nucleusModule ];
+
+      # The song fields a host module may set, and nothing else about songs.
       selectionModules = [ songbook.selectionModule ];
 
       # What that selection MEANS: first the checks (a song name the songbook
@@ -192,11 +194,11 @@ in
         ];
 
       # `system` is threaded to the modules rather than to `nixosSystem`: a host
-      # record states its own platform (`nixpkgs.hostPlatform` in its `nixos`
-      # half), because the constructor assembles the module list and lets the
-      # platform come from the modules it assembled. `host` and `username` ride
+      # module states its own platform (`nixpkgs.hostPlatform`), because the
+      # constructor assembles the module list and lets the platform come from
+      # the modules it assembled. `host` and `username` ride
       # along because modules and test fixtures have always had them — and
-      # `inputs` does NOT: every lane reads Aoide's own inputs as `aoideInputs`
+      # `inputs` does NOT: every module reads Aoide's own inputs as `aoideInputs`
       # (`nucleusModule` above), so threading them through specialArgs would be
       # a second, drifting answer to a question already answered once.
       specialArgs = { inherit username; };

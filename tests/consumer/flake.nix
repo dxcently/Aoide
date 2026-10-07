@@ -4,10 +4,10 @@
 # Aoide's source tree anywhere, and no threading of Aoide's own inputs.
 # Everything AoideOS offers a stranger arrives through the root flake's exports
 # — `nixosModules.nucleus`, `lib.{composition,livery,songbook,catalogue}`,
-# `songbookRoot` and `overlays.default` — and the flake inputs Aoide's own lanes need (quickshell, stylix, nvf, hyprland,
+# `songbookRoot` and `overlays.default` — and the flake inputs Aoide's own modules need (quickshell, stylix, nvf, hyprland,
 # the core itself) are closed over by `nixosModules.nucleus`, which is why this
 # file declares only nixpkgs, home-manager and aoide. It does not declare
-# `stylix` on purpose: selecting the `stylix` lane imports stylix's module from
+# `stylix` on purpose: selecting the `stylix` dendrite imports stylix's module from
 # Aoide's own inputs, and importing a second copy through a different input
 # value does not deduplicate (migration contract §12).
 #
@@ -46,7 +46,7 @@
       registry = {
         # `lib.catalogue` is the bulk view of the same paths
         # `aoide.nixosModules.<name>` spells one name at a time; `nucleus` is
-        # not a catalogue entry and is passed separately below.
+        # not a catalogue entry and is passed below as an extra module.
         catalogue = aoide.lib.catalogue;
         aggregations = import ./aggregations;
         overrides = { };
@@ -67,12 +67,12 @@
           hostName = name;
           knownHosts = [ name ];
           inherit registry;
-          nucleus = aoide.nixosModules.nucleus;
-          hostModules = [ (./hosts + "/${name}.nix") ];
+          extraModules = [ aoide.nixosModules.nucleus ];
+          host = ./hosts + "/${name}.nix";
           homeManagerModule = home-manager.nixosModules.home-manager;
           overlays = [ aoide.overlays.default ];
           # The song contract, wired exactly as §12 says a consumer wires it:
-          # `selectionModule` puts the two host-record fields in the gate pass,
+          # `selectionModule` puts the two host-module fields in the gate pass,
           # `songModules` turns the selection into `rice.nix` imports, and the
           # built-in set becomes the facts the paint lanes read.
           selectionModules = [ songbook.selectionModule ];
@@ -90,7 +90,7 @@
                 _module.args = {
                   inherit (songbook) song borrow;
                   # The directory the selection was validated against: the lyra
-                  # lane reads the root from here rather than naming one.
+                  # dendrite reads the root from here rather than naming one.
                   songbook = songbookDir;
                 };
                 aoide.song = song.declared;

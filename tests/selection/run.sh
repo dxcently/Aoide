@@ -21,7 +21,7 @@ habit="(builtins.getFlake \"github:dxcently/habit/$habitRev\")"
 # case                              expect  substring the error must contain
 cases=$(cat <<'EOF'
 realRegistryResolvesAoideos         ok      "compositor,greeter,hyprland,lyra,quickshell,stylix,wallpaper:hyprland"
-realRegistryLanesImport             ok      true
+realRegistryDendritesImport        ok      true
 realRegistryInventory               ok      "agents,aoideos,base,desktop"
 songDiscovery                       ok      "alpha landmine noshelf"
 songLandmineUnread                  ok      "1:true:true"

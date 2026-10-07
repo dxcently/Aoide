@@ -14,7 +14,7 @@
 #   2. The evaluation. `flake.nix`'s `outputs` is applied to the REF's own
 #      inputs (so a commit ref really freezes the tree under test, the same
 #      discipline tests/quickshell-seam uses), and the resulting hosts are read.
-#      `consumer` performs from its OWN songbook: it selects the nucleus lane,
+#      `consumer` performs from its OWN songbook: it hands over the nucleus module and selects
 #      lyra, the shell and stylix; it performs one song and builds in a second
 #      that BORROWS the first's widgets; and the song machinery a real host gets
 #      (deployed config, seeded stage, seeded machine songbook, templates on the

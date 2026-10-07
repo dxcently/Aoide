@@ -5,27 +5,23 @@
 # it names no song — so the shell it runs is the fixture directory's, started by
 # the quickshell lane, with no lyra anywhere in the evaluation (no rice binary,
 # no `songs/`, no shellbridge unit, no healthcheck).
-{
-  dendrites.quickshell.enable = true;
+_: {
+  habit.dendrites.quickshell.enable = true;
 
-  users.khoa = {
+  habit.users.khoa = {
     definition = ../user.nix;
-    homeManager.enable = true;
+    home.enable = true;
   };
 
-  nixos =
-    { ... }:
-    {
-      aoide.enable = true;
-      aoide.quickshell.config = toString ../fixture;
+  aoide.enable = true;
+  aoide.quickshell.config = toString ../fixture;
 
-      # The floors a real machine has; a toplevel wants them.
-      networking.hostName = "test-quickshell-only";
-      boot.loader.grub.enable = false;
-      fileSystems."/" = {
-        device = "none";
-        fsType = "tmpfs";
-      };
-      system.stateVersion = "25.11";
-    };
+  # The floors a real machine has; a toplevel wants them.
+  networking.hostName = "test-quickshell-only";
+  boot.loader.grub.enable = false;
+  fileSystems."/" = {
+    device = "none";
+    fsType = "tmpfs";
+  };
+  system.stateVersion = "25.11";
 }

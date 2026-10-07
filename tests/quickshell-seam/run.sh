@@ -6,7 +6,7 @@
 #   ./tests/quickshell-seam/run.sh git+file:///abs/dir?rev=<sha>   # a frozen commit
 #
 # The ref is the TREE under test, not just a source of inputs: `fixtures.nix`
-# reads the constructor, the catalogue, nucleus and the three host records out
+# reads the constructor, the catalogue, nucleus and the three host modules out
 # of it, so a commit ref tests that commit. Every eval below carries the ref.
 #
 # `test-quickshell-only` — quickshell selected, `aoide.quickshell.config` = the

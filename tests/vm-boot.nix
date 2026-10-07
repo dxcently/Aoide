@@ -6,7 +6,7 @@
 #
 # Exercises the module tree through the SAME assembly a real host gets — the
 # constructor (habit's `composition.mkNixosModules`, as
-# lib/aoideos.nix does) over the record below — plus the aoide package, greeter
+# lib/aoideos.nix does) over the host module below — plus the aoide package, greeter
 # wiring, the aoided user service, and the graph commands, without real hardware
 # or external network access. shellbridge is NOT exercised: its module gates on
 # the lyra enable fact (it exists to feed the painted shell), and this VM does
@@ -19,7 +19,7 @@
 #   stylix NOT SELECTED
 #     Reason: Stylix builds a wallpaper with ImageMagick and imports a large
 #     theme-target set; the closure is expensive and adds no value for a boot
-#     test. Its lane is simply not in the record, so the fact stays false.
+#     test. Its dendrite is simply not selected, so the fact stays false.
 #
 #   quickshell and lyra NOT SELECTED
 #     Reason: Quickshell sources an upstream flake input with a significant
@@ -72,23 +72,23 @@ let
   # overlay, which auto-discovers pkgs/<name> and guards each name against
   # shadowing a nixpkgs attribute. `aoide` itself is self-flaked
   # (pkgs/aoide/flake.nix) and named by neither aggregate — it arrives via
-  # `aoideInputs.aoide.nixosModules.default`, imported by the nucleus lane
+  # `aoideInputs.aoide.nixosModules.default`, imported by the nucleus module
   # (`lib/aoideos.nix`'s `nucleusModule`) and carrying `overlays.default` with it, the
   # same way a real host picks it up.
   overlay = (import ../lib/pkgs.nix { inherit lib; }).overlay {
     stock = inputs.nixpkgs.legacyPackages.${system};
   };
 
-  # The nucleus lane as `lib/aoideos.nix` builds it for a real host — the same
+  # The nucleus module as `lib/aoideos.nix` builds it for a real host — the same
   # value the flake exports as `nixosModules.nucleus`, and the ONE module that
-  # sets `_module.args.aoideInputs` (which is how every lane reaches Aoide's
+  # sets `_module.args.aoideInputs` (which is how every dendrite reaches Aoide's
   # own inputs now; nothing threads them through specialArgs).
   aoideos = import ../lib/aoideos.nix {
     inherit inputs lib system;
     username = "khoa";
   };
 
-  # The VM's host record — the same interface `hosts/<name>/default.nix`
+  # The VM's host module — the same interface `hosts/<name>/default.nix`
   # answers, inline because this machine exists only for the test.
   #
   # `compositor` is selected with its provider named (hyprland, the only one),
@@ -98,15 +98,19 @@ let
   # hand-written account, because the constructor wires Home Manager only where
   # a user asks for it and the tree's lanes write into that user's home.
   vmHost = {
-    dendrites.compositor = {
+    # A module value names its own file: the platform evaluation attributes
+    # `habit.*` definitions to a file and refuses those of any file but the host's.
+    _file = toString ./vm-boot.nix;
+
+    habit.dendrites.compositor = {
       enable = true;
       provider = "hyprland";
     };
-    dendrites.greeter.enable = true;
+    habit.dendrites.greeter.enable = true;
 
-    users.khoa = {
+    habit.users.khoa = {
       definition = ./vm-boot-user.nix;
-      homeManager.enable = true;
+      home.enable = true;
     };
   };
 
@@ -115,13 +119,13 @@ let
   resolved = composition.mkNixosModules {
     hostName = "vm-test";
     registry = import ../modules;
-    nucleus = aoideos.nucleusModule;
-    hostModules = [ vmHost ];
+    host = vmHost;
+    extraModules = [ aoideos.nucleusModule ];
     homeManagerModule = inputs.home-manager.nixosModules.home-manager;
     overlays = [ overlay ];
     # specialArgs mirror what lib/aoideos.nix passes: `username`, and NOT
-    # `inputs` — the lanes reach Aoide's own inputs as `aoideInputs`, which the
-    # nucleus lane above defines once. The node is named "vm-test".
+    # `inputs` — the dendrites reach Aoide's own inputs as `aoideInputs`, which the
+    # nucleus module above defines once. The node is named "vm-test".
     specialArgs = {
       username = "khoa";
     };
@@ -151,7 +155,7 @@ pkgs.testers.runNixOSTest {
     {
       imports = resolved.modules ++ [
         # ── This machine ────────────────────────────────────────────────
-        # Inline rather than in `vmHost.nixos`, so the test's own settings sit
+        # Inline rather than in `vmHost`, so the test's own settings sit
         # beside the test's own assertions. Mirrors yomi-strix with the lane set
         # trimmed.
         (

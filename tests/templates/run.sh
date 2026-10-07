@@ -60,16 +60,16 @@ done
 # Fixtures the templates deliberately do not ship: the second implementation of
 # a capability, and the files that must stay unread.
 cat > "$t/modules/dendrites/notifications/dunst.nix" <<'EOF'
-{ homeManager = { ... }: { }; }
+{ ... }: { }
 EOF
 cat > "$t/modules/dendrites/compositor/default.nix" <<'EOF'
 { providers = { hyprland = ./hyprland/hyprland.nix; niri = ./niri.nix; landmine = ./landmine.nix; }; }
 EOF
 cat > "$t/modules/dendrites/compositor/hyprland/hyprland.nix" <<'EOF'
-{ nixos = { ... }: { }; }
+{ ... }: { }
 EOF
 cat > "$t/modules/dendrites/compositor/niri.nix" <<'EOF'
-{ nixos = { ... }: { }; }
+{ ... }: { }
 EOF
 cat > "$t/modules/dendrites/compositor/landmine.nix" <<'EOF'
 throw "compositor/landmine.nix was imported — an unselected provider was evaluated"
@@ -95,7 +95,7 @@ cat > "$t/modules/overrides/tripwire.nix" <<'EOF'
 {
   dendrites = [ "examplebar" ];
   overlay = _final: _prev: throw "an unmatched override overlay was evaluated";
-  nixos = _: throw "an unmatched override module was evaluated";
+  system = _: throw "an unmatched override module was evaluated";
 }
 EOF
 
@@ -108,7 +108,7 @@ let
   hostNames = [ \"examplehost\" \"exampleserver\" ];
   resolve = name: host:
     let
-      selection = composition.evalSelection { inherit registry; modules = [ host ]; };
+      selection = composition.evalSelection { inherit registry host; };
       inv = composition.inventoryOf { hostName = name; inherit selection; };
       overrides = composition.overridesFor {
         inherit (selection) catalogue;
@@ -117,17 +117,14 @@ let
         hostName = name;
         inherit selection;
       };
-      lanes = {
-        system = composition.lanesFor {
-          inherit (selection) catalogue;
-          selected = selection.dendrites; lane = \"nixos\"; scope = \"for the system\";
-        };
-        home = lib.mapAttrs (n: u: composition.lanesFor {
-          inherit (selection) catalogue;
-          selected = u.dendrites; lane = \"homeManager\"; scope = \"by user '\\\${n}'\";
-        }) selection.users;
+      importsOf = selected: lib.mapAttrsToList (n: d:
+        import (composition.implOf selection.catalogue n d.provider).path
+      ) (lib.filterAttrs (_: d: d.enable) selected);
+      imported = {
+        system = importsOf selection.dendrites;
+        home = lib.mapAttrs (_: u: importsOf u.dendrites) selection.users;
       };
-    in builtins.deepSeq [ lanes overrides ] { inherit inv lanes overrides; };
+    in builtins.deepSeq [ imported overrides ] { inherit inv imported overrides; };
   a = resolve \"examplehost\" $t/hosts/examplehost;
   b = resolve \"exampleserver\" $t/hosts/exampleserver;
 in {
@@ -135,17 +132,17 @@ in {
   aNotifications = a.inv.users.exampleuser.dendrites.notifications.provider;
   aOptOut = a.inv.dendrites ? examplebar;
   aGroupMember = a.inv.dendrites ? exampletool;
-  aUserHomeLanes = builtins.length a.lanes.home.exampleuser;
+  aUserDendrites = builtins.length (builtins.attrNames a.inv.users.exampleuser.dendrites);
   aUserAggregation = a.inv.users.exampleuser.aggregation;
   bCompositor = b.inv.dendrites.compositor.provider;
   bNotifications = b.inv.dendrites ? notifications;
-  bHomeManager = b.inv.users.exampleuser.homeManager;
-  bHomeLanes = builtins.length b.lanes.home.exampleuser;
+  bHomeManager = b.inv.users.exampleuser.home;
+  bUserDendrites = builtins.length (builtins.attrNames b.inv.users.exampleuser.dendrites);
 
   # The override record: matched where its host filter and a selected target
-  # agree, and carrying all three halves.
+  # agree, and carrying all three fields.
   aMatched = builtins.concatStringsSep \",\" a.overrides.matched;
-  aHomeFix = builtins.length a.overrides.homeManager.exampleuser;
+  aHomeFix = builtins.length a.overrides.home.exampleuser;
   bMatched = builtins.length b.overrides.matched;
 
   # The overlay really is an overlay: feed it a stub package set shaped like
@@ -155,11 +152,11 @@ in {
       ripgrep.overrideAttrs = f: { inherit (f { }) doCheck; };
     }).ripgrep.doCheck;
 
-  # And the nixos half names REAL options: evaluated by the real NixOS module
+  # And the system half names REAL options: evaluated by the real NixOS module
   # system, so a misspelt option is a failing test rather than a comment.
   recordUsesRealOptions = (lib.nixosSystem {
     modules = [
-      (builtins.head a.overrides.nixos)
+      (builtins.head a.overrides.system)
       { nixpkgs.hostPlatform = \"x86_64-linux\";
         boot.loader.grub.enable = false;
         fileSystems.\"/\" = { device = \"none\"; fsType = \"tmpfs\"; };
@@ -181,22 +178,22 @@ else
   check "user overrides the group's shared default" "dunst" "$(g aNotifications)"
   check "enable = false beats group membership"   "false"    "$(g aOptOut)"
   check "group membership reaches the host"       "true"     "$(g aGroupMember)"
-  check "user scope gets its own home lanes"      "3"        "$(g aUserHomeLanes)"
+  check "user scope gets its own dendrites"      "3"        "$(g aUserDendrites)"
   check "user selects the group's home half"      "workspace" "$(g 'aUserAggregation[0]')"
   # Second host, same vocabulary, different answers. niri and the landmine
   # aggregation sit right beside what these two selected and stay unread — the
   # resolution above would have thrown on import otherwise.
   check "second host picks the other provider"    "niri"     "$(g bCompositor)"
   check "unselected group's members stay unselected" "false" "$(g bNotifications)"
-  check "no home lane where HM is off"            "false"    "$(g bHomeManager)"
-  check "and no home modules are assembled"       "0"        "$(g bHomeLanes)"
+  check "no Home Manager where it is off"            "false"    "$(g bHomeManager)"
+  check "and no user dendrites are selected"       "0"        "$(g bUserDendrites)"
   # The override record. tripwire.nix targets a capability neither host
   # selected and throws in both its bodies; the deepSeq above would have caught
   # a call, so "unmatched work is never done" is proved, not asserted.
   check "record matches its targeted host"        "examplefix" "$(g aMatched)"
   check "its overlay applies to the host packages" "false"   "$(g aOverlayApplies)"
   check "its home half rides the selecting user"  "1"        "$(g aHomeFix)"
-  check "its nixos half names real NixOS options" "false"    "$(g recordUsesRealOptions)"
+  check "its system half names real options" "false"    "$(g recordUsesRealOptions)"
   check "host filter keeps it off the other host" "0"        "$(g bMatched)"
 fi
 

@@ -2,7 +2,7 @@
 # lane, docs/architecture/ONBOARD.md "The vars-file generator"). Feeds `lyra
 # onboard`'s `aoide.nix` generator: `nix eval --json <checkout>#aoideOptions`
 # returns every VISIBLE, non-internal `aoide.*` option declared across
-# modules/nucleus and the dendrite bodies the registry catalogues,
+# modules/nucleus and the dendrites the registry catalogues,
 # narrowed to exactly what the generator needs to render one commented line —
 # name, description, and the default already rendered as nix SOURCE TEXT
 # (nixpkgs' own doc renderer does the quoting/escaping; the generator pastes
@@ -29,7 +29,7 @@
 # guidance.
 #
 # `_module.check = false`: modules under `modules/` set plenty of config
-# OUTSIDE the `aoide.*` tree (`home-manager.users.*`, `systemd.*`, …) that a
+# OUTSIDE the `aoide.*` tree (`habit.home`, `systemd.*`, …) that a
 # real host declares via the NixOS/home-manager module sets this bare eval
 # never loads. Those thunks are never forced (this file only reads
 # `.options.aoide`, never `.config`), but disabling the check is the
@@ -43,30 +43,32 @@
 let
   registry = import ../modules;
 
-  # A dendrite file is a lane record (CONTRACTS.md §2): the option
-  # declarations and the guard live on `body`, and the lane is the module the
-  # constructor imports for a host that selected it. Only `body` is read here —
-  # a lane that nothing selected must not be evaluated to render a doc line.
+  # A dendrite file is a plain module (CONTRACTS.md §2), so evaluating the
+  # catalogue is evaluating its files as they are: the option declarations and
+  # the guard are the module's own, and `habit.home` is a key no option here
+  # declares, which `_module.check = false` below leaves unread, as it does the
+  # rest of what a module sets outside `aoide.*`.
   #
   # A capability with alternatives is a provider registry instead
   # (`{ providers.<p> = <path>; }`, e.g. `compositor`), and each provider is a
-  # lane record of its own; the doc list needs every alternative's options, so
-  # every provider body is read. Same rule as
-  # `modules/dendrites/default.nix`'s whole-tree derivation.
-  bodyOf =
+  # plain module of its own; the doc list needs every alternative's options, so
+  # every provider file is read. A catalogue entry that is a module and not a
+  # registry is told by the same test habit's `implOf` applies: an attrset
+  # with `providers`.
+  modulesOf =
     path:
     let
       entry = import path;
     in
-    if entry ? body then [ entry.body ] else map (p: (import p).body) (lib.attrValues entry.providers);
+    if lib.isAttrs entry && entry ? providers then lib.attrValues entry.providers else [ path ];
 
-  bodies = lib.concatMap bodyOf (lib.attrValues registry.catalogue);
+  dendrites = lib.concatMap modulesOf (lib.attrValues registry.catalogue);
 
   evaled = lib.evalModules {
-    modules = bodies ++ [
+    modules = dendrites ++ [
       ../modules/nucleus
       # The core's own module, straight from this flake's input — the same
-      # value `lib/aoideos.nix`'s nucleus lane imports into a host. It comes
+      # value `lib/aoideos.nix`'s nucleus module imports into a host. It comes
       # from HERE rather than through `../modules/nucleus` because the
       # `aoide.*` option contract is part of the doc list this file renders,
       # and a bare `evalModules` has no lane to close over the inputs for it.

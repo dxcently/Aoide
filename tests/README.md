@@ -47,8 +47,8 @@ what those checks actually test.
   and owes lyra nothing (no rice binary, no `songs/`, no shellbridge, no
   healthcheck); a host with no config gets the package and no service; and a
   song with no `lyra` lane fails its own evaluation with the taught message.
-  `fixtures.nix` holds the readings, `hosts/` the three host records. The ref
-  IS the tree under test — fixtures, host records, catalogue and nucleus are
+  `fixtures.nix` holds the readings, `hosts/` the three host modules. The ref
+  IS the tree under test — fixtures, host modules, catalogue and nucleus are
   all read out of it, so a commit ref tests that commit and `path:` (the
   default: THIS checkout, uncommitted work included) tests what is on disk.
   Its positive control is `yomi-strix` from the same ref: a real host that HAS
@@ -56,7 +56,7 @@ what those checks actually test.
   have, so an absence check that could never fail is not one.
 - `distrobox.md` — manual container-based portability suite; not a gate.
 - `consumer/` — `tests/consumer/run.sh`, the export-surface fixture: a
-  stranger's flake (`flake.nix`, its own host records, user, aggregation, songs
+  stranger's flake (`flake.nix`, its own host modules, user, aggregation, songs
   and songbook) that reaches AoideOS ONLY through the root flake's public
   outputs. The runner greps the fixture for any path into Aoide's tree (and
   proves that grep can fire), then applies the fixture's `outputs` to the ref
