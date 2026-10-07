@@ -21,7 +21,7 @@ use aoide_protocol::{door, suggest};
 use std::path::PathBuf;
 
 const USAGE: &str = "aoided — the resident Aoide daemon: one policy surface, one gate, one audit log
-usage: aoided [--audit-log <path>]
+Usage: aoided [--audit-log <path>]
        aoided --version
        aoided --help
 

@@ -88,7 +88,7 @@ fn help_prints_usage_on_stdout() {
     let sb = Sandbox::new("help");
     let (out, err, code) = sb.aoided(&["--help"]);
     assert_eq!((code, err.as_str()), (0, ""));
-    assert!(out.contains("usage: aoided") && out.contains("--audit-log"), "{out}");
+    assert!(out.contains("Usage: aoided") && out.contains("--audit-log"), "{out}");
     assert!(sb.files().is_empty(), "{:?}", sb.files());
 }
 
