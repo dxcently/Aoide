@@ -129,7 +129,8 @@ Item {
             var at = "" + (r.receivedAt || "")
             var same = root.arrivals[id] !== undefined && root.arrivals[id] === at
             var t = (r.timeoutMs !== undefined) ? (r.timeoutMs | 0) : 0
-            dl[id] = (same && id in root.deadlines) ? root.deadlines[id] : (t > 0 ? (Date.parse(at) || now) + t : 0)
+            dl[id] = (same && id in root.deadlines) ? root.deadlines[id]
+                                                    : (t > 0 ? (Date.parse(at) || now) + t : 0)
             if ((same && root.lapsed[id]) || (dl[id] > 0 && now >= dl[id])) lp[id] = true
             av[id] = at
         }

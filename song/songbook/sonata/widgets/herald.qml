@@ -45,9 +45,8 @@
 // (0 = never — critical and every summons). Expiry is LOCAL: a lapsed card
 // leaves this popup but stays in the file for the dock's herald-center
 // ledger; nothing daemon-side ever expires a record. Deadlines are pinned
-// per arrival at first sight and count from the record's own `receivedAt`,
-// so a file rewrite (another arrival) never restarts a card's clock and a
-// QML reload never replays the stored ledger as fresh cards.
+// per id at first sight, so a file rewrite (another arrival) never restarts
+// a card's clock.
 //
 // Write-side, socket only (ShellBridge, the powermenu idiom — QML never
 // touches the file):
@@ -120,10 +119,10 @@ PanelWindow {
     // epoch-ms deadline (0 = never), one 500ms sweep while cards show.
     //
     // A deadline counts from the record's `receivedAt` (from first sight only
-    // when that does not parse): every reload of this file meets the whole
-    // stored ledger as first sight, and `now + t` replayed it as fresh cards.
-    // A record already past its deadline lapses in `ingest`, so it is never
-    // drawn.
+    // when that does not parse), so a reload of this file, which meets the
+    // whole stored ledger as first sight, never shows it again as fresh
+    // cards. A record already past its deadline lapses in `ingest`, so it is
+    // never drawn.
     //
     // Keyed by id AND `receivedAt`, not id alone: dunst's `stack_duplicates`
     // (modules/dendrites/dunst.nix) reuses ONE notification id for a repeated
@@ -157,7 +156,7 @@ PanelWindow {
             var t = (r.timeoutMs !== undefined) ? (r.timeoutMs | 0) : 0
             dl[id] = (sameArrival && id in root.deadlines) ? root.deadlines[id]
                                             : (t > 0 ? (Date.parse(receivedAt) || now) + t : 0)
-            // lapsed already (the SAME arrival) or past its deadline on first sight
+            // a lapse stays latched only within the SAME arrival
             if ((sameArrival && root.lapsed[id]) || (dl[id] > 0 && now >= dl[id])) lp[id] = true
             av[id] = receivedAt
         }
