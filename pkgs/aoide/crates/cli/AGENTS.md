@@ -44,6 +44,20 @@ Gated with reasons, never stubbed: the two `#!/bin/sh` plugin-shim tests (a
 - **Nix-independent.** No nix shell-outs, no NixOS assumption, anywhere in
   this crate or what it depends on (root `AGENTS.md`, "core is
   nix-independent"). Only `lyra` may be nix-dependent.
+- **`do` never runs what it prints.** It is a registry entry like any other
+  and holds no new power: the classifier's verdict is a candidate, the bound
+  line is checked by `Command::check` before it is shown, and a verdict that
+  argues against dispatch (`accept` not true, `conflicts`, trailing text,
+  `none`, an intent or slot the registry lacks) is a taught refusal, never a
+  best guess. Do not add an execute path, a `--run` flag, or a fallback that
+  picks the top candidate; `docs/architecture/AOIDE-VV-JEV.md` is the table.
+  The classifier is a shell-out (`verba-volantia` on `PATH` or `[verba]
+  binary`) — never a VV crate, candle, or vendored weights in this tree.
+- **The kit is derived from the registry, never authored beside it.**
+  `vv::kit` is the only place intent ids and slot names are made, and
+  `kit::resolve` is the only place they are read back. A command's phrasings
+  come from its own path, brief, summary and examples, so a command that wants
+  better recognition improves its `brief`/`examples`, not a second list here.
 - **The audit copy of an outcome is not the outcome.** `dispatch` writes one
   line per dispatch for both doors, and its message is deliberately NOT
   always `Outcome.message`: the pairing ceremony's text carries a
@@ -72,6 +86,10 @@ Gated with reasons, never stubbed: the two `#!/bin/sh` plugin-shim tests (a
   (`onboard`'s precedent) when the command is substantial enough to warrant
   one; anything else belongs in its domain crate's own `commands` module
   instead.
+- **A command that changes the closed set** (a new, renamed or removed
+  command) needs no edit to `vv`: `aoide do kit` re-derives the spec, and a
+  kit trained before it is refused by name for an intent the registry no
+  longer holds. Retrain after a command-set change that matters to `do`.
 - **A new special-cased command** (bypassing the generic `Outcome` envelope)
   extends the `special` closure passed to `aoide_protocol::door::run` in
   `run_cli`.
@@ -80,6 +98,9 @@ Gated with reasons, never stubbed: the two `#!/bin/sh` plugin-shim tests (a
 
 - This `README.md` when the command count, a root-coupled group, or a
   special-cased command changes.
+- `docs/architecture/AOIDE-VV-JEV.md` and `CONTRACTS.md §3` when `do`'s
+  refusal table, its wire reads, or the kit's shape changes; `[verba]` is
+  `aoide_storage::config`'s and CONTRACTS §4's.
 - The golden snapshot in `registry.rs` when the command-path set changes.
 - `docs/architecture/PACKAGE-LAYOUT.md`/`CONTRACTS.md §3` when the
   core/lyra split itself shifts.

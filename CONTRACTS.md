@@ -1029,6 +1029,34 @@ count.
   (`reason: "config-unreadable"`) or for no mesh to name
   (`reason: "no-mesh-declared"`). `--json`'s `data.report` shape:
   `{"mesh", "rows": [{"node", "outcome", …}], "sameOperatorNote"?}`.
+- `do <sentence…>` and `do kit [--out <file>]`, appended newest — a sentence to
+  the one command it means, through the verba-volantia classifier
+  (`docs/architecture/AOIDE-VV-JEV.md`, "VV — `aoide do`"). **`do` prints the
+  resolved command and never runs it**: a model suggests, the person decides.
+  It shells out to `verba-volantia dispatch --out <kit>` (binary: `[verba]
+  binary`, default `verba-volantia` on `PATH`; kit directory: `[verba]
+  weightsDir`, default `$AOIDE_ROOT/verba/aoide`; both §4's `config.toml`),
+  reads the first JSON line, and applies the fail-closed table: `accept` not
+  true, non-empty `conflicts`, non-null `trailing_editorial_text`, intent
+  `none`, an intent or slot the registry does not hold, or a bound command the
+  registry's own `Command::check` refuses each end in a taught refusal, exit 1
+  (a missing binary or kit, a timeout, an unreadable verdict likewise). An
+  abstention lists the nearest commands as full lines, best first, in
+  `data.candidates` (strings, which the text render prints) with the raw
+  verdict in `data.verdict`; an unfilled required slot refuses with the
+  command shown with the slot named (`aoide session trace <id>`, also
+  `data.command`). A success is `message` = `data.command` = the printed line,
+  plus `intent`, `slots`, `margin`, `threshold`, `verdict`. Text mode on the
+  CLI door prints the bare line on stdout and refusals on stderr with nothing
+  on stdout (the `workspace root` shape), so `$(aoide do "…")` substitutes
+  cleanly; `--json` keeps the envelope. `do kit` derives the classifier's
+  training spec (verba-volantia's `templates.json`: `wrappers`, then one
+  function per implemented, non-`internal` command except `do` — `name` the
+  path joined with `_`, `params` its positionals then value-taking flags,
+  `templates` its phrasings — and a final `none` function of non-command
+  requests) from the registry; text mode prints the spec itself, `--out`
+  writes it and prints the commands that train it. Bool flags are not slots.
+
 - `lyra schema --json` — the AoideOS-surface contract: onboard/rice/draft/
   mode/cover/livery/quickshell/reload/screen/shellbridge/herald/take/
   element, the painted surface. `crates/lyra/src/registry.rs`'s golden test

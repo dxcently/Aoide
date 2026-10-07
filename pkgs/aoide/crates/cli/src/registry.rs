@@ -437,6 +437,8 @@ mod tests {
             "session.trace",
             "session.watch",
             "context",
+            "do",
+            "do.kit",
             "soundcheck",
             "spawn",
             "update",

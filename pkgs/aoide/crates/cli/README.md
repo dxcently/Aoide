@@ -24,7 +24,8 @@ correspondence").
   `secrets enroll`, `secrets watch`, `events tail`, `pair watch`
   (P-P5), `conductor`, `guide`/`schema` raw output, `workspace root` — one
   bare path on stdout and NOTHING on stdout when it refuses, because a
-  launcher substitutes it into an argv). `dispatch` is also the
+  launcher substitutes it into an argv — and `do`/`do kit`, the same shape:
+  the bare command or spec on stdout, a taught refusal on stderr only). `dispatch` is also the
   one seam where every door's audit line is written, so it owns the rule
   that a line's message is not automatically the command's outcome text:
   the pairing ceremony (`pair`, `pair.reject`, `pair.watch`, and
@@ -46,7 +47,14 @@ correspondence").
   machine's **node line** — `aoide_storage::charter::node_line`, the one
   public key plus binding an operator pastes into a charter, and the last
   thing the operator walks away with), `infra` (`mcp
-  serve`'s tool-count reporting). Every other command group lives in its
+  serve`'s tool-count reporting), `vv` (`aoide do` — a sentence to the one
+  command it means, printed and never run, by shelling out to the
+  `verba-volantia` classifier (`vv::client`), applying the fail-closed table
+  over its verdict and binding its slots through the registry's own
+  `Command::check` (`vv`); and `aoide do kit`, the closed set read off the
+  registry as the classifier's training spec (`vv::kit`), whose `resolve` is
+  the same table read the other way, so the two cannot disagree on an intent
+  id or a slot name — `docs/architecture/AOIDE-VV-JEV.md`). Every other command group lives in its
   domain crate and is pulled in here by `commands::all()`.
 - `commands::LAYOUT` — how `aoide` lists itself: a tagline and six topic
   sections of heads (Start here · Sessions & conducting · Mesh & mail ·
