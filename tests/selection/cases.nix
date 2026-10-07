@@ -195,6 +195,43 @@ rec {
     else
       "unresolvable: ${builtins.concatStringsSep "," unresolvable}";
 
+  # ── Every bar embeds the shared rice-mode control (lib/checks.nix) ─────────
+  # `songbook-ricemode/` holds sonata (a bar that embeds the `ricemode` slot,
+  # and the floor record) and `mute` (a bar that does not). Paired so the check
+  # cannot pass by never firing: it names the mute bar, it holds once that song
+  # is out of the manifest, and it names a songbook with no floor. Only the
+  # throwing branch needs no `pkgs`; the passing one gets a stand-in builder.
+  checks = import ../../lib/checks.nix {
+    inherit lib;
+    pkgs.runCommand =
+      name: _: _:
+      "built ${name}";
+  };
+
+  ricemodeManifest =
+    (import ../../lib/songbook.nix {
+      inherit lib;
+      songbook = ./songbook-ricemode;
+    }).manifestAttrs;
+
+  barRicemodeOf =
+    manifest:
+    checks.barRicemode {
+      songbook = ./songbook-ricemode;
+      inherit manifest;
+    };
+
+  barRicemodeOmitted = barRicemodeOf ricemodeManifest;
+
+  barRicemodeEmbedded = barRicemodeOf (removeAttrs ricemodeManifest [ "mute" ]);
+
+  barRicemodeNoFloor = barRicemodeOf (
+    removeAttrs ricemodeManifest [ "mute" ]
+    // {
+      sonata = removeAttrs ricemodeManifest.sonata [ "ricemode" ];
+    }
+  );
+
   # ── The packages walker's override rule (lib/pkgs.nix) ─────────────────────
   # The composition's other half: the base package set arrives through this
   # walker's overlay, and a lane's replacement of a walker name stands because

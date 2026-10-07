@@ -310,6 +310,12 @@
             inherit (songbookLib) songNames strayNixFiles escapingNixFiles;
             songbook = ./song/songbook;
           };
+          # Every bar body embeds the shared `ricemode` slot and sonata carries
+          # the floor it resolves to (lib/checks.nix's Check 13).
+          bar-ricemode = checks.barRicemode {
+            songbook = ./song/songbook;
+            manifest = songbookLib.manifestAttrs;
+          };
           # The two livery fan-outs (baked Stylix, stage seed) agree under an
           # `aoide.livery.override` — proved against a fixed fixture inside
           # lib/checks.nix, not this host's own config (see lib/livery.nix

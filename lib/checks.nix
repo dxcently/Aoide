@@ -1,6 +1,6 @@
 # lib/checks.nix — the contractual coupling discipline, as flake checks.
 #
-# Ten checks ride as flake `checks` (see concepts/Governance and
+# These checks ride as flake `checks` (see concepts/Governance and
 # concepts/Notes in the wiki, and the mechanical-integrity design for fmt +
 # discovery specifically):
 #
@@ -67,12 +67,23 @@
 #       output matches `resolve`'s under a one-anchor override, and
 #       `stagePatch` is the identity with no override set.
 #
+#   11, 12. generator-offline, generator-relocatable — the shipped songbook
+#       generator reproduces `songbookManifest` offline, and from a relocated
+#       copy of the songbook (their own comment, below).
+#
+#   13. bar-ricemode — every bar body embeds the shared rice-mode control:
+#       the literal `slot: "ricemode"` is in the body of every distinct bar the
+#       songbook's manifest names (a borrowed bar is checked once, under its
+#       owner; a song with no bar of its own renders sonata's), and sonata
+#       carries the `ricemode` record every bar's slot falls back to.
+#
 # 1–3 and 5 are written so they PASS TRIVIALLY where nothing populates the
 # registry they inspect yet (1) and become real as Wave-1 lanes/packages
 # land. Each resolves to a trivial derivation: it either builds (assertion
 # held) or the eval fails with a readable message (assertion broken). 10 is
 # the same eval-time-assert shape against a fixed fixture instead of a
-# registry — always real, never trivially-empty. 4, 6, 7, 8, and 9 are real
+# registry — always real, never trivially-empty. 13 is that shape over the
+# committed songbook, one `readFile` per bar body. 4, 6, 7, 8, and 9 are real
 # `runCommand`s — each has to actually run a binary, so it can only fail at
 # build time, not eval time.
 { lib, pkgs }:
@@ -740,6 +751,42 @@ let
         fi
         printf 'aoide check generator-relocatable: ok\n' > "$out"
       '';
+
+  # ── Check 13: every bar embeds the shared rice-mode control ────────────────
+  # The rice-mode control is the slot `ricemode`: a bar embeds it as
+  # `WidgetSlot { slot: "ricemode" }`, and the slot resolves through the
+  # baseline chain to the song's own body or sonata's. A bar body without the
+  # literal has no rice-mode control, so a gesture added to the slot never
+  # reaches it; a songbook without sonata's record has no floor to resolve to.
+  #
+  # `manifest` is `songbookLib.manifestAttrs`, which names each song's bar by
+  # its owner: a borrowed bar (quodlibet's is fugue's) is read once, under its
+  # owner, and a song with no `bar` entry (etude, nocturne) renders sonata's,
+  # which sonata's own entry covers. Only the committed songbook is read, so a
+  # song that exists only in the runtime songbook is judged when `rice declare`
+  # copies it into the checkout.
+  barRicemode =
+    { songbook, manifest }:
+    let
+      bars = lib.unique (
+        lib.concatMap (m: lib.optional (m ? bar) "${m.bar.owner}/widgets/${m.bar.file}") (
+          builtins.attrValues manifest
+        )
+      );
+      # `builtins.split`, not `lib.hasInfix`: that one is a `builtins.match` over
+      # `.*needle.*`, which overflows the stack on a body the size of cadenza's bar.
+      embeds = text: builtins.length (builtins.split ''slot: "ricemode"'' text) > 1;
+      omitting = builtins.filter (rel: !(embeds (builtins.readFile (songbook + "/${rel}")))) bars;
+      noFloor = !((manifest.sonata or { }) ? ricemode);
+    in
+    assertCheck "bar-ricemode" (omitting == [ ] && !noFloor) (
+      lib.concatStringsSep "; " (
+        lib.optional (
+          omitting != [ ]
+        ) ''bar bodies without `slot: "ricemode"`: ${lib.concatStringsSep ", " omitting}''
+        ++ lib.optional noFloor "sonata has no `ricemode` slot, the floor every bar's slot resolves to"
+      )
+    );
 in
 {
   inherit
@@ -747,6 +794,7 @@ in
     surfaceOwnership
     songRuntimeUntracked
     songShape
+    barRicemode
     fmt
     discovery
     phantomCommands

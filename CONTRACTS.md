@@ -5548,6 +5548,15 @@ not a resolution, per "The shelf, and the two injected arguments" above). The
 (isolated per-module option-diffing is disproportionate for v0; see the
 `TODO(song-shape v1)` in `lib/checks.nix`).
 
+`checks.bar-ricemode` asserts the bar's half of the rice-mode control (see
+"Per-song flavor widgets"): the literal `slot: "ricemode"` is in the body of
+every distinct bar the songbook manifest names — a borrowed bar once, under its
+owner; a song with no bar of its own renders sonata's — and sonata carries the
+`ricemode` record every bar's slot falls back to. It reads only the committed
+songbook, so a song that exists only in the runtime songbook is judged when
+`rice declare` copies it into the checkout. That the bodies keep the gestures is
+a documented convention backed by code review.
+
 **Migration to v1:** the update playbook migrates `song/songbook/*/rice.nix`
 and `livery.json` from v0 to v1 with the livery schema (§1).
 
@@ -5604,6 +5613,15 @@ set of "flavor" surfaces — committed files, not nix options:
   a song's `rice.nix` still sets **ONLY** `aoide.livery` — widgets are
   committed QML files carried by the build, not nix options, and a widget is
   structurally incapable of reaching host/lane options through this surface.
+- **The rice-mode control is one slot, and every bar embeds it.** A bar body
+  embeds `WidgetSlot { slot: "ricemode" … }`, spelled exactly `slot: "ricemode"`.
+  The slot resolves through the baseline chain, so a song with no
+  `widgets/ricemode.qml` is dressed by sonata's, which is the floor. A song MAY
+  author its own body to put the control in its own grammar; every body keeps
+  the same bridge calls (`toggleRiceMode`, `riceDrafts`, `riceDraft`) and the
+  same gestures: left click toggles staging and declarative, right or middle
+  click opens the draft picker. A borrowed bar brings its lender's body with
+  it (quodlibet takes fugue's `ricemode` with fugue's `bar`).
 - **Playbook:** `song/songbook/update-playbook.md`.
 
 **Additive (2026-08-14) — baseline-fallback resolution:**

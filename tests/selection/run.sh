@@ -35,6 +35,9 @@ songEscapeClean                     ok      ""
 songEscapeFound                     ok      "escaper/rice.nix"
 songBorrowClosure                   ok      "borrower lender"
 songBorrowOwnersResolve             ok      "all-resolve"
+barRicemodeOmitted                  throws  bar-ricemode FAILED: bar bodies without `slot: "ricemode"`: mute/widgets/bar.qml
+barRicemodeEmbedded                 ok      "built aoide-check-bar-ricemode"
+barRicemodeNoFloor                  throws  bar-ricemode FAILED: sonata has no `ricemode` slot
 walkerYieldsListedOverride          ok      "the lane's songbook"
 walkerRefusesUnlistedOverride       throws  listed in intentionalOverrides
 EOF

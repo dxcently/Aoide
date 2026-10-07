@@ -53,6 +53,19 @@ come back here for the steps. To dress a slot:
 5. Nothing else is reachable: a widget sees `livery` + `bridge` (+ declared
    extras) only, never nix `config.*` (CONTRACTS.md §5 containment).
 
+**Every bar embeds `ricemode`.** The rice-mode control is one slot, and every
+`bar.qml` carries `WidgetSlot { slot: "ricemode" … }`, spelled exactly
+`slot: "ricemode"` (the check reads that literal). The slot resolves through
+the baseline chain below: a song with no `widgets/ricemode.qml` is dressed by
+sonata's, and a song may author its own to put the control in its own grammar,
+provided it keeps the contract: left click calls `bridge.toggleRiceMode()`,
+right or middle click opens the draft picker over `bridge.riceDrafts(cb)` and
+`bridge.riceDraft(action, name)`, and a bridge without `riceDrafts` shows no
+picker. `checks.bar-ricemode` fails a bar body that omits the embed, and a
+songbook whose sonata has no `ricemode`. It reads the committed songbook, so a
+song that exists only in the runtime songbook is checked when `rice declare`
+brings it into the checkout.
+
 **Build carry-over:** on the next `nixos-rebuild`, the lyra lane's
 derivation copies the new file to `$out/qml/songs/<name>/<slot>.qml` and adds
 `<name>` → `[…, "<slot>"]` to the generated `songs/manifest.json` — every
