@@ -137,7 +137,16 @@ lyra shellbridge [--run] [--json]
   `hyprctl dispatch exit`, or `systemctl suspend|hibernate|reboot|poweroff`,
   detached with a reaper thread), `ricemode` (re-execs the same binary as
   `rice mode <stage|declarative> [song] --json`, waits, then fires a detached
-  `notify-send "Aoide" <message>`), `refreshusage` (detached re-exec
+  `notify-send "Aoide" <message>`), `ricedraft` (the draft picker's gesture, a
+  closed `enter|new|save` whitelist, fire-and-forget like `ricemode`: re-execs
+  `lyra rice mode draft <name>` / `lyra rice draft save` with `--json` — from
+  declarative, `enter` and `new` first run a bare `lyra rice mode stage` — and
+  toasts the CLI's message, `partial: `-prefixed when an earlier step had
+  already succeeded; the audit line is `ricedraft action <action>: <ok|partial|
+  failed>`, never a name), `ricedrafts` (the picker's READ: re-execs `lyra rice
+  draft list <song> --json` under a 4 s bound and answers one line, `{ok, mode,
+  song, drafts: [{name, savedAt, current}]}`, or `{ok:false, reason, message}`;
+  it takes no fields, so it has no gate to fail), `refreshusage` (detached re-exec
   `usage --json`; the gadget picks up the `state/usage.json` write itself),
   `rechecksessions` (detached re-exec `session reap --announce --json`),
   `heraldpush` / `heraldverdict` / `heralddismiss` (the ledger; a verdict

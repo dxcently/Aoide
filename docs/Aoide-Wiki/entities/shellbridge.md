@@ -1,7 +1,7 @@
 ---
 type: entity
 created: 2026-07-25
-updated: 2026-08-28
+updated: 2026-10-07
 tags: [aoide, bridge, ipc, desktop]
 source: "[[references/AOIDE-HANDOFF]]"
 ---
@@ -75,6 +75,41 @@ The conductor card and its Details page are its only callers
 ([[Widget-Bridge-Contract]]'s trace section: ONE selected target, ONE request in
 flight, stopped the moment nothing is looked at — a snapshot while viewed, never
 a token stream). Refusals are audited; a successful poll is not.
+
+**The draft picker** is two verbs over the song's saved rice drafts, both
+re-execs of the sibling `lyra` (`rice` lives there, as `ricemode` does) and
+neither holding a draft rule of its own — the CLI owns the name regex, the
+minting and every refusal, and conduct never depends on the song crate.
+
+`{cmd:"ricedrafts"}` is the socket's second READ. It names the song through
+the mode marker — `stagingSong` first while declarative is locked (the song an
+unlock lands on), `song` first in every other mode — and re-execs `lyra rice
+draft list <song> --json` under a 4 s wall clock, below the QML client's own
+5 s. The answer is one line, `{ok:true, mode, song, drafts:[{name, savedAt,
+current}]}`; with no song to name it is `drafts:[]` and no child is started. A
+child that fails or answers nothing readable is a refusal, `{ok:false,
+reason:"cli-failed"|"no-answer", message}`, never an empty list. Refusals are
+audited as `ricedrafts-refused`; a successful read is not.
+
+`{cmd:"ricedraft", action:"enter"|"new"|"save", name?}` is the gesture, and
+fire-and-forget like `ricemode`: the outcome is a `notify-send` toast carrying
+the CLI's own message, never a reply. `enter` needs a `name` that is one argv
+token (the CLI judges whether it is a valid, existing draft); `new` and `save`
+refuse a `name` outright, so a mistaken caller is dropped instead of misread as
+success. `enter` runs `rice mode draft <name>`; `new` runs `rice draft save`
+with no name, which mints the lowest free `draft-<n>` of the staged song, then
+enters the `data.name` it answered with; `save` runs `rice draft save` and
+never changes the mode. Entering a draft is refused while declarative is
+locked, so `enter` and `new` from there first run a BARE `rice mode stage` —
+which restores the remembered `stagingSong` (house rule 10), where the toggle's
+own lock direction passes the declared song. Steps stop at the first failure.
+A failure after an earlier step succeeded is `partial`: nothing rolls back (the
+unlock stands, a minted draft stays saved), and the toast says so, prefixed
+`partial: `. The audit line is one per action, event `ricedraft`,
+`ricedraft-partial` or `ricedraft-failed`, detail `ricedraft action <enter|
+new|save>: <ok|partial|failed>` — never a draft or song name, which only the
+toast carries. A malformed line is dropped with the plain `unparseable` audit
+and no reply.
 
 **`hyprctl` must be on the service PATH, or every click fails silently.**
 Both the socket handler's `focus_window` and the window→session event

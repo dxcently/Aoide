@@ -8,9 +8,9 @@
 // Protocol: newline-delimited JSON. Each command is a JSON object with a
 // "cmd" field and payload fields. The socket path is the shellbridge default:
 // $XDG_RUNTIME_DIR/aoide/shellbridge.sock (falls back to /run/user/<uid>/aoide/shellbridge.sock).
-// Every command is fire-and-forget except "sessionaction", "projectaction" and
-// "sessiontrace", which are answered with one JSON line on the same connection,
-// which then closes.
+// Every command is fire-and-forget except "sessionaction", "projectaction",
+// "sessiontrace" and "ricedrafts", which are answered with one JSON line on the
+// same connection, which then closes.
 //
 // Communication discipline: this is the ONLY outbound channel from QML.
 // No MCP, no HTTP, no shell exec from QML — shellbridge is the gate.
@@ -61,7 +61,8 @@ QtObject {
     // Backs the bar's mode cell (bar.qml, rightContent's modeText). A click
     // is a two-way toggle, not a picker: no payload — the daemon reads
     // stage/mode.json itself and decides staging⇄declarative (see
-    // shellbridge.rs's dispatch_rice_mode_toggle).
+    // shellbridge.rs's dispatch_rice_mode_toggle). The picker is the two
+    // verbs below it: riceDrafts reads, riceDraft acts.
     function toggleRiceMode() {
         sendCommand({
             cmd: "ricemode"
@@ -121,19 +122,26 @@ QtObject {
     readonly property int replyTimeoutMs: 5000
 
     function sessionAction(sessionId, action, fields, callback) {
+        _ask({
+            cmd: "sessionaction",
+            sessionId: "" + sessionId,
+            action: "" + action,
+            fields: fields || ({})
+        }, callback, { ok: false, message: "shellbridge client unavailable" })
+    }
+
+    // The shape every answered verb shares: one throwaway socket, the `wanted`
+    // line out, one JSON line back to `callback`. `unavailable` is what the
+    // callback gets when no connection could be made at all.
+    function _ask(wanted, callback, unavailable) {
         var conn = actionFactory.createObject(root, {
             path: root.socketPath,
             cb: callback || null,
-            wanted: {
-                cmd: "sessionaction",
-                sessionId: "" + sessionId,
-                action: "" + action,
-                fields: fields || ({})
-            }
+            wanted: wanted
         })
         if (!conn) {
             if (callback)
-                callback({ ok: false, message: "shellbridge client unavailable" })
+                callback(unavailable)
             return
         }
         conn.start()
@@ -172,23 +180,49 @@ QtObject {
     // daemon remains the authority.
     function traceSession(sessionId, lines, clip, callback) {
         var n = (typeof lines === "number" && lines > 0) ? Math.min(Math.floor(lines), 40) : 12
-        var conn = actionFactory.createObject(root, {
-            path: root.socketPath,
-            cb: callback || null,
-            wanted: {
-                cmd: "sessiontrace",
-                sessionId: "" + sessionId,
-                lines: n,
-                clip: ("" + clip) === "detail" ? "detail" : "line"
-            }
-        })
-        if (!conn) {
-            if (callback)
-                callback({ ok: false, reason: "no-client",
-                           message: "shellbridge client unavailable" })
-            return
-        }
-        conn.start()
+        _ask({
+            cmd: "sessiontrace",
+            sessionId: "" + sessionId,
+            lines: n,
+            clip: ("" + clip) === "detail" ? "detail" : "line"
+        }, callback, { ok: false, reason: "no-client",
+                       message: "shellbridge client unavailable" })
+    }
+
+    // ── The draft picker ───────────────────────────────────────────────────
+    // One read and one gesture over the song's saved drafts. Neither holds a
+    // draft rule: the daemon re-execs `lyra rice …`, and the CLI owns the name
+    // regex, the minting and every refusal.
+    //
+    //   bridge.riceDrafts(cb)                 // what the picker lists
+    //   bridge.riceDraft("enter", "draft-2")  // route the stage into a draft
+    //   bridge.riceDraft("new")               // mint the next draft-<n>, enter it
+    //   bridge.riceDraft("save")              // snapshot the stage as a draft
+    //
+    // `riceDrafts` answers like traceSession: `cb` EXACTLY ONCE, on its own
+    // throwaway socket, no queue and no replay, the daemon's child bounded
+    // under replyTimeoutMs. The answer is
+    // { ok: true, mode, song, drafts: [{ name, savedAt, current }] } — `song`
+    // null and `drafts` empty when nothing is staged — or { ok: false, reason,
+    // message } with `reason` cli-failed / no-answer / no-client. An empty list
+    // with ok:true is "none yet"; a refusal is "nobody answered", and the
+    // picker must not paint the second as the first.
+    //
+    // `riceDraft` is fire-and-forget through the shared queue, like
+    // toggleRiceMode: no reply, and the outcome is a toast the daemon fires.
+    // `enter` and `new` from the locked declarative mode unlock it first, so a
+    // caller re-reads stage/mode.json and riceDrafts to see what happened. Only
+    // `enter` takes a name — the daemon refuses `new` and `save` carrying one.
+    function riceDrafts(callback) {
+        _ask({ cmd: "ricedrafts" }, callback,
+             { ok: false, reason: "no-client", message: "shellbridge client unavailable" })
+    }
+
+    function riceDraft(action, name) {
+        var wanted = { cmd: "ricedraft", action: "" + action }
+        if (action === "enter")
+            wanted.name = "" + name
+        sendCommand(wanted)
     }
 
     // Factory for one-shot action connections — each instance carries exactly

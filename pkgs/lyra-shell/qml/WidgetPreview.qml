@@ -206,9 +206,10 @@ ShellRoot {
     // The stub bridge — every method the songbook widgets call today, each
     // only logging. Confirmed against `grep -rn 'bridge\.' song/songbook/*/
     // widgets/`: sendCommand, focusSession, recheckSessions, toggleRiceMode,
-    // refreshUsage, sessionAction. `focusWindow` is on ShellBridge but no
-    // committed widget calls it yet; it is stubbed anyway so a widget that
-    // starts calling it on this canvas gets a log line, not a crash.
+    // refreshUsage, sessionAction. `focusWindow` and the picker's `riceDrafts`
+    // and `riceDraft` are on ShellBridge but no committed widget calls them
+    // yet; they are stubbed anyway so a widget that starts calling one on this
+    // canvas gets a log line, not a crash.
     property QtObject bridgeStub: QtObject {
         function focusSession(sessionId) {
             canvas.log("bridge.focusSession " + JSON.stringify({ sessionId: sessionId }))
@@ -236,6 +237,31 @@ ShellRoot {
                            sessionId: "" + sessionId,
                            message: "preview canvas stub — nothing was sent" })
             })
+        }
+        // The picker's read — same signature and callback contract as
+        // ShellBridge.riceDrafts, answered ASYNCHRONOUSLY (Qt.callLater, for
+        // the same reason sessionAction is) so the picker's pending state
+        // renders. The mode is the canvas livery's own; the control file's
+        // `drafts` key replaces the one canned draft, so a canvas run can pin
+        // an empty list or a long one.
+        function riceDrafts(callback) {
+            canvas.log("bridge.riceDrafts {}")
+            if (!callback) return
+            Qt.callLater(function () {
+                callback({ ok: true, stub: true,
+                           mode: canvas.liveryState.riceMode,
+                           song: canvas.songName,
+                           drafts: canvas.controlDoc.drafts
+                               || [{ name: "draft-1", savedAt: "2026-01-01T00:00:00Z",
+                                     current: false }] })
+            })
+        }
+        // The picker's gesture — only logs, like sendCommand: the real one is
+        // fire-and-forget and its outcome is a daemon toast.
+        function riceDraft(action, name) {
+            canvas.log("bridge.riceDraft " + JSON.stringify({
+                action: "" + action, name: action === "enter" ? "" + name : undefined
+            }))
         }
         // The trace query stub — same signature and callback contract as
         // ShellBridge.traceSession, answering canned steps ASYNCHRONOUSLY
