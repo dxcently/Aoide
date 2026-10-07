@@ -1705,16 +1705,22 @@ follows a symlink transparently; a WATCH does not — it stays on the inode it
 loaded and sees no event after the entry is swapped (leaving or rerouting a
 draft). So any command that SWAPS the file or symlink at `stage/livery.json`
 (changes its type or target) MUST write `stage/mode.json` LAST (every
-successful `rice mode` transition does; content writers going through
-`atomic_write` swap nothing and owe nothing),
+successful `rice mode` transition does, and so does `lyra reload` when it
+re-routes a draft; content writers going through `atomic_write` swap nothing
+and owe nothing),
 and a watching reader re-reads `livery.json` on every `mode.json` change
 (`mode.json` is always a real file, atomically replaced; the shell's
 `LiveryState.qml` is that reader). A failed transition and the activation
 reseed sit outside that guarantee: the reader is re-armed by the next
-`mode.json` write or the shell restart. Writers going through
-`aoide_storage::fs::atomic_write` transparently write through the symlink
-too. `rice mode stage`/`rice mode declarative` remove the symlink (leaving
-a plain real file) whenever they run.
+`mode.json` write (after a reseed in draft mode, `lyra reload`'s re-route) or
+the shell restart. Writers going through `aoide_storage::fs::atomic_write`
+transparently write through the symlink too; the activation seed does not. It
+RENAMES its declared file over the entry (`mv -f`, never a write through the
+link), so the draft's own file is untouched and the link is gone. `lyra reload`
+heals that in draft mode: when `stage/livery.json` is not the symlink to the
+marked draft's `livery.json` it re-routes it, and when that draft file is gone
+it refuses by name and writes nothing. `rice mode stage`/`rice mode
+declarative` remove the symlink (leaving a plain real file) whenever they run.
 
 ```json
 {
@@ -1964,9 +1970,21 @@ other. `rice mode draft <name>` sets both together on entry; `rice mode
 stage`/`rice mode declarative` both clear `draft` (and tear the routing
 symlink down) whenever they transition OUT of `draft` mode. `rice draft drop
 <name>` refuses rather than clearing this field, if `<name>` is the
-currently-routed draft (see below). Nothing else branches on `draft` — it
-is purely observational, surfaced by `rice mode status`. `since` is when the
+currently-routed draft (see below). Beyond that refusal, `rice mode status`
+surfaces `draft` and `lyra reload` acts on it (below). `since` is when the
 current mode was entered.
+
+`lyra reload` is the reader that restores the marked mode at login and after a
+switch, when the activation has laid the declared song over the runtime tree
+(the lyra lane runs it from its `aoide-rice-reload` unit). It acts on `mode`,
+`song` and `draft`: `staging` re-stages `song`, `draft` re-syncs the draft in
+place, `declarative` reloads the shell only. It never changes the mode. In
+`draft` it first re-routes `stage/livery.json` to the marked draft when the
+activation seed renamed a declared file over the link, then saves the SAME
+marker again after its sync, so this file is written LAST — the rule of §4's
+`song/stage/livery.json` entry, which is what re-arms the shell's livery
+watch. A draft whose `livery.json` is gone is refused by name, writing
+nothing.
 
 **Additive in v0 (khoa, 2026-08-17):** `stagingSong` remembers the last song
 actively used in `Staging` mode — distinct from `song`, which `rice mode

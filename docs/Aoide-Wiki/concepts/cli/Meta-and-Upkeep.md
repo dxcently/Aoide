@@ -9,7 +9,7 @@ tags: [aoide, cli, meta, upkeep]
 
 The meta commands (`guide`, `schema`, `do`) orient an agent. The stubs (`make`,
 `update`) are walking-skeleton reservations of schema surface for planned
-flows. The upkeep commands (`usage`, `quickshell reload`/`healthcheck`,
+flows. The upkeep commands (`usage`, `reload`, `quickshell healthcheck`,
 `soundcheck`) maintain local state and sweep the working tree; `onboard`
 runs the first-boot install flow. Handlers live in
 `pkgs/aoide/crates/cli/src/commands/meta.rs` (`guide`/`schema`),
@@ -17,9 +17,9 @@ runs the first-boot install flow. Handlers live in
 `pkgs/aoide/crates/cli/src/commands/onboard.rs` (`onboard`),
 `pkgs/aoide/crates/cli/src/commands/vv/` (`do`, `do kit`),
 `pkgs/aoide/crates/storage/src/commands.rs` (`usage`),
+`pkgs/aoide/crates/song/src/commands/reload.rs` (`reload`),
 `pkgs/aoide/crates/song/src/commands/quickshell.rs` (`quickshell
-reload`/`healthcheck`, the latter over
-`pkgs/aoide/crates/song/src/health.rs`), and
+healthcheck`, over `pkgs/aoide/crates/song/src/health.rs`), and
 `pkgs/aoide/crates/upkeep/src/{commands,scan}.rs` (`soundcheck`).
 
 Every command takes `--json`. Without it the CLI prints the human `message`
@@ -252,36 +252,73 @@ aoide usage [--json]
   (`reason: "state-write-failed"`). The usage widget ([[Gadget-Dock]]) reads
   the written file and must tolerate `live.ok == false`.
 
-### lyra quickshell reload
+### lyra reload
 
 ```
-lyra quickshell reload [--json]
+lyra reload [--json]
 ```
 
-- **Reads:** liveness probe via `systemctl --user show
-  aoide-quickshell.service --property=MainPID --value`
-  (`pkgs/aoide/crates/song/src/ipc.rs`); the `shell.qml` path under
-  `run/qml/` (`run_qml_dir()`: `$AOIDE_ROOT/run/qml/shell.qml`, default
-  `~/.aoide/run/qml/shell.qml`; `$AOIDE_STAGE_DIR`-relocatable).
-- **Pipes to / output:** when the service is up, spawns `quickshell -p
+- **Reads:** `stage/mode.json` (the authority; absent reads as
+  `declarative`) and dispatches on its `mode`
+  (`pkgs/aoide/crates/song/src/commands/reload.rs`).
+  - `declarative` — the shell reload only; nothing is unlocked, so nothing is
+    synced or snapshotted.
+  - `staging` — `lyra rice stage <song>`'s own body for the marker's `song`:
+    re-derives `stage/livery.json`, the cover and the terminal colours, applies
+    the hyprctl keywords, and syncs the song's widget bodies, `manifest.json`
+    and the widget-type registry into `run/qml/songs/`.
+  - `draft` — the same, except that `stage/livery.json` is the draft's own
+    content through its routing symlink and is never re-derived; the sync
+    applies hyprctl and the terminal colours off the staged content and syncs
+    the widget side. First the routing is checked: when `stage/livery.json`
+    is not the symlink to the marked draft's `livery.json` — the activation
+    seed renames its declared file over the link on every login and switch,
+    and leaves the draft file alone — it is re-routed (the same
+    remove-and-symlink `lyra rice mode draft` uses), and after the sync the
+    SAME marker is saved again, so `stage/mode.json` is written last and the
+    shell's livery watch re-arms. A draft whose `livery.json` is gone is
+    refused before anything is written.
+- **Writes:** nothing in `declarative`. In `staging` and `draft`, after the
+  sync, a take of the now-synced stage and widget bodies, deduped against the
+  head (`songbook/<song>/takes/`, or `songbook/<song>/drafts/<name>/takes/`
+  in a draft), so an unchanged reload mints nothing and every iteration is
+  reversible with `lyra rice back`. The sync runs before the snapshot: its
+  write is a pure function of the song, so the snapshot settles into a stable
+  value and dedupes. `changed` lists the stage files, terminal colours, widget
+  bodies, manifest, registry and take written, and in a draft re-route the
+  link and `stage/mode.json`.
+- **Pipes to / output:** the last beat, in every mode: when
+  `aoide-quickshell.service` is up, spawns `quickshell -p
   <run_qml_dir>/shell.qml ipc call shell reload` — the `-p` is required
-  because `ipc call` does not auto-discover an instance launched with a
-  path config. This invokes the `Quickshell.reload(false)` IPC handler
+  because `ipc call` does not auto-discover an instance launched with a path
+  config. This invokes the `Quickshell.reload(false)` IPC handler
   (`AoideIpc.qml`), which tears down and rebuilds the whole scene from
-  `shell.qml` — no systemd restart. Success is judged on OUTPUT, not the
+  `shell.qml`, no systemd restart (the probe is `systemctl --user show
+  aoide-quickshell.service --property=MainPID --value`,
+  `pkgs/aoide/crates/song/src/ipc.rs`). Success is judged on OUTPUT, not the
   exit code: `ipc call` exits 0 even for an unknown target/function
   (printing `Not ready to accept queries yet.`), and `reload()` is a void
   function, so a landed call prints nothing — empty stdout at exit 0 is the
-  only real success. Always `status: "ok"`; `--json` data `{status:
-  "reloaded" | "not-running" | "failed"}` with the matching human message.
-- **Notes:** not gated; best-effort — `not-running` (service absent: no IPC
-  attempted) and `failed` are reported facts, never command failures; exit
-  stays 0. This is the reload lane for dynamically-loaded widget QML
-  (`Qt.createComponent`) and lane-owned QML that Quickshell's own file
-  watcher never tracks ([[Quickshell]]). Named `quickshell`, not `shell`,
-  because a top-level `shell` command collided with the `--agent shell`
-  flag value (see the module doc in
-  `pkgs/aoide/crates/song/src/commands/quickshell.rs`).
+  only real success. `--json` data: `declarative` gives `{status: "reloaded"
+  | "not-running" | "failed"}`; `staging`/`draft` give `{mode, song, draft,
+  take, sync, reload}` where `take` is `{take: N, deduped: false}`,
+  `{take: null, deduped: true}` or `{take: null, takeError}`, `sync` is the
+  sync's own data, and `reload` is `{status, message}`. The human line reads
+  "reloaded <song> (<mode>) — " and then the shell reload's message.
+- **Notes:** not gated. The shell reload is best-effort: `not-running`
+  (service absent: no IPC attempted) and `failed` are reported facts, never
+  command failures. A sync that refuses or fails (no `song` in the marker,
+  an unreadable stage file, a song this system cannot stage) ends the
+  command with exit 1 before any snapshot or shell reload. The vanished-draft
+  refusal is a taught one: it names the draft and the missing path, and its
+  fix is `lyra rice mode stage`, which leaves draft mode. `lyra reload` is
+  also what brings a staged or drafted song back after a login or a switch:
+  the activation lays the declared song over the runtime tree, and the lyra
+  lane runs this command from its `aoide-rice-reload` unit. It is the reload
+  lane for dynamically-loaded widget QML (`Qt.createComponent`) and
+  lane-owned QML that Quickshell's own file watcher never tracks
+  ([[Quickshell]]). It absorbed the old `quickshell reload`; the group keeps
+  only `quickshell healthcheck`.
 
 ### lyra quickshell healthcheck
 

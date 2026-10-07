@@ -23,12 +23,25 @@
 //!   on every single reload. Draft's sync instead applies the SAME
 //!   live-apply + widget/registry-sync tail (`crate::live`/`crate::widgets`,
 //!   the identical primitives `handle_rice_stage` itself calls) against the
-//!   CURRENT staged content, touching `stage/livery.json` not at all. The
-//!   take hangs off the routed draft (`songbook/<song>/drafts/<name>/takes/`,
-//!   where takes already live). Widget bodies are SONG-scoped, not
-//!   draft-scoped (a draft forks the dress — livery+cover — never the
-//!   widgets), so a widget edit under draft mode mutates every draft's view
-//!   alike.
+//!   CURRENT staged content, touching the content of `stage/livery.json` not
+//!   at all. The take hangs off the routed draft
+//!   (`songbook/<song>/drafts/<name>/takes/`, where takes already live).
+//!   Widget bodies are SONG-scoped, not draft-scoped (a draft forks the dress
+//!   — livery+cover — never the widgets), so a widget edit under draft mode
+//!   mutates every draft's view alike. Before the sync the arm checks the
+//!   routing itself: the activation seed RENAMES the declared file over
+//!   `stage/livery.json` (the draft's own file is never written through), so
+//!   a link that is not the one to the marked draft's `livery.json` is
+//!   re-routed ([`super::mode::route_stage_to_draft`], the block `rice mode
+//!   draft` routes with) and, after the sync, the SAME marker is saved again
+//!   so `stage/mode.json` lands last — the shell's livery watch re-arms on a
+//!   `mode.json` change, never on a swapped entry. A draft whose file is gone
+//!   is refused by name and nothing is written.
+//!
+//! `lyra reload` is also what brings a staged or drafted song back after a
+//! login or a switch: the activation lays declared state over the runtime
+//! tree, and the lyra lane runs this command from its `aoide-rice-reload` unit
+//! to put back whatever `stage/mode.json` names.
 //!
 //! **Sync runs BEFORE snapshot in both arms** — not the order the beats are
 //! numbered in casual description, but load-bearing for dedupe-against-head:
@@ -45,7 +58,7 @@
 //! runs.
 
 use aoide_protocol::Invocation;
-use aoide_protocol::output::{Outcome, Status};
+use aoide_protocol::output::{Fix, Kind, Outcome, Status};
 use aoide_protocol::registry::{cmd, Registry};
 use aoide_storage::mode::{self, RiceMode};
 use serde_json::{json, Value};
@@ -100,22 +113,41 @@ fn reload_staging_or_draft(inv: &Invocation, marker: mode::ModeMarker) -> Outcom
     // Beat "sync": Staging re-derives declared content from the committed
     // songbook via `handle_rice_stage`'s own body (the existing seam, never
     // a copy). Draft applies the same live-apply + widget/registry-sync
-    // tail WITHOUT touching `stage/livery.json` — see the module doc for why
-    // that split is load-bearing, not cosmetic.
-    let mut synced = match draft {
-        None => super::rice::handle_rice_stage(&Invocation {
-            path: vec!["rice".to_string(), "stage".to_string()],
-            args: vec![song.clone()],
-            flags: inv.flags.clone(),
-            door: inv.door,
-        }),
-        Some(_) => sync_draft_in_place(&song),
+    // tail WITHOUT touching `stage/livery.json`'s content — see the module
+    // doc for why that split is load-bearing, not cosmetic — after making
+    // sure the file still routes to the draft.
+    let (mut synced, rerouted) = match draft {
+        None => (
+            super::rice::handle_rice_stage(&Invocation {
+                path: vec!["rice".to_string(), "stage".to_string()],
+                args: vec![song.clone()],
+                flags: inv.flags.clone(),
+                door: inv.door,
+            }),
+            false,
+        ),
+        Some(draft) => match route_to_marked_draft(&song, draft) {
+            Ok(rerouted) => (sync_draft_in_place(&song), rerouted),
+            Err(refused) => return refused,
+        },
     };
+    // The entry's type changed, so the marker follows it — whether or not the
+    // sync went on to succeed (CONTRACTS.md §4, `stage/mode.json`).
+    if rerouted {
+        if let Err(e) = mode::save_mode_marker(&marker) {
+            return Outcome::error("reload", format!("failed to write mode marker: {e}"))
+                .with_data(json!({ "reason": "marker-write-failed" }));
+        }
+    }
     if synced.status != Status::Ok {
         synced.command = "reload".to_string();
         return synced;
     }
     let mut changed = synced.changed.clone();
+    if rerouted {
+        changed.push(aoide_storage::fs::stage_dir().join("livery.json").to_string_lossy().into_owned());
+        changed.push(mode::mode_marker_path().to_string_lossy().into_owned());
+    }
 
     // Beat "snapshot": the now-synced stage + widget bodies, deduped against
     // the head — `commands/take.rs`'s own dedupe core (the User's own
@@ -168,6 +200,32 @@ fn reload_staging_or_draft(inv: &Invocation, marker: mode::ModeMarker) -> Outcom
         "sync": synced.data,
         "reload": { "status": status.tag(), "message": status.message() },
     }))
+}
+
+/// Make `stage/livery.json` the link to the marked draft's `livery.json`, as
+/// `rice mode draft` left it. `Ok(true)` when it had to be re-routed — the
+/// activation seed renames a declared file over the link — `Ok(false)` when the
+/// link was already right. A draft whose file is gone is refused by name
+/// before anything is written, dangling link or not: re-routing to it would
+/// leave a link to nothing.
+fn route_to_marked_draft(song: &str, draft: &str) -> Result<bool, Outcome> {
+    let want = aoide_storage::fs::draft_dir(song, draft).join("livery.json");
+    if !want.is_file() {
+        return Err(Outcome::refuse(
+            "reload",
+            Kind::Refused,
+            format!("draft `{draft}` of `{song}` is gone"),
+            format!("stage/mode.json routes to {}, which does not exist", want.display()),
+            Fix::Run("lyra rice mode stage".to_string()),
+        ));
+    }
+    let link = aoide_storage::fs::stage_dir().join("livery.json");
+    if std::fs::read_link(&link).is_ok_and(|to| to == want) {
+        return Ok(false);
+    }
+    super::mode::route_stage_to_draft(&want)
+        .map(|()| true)
+        .map_err(|e| Outcome::error("reload", e).with_data(json!({ "reason": "symlink-setup-failed" })))
 }
 
 /// Draft mode's own "sync" beat: apply hyprctl geometry/border keywords and
@@ -250,8 +308,50 @@ mod tests {
     use aoide_storage::fs as shellbridge;
     use aoide_storage::mode::{save_mode_marker, ModeMarker};
     use aoide_test_support::*;
+    use std::os::unix::fs::MetadataExt;
+    use std::path::{Path, PathBuf};
 
     const VALID_NOTES: &str = r##"{"schemaVersion":"0","palette":{"bg":"#000000"}}"##;
+
+    /// What the activation seed leaves at `stage/livery.json`: another song's
+    /// declared document, as a plain file.
+    const DECLARED_NOTES: &str = r##"{"schemaVersion":"0","palette":{"bg":"#222222"},"song":"nocturne"}"##;
+
+    const ROUTED_NOTES: &str = r##"{"schemaVersion":"0","palette":{"bg":"#abcdef"},"song":"sonata"}"##;
+
+    /// `<root>/aoide/song/stage`: the layout under which `run_qml_dir()` lands
+    /// inside the test's own root as well.
+    fn runtime_stage(tag: &str) -> (PathBuf, PathBuf) {
+        let root = unique_tmp(tag);
+        let stage = root.join("aoide").join("song").join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        (root, stage)
+    }
+
+    /// A drafted `sonata` whose draft holds [`ROUTED_NOTES`], routed by a real
+    /// link, with the marker saved as `rice mode draft` would. Returns the
+    /// draft's `livery.json`.
+    fn route_a_draft(stage: &Path) -> PathBuf {
+        let draft_livery = shellbridge::draft_dir("sonata", "neon-night").join("livery.json");
+        std::fs::create_dir_all(draft_livery.parent().unwrap()).unwrap();
+        std::fs::write(&draft_livery, ROUTED_NOTES).unwrap();
+        std::os::unix::fs::symlink(&draft_livery, stage.join("livery.json")).unwrap();
+        save_mode_marker(&ModeMarker {
+            mode: RiceMode::Draft,
+            song: Some("sonata".to_string()),
+            draft: Some("neon-night".to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+        draft_livery
+    }
+
+    /// The activation seed's write: `mv -f` of a temp file over the entry.
+    fn rename_declared_over(stage: &Path) {
+        let tmp = stage.join(".livery.json.seed");
+        std::fs::write(&tmp, DECLARED_NOTES).unwrap();
+        std::fs::rename(&tmp, stage.join("livery.json")).unwrap();
+    }
 
     fn reload_inv() -> Invocation {
         aoide_test_support::inv(&["reload"], &[])
@@ -462,9 +562,15 @@ mod tests {
         })
         .unwrap();
 
+        let marker_inode = std::fs::metadata(mode::mode_marker_path()).unwrap().ino();
         let out = handle_reload(&reload_inv());
         assert_eq!(out.status, Status::Ok, "{:?}", out.data);
         assert_eq!(out.data.as_ref().unwrap()["take"]["take"], 1);
+        assert_eq!(
+            std::fs::metadata(mode::mode_marker_path()).unwrap().ino(),
+            marker_inode,
+            "a link that was already right is not a swap: mode.json is not rewritten"
+        );
 
         let record = aoide_storage::takes::load_take("sonata", Some("neon-night"), 1)
             .expect("the take lives under the draft");
@@ -488,6 +594,181 @@ mod tests {
             "the routing symlink itself must survive a reload untouched"
         );
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The activation seed renames a declared file over the routing link —
+    /// the draft's own file is untouched, the link is gone. A reload brings
+    /// the link back to the marked draft and writes `mode.json` after it.
+    #[test]
+    fn draft_mode_reload_restores_the_link_the_seed_renamed_over() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let (root, stage) = runtime_stage("reload-draft-heal");
+        crate::commands::test_support::ensure_default_songbook_fixture();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let draft_livery = route_a_draft(&stage);
+        rename_declared_over(&stage);
+        let stage_livery = stage.join("livery.json");
+        assert!(
+            !std::fs::symlink_metadata(&stage_livery).unwrap().file_type().is_symlink(),
+            "the seed's rename replaced the link"
+        );
+        assert_eq!(std::fs::read_to_string(&draft_livery).unwrap(), ROUTED_NOTES, "and left the draft alone");
+        let marker_inode = std::fs::metadata(mode::mode_marker_path()).unwrap().ino();
+
+        let out = handle_reload(&reload_inv());
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+
+        assert_eq!(std::fs::read_link(&stage_livery).unwrap(), draft_livery);
+        assert_eq!(std::fs::read_to_string(&stage_livery).unwrap(), ROUTED_NOTES);
+        assert_eq!(std::fs::read_to_string(&draft_livery).unwrap(), ROUTED_NOTES);
+        let marker = std::fs::metadata(mode::mode_marker_path()).unwrap();
+        assert_ne!(marker.ino(), marker_inode, "mode.json was rewritten");
+        assert!(
+            marker.modified().unwrap() >= std::fs::symlink_metadata(&stage_livery).unwrap().modified().unwrap(),
+            "and after the link was made"
+        );
+        assert!(out.changed.iter().any(|c| c.ends_with("stage/livery.json")), "{:?}", out.changed);
+        assert!(out.changed.iter().any(|c| c.ends_with("stage/mode.json")), "{:?}", out.changed);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A draft that is gone is refused by name, whatever sits at the entry —
+    /// the declared file the seed left, or a link to the vanished file — and
+    /// nothing is written: no link made, no entry touched, the marker kept.
+    #[test]
+    fn draft_mode_reload_refuses_a_vanished_draft_and_writes_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR", "AOIDE_SESSION_ID"]);
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let (root, stage) = runtime_stage("reload-draft-gone");
+        crate::commands::test_support::ensure_default_songbook_fixture();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let draft_livery = route_a_draft(&stage);
+        std::fs::remove_dir_all(draft_livery.parent().unwrap()).unwrap();
+        let stage_livery = stage.join("livery.json");
+        let marker_before = std::fs::read(mode::mode_marker_path()).unwrap();
+
+        rename_declared_over(&stage);
+        let out = handle_reload(&reload_inv());
+        assert_eq!(out.status, Status::Error, "{:?}", out.data);
+        assert_eq!(out.status.exit_code(), 1);
+        let refusal = &out.data.as_ref().unwrap()["refusal"];
+        assert_eq!(refusal["kind"], "refused");
+        assert!(refusal["what"].as_str().unwrap().contains("`neon-night` of `sonata`"), "{refusal}");
+        assert!(refusal["why"].as_str().unwrap().contains(&draft_livery.display().to_string()), "{refusal}");
+        assert_eq!(refusal["fix"]["run"], "lyra rice mode stage");
+        assert_eq!(std::fs::read_to_string(&stage_livery).unwrap(), DECLARED_NOTES);
+        assert!(
+            !std::fs::symlink_metadata(&stage_livery).unwrap().file_type().is_symlink(),
+            "no link to a file that does not exist"
+        );
+        assert_eq!(std::fs::read(mode::mode_marker_path()).unwrap(), marker_before);
+
+        std::fs::remove_file(&stage_livery).unwrap();
+        std::os::unix::fs::symlink(&draft_livery, &stage_livery).unwrap();
+        let out = handle_reload(&reload_inv());
+        assert_eq!(out.status, Status::Error, "{:?}", out.data);
+        assert!(out.data.as_ref().unwrap()["refusal"]["what"].is_string(), "{:?}", out.data);
+        assert_eq!(std::fs::read_link(&stage_livery).unwrap(), draft_livery);
+        assert_eq!(std::fs::read(mode::mode_marker_path()).unwrap(), marker_before);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Declarative reloads nothing but the shell: whatever the seed laid at
+    /// `stage/livery.json` stays as it is.
+    #[test]
+    fn declarative_mode_reload_leaves_the_stage_livery_alone() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let (root, stage) = runtime_stage("reload-declarative-livery");
+        crate::commands::test_support::ensure_default_songbook_fixture();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        rename_declared_over(&stage);
+        save_mode_marker(&ModeMarker {
+            mode: RiceMode::Declarative,
+            song: Some("sonata".to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let out = handle_reload(&reload_inv());
+        assert_eq!(out.status, Status::Ok);
+        let stage_livery = stage.join("livery.json");
+        assert_eq!(std::fs::read_to_string(&stage_livery).unwrap(), DECLARED_NOTES);
+        assert!(!std::fs::symlink_metadata(&stage_livery).unwrap().file_type().is_symlink());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// An activation lays the declared song over the runtime: the stage file
+    /// names another song, `rsync --delete` drops the staged song's widget
+    /// bodies, and `manifest.json` goes back to the baked one. A staging
+    /// reload puts all three back.
+    #[test]
+    fn staging_mode_reload_restores_the_staged_song_after_an_activation() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&[
+            "AOIDE_STAGE_DIR",
+            "AOIDE_SESSION_ID",
+            crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR,
+        ]);
+        std::env::remove_var("AOIDE_SESSION_ID");
+        let (root, stage) = runtime_stage("reload-staging-activation");
+        let fixture = root.join("songbook-eval-fixture.json");
+        std::fs::write(
+            &fixture,
+            r#"{"manifest":{"sonata":{"bar":{"owner":"sonata","file":"bar.qml"}}},"registry":{}}"#,
+        )
+        .unwrap();
+        std::env::set_var(crate::widgets::SONGBOOK_EVAL_FIXTURE_VAR, &fixture);
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let songbook = shellbridge::songbook_dir("sonata");
+        std::fs::create_dir_all(songbook.join("widgets")).unwrap();
+        std::fs::write(songbook.join("livery.json"), VALID_NOTES).unwrap();
+        std::fs::write(songbook.join("widgets").join("bar.qml"), "// bar\n").unwrap();
+        save_mode_marker(&ModeMarker {
+            mode: RiceMode::Staging,
+            song: Some("sonata".to_string()),
+            staging_song: Some("sonata".to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+        let stage_livery = stage.join("livery.json");
+        let songs = shellbridge::run_qml_dir().join("songs");
+        let staged_song = || -> Value {
+            serde_json::from_str::<Value>(&std::fs::read_to_string(&stage_livery).unwrap()).unwrap()["song"].clone()
+        };
+        let manifest_has_sonata = || -> bool {
+            serde_json::from_str::<Value>(&std::fs::read_to_string(songs.join("manifest.json")).unwrap())
+                .unwrap()
+                .get("sonata")
+                .is_some()
+        };
+
+        let baked_manifest = r#"{"nocturne":{"bar":{"owner":"nocturne","file":"bar.qml"}}}"#;
+        std::fs::create_dir_all(&songs).unwrap();
+        std::fs::write(songs.join("manifest.json"), baked_manifest).unwrap();
+
+        let first = handle_reload(&reload_inv());
+        assert_eq!(first.status, Status::Ok, "{:?}", first.data);
+        assert_eq!(staged_song(), "sonata");
+        assert_eq!(std::fs::read_to_string(songs.join("sonata").join("bar.qml")).unwrap(), "// bar\n");
+        assert!(manifest_has_sonata());
+
+        rename_declared_over(&stage);
+        std::fs::remove_dir_all(songs.join("sonata")).unwrap();
+        std::fs::write(songs.join("manifest.json"), baked_manifest).unwrap();
+        assert_eq!(staged_song(), "nocturne");
+        assert!(!manifest_has_sonata());
+
+        let second = handle_reload(&reload_inv());
+        assert_eq!(second.status, Status::Ok, "{:?}", second.data);
+        assert_eq!(staged_song(), "sonata");
+        assert_eq!(std::fs::read_to_string(songs.join("sonata").join("bar.qml")).unwrap(), "// bar\n");
+        assert!(manifest_has_sonata());
+        assert!(!std::fs::symlink_metadata(&stage_livery).unwrap().file_type().is_symlink());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

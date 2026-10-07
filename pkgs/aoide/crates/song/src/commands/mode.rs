@@ -398,6 +398,25 @@ fn handle_mode_declarative(inv: &Invocation) -> Outcome {
     .with_data(json!({ "mode": "declarative", "song": marker.song }))
 }
 
+/// Point `stage/livery.json` at `draft_livery`, removing whatever sits there
+/// first (a real declared file, or a link routed to a different draft) —
+/// [`teardown_draft_symlink`]'s inverse. [`handle_mode_draft`] routes with it,
+/// and `lyra reload`'s draft arm re-routes with it after an activation seed
+/// renamed a declared file over the link. The error is the outcome message,
+/// naming the step that failed.
+pub(crate) fn route_stage_to_draft(draft_livery: &std::path::Path) -> Result<(), String> {
+    let stage_livery = shellbridge::stage_dir().join("livery.json");
+    if std::fs::symlink_metadata(&stage_livery).is_ok() {
+        std::fs::remove_file(&stage_livery)
+            .map_err(|e| format!("failed to clear stage/livery.json before routing: {e}"))?;
+    }
+    if let Some(parent) = stage_livery.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("failed to prepare the stage dir: {e}"))?;
+    }
+    std::os::unix::fs::symlink(draft_livery, &stage_livery)
+        .map_err(|e| format!("failed to route stage/livery.json to the draft: {e}"))
+}
+
 /// `rice mode draft <name>` — enter DRAFT mode: point `stage/livery.json`
 /// at a symlink into `songbook/<song>/drafts/<name>/livery.json`, where
 /// `song` is resolved the same way `rice mode stage`'s no-arg form does
@@ -415,10 +434,10 @@ fn handle_mode_declarative(inv: &Invocation) -> Outcome {
 /// set`/`stage/cover.json` are NOT part of this routing — only
 /// `livery.json` is symlinked.)
 ///
-/// Removes whatever currently sits at `stage/livery.json` (a real declared
-/// file, or an old symlink routed to a DIFFERENT draft) before creating the
-/// new symlink. Refuses with the same `declarative-mode-locked` shape every
-/// other write path uses.
+/// [`route_stage_to_draft`] removes whatever currently sits at
+/// `stage/livery.json` (a real declared file, or an old symlink routed to a
+/// DIFFERENT draft) before creating the new symlink. Refuses with the same
+/// `declarative-mode-locked` shape every other write path uses.
 fn handle_mode_draft(inv: &Invocation) -> Outcome {
     let existing = load_mode_marker();
     if existing.mode == RiceMode::Declarative {
@@ -473,32 +492,12 @@ fn handle_mode_draft(inv: &Invocation) -> Outcome {
         changed.append(&mut forked.changed);
     }
 
-    let stage_livery = shellbridge::stage_dir().join("livery.json");
-    if std::fs::symlink_metadata(&stage_livery).is_ok() {
-        if let Err(e) = std::fs::remove_file(&stage_livery) {
-            return Outcome::error(
-                "rice.mode.draft",
-                format!("failed to clear stage/livery.json before routing: {e}"),
-            )
+    if let Err(e) = route_stage_to_draft(&draft_livery) {
+        return Outcome::error("rice.mode.draft", e)
             .changed(changed)
             .with_data(json!({ "reason": "symlink-setup-failed" }));
-        }
     }
-    if let Some(parent) = stage_livery.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            return Outcome::error("rice.mode.draft", format!("failed to prepare the stage dir: {e}"))
-                .changed(changed)
-                .with_data(json!({ "reason": "symlink-setup-failed" }));
-        }
-    }
-    if let Err(e) = std::os::unix::fs::symlink(&draft_livery, &stage_livery) {
-        return Outcome::error(
-            "rice.mode.draft",
-            format!("failed to route stage/livery.json to the draft: {e}"),
-        )
-        .changed(changed)
-        .with_data(json!({ "reason": "symlink-setup-failed" }));
-    }
+    let stage_livery = shellbridge::stage_dir().join("livery.json");
     changed.push(stage_livery.to_string_lossy().into_owned());
 
     let marker = ModeMarker {
