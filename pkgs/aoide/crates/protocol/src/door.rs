@@ -857,6 +857,9 @@ pub fn run(
         }
     };
     let _ = COLOR.set(mode);
+    if rest == ["--version"] {
+        return say(&format!("{bin_name} {}", crate::registry::AOIDE_VERSION)).unwrap_or(exit::OK);
+    }
     let width = style::width();
     let for_stream = |stream| Term { style: Style::for_stream(mode, json, stream), width };
 

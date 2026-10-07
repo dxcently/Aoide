@@ -162,3 +162,10 @@ fn aoided_help_with_a_closed_stdout_exits_quietly() {
     let (code, err) = with_stdout_closed(env!("CARGO_BIN_EXE_aoided"), &["--help"]);
     assert_eq!((code, err.as_str()), (141, ""));
 }
+
+#[test]
+fn aoide_version_prints_the_version() {
+    let out = Command::new(env!("CARGO_BIN_EXE_aoide")).arg("--version").output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), format!("aoide {}", env!("CARGO_PKG_VERSION")));
+}
