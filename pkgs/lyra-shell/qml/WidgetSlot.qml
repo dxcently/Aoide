@@ -27,14 +27,15 @@
 // created object is `Component.createObject(parent, initialProperties)`, so
 // this manages the loaded item's lifecycle directly instead.
 //
-// Idempotence guard (ported from SurfaceSlot.qml, 2026-08-18): `_rebuild()`
-// skips the destroy/recreate cycle when the resolved source and every extra
-// VALUE match what the live `_item` already came from. Without it, an
-// `extraProps` object-literal binding (a fresh JS object every re-evaluation,
-// same instances inside) rebuilt the loaded widget on every unrelated
-// re-evaluation — see `_builtSource`/`_builtExtras`/`_sameExtras` below for
-// the mechanism, sized for WidgetSlot's own `fallback` branch as well as the
-// song-provides one.
+// Rebuild key and extras: the loaded widget is rebuilt only when the resolved
+// source changes (`_rebuild()` below). Extras are not part of that key. An
+// `extraProps` binding is an object literal — a fresh JS object on every
+// re-evaluation, same instances inside — and an extra can itself change while
+// a song switch is in flight (the bar's `powermenu`/`dock` are the live
+// `.item` of another slot, null while that slot rebuilds). Extras are assigned
+// onto the live widget key by key (an identical value signals nothing), so a
+// widget reads an extra at use time and never assumes the value it was
+// created with.
 import QtQuick
 
 Item {
@@ -69,26 +70,12 @@ Item {
 
     property Item _item: null
 
-    // ── Idempotence guard (ported from SurfaceSlot.qml — same defect, same
-    // fix) ───────────────────────────────────────────────────────────────
-    // `extraProps` is declared at every call site as an object LITERAL
-    // (`WidgetSlot { extraProps: { shared: shared, powermenu:
-    // powermenuSlot.item } }`), so every re-evaluation of the enclosing
-    // binding hands `onExtraPropsChanged` a brand-new JS object holding the
-    // very same instances. Comparing by identity called that a change and
-    // rebuilt on every unrelated re-evaluation — shell.qml's bar slot gets
-    // `powermenu: powermenuSlot.item`, which flips null → non-null exactly
-    // once per reload, and that one flip was destroying and recreating the
-    // whole 2735-line bar. `_builtSource`/`_builtExtras` record what the
-    // live `_item` was actually built from; `_rebuild` now only tears down
-    // and reloads when the resolved source OR an extra's VALUE actually
-    // changed. Covers both branches below: the song-provides branch keys off
-    // `resolvedSource` (non-empty while a song owns the slot), and the
-    // `fallback` branch keys off the same field staying `""` (its stable
-    // value whenever `songProvides` is false) — so an unrelated re-evaluation
-    // that leaves both source and extras untouched is skipped either way.
+    // The resolved source the live `_item` was built from. `_rebuild` tears
+    // down and reloads only when it differs. Covers both branches below: the
+    // song-provides branch keys off `resolvedSource` (non-empty while a song
+    // owns the slot), and the `fallback` branch keys off the same field
+    // staying `""` (its stable value whenever `songProvides` is false).
     property string _builtSource: ""
-    property var _builtExtras: ({})
 
     // Hosts size to content (BarPopout's slot Item uses
     // implicitHeight: childrenRect.height; a Repeater delegate binds its own
@@ -99,22 +86,16 @@ Item {
     height: implicitHeight
 
     onResolvedSourceChanged: _rebuild()
-    onExtraPropsChanged: _rebuild()
+    onExtraPropsChanged: root._applyExtras(root._item)
     Component.onCompleted: _rebuild()
 
     function _rebuild() {
-        // Idempotent (see `_builtSource`/`_builtExtras` above): the live
-        // `_item` already came from exactly this source and these extras, so
-        // there is nothing to rebuild — tearing it down to build an
-        // identical replacement is the churn this guard exists to stop.
-        if (root._item && root.resolvedSource === root._builtSource
-                && root._sameExtras(root.extraProps)) return
+        if (root._item && root.resolvedSource === root._builtSource) return
         if (root._item) {
             root._item.destroy()
             root._item = null
         }
         root._builtSource = root.resolvedSource
-        root._builtExtras = root.extraProps
         if (root.songProvides) {
             var comp = Qt.createComponent(root.stagingEngine.source(root.resolvedSong, root.slot))
             root._create(comp, root._songProps())
@@ -123,18 +104,12 @@ Item {
         }
     }
 
-    // Shallow value compare, not identity — see the guard header above for
-    // why identity would rebuild forever.
-    function _sameExtras(next) {
-        var prev = root._builtExtras
-        if (!prev || !next) return prev === next
-        var kn = Object.keys(next)
-        var kp = Object.keys(prev)
-        if (kn.length !== kp.length) return false
-        for (var i = 0; i < kn.length; i++) {
-            if (next[kn[i]] !== prev[kn[i]]) return false
+    function _applyExtras(item) {
+        if (!item) return
+        var keys = Object.keys(root.extraProps)
+        for (var i = 0; i < keys.length; i++) {
+            if (item.hasOwnProperty(keys[i])) item[keys[i]] = root.extraProps[keys[i]]
         }
-        return true
     }
 
     function _songProps() {
@@ -177,6 +152,9 @@ Item {
         // bridge wasn't in the fallback's creation props — inject it now,
         // but only if the item actually declares that property.
         if (props.bridge === undefined && item.hasOwnProperty("bridge")) item.bridge = root.bridge
+        // `props` was captured before the component finished loading; an extra
+        // that changed meanwhile found no `_item` to receive it.
+        root._applyExtras(item)
         root._item = item
     }
 }

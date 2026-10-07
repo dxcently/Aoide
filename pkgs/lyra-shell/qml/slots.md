@@ -84,6 +84,11 @@ Every widget QML file, whatever slot it fills, must follow this shape:
 - **Declares any slot-specific extras as `required property`** — e.g. the
   bar slot's `shared` (see table). Extras are per-slot, not
   universal; check the table for what a given slot's anchor passes.
+  Under a `WidgetSlot` an extra can change after creation (the bar's
+  `powermenu` and `dock` are another slot's live `.item`, null while that
+  slot rebuilds): the anchor assigns the new value onto the live widget
+  instead of rebuilding it, so a widget reads an extra at use time, never
+  once at creation. A `SurfaceSlot` rebuilds its surface on a changed extra.
 - **Sizes itself via `implicitWidth`/`implicitHeight`** — the host
   positions the `WidgetSlot`, not the widget; the widget only needs to
   report its own footprint.
