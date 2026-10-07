@@ -634,7 +634,7 @@ the inbound half of the two-door contract (the outbound half is
   ceremony and the SSE takeover are not refused here, they are unreachable —
   the functions behind them are never called from this process. A method name
   it cannot serve audits under its OWN label (`a2a.mail-adapter.refused
-  message/send`), never a door method's name emitted by a listener that has no
+  message/send`; likewise `message/stream`, `tasks/resubscribe`, `tasks/cancel`), never a door method's name emitted by a listener that has no
   such method; a mail method keeps the label the door emits for it.
   `mailPoll` is sealed-only in the pull direction as well as `mailDeposit` in
   the push one: an entry spooled toward a poller that held no binding is

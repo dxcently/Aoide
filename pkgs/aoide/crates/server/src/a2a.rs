@@ -5823,6 +5823,9 @@ fn rpc_method_label(parsed_method: Option<&str>, history_asked: bool, frame_aske
         Some("tasks/get") if frame_asked => "tasks/get.frame",
         Some("tasks/get") => "tasks/get",
         Some("message/send") => "message/send",
+        Some("message/stream") => "message/stream",
+        Some("tasks/resubscribe") => "tasks/resubscribe",
+        Some("tasks/cancel") => "tasks/cancel",
         Some("aoide/graphSummary") => "aoide/graphSummary",
         Some("aoide/pairRequest") => "aoide/pairRequest",
         Some("aoide/pairReveal") => "aoide/pairReveal",
@@ -19224,6 +19227,13 @@ mod tests {
         assert_eq!(unknown, "a2a.mail-adapter.refused", "a hostile method name is not interpolated");
         assert_eq!(mail_method_label(None), "mail-adapter.refused");
         assert_eq!(mail_method_label(Some("aoide/mailPoll")), "aoide/mailPoll");
+        for method in ["message/stream", "tasks/resubscribe", "tasks/cancel"] {
+            assert_eq!(
+                mail_method_label(Some(method)),
+                format!("mail-adapter.refused {method}"),
+                "every refused door method keeps its name in the audit line"
+            );
+        }
 
         // And it is what actually lands in the log, over a real socket.
         let port = free_loopback_port();
