@@ -32,20 +32,28 @@
   root id and its `session_id` is `None`, so no local action — focus,
   prune, project — can resolve it against this box's roster; its far id
   rides `remote_id` for the Mesh row and its letter goes to `node/petname`
-  (`ContextTarget::Remote`), and nothing else crosses the node line. A
+  (`ContextTarget::Remote`) only when the petname is a legal mailbox name
+  (`app::is_mailbox_name`, the wire's slug shape — a comma or slash would
+  fan the letter out), and nothing else crosses the node line. A far
+  `parentSessionId` chain that never reaches its node (a loop) falls flat
+  under the node, children kept; every row the node counts is a card. A
   cached row's state slot carries the roster's `presence` word, never its
   last live state.
 - `graphview::build_model` is memoised on `App::graph_cache`, keyed by
   `ModelKey` (view, selection, folds, camera, the retained world's
-  generation, the failed-probe age). Every path that changes the forest's
-  inputs — stage reload, a landed roster probe, a test that edits
-  `app.sessions` or `app.roster` — must go through `sync_graph_scene`,
-  which clears it; a new scene input that render reads goes into the key.
+  generation, the failed-probe age, the wall-clock minute the host ages
+  print). Every path that changes the forest's inputs — `reload_all`, a
+  stage mtime the tick sees (`poll_refresh`), a landed roster probe, a test
+  that edits `app.sessions` or `app.roster` — must go through
+  `sync_graph_scene`, which clears it; a new scene input that render reads
+  goes into the key.
 - A fold is a view choice in `SceneState::folded`, keyed by node id like the
   selection, never a scene mutation; a folded card's mark (`graphview::Fold`)
   must count what it hides and name an awaiting descendant, so the fold
-  never hides a blocked agent silently. A step toward hidden children
-  unfolds rather than doing nothing.
+  never hides a blocked agent silently; when the border is too short for
+  the full mark, the awaiting count survives (`Fold::label_fitting`). A step
+  toward hidden children unfolds rather than doing nothing, and picking any
+  card opens every fold above it, so the cursor never sits on a hidden card.
 - The follow camera (no manual pan) shows the forest, never the pad: an
   axis the forest fits in holds it whole, an overflowing axis centres the
   selected card clamped inside the forest's bounds. The pad is reachable

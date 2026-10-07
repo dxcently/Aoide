@@ -1355,7 +1355,11 @@ supplies never carry it (no local session slice to walk), and `node list`
 rows do not carry it either. The same rows carry `nativeRole` under the
 record rule above (present only when the record carries one); a row built
 from a remote node's graph document relays that node's own published
-`nativeRole` and never synthesizes one.
+`nativeRole` and never synthesizes one. The same rows also carry an additive
+`parentSessionId` (string), present only when the row's spawner is a
+session in the same grouping — for a `--hosts` node, a session that node
+itself lists — so a consumer can rank a far forest; a cross-node parent
+rides `remoteParent` instead, never this key.
 
 **`workspaceProject` — the workspace's default project, stamped at birth.**
 A session record MAY carry an optional `workspaceProject` (string), naming

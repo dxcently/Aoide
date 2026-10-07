@@ -133,6 +133,32 @@ impl Fold {
         }
         s
     }
+
+    /// The label at `budget` cells: the full form when it fits, else the
+    /// terse `▸5·1!` that keeps the awaiting count ahead of everything —
+    /// the one number a fold must never truncate away — and only then an
+    /// end-cut.
+    pub fn label_fitting(&self, budget: usize) -> String {
+        let full = self.label();
+        if full.chars().count() <= budget {
+            return full;
+        }
+        let terse = if self.awaiting > 0 {
+            format!("▸{}·{}!", self.hidden, self.awaiting)
+        } else {
+            format!("▸{}", self.hidden)
+        };
+        if terse.chars().count() <= budget {
+            return terse;
+        }
+        if self.awaiting > 0 {
+            let bare = format!("{}!", self.awaiting);
+            if bare.chars().count() <= budget {
+                return bare;
+            }
+        }
+        truncate_end(&terse, budget)
+    }
 }
 
 /// Node metadata carried from the parsed document into the DFS.
@@ -197,9 +223,29 @@ pub fn select_index(app: &mut App, i: usize) {
     let model = build_model(app);
     let picked = model.visible().nth(i).map(|n| n.id.clone());
     if let Some(id) = picked {
-        app.graph.selected = id;
-        app.graph.camera.pan = None;
+        pick(app, &model, id);
     }
+}
+
+/// Make `id` the selection: the camera follows it again, and every fold
+/// above it opens, so the cursor can never sit on a card the view hides.
+fn pick(app: &mut App, model: &Model, id: String) {
+    let mut cur = id.clone();
+    let mut hops = 0;
+    while let Some((parent, _)) = model
+        .children
+        .iter()
+        .find(|(p, kids)| kids.contains(&cur) && model.nodes.iter().any(|n| &n.id == *p))
+    {
+        app.graph.folded.remove(parent);
+        cur = parent.clone();
+        hops += 1;
+        if hops > model.nodes.len() {
+            break;
+        }
+    }
+    app.graph.selected = id;
+    app.graph.camera.pan = None;
 }
 
 /// Move the selection to the sibling before (`forward = false`) or after
@@ -242,8 +288,7 @@ pub fn select_sibling(app: &mut App, forward: bool) {
         pos.checked_sub(1).and_then(|p| siblings.get(p))
     };
     if let Some(target_id) = target.filter(|t| model.nodes.iter().any(|n| &n.id == *t)) {
-        app.graph.selected = target_id.clone();
-        app.graph.camera.pan = None;
+        pick(app, &model, target_id.clone());
     }
 }
 
@@ -262,8 +307,7 @@ pub fn select_parent(app: &mut App) {
         .find(|(p, kids)| kids.contains(&id) && model.nodes.iter().any(|n| &n.id == *p))
         .map(|(p, _)| p.clone());
     if let Some(parent) = parent {
-        app.graph.selected = parent;
-        app.graph.camera.pan = None;
+        pick(app, &model, parent);
     }
 }
 
@@ -302,8 +346,7 @@ pub fn select_child(app: &mut App) {
         .find(|k| model.nodes.iter().any(|n| &n.id == *k))
         .cloned();
     if let Some(child) = child {
-        app.graph.selected = child;
-        app.graph.camera.pan = None;
+        pick(app, &model, child);
     }
 }
 
@@ -363,6 +406,10 @@ pub struct ModelKey {
     camera: Camera,
     generation: u64,
     probe_failed: Option<String>,
+    /// The wall clock to the minute: the ages a host card prints (`last seen
+    /// 14h07m ago`) are minute-grained, so the build goes stale once a
+    /// minute at most and a frame never pays for a clock tick otherwise.
+    minute: u64,
 }
 
 /// Build the layout model from the canonical graph document and the roster's
@@ -378,6 +425,10 @@ pub fn build_model(app: &App) -> Rc<Model> {
         camera: app.graph.camera,
         generation: app.graph.positions.generation(),
         probe_failed: app.roster_probe_failed(),
+        minute: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() / 60)
+            .unwrap_or(0),
     };
     if let Some((k, m)) = app.graph_cache.borrow().as_ref() {
         if *k == key {
@@ -614,17 +665,46 @@ pub fn build_model_from(
                 cached: probe_failed.is_some(),
             },
         );
-        let mut kids = Vec::with_capacity(node.sessions.len());
+        // Parentage the far node published is taken only where it leads back
+        // to the node: a row whose chain never reaches the root — a far
+        // `graph link` loop, `A↔B` — falls flat under the node with its
+        // children still beneath it, so every row the node counts is a card
+        // somebody can see, and a blocked agent in a loop still wears its
+        // mark.
         let on_node = |id: &str| node.sessions.iter().any(|s| s.session_id == id);
+        let far = |id: &str| format!("{nid}/session:{id}");
+        let mut kids: Vec<String> = Vec::new();
+        let mut reach: HashSet<String> = HashSet::new();
+        let mut pending: Vec<(String, String)> = Vec::new();
         for s in &node.sessions {
-            let sid = format!("{nid}/session:{}", s.session_id);
             match s.parent.as_deref().filter(|p| on_node(p) && *p != s.session_id) {
-                Some(parent) => children
-                    .entry(format!("{nid}/session:{parent}"))
-                    .or_default()
-                    .push(sid.clone()),
-                None => kids.push(sid.clone()),
+                Some(parent) => pending.push((s.session_id.clone(), parent.to_string())),
+                None => {
+                    kids.push(far(&s.session_id));
+                    reach.insert(s.session_id.clone());
+                }
             }
+        }
+        while !pending.is_empty() {
+            let before = pending.len();
+            let mut rest = Vec::new();
+            for (sid, parent) in pending {
+                if reach.contains(&parent) {
+                    children.entry(far(&parent)).or_default().push(far(&sid));
+                    reach.insert(sid);
+                } else {
+                    rest.push((sid, parent));
+                }
+            }
+            pending = rest;
+            if pending.len() == before {
+                let (sid, _) = pending.remove(0);
+                kids.push(far(&sid));
+                reach.insert(sid);
+            }
+        }
+        for s in &node.sessions {
+            let sid = far(&s.session_id);
             // A cached row's state is what the far node LAST said; the
             // card's state slot carries the cache's word instead, and the
             // old state rides the activity row as history.
@@ -1441,7 +1521,7 @@ fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &m
         .title_bottom(Line::from(Span::styled(
             match n.folded {
                 Some(fold) if border_budget >= 4 => {
-                    format!(" {} ", truncate_end(&fold.label(), border_budget - 2))
+                    format!(" {} ", fold.label_fitting(border_budget - 2))
                 }
                 _ => String::new(),
             },
@@ -2293,6 +2373,108 @@ mod tests {
         assert!(node(&m, "node:sakaki/session:far2").cached);
         let out = dump(&paint(&app, Rect::new(0, 0, 320, 40)));
         assert!(out.contains("probe failed"), "{out}");
+    }
+
+    #[test]
+    fn a_far_parent_loop_falls_flat_under_its_node_and_keeps_its_children() {
+        let data = serde_json::json!({
+            "host": "osaka", "generatedAt": "t",
+            "nodes": [
+                { "name": "osaka", "isLocal": true, "presence": "online", "fetchedAt": null, "sessions": [] },
+                { "name": "far", "isLocal": false, "presence": "online", "fetchedAt": null,
+                  "sessions": [
+                      { "sessionId": "a", "label": "far/child/a (…a)", "petname": "a-a", "agent": "claude",
+                        "state": "awaiting", "presence": "online", "cwd": "/", "parentSessionId": "b" },
+                      { "sessionId": "b", "label": "far/child/b (…b)", "petname": "b-b", "agent": "claude",
+                        "state": "idle", "presence": "online", "cwd": "/", "parentSessionId": "a" },
+                      { "sessionId": "c", "label": "far/child/c (…c)", "petname": "c-c", "agent": "claude",
+                        "state": "working", "presence": "online", "cwd": "/", "parentSessionId": "a" },
+                      { "sessionId": "d", "label": "far/root/d (…d)", "petname": "d-d", "agent": "claude",
+                        "state": "idle", "presence": "online", "cwd": "/" } ] },
+            ],
+        });
+        let mut app = App::for_test(vec![], vec![], Vec::new());
+        app.roster.outcome = Some(aoide_protocol::output::Outcome::ok("session", "x").with_data(data));
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        let m = build_model(&app);
+        let host = node(&m, "node:far");
+        assert_eq!(host.title, "4 session(s)");
+        for id in ["a", "b", "c", "d"] {
+            assert!(m.visible().any(|n| n.id == format!("node:far/session:{id}")), "{id} is a card");
+        }
+        let a = node(&m, "node:far/session:a");
+        assert_eq!(a.depth, 1, "the loop's first row falls flat under the node");
+        assert_eq!(node(&m, "node:far/session:b").depth, 2, "its partner hangs beneath it");
+        assert_eq!(node(&m, "node:far/session:c").depth, 2, "and so does its real child");
+        assert_eq!(node(&m, "node:far/session:d").depth, 1);
+        // Folding the node still counts every row, awaiting included.
+        app.graph.selected = "node:far".into();
+        toggle_fold(&mut app);
+        assert_eq!(
+            node(&build_model(&app), "node:far").folded,
+            Some(Fold { hidden: 4, awaiting: 1, working: 1 })
+        );
+    }
+
+    #[test]
+    fn a_fold_label_keeps_the_awaiting_count_when_the_border_is_short() {
+        let fold = Fold { hidden: 12, awaiting: 3, working: 4 };
+        assert_eq!(fold.label_fitting(30), "▸ 12 · 3 awaiting");
+        assert_eq!(fold.label_fitting(10), "▸12·3!");
+        assert_eq!(fold.label_fitting(3), "3!");
+        let calm = Fold { hidden: 5, awaiting: 0, working: 2 };
+        assert_eq!(calm.label_fitting(8), "▸5");
+    }
+
+    #[test]
+    fn picking_a_card_opens_every_fold_above_it() {
+        let mut app = App::for_test(
+            vec![],
+            vec![
+                session("hub", "/x", "working", None),
+                session("mid", "/x", "idle", Some("hub")),
+                session("leaf", "/x", "idle", Some("mid")),
+            ],
+            Vec::new(),
+        );
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        app.graph.folded.insert("session:hub".into());
+        app.graph.folded.insert("session:mid".into());
+        assert!(build_model(&app).visible().all(|n| n.id != "session:leaf"));
+        let model = build_model(&app);
+        pick(&mut app, &model, "session:leaf".into());
+        assert!(app.graph.folded.is_empty(), "both folds above the leaf opened");
+        assert_eq!(selected_session_id(&app).as_deref(), Some("leaf"));
+        assert!(build_model(&app).visible().any(|n| n.id == "session:leaf"));
+    }
+
+    #[test]
+    fn a_far_petname_that_is_no_mailbox_name_gets_no_letter() {
+        let data = serde_json::json!({
+            "host": "osaka", "generatedAt": "t",
+            "nodes": [
+                { "name": "osaka", "isLocal": true, "presence": "online", "fetchedAt": null, "sessions": [] },
+                { "name": "far", "isLocal": false, "presence": "online", "fetchedAt": null,
+                  "sessions": [
+                      { "sessionId": "x", "label": "far/root/x (…x)", "petname": "x,other/y", "agent": "claude",
+                        "state": "idle", "presence": "online", "cwd": "/" } ] },
+            ],
+        });
+        let mut app = App::for_test(vec![], vec![], Vec::new());
+        app.roster.outcome = Some(aoide_protocol::output::Outcome::ok("session", "x").with_data(data));
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        app.panel = crate::app::Panel::Graph;
+        app.sidebar_focused = false;
+        app.graph.selected = "node:far/session:x".into();
+        crate::handle_key(&mut app, crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char('s')));
+        assert!(app.mail_draft.is_none(), "a comma or slash in a petname would fan the letter out");
+        assert!(app.last_outcome.is_some());
+        crate::handle_key(&mut app, crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char('e')));
+        assert_eq!(app.context_menu.as_ref().unwrap().actions, vec![crate::app::ContextAction::Details]);
+        assert!(crate::app::is_mailbox_name("misty-comet") && !crate::app::is_mailbox_name("Misty") && !crate::app::is_mailbox_name(""));
     }
 
     #[test]

@@ -112,8 +112,9 @@ mutation the panel dispatches on its own.
 card wears a mark on its bottom border — `▸ 5 · 1 awaiting`, the hidden
 count and then the most urgent class among them (awaiting over working),
 drawn in the awaiting colour when one is — so a blocked agent is never
-hidden in silence. `j` on a folded card unfolds it and steps down; `h`/`l`
-walk its rank as before. The fold is a view choice keyed by the card's id,
+hidden in silence; a border too short for the full mark keeps the awaiting
+count (`▸12·3!`). `j` on a folded card unfolds it and steps down; `h`/`l`
+walk its rank as before; picking any card opens every fold above it. The fold is a view choice keyed by the card's id,
 so a refresh cannot move it onto another card.
 
 The canvas readout names the zoom, the view and where the cursor stands —
@@ -138,10 +139,14 @@ drawn muted like its Mesh row. A probe that fails after a good one keeps the
 last rows on the canvas, muted, every host card's last row reading `probe
 failed <age>` — the forest never empties in silence. A remote card carries
 no local session id, so Enter and the local actions pass over it; `s` on a
-far agent writes to its own mailbox, `node/petname`, exactly the address the
-Mesh row's compose uses, and its menu offers Details — the card's Mesh row —
-and Write letter. Nothing else crosses the node line: no focus, no prune,
-no project.
+far agent opens the composer on its own mailbox, `node/petname` (a new way
+into the same gated `mail send` every letter takes; the Mesh row's `s` is a
+terminal `send`, a different thing), and its menu offers Details — the
+card's Mesh row — and Write letter. A petname that is not a legal mailbox
+name (`^[a-z0-9][a-z0-9-]*$`) is refused rather than addressed. Nothing
+else crosses the node line: no focus, no prune, no project. A far spawn
+chain that loops back on itself falls flat under its node with its children
+kept, so every session the node counts is a card.
 
 Space + left drag or middle drag pans the canvas; the wheel pans vertically and
 Shift + wheel pans horizontally. Ctrl + wheel zooms the camera through 50%,

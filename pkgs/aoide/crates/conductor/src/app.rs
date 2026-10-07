@@ -1380,10 +1380,12 @@ impl App {
             audit: Self::mtime(&Self::audit_path()),
         };
 
+        let mut stage_changed = false;
         if cur.projects != self.mtimes.projects {
             let p: ProjectsFile = Self::load_json(&dir.join("projects.json"));
             self.projects = p.projects;
             changed = true;
+            stage_changed = true;
         }
         if cur.history != self.mtimes.history {
             self.reload_history();
@@ -1393,11 +1395,13 @@ impl App {
             let s: SessionsFile = Self::load_json(&dir.join("sessions.json"));
             self.sessions = s.sessions;
             changed = true;
+            stage_changed = true;
         }
         if cur.hooks != self.mtimes.hooks {
             let h: HooksFile = Self::load_json(&dir.join("hooks.json"));
             self.hooks = h.hooks;
             changed = true;
+            stage_changed = true;
         }
         if cur.notes != self.mtimes.notes {
             self.palette = load_palette(&stage_notes_path(&rice_dir));
@@ -1435,6 +1439,14 @@ impl App {
             changed = true;
         }
 
+        if stage_changed {
+            // The forest's inputs moved: fold the new stage into the retained
+            // scene (new cards take slots, departed ones leave) and drop the
+            // cached model, exactly as a full reload does. A memo key could
+            // carry a stage generation instead, but the scene needs the
+            // re-placement anyway and this is the one path that does both.
+            self.sync_graph_scene();
+        }
         if changed {
             self.note_new_sessions();
             self.clamp_selection();
@@ -3676,7 +3688,7 @@ impl App {
         y: u16,
     ) {
         let mut actions = vec![ContextAction::Details];
-        if petname.as_ref().is_some_and(|p| !p.is_empty()) && !terminal {
+        if petname.as_deref().is_some_and(is_mailbox_name) && !terminal {
             actions.push(ContextAction::WriteLetter);
         }
         self.context_menu = Some(ContextMenu {
@@ -3811,7 +3823,7 @@ impl App {
                 self.show_remote_in_mesh(&session_id);
             }
             (ContextTarget::Remote { node, petname, .. }, ContextAction::WriteLetter) => {
-                if let Some(p) = petname {
+                if let Some(p) = petname.filter(|p| is_mailbox_name(p)) {
                     self.open_mail_to(format!("{node}/{p}"));
                 }
             }
@@ -4926,6 +4938,17 @@ impl App {
 /// matters since the `stop`/`stopped` vocabulary was split off `done`: a
 /// `stopped` session finished its TURN and is still very much alive, so it must
 /// stay in the `live` count.
+/// The one shape a mailbox name takes on the wire, `^[a-z0-9][a-z0-9-]*$`
+/// (CONTRACTS.md §5 — the slug predicate every mailbox and task name shares),
+/// checked before a far petname becomes a `node/petname` address: a name
+/// carrying a comma or a slash would fan a letter out to recipients the
+/// operator never picked.
+pub fn is_mailbox_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
 pub fn is_terminal(rec: &SessionRecord) -> bool {
     rec.agent == "shell" || rec.kind.as_deref() == Some("shell")
 }
@@ -6083,6 +6106,43 @@ mod tests {
                 "a hidden pane must never spawn a fetch"
             );
             assert_eq!(ROSTER_CALLS.load(Ordering::SeqCst), 0);
+        });
+    }
+
+    #[test]
+    fn a_stage_change_seen_by_the_tick_reaches_the_graph_card_at_once() {
+        with_isolated_stage(|| {
+            let dir = App::stage();
+            std::fs::create_dir_all(&dir).unwrap();
+            let write = |state: &str, stamp: std::time::SystemTime| {
+                let path = dir.join("sessions.json");
+                std::fs::write(
+                    &path,
+                    json!({ "sessions": [ { "sessionId": "agent-1", "agent": "claude",
+                        "windowAddress": "0x1", "cwd": "/x", "state": state, "startedAt": "t" } ] })
+                    .to_string(),
+                )
+                .unwrap();
+                std::fs::File::options().write(true).open(&path).unwrap().set_modified(stamp).unwrap();
+            };
+            let t0 = std::time::SystemTime::now();
+            write("working", t0);
+            let mut app = App::load(no_dispatch);
+            app.graph.view = crate::scene::View::All;
+            let card = |app: &App| {
+                crate::graphview::build_model(app)
+                    .nodes
+                    .iter()
+                    .find(|n| n.session_id.as_deref() == Some("agent-1"))
+                    .and_then(|n| n.state.clone())
+            };
+            assert_eq!(card(&app).as_deref(), Some("working"));
+
+            // The hook flips the record on disk; the next tick must show it
+            // on the card without waiting for a roster probe.
+            write("awaiting", t0 + std::time::Duration::from_secs(2));
+            assert!(app.poll_refresh(), "the tick saw the stage move");
+            assert_eq!(card(&app).as_deref(), Some("awaiting"), "the cached model was dropped with the stage");
         });
     }
 

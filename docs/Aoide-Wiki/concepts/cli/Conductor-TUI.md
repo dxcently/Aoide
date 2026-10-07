@@ -160,9 +160,10 @@ followed by one **host card per registered node** off the roster probe
 `n session(s)` or `last seen <age>`), its
 reported sessions beneath, ranked under a same-node spawner when the row
 names one (`parentSessionId`) and flat otherwise. A remote card carries no local session id,
-so the local actions pass over it — `s` writes to the far agent's
-`node/petname` mailbox and `e` offers Details (its Mesh row) and Write
-letter; a cached row wears `last-seen` as its
+so the local actions pass over it — `s` opens the composer on the far
+agent's `node/petname` mailbox (the same gated `mail send` as any letter;
+refused for a petname that is not a legal mailbox name) and `e` offers
+Details (its Mesh row) and Write letter; a cached row wears `last-seen` as its
 state and `was <state>` as its activity, dimmed. A probe that fails after a
 good one keeps the last rows, dimmed, each host card's last row reading
 `probe failed <age>`.
@@ -217,6 +218,10 @@ log invariant holds.
   probe is folded into the retained graph scene like a stage refresh; a
   failed one — or an Ok reply with no `nodes` — keeps the previous rows,
   muted, and says so.
+- **A stage change reaches the graph on the tick.** `poll_refresh` folds a
+  moved `sessions.json`/`hooks.json`/`projects.json` into the retained scene
+  at once, so a hook flipping an agent to `awaiting` shows on its card, fold
+  mark and readout within ~500 ms, not at the next roster probe.
 - **`session pending list`'s `id` is an array position, not a stable id** —
   resolving one entry shifts every id after it. `App::dispatch` re-lists
   synchronously before the next paint, so a second `a`/`d` in the same visit

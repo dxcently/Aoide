@@ -439,10 +439,12 @@ fn handle_key(app: &mut App, key: KeyEvent) -> bool {
 
     if app.panel == Panel::Graph && key.code == KeyCode::Char('s') {
         match graphview::selected_node(app) {
-            // A far agent's mailbox is `node/petname`, the same address the
-            // Mesh row's compose uses; a far terminal has none.
+            // A far agent's mailbox is `node/petname`: the composer opens
+            // on it and the letter goes through the same gated `mail send`
+            // every letter does. A far terminal has none, and a petname that
+            // is not a legal mailbox name is refused rather than addressed.
             Some(node) if node.host.is_some() => match (&node.host, &node.petname) {
-                (Some(host), Some(p)) if !p.is_empty() && node.harness != "shell" => {
+                (Some(host), Some(p)) if app::is_mailbox_name(p) && node.harness != "shell" => {
                     app.open_mail_to(format!("{host}/{p}"));
                 }
                 _ => {

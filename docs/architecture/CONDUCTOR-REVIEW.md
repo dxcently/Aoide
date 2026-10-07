@@ -191,9 +191,10 @@ this ("rebuilds the whole-world grid three times per interaction").
     ancestor is an agent, so a spawned terminal nests under its agent;
     Terminals holds all-shell chains; a wrapper shell stays there while the
     agent it wraps heads its own tree. The header counts stay by kind.
-11. **Remote card actions.** `s` on a far agent writes to `node/petname`,
-    the Mesh row's own address; `e` offers Details (its Mesh row) and Write
-    letter; nothing else crosses the node line.
+11. **Remote card actions.** `s` on a far agent opens the composer on
+    `node/petname` — a new path into the same gated `mail send`, refused for
+    a petname that is not a legal mailbox name; `e` offers Details (its Mesh
+    row) and Write letter; nothing else crosses the node line.
 12. **The start page sits in the middle.** `board::home_layout` centres the
     column across the body and the block down it at any size, dropping the
     logo before a box would clip.
