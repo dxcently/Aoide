@@ -161,7 +161,7 @@ lyra rice compose <name> [--from <song>] [--force] [--json]
 ### lyra rice draft save
 
 ```
-lyra rice draft save <name> [--json]
+lyra rice draft save [<name>] [--json]
 ```
 
 - **Reads:** `song/stage/livery.json` (required — must parse and carry a
@@ -173,9 +173,11 @@ lyra rice draft save <name> [--json]
   stage no longer has one (the draft mirrors the stage exactly at save time).
 - **Output:** data `{name, song, livery, cover}`.
 - **Notes:** upserts; works in any mode — never gated by the declarative
-  lock, never touches `mode.json`. Errors: `no-staged-livery`,
-  `invalid-json`, `no-resolvable-song`, `invalid-name` (exit 1; usage exit 2
-  when `<name>` is missing).
+  lock, never touches `mode.json`. With no `<name>` the command mints the
+  lowest free `draft-<n>` among the staged song's `drafts/` entries and
+  returns it as `name`; this is the only place a draft name is minted.
+  Errors: `no-staged-livery`, `invalid-json`, `no-resolvable-song`,
+  `invalid-name` (exit 1).
 
 ### lyra rice draft list
 

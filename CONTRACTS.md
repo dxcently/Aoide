@@ -2013,12 +2013,14 @@ draft file, because `aoide_storage::fs::atomic_write` resolves and writes
 through a symlink at its destination rather than letting POSIX `rename()`
 replace it — general behavior in that one function, not draft-specific.
 
-`rice draft save <name>` is a SEPARATE, mode-independent command: it forks
+`rice draft save [<name>]` is a SEPARATE, mode-independent command: it forks
 whatever's currently live (reading transparently through a routing symlink
 if one is active) into a new-or-updated draft snapshot without switching
 modes — upserting (re-saving an existing name overwrites its `livery.json`
 and, if the current stage no longer carries a cover, removes a stale
-`cover.json`). `rice draft drop <name>` deletes a draft outright; a missing
+`cover.json`). A name omitted at save is minted as the lowest free
+`draft-<n>` among the staged song's `drafts/` entries and returned as
+`data.name`. `rice draft drop <name>` deletes a draft outright; a missing
 name is an error, not idempotent-silent, and dropping the CURRENTLY-ROUTED
 draft is refused (`draft-is-live`) rather than silently also tearing down
 the routing and falling back to `staging` — switch modes first

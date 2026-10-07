@@ -21,12 +21,16 @@
 //! draft-awareness anywhere, because [`aoide_storage::fs::atomic_write`] is
 //! symlink-transparent. This module owns only the drafts THEMSELVES:
 //!
-//! - **`rice draft save <name>`** — fork whatever's currently live into a
+//! - **`rice draft save [<name>]`** — fork whatever's currently live into a
 //!   NEW or updated draft snapshot, independent of switching modes (e.g.
 //!   preserving a moment as a second draft while still working in a first
 //!   one, or saving a snapshot while in plain `Staging` without ever
 //!   entering `Draft` mode). Upserts. Never touches `mode.json` — it doesn't
-//!   change what's currently routed/active, only what's saved.
+//!   change what's currently routed/active, only what's saved. With no
+//!   `<name>` it mints the lowest free `draft-<n>` for the staged song
+//!   ([`mint_draft_name`]) and returns it as `data.name`: the one place a
+//!   draft name is minted, so a surface that offers "new draft" asks here
+//!   instead of inventing a name of its own.
 //!   [`fork_stage_into`] is the reusable core; `rice mode draft <name>`'s own
 //!   "create the draft if it doesn't exist yet" step calls the SAME
 //!   function rather than reimplementing the read/write.
@@ -60,12 +64,13 @@ use serde_json::{json, Value};
 pub fn register(r: &mut Registry) {
     r.insert(cmd!(
         path: ["rice", "draft", "save"],
-        summary: "Fork the current stage (stage/livery.json, required; stage/cover.json if present) into songbook/<song>/drafts/<name>/ — <song> is the currently staged song. Upserts; independent of mode (never switches modes).",
-        args: [arg!("name", "string", true, "Draft name to save under the current song's drafts/.")],
+        summary: "Fork the current stage (stage/livery.json, required; stage/cover.json if present) into songbook/<song>/drafts/<name>/ — <song> is the currently staged song. With no <name>, mints the lowest free `draft-<n>` for it. Upserts; independent of mode (never switches modes).",
+        args: [arg!("name", "string", false, "Draft name; omit it to mint the lowest free `draft-<n>` for the staged song.")],
         flags: [],
         gated: false,
         implemented: true,
         handler: handle_draft_save,
+        examples: ["rice draft save", "rice draft save neon-night"],
     ));
     r.insert(cmd!(
         path: ["rice", "draft", "list"],
@@ -102,11 +107,12 @@ fn no_resolvable_song(cmd: &str) -> Outcome {
     .with_data(json!({ "reason": "no-resolvable-song" }))
 }
 
-/// `rice draft save <name>` — fork the current stage into
+/// `rice draft save [<name>]` — fork the current stage into
 /// `songbook/<song>/drafts/<name>/`, where `<song>` is whatever
 /// `stage/livery.json`'s own `"song"` field names right now. `stage/livery.json`
 /// is required (error if absent/unparseable/song-less — there is nothing to
-/// snapshot, or nowhere to nest it, without one).
+/// snapshot, or nowhere to nest it, without one). The song resolves BEFORE the
+/// name because a minted name is the lowest free one of THAT song's drafts.
 ///
 /// Reads + validates the stage itself (rather than delegating to
 /// [`fork_stage_into`] for that part) so a missing file, invalid JSON, and a
@@ -120,27 +126,6 @@ fn no_resolvable_song(cmd: &str) -> Outcome {
 /// (`songbook/<song>/drafts/`, never `stage/`), so it works in any mode
 /// without changing what's currently active.
 fn handle_draft_save(inv: &Invocation) -> Outcome {
-    let name = match inv.args.first() {
-        Some(n) => n.clone(),
-        None => {
-            return Outcome::usage(
-                "rice.draft.save",
-                "usage: aoide rice draft save <name> [--json]",
-            )
-            .with_data(json!({ "reason": "missing-name" }));
-        }
-    };
-    if !crate::compose::valid_song_name(&name) {
-        return Outcome::error(
-            "rice.draft.save",
-            format!(
-                "`{name}` is not a valid draft name: must match `^[a-z0-9][a-z0-9-]*$` \
-                 (lowercase letters, digits, hyphens; no leading hyphen, no `/`, no `..`)"
-            ),
-        )
-        .with_data(json!({ "reason": "invalid-name", "name": name }));
-    }
-
     let livery_src = shellbridge::stage_dir().join("livery.json");
     let raw = match std::fs::read_to_string(&livery_src) {
         Ok(s) => s,
@@ -177,7 +162,42 @@ fn handle_draft_save(inv: &Invocation) -> Outcome {
         }
     };
 
+    let name = inv.args.first().cloned().unwrap_or_else(|| mint_draft_name(&song));
+    if !crate::compose::valid_song_name(&name) {
+        return Outcome::error(
+            "rice.draft.save",
+            format!(
+                "`{name}` is not a valid draft name: must match `^[a-z0-9][a-z0-9-]*$` \
+                 (lowercase letters, digits, hyphens; no leading hyphen, no `/`, no `..`)"
+            ),
+        )
+        .with_data(json!({ "reason": "invalid-name", "name": name }));
+    }
+
     fork_stage_into(&song, &name)
+}
+
+/// `draft-<n>` for the lowest positive `n` no entry of `<song>`'s `drafts/`
+/// is already named. Any entry counts as taken, a directory with no
+/// `livery.json` included, so a half-written draft is never overwritten; an
+/// absent `drafts/` is empty. Candidates carry no leading zero, so `draft-01`,
+/// `draft-0` and `draft-x` never collide with one.
+fn mint_draft_name(song: &str) -> String {
+    let taken: Vec<String> = std::fs::read_dir(shellbridge::song_drafts_dir(song))
+        .map(|read| {
+            read.flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut n = 1;
+    loop {
+        let name = format!("draft-{n}");
+        if !taken.contains(&name) {
+            return name;
+        }
+        n += 1;
+    }
 }
 
 /// The reusable core of a draft snapshot: atomic-write the CURRENT
@@ -365,16 +385,7 @@ fn handle_draft_list(inv: &Invocation) -> Outcome {
 /// behavior; `rice mode stage`/`rice mode declarative` are the explicit,
 /// already-documented way to leave `Draft` mode first.
 fn handle_draft_drop(inv: &Invocation) -> Outcome {
-    let name = match inv.args.first() {
-        Some(n) => n.clone(),
-        None => {
-            return Outcome::usage(
-                "rice.draft.drop",
-                "usage: aoide rice draft drop <name> [--json]",
-            )
-            .with_data(json!({ "reason": "missing-name" }));
-        }
-    };
+    let name = inv.args.first().cloned().unwrap_or_default();
     if !crate::compose::valid_song_name(&name) {
         return Outcome::error(
             "rice.draft.drop",
@@ -665,6 +676,144 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn save_with_no_name_mints_draft_1_for_a_song_with_no_drafts() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("draft-mint-first");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        stage_with_song(&stage, "sonata");
+        crate::commands::test_support::ensure_default_songbook_fixture();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let out = handle_draft_save(&inv(&["rice", "draft", "save"], &[]));
+        assert_eq!(out.status, Status::Ok, "{:?}", out.data);
+        assert_eq!(out.data.unwrap()["name"], "draft-1");
+        let drafts = root.join("songbook").join("sonata").join("drafts");
+        assert!(drafts.join("draft-1").join("livery.json").is_file());
+
+        let again = handle_draft_save(&inv(&["rice", "draft", "save"], &[]));
+        assert_eq!(again.data.unwrap()["name"], "draft-2");
+        assert!(drafts.join("draft-1").join("livery.json").is_file(), "the first mint is never overwritten");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn minting_fills_the_lowest_gap() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("draft-mint-gap");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        stage_with_song(&stage, "sonata");
+        crate::commands::test_support::ensure_default_songbook_fixture();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let drafts = root.join("songbook").join("sonata").join("drafts");
+        for taken in ["draft-1", "draft-3"] {
+            std::fs::create_dir_all(drafts.join(taken)).unwrap();
+        }
+
+        let out = handle_draft_save(&inv(&["rice", "draft", "save"], &[]));
+        assert_eq!(out.data.unwrap()["name"], "draft-2");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn minting_ignores_every_name_that_is_not_draft_n() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("draft-mint-ignores");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        stage_with_song(&stage, "sonata");
+        crate::commands::test_support::ensure_default_songbook_fixture();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let drafts = root.join("songbook").join("sonata").join("drafts");
+        for other in ["draft-0", "draft-01", "draft-x", "neon-night"] {
+            std::fs::create_dir_all(drafts.join(other)).unwrap();
+        }
+
+        let out = handle_draft_save(&inv(&["rice", "draft", "save"], &[]));
+        assert_eq!(out.data.unwrap()["name"], "draft-1");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn minting_counts_a_directory_with_no_livery_as_taken() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("draft-mint-halfwritten");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        stage_with_song(&stage, "sonata");
+        crate::commands::test_support::ensure_default_songbook_fixture();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let half = root.join("songbook").join("sonata").join("drafts").join("draft-1");
+        std::fs::create_dir_all(&half).unwrap();
+        std::fs::write(half.join("cover.json"), "{}").unwrap();
+
+        let out = handle_draft_save(&inv(&["rice", "draft", "save"], &[]));
+        assert_eq!(out.data.unwrap()["name"], "draft-2");
+        assert!(!half.join("livery.json").exists(), "the half-written draft is left alone");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn minting_counts_only_the_staged_songs_drafts() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("draft-mint-per-song");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        stage_with_song(&stage, "sonata");
+        crate::commands::test_support::ensure_default_songbook_fixture();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        std::fs::create_dir_all(root.join("songbook").join("moonlight").join("drafts").join("draft-1")).unwrap();
+
+        let out = handle_draft_save(&inv(&["rice", "draft", "save"], &[]));
+        assert_eq!(out.data.unwrap()["name"], "draft-1");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn save_with_no_name_and_no_staged_song_refuses_and_creates_nothing() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("draft-mint-nosong");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        std::fs::write(stage.join("livery.json"), VALID_NOTES).unwrap();
+        crate::commands::test_support::ensure_default_songbook_fixture();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let out = handle_draft_save(&inv(&["rice", "draft", "save"], &[]));
+        assert_eq!(out.status, Status::Error);
+        assert_eq!(out.data.unwrap()["reason"], "no-resolvable-song");
+        assert!(!root.join("songbook").exists(), "nothing is created for a refused mint");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn save_returns_the_name_whether_it_was_given_or_minted() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let root = unique_tmp("draft-mint-data-name");
+        let stage = root.join("stage");
+        std::fs::create_dir_all(&stage).unwrap();
+        stage_with_song(&stage, "sonata");
+        crate::commands::test_support::ensure_default_songbook_fixture();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        let given = handle_draft_save(&inv(&["rice", "draft", "save"], &["neon"])).data.unwrap();
+        let minted = handle_draft_save(&inv(&["rice", "draft", "save"], &[])).data.unwrap();
+        assert_eq!(given["name"], "neon");
+        assert_eq!(minted["name"], "draft-1");
+        assert_eq!(given["song"], "sonata");
+        assert_eq!(minted["song"], "sonata");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     // ── rice draft list ──────────────────────────────────────────────────
 
     #[test]
@@ -803,6 +952,22 @@ mod tests {
         assert_eq!(out.status, Status::Error);
         assert_eq!(out.data.unwrap()["reason"], "invalid-name");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn drop_with_an_empty_name_is_an_invalid_name_not_a_panic() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STAGE_DIR"]);
+        let stage = unique_tmp("draft-drop-empty");
+        crate::commands::test_support::ensure_default_songbook_fixture();
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+
+        for args in [&[][..], &[""][..]] {
+            let out = handle_draft_drop(&inv(&["rice", "draft", "drop"], args));
+            assert_eq!(out.status, Status::Error);
+            assert_eq!(out.data.unwrap()["reason"], "invalid-name");
+        }
+        let _ = std::fs::remove_dir_all(&stage);
     }
 
     #[test]

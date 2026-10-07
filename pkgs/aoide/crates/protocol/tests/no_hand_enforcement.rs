@@ -38,7 +38,6 @@ const ALLOWED: &[(&str, usize)] = &[
     ("screen/src/send.rs", 1),
     ("screen/src/text.rs", 1),
     ("song/src/commands/cover.rs", 3),
-    ("song/src/commands/draft.rs", 2),
     ("song/src/commands/livery.rs", 2),
     ("song/src/commands/mode.rs", 1),
     ("song/src/commands/rice.rs", 3),
