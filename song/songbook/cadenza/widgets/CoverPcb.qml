@@ -29,9 +29,11 @@
 // any Pane glows queued before it. It paints the ground until the first board
 // arrives, then the board: `board` is null only until then. A size change
 // restarts a 250ms `settle` Timer, and only the settled size is asked of the
-// worker, which computes one board at a time: the last board stays on the
-// canvas until the new one lands, and an answer to a superseded size is
-// dropped.
+// worker, which computes one board at a time. A settled size that asked for a
+// board does not paint (the old board belongs to the old size's coordinates):
+// the canvas keeps its last texture, stretched to the new size, until the
+// board lands and paints. A settled size that asked for nothing, or one with
+// no board yet, paints at once. An answer to a superseded size is dropped.
 //
 // Deterministic: one seed (`seed` below), a local PRNG (mulberry32), no
 // Math.random, no clock. The same size and seed give the same pixels.
@@ -64,11 +66,12 @@ Item {
         onTriggered: {
             var w = Math.round(root.width), h = Math.round(root.height)
             var key = w + "x" + h + ":" + root.seed
-            if (key !== root.wantKey) {
+            var posted = key !== root.wantKey
+            if (posted) {
                 root.wantKey = key
                 worker.sendMessage({ key: key, w: w, h: h, seed: root.seed })
             }
-            canvas.requestPaint()
+            if (!posted || !root.board) canvas.requestPaint()
         }
     }
 
@@ -87,8 +90,9 @@ Item {
         anchors.fill: parent
         renderTarget: Canvas.Image
         renderStrategy: Canvas.Threaded
+        // A resize repaints by itself: draw only once settled.
         onPaint: {
-            if (settle.running) return      // a resize repaints by itself; `settle` paints the settled size
+            if (settle.running) return
             var ctx = getContext("2d")
             var bd = root.board
             ctx.reset()
