@@ -90,33 +90,55 @@ in git; `git log --follow -- song/songbook/default/` finds it.
   thread. Cadenza's Pane glows froze the whole shell for tens of seconds per
   scene build: the bar clock, the herald sweep, queued shortcuts and the
   `rice stage` reload IPC all waited. `renderStrategy: Canvas.Threaded` gives
-  byte-identical pixels; the CPU moves to a worker, so the result lands late.
-- **A hidden Canvas still paints.** `visible: false` (cadenza's
-  `innerGlow: false`) cost the same CPU as a visible one: 4.0 s of user time
-  at 330x200 either way.
+  byte-identical pixels; the paint moves to the engine's render thread, so the
+  result lands late.
+- **A hidden Canvas still paints.** `visible: false` cost the same CPU as a
+  visible one: 4.0 s of user time at 330x200 either way. Cadenza's
+  `innerGlow: false` therefore instantiates no canvas (a `Loader` with
+  `active`), and the property now saves the paint it names.
+- **Threaded canvases share one render thread.** Every `Canvas.Threaded` in an
+  engine paints on the same thread, one paint at a time, and repeated
+  `requestPaint()` calls are not coalesced: ten height changes of one 330x200
+  glow queued eleven 4 s paints (the last done 46 s in), and every other
+  Threaded canvas, CoverPcb's included, waited behind them. A resize also
+  repaints a canvas by itself, so the debounce is a single-shot `settle`
+  Timer plus `if (settle.running) return` in `onPaint`: the same burst costs
+  two paints (the last done 8.6 s in), and the skipped paints leave the last
+  texture on screen, stretched. CoverPcb takes the same debounce on its worker
+  request: three size changes 200 ms apart queued three boards, and the last
+  landed 6.7 s after the final size; one request now lands 3.3 s after it.
 - **Seconds of JS belong in a WorkerScript, and so does the canvas that
   strokes the result.** CoverPcb generated its board in `onPaint`: 3.3 s per
-  output. It now answers from `CoverPcbWorker.mjs` with an identical board;
+  output. It now answers from `CoverPcbWorker.js` with an identical board;
   stroking the board is another ~110-150 ms, so that canvas is Threaded too.
-  Measuring only the generator (17 ms) hides that second cost. A WorkerScript
-  prints one `QObject::connect(QJSEngine, QtObject): invalid nullptr
-  parameter` warning; it is Qt's own and harmless.
+  Measuring only the generator (17 ms) hides that second cost. The worker is
+  `.js`, not `.mjs`: a WorkerScript runs an `.mjs` as a strict ES module,
+  while `design/trace.test.js` lifts the same block through `new Function`
+  (sloppy), so `.js` keeps the test and the shell on the same semantics. A
+  WorkerScript prints one `QObject::connect(QJSEngine, QtObject): invalid
+  nullptr parameter` warning; it is Qt's own and harmless.
 - **A transient toast's clock anchors to its own arrival.** `now + timeoutMs`
   at first sight replays the stored ledger as fresh toasts on every QML
   reload, which is every song switch that writes bodies. The deadline is
   `Date.parse(receivedAt) + timeoutMs` (first sight only when it does not
   parse), and a record already past it lapses inside `ingest`, because the
   500 ms sweep starts only after something shows. Sonata, fugue (quodlibet
-  borrows it) and cadenza carry the same clock.
+  borrows it) and cadenza carry the same clock. Fixture toasts carry
+  `timeoutMs: 0` for the same reason: their dates are fixed and long past.
 - **Measure GUI-thread stalls offscreen, with the shell's own binary.**
   quickshell with `QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software`, a
   scratch `XDG_RUNTIME_DIR` and `AOIDE_ROOT`, `WAYLAND_DISPLAY` unset, and a
   10 ms Timer logging every gap over 60 ms. The floor of a bare window is
-  15 ms. A `PanelWindow` root cannot load there (no layer-shell backend):
-  swap it for a `FloatingWindow` in a scratch copy and the clock logic runs
+  15 ms. The gap does not see the render thread: also log `onPainted` per
+  canvas (count, and time to the last one), where a queued backlog shows. A
+  `PanelWindow` root cannot load there (no layer-shell backend): swap it for
+  a `FloatingWindow` in a scratch copy and the clock logic runs
   unchanged. The software backend says nothing about the GPU path, so
   `Canvas.Threaded` on the live shell stays unmeasured until a live pass.
 - **A built-in song's runtime copy is read-only.** `~/.aoide/song/songbook/
   sonata` is seeded from the nix store at 0444/0555. `chmod u+w` the one file
   and write it in place (a temp-and-rename needs the directory); `lyra rice
   declare` then carried it into the checkout like any other song.
+- **`lyra rice declare` copies; it does not delete.** A file renamed in the
+  runtime tree arrives under its new name, and the old name stays in the
+  checkout until it is removed there (`CoverPcbWorker.mjs` to `.js`).
