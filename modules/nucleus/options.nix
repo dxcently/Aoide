@@ -423,7 +423,7 @@ let
 in
 {
   # The core's own module (`pkgs/aoide/module`, `nixosModules.default` of the
-  # `aoide` input) is imported by the nucleus LANE that closes over this flake's
+  # `aoide` input) is imported by the nucleus module that closes over this flake's
   # inputs — `lib/aoideos.nix`'s `nucleusModule` — and not here: an `imports`
   # list cannot read a module argument that `_module.args` supplies (the module
   # list is what `config` is assembled from, so the read is a cycle), and this
@@ -460,12 +460,12 @@ in
       '';
     };
 
-    # The songs this host BUILDS IN — the host record's `song.declared ∪
-    # song.available`, derived and set by the constructor's hook
+    # The songs this host BUILDS IN — the host's `habit.song.declared ∪
+    # habit.song.available`, derived and set by the constructor's hook
     # (`lib/aoideos.nix`, over `lib/songbook.nix`'s `builtIn`). A FACT about the
     # selection, exactly as `aoide.song` is, and never hand-set: the lane that
     # builds a song's widgets, installs its packages and seeds its folder reads
-    # it instead of asking the host record, which it cannot see.
+    # it instead of asking the host, which it cannot see.
     #
     # It is declared here, in the unconditional core, because the hook sets it
     # on EVERY host — including one that selected no paint lane at all, where

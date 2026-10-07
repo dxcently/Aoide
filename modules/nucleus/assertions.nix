@@ -27,7 +27,7 @@
     # stay inert, and the host boots with no surface at all.
     #
     # The fix is a selection, not a flag on this option: `aoide.song` is the
-    # derived FACT (a host record's `song.declared` produces it), so the thing
+    # derived FACT (a host's `habit.song.declared` produces it), so the thing
     # to change is which lane the host takes.
     {
       assertion = config.aoide.song == null || config.aoide.lyra.enable;

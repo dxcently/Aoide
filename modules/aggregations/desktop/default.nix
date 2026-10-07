@@ -24,7 +24,7 @@
     # this aggregation is running a compositor or a shell, and mkDefault keeps a
     # headless host free to say otherwise. `enable32Bit` is NOT defaulted — a
     # host that needs 32-bit userspace says so itself (yomi-strix does).
-    nixos =
+    module =
       { lib, ... }:
       {
         hardware.graphics.enable = lib.mkDefault true;

@@ -3,7 +3,7 @@
 # Every `*.nix` file beside this one is a record; this file produces
 # `name = path` and imports nothing. A record IS read by the constructor on
 # every host, because matching means reading which dendrites it targets. What an
-# unmatched record never costs is its work: `overlay` and the lane modules are
+# unmatched record never costs is its work: `overlay`, `system` and `home` are
 # functions, and nothing calls them.
 #
 # Empty is a real answer: the directory can hold nothing but this file, and

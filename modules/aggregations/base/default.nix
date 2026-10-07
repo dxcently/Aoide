@@ -33,7 +33,7 @@
     # The framework switch and the sane stateVersion used to live in
     # `hosts/common`; they are the same for every host, so they are the floor's
     # business and no host file restates them.
-    nixos =
+    module =
       { lib, ... }:
       {
         aoide.enable = lib.mkDefault true;

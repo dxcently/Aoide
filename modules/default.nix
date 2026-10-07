@@ -3,10 +3,9 @@
 # `catalogue` names every dendrite once, by the name a host, a user or an
 # aggregation selects it with, and points at the file (or directory) that
 # answers it. It is the ONE place a dendrite file is named (`AGENTS.md` house
-# rule 7): `modules/dendrites/default.nix` derives its imports from it, so one
-# line here is both what makes a dendrite selectable and what puts it in the
-# full tree — a name with no line is unreachable, and a capability is shelved by
-# dropping its line without deleting its file.
+# rule 7): one line here is what makes a dendrite selectable — a name with no
+# line is unreachable, and a capability is shelved by dropping its line without
+# deleting its file.
 #
 # Nothing here joins a module graph: habit's composition reads this record
 # before any module graph exists and imports only what selection kept.
@@ -24,7 +23,7 @@
     claude-code = ./dendrites/claude-code.nix;
     cli = ./dendrites/cli.nix;
     clipboard = ./dendrites/clipboard.nix;
-    # The compositor capability: a provider registry, not a lane record. Its
+    # The compositor capability: a provider registry, not a plain module. Its
     # `hyprland` provider is the LOOK; the BEHAVIOUR is the `hyprland` entry
     # below, which keeps that name because `aoide.hyprland.*` stays a
     # host-facing option.
@@ -57,7 +56,7 @@
     starship = ./dendrites/starship.nix;
     stylix = ./dendrites/stylix.nix;
     vision = ./dendrites/vision.nix;
-    # The wallpaper capability: a provider registry, not a lane record. Its
+    # The wallpaper capability: a provider registry, not a plain module. Its
     # providers are the alternatives a host chooses between the way it chooses
     # a compositor — the shell's own layer, or an external engine.
     wallpaper = ./dendrites/wallpaper;
