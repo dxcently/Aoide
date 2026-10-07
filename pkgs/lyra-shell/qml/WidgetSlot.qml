@@ -35,7 +35,9 @@
 // `.item` of another slot, null while that slot rebuilds). Extras are assigned
 // onto the live widget key by key (an identical value signals nothing), so a
 // widget reads an extra at use time and never assumes the value it was
-// created with.
+// created with. The widget is tracked as `_item` before any assignment, and
+// a key the widget cannot take (a type mismatch) warns and is skipped alone:
+// the widget stays tracked and the other keys still land.
 import QtQuick
 
 Item {
@@ -108,7 +110,12 @@ Item {
         if (!item) return
         var keys = Object.keys(root.extraProps)
         for (var i = 0; i < keys.length; i++) {
-            if (item.hasOwnProperty(keys[i])) item[keys[i]] = root.extraProps[keys[i]]
+            if (!item.hasOwnProperty(keys[i])) continue
+            try {
+                item[keys[i]] = root.extraProps[keys[i]]
+            } catch (e) {
+                console.warn("[aoide/widgetslot] extra", keys[i], "not assignable on slot", root.slot, "-", e)
+            }
         }
     }
 
@@ -149,12 +156,12 @@ Item {
             console.warn("[aoide/widgetslot] createObject failed for slot", root.slot)
             return
         }
+        root._item = item
         // bridge wasn't in the fallback's creation props — inject it now,
         // but only if the item actually declares that property.
         if (props.bridge === undefined && item.hasOwnProperty("bridge")) item.bridge = root.bridge
         // `props` was captured before the component finished loading; an extra
         // that changed meanwhile found no `_item` to receive it.
         root._applyExtras(item)
-        root._item = item
     }
 }

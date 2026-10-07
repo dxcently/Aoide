@@ -88,7 +88,10 @@ Every widget QML file, whatever slot it fills, must follow this shape:
   `powermenu` and `dock` are another slot's live `.item`, null while that
   slot rebuilds): the anchor assigns the new value onto the live widget
   instead of rebuilding it, so a widget reads an extra at use time, never
-  once at creation. A `SurfaceSlot` rebuilds its surface on a changed extra.
+  once at creation. A value that does not fit the extra's declared type
+  logs `[aoide/widgetslot]` and skips that key alone, so declare an extra
+  that holds another slot's item as `var`. A `SurfaceSlot` rebuilds its
+  surface on a changed extra.
 - **Sizes itself via `implicitWidth`/`implicitHeight`** — the host
   positions the `WidgetSlot`, not the widget; the widget only needs to
   report its own footprint.
