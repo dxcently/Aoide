@@ -132,7 +132,8 @@ never the inbound/serve half (that's `aoide-server`).
   (advertise-but-locked)" section): `run_sweep(secs)` binds
   `0.0.0.0:aoide_storage::advertise::PORT` (a plain bind hears the
   broadcast — no group join, no interface pinning, no capability
-  probing), listens for a bounded window, validates every line heard
+  probing; unit tests bind an ephemeral port instead and drive `listen`
+  on their own socket), listens for a bounded window, validates every line heard
   (`aoide_storage::advertise::parse_and_validate`), and folds survivors
   into a `SweepResult` deduped by (name, source), freshest wins, BOUNDED
   at `MAX_HEARD` distinct entries (a flood past the cap counts as

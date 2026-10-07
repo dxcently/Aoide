@@ -126,16 +126,23 @@ fn fold_heard(
     true
 }
 
-/// Bind `0.0.0.0:`[`advertise::PORT`] and listen for `secs` seconds,
-/// validating and dedupe-folding every line heard
-/// ([`advertise::parse_and_validate`]). Real network I/O — a bind failure
-/// (the port already bound by another sweep, a network lockdown, …)
-/// surfaces as `Err` rather than an empty result, so a caller can tell
-/// "heard nothing" apart from "couldn't even listen." Bounded by a short
-/// per-read timeout so the deadline is honored even when nothing ever
-/// arrives — never a blocking `recv_from` with no timeout at all.
+/// Bind `0.0.0.0:`[`advertise::PORT`] and [`listen`] for `secs` seconds.
+/// Real network I/O — a bind failure (the port already bound by another
+/// sweep, a network lockdown, …) surfaces as `Err` rather than an empty
+/// result, so a caller can tell "heard nothing" apart from "couldn't even
+/// listen." This crate's own unit tests bind an ephemeral port instead, so
+/// they never touch the well-known one a live `aoide node discover` (or an
+/// advertiser) may hold.
 pub fn run_sweep(secs: u64) -> std::io::Result<SweepResult> {
-    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, advertise::PORT))?;
+    let port = if cfg!(test) { 0 } else { advertise::PORT };
+    listen(UdpSocket::bind((Ipv4Addr::UNSPECIFIED, port))?, secs)
+}
+
+/// Listen on an already-bound `socket` for `secs` seconds, validating and
+/// dedupe-folding every line heard ([`advertise::parse_and_validate`]).
+/// Bounded by a short per-read timeout so the deadline is honored even when
+/// nothing ever arrives — never a blocking `recv_from` with no timeout at all.
+pub(crate) fn listen(socket: UdpSocket, secs: u64) -> std::io::Result<SweepResult> {
     socket.set_read_timeout(Some(Duration::from_millis(200)))?;
 
     let mut state: HashMap<(String, String), Heard> = HashMap::new();
@@ -394,17 +401,10 @@ mod tests {
     /// racing this crate's own `run_sweep` on the same real network stack,
     /// not a mocked socket.
     ///
-    /// **#126: takes `env_lock` for its whole body**, the SAME lock
-    /// `commands.rs`'s own `node discover` sweep tests already hold via
-    /// `with_node_state` — all three tests bind the ONE fixed
-    /// `advertise::PORT` (there is no ephemeral-port form of this test: it
-    /// exists specifically to prove a REAL line sent to the REAL advertised
-    /// port is heard, `run_sweep`'s own doc). Without this, `cargo test`'s
-    /// default parallel scheduling could run this test concurrently with
-    /// either of `commands.rs`'s, both binding the same port, and the loser
-    /// panics on a live `EADDRINUSE` — a real production case
-    /// (`describe_sweep_error`'s own taught message below), just not one
-    /// this crate's own tests should ever manufacture against themselves.
+    /// Listens on its own ephemeral loopback socket, so it shares nothing
+    /// with a live sweep or with the other tests. It takes `env_lock` all the
+    /// same, only to keep a three-second window off a loaded scheduler's
+    /// other socket tests.
     #[test]
     fn run_sweep_hears_an_advertisement_sent_over_the_real_loopback_stack() {
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
@@ -415,18 +415,20 @@ mod tests {
         // resent on a short tick since we don't know exactly when the sweep
         // starts listening, mirroring `send_once`'s own
         // fresh-socket-per-send shape rather than holding one open.
+        let listener = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let sender_stop = stop.clone();
         let sender = std::thread::spawn(move || {
             while !sender_stop.load(std::sync::atomic::Ordering::Relaxed) {
                 if let Ok(socket) = UdpSocket::bind(("127.0.0.1", 0)) {
-                    let _ = socket.send_to(line.as_bytes(), ("127.0.0.1", advertise::PORT));
+                    let _ = socket.send_to(line.as_bytes(), ("127.0.0.1", port));
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
         });
 
-        let result = run_sweep(3).expect("binding 0.0.0.0 on the fixed port needs no capability a sandbox lacks");
+        let result = listen(listener, 3).expect("binding 0.0.0.0 needs no capability a sandbox lacks");
         stop.store(true, std::sync::atomic::Ordering::Relaxed);
         sender.join().expect("sender thread must not panic");
 
@@ -437,7 +439,7 @@ mod tests {
              sweep window; got {:?} — check for another process holding UDP {} before \
              suspecting the socket code",
             result.heard,
-            advertise::PORT
+            port
         );
         let hit = result.heard.iter().find(|h| h.advertisement == sent).unwrap();
         assert_eq!(hit.src_addr, "127.0.0.1", "src_addr is the packet's OBSERVED source");
