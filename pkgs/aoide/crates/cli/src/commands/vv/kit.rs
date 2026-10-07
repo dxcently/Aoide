@@ -51,10 +51,25 @@ pub enum Slot {
     Flag(&'static str),
 }
 
+/// Intents a sentence must never resolve to: they release or write secrets
+/// (the value would land in the utterance, the shell history and the printed
+/// line), sign or move trust, or destroy state that cannot be got back. A person
+/// types these on purpose. `secrets status` is the one read in the secrets door.
+const DENIED: &[&str] = &[
+    "session_kill", "session_prune", "session_reap", "mail_rm", "mail_outbox_rm", "node_remove", "project_remove",
+    "workspace_clear", "mesh_join", "melete_call",
+];
+const DENIED_PREFIXES: &[&str] = &["secrets_", "mesh_charter_"];
+const DENIED_EXCEPT: &[&str] = &["secrets_status"];
+
+pub fn denied(id: &str) -> bool {
+    !DENIED_EXCEPT.contains(&id) && (DENIED.contains(&id) || DENIED_PREFIXES.iter().any(|p| id.starts_with(p)))
+}
+
 /// A command is in the closed set when a person can type it: implemented, not
-/// hook plumbing, and not `do` itself.
+/// hook plumbing, not `do` itself, and not [`denied`].
 pub fn surface(r: &Registry) -> impl Iterator<Item = &Command> {
-    r.commands().filter(|c| c.implemented && !c.internal && c.path[0] != "do")
+    r.commands().filter(|c| c.implemented && !c.internal && c.path[0] != "do" && !denied(&intent_id(c)))
 }
 
 pub fn intent_id(c: &Command) -> String {
@@ -277,6 +292,24 @@ mod tests {
         assert_eq!(ids, ["session_trace", "node_pull"], "no plumbing, no stub, not `do` itself");
         assert!(resolve(&r, "session_trace").is_some());
         assert!(resolve(&r, "session_start").is_none() && resolve(&r, "none").is_none());
+    }
+
+    #[test]
+    fn dangerous_and_irreversible_intents_are_neither_taught_nor_resolved() {
+        let r = crate::commands::all();
+        let spec = spec(&r);
+        let named: Vec<&str> = spec["functions"].as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap()).collect();
+        for c in r.commands() {
+            let id = intent_id(c);
+            if denied(&id) {
+                assert!(resolve(&r, &id).is_none(), "{id} resolves");
+                assert!(!named.contains(&id.as_str()), "{id} is in the kit");
+            }
+        }
+        for id in ["secrets_put", "secrets_exec", "secrets_add", "mesh_charter_sign", "session_kill", "session_prune", "session_reap", "mail_rm"] {
+            assert!(denied(id) && resolve(&r, id).is_none(), "{id}");
+        }
+        assert!(resolve(&r, "secrets_status").is_some(), "the one read in the secrets door stays");
     }
 
     #[test]

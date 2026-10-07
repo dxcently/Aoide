@@ -49,7 +49,10 @@ Gated with reasons, never stubbed: the two `#!/bin/sh` plugin-shim tests (a
   line is checked by `Command::check` before it is shown, and a verdict that
   argues against dispatch (`accept` not true, `conflicts`, trailing text,
   `none`, an intent or slot the registry lacks) is a taught refusal, never a
-  best guess. Do not add an execute path, a `--run` flag, or a fallback that
+  best guess. The printed line must re-parse (`door::parse`) to the exact checked
+  invocation, and a verdict is read only from a child that exited 0. The
+  denied intents (`vv/kit.rs::DENIED`: secrets, mesh charter, irreversible
+  removals) stay out of the kit and out of `resolve`. Do not add an execute path, a `--run` flag, or a fallback that
   picks the top candidate; `docs/architecture/AOIDE-VV-JEV.md` is the table.
   The classifier is a shell-out (`verba-volantia` on `PATH` or `[verba]
   binary`) — never a VV crate, candle, or vendored weights in this tree.

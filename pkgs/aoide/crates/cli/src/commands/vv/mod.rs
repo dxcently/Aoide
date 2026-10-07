@@ -136,6 +136,16 @@ fn decide(r: &Registry, utterance: &str, verdict: &Value) -> Result<Outcome, Out
         .with_fields(json!({ "intent": intent, "slots": slots, "command": run_line(&fix), "verdict": verdict })));
     }
     let line = bound.command_line("aoide", &[], false);
+    if let Err(why) = reads_back(r, &line, &probe) {
+        return Err(Outcome::refuse(
+            COMMAND,
+            Kind::Refused,
+            format!("`{utterance}` means `aoide {}`, but its values would not read back as said", c.path.join(" ")),
+            why,
+            Fix::None("say the values without leading dashes, or type the command yourself"),
+        )
+        .with_fields(json!({ "intent": intent, "slots": slots, "verdict": verdict })));
+    }
     Ok(Outcome::ok(COMMAND, line.clone()).with_data(json!({
         "command": line,
         "intent": intent,
@@ -156,6 +166,52 @@ fn keep_given(fix: Fix, bound: &Invocation) -> Fix {
         }
     }
     Fix::Run(line)
+}
+
+/// The printed line, typed at a shell and parsed by the door, must be exactly
+/// the invocation the registry checked: a value that reads as a flag (`--yes`)
+/// would otherwise ride into a copy-pasted line the registry never saw.
+fn reads_back(r: &Registry, line: &str, checked: &Invocation) -> Result<(), String> {
+    let argv = shell_words(line).ok_or("the line is not one shell command")?;
+    let (typed, _) = aoide_protocol::door::parse(&argv[1..], aoide_protocol::Door::Cli, "aoide", r)
+        .map_err(|_| "typed at a shell, it is read as a different command".to_string())?;
+    if typed.path == checked.path && typed.args == checked.args && typed.flags == checked.flags {
+        Ok(())
+    } else {
+        Err("typed at a shell, its arguments and flags are read differently than they were bound".into())
+    }
+}
+
+/// POSIX words of a line `Invocation::command_line` wrote: bare words and
+/// single-quoted runs (`'\''` for a quote).
+fn shell_words(line: &str) -> Option<Vec<String>> {
+    let (mut words, mut cur, mut started, mut quoted) = (Vec::new(), String::new(), false, false);
+    let mut chars = line.chars();
+    while let Some(ch) = chars.next() {
+        match (quoted, ch) {
+            (true, '\'') => quoted = false,
+            (true, c) => cur.push(c),
+            (false, '\'') => {
+                quoted = true;
+                started = true;
+            }
+            (false, '\\') => cur.push(chars.next().filter(|c| *c == '\'')?),
+            (false, c) if c.is_whitespace() => {
+                if started || !cur.is_empty() {
+                    words.push(std::mem::take(&mut cur));
+                    started = false;
+                }
+            }
+            (false, c) => cur.push(c),
+        }
+    }
+    if quoted {
+        return None;
+    }
+    if started || !cur.is_empty() {
+        words.push(cur);
+    }
+    Some(words)
 }
 
 fn run_line(fix: &Fix) -> Value {
@@ -179,6 +235,9 @@ fn bind(c: &Command, slots: &Map<String, Value>) -> Result<Invocation, String> {
         let Some((_, slot)) = table.iter().find(|(id, _)| id == param) else {
             return Err(format!("`{param}` is not a slot of this command"));
         };
+        if text.chars().any(char::is_control) {
+            return Err(format!("`{param}` holds a control character or a line break, which no command takes"));
+        }
         match (slot, text.trim()) {
             (_, "") => {}
             (Slot::Arg(i), text) => args[*i] = Some(text.to_string()),
@@ -262,7 +321,7 @@ mod tests {
         json!({
             "utterance": "u", "delex": "u", "intent": intent, "intent_prob": 0.9, "margin": margin, "threshold": 0.64,
             "accept": accept, "slots": slots, "conflicts": [], "trailing_editorial_text": null,
-            "candidates": [{"intent": intent, "score": 0.8}, {"intent": "session_prune", "score": 0.1}, {"intent": "none", "score": 0.05}],
+            "candidates": [{"intent": intent, "score": 0.8}, {"intent": "session_watch", "score": 0.1}, {"intent": "none", "score": 0.05}],
         })
     }
 
@@ -291,6 +350,46 @@ mod tests {
     }
 
     #[test]
+    fn a_value_that_would_read_as_a_flag_is_refused_not_printed() {
+        let o = decide(registry(), "u", &verdict("session_trace", json!({ "id": "abc", "tail": "--follow" }), true, 0.8)).unwrap_err();
+        assert_eq!(o.status.exit_code(), 1);
+        let text = rendered(&o);
+        assert!(text.contains("would not read back as said"), "{text}");
+        assert!(!text.contains("fix: aoide"), "no runnable line is offered: {text}");
+        let v = verdict("secrets_status", json!({ "name": "--yes" }), true, 0.8);
+        assert!(decide(registry(), "u", &v).is_err());
+        let v = verdict("session_trace", json!({ "id": "--yes" }), true, 0.8);
+        assert!(decide(registry(), "u", &v).unwrap().message.contains("-- --yes"), "a positional goes after `--` and stays one value");
+    }
+
+    #[test]
+    fn a_name_that_reads_as_a_flag_is_pinned_as_a_positional() {
+        let v = verdict("node_pull", json!({ "name": "--yes" }), true, 0.8);
+        assert_eq!(decide(registry(), "u", &v).unwrap().message, "aoide node pull -- --yes");
+    }
+
+    #[test]
+    fn quoted_values_survive_the_round_trip() {
+        let v = verdict("session_trace", json!({ "id": "it's a; $(x) `y`" }), true, 0.8);
+        let o = decide(registry(), "u", &v).unwrap();
+        assert_eq!(shell_words(&o.message).unwrap()[3], "it's a; $(x) `y`");
+    }
+
+    #[test]
+    fn control_characters_and_line_breaks_in_a_value_are_refused() {
+        for bad in ["a\u{1b}[31mb", "a\nb", "a\u{7}"] {
+            let v = verdict("session_trace", json!({ "id": bad }), true, 0.8);
+            assert!(rendered(&decide(registry(), "u", &v).unwrap_err()).contains("control character"), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_denied_intent_is_not_a_command_even_when_accepted() {
+        let o = decide(registry(), "u", &verdict("secrets_put", json!({ "name": "db" }), true, 0.99)).unwrap_err();
+        assert!(rendered(&o).contains("`secrets_put`, which is not an aoide command"));
+    }
+
+    #[test]
     fn a_missing_required_slot_prints_the_command_with_the_slot_named_and_refuses() {
         let o = decide(registry(), "show the trace", &verdict("session_trace", json!({}), true, 0.8)).unwrap_err();
         assert_eq!(o.status, crate::output::Status::Error, "a valid ask the world could not finish is exit 1");
@@ -316,7 +415,7 @@ mod tests {
         assert_eq!(o.status.exit_code(), 1);
         let text = rendered(&o);
         assert!(text.contains("under the 0.64 this kit was calibrated to"), "{text}");
-        assert!(text.contains("candidates:\n    0.80  aoide session trace abc\n    0.10  aoide session prune"), "{text}");
+        assert!(text.contains("candidates:\n    0.80  aoide session trace abc\n    0.10  aoide session watch abc"), "{text}");
         assert!(!text.contains("aoide none"), "the `none` class is not a command to offer: {text}");
         assert!(o.data.unwrap()["verdict"]["intent"] == "session_trace");
     }
@@ -354,11 +453,11 @@ mod tests {
 
     #[test]
     fn a_value_the_registry_refuses_comes_back_as_the_commands_own_fix() {
-        let v = verdict("secrets_automate", json!({ "name": "db", "action": "maybe" }), true, 0.9);
+        let v = verdict("node_advertise", json!({ "state": "maybe" }), true, 0.9);
         let o = decide(registry(), "u", &v).unwrap_err();
         let text = rendered(&o);
-        assert!(text.contains("does not accept `maybe` for <action>"), "{text}");
-        assert!(text.contains("fix: aoide secrets automate db "), "{text}");
+        assert!(text.contains("does not accept `maybe` for <state>"), "{text}");
+        assert!(text.contains("fix: aoide node advertise on"), "{text}");
     }
 
     #[cfg(unix)]
@@ -479,6 +578,14 @@ mod tests {
             let _b = boxed("do-fails", Some("echo 'Error: weights/meta.json: train first' >&2; exit 1"));
             let text = rendered(&say("x"));
             assert!(text.contains("gave no answer") && text.contains("it exited with an error: Error: weights/meta.json: train first"), "{text}");
+        }
+
+        #[test]
+        fn a_verdict_from_a_child_that_then_fails_is_not_accepted() {
+            let ok = canned(&verdict("session_trace", json!({ "id": "a" }), true, 0.8));
+            let _b = boxed("do-exit3", Some(&format!("{ok}\nexit 3")));
+            let text = rendered(&say("x"));
+            assert!(text.contains("gave no answer") && !text.contains("fix: aoide session"), "{text}");
         }
 
         #[test]

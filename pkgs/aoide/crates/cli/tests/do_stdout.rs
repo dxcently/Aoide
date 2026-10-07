@@ -67,7 +67,7 @@ fn say(verdict: &str) -> String {
 }
 
 const ACCEPT: &str = r#"{"accept":true,"candidates":[{"intent":"session_trace","score":0.82}],"conflicts":[],"intent":"session_trace","margin":0.77,"slots":{"id":"abc123"},"threshold":0.64,"trailing_editorial_text":null}"#;
-const ABSTAIN: &str = r#"{"accept":false,"candidates":[{"intent":"session_trace","score":0.31},{"intent":"session_prune","score":0.2}],"conflicts":[],"intent":"session_trace","margin":0.11,"slots":{"id":"zz"},"threshold":0.64,"trailing_editorial_text":null}"#;
+const ABSTAIN: &str = r#"{"accept":false,"candidates":[{"intent":"session_trace","score":0.31},{"intent":"session_watch","score":0.2}],"conflicts":[],"intent":"session_trace","margin":0.11,"slots":{"id":"zz"},"threshold":0.64,"trailing_editorial_text":null}"#;
 
 #[test]
 fn an_accepted_sentence_prints_one_bare_command_that_the_same_binary_parses() {
@@ -93,7 +93,7 @@ fn every_refusal_leaves_stdout_empty_and_teaches_on_stderr() {
     let (out, err, code) = abstains.aoide(&["do", "make me a sandwich"]);
     assert_eq!((out.as_str(), code), ("", 1));
     assert!(err.contains("did not resolve to one command") && err.contains("0.31  aoide session trace zz"), "{err}");
-    assert!(err.contains("0.20  aoide session prune"), "{err}");
+    assert!(err.contains("0.20  aoide session watch zz"), "{err}");
 
     let silent = Demo::new("missing", None);
     let (out, err, code) = silent.aoide(&["do", "anything"]);

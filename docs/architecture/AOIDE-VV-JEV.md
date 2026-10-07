@@ -44,7 +44,7 @@ them.
 
 **The wire.** `verba-volantia dispatch --out <kit>` reads one utterance per line on stdin and
 prints one JSON verdict per line; `aoide do` sends one line and reads the first line of
-stdout that is a JSON object, bounded to 20 seconds. The fields core reads are `intent`,
+stdout that is a JSON object, bounded to 20 seconds and 1 MiB, and only when the child exited successfully. The fields core reads are `intent`,
 `margin`, `threshold`, `accept`, `candidates[]` (`{intent, score}`, best first), `slots{}`,
 `conflicts[]` and `trailing_editorial_text`; `intent_prob`, `delex`, `utterance`, `risk` and
 `route` ride along unread. `accept`, `margin` and `threshold` belong to the checkpoint. The
@@ -70,7 +70,10 @@ row ends in a taught refusal (what, why, fix) with exit 1.
 | intent `none` | not an aoide command; `aoide guide` is the fix |
 | an intent or slot the registry does not hold | a kit bug, never a command |
 | a required slot unfilled, or a value the registry refuses | the command prints with the slot named (`aoide session trace <id>`), refused, so nothing half-bound reads as done |
-| no binary, no kit, timeout, spawn failure, a non-zero exit | one refusal naming the missing piece and where it goes |
+| a bound command whose printed line does not parse back to the checked invocation (a value such as `--follow` or `--yes` that reads as a flag) | refused, nothing printed: the line is re-parsed by the door and must equal what the registry checked |
+| a slot value holding a control character or a line break | refused, nothing printed |
+| an intent in the denied set (see *The command kit*) | not a command; never taught, never resolved |
+| no binary, no kit, timeout, spawn failure, a non-zero exit (even after a verdict line) | one refusal naming the missing piece and where it goes |
 | unparsable line, or no verdict | one refusal |
 
 **`aoided` remains the authority.** `aoide do` runs nothing, so it holds no new power: the
@@ -88,7 +91,12 @@ slots, so a printed command never carries `--yes` or `--submit`; add them by han
 phrasings are read off each command's path, brief, summary and examples, plus a handful of
 requests that are not commands as the `none` class. A phrasing two commands share is dropped
 from both. The closed set is every implemented command a person can type — not hook plumbing,
-not `do` itself — and narrowing it is a decision this page does not make.
+not `do` itself, and not the denied set: every `secrets` command but `secrets status` (a
+secret would land in the utterance, the shell history and the printed line), every `mesh
+charter`, `mesh join`, `melete call`, and the irreversible removals (`session kill/prune/
+reap`, `mail rm`, `mail outbox rm`, `node remove`, `project remove`, `workspace clear`). The
+set is one const in `vv/kit.rs`; a denied intent is neither taught nor resolved, so a
+classifier that answers one is refused as a kit bug.
 
 ```
 aoide do kit --out templates.json

@@ -1038,8 +1038,11 @@ count.
   weightsDir`, default `$AOIDE_ROOT/verba/aoide`; both §4's `config.toml`),
   reads the first JSON line, and applies the fail-closed table: `accept` not
   true, non-empty `conflicts`, non-null `trailing_editorial_text`, intent
-  `none`, an intent or slot the registry does not hold, or a bound command the
-  registry's own `Command::check` refuses each end in a taught refusal, exit 1
+  `none`, an intent or slot the registry does not hold (the denied set —
+  `secrets_*` but `secrets_status`, `mesh_charter_*`, irreversible removals — is
+  never in the kit), a value with a control character, a bound command the
+  registry's own `Command::check` refuses, or a printed line that does not
+  re-parse to the checked invocation each end in a taught refusal, exit 1
   (a missing binary or kit, a timeout, an unreadable verdict likewise). An
   abstention lists the nearest commands as full lines, best first, in
   `data.candidates` (strings, which the text render prints) with the raw
