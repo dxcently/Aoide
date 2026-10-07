@@ -752,8 +752,12 @@ A `charter` letter for another node is a letter in transit like any other: the
 signing machine spools it toward the hop the four steps pick, so a `poll`
 node's copy waits at its relay for its own ask, and a relay carries it on after
 the same keyless checks and the origin's key in the charter it holds. A relay
-admits it on the depositor's `message` grant, since only the destination can
-open it to verify the operator signature.
+admits it on the depositor's `message` grant, decided before anything about the
+container is verified, deduped or routed, since only the destination can open it
+to verify the operator signature. A container is addressed to a box by its name
+there or, where the mesh does not yet name the box by its key (a first charter,
+whose line may spell the box differently from its hostname), by the age key it
+is sealed to being one of the box's own.
 
 `not-correspondence` is the plaintext lane's own: an envelope whose `type`
 is `charter` carries no charter — a charter letter is applied from the
@@ -1214,7 +1218,10 @@ control: it only changes which side initiates. **A `charter` letter bypasses a
 `hold`**: the node a hold names must still receive the charter that holds it or
 lifts it, and a relay never asks the operator, so a charter letter is spooled
 to be dialled and carried on without being held. Only a `poll` address holds
-one, because that node cannot be dialled at all.
+one, because that node cannot be dialled at all. The price is that any node
+holding `message` can cause a relay to dial a held node with a charter container:
+an outbound request to the address the mesh declares for it, never to one the
+depositor names, carrying a container only the destination can open.
 
 Two speeds of quarantine, because `down` lives in the declaration and
 the declaration is signed by an operator or managed on a NixOS box

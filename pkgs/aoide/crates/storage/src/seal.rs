@@ -1454,7 +1454,7 @@ pub fn deposit_container_over(
     // **The identity is read ONCE for this deposit**, before any branch, and what
     // it yields travels with the deposit: the hop's signature, the chain's
     // last-next check and the destination test all read the same keypair.
-    let (kp, local) = own_keypair_and_local_name()?;
+    let (kp, _) = own_keypair_and_local_name()?;
     let own_key = kp.info().pubkey_hex.clone();
 
     // 2. Recompute ctx from the outer fields, never from the wire.
@@ -1495,7 +1495,7 @@ pub fn deposit_container_over(
     // node is a letter in transit like any other: this box carries it on below,
     // which is how a `poll` node's charter reaches it through its relay.
     let declared = crate::routing::own_name_in(&set, request_mesh, &own_key);
-    let for_here = container.to.node == local || declared.as_deref() == Some(container.to.node.as_str());
+    let for_here = addressed_here(container, request_mesh, set)?;
     if container.purpose == PURPOSE_CHARTER && for_here {
         return deposit_charter(container, &ctx, &ct, &sig, request_mesh, &own_key);
     }
@@ -1786,6 +1786,34 @@ pub fn file_transit_hop(hop: &TransitHop, via: &str) -> Result<(), String> {
     record_admitted(&hop.container, &hop.digest)
 }
 
+/// Is this container addressed to THIS box? By name (the OS-derived local name,
+/// or the name the mesh's declaration gives this box's key), or — for a box that
+/// holds no declaration yet, whose charter line may spell it differently from
+/// its hostname — by the age key `to.age` names being one of this box's own
+/// identities, current or still in its grace window. Where the mesh does name
+/// this box, only its name there counts. A pure read of local facts:
+/// the door asks it BEFORE a container it is not the destination of is verified.
+pub fn addressed_here(
+    container: &Container,
+    request_mesh: &str,
+    set: &[crate::routing::Loaded],
+) -> Result<bool, String> {
+    let (kp, local) = own_keypair_and_local_name()?;
+    if container.to.node == local {
+        return Ok(true);
+    }
+    if let Some(named) = crate::routing::declared_name(set, request_mesh, &kp.info().pubkey_hex) {
+        // The mesh names this box by its key, so the name decides: a key match
+        // under another name is somebody else's address for this box's key.
+        return Ok(named == container.to.node);
+    }
+    let (current, _) = load_or_mint_age_identity().map_err(|e| e.to_string())?;
+    if current.to_public().to_string() == container.to.age {
+        return Ok(true);
+    }
+    Ok(live_retired_identities(&now_iso_utc()).iter().any(|id| id.to_public().to_string() == container.to.age))
+}
+
 /// The `charter` letter's branch (P-CHARTER). Every step it shares with the
 /// mail branch it runs the same way; the two it does not share are the
 /// reason this branch exists at all:
@@ -1839,13 +1867,6 @@ fn deposit_charter(
         // the same `duplicate` a retried letter gets, with nothing behind it.
         Seen::Duplicate { .. } => return Ok(ContainerOutcome::Duplicate { filed_letter: false }),
         Seen::Fresh => {}
-    }
-
-    if container.to.node != crate::display::local_node_name() {
-        return Ok(refusal(
-            ADDRESSING_MISMATCH,
-            format!("charter is addressed to `{}`, not this node", container.to.node),
-        ));
     }
 
     let pt = match decrypt_with_identities(ct) {
@@ -2313,6 +2334,31 @@ mod tests {
         let live = live_retired_identities(&now);
         assert_eq!(live.len(), 1, "the superseded key is kept inside its grace window");
         assert_eq!(recipient_of(&live[0]), first.age_pubkey);
+    }
+
+    /// **A bootstrap box whose charter line spells it differently from its
+    /// hostname still takes its own first charter.** With no declaration naming
+    /// this box, `to.age` being one of its own age identities is what makes a
+    /// container its own; a stranger's key, or a box the mesh already names
+    /// under another name, is not.
+    #[test]
+    fn a_container_for_this_boxs_own_age_key_is_addressed_here_under_any_name() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = EnvSaver::capture(&["AOIDE_STATE_DIR", "AOIDE_ROOT"]);
+        env(&scratch("seal-addressed-here"));
+
+        let binding = publish_binding().unwrap();
+        let mut container = seal_charter(
+            b"charter", b"sig", &binding, "home", 1, "a-name-no-hostname-has", "a-name-no-hostname-has", &now_iso_utc(),
+        )
+        .unwrap();
+        assert!(addressed_here(&container, "home", &[]).unwrap(), "own age key, no declaration");
+
+        container.to.age = "age1someoneelse".to_string();
+        assert!(!addressed_here(&container, "home", &[]).unwrap(), "another node's key under another name");
+
+        container.to.node = crate::display::local_node_name();
+        assert!(addressed_here(&container, "home", &[]).unwrap(), "the hostname is still a name");
     }
 
     #[test]

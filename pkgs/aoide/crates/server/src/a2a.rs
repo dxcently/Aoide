@@ -4060,6 +4060,19 @@ fn deposit_sealed(
             Err(e) => return Err((-32602, format!("invalid params: container: {e}"))),
         };
 
+    // A charter container is admitted on a signed caller alone only for the
+    // box it is addressed to. For another node it is a transit hop, which needs
+    // the grant — decided HERE, before the container is verified, deduped or
+    // routed, so a caller without one learns nothing from what those steps say.
+    if container.purpose == aoide_storage::seal::PURPOSE_CHARTER
+        && !deposit_admitted(&caller_grant(ctx.signed_caller))
+        && !aoide_storage::seal::addressed_here(&container, request_mesh, declarations)
+            .map_err(|e| (-32603_i64, format!("internal error: {e}")))?
+    {
+        let (code, msg) = deposit_refusal(ctx.signed_caller, request_mesh, ctx.audit_log);
+        let _ = audit(ctx.audit_log, Door::A2a, EventClass::Audit, "a2a.aoide/mailDeposit", "unauthorized", &msg);
+        return Err((code, msg));
+    }
     // P-CHARTER (review finding 4, and the design ruling it carries): the
     // mesh a letter rides is checked ONE layer down, inside
     // `seal::deposit_container_over`, AFTER the origin signature and against
@@ -17053,6 +17066,45 @@ mod tests {
                 assert!(err.1.starts_with("mail poll refused"), "{who:?} {params}: {}", err.1);
             }
         }
+
+        mail_deposit_cleanup(&root, saved_state, saved_stage);
+    }
+
+    /// A signed caller with no `message` grant gets the refusal for a charter
+    /// container addressed ELSEWHERE before anything about it is verified,
+    /// deduped or routed (no oracle on this box's declarations or seen set) —
+    /// while one addressed here, by name or by this box's own age key, is still
+    /// admitted on the signature alone and reaches the charter's own checks.
+    #[test]
+    fn a_grantless_caller_cannot_probe_a_charter_container_for_another_node() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved_state = std::env::var("AOIDE_STATE_DIR").ok();
+        let saved_stage = std::env::var("AOIDE_STAGE_DIR").ok();
+        let root = mail_deposit_root("charter-probe");
+        act_as(&root, "here");
+        setup_signed_node_with_allows("box-b", &[]);
+        let audit_log = root.join("log");
+        let ctx = mail_deposit_ctx(&audit_log, Some("box-b"));
+
+        let binding = aoide_storage::seal::publish_binding().unwrap();
+        let mut container = aoide_storage::seal::seal_charter(
+            b"not a charter", b"not a sig", &binding, "home", 1, "elsewhere", "elsewhere",
+            &aoide_storage::time::now_iso_utc(),
+        )
+        .unwrap();
+
+        // Another node's key and another node's name: refused before any check.
+        container.to.age = "age1someoneelse".to_string();
+        let err = mail_deposit(&json!({ "container": container }), &ctx).expect_err("grantless and not for here");
+        assert_eq!(err.0, -32010, "{}", err.1);
+        assert!(err.1.starts_with("mail deposit refused"), "{}", err.1);
+
+        // Addressed here by this box's own age key, whatever name the charter
+        // line spells: admitted to the charter's own verification, which says
+        // what is wrong with the (deliberately bogus) payload as a result.
+        container.to.age = binding.age_pubkey.clone();
+        let reply = mail_deposit(&json!({ "container": container }), &ctx).expect("an answer, not a -32010");
+        assert_eq!(reply["status"], json!("refused"), "{reply}");
 
         mail_deposit_cleanup(&root, saved_state, saved_stage);
     }

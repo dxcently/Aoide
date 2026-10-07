@@ -897,6 +897,9 @@ pub struct PollOutcome {
     /// unreadable there). Nothing was handed over, and "0 filed" must not
     /// read as an empty mailbox.
     pub node_refused: Option<String>,
+    /// Another poll of this node was already running (the `.poll` lock), so
+    /// this one asked nothing: the poll in flight does the asking.
+    pub busy: bool,
 }
 
 pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, String> {
@@ -927,9 +930,7 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
     // relay refuses as a different body for one msgid. The poll in flight does
     // the asking; this one says so rather than answering "0 filed".
     let Some(_poll_lock) = aoide_storage::outbox::try_take_poll_lock(node_name)? else {
-        return Err(format!(
-            "another poll of `{node_name}` is already in progress, and it does the asking — ask again once it is done"
-        ));
+        return Ok(PollOutcome { busy: true, ..PollOutcome::default() });
     };
     // P-SEAL: publish our binding and learn theirs before taking anything
     // over, so a node that has just published one never hands us plaintext
@@ -1201,7 +1202,7 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
             &format!("{msgid} from `{node_name}` withheld: {reason}"),
         );
     }
-    Ok(PollOutcome { filed, refused, withheld, node_refused: None })
+    Ok(PollOutcome { filed, refused, withheld, node_refused: None, busy: false })
 }
 
 /// Publish this node's binding to `node` and store the one it answers with,
@@ -2822,8 +2823,8 @@ mod tests {
         register_relay(format!("http://127.0.0.1:{port}/"));
 
         let in_flight = aoide_storage::outbox::try_take_poll_lock("relay").unwrap().expect("nothing polls yet");
-        let err = poll_node("relay", None).expect_err("a poll already runs");
-        assert!(err.contains("already in progress"), "{err}");
+        let busy = poll_node("relay", None).expect("a busy poll is an answer, not an error");
+        assert!(busy.busy && busy.filed == 0, "{busy:?}");
         assert!(aoide_storage::mail::read_base().unwrap().is_empty(), "the second poll filed nothing");
         drop(in_flight);
 

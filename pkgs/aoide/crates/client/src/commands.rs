@@ -6108,6 +6108,7 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
     let mut refused_total = 0usize;
     let mut withheld_total = 0usize;
     let mut not_dialled = 0usize;
+    let mut busy = 0usize;
     for node in &targets {
         // **A `down` node is not polled, and the command SAYS so.** `poll_node`
         // returns an empty outcome for it, and reporting that as "polled" is the
@@ -6148,6 +6149,11 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
                 // reason: a sealed-only listener holding an entry back is
                 // exactly the "0 filed and no reason" answer this projection
                 // exists to prevent.
+                if outcome.busy {
+                    busy += 1;
+                    rows.push(json!({ "node": node, "status": "busy", "filed": 0 }));
+                    continue;
+                }
                 if let Some(detail) = &outcome.node_refused {
                     rows.push(json!({ "node": node, "status": "refused", "filed": 0, "reason": detail }));
                     continue;
@@ -6186,7 +6192,7 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
         "no paired node holds `message` — nothing to poll".to_string()
     } else {
         format!(
-            "polled {} node(s): {filed} envelope(s) filed{}{}{}{}{}",
+            "polled {} node(s): {filed} envelope(s) filed{}{}{}{}{}{}",
             targets.len(),
             if refused_total == 0 { String::new() } else { format!(", {refused_total} container(s) refused") },
             if withheld_total == 0 {
@@ -6195,6 +6201,7 @@ fn handle_mail_poll(inv: &Invocation) -> Outcome {
                 format!(", {withheld_total} withheld (sealed-required — they stay on the far side until this box publishes a binding)")
             },
             if unreachable == 0 { String::new() } else { format!(", {unreachable} unreachable") },
+            if busy == 0 { String::new() } else { format!(", {busy} busy (another poll of it is already running and does the asking)") },
             if not_dialled == 0 { String::new() } else { format!(", {not_dialled} not dialled (declared `down`)") },
             if targets.len() > 1 { format!("\n  {}", results.join("\n  ")) } else { String::new() }
         )
@@ -6214,6 +6221,7 @@ fn poll_results(rows: &[Value]) -> Vec<String> {
             match status {
                 "polled" => format!("{node}: polled, {} filed", r["filed"]),
                 "refused" => format!("{node}: refused — {}", r["reason"].as_str().unwrap_or_default()),
+                "busy" => format!("{node}: busy — another poll of it is already running"),
                 "unreachable" => format!("{node}: unreachable — {}", r["reason"].as_str().unwrap_or_default()),
                 _ => format!("{node}: not dialled ({})", r["reason"].as_str().unwrap_or("declared down")),
             }
