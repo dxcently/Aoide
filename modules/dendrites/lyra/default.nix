@@ -544,7 +544,12 @@ let
         # The copy is left writable by its owner. `cp -r` out of the store keeps
         # the store's modes (dr-xr-xr-x), and the runtime songbook is the ONE
         # place a song is edited: a read-only song cannot be edited by an agent,
-        # and staging cannot write its `takes/` there.
+        # and staging cannot write its `takes/` there. A folder that already
+        # exists with the store's modes gets the same `chmod -R u+w` whenever
+        # anything in it lacks owner-write: a mode fix only, never a rewrite,
+        # an addition or a deletion. `find` finds nothing on a writable copy,
+        # which is then not touched at all. A symlink at the song's path is
+        # the machine's own link and stays as it is.
         #
         # Gated on the BUILT-IN set, not on the active song: a host that builds a
         # song in as `available` without performing it still gets seeded, and a
@@ -558,7 +563,8 @@ let
         # host already restricted to its built-in set). `[ ! -e ]` is a read,
         # evaluated even under `--dry-run`, while `run cp` is not: a dry run over
         # an existing songbook writes nothing, and one over an absent song prints
-        # the copy and the chmod it would make.
+        # the copy and the chmod it would make, as one over a read-only copy
+        # prints the chmod.
         home-manager.users.${config.aoide.user} =
           { lib, ... }:
           {
@@ -573,9 +579,13 @@ let
                   songbookDir="${config.aoide.root}/song/songbook"
                   run ${pkgs.coreutils}/bin/mkdir -p "$songbookDir"
                   ${lib.concatMapStrings (name: ''
-                    if [ ! -e "$songbookDir/${name}" ] && [ ! -L "$songbookDir/${name}" ]; then
-                      run ${pkgs.coreutils}/bin/cp -r "${pkgs.lyra-songbook}/share/lyra/songbook/${name}" "$songbookDir/${name}"
-                      run ${pkgs.coreutils}/bin/chmod -R u+w "$songbookDir/${name}"
+                    songDir="$songbookDir/${name}"
+                    if [ ! -e "$songDir" ] && [ ! -L "$songDir" ]; then
+                      run ${pkgs.coreutils}/bin/cp -r "${pkgs.lyra-songbook}/share/lyra/songbook/${name}" "$songDir"
+                      run ${pkgs.coreutils}/bin/chmod -R u+w "$songDir"
+                    elif [ -d "$songDir" ] && [ ! -L "$songDir" ] \
+                      && [ -n "$(${pkgs.findutils}/bin/find "$songDir" ! -perm -u+w -print -quit)" ]; then
+                      run ${pkgs.coreutils}/bin/chmod -R u+w "$songDir"
                     fi
                   '') builtIn}
                 '';

@@ -30,7 +30,11 @@ modules/dendrites/lyra/
   songbook **only when it is absent** — a rebuild never rewrites what the machine
   has — and leaves the copy writable by its owner, not in the store's read-only
   modes: the runtime songbook is the one place a song is edited, and staging
-  writes `takes/` there. That set is CLOSED UNDER BORROWS (`lib/songbook.nix`'s `builtIn`): a
+  writes `takes/` there. A folder that is already there and has anything
+  without owner-write (a copy in the store's read-only modes) gets `chmod -R
+  u+w` and nothing else — no content is rewritten, added or deleted, a
+  writable folder is not touched, and a symlink at the song's path is left to
+  its owner. That set is CLOSED UNDER BORROWS (`lib/songbook.nix`'s `builtIn`): a
   selected song's records name their slot bodies by `owner`, so the lenders ship
   and seed beside it, which is what makes every manifest record resolve to a
   directory that exists on the host. Guarded on that fact; the lane sets it

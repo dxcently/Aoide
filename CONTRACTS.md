@@ -5608,7 +5608,10 @@ bump: every "shipped baseline" reference in this section simply names
 it made itself. It is never a link to, or a copy synced from, the repo — and a
 rebuild never rewrites what it holds. The lyra lane's activation step
 `aoideSeedSongbook` copies each built-in song folder in **only when that folder
-does not exist**: no comparison, no merge, never an overwrite. `sonata/takes/`,
+does not exist**: no comparison, no merge, never an overwrite, and the copy is
+left writable by its owner. A folder already there with anything lacking
+owner-write (a copy in the store's read-only modes) gets that mode back and
+nothing else; a writable folder is not touched. `sonata/takes/`,
 `sonata/drafts/` and hand-edited `design/` notes on a machine that already has
 them survive every switch (root `AGENTS.md` rule 10 — staging never waits on
 the declared build, and is always the last song staged).
