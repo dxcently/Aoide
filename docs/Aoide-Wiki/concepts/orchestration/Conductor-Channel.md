@@ -301,15 +301,19 @@ through.
     last hook event instead of a trace —
 
     ```
-    [claude <petname>] awaiting · <the tool in flight>     (bare when none)
+    [claude <petname>] awaiting
     [claude <petname>] silent 12 min · last: <the tool in flight, else "working">
     [claude <petname>] settled
     ```
 
     `awaiting` on entering that phase, `silent` when a `working` phase has had
     no hook event for 12 minutes (once per silence), `settled` when a child
-    last seen `working` or `awaiting` stops. The tag is the child's own agent
-    profile name. See `Session-Graph.md`'s "And the parent hears it".
+    last seen `working` or `awaiting` stops; the first look at a child says
+    nothing. The tag is the child's own agent profile name. The recipient is
+    the child's SPAWNER, never the wrap hosting it (a hook child's
+    `parentSessionId` is that wrap, and typing into it would be the child's
+    own next prompt), and only over an edge the kernel attested — see
+    `Session-Graph.md`'s "And the parent hears it".
   - **Remote-parent — the same relation across machines.** The A2A door's
     rule, not the local socket's, listed here because it answers the same
     question — is the sender this target's parent? — for the one send that

@@ -290,14 +290,25 @@ mid-turn …` (its eidolon record was just dropped with the turn still open),
 in a row · last: <tool label>`, `… silent 12 min · last: …`. Every other
 child whose harness reports through hooks (claude, kimi, pi — any agent whose
 hook writes `hooks.json`) is read off its hook phase and the stamp of its last
-hook event, which is all that file carries — `[claude <petname>] awaiting ·
-<the tool in flight>` on entering a permission prompt or question (bare
-`awaiting` when no tool is in flight), `[claude <petname>] silent 12 min ·
-last: <the tool in flight, else "working">` when a `working` phase has had no
-hook event for 12 minutes (once per silence; any new hook event re-arms it),
-and `[claude <petname>] settled` when a child last seen `working` or
-`awaiting` stops. A child first found already stopped says nothing, and a
-turn that begins and ends between two ticks is not heard. It is not a send
+hook event, which is all that file carries — `[claude <petname>] awaiting` on
+entering a permission prompt or question (the hook says no more than that:
+the tool in flight is cleared the moment the phase leaves `working`),
+`[claude <petname>] silent 12 min · last: <the tool in flight, else
+"working">` when a `working` phase has had no hook event for 12 minutes (once
+per silence; any new hook event re-arms it; a stamp more than a day old is a
+dead record, not a silence), and `[claude <petname>] settled` when a child
+last seen `working` or `awaiting` stops. The first look at a child is a
+baseline and says nothing, a child found already stopped says nothing, and a
+turn that begins and ends between two ticks is not heard. A hook child's own
+`parentSessionId` is the wrap that hosts it, never the session that spawned
+it, so this source does not write to that edge: it climbs to the wrap's own
+`parentSessionId` and speaks only when `attestedSpawner` — the parent the
+registering `aoide conduct` process saw in its own `/proc` ancestry — names it,
+and the child's `hookAncestry` (stamped by the hook door from the hook
+process's own credentials) holds the wrap's pid. A spawner that is itself an
+agent is resolved to the wrap hosting it by the same test. A forged `session
+start --parent` carries neither and is ignored, and a child is never its own
+recipient nor its host wrap's. It is not a send
 and never becomes one: the send door attests the sender from the running
 process's `/proc` ancestry, so inside the daemon the sender is the daemon and
 never the child — the line is raw-injected the doorbell's way (a live channel
