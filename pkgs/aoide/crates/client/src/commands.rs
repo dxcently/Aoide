@@ -7323,9 +7323,10 @@ mod tests {
 
     // ── `node discover` — discovery grants nothing (P-P6). ───────────────────
     //
-    // `run_sweep` needs a real socket (a plain fixed-port bind — no group
-    // join since the #106 broadcast fix, so this runs everywhere, the nix
-    // build sandbox included), but it does NOT need a real ADVERTISEMENT
+    // `run_sweep` needs a real socket (a plain bind — no group join since
+    // the #106 broadcast fix, an ephemeral port under test, so this runs
+    // everywhere, the nix build sandbox included), but it does NOT need a
+    // real ADVERTISEMENT
     // to prove the one invariant that matters here: a 1s sweep that hears
     // nothing still must leave `state/nodes.json` byte-identical to what
     // it was before. The genuine heard-a-real-advertisement path is
@@ -7754,6 +7755,7 @@ mod tests {
             // The same record with the via cleared is dialable again (it
             // refuses for a network reason, not on the shape).
             node.via = None;
+            node.url = "https://127.0.0.1:1/".to_string();
             let err = post_json_to_node(&node, "{}", None, &[], 5).expect_err("nothing listens there");
             assert!(!err.contains("TLS handshake into"), "the shape refusal is gone once the via is: {err}");
         });
@@ -9475,11 +9477,8 @@ mod tests {
 
         with_node_state("smart-target-hostname-arm", || {
             // `with_node_state` already holds `crate::env_lock()` for its
-            // whole body — the SAME lock every real-sweep test in this
-            // module takes (its own doc, `run_sweep_hears_an_advertisement_
-            // sent_over_the_real_loopback_stack`'s doc in `discover.rs`); a
-            // second `.lock()` here on the same (non-reentrant) mutex, on
-            // the SAME thread, would deadlock rather than merely block.
+            // whole body; a second `.lock()` here on the same
+            // (non-reentrant) mutex, on the SAME thread, would deadlock.
             let inv = Invocation {
                 path: vec!["pair".into()],
                 args: vec!["nobody-is-advertising-this-name".to_string()],
@@ -9931,14 +9930,14 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-verified");
 
-        aoide_storage::node_store::save_nodes(&[verified_node("osaka", "http://127.0.0.1:1/")]).unwrap();
+        aoide_storage::node_store::save_nodes(&[verified_node("peer-node", "http://127.0.0.1:1/")]).unwrap();
 
-        let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi", "osaka"], &[("to", "osaka/bob")]));
+        let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi", "peer-node"], &[("to", "peer-node/bob")]));
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "the WRITE succeeding is what this command reports, msg: {}", said(&out));
 
-        let spooled = aoide_storage::outbox::list_entries("osaka").unwrap();
-        assert_eq!(spooled.len(), 1, "the entry is written even though osaka's own address (127.0.0.1:1) refuses every connection");
-        assert_eq!(spooled[0].envelope.text, "hi osaka");
+        let spooled = aoide_storage::outbox::list_entries("peer-node").unwrap();
+        assert_eq!(spooled.len(), 1, "the entry is written even though peer-node's own address (127.0.0.1:1) refuses every connection");
+        assert_eq!(spooled[0].envelope.text, "hi peer-node");
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -9951,18 +9950,18 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-hold");
 
-        aoide_storage::node_store::save_nodes(&[verified_node("osaka", "http://127.0.0.1:1/")]).unwrap();
+        aoide_storage::node_store::save_nodes(&[verified_node("peer-node", "http://127.0.0.1:1/")]).unwrap();
 
         let out = handle_mail_send(&mail_inv_with_flags(
             &["mail", "send"],
             &["wait for my ask"],
-            &[("to", "osaka/bob"), ("hold", "")],
+            &[("to", "peer-node/bob"), ("hold", "")],
         ));
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", said(&out));
-        assert!(said(&out).contains("held for osaka/bob"), "a held send says it is held: {}", said(&out));
+        assert!(said(&out).contains("held for peer-node/bob"), "a held send says it is held: {}", said(&out));
         assert!(said(&out).contains("polls"), "and who moves it: {}", said(&out));
 
-        let spooled = aoide_storage::outbox::list_entries("osaka").unwrap();
+        let spooled = aoide_storage::outbox::list_entries("peer-node").unwrap();
         assert_eq!(spooled.len(), 1);
         assert!(spooled[0].is_held(), "the spooled entry carries the hold flavor");
         assert_eq!(spooled[0].tries, 0, "a hold entry is never dialed, so it is never attempted");
@@ -10308,22 +10307,22 @@ mod tests {
     fn mail_outbox_reports_waiting_tries_and_last_outcome_per_entry() {        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-outbox-report");
 
-        let envelope = aoide_storage::mail::mint_outbound_letter("here", "osaka", "bob", "hi").unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "hi").unwrap();
         let mut entry = aoide_storage::outbox::OutboxEntry::fresh(envelope);
         entry.tries = 2;
         entry.last_try_at = "2026-09-07T00:00:00Z".to_string();
         entry.last_outcome = "transport-error: HTTP 0".to_string();
-        aoide_storage::outbox::write_entry("osaka", &entry).unwrap();
+        aoide_storage::outbox::write_entry("peer-node", &entry).unwrap();
 
         let out = handle_mail_outbox(&mail_inv(&["mail", "outbox"], &[]));
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
         let entries = out.data.unwrap()["entries"].as_array().unwrap().clone();
         assert_eq!(entries.len(), 1, "the one entry spooled is still waiting — a retired entry is never listed");
-        assert_eq!(entries[0]["node"], "osaka");
+        assert_eq!(entries[0]["node"], "peer-node");
         assert_eq!(entries[0]["tries"], 2);
         assert_eq!(entries[0]["lastOutcome"], "transport-error: HTTP 0");
 
-        let filtered = handle_mail_outbox(&mail_inv(&["mail", "outbox"], &["osaka"]));
+        let filtered = handle_mail_outbox(&mail_inv(&["mail", "outbox"], &["peer-node"]));
         assert_eq!(filtered.data.unwrap()["entries"].as_array().unwrap().len(), 1, "filtering to the one node with anything waiting still finds it");
 
         let missing = handle_mail_outbox(&mail_inv(&["mail", "outbox"], &["nobody"]));
@@ -10337,29 +10336,29 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-outbox-summary");
 
-        let fresh = aoide_storage::mail::mint_outbound_letter("here", "osaka", "bob", "hi").unwrap();
-        aoide_storage::outbox::write_entry("osaka", &aoide_storage::outbox::OutboxEntry::fresh(fresh)).unwrap();
+        let fresh = aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "hi").unwrap();
+        aoide_storage::outbox::write_entry("peer-node", &aoide_storage::outbox::OutboxEntry::fresh(fresh)).unwrap();
 
         let mut retried = aoide_storage::outbox::OutboxEntry::fresh(
-            aoide_storage::mail::mint_outbound_letter("here", "osaka", "carol", "hi again").unwrap(),
+            aoide_storage::mail::mint_outbound_letter("here", "peer-node", "carol", "hi again").unwrap(),
         );
         retried.tries = 3;
         retried.last_outcome = "transport: HTTP 0".to_string();
-        aoide_storage::outbox::write_entry("osaka", &retried).unwrap();
+        aoide_storage::outbox::write_entry("peer-node", &retried).unwrap();
 
         let mut refused = aoide_storage::outbox::OutboxEntry::fresh(
-            aoide_storage::mail::mint_outbound_letter("here", "osaka", "dave", "bad").unwrap(),
+            aoide_storage::mail::mint_outbound_letter("here", "peer-node", "dave", "bad").unwrap(),
         );
         refused.tries = 1;
         refused.refused = true;
         refused.last_outcome = "refused: bad-msgid".to_string();
-        aoide_storage::outbox::write_entry("osaka", &refused).unwrap();
+        aoide_storage::outbox::write_entry("peer-node", &refused).unwrap();
 
         let out = handle_mail_outbox(&mail_inv(&["mail", "outbox"], &[]));
         assert_eq!(out.status, aoide_protocol::output::Status::Ok, "msg: {}", out.message);
         let data = out.data.unwrap();
-        let summary = &data["summary"]["osaka"];
-        assert_eq!(summary["depth"], 3, "three entries spooled for osaka");
+        let summary = &data["summary"]["peer-node"];
+        assert_eq!(summary["depth"], 3, "three entries spooled for peer-node");
         assert_eq!(summary["refused"], 1, "exactly one entry is parked refused");
         assert_eq!(summary["tries"]["0"], 1, "one entry never attempted");
         assert_eq!(summary["tries"]["1"], 1, "one entry attempted once (the refused one)");
@@ -10393,7 +10392,7 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("delivery-retrying");
 
-        let envelope = aoide_storage::mail::mint_outbound_letter("here", "osaka", "bob", "hi").unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "hi").unwrap();
         let entry = aoide_storage::outbox::OutboxEntry::fresh(envelope);
         let link = aoide_storage::outbox::LinkState {
             backoff_secs: 12,
@@ -10401,7 +10400,7 @@ mod tests {
             last_outcome: "curl failed".to_string(),
         };
 
-        let d = delivery_projection(&[], "osaka", &entry, Some(&link));
+        let d = delivery_projection(&[], "peer-node", &entry, Some(&link));
         assert_eq!(d["status"], "retrying");
         assert_eq!(d["reason"], "curl failed");
         assert_eq!(d["reasonScope"], "link");
@@ -10416,17 +10415,17 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("delivery-two-entries-held-off");
 
-        let env1 = aoide_storage::mail::mint_outbound_letter("here", "osaka", "bob", "one").unwrap();
+        let env1 = aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "one").unwrap();
         let mut entry1 = aoide_storage::outbox::OutboxEntry::fresh(env1);
         entry1.tries = 1; // the first entry a drain actually reached before the link failed
-        let env2 = aoide_storage::mail::mint_outbound_letter("here", "osaka", "bob", "two").unwrap();
+        let env2 = aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "two").unwrap();
         let entry2 = aoide_storage::outbox::OutboxEntry::fresh(env2); // never attempted this pass
 
-        aoide_storage::outbox::back_off("osaka", 1_000, "transport-error: connection refused").unwrap();
-        let link = aoide_storage::outbox::read_link_state("osaka").unwrap();
+        aoide_storage::outbox::back_off("peer-node", 1_000, "transport-error: connection refused").unwrap();
+        let link = aoide_storage::outbox::read_link_state("peer-node").unwrap();
 
-        let d1 = delivery_projection(&[], "osaka", &entry1, link.as_ref());
-        let d2 = delivery_projection(&[], "osaka", &entry2, link.as_ref());
+        let d1 = delivery_projection(&[], "peer-node", &entry1, link.as_ref());
+        let d2 = delivery_projection(&[], "peer-node", &entry2, link.as_ref());
         assert_eq!(d1["status"], "retrying");
         assert_eq!(d2["status"], "retrying");
         assert_eq!(d1["reason"], d2["reason"], "both entries reflect the SAME shared node link, never a per-entry reason");
@@ -10440,16 +10439,16 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("delivery-refused-wins");
 
-        let envelope = aoide_storage::mail::mint_outbound_letter("here", "osaka", "bob", "hi").unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "hi").unwrap();
         let mut entry = aoide_storage::outbox::OutboxEntry::fresh(envelope);
         entry.refused = true;
         entry.tries = 1;
         entry.last_outcome = "refused: bad-msgid: envelope msgid does not match".to_string();
 
-        aoide_storage::outbox::back_off("osaka", 1_000, "transport-error: HTTP 500").unwrap();
-        let link = aoide_storage::outbox::read_link_state("osaka").unwrap();
+        aoide_storage::outbox::back_off("peer-node", 1_000, "transport-error: HTTP 500").unwrap();
+        let link = aoide_storage::outbox::read_link_state("peer-node").unwrap();
 
-        let d = delivery_projection(&[], "osaka", &entry, link.as_ref());
+        let d = delivery_projection(&[], "peer-node", &entry, link.as_ref());
         assert_eq!(d["status"], "refused", "a policy refusal wins over an unrelated link failure");
         assert_eq!(d["reason"], "refused: bad-msgid: envelope msgid does not match");
         assert_eq!(d["reasonScope"], "entry");
@@ -10464,12 +10463,12 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("delivery-accepted-then-link-fails");
 
-        let envelope = aoide_storage::mail::mint_outbound_letter("here", "osaka", "bob", "hi").unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "hi").unwrap();
         let mut entry = aoide_storage::outbox::OutboxEntry::fresh(envelope);
         entry.tries = 1;
         entry.last_outcome = "accepted".to_string();
 
-        let clean = delivery_projection(&[], "osaka", &entry, None);
+        let clean = delivery_projection(&[], "peer-node", &entry, None);
         assert_eq!(clean["status"], "accepted");
         assert_eq!(clean["ackPending"], true);
         assert_eq!(clean["reason"], Value::Null);
@@ -10477,9 +10476,9 @@ mod tests {
         // A LATER, unrelated letter to the same node fails transport-wise,
         // backing off the LINK — this entry's own evidence must not be
         // downgraded by it.
-        aoide_storage::outbox::back_off("osaka", 2_000, "transport-error: HTTP 0").unwrap();
-        let link = aoide_storage::outbox::read_link_state("osaka").unwrap();
-        let later = delivery_projection(&[], "osaka", &entry, link.as_ref());
+        aoide_storage::outbox::back_off("peer-node", 2_000, "transport-error: HTTP 0").unwrap();
+        let link = aoide_storage::outbox::read_link_state("peer-node").unwrap();
+        let later = delivery_projection(&[], "peer-node", &entry, link.as_ref());
         assert_eq!(later["status"], "accepted", "never downgraded by an unrelated later link failure");
         assert_eq!(later["ackPending"], true);
         assert_eq!(later["reason"], "transport-error: HTTP 0");
@@ -10494,16 +10493,16 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("delivery-retry-clears-link");
 
-        let envelope = aoide_storage::mail::mint_outbound_letter("here", "osaka", "bob", "hi").unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "hi").unwrap();
         let mut entry = aoide_storage::outbox::OutboxEntry::fresh(envelope);
         entry.last_outcome = "accepted".to_string();
 
-        aoide_storage::outbox::back_off("osaka", 3_000, "transport-error: timeout").unwrap();
-        aoide_storage::outbox::clear_link_state("osaka").unwrap(); // the retry succeeded
-        let link = aoide_storage::outbox::read_link_state("osaka").unwrap();
+        aoide_storage::outbox::back_off("peer-node", 3_000, "transport-error: timeout").unwrap();
+        aoide_storage::outbox::clear_link_state("peer-node").unwrap(); // the retry succeeded
+        let link = aoide_storage::outbox::read_link_state("peer-node").unwrap();
         assert!(link.is_none());
 
-        let d = delivery_projection(&[], "osaka", &entry, link.as_ref());
+        let d = delivery_projection(&[], "peer-node", &entry, link.as_ref());
         assert_eq!(d["status"], "accepted", "the entry's own outcome still stands");
         assert_eq!(d["reason"], Value::Null, "no stale link reason survives a cleared link");
         assert_eq!(d["nextAttemptAt"], Value::Null);
@@ -10605,12 +10604,12 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("delivery-concurrent-rm");
 
-        let envelope = aoide_storage::mail::mint_outbound_letter("here", "osaka", "bob", "hi").unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "hi").unwrap();
         let msgid = envelope.msgid.clone();
-        aoide_storage::outbox::write_entry("osaka", &aoide_storage::outbox::OutboxEntry::fresh(envelope)).unwrap();
-        assert!(aoide_storage::outbox::remove_entry("osaka", &msgid).unwrap(), "simulates a concurrent `mail outbox rm`");
+        aoide_storage::outbox::write_entry("peer-node", &aoide_storage::outbox::OutboxEntry::fresh(envelope)).unwrap();
+        assert!(aoide_storage::outbox::remove_entry("peer-node", &msgid).unwrap(), "simulates a concurrent `mail outbox rm`");
 
-        let d = post_send_delivery("osaka", &msgid);
+        let d = post_send_delivery("peer-node", &msgid);
         assert_ne!(d["status"], "delivered", "an entry's own absence is never read as delivery");
         assert_eq!(d["status"], "queued");
         assert!(d["reason"].as_str().unwrap().contains("status unavailable"));
@@ -10623,7 +10622,7 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-spool-failure");
 
-        aoide_storage::node_store::save_nodes(&[verified_node("osaka", "http://127.0.0.1:1/")]).unwrap();
+        aoide_storage::node_store::save_nodes(&[verified_node("peer-node", "http://127.0.0.1:1/")]).unwrap();
 
         // Force the shared stage lock to fail (EISDIR) — the same
         // technique `outbox::every_outbox_mutation_refuses_when_the_lock_
@@ -10632,7 +10631,7 @@ mod tests {
         // makes, so this fails before any drain is even attempted.
         std::fs::create_dir_all(aoide_storage::fs::stage_dir().join(".stage.lock")).unwrap();
 
-        let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "osaka/bob")]));
+        let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "peer-node/bob")]));
         assert_eq!(out.status, aoide_protocol::output::Status::Error, "a local spool write failure is a command error, never a masked delivery status");
         assert!(out.data.as_ref().unwrap().get("delivery").is_none(), "an error outcome carries no delivery projection at all");
 
@@ -10657,12 +10656,12 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-drain-local-io-error");
 
-        aoide_storage::node_store::save_nodes(&[verified_node("osaka", "http://127.0.0.1:1/")]).unwrap();
+        aoide_storage::node_store::save_nodes(&[verified_node("peer-node", "http://127.0.0.1:1/")]).unwrap();
 
-        let bsy = aoide_storage::outbox::outbox_dir().join("osaka").join(".bsy");
+        let bsy = aoide_storage::outbox::outbox_dir().join("peer-node").join(".bsy");
         std::fs::create_dir_all(&bsy).unwrap();
 
-        let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "osaka/bob")]));
+        let out = handle_mail_send(&mail_inv_with_flags(&["mail", "send"], &["hi"], &[("to", "peer-node/bob")]));
         assert_eq!(
             out.status,
             aoide_protocol::output::Status::Ok,
@@ -10670,7 +10669,7 @@ mod tests {
             said(&out)
         );
 
-        let spooled = aoide_storage::outbox::list_entries("osaka").unwrap();
+        let spooled = aoide_storage::outbox::list_entries("peer-node").unwrap();
         assert_eq!(spooled.len(), 1, "the entry is still spooled despite the drain's own local failure");
 
         let data = out.data.unwrap();
@@ -10690,9 +10689,9 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-send-status-read-failure");
 
-        let envelope = aoide_storage::mail::mint_outbound_letter("here", "osaka", "bob", "hi").unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "hi").unwrap();
         let msgid = envelope.msgid.clone();
-        aoide_storage::outbox::write_entry("osaka", &aoide_storage::outbox::OutboxEntry::fresh(envelope)).unwrap(); // the spool succeeds first
+        aoide_storage::outbox::write_entry("peer-node", &aoide_storage::outbox::OutboxEntry::fresh(envelope)).unwrap(); // the spool succeeds first
 
         // THEN the re-read breaks: the spool's own successful write already
         // left `.stage.lock` behind as a regular (flocked) file, so it has
@@ -10701,7 +10700,7 @@ mod tests {
         let _ = std::fs::remove_file(&lock_path);
         std::fs::create_dir_all(&lock_path).unwrap();
 
-        let d = post_send_delivery("osaka", &msgid);
+        let d = post_send_delivery("peer-node", &msgid);
         assert_eq!(d["status"], "queued", "the spool already succeeded — a read failure afterward is reported, never a fabricated failure");
         assert_eq!(d["reasonScope"], "local");
         assert!(d["reason"].as_str().unwrap().starts_with("status unavailable"));
@@ -10716,10 +10715,10 @@ mod tests {
         let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_env, root) = aoide_test_support::isolated_mail_root("mail-outbox-no-network");
 
-        aoide_storage::node_store::save_nodes(&[verified_node("osaka", "http://127.0.0.1:1/")]).unwrap();
-        let envelope = aoide_storage::mail::mint_outbound_letter("here", "osaka", "bob", "hi").unwrap();
-        aoide_storage::outbox::write_entry("osaka", &aoide_storage::outbox::OutboxEntry::fresh(envelope)).unwrap();
-        aoide_storage::outbox::back_off("osaka", 1_000, "transport-error: HTTP 0").unwrap();
+        aoide_storage::node_store::save_nodes(&[verified_node("peer-node", "http://127.0.0.1:1/")]).unwrap();
+        let envelope = aoide_storage::mail::mint_outbound_letter("here", "peer-node", "bob", "hi").unwrap();
+        aoide_storage::outbox::write_entry("peer-node", &aoide_storage::outbox::OutboxEntry::fresh(envelope)).unwrap();
+        aoide_storage::outbox::back_off("peer-node", 1_000, "transport-error: HTTP 0").unwrap();
 
         let shim_dir = std::env::temp_dir().join(format!(
             "aoide-client-mail-outbox-curlshim-{}-{}",
