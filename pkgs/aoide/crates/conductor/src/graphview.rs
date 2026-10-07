@@ -99,10 +99,36 @@ pub struct Node {
     /// The card's facts are a cache, not a live reply: a `last-seen` row, or
     /// any remote card while the last probe failed. Drawn dimmed.
     pub cached: bool,
+    /// What a folded card hides: the descendant count and how many of them
+    /// are awaiting a human, so a fold never hides a blocked agent silently.
+    pub folded: Option<Fold>,
     pub depth: usize,
     pub row: usize,
     /// The card's retained rectangle in world cells.
     pub world: WorldRect,
+}
+
+/// The summary a folded card wears on its bottom border.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fold {
+    pub hidden: usize,
+    pub awaiting: usize,
+    pub working: usize,
+}
+
+impl Fold {
+    /// `▸ 5 · 1 awaiting` — the hidden count, then the most urgent class
+    /// present (awaiting over working) so the mark says what matters in
+    /// the twenty cells a border holds.
+    pub fn label(&self) -> String {
+        let mut s = format!("▸ {}", self.hidden);
+        if self.awaiting > 0 {
+            s.push_str(&format!(" · {} awaiting", self.awaiting));
+        } else if self.working > 0 {
+            s.push_str(&format!(" · {} working", self.working));
+        }
+        s
+    }
 }
 
 /// Node metadata carried from the parsed document into the DFS.
@@ -236,13 +262,33 @@ pub fn select_parent(app: &mut App) {
     }
 }
 
+/// Fold or unfold the selected card's children. A leaf folds nothing.
+pub fn toggle_fold(app: &mut App) {
+    let model = build_model(app);
+    let Some(id) = model.visible().nth(model.selected).map(|n| n.id.clone()) else {
+        return;
+    };
+    let has_children = model
+        .children
+        .get(&id)
+        .is_some_and(|kids| kids.iter().any(|k| model.nodes.iter().any(|n| &n.id == k)));
+    if !has_children {
+        return;
+    }
+    if !app.graph.folded.remove(&id) {
+        app.graph.folded.insert(id);
+    }
+}
+
 /// Move the selection down one rank, onto the selected card's first child in
-/// draw order. Does nothing on a leaf.
+/// draw order. Does nothing on a leaf; a folded card unfolds first, since a
+/// step toward what is hidden is a request to see it.
 pub fn select_child(app: &mut App) {
     let model = build_model(app);
     let Some(id) = model.visible().nth(model.selected).map(|n| n.id.clone()) else {
         return;
     };
+    app.graph.folded.remove(&id);
     let child = model
         .children
         .get(&id)
@@ -580,6 +626,16 @@ pub fn build_model_from(
         .iter()
         .position(|&i| nodes[i].id == app.graph.selected)
         .unwrap_or(0);
+    let summaries: Vec<(usize, Fold)> = nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| app.graph.folded.contains(&n.id))
+        .map(|(i, n)| (i, fold_summary(&n.id, &nodes, &children)))
+        .filter(|(_, f)| f.hidden > 0)
+        .collect();
+    for (i, fold) in summaries {
+        nodes[i].folded = Some(fold);
+    }
 
     for node in nodes.iter_mut().filter(|n| n.host.is_none()) {
         if let Some(record) = node
@@ -649,6 +705,7 @@ fn walk(
             model: m.model.clone(),
             host: m.host.clone(),
             cached: m.cached,
+            folded: None,
             depth,
             row: out.len(),
             world: WorldRect::new(0, 0, CARD_W, CARD_H),
@@ -753,8 +810,11 @@ fn visible_order(
     children: &HashMap<String, Vec<String>>,
     scene: &crate::scene::SceneState,
 ) -> Vec<usize> {
+    let hidden = hidden_by_folds(nodes, children, &scene.folded);
     if scene.view == View::All || nodes.is_empty() {
-        return (0..nodes.len()).collect();
+        return (0..nodes.len())
+            .filter(|i| !hidden.contains(nodes[*i].id.as_str()))
+            .collect();
     }
     let anchor = if nodes.iter().any(|n| n.id == scene.selected) {
         scene.selected.clone()
@@ -782,8 +842,54 @@ fn visible_order(
         }
     }
     (0..nodes.len())
-        .filter(|&i| seen.contains(nodes[i].id.as_str()))
+        .filter(|&i| seen.contains(nodes[i].id.as_str()) && !hidden.contains(nodes[i].id.as_str()))
         .collect()
+}
+
+/// Every descendant of a folded card, by id. A folded card itself stays;
+/// what it folds away is everything beneath it.
+fn hidden_by_folds<'a>(
+    nodes: &'a [Node],
+    children: &'a HashMap<String, Vec<String>>,
+    folded: &std::collections::BTreeSet<String>,
+) -> HashSet<&'a str> {
+    let mut hidden: HashSet<&str> = HashSet::new();
+    for id in folded {
+        let Some(root) = nodes.iter().find(|n| &n.id == id) else {
+            continue;
+        };
+        let mut queue: VecDeque<&str> = VecDeque::from([root.id.as_str()]);
+        while let Some(cur) = queue.pop_front() {
+            for kid in children.get(cur).into_iter().flatten() {
+                if let Some(n) = nodes.iter().find(|n| &n.id == kid) {
+                    if hidden.insert(n.id.as_str()) {
+                        queue.push_back(n.id.as_str());
+                    }
+                }
+            }
+        }
+    }
+    hidden
+}
+
+/// What one folded card hides: the descendants under it and how many are
+/// awaiting a human or working.
+fn fold_summary(id: &str, nodes: &[Node], children: &HashMap<String, Vec<String>>) -> Fold {
+    let one = std::collections::BTreeSet::from([id.to_string()]);
+    let hidden = hidden_by_folds(nodes, children, &one);
+    let mut fold = Fold {
+        hidden: hidden.len(),
+        awaiting: 0,
+        working: 0,
+    };
+    for n in nodes.iter().filter(|n| hidden.contains(n.id.as_str())) {
+        match theme::classify(n.state.as_deref().unwrap_or("")) {
+            theme::StateClass::Awaiting => fold.awaiting += 1,
+            theme::StateClass::Working => fold.working += 1,
+            _ => {}
+        }
+    }
+    fold
 }
 
 // ── Camera geometry: one transform, shared by render, hit test and pan ──────
@@ -1279,6 +1385,18 @@ fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &m
                 String::new()
             },
             top_style,
+        )))
+        .title_bottom(Line::from(Span::styled(
+            match n.folded {
+                Some(fold) if border_budget >= 4 => {
+                    format!(" {} ", truncate_end(&fold.label(), border_budget - 2))
+                }
+                _ => String::new(),
+            },
+            match n.folded {
+                Some(fold) if fold.awaiting > 0 => border.patch(theme::state_style("awaiting", pal)),
+                _ => border.add_modifier(Modifier::BOLD),
+            },
         )))
         .style(surface)
         .padding(Padding::horizontal(1));
@@ -1959,6 +2077,59 @@ mod tests {
         assert!(out.contains("AGENT · last-seen"), "{out}");
         assert!(out.contains("was working"), "{out}");
         assert!(out.contains("🖧 NODE · never-pull"), "{out}");
+    }
+
+    #[test]
+    fn a_fold_hides_the_subtree_and_its_mark_counts_the_awaiting_child() {
+        let mut app = App::for_test(
+            vec![],
+            vec![
+                session("hub", "/x", "working", None),
+                session("a", "/x", "awaiting", Some("hub")),
+                session("b", "/x", "working", Some("hub")),
+                session("b1", "/x", "idle", Some("b")),
+                session("other", "/y", "idle", None),
+            ],
+            Vec::new(),
+        );
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        let total = node_order(&app).len();
+        app.graph.selected = "session:hub".into();
+        toggle_fold(&mut app);
+        assert!(app.graph.folded.contains("session:hub"));
+        let m = build_model(&app);
+        assert_eq!(m.visible_len(), total - 3, "a, b and b1 fold away; hub and other stay");
+        assert!(m.visible().any(|n| n.id == "session:hub"));
+        assert!(m.visible().all(|n| n.id != "session:b1"));
+        let hub = node(&m, "hub");
+        assert_eq!(
+            hub.folded,
+            Some(Fold {
+                hidden: 3,
+                awaiting: 1,
+                working: 1
+            })
+        );
+        assert_eq!(hub.folded.unwrap().label(), "▸ 3 · 1 awaiting");
+        let out = dump(&paint(&app, Rect::new(0, 0, 160, 30)));
+        assert!(out.contains("▸ 3 · 1 awaiting"), "{out}");
+
+        // The siblings across the rank still walk; a step toward the hidden
+        // children unfolds the card instead of going nowhere.
+        select_sibling(&mut app, true);
+        assert_eq!(selected_session_id(&app).as_deref(), Some("other"));
+        select_sibling(&mut app, false);
+        select_child(&mut app);
+        assert!(!app.graph.folded.contains("session:hub"), "j unfolds");
+        assert_eq!(selected_session_id(&app).as_deref(), Some("a"));
+        assert_eq!(build_model(&app).visible_len(), total);
+
+        // A leaf has nothing to fold; `f` on it changes nothing.
+        app.graph.selected = "session:a".into();
+        toggle_fold(&mut app);
+        assert!(app.graph.folded.is_empty());
+        assert!(node(&build_model(&app), "a").folded.is_none());
     }
 
     #[test]

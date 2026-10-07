@@ -39,6 +39,7 @@ whenever it holds more rows than fit, and stays gone otherwise.
 | `h` / `l`, Left / Right | Fold or unfold tree groups |
 | `e` / right-click | Actions for a tree, graph, project or session target |
 | `a` in Graph | Whole forest, or only the selected card's own graph |
+| `f` in Graph | Fold or unfold the selected card's children; the fold mark counts what is hidden |
 | `j` / `k`, Down / Up in Graph | Move the selection down/up a rank, toward the first child or the parent, across the whole forest |
 | `h` / `l`, Left / Right in Graph | Move the selection to the previous/next sibling across the rank (for a root, the previous/next root), across the whole forest |
 | Enter in Graph | Open or focus the selected session |
@@ -101,6 +102,14 @@ card and `h` steps back. Enter opens or focuses
 the selected session, `s` writes a letter to the selected agent directly
 without opening the actions menu, and `p` prunes ended sessions — the one
 mutation the panel dispatches on its own.
+
+`f` folds the selected card's children away and unfolds them again. A folded
+card wears a mark on its bottom border — `▸ 5 · 1 awaiting`, the hidden
+count and then the most urgent class among them (awaiting over working),
+drawn in the awaiting colour when one is — so a blocked agent is never
+hidden in silence. `j` on a folded card unfolds it and steps down; `h`/`l`
+walk its rank as before. The fold is a view choice keyed by the card's id,
+so a refresh cannot move it onto another card.
 
 The canvas readout names the zoom, the view and where the cursor stands —
 `card 3/20 · rank 1` — so the forest the pane is not showing has a size.

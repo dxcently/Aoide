@@ -29,6 +29,11 @@
   root id and its `session_id` is `None`, so no local action — focus, letter,
   menu, prune — can resolve it against this box's roster; a cached row's
   state slot carries the roster's `presence` word, never its last live state.
+- A fold is a view choice in `SceneState::folded`, keyed by node id like the
+  selection, never a scene mutation; a folded card's mark (`graphview::Fold`)
+  must count what it hides and name an awaiting descendant, so the fold
+  never hides a blocked agent silently. A step toward hidden children
+  unfolds rather than doing nothing.
 - The follow camera (no manual pan) shows the forest, never the pad: an
   axis the forest fits in holds it whole, an overflowing axis centres the
   selected card clamped inside the forest's bounds. The pad is reachable

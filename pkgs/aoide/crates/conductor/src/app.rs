@@ -4426,6 +4426,7 @@ impl App {
                 crate::graphview::select_index(self, nodes.len().saturating_sub(1))
             }
             KeyCode::Char('a') => crate::graphview::toggle_view(self),
+            KeyCode::Char('f') => crate::graphview::toggle_fold(self),
             KeyCode::Enter => {
                 if let Some(id) = nodes.get(selected).and_then(|n| n.session_id.clone()) {
                     // Node → record via `merged()` (the same lookup the

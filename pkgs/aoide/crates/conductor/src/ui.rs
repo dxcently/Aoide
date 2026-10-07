@@ -242,7 +242,7 @@ fn keymap_hint(panel: Panel) -> &'static str {
         Panel::Home => "click to open · Ctrl-P projects · ? help · q quit",
         Panel::Mail => "↑/↓ letters · PgUp/PgDn read · r refresh · ? help",
         Panel::Graph => {
-            "j/k child/parent · h/l sibling · a all/focus · Enter open · s letter · e menu · drag/wheel pan · Ctrl-wheel zoom · p prune"
+            "j/k child/parent · h/l sibling · f fold · a all/focus · Enter open · s letter · e menu · drag/wheel pan · Ctrl-wheel zoom · p prune"
         }
         Panel::Session|Panel::Terminals => {
             "j/k select · Enter jump/fold · h/l fold · L link · a add root · d rm · p prune · ? help · q quit"

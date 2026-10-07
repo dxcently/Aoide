@@ -272,6 +272,10 @@ pub struct SceneState {
     /// arriving earlier in preorder would silently move the cursor onto a
     /// different card. An id names the same card or no card at all.
     pub selected: String,
+    /// Cards whose children are folded away — a view choice, keyed by node
+    /// id like the selection, so a refresh cannot move a fold onto another
+    /// card. A folded card draws a mark summarising what it hides.
+    pub folded: std::collections::BTreeSet<String>,
     pub pan_mode: bool,
     /// An in-flight camera drag: pointer origin and the camera origin it started from.
     pub drag: Option<(u16, u16, i32, i32)>,

@@ -169,6 +169,7 @@ good one keeps the last rows, dimmed, each host card's last row reading
 | `h`/`l`, `←`/`→` | previous / next sibling — likewise, no wrap |
 | `g`/`Home`, `G`/`End` | first / last drawn card |
 | `a` | Focus (the selected card's connected component; the gathering root is not a connection) ↔ All |
+| `f` | fold / unfold the selected card's children; the bottom border reads `▸ n · k awaiting` |
 | `Enter` | cue the selected local session |
 | `s` | write a letter to the selected local agent |
 | `e` / right-click | the card's context menu |
