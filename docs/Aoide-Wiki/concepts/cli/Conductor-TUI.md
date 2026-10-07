@@ -84,7 +84,8 @@ aoide conductor [--json]
 
 `board::NAV` fixes the tab order the number keys and `Tab` follow. Every
 workspace panel keeps the project tree on the left: a project folds its
-Agents, Terminals and Past groups independently; sessions attached to no
+Agents, Terminals and Past groups independently (a terminal an agent
+spawned nests under that agent in Agents; Terminals holds all-shell chains); sessions attached to no
 project gather under `Active sessions` (live only), and their ended records
 form one root-level Past node. `Ctrl-P` moves keyboard focus between the
 tree and the body; only the focused region draws a bright selection.

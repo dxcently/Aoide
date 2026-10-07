@@ -3043,11 +3043,36 @@ impl App {
                 folded,
             });
             if !folded {
+                // Lineage first: a session files under Agents when it or any
+                // ancestor in its spawn chain is an agent, so a terminal an
+                // agent spawned sits beneath that agent rather than torn off
+                // into Terminals. Terminals holds the chains that are shells
+                // throughout — a wrapper shell stays there while the agent it
+                // wraps heads its own tree under Agents.
+                let chain_is_shells = |s: &SessionRecord| -> bool {
+                    let mut cur = s;
+                    let mut hops = 0;
+                    while is_terminal(cur) {
+                        let Some(parent) = cur
+                            .parent_session_id
+                            .as_deref()
+                            .and_then(|p| live.iter().find(|r| r.session_id == p))
+                        else {
+                            return true;
+                        };
+                        hops += 1;
+                        if hops > live.len() {
+                            return true; // a malformed cycle of shells
+                        }
+                        cur = parent;
+                    }
+                    false
+                };
                 for terminal in [false, true] {
                     let group: Vec<_> = live
                         .iter()
                         .copied()
-                        .filter(|s| is_terminal(s) == terminal)
+                        .filter(|s| chain_is_shells(s) == terminal)
                         .collect();
                     if group.is_empty() {
                         continue;
@@ -5179,6 +5204,93 @@ mod tests {
             .any(|r| matches!(r, SidebarRow::Project { name, .. } if name == "retired-project")));
     }
     use super::*;
+
+    #[test]
+    fn sidebar_files_a_spawned_terminal_under_the_agent_that_spawned_it() {
+        let agent = SessionRecord {
+            session_id: "agent-0001".into(),
+            cwd: "/p".into(),
+            agent: "claude".into(),
+            state: "working".into(),
+            ..Default::default()
+        };
+        let shell = SessionRecord {
+            session_id: "shell-0002".into(),
+            cwd: "/p".into(),
+            agent: "shell".into(),
+            parent_session_id: Some("agent-0001".into()),
+            state: "working".into(),
+            ..Default::default()
+        };
+        let grandchild = SessionRecord {
+            session_id: "agent-0003".into(),
+            cwd: "/p".into(),
+            agent: "claude".into(),
+            parent_session_id: Some("shell-0002".into()),
+            state: "idle".into(),
+            ..Default::default()
+        };
+        let loose_shell = SessionRecord {
+            session_id: "shell-0004".into(),
+            cwd: "/p".into(),
+            agent: "shell".into(),
+            state: "idle".into(),
+            ..Default::default()
+        };
+        // A wrapper shell that launched an agent stays in Terminals; the
+        // agent it wraps heads its own tree under Agents.
+        let wrapper = SessionRecord {
+            session_id: "shell-0005".into(),
+            cwd: "/p".into(),
+            agent: "shell".into(),
+            state: "idle".into(),
+            ..Default::default()
+        };
+        let wrapped = SessionRecord {
+            session_id: "agent-0006".into(),
+            cwd: "/p".into(),
+            agent: "claude".into(),
+            parent_session_id: Some("shell-0005".into()),
+            state: "working".into(),
+            ..Default::default()
+        };
+        let app = App::for_test(
+            vec![],
+            vec![agent, shell, grandchild, loose_shell, wrapper, wrapped],
+            vec![],
+        );
+        let rows = app.sidebar_rows();
+        let sections: Vec<(bool, usize)> = rows
+            .iter()
+            .filter_map(|r| match r {
+                SidebarRow::Section { terminal, count, .. } => Some((*terminal, *count)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sections, vec![(false, 4), (true, 2)], "a chain files with its first agent: {rows:?}");
+        let depth = |id: &str| {
+            rows.iter()
+                .find_map(|r| match r {
+                    SidebarRow::Session { rec, depth, .. } if rec.session_id == id => Some(*depth),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        assert_eq!(depth("shell-0002"), depth("agent-0001") + 1, "the shell nests under its agent");
+        assert_eq!(depth("agent-0003"), depth("shell-0002") + 1, "and its own child under it");
+        let order: Vec<&str> = rows
+            .iter()
+            .filter_map(|r| match r {
+                SidebarRow::Session { rec, .. } => Some(rec.session_id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            order,
+            vec!["agent-0001", "shell-0002", "agent-0003", "agent-0006", "shell-0004", "shell-0005"]
+        );
+        assert_eq!(depth("agent-0006"), depth("agent-0001"), "a wrapped agent heads its own tree");
+    }
 
     #[test]
     fn sidebar_keeps_empty_projects_and_inherits_owner_outside_root() {

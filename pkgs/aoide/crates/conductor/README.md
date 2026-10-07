@@ -20,7 +20,12 @@ alignment. Arrows or `h` / `j` / `k` / `l` select an action or recent
 project; Enter opens it. `H` opens connected hosts and `L` opens Activity. Shared surfaces use even shading and single separator
 lines; bright selection highlights identify only the keyboard-focused region,
 while other selections retain subdued shading. Workspace views expose a project sidebar whose Agents,
-Terminals and Past groups fold independently. Past includes durable session
+Terminals and Past groups fold independently. The groups follow lineage
+before kind: a session files under Agents when it or any ancestor in its
+spawn chain is an agent, so a terminal an agent spawned nests beneath that
+agent; Terminals holds the chains that are shells throughout, and a wrapper
+shell stays there while the agent it wraps heads its own tree under Agents.
+The header's Agents and Terminals counts stay counts by kind. Past includes durable session
 ledger entries, not just ended records still retained in the current stage.
 Sessions belonging to no project gather in an `Active sessions` group holding
 only live ones; their ended sessions form the one Past node at the root of the

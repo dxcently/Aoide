@@ -182,6 +182,10 @@ A panel adds an App selection/state seam and pure renderer, then joins the
 shared navigation, keyboard and mouse geometry. Number keys 1–9 then 0 and Tab cycling follow the visible tab order. Panel-specific keys
 are scoped to their handlers; text input and overlays take priority.
 
+The sidebar's Agents/Terminals split is by spawn chain, not by a row's own
+kind: a row goes to Agents when it or an ancestor is an agent, so lineage is
+never broken to sort by kind; only all-shell chains are Terminals.
+
 Project rows represent projects, not individual roots. Use `Project::roots`
 and existing attribution/grouping helpers. Tree row models are the common
 source for rendering, focus, collapse and activation.
