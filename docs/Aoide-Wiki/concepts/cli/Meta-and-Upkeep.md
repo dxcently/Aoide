@@ -1,13 +1,13 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-08-29
+updated: 2026-10-07
 tags: [aoide, cli, meta, upkeep]
 ---
 
 # Meta & Upkeep Commands — Guide, Schema, Soundcheck
 
-The meta commands (`guide`, `schema`) orient an agent. The stubs (`make`,
+The meta commands (`guide`, `schema`, `do`) orient an agent. The stubs (`make`,
 `update`) are walking-skeleton reservations of schema surface for planned
 flows. The upkeep commands (`usage`, `quickshell reload`/`healthcheck`,
 `soundcheck`) maintain local state and sweep the working tree; `onboard`
@@ -15,6 +15,7 @@ runs the first-boot install flow. Handlers live in
 `pkgs/aoide/crates/cli/src/commands/meta.rs` (`guide`/`schema`),
 `pkgs/aoide/crates/cli/src/commands/stubs.rs` (the stubs),
 `pkgs/aoide/crates/cli/src/commands/onboard.rs` (`onboard`),
+`pkgs/aoide/crates/cli/src/commands/vv/` (`do`, `do kit`),
 `pkgs/aoide/crates/storage/src/commands.rs` (`usage`),
 `pkgs/aoide/crates/song/src/commands/quickshell.rs` (`quickshell
 reload`/`healthcheck`, the latter over
@@ -74,6 +75,49 @@ aoide schema [--json]
   ([[Agent-Interface]]). `lyra schema` mirrors it for the paint side: its own
   registry, its own golden snapshot (48 command paths, evolving independently
   of core's 80 — see [[lyra]]).
+
+### aoide do
+
+```
+aoide do <sentence…> [--json]
+aoide do kit [--out <file>] [--json]
+```
+
+- **Reads:** `[verba]` from `$AOIDE_ROOT/config.toml` (`binary`, default
+  `verba-volantia` on `PATH`; `weightsDir`, default `$AOIDE_ROOT/verba/aoide`),
+  the assembled registry, and the kit directory (`meta.json`,
+  `model.safetensors`, optional `lexicon.txt`). It spawns
+  `verba-volantia dispatch --out <kit>`, writes the sentence on its stdin and
+  reads the first JSON line of stdout, bounded to 20 seconds.
+- **Writes:** nothing. `do` prints the command the sentence means and never
+  runs it; running the line is an ordinary invocation through the usual gate and
+  audit log. `do kit --out` writes the one file it is given.
+- **Output:** text mode on the CLI prints the bare command on stdout
+  (`$(aoide do "show the trace for abc123")` substitutes it) and every refusal on
+  stderr with nothing on stdout. `--json` keeps the envelope: `data.command`,
+  `intent`, `slots`, `margin`, `threshold` and the raw `verdict`.
+- **Refusals** (taught what/why/fix, exit 1): a missing binary or kit says where
+  each goes; an abstention (`accept` not true), a self-contradicting verdict
+  (`conflicts`), unaddressed text (`trailing_editorial_text`) and the `none` class
+  dispatch nothing and list the nearest commands as full lines
+  (`data.candidates`); an unfilled required slot prints the command with the slot
+  named (`aoide session trace <id>`); an intent or slot the registry lacks is a kit
+  bug, never a command. The table and its reasons are
+  [AOIDE-VV-JEV](../../../architecture/AOIDE-VV-JEV.md)'s.
+- **`do kit`:** emits verba-volantia's `templates.json` derived from the registry:
+  one intent per implemented, non-internal command, one slot per positional or
+  value-taking flag, a handful of phrasings read off its path, brief, summary
+  and examples, plus a `none` class. Text mode prints the spec; `--out` writes
+  it and prints the training commands:
+
+  ```
+  aoide do kit --out templates.json
+  verba-volantia gen --spec templates.json --data data/aoide
+  verba-volantia train --data data/aoide --out weights/aoide --seed 1 --epochs 60 --batch 256 --bucket-window 16 --smooth 0.1
+  mkdir -p $AOIDE_ROOT/verba/aoide && cp -r weights/aoide/. $AOIDE_ROOT/verba/aoide
+  ```
+- **Notes:** not gated; CLI, MCP and A2A doors all reach it. Bool flags are not
+  slots, so a printed command never carries `--yes`/`--submit`.
 
 ### aoide make
 

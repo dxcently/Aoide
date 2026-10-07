@@ -94,7 +94,8 @@ start at [[aoide-cli]] and the group pages linked below.
   pipeline commands (all stubs today), `herald push` (shellbridge socket →
   `state/stage/herald.json`), and `hooks install` (harness settings merge,
   `--capture` tee to `state/<agent>-hooks.jsonl`).
-- [[Meta-and-Upkeep|Meta-and-Upkeep]] — `guide`, `schema`,
+- [[Meta-and-Upkeep|Meta-and-Upkeep]] — `guide`, `schema`, `do`/`do kit` (a
+  sentence to the one command it means, printed and never run),
   `make`/`update` (stubs), `onboard` (the first-boot flow, core and lyra
   halves), `usage` (→ `state/usage.json`),
   `quickshell reload`/`healthcheck` (the live placeholder-screen watchdog),
