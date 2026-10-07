@@ -18,15 +18,23 @@ use serde_json::Map;
 
 /// May `rec`'s recorded pid become `new`? A record's pid is the kernel's fact
 /// about which process the session IS (the daemon's seal binds it, `kill`
-/// signals it, the reaper watches it), so it never moves by request while that
-/// process lives: only a pid-less record is filled, an equal pid is a no-op,
-/// and a pid whose process is gone (a re-run of the same id) is replaced. The
-/// caller drops the seal when the pid does move.
+/// signals it, sends are attested by it), so it never moves by request: a
+/// pid-less record is filled and an equal pid is a no-op; nothing else moves
+/// a record that is conductable or sealed (now or ever) — a dead wrap is the
+/// reaper's to end, not a pid to hand to the next caller. Only a plain hook
+/// record whose process is gone (a harness restarted under its own id) is
+/// replaced. Liveness is the reaper's own probe ([`crate::fs::pid_is_alive`],
+/// `kill(pid, 0)`), which reads an unanswerable probe as ALIVE.
 pub fn pid_may_move(rec: &SessionRecord, new: u32) -> bool {
     match rec.pid {
         None => true,
         Some(old) if old == new => true,
-        Some(old) => crate::attest::pid_starttime(old as i32).is_none(),
+        Some(old) => {
+            rec.seal.is_none()
+                && rec.ever_sealed != Some(true)
+                && rec.conductable != Some(true)
+                && !crate::fs::pid_is_alive(old)
+        }
     }
 }
 
@@ -78,11 +86,6 @@ pub fn upsert_session(
         }
         if let Some(p) = pid {
             if pid_may_move(s, p) {
-                if s.pid != Some(p) {
-                    // The seal binds the OLD pid; it names nothing now.
-                    s.seal = None;
-                    s.sealed_issued_at = None;
-                }
                 s.pid = Some(p);
             }
         }
@@ -180,6 +183,7 @@ pub fn upsert_session(
             // pid; a fresh registration otherwise starts without one.
             seal: None,
             sealed_issued_at: None,
+            ever_sealed: None,
             // Stamped later by the PTY tick's `conduct_refresh_shell`
             // (P-C5), only for a conducted SHELL; a fresh registration has
             // not ticked yet.
@@ -270,7 +274,7 @@ mod tests {
         assert!(after.contains(&petname_key), "the serialized petname changed across an update: {after}");
     }
 
-    fn live_pid_record(pid: u32, sealed: bool) -> SessionRecord {
+    fn pid_record(pid: u32, sealed: bool, conductable: bool) -> SessionRecord {
         SessionRecord {
             session_id: "w".into(),
             agent: "claude".into(),
@@ -278,34 +282,48 @@ mod tests {
             pid: Some(pid),
             seal: sealed.then(|| "seal".to_string()),
             sealed_issued_at: sealed.then_some(1),
+            ever_sealed: sealed.then_some(true),
+            conductable: conductable.then_some(true),
             ..Default::default()
         }
+    }
+
+    const DEAD: u32 = 2_000_000_000;
+
+    fn start_with(rec: SessionRecord, pid: u32) -> SessionRecord {
+        let mut sessions = vec![rec];
+        upsert_session(&mut sessions, "w", None, None, None, None, None, None, None, Some(pid), "t");
+        sessions.remove(0)
     }
 
     #[test]
     fn upsert_session_never_moves_the_pid_of_a_live_record() {
         let me = std::process::id();
-        let mut sessions = vec![live_pid_record(me, true)];
-        upsert_session(&mut sessions, "w", None, None, None, None, None, None, None, Some(me + 1), "t");
-        assert_eq!(sessions[0].pid, Some(me));
-        assert_eq!(sessions[0].seal.as_deref(), Some("seal"), "a refused move keeps the seal");
+        let after = start_with(pid_record(me, true, false), me + 1);
+        assert_eq!(after.pid, Some(me));
+        assert_eq!(after.seal.as_deref(), Some("seal"));
+    }
+
+    #[test]
+    fn upsert_session_never_moves_a_dead_sealed_or_conductable_pid() {
+        let me = std::process::id();
+        assert_eq!(start_with(pid_record(DEAD, true, false), me).pid, Some(DEAD), "sealed");
+        assert_eq!(start_with(pid_record(DEAD, false, true), me).pid, Some(DEAD), "conductable");
+        let mut once_sealed = pid_record(DEAD, false, false);
+        once_sealed.ever_sealed = Some(true);
+        assert_eq!(start_with(once_sealed, me).pid, Some(DEAD), "ever sealed");
+    }
+
+    #[test]
+    fn upsert_session_replaces_the_dead_pid_of_a_plain_unsealed_record() {
+        let me = std::process::id();
+        assert_eq!(start_with(pid_record(DEAD, false, false), me).pid, Some(me));
     }
 
     #[test]
     fn upsert_session_reregistering_the_same_pid_keeps_the_seal() {
         let me = std::process::id();
-        let mut sessions = vec![live_pid_record(me, true)];
-        upsert_session(&mut sessions, "w", None, None, None, None, None, None, None, Some(me), "t");
-        assert_eq!(sessions[0].seal.as_deref(), Some("seal"));
-    }
-
-    #[test]
-    fn upsert_session_replaces_a_dead_pid_and_drops_its_seal() {
-        let mut sessions = vec![live_pid_record(2_000_000_000, true)];
-        let me = std::process::id();
-        upsert_session(&mut sessions, "w", None, None, None, None, None, None, None, Some(me), "t");
-        assert_eq!(sessions[0].pid, Some(me));
-        assert_eq!((sessions[0].seal.as_deref(), sessions[0].sealed_issued_at), (None, None));
+        assert_eq!(start_with(pid_record(me, true, true), me).seal.as_deref(), Some("seal"));
     }
 
     #[test]

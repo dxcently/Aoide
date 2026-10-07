@@ -181,13 +181,14 @@ a2a spawn probe needs `/bin/sh` + `printf`'s byte-exact output.
 - **`daemon::seal_freshly_registered_session` mints/stamps a seal ONLY for
   a successful `session start` dispatch whose record already carries a
   `pid`, and it seals a record ONCE.** A record that already carries a
-  `seal` is never re-sealed: a seal that still verifies is left alone, and
-  one that does not (the pid moved under it, or the process died) makes the
-  dispatch reply a taught error and appends a `seal_refused` event to the
-  events feed — re-sealing over the record's current pid would hand a
-  repointed pid the wrap's identity. `seal_unsealed_live_sessions` likewise
-  only touches `seal.is_none()`. Never add a path that re-mints over a
-  record whose seal exists; the pid it mints over is the record's OWN `pid`
+  `seal`, or ever did (`everSealed`), is never sealed again — by this
+  function or by the `seal_unsealed_live_sessions` tick. `session_start_
+  refusal` refuses a dispatched `session start` BEFORE it runs when the
+  record is sealed over a live pid that no longer verifies (taught error +
+  `seal_refused` event); a sealed record whose process merely died is not
+  refused. Never refuse after mutating, and never add a path that re-mints
+  over a record that has ever been sealed; the pid it mints over is the
+  record's OWN `pid`
   field (kept immutable by `aoide_storage::session::pid_may_move`), not a
   peercred-verified connecting pid.
 - **Request-line reads on the daemon socket go through

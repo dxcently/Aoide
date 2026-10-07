@@ -866,6 +866,7 @@ pub fn stamp_seal(id: &str, seal: &str, issued_at: i64) {
         {
             s.seal = Some(seal.to_string());
             s.sealed_issued_at = Some(issued_at);
+            s.ever_sealed = Some(true);
             if file.schema_version.is_empty() {
                 file.schema_version = STAGE_GRAPH_VERSION.to_string();
             }

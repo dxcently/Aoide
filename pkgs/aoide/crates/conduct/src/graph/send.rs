@@ -1859,8 +1859,6 @@ fn hook_ensure_session_with(
                     .iter_mut()
                     .find(|s| s.session_id == id && s.pid != Some(pid) && pid_may_move(s, pid))
                 {
-                    s.seal = None;
-                    s.sealed_issued_at = None;
                     s.pid = Some(pid);
                     if file.schema_version.is_empty() {
                         file.schema_version = STAGE_GRAPH_VERSION.to_string();
@@ -6339,6 +6337,53 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&stage);
     }
+    /// The dead-wrap claim: kill a sealed conductable wrap's process, then hook
+    /// with this process's own (vouched) pid. The pid does not move and the
+    /// seal stays as it was, so nothing is left to re-seal over the claimant.
+    #[test]
+    fn a_dead_conducted_wrap_cannot_be_claimed_by_a_hook() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("hook-dead-wrap");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let dead = child.id();
+        child.kill().unwrap();
+        child.wait().unwrap();
+        let mut f: SessionsFile = load_stage(&sessions_path()).unwrap_or_default();
+        f.sessions.push(SessionRecord {
+            session_id: "w".into(),
+            agent: "claude".into(),
+            state: "idle".into(),
+            pid: Some(dead),
+            conductable: Some(true),
+            seal: Some("seal".into()),
+            sealed_issued_at: Some(1),
+            ever_sealed: Some(true),
+            ..Default::default()
+        });
+        write_stage(&sessions_path(), &f).unwrap();
+        let me = std::process::id();
+        for event in ["UserPromptSubmit", "SessionStart"] {
+            hook_from_str(&format!(
+                r#"{{ "session_id": "w", "hook_event_name": "{event}", "cwd": "/p", "pid": {me} }}"#
+            ));
+            let rec = load_stage::<SessionsFile>(&sessions_path())
+                .unwrap()
+                .sessions
+                .into_iter()
+                .find(|s| s.session_id == "w")
+                .unwrap();
+            assert_eq!(rec.pid, Some(dead), "{event}: a dead wrap's pid is not handed out");
+            assert_eq!(rec.seal.as_deref(), Some("seal"), "{event}: the seal is untouched");
+        }
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+
     #[test]
     fn pi_payload_ceiling_publishes_and_outranks_the_catalog() {
         // pi's extension reports its active model's `contextWindow` on every

@@ -1832,6 +1832,7 @@ mod tests {
             origin: None,
             seal: None,
             sealed_issued_at: None,
+            ever_sealed: None,
             restore: None,
             extra: serde_json::Map::new(),
         }

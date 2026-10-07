@@ -79,6 +79,7 @@ pub(crate) fn session(
         origin: None,
         seal: None,
         sealed_issued_at: None,
+        ever_sealed: None,
         restore: None,
         sources: None,
         native_role: None,

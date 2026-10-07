@@ -676,6 +676,12 @@ pub struct SessionRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub sealed_issued_at: Option<i64>,
+    /// Set by `stamp_seal` the first time a seal lands, and never cleared: the
+    /// daemon never mints a seal over a record that has EVER carried one, so a
+    /// seal that goes missing (hand edit, a bug) can never be laundered into a
+    /// fresh seal over some other pid.
+    #[serde(rename = "everSealed", default, skip_serializing_if = "Option::is_none")]
+    pub ever_sealed: Option<bool>,
     /// Additive/v0-safe (P-C5, durable-sessions plan): a conducted SHELL's
     /// continuously-captured restore snapshot (`RestoreSnapshot`, above) —
     /// cwd/idle/argv/typed off the PTY tick. Absent for every non-shell

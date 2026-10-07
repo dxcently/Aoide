@@ -1249,6 +1249,23 @@ pub fn session_conduct(inv: &Invocation) -> Outcome {
         .get("id")
         .cloned()
         .unwrap_or_else(|| format!("conduct-{}-{}", std::process::id(), unix_ts()));
+    // A conducted id is born once: an existing record that is conductable or
+    // sealed (now or ever) holds a pid no one may hand to another process, so
+    // reusing its id would leave it stranded on the old pid (or invite a
+    // takeover of a dead wrap's identity). A fresh id registers fresh.
+    if let Ok(f) = load_stage::<SessionsFile>(&sessions_path()) {
+        let me = std::process::id();
+        if f.sessions.iter().any(|s| {
+            s.session_id == id
+                && s.pid != Some(me)
+                && (s.conductable == Some(true) || s.seal.is_some() || s.ever_sealed == Some(true))
+        }) {
+            return Outcome::error(
+                cmd,
+                format!("session id `{id}` belongs to an earlier conducted session; pick a new --id (or omit it)"),
+            );
+        }
+    }
     let cwd = std::env::current_dir()
         .ok()
         .map(|p| p.to_string_lossy().into_owned());

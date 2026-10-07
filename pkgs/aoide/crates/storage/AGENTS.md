@@ -24,11 +24,12 @@
 ## Invariants
 
 - **A session record's `pid` moves only through `session::pid_may_move`.**
-  Set when absent, no-op when equal, replaced only when the recorded process is
-  gone (and then `seal`/`sealedIssuedAt` are dropped together). `upsert_session`
-  is the one writer that applies it; a new writer of `SessionRecord.pid` from
-  caller-supplied input must call it too. The seal binds the pid, so a movable
-  live pid is a forgeable seal.
+  Set when absent, no-op when equal; never moved on a record that is
+  conductable, sealed, or `everSealed` (dead or alive); a plain hook record
+  whose process is gone (per `fs::pid_is_alive`, fail-closed) may be replaced.
+  `upsert_session` is the one writer that applies it; a new writer of
+  `SessionRecord.pid` from caller-supplied input must call it too. The seal
+  binds the pid, so a movable pid is a forgeable seal.
 - **`runtime_dir::socket_dir` is a PURE resolution.** It answers a path and
   creates nothing — `tunnel::list_records`' own tests depend on "the `aoide/`
   subdirectory does not exist until a writer makes it", and a resolver that

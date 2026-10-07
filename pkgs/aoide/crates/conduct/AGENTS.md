@@ -106,7 +106,8 @@ in the message.
   arm (`do_session_start` via `upsert_session`) and the existing-record
   refresh go through `aoide_storage::session::pid_may_move`. Anything that
   signals or injects by pid (`session kill`) re-verifies the seal against the
-  live starttime (`terminate_with_key`); lineage-only readers (`eidolon::
+  live starttime (`terminate_with_key`); `conduct --id` refuses an id whose
+  record is conductable or sealed (a conducted id is born once); lineage-only readers (`eidolon::
   resolve_parent`, `resolve_parent_claim`) lean on the pid being immutable
   while the process lives, not on a seal.
 - **The workspace default is stamped ONCE, through ONE seam, at THREE
