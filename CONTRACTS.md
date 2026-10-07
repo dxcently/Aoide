@@ -2554,6 +2554,26 @@ starttime `0`, so a verifier's fresh `/proc` read can never produce a
 matching `0` — a stored `0` cannot be revalidated, not a weaker-but-valid
 seal.**
 
+**A record's `pid` is the kernel's fact, and it never moves by request while
+that process lives.** The seal binds `pid` + `pidStarttime`, and `session
+kill`, the reaper, the claim check and the attested-ancestry walks all read
+it, so no door may rewrite it from caller-supplied text. The one rule
+(`aoide_storage::session::pid_may_move`, applied by `upsert_session` and the
+hook door's refresh): a record's `pid` is set when it has none, is a no-op when
+equal, and is replaced only when the recorded process is GONE (no
+`/proc/<pid>/stat`) — a re-run of the same id — and then `seal` and
+`sealedIssuedAt` are dropped together, since they vouched for the old process.
+A hook payload's `pid` is taken only when it names the hook process or one of
+its own `/proc` ancestors (the harness that fired it); any other value is
+ignored. `session start --id <existing>` never re-seals a sealed record: if
+its seal still verifies against the live process nothing happens, and if it
+does not (the pid moved under it, or the process died) the dispatch is
+refused with a taught error and an `audit`-class `seal_refused` event is
+appended to the events feed. Sealing only ever happens on an UNSEALED record,
+over the pid it holds, once. Residual: a same-uid process can still hand-edit
+`sessions.json`; the hand-edit watcher reports it, and nothing here claims to
+stop it.
+
 **The signing key is NOT `state/identity/`'s on-disk node-wire key.** Under
 OQ1-A (the User-answered threat-model question, LANE IDENTITY's design pass)
 the seal's secrecy rests on PROCESS LIVENESS, not file permissions: `aoided`

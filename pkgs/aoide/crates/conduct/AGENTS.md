@@ -99,6 +99,16 @@ in the message.
 
 ## Invariants
 
+- **The hook door never moves a live record's pid and never trusts a payload
+  pid it cannot vouch for.** `vouched_payload_pid` keeps a payload `pid` only
+  if it is the hook process or one of its `/proc` ancestors (`hook_pid` is the
+  door's own `SO_PEERCRED` stamp on the daemon arm); both the registration
+  arm (`do_session_start` via `upsert_session`) and the existing-record
+  refresh go through `aoide_storage::session::pid_may_move`. Anything that
+  signals or injects by pid (`session kill`) re-verifies the seal against the
+  live starttime (`terminate_with_key`); lineage-only readers (`eidolon::
+  resolve_parent`, `resolve_parent_claim`) lean on the pid being immutable
+  while the process lives, not on a seal.
 - **The workspace default is stamped ONCE, through ONE seam, at THREE
   sites.** `SessionRecord.workspaceProject` (additive, `skip_serializing_if`)
   is written only by `graph/model.rs::observe_workspace` — the same seam

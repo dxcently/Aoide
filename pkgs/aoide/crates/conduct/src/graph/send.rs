@@ -57,6 +57,7 @@ use aoide_protocol::{Door, Invocation};
 use aoide_protocol::output::Outcome;
 use aoide_storage::addr::{self, LocalCandidate, Resolution};
 use aoide_storage::fs::{conducting_stage_dir, with_stage_lock};
+use aoide_storage::session::pid_may_move;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -1685,6 +1686,16 @@ fn payload_pid(payload: &Value) -> Option<u32> {
         .and_then(|p| u32::try_from(p).ok())
 }
 
+/// The payload's self-reported pid, kept only when this hook process's own
+/// kernel ancestry vouches for it: the harness that fires a hook is the
+/// hook's own parent chain, so a pid outside `hook_pid`'s `/proc` ancestry is
+/// someone else's process named by whoever wrote the payload, and is dropped.
+/// No `hook_pid` (no door-stamped peer) vouches for nothing.
+fn vouched_payload_pid(payload: &Value, hook_pid: Option<i32>) -> Option<u32> {
+    let reported = payload_pid(payload)?;
+    pid_ancestry(hook_pid?).contains(&i32::try_from(reported).ok()?).then_some(reported)
+}
+
 /// A hook payload's self-reported `context_ceiling` — the active model's
 /// context-window size in tokens, straight from the harness's own model
 /// catalog (pi's extension reads `ctx.getContextUsage().contextWindow`).
@@ -1822,7 +1833,7 @@ fn hook_ensure_session_with(
     if let Some(w) = attested.as_deref() {
         stamp_attested_parent(id, w);
     }
-    let reported = payload_pid(payload);
+    let reported = vouched_payload_pid(payload, hook_pid);
     let existing = load_stage::<SessionsFile>(&sessions_path()).ok();
     let exists = existing
         .as_ref()
@@ -1830,6 +1841,7 @@ fn hook_ensure_session_with(
         .unwrap_or(false);
     if exists {
         if let Some(pid) = reported {
+            // Moves a pid only where `pid_may_move` allows: a live pid stays.
             // The write takes the SAME stage lock every other stage writer
             // holds (do_session_phase, refresh_transcript_fields, the reaper):
             // an unlocked read-modify-write here raced the locked writers and
@@ -1845,8 +1857,10 @@ fn hook_ensure_session_with(
                 if let Some(s) = file
                     .sessions
                     .iter_mut()
-                    .find(|s| s.session_id == id && s.pid != Some(pid))
+                    .find(|s| s.session_id == id && s.pid != Some(pid) && pid_may_move(s, pid))
                 {
+                    s.seal = None;
+                    s.sealed_issued_at = None;
                     s.pid = Some(pid);
                     if file.schema_version.is_empty() {
                         file.schema_version = STAGE_GRAPH_VERSION.to_string();
@@ -2062,7 +2076,7 @@ fn hook_for_profile_gated(
             // else (a fresh id, `idle`, `stopped`, `done`) is a settled
             // boundary.
             let mid_turn = stored_phase(&id) == "working";
-            let pid = payload_pid(&payload).or(discovered);
+            let pid = vouched_payload_pid(&payload, hook_pid).or(discovered);
             let out = do_session_start(
                 &id,
                 Some(profile.name),
@@ -6195,6 +6209,9 @@ mod tests {
         // self-reports `process.pid`; the door must store THAT as the
         // session's pid (at Start AND as a refresh on any later hook), so the
         // reaper's /proc signal fires when the agent dies, terminal or not.
+        // The pid is only taken when it names the hook process or one of its
+        // ancestors (`vouched_payload_pid`): here the test process is the hook
+        // and its parent stands in for the harness.
         let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var("AOIDE_STAGE_DIR").ok();
         let stage = unique_stage("pi-pid");
@@ -6204,12 +6221,14 @@ mod tests {
         // SessionStart with a self-reported pid: the record anchors on it (the
         // discovered terminal window is still stamped; the payload only
         // overrides the pid).
+        let me = std::process::id();
+        let harness = pid_ancestry(me as i32).get(1).copied().expect("a parent") as u32;
         hook_for_profile(
             pi,
-            r#"{ "session_id": "p9", "hook_event_name": "SessionStart", "cwd": "/proj", "pid": 4242 }"#,
+            &format!(r#"{{ "session_id": "p9", "hook_event_name": "SessionStart", "cwd": "/proj", "pid": {harness} }}"#),
         );
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
-        assert_eq!(s.sessions[0].pid, Some(4242));
+        assert_eq!(s.sessions[0].pid, Some(harness));
 
         // Refresh: a record born with a terminal pid converges to the reported
         // pid on its next hook — the self-heal for pre-seam records, so a live
@@ -6221,18 +6240,18 @@ mod tests {
             session_id: "old".into(),
             agent: "pi".into(),
             state: "idle".into(),
-            pid: Some(7),
+            pid: Some(2_000_000_000),
             ..Default::default()
         });
         write_stage(&sessions_path(), &f).unwrap();
         hook_for_profile(
             pi,
-            r#"{ "session_id": "old", "hook_event_name": "UserPromptSubmit", "user_prompt": "hi", "pid": "5150" }"#,
+            &format!(r#"{{ "session_id": "old", "hook_event_name": "UserPromptSubmit", "user_prompt": "hi", "pid": "{harness}" }}"#),
         );
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
         assert_eq!(
             s.sessions.iter().find(|x| x.session_id == "old").unwrap().pid,
-            Some(5150)
+            Some(harness)
         );
 
         // A payload WITHOUT pid (claude/kimi) never rewrites the stored pid.
@@ -6240,8 +6259,79 @@ mod tests {
         let s: SessionsFile = load_stage(&sessions_path()).unwrap();
         assert_eq!(
             s.sessions.iter().find(|x| x.session_id == "old").unwrap().pid,
-            Some(5150)
+            Some(harness)
         );
+
+        match saved {
+            Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),
+            None => std::env::remove_var("AOIDE_STAGE_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&stage);
+    }
+    /// The repoint attack, step 1 (pid-trust lane): a payload naming ANOTHER
+    /// live process's pid must not move a live record's pid — even when that
+    /// pid is a real ancestor of the hook — and a pid outside the hook's own
+    /// ancestry is ignored outright, on a fresh registration too.
+    #[test]
+    fn a_hook_payload_cannot_repoint_a_live_records_pid() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var("AOIDE_STAGE_DIR").ok();
+        let stage = unique_stage("hook-repoint");
+        std::env::set_var("AOIDE_STAGE_DIR", &stage);
+        let me = std::process::id();
+        let parent = pid_ancestry(me as i32).get(1).copied().expect("a parent") as u32;
+        let pid_of = |id: &str| {
+            load_stage::<SessionsFile>(&sessions_path())
+                .unwrap()
+                .sessions
+                .iter()
+                .find(|s| s.session_id == id)
+                .and_then(|s| s.pid)
+        };
+        let seed = |id: &str, pid: Option<u32>| {
+            let mut f: SessionsFile = load_stage(&sessions_path()).unwrap_or_default();
+            f.sessions.push(SessionRecord {
+                session_id: id.into(),
+                agent: "claude".into(),
+                state: "idle".into(),
+                pid,
+                conductable: Some(true),
+                seal: pid.map(|_| "seal".to_string()),
+                sealed_issued_at: pid.map(|_| 1),
+                ..Default::default()
+            });
+            write_stage(&sessions_path(), &f).unwrap();
+        };
+
+        // A live wrap `w` at `me`; the "attacker" payload names the parent.
+        seed("w", Some(me));
+        hook_from_str(&format!(
+            r#"{{ "session_id": "w", "hook_event_name": "UserPromptSubmit", "pid": {parent} }}"#
+        ));
+        assert_eq!(pid_of("w"), Some(me), "a live pid never moves by payload");
+        hook_from_str(&format!(
+            r#"{{ "session_id": "w", "hook_event_name": "SessionStart", "cwd": "/p", "pid": {parent} }}"#
+        ));
+        assert_eq!(pid_of("w"), Some(me), "nor through the Start arm's upsert");
+
+        // A payload pid outside the hook's ancestry is ignored: a fresh
+        // registration falls back to discovery (none here), a pid-less record
+        // stays pid-less.
+        seed("loose", None);
+        hook_from_str(
+            r#"{ "session_id": "loose", "hook_event_name": "UserPromptSubmit", "pid": 2000000000 }"#,
+        );
+        assert_eq!(pid_of("loose"), None, "a pid the hook does not run under is ignored");
+        hook_from_str(
+            r#"{ "session_id": "fresh", "hook_event_name": "SessionStart", "cwd": "/p", "pid": 2000000000 }"#,
+        );
+        assert_ne!(pid_of("fresh"), Some(2_000_000_000), "nor taken at registration");
+
+        // The legit fill: the same record, a pid the hook DOES run under.
+        hook_from_str(&format!(
+            r#"{{ "session_id": "loose", "hook_event_name": "UserPromptSubmit", "pid": {parent} }}"#
+        ));
+        assert_eq!(pid_of("loose"), Some(parent), "a pid-less record takes its harness pid");
 
         match saved {
             Some(v) => std::env::set_var("AOIDE_STAGE_DIR", v),

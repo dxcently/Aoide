@@ -500,6 +500,47 @@ mod tests {
         assert!(!status.success());
     }
 
+    /// The kill-steering attack: a record whose pid was repointed at another
+    /// same-uid process (its seal still binds the original) must not signal
+    /// that process; the real wrap, sealed over its own pid, still dies.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn a_repointed_record_cannot_steer_kill_to_a_foreign_process() {
+        let spawn = || std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let (mut wrap, mut foreign) = (spawn(), spawn());
+        let key = aoide_storage::identity::mint_ephemeral().unwrap();
+        let mut record = rec("w");
+        record.pid = Some(wrap.id());
+        record.sealed_issued_at = Some(123);
+        record.seal = Some(aoide_storage::sealed_id::mint_seal(
+            &key,
+            &aoide_storage::sealed_id::SealedIdentity {
+                session_id: "w".into(),
+                pid: wrap.id() as i32,
+                pid_starttime: aoide_storage::attest::pid_starttime(wrap.id() as i32).unwrap(),
+                origin_class: String::new(),
+                issued_at: 123,
+            },
+        ));
+
+        let mut repointed = record.clone();
+        repointed.pid = Some(foreign.id());
+        let steered = terminate_with_key(&repointed, &key.info().pubkey_hex);
+        let foreign_alive = foreign.try_wait().unwrap().is_none();
+        let genuine = terminate_with_key(&record, &key.info().pubkey_hex);
+
+        let _ = foreign.kill();
+        let _ = foreign.wait();
+        if genuine.is_err() {
+            let _ = wrap.kill();
+        }
+        let wrap_status = wrap.wait().unwrap();
+        assert!(steered.is_err(), "a repointed record must not verify");
+        assert!(foreign_alive, "the foreign process was never signalled");
+        assert!(genuine.is_ok(), "{genuine:?}");
+        assert!(!wrap_status.success(), "the real wrap was terminated");
+    }
+
     #[test]
     fn project_assignment_validates_before_write_and_clear_preserves_cwd() {
         let _lock = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());

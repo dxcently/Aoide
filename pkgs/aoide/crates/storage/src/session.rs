@@ -16,6 +16,20 @@ use crate::records::{HookRecord, SessionRecord};
 use aoide_protocol::agents::CLAUDE_PROFILE;
 use serde_json::Map;
 
+/// May `rec`'s recorded pid become `new`? A record's pid is the kernel's fact
+/// about which process the session IS (the daemon's seal binds it, `kill`
+/// signals it, the reaper watches it), so it never moves by request while that
+/// process lives: only a pid-less record is filled, an equal pid is a no-op,
+/// and a pid whose process is gone (a re-run of the same id) is replaced. The
+/// caller drops the seal when the pid does move.
+pub fn pid_may_move(rec: &SessionRecord, new: u32) -> bool {
+    match rec.pid {
+        None => true,
+        Some(old) if old == new => true,
+        Some(old) => crate::attest::pid_starttime(old as i32).is_none(),
+    }
+}
+
 /// UPSERT a session record by id (pure; the handler wires I/O around it).
 ///
 /// A fresh id is inserted `state="idle"` (at rest until a prompt/tool or a
@@ -23,7 +37,8 @@ use serde_json::Map;
 /// defaulting to `claude`. A re-start of an existing id updates only the fields
 /// provided (a `None` leaves the stored value), leaves the live `state`
 /// untouched (a resume must not reset a working session), and NEVER clobbers
-/// `startedAt` — the record is bounded to one per id, never duplicated. Returns
+/// `startedAt` — the record is bounded to one per id, never duplicated. A
+/// supplied `pid` lands only where [`pid_may_move`] allows. Returns
 /// `true` when a new record was inserted.
 #[allow(clippy::too_many_arguments)]
 pub fn upsert_session(
@@ -62,7 +77,14 @@ pub fn upsert_session(
             s.title = Some(t.to_string());
         }
         if let Some(p) = pid {
-            s.pid = Some(p);
+            if pid_may_move(s, p) {
+                if s.pid != Some(p) {
+                    // The seal binds the OLD pid; it names nothing now.
+                    s.seal = None;
+                    s.sealed_issued_at = None;
+                }
+                s.pid = Some(p);
+            }
         }
         // A re-start (hook SessionStart on resume/compact, or a re-run `graph
         // session start`) must NOT reset the live state — a working/awaiting
@@ -246,6 +268,51 @@ mod tests {
         let petname_key = format!("\"petname\":\"{}\"", minted.unwrap());
         assert!(before.contains(&petname_key), "before: {before}");
         assert!(after.contains(&petname_key), "the serialized petname changed across an update: {after}");
+    }
+
+    fn live_pid_record(pid: u32, sealed: bool) -> SessionRecord {
+        SessionRecord {
+            session_id: "w".into(),
+            agent: "claude".into(),
+            state: "idle".into(),
+            pid: Some(pid),
+            seal: sealed.then(|| "seal".to_string()),
+            sealed_issued_at: sealed.then_some(1),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn upsert_session_never_moves_the_pid_of_a_live_record() {
+        let me = std::process::id();
+        let mut sessions = vec![live_pid_record(me, true)];
+        upsert_session(&mut sessions, "w", None, None, None, None, None, None, None, Some(me + 1), "t");
+        assert_eq!(sessions[0].pid, Some(me));
+        assert_eq!(sessions[0].seal.as_deref(), Some("seal"), "a refused move keeps the seal");
+    }
+
+    #[test]
+    fn upsert_session_reregistering_the_same_pid_keeps_the_seal() {
+        let me = std::process::id();
+        let mut sessions = vec![live_pid_record(me, true)];
+        upsert_session(&mut sessions, "w", None, None, None, None, None, None, None, Some(me), "t");
+        assert_eq!(sessions[0].seal.as_deref(), Some("seal"));
+    }
+
+    #[test]
+    fn upsert_session_replaces_a_dead_pid_and_drops_its_seal() {
+        let mut sessions = vec![live_pid_record(2_000_000_000, true)];
+        let me = std::process::id();
+        upsert_session(&mut sessions, "w", None, None, None, None, None, None, None, Some(me), "t");
+        assert_eq!(sessions[0].pid, Some(me));
+        assert_eq!((sessions[0].seal.as_deref(), sessions[0].sealed_issued_at), (None, None));
+    }
+
+    #[test]
+    fn upsert_session_fills_a_pidless_record() {
+        let mut sessions = vec![SessionRecord { session_id: "w".into(), ..Default::default() }];
+        upsert_session(&mut sessions, "w", None, None, None, None, None, None, None, Some(7), "t");
+        assert_eq!(sessions[0].pid, Some(7));
     }
 
     #[test]
