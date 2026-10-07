@@ -2089,6 +2089,22 @@ by `aoide graph link` (cycle-checked), cleared by `aoide session prune` when the
 parent is removed. Absent means "no spawned-by edge"; readers must tolerate
 both forms, and rewriters must round-trip fields they do not know.
 
+**`attestedSpawner` — which parent the kernel confirmed.** A session record MAY
+carry an optional `attestedSpawner` (string): the parent id that
+`aoide conduct`'s registration saw in its OWN `/proc` ancestry — the parent
+record's pid was really above the registering process, or the parent is the
+agent whose `hookAncestry` it matched (`window::spawner_is_attested`). It is a
+birth fact stamped by the registering process, set or cleared on every
+registration, and holds the id itself rather than a flag: `parentSessionId` can
+be rewritten by a bare `session start --parent` with no evidence at all, and a
+reader trusts the edge only while `attestedSpawner == parentSessionId`. It
+exists because a detached `aoide spawn` leaves its child reparented to init, so
+the ancestry cannot be re-derived later. Absent for every parent the kernel did
+not back (an explicit `--parent` or ambient `AOIDE_SESSION_ID` naming a session
+the registering process does not run beneath, and every wrap registered by
+`aoide wrap`) and every record predating it; additive, round-tripped like every
+unknown field.
+
 **`remoteParent` — the SAME edge across machines, deliberately a SECOND
 field.** A session record MAY carry an optional `remoteParent` object,
 `{node, key, sessionId}`: the session that spawned it on ANOTHER node.
@@ -3409,15 +3425,19 @@ There is no command that reads or edits it: it is a cursor, not a queue.
 `updatedAt` verbatim, and `silent` — absent while false — the latch that the
 12-minute silence line was sent for that `at`. A hook event is a `phase` or
 `at` that differs from the cursor's; it re-arms `silent`. The decision over it:
-`awaiting` is claimed on ENTERING that phase (a restamp of it is not another
-entry); `settled` when the cursor last held `working` or `awaiting` and the
-record now reads `stopped` or `idle` (a child first seen already stopped, and
-the later `stopped`→`idle` decay, say nothing); `silent` when the record reads
-`working` and its `at` is at least 12 minutes old. `hooks.json` carries no
-reason for a state, so the `awaiting` line names the session record's own
-`activity` (the tool in flight, widened to the `tool` label when that names
-the same tool), and nothing when none is in flight. A reader that does not know `hook` ignores
-it. A child whose session leaves the roster drops out on the same pass.
+the first examination of a child (no `hook` yet) is a baseline and claims
+nothing; `awaiting` is claimed on ENTERING that phase (a restamp of it is not
+another entry); `settled` when the cursor last held `working` or `awaiting`
+and the record now reads `stopped` or `idle` (the later `stopped`→`idle` decay
+says nothing); `silent` when the record reads `working` and its `at` is at
+least 12 minutes and under 24 hours old. `hooks.json` carries no reason for a
+state, so the `awaiting` line has none. The line goes to the child's SPAWNER,
+never to its `parentSessionId` (a hook child's own host wrap): the host wrap
+must be a conducted wrap whose pid is in the child's `hookAncestry`, and its
+`parentSessionId` counts only while it equals its `attestedSpawner` (§
+`sessions.json`). A child with no such recipient is not tracked and has no
+entry. A reader that does not know `hook` ignores it. A child whose session
+leaves the roster drops out on the same pass.
 
 ### `state/stage/remote-children.json` — **v0**
 

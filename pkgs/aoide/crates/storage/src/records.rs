@@ -521,6 +521,22 @@ pub struct SessionRecord {
     /// terminal a human opened themselves.
     #[serde(default, skip_serializing_if = "is_false")]
     pub spawned: bool,
+    /// The parent id the registering process's own kernel ancestry CONFIRMED
+    /// when this record was registered by `aoide conduct` (`window::
+    /// spawner_is_attested`): the claimed parent's pid, or an agent's
+    /// `hookAncestry`, was really above the registering process in `/proc`.
+    /// A birth fact stamped beside `headless`/`spawned`, holding the id itself
+    /// rather than a flag so a later `session start --parent <other>` — which
+    /// rewrites `parentSessionId` on an existing id without any evidence —
+    /// can never inherit it: a reader trusts the edge only while
+    /// `attestedSpawner == parentSessionId`. It is how a detached spawn's edge
+    /// (`aoide spawn` leaves its child reparented to init, so no live `/proc`
+    /// walk can re-derive it) stays checkable later; the ping-back's hook
+    /// source speaks only for such an edge. Absent for every unconfirmed
+    /// parent (an explicit `--parent` or ambient env the kernel did not back)
+    /// and every legacy record. Additive/v0-safe.
+    #[serde(rename = "attestedSpawner", default, skip_serializing_if = "Option::is_none")]
+    pub attested_spawner: Option<String>,
     /// True while this session is EXEMPT from the reaper's staleness
     /// judgments (task #20, `aoide session grant exempt on|off`) — the
     /// safety valve for `session reap --now`, which otherwise takes every

@@ -184,6 +184,7 @@ pub fn upsert_session(
             seal: None,
             sealed_issued_at: None,
             ever_sealed: None,
+            attested_spawner: None,
             // Stamped later by the PTY tick's `conduct_refresh_shell`
             // (P-C5), only for a conducted SHELL; a fresh registration has
             // not ticked yet.

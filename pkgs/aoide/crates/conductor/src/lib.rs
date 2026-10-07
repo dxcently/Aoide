@@ -1833,6 +1833,7 @@ mod tests {
             seal: None,
             sealed_issued_at: None,
             ever_sealed: None,
+            attested_spawner: None,
             restore: None,
             extra: serde_json::Map::new(),
         }

@@ -80,6 +80,7 @@ pub(crate) fn session(
         seal: None,
         sealed_issued_at: None,
         ever_sealed: None,
+        attested_spawner: None,
         restore: None,
         sources: None,
         native_role: None,
