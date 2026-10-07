@@ -23,6 +23,7 @@
   dendrites.obsidian.enable = true;
   dendrites.qbittorrent.enable = true;
   dendrites.inference.enable = true;
+  dendrites.tailscale.enable = true;
 
   # ── Who paints a wallpaper pick ────────────────────────────────────────────
   # The compositor line's twin: the aggregation ships the shell's own layer as

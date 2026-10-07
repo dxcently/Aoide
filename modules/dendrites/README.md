@@ -7,7 +7,7 @@ self-gates on its own `aoide.<name>.enable`. Today's set spans desktop apps
 mcfly, nh), agent and desktop AI tooling (claude-code, eidolon, kimi-code,
 pi-coding-agent, OpenAI Codex + ChatGPT), local model-serving tooling
 (inference: Ollama + llama.cpp), system services (dunst, networkmanager,
-audio), and **the paint lanes** — what makes a machine paint at all:
+tailscale, audio), and **the paint lanes** — what makes a machine paint at all:
 `compositor` (with its `hyprland` provider), `greeter`, `stylix`, `quickshell`
 (the shell runtime: the package and the one `aoide-quickshell` service), `lyra`
 (the Quickshell surface, its shellbridge, and the song-gated deploy half) and
