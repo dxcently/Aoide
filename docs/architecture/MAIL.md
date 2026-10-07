@@ -1260,7 +1260,10 @@ authoritative first:
   box's own mailbase for this exact `msgid` (the ack mechanics: "Wire"
   and "Delivery and the doorbell" above). Never inferred from the
   entry's own absence — an entry can vanish for other reasons too
-  (`aoide mail outbox rm`), so absence alone is never read as delivery.
+  (`aoide mail outbox rm`), so absence alone is never read as delivery. The
+  receipt also retires the entry, so `aoide mail outbox` lists only letters
+  still waiting; once delivered, the receipt line in the sender's mailbase is
+  where it shows.
 - `accepted` — the peer's own deposit response said accepted or
   duplicate, but no ack has landed yet (`ackPending: true`). A LATER,
   unrelated link failure rides beside it — reason and `nextAttemptAt`

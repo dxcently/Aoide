@@ -94,8 +94,11 @@ and state, and `aoide.config.settings` is whole-file-or-nothing
    aoide mesh charter sign home
    ```
 
-   Expected: a new version, one `charter` letter spooled per other node. yomi
-   shows `NOT DIALLED` or `poll-only`: it is reached by its own ask.
+   Expected: a new version, one `charter` letter per other node, each spooled
+   toward the hop the route picks and reported per node. A `poll` node (yomi-strix)
+   reads `held at sakaki for yomi-strix's ask`: the letter was handed to the relay
+   and waits there for yomi's own `aoide mail poll`. A line reading `NOT DIALLED`
+   or `queued` says why the letter did not leave and is where to look first.
 2. osaka: carry the signed pair to yomi by file (a charter reaches a node off
    the LAN by file or by letter, HTTPS-MESH-API.md "Charters" step 4):
 
@@ -190,7 +193,8 @@ aoide mail outbox sakaki --json
 ```
 
 Expected: one entry for that `msgid`, `delivery.status` `accepted` once the
-deposit to `https://aoide.necoconeco.net` answered `accepted`.
+deposit to `https://aoide.necoconeco.net` answered `accepted`. `mail outbox`
+lists only entries still waiting: a delivered letter leaves it.
 
 sakaki (over ssh from osaka):
 
@@ -215,11 +219,13 @@ osaka (the receipt waits at the relay for osaka's ask):
 ```sh
 aoide mail poll sakaki
 aoide mail outbox sakaki --json
+grep '"type":"receipt"' $AOIDE_ROOT/state/mail/base.jsonl | grep -c <msgid of T1>
 ```
 
-Expected: `1 envelope(s) filed` (the receipt), then the T1 entry reads
-`delivery.status` `delivered`. Not `accepted`: delivered means a
-destination-signed receipt is in osaka's own mailbase (MAIL.md Status).
+Expected: `1 envelope(s) filed` (the receipt), the T1 entry gone from the outbox
+listing, and the count `1`. Delivered means a destination-signed receipt is in
+osaka's own mailbase (MAIL.md Status): the receipt retires the entry, so the
+mailbase line, not an outbox row, is what shows it.
 
 ## 4. T2: yomi to osaka, the same way
 
@@ -242,8 +248,9 @@ aoide mail read --for conductor
 ```
 
 Expected: the text `$M yomi-to-osaka`. Then on yomi, after its next timer
-tick (or `aoide mail poll sakaki`): `aoide mail outbox sakaki --json` reads
-`delivered`.
+tick (or `aoide mail poll sakaki`): the T2 entry is gone from
+`aoide mail outbox sakaki`, and `grep '"type":"receipt"'
+$AOIDE_ROOT/state/mail/base.jsonl | grep -c <msgid of T2>` is `1`.
 
 ## 5. T3: an unsigned request is refused
 
@@ -255,9 +262,20 @@ curl -sS https://aoide.necoconeco.net/ -H 'content-type: application/json' \
 ```
 
 Expected: HTTP 200 with a JSON-RPC `error`, code `-32010`, message starting
-`mail poll refused:` and naming a verified, per-request SIGNED request
-(`a2a.rs::poll_refusal`). No `result`, no envelope. The same shape for
-`aoide/mailDeposit` with `"params":{"container":{}}`: `mail deposit refused`.
+`mail poll refused:`. `home` is a charter mesh, so the sentence is the charter's
+(`a2a.rs::charter_refusal`: the charter is what grants in it, and the caller's
+line carries no `message`); the "verified, per-request SIGNED request" wording
+is the answer in a pair mesh (`poll_refusal`). No `result`, no envelope. An
+empty container is refused the same way, whatever the params hold, because the
+caller is judged before they are read:
+
+```sh
+curl -sS https://aoide.necoconeco.net/ -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"aoide/mailDeposit","params":{"container":{}}}'
+```
+
+Expected: code `-32010`, message starting `mail deposit refused:`, never an
+`invalid params` answer.
 sakaki:
 
 ```sh
@@ -306,8 +324,10 @@ jq -r '.container | {purpose, msgid, mesh, to: .to.node, ct_bytes: (.ct|length)}
 Expected: the marker and the mailbox name appear nowhere; the container shows
 `ct` as an opaque string and only routing facts beside it (node names, msgid,
 mesh, size). A `type=transit` line in `state/mail/base.jsonl` holds metadata
-and no body (MAIL.md Store). After yomi acks, the entry leaves the spool: the
-`jq` glob matches nothing. The relay sees who wrote to whom, when and how
+and no body (MAIL.md Store). The entry leaves the spool on the poll AFTER the
+one that took the letter: yomi's poll that files it records the msgid, and the
+next poll carries that acknowledgement to the relay, which then retires its
+custody. After that second poll the `jq` glob matches nothing. The relay sees who wrote to whom, when and how
 large, and that is its documented ceiling.
 
 ## 8. T6: `down` and `hold`
@@ -316,7 +336,8 @@ Each declaration is edited into `charters/home.toml` on osaka and signed with
 `aoide mesh charter sign home`. Every sign bumps the version.
 
 **Down (kept, refused, released).** First queue a letter yomi has not taken:
-stop the timer (`systemctl --user stop aoide-h1-poll.timer` on yomi), then on osaka:
+stop the timer (`systemctl --user stop aoide-h1-poll.timer` on yomi; a
+`systemd-run` transient timer is removed when it stops), then on osaka:
 
 ```sh
 aoide mail send --to yomi-strix/conductor -- "$M queued-before-down"
@@ -340,10 +361,12 @@ On sakaki the queued container is still in `state/outbox/yomi-strix/`: a
 letter already queued for a `down` node is KEPT. On yomi, `aoide mail poll
 sakaki` is refused by the relay naming `down` (the caller's own `down` is
 refused at the door; yomi still holds the earlier charter and does not know).
-Then remove the `[status]` table, sign, and restart yomi's timer:
+Then remove the `[status]` table, sign, and create yomi's timer again with the
+line from section 1, step 5 (the stopped transient timer no longer exists):
 
 ```sh
-systemctl --user start aoide-h1-poll.timer   # on yomi: the timer stopped above runs again
+systemd-run --user --unit=aoide-h1-poll --setenv=PATH="$PATH" \
+  --on-active=5s --on-unit-active=30s "$(command -v aoide)" mail poll sakaki   # on yomi
 aoide mail poll sakaki          # on yomi
 aoide mail read --for conductor # on yomi: "$M queued-before-down" arrives, the same msgid, never re-minted
 ```
@@ -367,15 +390,16 @@ aoide mail send --to yomi-strix/conductor -- "$M held"
 aoide mail outbox sakaki --json          # the entry is hold-flavored; the deposit is never attempted
 ```
 
-and sakaki's log shows no `mailDeposit` from osaka for it. The entry leaves
-only by sakaki's own mailPoll of osaka, which a `poll` osaka never receives:
-this is the specified behaviour, and so the cleanup is by hand. Remove the
-`[status]` table, sign, then on osaka list and drop the held entries (the
-`held` letter and the charter letter signed under the declaration):
+and sakaki's log shows no `mailDeposit` from osaka for the ordinary letter. The
+entry leaves only by sakaki's own mailPoll of osaka, which a `poll` osaka never
+receives: this is the specified behaviour. A `charter` letter is the exception
+(MAIL.md Status): the charter letter signed under the hold is deposited at the
+held relay and applied there, so it needs no cleaning. Remove the `[status]`
+table and sign, then on osaka drop the one held ordinary letter:
 
 ```sh
 aoide mail outbox sakaki
-aoide mail outbox rm <msgid>             # each held entry
+aoide mail outbox rm <msgid>             # the held `$M held` entry
 ```
 
 The declaration that no longer holds is read by the next send: a fresh
