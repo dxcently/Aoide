@@ -239,7 +239,9 @@ QtObject {
     // toggleRiceMode: no reply, and the outcome is a toast the daemon fires.
     // `enter` and `new` from the locked declarative mode unlock it first, so a
     // caller re-reads stage/mode.json and riceDrafts to see what happened. Only
-    // `enter` takes a name — the daemon refuses `new` and `save` carrying one.
+    // `enter` takes a name, and a missing or empty one is sent as no name at all,
+    // so the daemon drops the line instead of entering a draft called "undefined".
+    // The daemon also refuses `new` and `save` carrying one.
     function riceDrafts(callback) {
         _ask({ cmd: "ricedrafts" }, callback,
              { ok: false, reason: "no-client", message: "shellbridge client unavailable" })
@@ -247,8 +249,8 @@ QtObject {
 
     function riceDraft(action, name) {
         var wanted = { cmd: "ricedraft", action: "" + action }
-        if (action === "enter")
-            wanted.name = "" + name
+        if (action === "enter" && typeof name === "string" && name.length > 0)
+            wanted.name = name
         sendCommand(wanted)
     }
 

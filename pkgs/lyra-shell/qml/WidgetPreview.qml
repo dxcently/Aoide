@@ -257,11 +257,14 @@ ShellRoot {
             })
         }
         // The picker's gesture — only logs, like sendCommand: the real one is
-        // fire-and-forget and its outcome is a daemon toast.
+        // fire-and-forget and its outcome is a daemon toast. The logged line is
+        // the one ShellBridge.riceDraft would send: a name only for a non-empty
+        // string on `enter`.
         function riceDraft(action, name) {
-            canvas.log("bridge.riceDraft " + JSON.stringify({
-                action: "" + action, name: action === "enter" ? "" + name : undefined
-            }))
+            var wanted = { action: "" + action }
+            if (action === "enter" && typeof name === "string" && name.length > 0)
+                wanted.name = name
+            canvas.log("bridge.riceDraft " + JSON.stringify(wanted))
         }
         // The trace query stub — same signature and callback contract as
         // ShellBridge.traceSession, answering canned steps ASYNCHRONOUSLY
