@@ -904,14 +904,29 @@ fn draw_roster(f: &mut Frame, area: Rect, app: &App) {
     // A stateful list (P-C5 adds selection to C4's read-only pane) — same
     // shape [`draw_sessions`] uses over the DAG's flattened rows.
     let pal = &app.palette;
-    let items: Vec<ListItem> = rows.iter().map(|r| roster_row_item(r, pal)).collect();
+    // While the last probe failed every row is the previous probe's, so the
+    // whole list reads muted beneath the fetch line that says so.
+    let stale = app.roster_probe_failed().is_some();
+    let items: Vec<ListItem> = rows.iter().map(|r| roster_row_item(r, pal, stale)).collect();
     let list = List::new(items).highlight_style(selection_style(app));
     let mut state = ListState::default();
     state.select(Some(app.roster_sel.min(rows.len().saturating_sub(1))));
     f.render_stateful_widget(list, parts[3], &mut state);
 }
 
-fn roster_row_item<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette) -> ListItem<'a> {
+fn roster_row_item<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette, stale: bool) -> ListItem<'a> {
+    let item = roster_row_line(row, pal);
+    if stale {
+        let muted = theme::muted(pal);
+        ListItem::new(Line::from(
+            item.spans.into_iter().map(|s| Span::styled(s.content, muted)).collect::<Vec<_>>(),
+        ))
+    } else {
+        ListItem::new(item)
+    }
+}
+
+fn roster_row_line<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette) -> Line<'a> {
     match row {
         crate::app::RosterRow::NodeHeader {
             name,
@@ -938,15 +953,15 @@ fn roster_row_item<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette) -
                 Some(false) => format!("  unverified (no pairing on record) · grants {grants}"),
                 None => "  no registry record".to_string(),
             };
-            ListItem::new(Line::from(vec![
+            Line::from(vec![
                 Span::styled(head, Style::default().add_modifier(Modifier::BOLD)),
                 Span::styled(trust, theme::dim()),
-            ]))
+            ])
         }
-        crate::app::RosterRow::Drift { mesh, node, label } => ListItem::new(Line::from(vec![
+        crate::app::RosterRow::Drift { mesh, node, label } => Line::from(vec![
             Span::raw(format!("  drift {mesh}: {node} — ")),
             Span::styled(label.clone(), theme::dim()),
-        ])),
+        ]),
         crate::app::RosterRow::Session {
             session: s,
             is_last,
@@ -956,26 +971,24 @@ fn roster_row_item<'a>(row: &crate::app::RosterRow, pal: &crate::app::Palette) -
             // state it carries is what the far node last said, not what it
             // is doing now.
             if s.is_cached() {
-                return ListItem::new(Line::from(vec![
+                return Line::from(vec![
                     Span::raw(format!("  {branch}")),
                     Span::styled(
                         format!("· {}  {} · was {}", s.label, s.presence, s.state),
-                        theme::dim(),
+                        theme::muted(pal),
                     ),
-                ]));
+                ]);
             }
             let st = theme::state_style(&s.state, pal);
             let sg = theme::state_glyph(&s.state);
-            ListItem::new(Line::from(vec![
+            Line::from(vec![
                 Span::raw(format!("  {branch}")),
                 Span::styled(format!("{sg} "), st),
                 Span::raw(format!("{}  ", s.label)),
                 Span::styled(s.state.clone(), st),
-            ]))
+            ])
         }
-        crate::app::RosterRow::Empty => {
-            ListItem::new(Line::from("     (no sessions)").style(theme::dim()))
-        }
+        crate::app::RosterRow::Empty => Line::from("     (no sessions)").style(theme::dim()),
     }
 }
 
@@ -1999,6 +2012,24 @@ mod tests {
             local_pos < node_pos,
             "local box renders before nodes: {out}"
         );
+    }
+
+    #[test]
+    fn roster_rows_read_muted_while_the_last_probe_failed() {
+        let mut a = App::for_test(vec![], vec![], vec![]);
+        a.panel = Panel::Roster;
+        a.absorb_roster_outcome(roster_fixture());
+        a.absorb_roster_outcome(aoide_protocol::output::Outcome::error("session", "HTTP 000"));
+        let backend = TestBackend::new(100, 30);
+        let mut term = Terminal::new(backend).unwrap();
+        term.draw(|f| draw(f, &a)).unwrap();
+        let buf = term.backend().buffer();
+        let out = dump(buf);
+        assert!(out.contains("probe failed"), "{out}");
+        let muted = theme::muted(&a.palette).fg.unwrap();
+        let row = out.lines().position(|l| l.contains("brave-otter")).unwrap() as u16;
+        let col = out.lines().nth(row as usize).unwrap().find("brave-otter").unwrap() as u16;
+        assert_eq!(buf[(col, row)].fg, muted, "the live row's label reads muted while the probe is failed");
     }
 
     #[test]

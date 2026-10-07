@@ -113,16 +113,21 @@
   use `App::stage`; palette notes use `App::rice_stage`. Historical ledger,
   mail and audit paths use their existing owning APIs.
 - Roster probes remain bounded and asynchronous; refresh throttling must
-  not freeze input. The probe is the one read that bypasses `DispatchFn`:
-  it calls `aoide_conduct::graph::session_roster` through `App::roster_fn`
-  (tests inject `for_test_with_roster`), because a tick-driven read must
-  not write an audit record every fifteen seconds. A cached session row
+  not freeze input. The tick's probe is the one read that bypasses
+  `DispatchFn`: it calls `aoide_conduct::graph::session_roster` through
+  `App::roster_fn` (tests inject `for_test_with_roster`), because a
+  tick-driven read must not write an audit record every fifteen seconds;
+  the manual `r` is an act and takes the audited dispatcher
+  (`spawn_roster_fetch(true)`). A cached session row
   (`presence` of `last-seen` or `unknown`, `RosterSession::is_cached`)
   renders the cache's word and the node header's age, never the live state
   glyph or colour; the backend's `presence` is the only source of that
   fact. A failed probe after a good one keeps the rows
   (`RosterCache::failed`) and every surface that paints them says the probe
-  failed and how long ago; rows never vanish in silence. The presence
+  failed and how long ago, muted; rows never vanish in silence, and an Ok
+  reply without a `nodes` array is that same failure, never an empty
+  roster. "Muted" is `theme::muted` (the palette's muted hue); `theme::dim`
+  is deliberately a no-op and never the way to mark a stale fact. The presence
   phrase and every age come from `theme::presence_phrase`/`age_words`;
   never spell a second one.
 - Pending IDs are array positions. Relist after every approve/deny before

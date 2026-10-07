@@ -1314,9 +1314,9 @@ fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &m
     } else {
         surface.patch(theme::state_style(n.state.as_deref().unwrap_or(""), pal))
     };
-    // A cached card is dimmed whole, like the Mesh row it mirrors.
-    let surface = if n.cached { surface.patch(theme::dim()) } else { surface };
-    let border = if n.cached { border.patch(theme::dim()) } else { border };
+    // A cached card is muted whole, like the Mesh row it mirrors.
+    let surface = if n.cached { surface.patch(theme::muted(pal)) } else { surface };
+    let border = if n.cached { border.patch(theme::muted(pal)) } else { border };
     let state = n.state.as_deref().unwrap_or("");
     let role = if n.role.is_empty() {
         if n.harness == "shell" {

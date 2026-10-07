@@ -1532,12 +1532,15 @@ impl App {
     /// Spawn the `session --hosts` dispatch on a background thread. A no-op
     /// while a fetch is already in flight — callers (the tick, a panel
     /// switch, the manual refresh key) never need to check that themselves.
-    fn spawn_roster_fetch(&mut self) {
+    /// `audited` picks the door: a manual `r` is an operator's act and goes
+    /// through the audited dispatcher like any typed command; the tick and
+    /// a pane opening are reads and call the roster handler directly.
+    fn spawn_roster_fetch(&mut self, audited: bool) {
         if self.roster_rx.is_some() {
             return;
         }
         let (tx, rx) = mpsc::channel();
-        let roster_fn = self.roster_fn;
+        let roster_fn: RosterFn = if audited { self.dispatch_fn } else { self.roster_fn };
         std::thread::spawn(move || {
             let inv = Invocation {
                 path: vec!["session".to_string()],
@@ -1580,7 +1583,7 @@ impl App {
         // The Graph paints the roster's nodes too, so it keeps the probe
         // ticking on the same throttle; any other pane leaves the wire alone.
         if matches!(self.panel, Panel::Roster | Panel::Graph) && self.roster_stale() {
-            self.spawn_roster_fetch();
+            self.spawn_roster_fetch(false);
             changed = true; // a fresh "probing…" status is itself a repaint
         }
         changed
@@ -1680,6 +1683,20 @@ impl App {
     /// outcome itself, so the status line carries its refusal.
     pub(crate) fn absorb_roster_outcome(&mut self, outcome: Outcome) {
         let now = Instant::now();
+        // An Ok reply that carries no `nodes` array is not a roster: taking
+        // it would replace good rows with none, so it is a failure like any
+        // other — the rows stay and the fetch line says why.
+        let well_formed = outcome.status != Status::Ok
+            || outcome
+                .data
+                .as_ref()
+                .and_then(|d| d.get("nodes"))
+                .is_some_and(|n| n.is_array());
+        let outcome = if well_formed {
+            outcome
+        } else {
+            Outcome::error(outcome.command.clone(), "roster reply carried no nodes")
+        };
         if outcome.status == Status::Ok || self.roster.outcome.is_none() {
             self.roster.outcome = Some(outcome);
             self.roster.failed = None;
@@ -3382,7 +3399,7 @@ impl App {
         }
         self.panel = p;
         if p == Panel::Roster && self.roster_stale() {
-            self.spawn_roster_fetch();
+            self.spawn_roster_fetch(false);
         }
         if p == Panel::Pending {
             // Three queues, one pane: the local pending list and pairing
@@ -4445,7 +4462,7 @@ impl App {
     /// prompt on the selected session row ([`App::open_compose`]).
     fn handle_roster_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Char('r') => self.spawn_roster_fetch(),
+            KeyCode::Char('r') => self.spawn_roster_fetch(true),
             KeyCode::Char('j') | KeyCode::Down => {
                 let n = self.roster_flat_rows().len();
                 if n > 0 && self.roster_sel + 1 < n {
@@ -6131,7 +6148,10 @@ mod tests {
         let _rguard = ROSTER_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         ROSTER_CALLS.store(0, Ordering::SeqCst);
 
-        let mut app = App::for_test_with_roster(counting_roster_dispatch);
+        // `r` is an operator's act: it goes through the audited dispatcher,
+        // not the unaudited roster seam the tick uses.
+        let mut app = App::for_test_with_dispatch(counting_roster_dispatch);
+        app.roster_fn = |_: &Invocation| panic!("the manual refresh must not take the unaudited seam");
         app.panel = Panel::Roster;
         app.roster.fetched_at = Some(Instant::now()); // fresh — a tick would skip it
 
@@ -6153,14 +6173,14 @@ mod tests {
 
         let mut app = App::for_test_with_roster(counting_roster_dispatch);
         app.panel = Panel::Roster;
-        app.spawn_roster_fetch();
+        app.spawn_roster_fetch(false);
         assert!(app.roster_rx.is_some());
 
         // A second manual refresh while the first is still in flight must be
         // a no-op — `spawn_roster_fetch`'s own guard, exercised directly
         // since a real fetch here completes in well under a millisecond and
         // could otherwise race the assertion.
-        app.spawn_roster_fetch();
+        app.spawn_roster_fetch(false);
 
         let rx = app.roster_rx.take().unwrap();
         rx.recv_timeout(Duration::from_secs(2))
@@ -6233,6 +6253,13 @@ mod tests {
     #[test]
     fn a_failed_probe_keeps_the_last_good_rows_and_says_so() {
         let mut app = App::for_test(Vec::new(), Vec::new(), Vec::new());
+        let good_again = || Outcome::ok("session", "2 node(s)").with_data(json!({
+            "host": "h", "generatedAt": "t",
+            "nodes": [
+                { "name": "h", "isLocal": true, "presence": "online", "fetchedAt": null, "sessions": [] },
+                { "name": "far", "isLocal": false, "presence": "online", "fetchedAt": null, "sessions": [] },
+            ],
+        }));
         let good = Outcome::ok("session", "2 node(s)").with_data(json!({
             "host": "h", "generatedAt": "t",
             "nodes": [
@@ -6261,6 +6288,16 @@ mod tests {
             "host": "h", "generatedAt": "t", "nodes": [] })));
         assert!(app.roster_probe_failed().is_none(), "a good probe clears the failure");
         assert!(app.roster_nodes().is_empty());
+
+        // An Ok reply with no nodes array is no roster: the rows stay and the
+        // fetch line names it.
+        app.absorb_roster_outcome(good_again());
+        assert_eq!(app.roster_nodes().len(), 2);
+        app.absorb_roster_outcome(Outcome::ok("session", "?").with_data(json!({ "host": "h" })));
+        assert_eq!(app.roster_nodes().len(), 2, "malformed Ok never empties the rows");
+        assert!(app.roster_status().contains("roster reply carried no nodes"), "{}", app.roster_status());
+        app.absorb_roster_outcome(Outcome::ok("session", "?"));
+        assert_eq!(app.roster_nodes().len(), 2, "an Ok with no data either");
     }
 
     #[test]

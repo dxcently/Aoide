@@ -209,11 +209,13 @@ log invariant holds.
 
 ## Three behaviours a reader will hit
 
-- **The roster probe throttles, and is not audited.** A stale cache fetches
-  immediately on entering Mesh or Graph; otherwise a fetch fires at most
-  every ~15 s while either is visible. `r` in Mesh overrides the window. A
-  landed probe is folded into the retained graph scene like a stage
-  refresh; a failed one keeps the previous rows and says so.
+- **The roster probe throttles; the tick is not audited, `r` is.** A stale
+  cache fetches immediately on entering Mesh or Graph; otherwise a fetch
+  fires at most every ~15 s while either is visible, as a library call. `r`
+  in Mesh overrides the window through the audited dispatcher. A landed
+  probe is folded into the retained graph scene like a stage refresh; a
+  failed one — or an Ok reply with no `nodes` — keeps the previous rows,
+  muted, and says so.
 - **`session pending list`'s `id` is an array position, not a stable id** —
   resolving one entry shifts every id after it. `App::dispatch` re-lists
   synchronously before the next paint, so a second `a`/`d` in the same visit
