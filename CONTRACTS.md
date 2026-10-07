@@ -1699,9 +1699,14 @@ song's own colours.
 
 **Additive in v0:** this path MAY be a SYMLINK rather than a plain file —
 `rice mode draft <name>` (§4's `stage/mode.json` entry) routes it into a
-saved `song/songbook/<song>/drafts/<name>/livery.json`. Readers never need
-to care (following a symlink is transparent to any read); writers going
-through `aoide_storage::fs::atomic_write` transparently write through it
+saved `song/songbook/<song>/drafts/<name>/livery.json`. A one-shot read
+follows a symlink transparently; a WATCH does not — it stays on the inode it
+loaded and sees no event after the entry is swapped (leaving or rerouting a
+draft). So every successful `rice mode` transition writes `stage/mode.json`
+LAST, and a watching reader re-reads `livery.json` on every `mode.json`
+change (`mode.json` is always a real file, atomically replaced; the shell's
+`LiveryState.qml` is that reader). Writers going through
+`aoide_storage::fs::atomic_write` transparently write through the symlink
 too. `rice mode stage`/`rice mode declarative` remove the symlink (leaving
 a plain real file) whenever they run.
 

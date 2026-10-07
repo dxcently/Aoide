@@ -3,19 +3,22 @@
 // Singleton: every surface widget binds to properties here. When the livery
 // file is atomically replaced (write-temp-then-rename per CONTRACTS.md §4),
 // the FileView fires a change signal and all bindings update in one pass —
-// the full arrangement hot-reloads without a QML restart. The canonical
-// file is livery.json, sole source since LIVERY-MERGE Phase 4 dropped the
-// legacy mirror.
+// the full arrangement hot-reloads without a QML restart, as long as the
+// entry keeps the type and target the watch was armed on (the watch contract
+// below covers a routing change). The canonical file is livery.json, sole
+// source since LIVERY-MERGE Phase 4 dropped the legacy mirror.
 //
 // Watch contract: a FileView watches the inode its path resolved to when it
 // last loaded, and stage/livery.json is a routing entry — a real file, or a
 // symlink to a draft's livery.json. Replacing the symlink (leaving a draft,
 // rerouting draft to draft) leaves the watch on the old draft's inode, which
-// sees no event again, so every transition that changes the entry's type or
-// target writes stage/mode.json LAST. mode.json is always a real file,
-// atomically replaced, so its watch stays live; on every mode.json change
-// the shell re-reads both files, and reload() re-arms the livery watch on
-// whatever the path resolves to now.
+// sees no event again, so every successful `rice mode` transition (stage,
+// declarative, draft) writes stage/mode.json LAST. mode.json is always a real
+// file, atomically replaced, so its watch stays live; on every mode.json
+// change the shell re-reads both files, and reload() re-arms the livery watch
+// on whatever the path resolves to now. The activation seed
+// (`home.activation.aoideSeedStage`) also swaps the entry, writes no
+// mode.json, and restarts the shell instead (`aoideRestartRice`).
 //
 // livery schema v0 (CONTRACTS.md §1): palette + bar.* / notif.* / window.*
 // All values are concrete hex strings (fallbacks already applied by the
