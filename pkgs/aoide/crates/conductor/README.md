@@ -34,7 +34,7 @@ whenever it holds more rows than fit, and stays gone otherwise.
 | `e` / right-click | Actions for a tree, graph, project or session target |
 | `a` in Graph | Whole forest, or only the selected card's own graph |
 | `j` / `k`, Down / Up in Graph | Move the selection down/up a rank, toward the first child or the parent, across the whole forest |
-| `h` / `l`, Left / Right in Graph | Move the selection to the previous/next sibling across the rank, across the whole forest |
+| `h` / `l`, Left / Right in Graph | Move the selection to the previous/next sibling across the rank (for a root, the previous/next root), across the whole forest |
 | Enter in Graph | Open or focus the selected session |
 | `s` in Graph | Write a letter to the selected agent |
 | `p` in Graph | Prune ended sessions |
@@ -83,7 +83,9 @@ sibling across the rank, and neither wraps at a rank's end. Every step is
 resolved against the whole forest, never the drawn slice: under Focus the view
 is derived from the selection, so `k` on a loose session climbs to the
 gathering root and opens the forest again, and `l` reaches a sibling the
-component did not draw and re-forms the view around it. Enter opens or focuses
+component did not draw and re-forms the view around it. A root's siblings are
+the other roots, so `l` on the gathering root steps across to the first host
+card and `h` steps back. Enter opens or focuses
 the selected session, `s` writes a letter to the selected agent directly
 without opening the actions menu, and `p` prunes ended sessions — the one
 mutation the panel dispatches on its own.

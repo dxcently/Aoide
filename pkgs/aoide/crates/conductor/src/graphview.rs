@@ -169,8 +169,8 @@ pub fn select_index(app: &mut App, i: usize) {
 
 /// Move the selection to the sibling before (`forward = false`) or after
 /// (`forward = true`) it across the rank: a node sharing this one's parent,
-/// in the existing child order. Never wraps at a rank's end, and does
-/// nothing for a root (no parent) or an only child.
+/// in the existing child order, or for a root the previous or next root.
+/// Never wraps at a rank's end, and does nothing for an only child.
 ///
 /// The step is resolved against the WHOLE forest, not the drawn slice: under
 /// Focus the view is derived from the selection, so landing on a sibling the
@@ -181,9 +181,19 @@ pub fn select_sibling(app: &mut App, forward: bool) {
     let Some(id) = model.visible().nth(model.selected).map(|n| n.id.clone()) else {
         return;
     };
-    let Some(siblings) = model.children.values().find(|kids| kids.contains(&id)) else {
-        return; // a root has no parent, hence no siblings
-    };
+    // A root's siblings are the other roots, in forest order — the way from
+    // this box's forest across to the host cards and back.
+    let roots: Vec<String> = model
+        .nodes
+        .iter()
+        .filter(|n| n.depth == 0)
+        .map(|n| n.id.clone())
+        .collect();
+    let siblings = model
+        .children
+        .values()
+        .find(|kids| kids.contains(&id))
+        .unwrap_or(&roots);
     let Some(pos) = siblings.iter().position(|s| s == &id) else {
         return;
     };
@@ -816,9 +826,12 @@ fn origin(model: &Model, area: Rect) -> (i32, i32) {
             o.clamp(lo, hi - pane)
         }
     };
+    // Clamped at zero only: the padded extent is the DRAG's range, and
+    // clamping a follow origin against it would pull the forest back down
+    // the pane to keep the bottom pad reachable.
     (
-        clamp(follow(r.x, r.w, x0, x1, pw, true), ew, pw),
-        clamp(follow(r.y, r.h, y0, y1, ph, false), eh, ph),
+        follow(r.x, r.w, x0, x1, pw, true).max(0),
+        follow(r.y, r.h, y0, y1, ph, false).max(0),
     )
 }
 
@@ -1982,6 +1995,26 @@ mod tests {
 
         select_sibling(&mut app, false);
         assert_eq!(selected_session_id(&app).as_deref(), Some("a"));
+
+        // A root's siblings are the other roots: the gathering root steps
+        // across to a host card and back, so the keyboard reaches every
+        // forest the canvas holds.
+        app.roster.outcome = Some(roster_fixture());
+        app.sync_graph_scene();
+        select_parent(&mut app);
+        assert_eq!(app.graph.selected, UNANCHORED_ID);
+        select_sibling(&mut app, true);
+        assert_eq!(app.graph.selected, "node:yomi-strix", "l on a root reaches the next root");
+        assert_eq!(ids(&app), vec!["node:yomi-strix", "node:yomi-strix/session:far1"]);
+        select_sibling(&mut app, false);
+        assert_eq!(app.graph.selected, UNANCHORED_ID);
+        select_sibling(&mut app, false);
+        assert_eq!(app.graph.selected, UNANCHORED_ID, "the first root has no previous");
+        app.roster.outcome = None;
+        app.sync_graph_scene();
+
+        select_child(&mut app);
+        assert_eq!(selected_session_id(&app).as_deref(), Some("a"));
         select_child(&mut app);
         assert_eq!(selected_session_id(&app).as_deref(), Some("a1"));
         select_child(&mut app);
@@ -2006,7 +2039,10 @@ mod tests {
         );
         app.graph.view = View::All;
         app.sync_graph_scene();
-        let area = Rect::new(0, 0, 60, 40);
+        // Taller than the three-rank forest (gathering root, root, child: 27
+        // rows) but shorter than that forest plus its bottom pad — the pane a
+        // padded-extent clamp would pull the roots back down in.
+        let area = Rect::new(0, 0, 60, 50);
         let model = build_model(&app);
         let top = model.visible().map(|n| n.world.y).min().unwrap();
         let (left, right) = model
@@ -2377,10 +2413,12 @@ mod tests {
         placed[right].y = junction - CARD_H / 2;
         app.graph.positions.commit(ids, &placed);
 
+        // A manual pan at the canvas origin, set before the model is built,
+        // so `o` and the paint read the same camera.
+        app.graph.camera.pan = Some((0, 0));
         let model = build_model(&app);
         let ext = graph_extent(&app);
         let area = Rect::new(0, 0, ext.0 as u16, ext.1 as u16);
-        app.graph.camera.pan = Some((0, 0));
         let o = origin(&model, area);
         let buf = paint(&app, area);
         let card = model.camera.scale_rect(node(&model, "right").world);

@@ -17,9 +17,10 @@
   the world. Placement keeps a surviving node's rectangle, re-places a node
   whose depth changed, and drops a departed one. Selection is a node identity,
   never a row index, so a refresh cannot move it. A rank or sibling step
-  (`j`/`k`/`h`/`l`) resolves against the whole forest and the view follows
-  the selection; never gate a step on what the current view draws, or a
-  Focus view strands the cursor one `j` below its root.
+  (`j`/`k`/`h`/`l`) resolves against the whole forest — a root's siblings
+  are the other roots — and the view follows the selection; never gate a
+  step on what the current view draws, or a Focus view strands the cursor
+  one `j` below its root.
 - Registered nodes enter the graph from the roster outcome (`App::roster_nodes`),
   never from the document's `node:*` fold (fresh only inside the cache TTL,
   written only by `node pull`). A remote card's id is prefixed with its node's
