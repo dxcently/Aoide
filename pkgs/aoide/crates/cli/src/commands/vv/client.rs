@@ -17,6 +17,9 @@ use std::time::{Duration, Instant};
 /// One dispatch is a forward pass over a sub-2 MB model; a child still silent
 /// after this is hung, not slow.
 const LIMIT: Duration = Duration::from_secs(20);
+/// More than this on stdout is not a verdict; the rest is read and dropped so
+/// the child never blocks on a full pipe.
+const OUTPUT_CAP: u64 = 1 << 20;
 const POLL: Duration = Duration::from_millis(10);
 const KIT_FILES: &[&str] = &["meta.json", "model.safetensors"];
 const TRAIN_FIX: &str = "aoide do kit --help";
@@ -88,14 +91,22 @@ pub fn classify(kit: &Kit, utterance: &str) -> Result<Value, Refusal> {
     kit.check()?;
     let mut cmd = Command::new(&kit.binary);
     cmd.arg("dispatch").arg("--out").arg(&kit.dir).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let out = run(cmd, utterance).map_err(|e| failure(kit, e))?;
-    let line = out.stdout.lines().map(str::trim).find(|l| l.starts_with('{'));
-    let Some(line) = line else {
-        let why = match out.stderr.lines().last().map(str::trim).filter(|l| !l.is_empty()) {
-            Some(last) if !out.ok => format!("it exited with an error: {last}"),
-            _ => "it printed no verdict; it reads nothing in the utterance to classify".to_string(),
+    let out = run(cmd, utterance, LIMIT).map_err(|e| failure(kit, e))?;
+    let last_error = out.stderr.lines().last().map(str::trim).filter(|l| !l.is_empty());
+    if !out.ok {
+        let why = match last_error {
+            Some(last) => format!("it exited with an error: {last}"),
+            None => "it exited with an error and said nothing".to_string(),
         };
         return Err(Refusal::new(Kind::Failed, "the classifier gave no answer", why, Fix::Run(TRAIN_FIX.into())));
+    }
+    let Some(line) = out.stdout.lines().map(str::trim).find(|l| l.starts_with('{')) else {
+        return Err(Refusal::new(
+            Kind::Failed,
+            "the classifier gave no answer",
+            "it printed no verdict; it reads nothing in the utterance to classify",
+            Fix::Run(TRAIN_FIX.into()),
+        ));
     };
     serde_json::from_str::<Value>(line)
         .ok()
@@ -126,7 +137,8 @@ fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> std::thread::JoinHandle<S
     std::thread::spawn(move || {
         let mut bytes = Vec::new();
         if let Some(mut pipe) = pipe {
-            let _ = pipe.read_to_end(&mut bytes);
+            let _ = (&mut pipe).take(OUTPUT_CAP).read_to_end(&mut bytes);
+            let _ = std::io::copy(&mut pipe, &mut std::io::sink());
         }
         String::from_utf8_lossy(&bytes).into_owned()
     })
@@ -144,10 +156,10 @@ struct Ran {
     stderr: String,
 }
 
-/// Run `cmd` with `line` on its stdin, bounded by [`LIMIT`]. Both pipes are
+/// Run `cmd` with `line` on its stdin, bounded by `limit`. Both pipes are
 /// drained on threads so a chatty child never blocks on a full buffer, and the
 /// write is a thread too so a child that never reads cannot hold the caller.
-fn run(mut cmd: Command, line: &str) -> Result<Ran, RunError> {
+fn run(mut cmd: Command, line: &str, limit: Duration) -> Result<Ran, RunError> {
     let mut child = cmd.spawn().map_err(RunError::Spawn)?;
     let mut stdin = child.stdin.take();
     let line = format!("{line}\n");
@@ -158,7 +170,7 @@ fn run(mut cmd: Command, line: &str) -> Result<Ran, RunError> {
     });
     let stdout = drain(child.stdout.take());
     let stderr = drain(child.stderr.take());
-    let deadline = Instant::now() + LIMIT;
+    let deadline = Instant::now() + limit;
     let status = loop {
         match child.try_wait().map_err(RunError::Io)? {
             Some(status) => break status,
@@ -172,4 +184,29 @@ fn run(mut cmd: Command, line: &str) -> Result<Ran, RunError> {
     };
     let join = |h: std::thread::JoinHandle<String>| h.join().unwrap_or_default();
     Ok(Ran { ok: status.success(), stdout: join(stdout), stderr: join(stderr) })
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    fn sh(script: &str) -> Command {
+        let mut cmd = Command::new("/bin/sh");
+        cmd.arg("-c").arg(script).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd
+    }
+
+    #[test]
+    fn a_child_still_running_at_the_limit_is_stopped_and_reported_as_timed_out() {
+        let started = Instant::now();
+        let out = run(sh("sleep 5"), "x", Duration::from_millis(200));
+        assert!(matches!(out, Err(RunError::TimedOut)));
+        assert!(started.elapsed() < Duration::from_secs(4), "the caller was held past the limit");
+    }
+
+    #[test]
+    fn output_past_the_cap_is_dropped_without_blocking_the_child() {
+        let out = run(sh("head -c 3000000 /dev/zero | tr '\\0' 'a'; echo; echo '{}'"), "x", Duration::from_secs(20)).ok().unwrap();
+        assert!(out.ok && out.stdout.len() as u64 <= OUTPUT_CAP);
+    }
 }
