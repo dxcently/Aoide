@@ -52,7 +52,7 @@ Gated with reasons, never stubbed: the two `#!/bin/sh` plugin-shim tests (a
   best guess. The printed line must re-parse (`door::parse`) to the exact checked
   invocation, and a verdict is read only from a child that exited 0. The
   denied intents (`vv/kit.rs::DENIED`: secrets, mesh charter, irreversible
-  removals) stay out of the kit and out of `resolve`. Do not add an execute path, a `--run` flag, or a fallback that
+  removals, trust/grant/config changes, pair, server modes) stay out of the kit and out of `resolve`. Do not add an execute path, a `--run` flag, or a fallback that
   picks the top candidate; `docs/architecture/AOIDE-VV-JEV.md` is the table.
   The classifier is a shell-out (`verba-volantia` on `PATH` or `[verba]
   binary`) — never a VV crate, candle, or vendored weights in this tree.

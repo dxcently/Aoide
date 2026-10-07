@@ -1039,7 +1039,7 @@ count.
   reads the first JSON line, and applies the fail-closed table: `accept` not
   true, non-empty `conflicts`, non-null `trailing_editorial_text`, intent
   `none`, an intent or slot the registry does not hold (the denied set —
-  `secrets_*` but `secrets_status`, `mesh_charter_*`, irreversible removals — is
+  `secrets_*` but `secrets_status`, `mesh_charter_*`, irreversible removals, trust/grant/config changes, `pair*`, server modes — is
   never in the kit), a value with a control character, a bound command the
   registry's own `Command::check` refuses, or a printed line that does not
   re-parse to the checked invocation each end in a taught refusal, exit 1

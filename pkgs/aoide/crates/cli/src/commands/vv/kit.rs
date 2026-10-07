@@ -58,12 +58,16 @@ pub enum Slot {
 const DENIED: &[&str] = &[
     "session_kill", "session_prune", "session_reap", "mail_rm", "mail_outbox_rm", "node_remove", "project_remove",
     "workspace_clear", "mesh_join", "melete_call",
+    // They change what is trusted, granted or configured, or start a server.
+    "config_set", "session_pending_approve", "session_pending_deny", "session_grant", "session_permit", "node_allow",
+    "node_spawn", "node_add", "node_hub", "pair", "hooks_install", "daemon",
 ];
-const DENIED_PREFIXES: &[&str] = &["secrets_", "mesh_charter_"];
+const DENIED_PREFIXES: &[&str] = &["secrets_", "mesh_charter_", "pair_"];
+const DENIED_SUFFIXES: &[&str] = &["_serve"];
 const DENIED_EXCEPT: &[&str] = &["secrets_status"];
 
 pub fn denied(id: &str) -> bool {
-    !DENIED_EXCEPT.contains(&id) && (DENIED.contains(&id) || DENIED_PREFIXES.iter().any(|p| id.starts_with(p)))
+    !DENIED_EXCEPT.contains(&id) && (DENIED.contains(&id) || DENIED_PREFIXES.iter().any(|p| id.starts_with(p)) || DENIED_SUFFIXES.iter().any(|x| id.ends_with(x)))
 }
 
 /// A command is in the closed set when a person can type it: implemented, not
@@ -306,10 +310,14 @@ mod tests {
                 assert!(!named.contains(&id.as_str()), "{id} is in the kit");
             }
         }
-        for id in ["secrets_put", "secrets_exec", "secrets_add", "mesh_charter_sign", "session_kill", "session_prune", "session_reap", "mail_rm"] {
+        for id in ["secrets_put", "secrets_exec", "secrets_add", "mesh_charter_sign", "session_kill", "session_prune", "session_reap", "mail_rm", "config_set", "session_grant", "session_permit", "session_pending_approve", "session_pending_deny", "node_allow", "node_spawn", "node_add", "node_hub", "pair", "pair_reject", "pair_watch", "hooks_install", "mcp_serve", "a2a_serve", "mail_serve", "daemon"] {
             assert!(denied(id) && resolve(&r, id).is_none(), "{id}");
         }
         assert!(resolve(&r, "secrets_status").is_some(), "the one read in the secrets door stays");
+        for id in ["send", "mail_send", "spawn", "conduct", "resurrect"] {
+            assert!(!denied(id) && resolve(&r, id).is_some(), "{id} is printed only and stays");
+        }
+        assert!(r.commands().filter(|c| c.implemented).all(|c| !intent_id(c).ends_with("_serve") || denied(&intent_id(c))), "every server mode is denied");
     }
 
     #[test]

@@ -72,6 +72,7 @@ row ends in a taught refusal (what, why, fix) with exit 1.
 | a required slot unfilled, or a value the registry refuses | the command prints with the slot named (`aoide session trace <id>`), refused, so nothing half-bound reads as done |
 | a bound command whose printed line does not parse back to the checked invocation (a value such as `--follow` or `--yes` that reads as a flag) | refused, nothing printed: the line is re-parsed by the door and must equal what the registry checked |
 | a slot value holding a control character or a line break | refused, nothing printed |
+| a value that would read as a flag (or needs shell quoting) in the fix line of a refusal | the fix is `none`: no half-bound line is offered |
 | an intent in the denied set (see *The command kit*) | not a command; never taught, never resolved |
 | no binary, no kit, timeout, spawn failure, a non-zero exit (even after a verdict line) | one refusal naming the missing piece and where it goes |
 | unparsable line, or no verdict | one refusal |
@@ -93,8 +94,12 @@ requests that are not commands as the `none` class. A phrasing two commands shar
 from both. The closed set is every implemented command a person can type — not hook plumbing,
 not `do` itself, and not the denied set: every `secrets` command but `secrets status` (a
 secret would land in the utterance, the shell history and the printed line), every `mesh
-charter`, `mesh join`, `melete call`, and the irreversible removals (`session kill/prune/
-reap`, `mail rm`, `mail outbox rm`, `node remove`, `project remove`, `workspace clear`). The
+charter`, `mesh join`, `melete call`, the irreversible removals (`session kill/prune/
+reap`, `mail rm`, `mail outbox rm`, `node remove`, `project remove`, `workspace clear`),
+what changes trust, grants or configuration (`config set`, `session grant/permit`,
+`session pending approve/deny`, `node add/allow/hub/spawn`, `pair` and `pair reject/watch`,
+`hooks install`), and every server mode (`daemon`, `mcp serve`, `a2a serve`, `mail serve`).
+Printed-only commands stay: `send`, `mail send`, `spawn`, `conduct`, `resurrect`. The
 set is one const in `vv/kit.rs`; a denied intent is neither taught nor resolved, so a
 classifier that answers one is refused as a kit bug.
 

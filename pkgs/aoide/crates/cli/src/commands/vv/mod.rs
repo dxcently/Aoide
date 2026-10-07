@@ -160,6 +160,10 @@ fn decide(r: &Registry, utterance: &str, verdict: &Value) -> Result<Outcome, Out
 /// classifier did fill belong on it too, or the line forgets what was said.
 fn keep_given(fix: Fix, bound: &Invocation) -> Fix {
     let Fix::Run(mut line) = fix else { return fix };
+    let plain = |v: &str| !v.starts_with('-') && aoide_protocol::invocation::shell_word(v) == v;
+    if !bound.args.iter().chain(bound.flags.values()).all(|v| plain(v)) {
+        return Fix::None("say the values plainly (no leading dash, spaces or shell characters), or type the command yourself");
+    }
     for (name, value) in bound.flags.iter().filter(|(name, _)| name.as_str() != "json") {
         if !line.split_whitespace().any(|w| w.strip_prefix("--") == Some(name.as_str())) {
             line.push_str(&format!(" --{name} {}", aoide_protocol::invocation::shell_word(value)));
@@ -360,6 +364,17 @@ mod tests {
         assert!(decide(registry(), "u", &v).is_err());
         let v = verdict("session_trace", json!({ "id": "--yes" }), true, 0.8);
         assert!(decide(registry(), "u", &v).unwrap().message.contains("-- --yes"), "a positional goes after `--` and stays one value");
+    }
+
+    #[test]
+    fn a_fix_line_never_carries_a_value_that_would_read_as_a_flag() {
+        let v = verdict("session_trace", json!({ "tail": "--follow" }), true, 0.8);
+        let o = decide(registry(), "u", &v).unwrap_err();
+        let text = rendered(&o);
+        assert!(text.contains("fix: none: say the values plainly") && !text.contains("--follow"), "{text}");
+        assert_eq!(o.data.unwrap()["command"], Value::Null);
+        let v = verdict("session_trace", json!({ "tail": "--follow" }), false, 0.1);
+        assert!(!rendered(&decide(registry(), "u", &v).unwrap_err()).contains("--follow"), "candidates carry no such line either");
     }
 
     #[test]
