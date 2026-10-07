@@ -18,15 +18,16 @@ Supplementary-Plane symbols. Three separate failures established this:
 | glyph | where | what happened |
 |---|---|---|
 | `𝄐` / `𝄑` U+1D110/U+1D111 (fermata pair) | `bar.qml` tray toggle, `font.family: "monospace"` + `font.bold: true` | rendered **fully invisible**. Root-caused with pixel-diff screenshots, not guessed: forcing `visible: true` unconditionally changed zero pixels; removing `font.bold` made the glyph appear immediately. The bold face on this stack has no glyph for the pair and Quickshell drew nothing at all |
-| `𝄂` U+1D102 (final barline) | `bar.qml` rice-mode cell, `font.family: "monospace"` | rendered as a bare `\|` fallback |
+| `𝄂` U+1D102 (final barline) | the rice-mode cell (`ricemode.qml`), `font.family: "monospace"` | rendered as a bare `\|` fallback |
 | `‖` U+2016 (double vertical line) | same cell | rendered as a stray `/` — **and this is common General Punctuation, not a rare SMP symbol**, which is what sharpened the lesson past "rare glyphs are risky" |
 
 The rice-mode cell settled on plain ASCII `"||"`, which "sidesteps the whole
 fallback chain".
 
 **A correlation worth knowing, with the causation NOT established:** all three
-recorded failures are in `bar.qml`, which declares `font.family: "monospace"`
-(the generic fontconfig alias) on every cell. The same `𝄂` code point is
+recorded failures are in `bar.qml` and the rice-mode cell it embeds
+(`ricemode.qml`), which declare `font.family: "monospace"` (the generic
+fontconfig alias) on every cell. The same `𝄂` code point is
 declared with `"Noto Music"` in `notifications.qml`, `calendar.qml` and
 `powermenu.qml`'s heading, and with `"JetBrainsMono Nerd Font"` in
 `powermenu.qml`'s bottom frame, and none of those has been reported failing.

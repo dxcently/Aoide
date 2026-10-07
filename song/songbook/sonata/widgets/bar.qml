@@ -1116,53 +1116,6 @@ component WorkspaceRow: Item {
         when: root.wifiDev !== null
     }
 
-    // ── Rice mode vocabulary (Aoide-native — livery.riceMode) ───────────────
-    // The rice engine's edit-state, one of exactly three strings (storage::
-    // mode's RiceMode, lowercase on the wire, hot from stage/mode.json via
-    // LiveryState): is this manuscript under the pen right now?
-    //   declarative → || decl — the measure is CLOSED. Live writes refused;
-    //     what's true is what the last home-manager switch baked. Plain
-    //     ASCII double bar reads as "finished and published" without
-    //     touching the font's Unicode fallback chain at all. Resting ink,
-    //     dimmed — the safe default should recede, not glow. (NOT 𝄽: the
-    //     idle rest already works two jobs on this strip — mute + net-down —
-    //     a third would let "𝄽 decl" sit two cells from "𝄽 off". TWO glyphs
-    //     were tried and rejected here after live testing this session: 𝄂
-    //     U+1D102 renders as a bare "|" fallback, and ‖ U+2016 — despite
-    //     being common General Punctuation, not a rare SMP symbol — STILL
-    //     rendered wrong (a stray "/") on this font stack. Lesson sharpened
-    //     past the trayToggle scar: it's not just rare SMP glyphs that need
-    //     live verification before trusting them, ANY non-ASCII glyph does,
-    //     on this stack. Plain "||" sidesteps the whole fallback chain.)
-    //   staging     → ♪ stage — the measure is OPEN, a note under the pen:
-    //     hot-load unlocked, rice stage/cover set write the live desktop.
-    //     Gold — the bar's open/active register (open toggles, the active
-    //     workspace) AND the state tier's own working→gold partnering
-    //     (grammar §2): the engine is literally in its working state.
-    //   draft       → 𝄋 draft — dal segno: stage writes route through a
-    //     saved mark (a draft snapshot), never the committed song. Aegean
-    //     holoBlue — the PREVIEW register (the workspace hover-ring's
-    //     "a copy, not the real thing"), distinct from both resting ink
-    //     and live gold. Not urgent: no mode is an alarm.
-    // Unknown strings fall through to the declarative row — the same
-    // safe-default reading LiveryState and mode.rs apply to an absent or
-    // corrupt marker.
-    function modeGlyph(m) {
-        if (m === "staging") return "♪"
-        if (m === "draft")   return "𝄋"
-        return "||"
-    }
-    function modeWord(m) {
-        if (m === "staging") return "stage"
-        if (m === "draft")   return "draft"
-        return "decl"
-    }
-    function modeColor(m) {
-        if (m === "staging") return root.livery.paletteAccent
-        if (m === "draft")   return root.livery.holoBlue
-        return root.livery.paletteFg
-    }
-
     // ── Window title (Hyprland active toplevel) with kaomoji empty-rewrite ──
     // A small songbook of music kaomoji combos; the empty-title rewrite picks
     // one at RANDOM, re-rolled each time the active window changes, so an empty
@@ -1510,41 +1463,18 @@ component WorkspaceRow: Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: 10
 
-        // Rice mode — Aoide-native: the manuscript's own edit-state, read
-        // live off livery.riceMode (stage/mode.json). LEADS the right stave,
-        // apart from the hardware expression marks (vol/mic/batt/net) that
-        // follow — song-state before instrument-state, mirroring how the ✎N
-        // Aoide cell leads the left stave. It also keeps the 𝄂 glyph far
-        // from the DRAWN final barline closing this Row, so the strip never
-        // shows two adjacent closing marks. A CONTROL, not just a status mark
-        // (khoa, 2026-08-15): click is a two-way toggle — staging locks to
-        // declarative; declarative OR draft unlocks back to staging — sent
-        // through root.bridge.toggleRiceMode(), never a direct write from
-        // QML. Glyph + word + colour per mode: root.modeGlyph's comment
-        // carries the mapping.
-        // NO font.bold — 𝄂 (U+1D102) is an SMP musical symbol this file has
-        // only ever DRAWN (as rules), never rendered as text, and the bold
-        // monospace face silently drops rare SMP glyphs (the fermata scar on
-        // trayToggle below); regular weight is the verified-safe rendering.
-        // If 𝄂 fails visual check even regular, fall back to 𝄽.
-        Text {
-            id: modeText
+        // Rice mode — the manuscript's own edit-state and its control, the
+        // shared `ricemode` slot (sonata's widgets/ricemode.qml is the floor,
+        // and carries the glyphs, the gestures and the draft picker). It LEADS
+        // the right stave, apart from the hardware expression marks
+        // (vol/mic/batt/net) that follow — song-state before instrument-state,
+        // mirroring how the ✎N Aoide cell leads the left stave.
+        WidgetSlot {
+            livery: root.livery
+            bridge: root.bridge
+            stagingEngine: root.stagingEngine
+            slot: "ricemode"
             anchors.verticalCenter: parent.verticalCenter
-            text: root.modeGlyph(root.livery.riceMode) + " " +
-                  root.modeWord(root.livery.riceMode)
-            color: root.modeColor(root.livery.riceMode)
-            // Declarative — locked, at rest, the ~always state — recedes
-            // like the net cell's dead-link register; both unlocked modes
-            // read at full strength (they're the news).
-            opacity: root.livery.riceMode === "declarative" ? 0.55 : 1.0
-            font.family: "monospace"
-            font.pixelSize: 14
-
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.bridge.toggleRiceMode()
-            }
         }
 
         // Volume (OUTPUT) — scroll = adjust, click = open the colonnade,

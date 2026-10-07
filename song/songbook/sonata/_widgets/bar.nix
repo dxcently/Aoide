@@ -13,9 +13,10 @@
 # hand-synced comment.
 #
 # `dependsOn`: bar.qml embeds `WidgetSlot { slot: "calendar" }` itself
-# (its clock popout), and declares `required property var powermenu` /
-# `required property var dock`, both of which it calls `.toggle()` on
-# (the clef and the agent-sessions cell).
+# (its clock popout) and `WidgetSlot { slot: "ricemode" }` (the rice-mode
+# control leading its right stave), and declares `required property var
+# powermenu` / `required property var dock`, both of which it calls `.toggle()`
+# on (the clef and the agent-sessions cell).
 #
 # `helpers`: the uppercase types bar.qml actually instantiates —
 # `AudioColonnade`, `BarPopout`, `SteleLayerPopout`, `StelePopout`.
@@ -31,6 +32,7 @@ _: {
 
   dependsOn = [
     "calendar"
+    "ricemode"
     "powermenu"
     "dock"
   ];
