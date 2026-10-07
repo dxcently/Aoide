@@ -234,7 +234,7 @@ Every helper takes `required property var kit`. All text is
 | `open` | true | false→true: reveal; true→false: close |
 | `animateOnCreate` | false | a pane created open skips the reveal unless set. A list delegate must never animate |
 | `glow` | `"outline"` | title glow: `off` / `outline` / `bloom` (§5) |
-| `innerGlow` | true | `title` phosphor blooming inward from all four edges (below); `false` instantiates no canvas, so the pane pays no glow paint |
+| `innerGlow` | on from the first open | `title` phosphor blooming inward from all four edges (below); `false` instantiates no canvas, so the pane pays no glow paint |
 | `content` | null | a `Component`, instantiated inset one cell and one line, clipped |
 | `cols`, `rows` | 20, 3 | INNER size in cells |
 | *out* `innerCols`, `innerRows`, `contentItem` | | the inner size when sized from outside; the live body |
@@ -278,12 +278,25 @@ against 12 ms with no blur. The canvas is `Canvas.Threaded`, so the paint
 stays off the GUI thread. It runs on the one render thread the engine shares
 between every Threaded canvas (CoverPcb's too), serially and without
 coalescing repeated requests: a glow lands seconds after its pane, and every
-Threaded canvas waits behind the glows queued before it. A change of size or
-tint therefore restarts a 250ms `settle` Timer, and only the settled size is
-painted. The last glow stays, stretched, until that paint lands, and a pane
-whose height follows its content queues one paint per pause, not one per
-change. A hidden canvas paints too, so `innerGlow: false` never instantiates
-the canvas (a `Loader` whose `active` is `innerGlow`).
+Threaded canvas waits behind the glows queued before it. So a canvas keeps
+one paint in flight. A change of size or tint restarts a 250ms `settle` Timer,
+which spaces paints apart but cannot bound a 4 s paint's backlog; when it
+fires, the canvas draws only if no paint is in flight (`inFlight`, set when a
+draw starts and cleared by `onPainted`). Otherwise it records `stale`, and
+`onPainted` requests one more paint at the size by then. The last glow stays,
+stretched, until that paint lands: a pane whose height follows its content
+has one paint running and at most one more recorded, however long it keeps
+changing (ten height changes 300ms apart on a 330x200 glow draw twice,
+offscreen).
+
+A hidden canvas paints too, so `innerGlow: false` never instantiates the
+canvas (a `Loader` whose `active` is `innerGlow`). `innerGlow` follows
+`_opened`, a latch the pane's first open sets and nothing clears: a pane that
+is never opened never queues a glow, and an opened one keeps its canvas
+through close and reopen. The trade is that a pane created closed pays for
+its glow at its first reveal, when the glow lands seconds after the pane,
+where a pane created open pays it at creation. That wait is measured offscreen
+on the software backend only (4 s at 330x200), not on the GPU.
 
 Block has no rules and no glow.
 

@@ -46,12 +46,21 @@
 // render thread the engine shares between every Threaded canvas (CoverPcb's
 // too), serially and without coalescing repeated requests: a glow lands
 // seconds after its pane, and every Threaded canvas waits behind the glows
-// queued before it. A change of size or tint therefore restarts a 250ms
-// `settle` Timer, and only the settled size is painted (the last glow stays,
-// stretched, until that paint lands): a pane whose height follows its content
-// queues one paint per pause, not one per change.
+// queued before it. So a canvas keeps ONE paint in flight. A change of size or
+// tint restarts a 250ms `settle` Timer, which spaces paints apart but cannot
+// bound a 4 s paint's backlog; when it fires, the canvas draws only if no paint
+// is in flight (`inFlight`: set when a draw starts, cleared by `onPainted`).
+// Otherwise it records `stale`, and `onPainted` requests one more paint at the
+// size by then. The last glow stays, stretched, until that paint lands: a pane
+// whose height follows its content has one paint running and at most one more
+// recorded, however long it keeps changing.
+//
 // A hidden canvas still paints, so `innerGlow: false` does not hide it: the
-// canvas is never instantiated.
+// canvas is never instantiated. `innerGlow` follows `_opened`, a latch the
+// pane's first open sets and nothing clears: a pane that is never opened never
+// paints a glow, and a pane created closed pays for it at its first reveal,
+// when the glow lands seconds after the pane. That cost is measured offscreen
+// on the software backend only, not on the GPU.
 //
 // ── SIZE ──────────────────────────────────────────────────────────────────
 // Whole cells: `cols`/`rows` are the INNER content size; the pane reports
@@ -73,7 +82,7 @@ Item {
     property bool open: true
     property bool animateOnCreate: false
     property string glow: "outline"      // title glow: "off" | "outline" | "bloom"
-    property bool innerGlow: true        // title phosphor bleeding inward (INNER GLOW)
+    property bool innerGlow: _opened     // title phosphor bleeding inward (INNER GLOW)
     property Component content: null
 
     property int cols: 20
@@ -88,16 +97,18 @@ Item {
     // ── state (plain values: the animations own them) ─────────────────────
     property real pen: 0        // 0..1 of the perimeter drawn
     property real fillA: 0
+    property bool _opened: false    // latch: the first open sets it, nothing clears it
     property color ruleColor: focused ? kit.title : kit.dim
     Behavior on ruleColor { ColorAnimation { duration: 150 } }
 
     Component.onCompleted: {
         if (!open) return
+        _opened = true
         if (animateOnCreate) revealAnim.start()
         else { pen = 1; fillA = kit.paneAlpha }
     }
     onOpenChanged: {
-        if (open) { closeAnim.stop(); revealAnim.start() }
+        if (open) { _opened = true; closeAnim.stop(); revealAnim.start() }
         else      { revealAnim.stop(); closeAnim.start() }
     }
     SequentialAnimation {
@@ -141,7 +152,7 @@ Item {
     // Painting, threading and `innerGlow`: header, INNER GLOW.
     readonly property real _glowBlur: 34          // Context2D shadowBlur
     readonly property real _glowPeak: 0.8         // shadowColor alpha (focused)
-    readonly property real _glowRest: 0.5        // rest strength, of focused
+    readonly property real _glowRest: 0.5         // rest strength, a fraction of focused
     property real _glowLevel: focused ? 1 : _glowRest
     Behavior on _glowLevel { NumberAnimation { duration: 150 } }
     Loader {
@@ -153,12 +164,17 @@ Item {
             id: glowCanvas
             renderStrategy: Canvas.Threaded
             readonly property color tint: pane.kit.title
+            property bool inFlight: false       // a draw is on the render thread
+            property bool stale: false          // the settled size changed during it
             onTintChanged: settle.restart()
             onWidthChanged: settle.restart()
             onHeightChanged: settle.restart()
             Timer { id: settle; interval: 250; onTriggered: glowCanvas.requestPaint() }
+            // A resize repaints by itself: draw only once settled.
             onPaint: {
-                if (settle.running) return      // a resize repaints by itself; `settle` paints the settled size
+                if (settle.running) return
+                if (inFlight) { stale = true; return }
+                inFlight = true
                 var ctx = getContext("2d")
                 ctx.reset()
                 ctx.clearRect(0, 0, width, height)
@@ -171,6 +187,10 @@ Item {
                 ctx.rect(-t, -t, width + 2 * t, height + 2 * t)
                 ctx.rect(0, 0, width, height)
                 ctx.fill()
+            }
+            onPainted: {
+                inFlight = false
+                if (stale) { stale = false; requestPaint() }
             }
         }
     }
