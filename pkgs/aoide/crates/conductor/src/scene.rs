@@ -154,7 +154,12 @@ pub struct Placed {
 /// The retained position store: node id → the world coordinates it keeps
 /// across refreshes.
 #[derive(Clone, Debug, Default)]
-pub struct Positions(BTreeMap<String, Placed>);
+pub struct Positions {
+    cells: BTreeMap<String, Placed>,
+    /// Bumped by every commit, so a cache keyed on the retained world knows
+    /// when the world it was built over has been replaced.
+    generation: u64,
+}
 
 impl Positions {
     /// Resolve a freshly laid-out forest against the retained store, in
@@ -169,7 +174,7 @@ impl Positions {
     pub fn place(&self, fresh: &[(String, Placed)], card: (i32, i32), lane: i32) -> Vec<Placed> {
         let retained: Vec<Option<Placed>> = fresh
             .iter()
-            .map(|(id, f)| self.0.get(id).copied().filter(|p| p.depth == f.depth))
+            .map(|(id, f)| self.cells.get(id).copied().filter(|p| p.depth == f.depth))
             .collect();
         let mut taken: Vec<Placed> = retained.iter().flatten().copied().collect();
         let mut out = Vec::with_capacity(fresh.len());
@@ -198,20 +203,25 @@ impl Positions {
     /// Make a resolved placement the retained truth, dropping every node that
     /// left the forest.
     pub fn commit(&mut self, ids: impl IntoIterator<Item = String>, placed: &[Placed]) {
-        self.0 = ids
+        self.cells = ids
             .into_iter()
             .zip(placed.iter().copied())
             .collect::<BTreeMap<_, _>>();
+        self.generation += 1;
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     pub fn get(&self, id: &str) -> Option<Placed> {
-        self.0.get(id).copied()
+        self.cells.get(id).copied()
     }
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.cells.len()
     }
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.cells.is_empty()
     }
 }
 

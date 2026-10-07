@@ -320,7 +320,7 @@ visible alongside the previous successful snapshot.
 | `board` | Home/workspace composition, navigation, sidebar and shared drawing/hit-test geometry |
 | `ui` | Pure panel/detail/overlay rendering |
 | `scene` | Camera, view choice, retained world positions and the clipping painter |
-| `graphview` | Graph model (local forest plus the roster's nodes), card layout and wires over the retained scene |
+| `graphview` | Graph model (local forest plus the roster's nodes), built once per scene key and cached on `App`, card layout and wires over the retained scene |
 | `mailview` | Non-consuming local letters, signed thread grouping and legacy pair correspondence |
 | `eventview` | Bounded audit reader and full-record event rendering |
 | `logtail` | Read-only headless-session log overlay |

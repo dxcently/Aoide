@@ -99,9 +99,11 @@ with their existing bounds and cache semantics.
 
 ## Graph scene
 
-The graph is a retained scene. World coordinates, the camera, the chosen view
-and the selected node's identity live in `App`, outside render, so a frame
-never reconstructs what the last one decided.
+The graph is a retained scene. World coordinates, the camera, the chosen view,
+the folds and the selected node's identity live in `App`, outside render, so
+a frame never reconstructs what the last one decided; the built model is
+cached beside them, keyed on that state and cleared when the forest's inputs
+change, so one keypress costs one build.
 
 ```text
 stage refresh ─── nodes and edges ───┐

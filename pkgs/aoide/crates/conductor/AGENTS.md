@@ -29,6 +29,12 @@
   root id and its `session_id` is `None`, so no local action — focus, letter,
   menu, prune — can resolve it against this box's roster; a cached row's
   state slot carries the roster's `presence` word, never its last live state.
+- `graphview::build_model` is memoised on `App::graph_cache`, keyed by
+  `ModelKey` (view, selection, folds, camera, the retained world's
+  generation, the failed-probe age). Every path that changes the forest's
+  inputs — stage reload, a landed roster probe, a test that edits
+  `app.sessions` or `app.roster` — must go through `sync_graph_scene`,
+  which clears it; a new scene input that render reads goes into the key.
 - A fold is a view choice in `SceneState::folded`, keyed by node id like the
   selection, never a scene mutation; a folded card's mark (`graphview::Fold`)
   must count what it hides and name an awaiting descendant, so the fold

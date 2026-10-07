@@ -916,6 +916,11 @@ pub struct App {
     /// and the world coordinates cards keep across refreshes. It lives here,
     /// outside render, so a frame never reconstructs what the last one decided.
     pub graph: crate::scene::SceneState,
+    /// The last graph model built, with the key it was built for — read by
+    /// `graphview::build_model`, which every key, click, extent and frame
+    /// goes through. Cleared by `sync_graph_scene`, the one place the
+    /// forest's inputs (stage, roster, retained positions) change.
+    pub graph_cache: std::cell::RefCell<Option<(crate::graphview::ModelKey, std::rc::Rc<crate::graphview::Model>)>>,
     /// Selected row in the SESSION panel (indexes [`App::dag_rows`]).
     pub dag_sel: usize,
     /// Selected row in the PROJECTS panel.
@@ -1083,6 +1088,7 @@ impl App {
             help_open: false,
             tail: None,
             graph: crate::scene::SceneState::default(),
+            graph_cache: std::cell::RefCell::new(None),
             dag_sel: 0,
             proj_sel: 0,
             projects: Vec::new(),
@@ -1283,6 +1289,7 @@ impl App {
     /// The selection is an ID, so it names the same card across the refresh —
     /// or, once that card is gone, falls back to the first one.
     pub fn sync_graph_scene(&mut self) {
+        self.graph_cache.borrow_mut().take();
         let model = crate::graphview::build_model(self);
         let placed: Vec<crate::scene::Placed> = model
             .nodes
@@ -1298,6 +1305,7 @@ impl App {
         if !ids.contains(&self.graph.selected) {
             self.graph.selected = ids.first().cloned().unwrap_or_default();
         }
+        self.graph_cache.borrow_mut().take();
     }
 
     /// Terminal-watcher bookkeeping: any session id we have never seen becomes

@@ -43,6 +43,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Padding, Paragraph, Widget};
 use ratatui::Frame;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::rc::Rc;
 
 /// Vertical gap between depth ranks — just enough room for a wire's stem,
 /// spreader and drop, never a wide gutter, since rank stacks eat screen
@@ -345,10 +346,43 @@ pub fn readout(app: &App) -> String {
     }
 }
 
+/// Everything a built model depends on besides the forest's inputs: the
+/// scene's view, selection, folds and camera, the retained world's
+/// generation, and the failed-probe age the host cards print. The inputs
+/// themselves — stage, roster — change only through `sync_graph_scene`,
+/// which clears the cache.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelKey {
+    view: View,
+    selected: String,
+    folded: std::collections::BTreeSet<String>,
+    camera: Camera,
+    generation: u64,
+    probe_failed: Option<String>,
+}
+
 /// Build the layout model from the canonical graph document and the roster's
-/// last word on every registered node.
-pub fn build_model(app: &App) -> Model {
-    build_model_on(app, &aoide_storage::display::local_host_name())
+/// last word on every registered node — once per distinct key: a frame's
+/// render, hit test, extent and origin all read the same build rather than
+/// re-reading `nodes.json` and every node cache three to five times per
+/// keypress.
+pub fn build_model(app: &App) -> Rc<Model> {
+    let key = ModelKey {
+        view: app.graph.view,
+        selected: app.graph.selected.clone(),
+        folded: app.graph.folded.clone(),
+        camera: app.graph.camera,
+        generation: app.graph.positions.generation(),
+        probe_failed: app.roster_probe_failed(),
+    };
+    if let Some((k, m)) = app.graph_cache.borrow().as_ref() {
+        if *k == key {
+            return m.clone();
+        }
+    }
+    let model = Rc::new(build_model_on(app, &aoide_storage::display::local_host_name()));
+    *app.graph_cache.borrow_mut() = Some((key, model.clone()));
+    model
 }
 
 /// [`build_model`] with the host every session label carries stated rather
@@ -2077,6 +2111,29 @@ mod tests {
         assert!(out.contains("AGENT · last-seen"), "{out}");
         assert!(out.contains("was working"), "{out}");
         assert!(out.contains("🖧 NODE · never-pull"), "{out}");
+    }
+
+    #[test]
+    fn the_model_is_built_once_per_key_and_rebuilt_when_the_scene_or_the_forest_changes() {
+        let mut app = App::for_test(vec![], vec![session("a", "/x", "working", None)], Vec::new());
+        app.sync_graph_scene();
+        let first = build_model(&app);
+        assert!(Rc::ptr_eq(&first, &build_model(&app)), "same key, same build");
+
+        app.graph.view = View::All;
+        let second = build_model(&app);
+        assert!(!Rc::ptr_eq(&first, &second), "a view change is a new key");
+        assert!(Rc::ptr_eq(&second, &build_model(&app)));
+
+        app.graph.selected = "session:a".into();
+        assert!(!Rc::ptr_eq(&second, &build_model(&app)), "the selection is in the key");
+
+        let before = build_model(&app);
+        app.sessions.push(session("b", "/x", "idle", None));
+        app.sync_graph_scene();
+        let after = build_model(&app);
+        assert!(!Rc::ptr_eq(&before, &after), "a sync clears the cache");
+        assert_eq!(after.nodes.len(), before.nodes.len() + 1);
     }
 
     #[test]
