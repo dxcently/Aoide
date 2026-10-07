@@ -160,8 +160,12 @@ pub fn select_index(app: &mut App, i: usize) {
 /// Move the selection to the sibling before (`forward = false`) or after
 /// (`forward = true`) it across the rank: a node sharing this one's parent,
 /// in the existing child order. Never wraps at a rank's end, and does
-/// nothing for a root (no parent), an only child, or a sibling the current
-/// view does not draw.
+/// nothing for a root (no parent) or an only child.
+///
+/// The step is resolved against the WHOLE forest, not the drawn slice: under
+/// Focus the view is derived from the selection, so landing on a sibling the
+/// current component did not draw simply re-forms the view around it. The
+/// cursor is never stranded on a card whose neighbours the view hid.
 pub fn select_sibling(app: &mut App, forward: bool) {
     let model = build_model(app);
     let Some(id) = model.visible().nth(model.selected).map(|n| n.id.clone()) else {
@@ -178,11 +182,48 @@ pub fn select_sibling(app: &mut App, forward: bool) {
     } else {
         pos.checked_sub(1).and_then(|p| siblings.get(p))
     };
-    let Some(target_id) = target else {
+    if let Some(target_id) = target.filter(|t| model.nodes.iter().any(|n| &n.id == *t)) {
+        app.graph.selected = target_id.clone();
+        app.graph.camera.pan = None;
+    }
+}
+
+/// Move the selection up one rank, onto the selected card's parent in the
+/// forest — the gathering root included, so a Focus view on a loose session
+/// climbs back out to the forest it was picked from.
+pub fn select_parent(app: &mut App) {
+    let model = build_model(app);
+    let Some(id) = model.visible().nth(model.selected).map(|n| n.id.clone()) else {
         return;
     };
-    if model.visible().any(|n| &n.id == target_id) {
-        app.graph.selected = target_id.clone();
+    let parent = model
+        .children
+        .iter()
+        .find(|(_, kids)| kids.contains(&id))
+        .map(|(p, _)| p.clone())
+        .filter(|p| model.nodes.iter().any(|n| &n.id == p));
+    if let Some(parent) = parent {
+        app.graph.selected = parent;
+        app.graph.camera.pan = None;
+    }
+}
+
+/// Move the selection down one rank, onto the selected card's first child in
+/// draw order. Does nothing on a leaf.
+pub fn select_child(app: &mut App) {
+    let model = build_model(app);
+    let Some(id) = model.visible().nth(model.selected).map(|n| n.id.clone()) else {
+        return;
+    };
+    let child = model
+        .children
+        .get(&id)
+        .into_iter()
+        .flatten()
+        .find(|k| model.nodes.iter().any(|n| &n.id == *k))
+        .cloned();
+    if let Some(child) = child {
+        app.graph.selected = child;
         app.graph.camera.pan = None;
     }
 }
@@ -624,27 +665,42 @@ fn origin(model: &Model, area: Rect) -> (i32, i32) {
     if let Some((x, y)) = model.camera.pan {
         return (clamp(x, ew, pw), clamp(y, eh, ph));
     }
-    // The camera follows the selection: the selected card sits at the centre
-    // of the pane, and the canvas pad gives it room to get there. A card
+    // The camera follows the selection, but shows the forest, never the pad
+    // around it: the pad exists so a drag or a zoom can reach past the
+    // outermost cards, and a camera nobody has moved has no reason to be
+    // there. Along an axis the drawn forest fits in, the pane holds the
+    // forest — top-aligned vertically (the roots are the orientation), centred
+    // horizontally. Along an axis it overflows, the selected card sits at the
+    // centre, clamped so the pane never leaves the forest's own bounds. A card
     // larger than the pane anchors its top-left instead.
-    model
-        .visible()
-        .nth(model.selected)
-        .map(|n| {
-            let r = model.camera.scale_rect(n.world);
-            let centre = |o: i32, len: i32, pane: i32| {
-                if len <= pane {
-                    (o + len / 2 - pane / 2).max(0)
-                } else {
-                    o
-                }
-            };
-            (
-                clamp(centre(r.x, r.w, pw), ew, pw),
-                clamp(centre(r.y, r.h, ph), eh, ph),
-            )
-        })
-        .unwrap_or((0, 0))
+    let Some(sel) = model.visible().nth(model.selected) else {
+        return (0, 0);
+    };
+    let r = model.camera.scale_rect(sel.world);
+    let (x0, y0, x1, y1) = model.visible().fold(
+        (i32::MAX, i32::MAX, i32::MIN, i32::MIN),
+        |(x0, y0, x1, y1), n| {
+            let b = model.camera.scale_rect(n.world);
+            (x0.min(b.x), y0.min(b.y), x1.max(b.right()), y1.max(b.bottom()))
+        },
+    );
+    let follow = |o: i32, len: i32, lo: i32, hi: i32, pane: i32, centre_fit: bool| {
+        if hi - lo <= pane {
+            if centre_fit {
+                lo + (hi - lo) / 2 - pane / 2
+            } else {
+                lo
+            }
+        } else if len <= pane {
+            (o + len / 2 - pane / 2).clamp(lo, hi - pane)
+        } else {
+            o.clamp(lo, hi - pane)
+        }
+    };
+    (
+        clamp(follow(r.x, r.w, x0, x1, pw, true), ew, pw),
+        clamp(follow(r.y, r.h, y0, y1, ph, false), eh, ph),
+    )
 }
 
 /// Zoom the camera over the retained world. Terminal glyphs remain cell-sized:
@@ -1642,6 +1698,112 @@ mod tests {
         // Picking the gathering root itself opens the sessions under it.
         app.graph.selected = UNANCHORED_ID.into();
         assert_eq!(node_order(&app).len(), 3);
+    }
+
+    #[test]
+    fn focus_navigation_walks_the_forest_and_the_view_follows() {
+        // Two loose roots, one with a child. Under Focus the gathering root
+        // is not a connection, so once the cursor is on `a` the view draws
+        // `a` and `a1` alone — but the KEYS must still reach the parent and
+        // the sibling the view hid, or the cursor is stranded after one `j`.
+        let mut app = App::for_test(
+            vec![],
+            vec![
+                session("a", "/tmp/a", "working", None),
+                session("a1", "/tmp/a", "idle", Some("a")),
+                session("b", "/tmp/b", "idle", None),
+            ],
+            Vec::new(),
+        );
+        app.sync_graph_scene();
+        assert_eq!(app.graph.view, View::Focus);
+        assert_eq!(app.graph.selected, UNANCHORED_ID);
+        let ids = |app: &App| -> Vec<String> {
+            node_order(app)
+                .iter()
+                .map(|n| n.session_id.clone().unwrap_or_else(|| n.id.clone()))
+                .collect()
+        };
+
+        select_child(&mut app);
+        assert_eq!(selected_session_id(&app).as_deref(), Some("a"));
+        assert_eq!(ids(&app), vec!["a", "a1"], "focus narrows to a's component");
+
+        select_parent(&mut app);
+        assert_eq!(app.graph.selected, UNANCHORED_ID, "k climbs back to the gathering root");
+        assert_eq!(ids(&app).len(), 4, "the root opens the whole forest again");
+
+        select_child(&mut app);
+        select_sibling(&mut app, true);
+        assert_eq!(selected_session_id(&app).as_deref(), Some("b"), "l reaches the hidden sibling");
+        assert_eq!(ids(&app), vec!["b"], "and the view re-forms around it");
+        select_sibling(&mut app, true);
+        assert_eq!(selected_session_id(&app).as_deref(), Some("b"), "no wrap at the rank's end");
+
+        select_sibling(&mut app, false);
+        assert_eq!(selected_session_id(&app).as_deref(), Some("a"));
+        select_child(&mut app);
+        assert_eq!(selected_session_id(&app).as_deref(), Some("a1"));
+        select_child(&mut app);
+        assert_eq!(selected_session_id(&app).as_deref(), Some("a1"), "a leaf has no child");
+        select_parent(&mut app);
+        assert_eq!(selected_session_id(&app).as_deref(), Some("a"));
+        assert!(app.graph.camera.pan.is_none(), "every step hands the camera back to the selection");
+    }
+
+    #[test]
+    fn the_follow_camera_shows_the_forest_not_the_pad() {
+        // A forest shorter than the pane starts at its own top row: the
+        // canvas pad above the roots is for dragging past them, never the
+        // opening picture.
+        let mut app = App::for_test(
+            vec![],
+            vec![
+                session("root", "/x", "working", None),
+                session("child", "/x", "idle", Some("root")),
+            ],
+            Vec::new(),
+        );
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        let area = Rect::new(0, 0, 60, 40);
+        let model = build_model(&app);
+        let top = model.visible().map(|n| n.world.y).min().unwrap();
+        let (left, right) = model
+            .visible()
+            .fold((i32::MAX, i32::MIN), |(l, r), n| (l.min(n.world.x), r.max(n.world.right())));
+        for sel in 0..model.visible_len() {
+            select_index(&mut app, sel);
+            let o = origin(&build_model(&app), area);
+            assert_eq!(o.1, top, "sel {sel}: the first rank sits on the pane's top row");
+            assert!(o.0 <= left && right <= o.0 + 60, "sel {sel}: the forest is centred whole");
+        }
+
+        // A rank wider than the pane: the selected card is centred, but the
+        // pane never slides past the forest's own edge into the pad.
+        let mut wide: Vec<SessionRecord> = vec![session("hub", "/x", "working", None)];
+        wide.extend((0..13).map(|i| session(&format!("w{i}"), "/x", "idle", Some("hub"))));
+        let mut app = App::for_test(vec![], wide, Vec::new());
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        let area = Rect::new(0, 0, 54, 14);
+        let model = build_model(&app);
+        let (x0, x1) = model
+            .visible()
+            .fold((i32::MAX, i32::MIN), |(l, r), n| (l.min(n.world.x), r.max(n.world.right())));
+        let (y0, y1) = model
+            .visible()
+            .fold((i32::MAX, i32::MIN), |(l, r), n| (l.min(n.world.y), r.max(n.world.bottom())));
+        for sel in 0..model.visible_len() {
+            select_index(&mut app, sel);
+            let m = build_model(&app);
+            let o = origin(&m, area);
+            let r = m.visible().nth(sel).unwrap().world;
+            assert!(o.0 >= x0 && o.0 + 54 <= x1, "sel {sel}: pane inside the forest's width");
+            assert!(o.1 >= y0 && o.1 + 14 <= y1, "sel {sel}: pane inside the forest's height");
+            assert!(r.x >= o.0 && r.right() <= o.0 + 54, "sel {sel}: the selected card is on screen");
+            assert!(r.y >= o.1 && r.bottom() <= o.1 + 14, "sel {sel}: the selected card is on screen");
+        }
     }
 
     // ── Camera: one transform for render, hit test and pan ─────────────────

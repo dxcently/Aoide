@@ -4336,23 +4336,11 @@ impl App {
         let nodes = crate::graphview::node_order(self);
         let selected = crate::graphview::selected_index(self);
         match key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
-                if let Some(node) = nodes.get(selected) {
-                    if nodes
-                        .get(selected + 1)
-                        .is_some_and(|n| n.depth > node.depth)
-                    {
-                        crate::graphview::select_index(self, selected + 1);
-                    }
-                }
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                if let Some(node) = nodes.get(selected) {
-                    if let Some(i) = nodes[..selected].iter().rposition(|n| n.depth < node.depth) {
-                        crate::graphview::select_index(self, i);
-                    }
-                }
-            }
+            // Rank steps resolve against the whole forest, so a Focus view
+            // on a loose session climbs back out to its gathering root and
+            // steps across to a sibling the component did not draw.
+            KeyCode::Char('j') | KeyCode::Down => crate::graphview::select_child(self),
+            KeyCode::Char('k') | KeyCode::Up => crate::graphview::select_parent(self),
             KeyCode::Char('h') | KeyCode::Left => crate::graphview::select_sibling(self, false),
             KeyCode::Char('l') | KeyCode::Right => crate::graphview::select_sibling(self, true),
             KeyCode::Home | KeyCode::Char('g') => crate::graphview::select_index(self, 0),

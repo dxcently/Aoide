@@ -16,7 +16,14 @@
   node's identity live in `App::graph`; a frame reads them and never rebuilds
   the world. Placement keeps a surviving node's rectangle, re-places a node
   whose depth changed, and drops a departed one. Selection is a node identity,
-  never a row index, so a refresh cannot move it.
+  never a row index, so a refresh cannot move it. A rank or sibling step
+  (`j`/`k`/`h`/`l`) resolves against the whole forest and the view follows
+  the selection; never gate a step on what the current view draws, or a
+  Focus view strands the cursor one `j` below its root.
+- The follow camera (no manual pan) shows the forest, never the pad: an
+  axis the forest fits in holds it whole, an overflowing axis centres the
+  selected card clamped inside the forest's bounds. The pad is reachable
+  only by a drag or a zoom.
 - Graph zoom is a camera transform of those fixed world rectangles at
   50/75/100/125/150%. Pointer-anchored zoom, pan limits, render and hit tests
   share one transform; never let render record rectangles for a later hit test.

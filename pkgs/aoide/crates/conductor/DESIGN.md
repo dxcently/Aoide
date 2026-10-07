@@ -171,7 +171,10 @@ edges unless it is itself the selected node.
 
 The camera's pan is the viewport's top-left in scaled cells, which keeps
 panning a screen gesture at every zoom; an unset pan means the camera follows
-the selection by centring it. Ctrl + wheel steps 50%, 75%, 100%, 125% and 150%
+the selection — centring the selected card along an axis the forest
+overflows, holding the forest whole along one it fits, and never showing the
+pad a drag could reach. Rank and sibling steps resolve against the whole
+forest, and Focus re-forms around wherever the cursor lands. Ctrl + wheel steps 50%, 75%, 100%, 125% and 150%
 and holds the pointer's world location fixed, bounded by the padded canvas
 edges. The painter clips every write to the pane and drops a wide glyph that
 would straddle the right edge, so the world outside the camera costs nothing

@@ -33,8 +33,8 @@ whenever it holds more rows than fit, and stays gone otherwise.
 | `h` / `l`, Left / Right | Fold or unfold tree groups |
 | `e` / right-click | Actions for a tree, graph, project or session target |
 | `a` in Graph | Whole forest, or only the selected card's own graph |
-| `j` / `k`, Down / Up in Graph | Move the selection down/up a rank, toward a child or the parent |
-| `h` / `l`, Left / Right in Graph | Move the selection to the previous/next sibling across the rank |
+| `j` / `k`, Down / Up in Graph | Move the selection down/up a rank, toward the first child or the parent, across the whole forest |
+| `h` / `l`, Left / Right in Graph | Move the selection to the previous/next sibling across the rank, across the whole forest |
 | Enter in Graph | Open or focus the selected session |
 | `s` in Graph | Write a letter to the selected agent |
 | `p` in Graph | Prune ended sessions |
@@ -77,9 +77,13 @@ exception — it moves to its new rank, because a retained position would draw
 a child above its parent. Selection names a card by identity rather than by
 row, so the same card stays selected across a refresh.
 
-`j` / `k` or Down / Up step the selection a rank at a time, toward a child or
-the parent; `h` / `l` or Left / Right step it to the previous or next sibling
-across the rank, and neither wraps at a rank's end. Enter opens or focuses
+`j` / `k` or Down / Up step the selection a rank at a time, toward the first
+child or the parent; `h` / `l` or Left / Right step it to the previous or next
+sibling across the rank, and neither wraps at a rank's end. Every step is
+resolved against the whole forest, never the drawn slice: under Focus the view
+is derived from the selection, so `k` on a loose session climbs to the
+gathering root and opens the forest again, and `l` reaches a sibling the
+component did not draw and re-forms the view around it. Enter opens or focuses
 the selected session, `s` writes a letter to the selected agent directly
 without opening the actions menu, and `p` prunes ended sessions — the one
 mutation the panel dispatches on its own.
@@ -93,9 +97,12 @@ borrowing a forest of strangers.
 Space + left drag or middle drag pans the canvas; the wheel pans vertically and
 Shift + wheel pans horizontally. Ctrl + wheel zooms the camera through 50%,
 75%, 100%, 125% and 150%, anchored at the pointer. Until a drag or a pan moves
-it, the camera follows the selection by centring the selected card. The forest
-sits on a padded canvas, so the camera reaches past the outermost cards. Only
-what the camera can see is painted.
+it, the camera follows the selection and shows the forest, never the pad
+around it: along an axis the forest fits in, the pane holds the forest whole
+(top-aligned, centred across); along an axis it overflows, the selected card
+is centred, clamped so the pane stays inside the forest's own bounds. The
+forest sits on a padded canvas, so a drag or a zoom reaches past the outermost
+cards. Only what the camera can see is painted.
 
 Wires run below the cards, so a card covers the wire that crosses it. Each wire
 wears the state colour of the session it leads to, so a working agent lights
