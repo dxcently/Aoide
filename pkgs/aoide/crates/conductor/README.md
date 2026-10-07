@@ -94,6 +94,17 @@ no project gather under one synthetic root, and that root is not a connection:
 a session attached to nothing shows itself alone under Focus rather than
 borrowing a forest of strangers.
 
+Every registered node stands after this box's forest as a host card (`🖧
+NODE · online|unreachable|never-pulled`, its name, and `n session(s) · live`,
+`unreachable · last seen <age> ago` or `never pulled`), with the sessions the
+roster reports for it hanging flat beneath — the roster carries no spawned
+edges across the wire. The rows are the same `session --hosts` probe Mesh
+paints, refreshed on the same ~15 s throttle while Graph is open; a cached
+row under an unreachable node wears the cache's word (`last-seen`) as its
+state and `was <state>` as its activity, never a live glyph. A remote card
+carries no local session id, so Enter, `s` and the menu act on nothing: a
+far session is looked at here, and conducted from Mesh or the shell.
+
 Space + left drag or middle drag pans the canvas; the wheel pans vertically and
 Shift + wheel pans horizontally. Ctrl + wheel zooms the camera through 50%,
 75%, 100%, 125% and 150%, anchored at the pointer. Until a drag or a pan moves
@@ -275,7 +286,7 @@ visible alongside the previous successful snapshot.
 | `board` | Home/workspace composition, navigation, sidebar and shared drawing/hit-test geometry |
 | `ui` | Pure panel/detail/overlay rendering |
 | `scene` | Camera, view choice, retained world positions and the clipping painter |
-| `graphview` | Graph model, card layout and wires over the retained scene |
+| `graphview` | Graph model (local forest plus the roster's nodes), card layout and wires over the retained scene |
 | `mailview` | Non-consuming local letters, signed thread grouping and legacy pair correspondence |
 | `eventview` | Bounded audit reader and full-record event rendering |
 | `logtail` | Read-only headless-session log overlay |

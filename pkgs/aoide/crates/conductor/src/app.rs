@@ -1534,8 +1534,14 @@ impl App {
             // while `open_compose`'s raw `.get(self.roster_sel)` silently
             // no-ops `s` against a row that no longer exists at that index.
             self.clamp_selection();
+            // The graph folds the roster's nodes in as cards, so a landed
+            // probe is a forest change the retained scene takes like a
+            // stage refresh.
+            self.sync_graph_scene();
         }
-        if self.panel == Panel::Roster && self.roster_stale() {
+        // The Graph paints the roster's nodes too, so it keeps the probe
+        // ticking on the same throttle; any other pane leaves the wire alone.
+        if matches!(self.panel, Panel::Roster | Panel::Graph) && self.roster_stale() {
             self.spawn_roster_fetch();
             changed = true; // a fresh "probing…" status is itself a repaint
         }
@@ -5829,6 +5835,31 @@ mod tests {
                 "a hidden pane must never spawn a fetch"
             );
             assert_eq!(ROSTER_CALLS.load(Ordering::SeqCst), 0);
+        });
+    }
+
+    #[test]
+    fn graph_tick_keeps_the_roster_probe_ticking() {
+        with_isolated_stage(|| {
+            let _rguard = ROSTER_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            ROSTER_CALLS.store(0, Ordering::SeqCst);
+
+            // The graph paints registered nodes off the roster, so it keeps
+            // the probe on the same throttle Mesh does.
+            let mut app = App::for_test_with_dispatch(counting_roster_dispatch);
+            app.panel = Panel::Graph;
+
+            app.poll_refresh();
+
+            let rx = app
+                .roster_rx
+                .take()
+                .expect("the graph pane spawns the roster probe");
+            let outcome = rx
+                .recv_timeout(Duration::from_secs(2))
+                .expect("the background dispatch completes");
+            assert_eq!(outcome.command, "session");
+            assert_eq!(ROSTER_CALLS.load(Ordering::SeqCst), 1);
         });
     }
 

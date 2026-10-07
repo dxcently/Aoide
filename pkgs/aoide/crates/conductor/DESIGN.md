@@ -104,6 +104,7 @@ never reconstructs what the last one decided.
 
 ```text
 stage refresh ─── nodes and edges ───┐
+roster probe ──── host cards + rows ─┤
                                      ▼
                               tree layout ── proposed world cells
                                      │
@@ -163,6 +164,11 @@ Ratatui ships no node/edge/tree/DAG widget to reach for instead: `GraphType`
 belongs to `Chart`/`Dataset` and names a Cartesian series style (`Scatter`,
 `Line`, `Bar`, `Area`), a plotting-axis concept with nothing to do with graph
 topology.
+
+Registered nodes join the forest as host roots off the roster probe (the
+same outcome Mesh paints, polled while Graph is open), each with the roster's
+rows flat beneath it; a cached row's state is the roster's own cache word. A
+remote card has no local session id, so the local actions pass over it.
 
 Focus walks the graph undirected from the selected node and draws that
 component alone; All draws every node. The synthetic root gathering sessions

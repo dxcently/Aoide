@@ -67,6 +67,9 @@ pub enum NodeKind {
     /// The synthetic root gathering sessions anchored to no project (mirrors the
     /// projectless group the Unicode tree render uses).
     Unanchored,
+    /// A registered node on the mesh, as the roster probe last saw it: the
+    /// root its remote sessions hang from.
+    Host,
 }
 
 /// One laid-out node: identity, display bits, and its retained world rectangle.
@@ -89,6 +92,10 @@ pub struct Node {
     /// the synthetic unanchored root, shells, and any session that hasn't
     /// produced an assistant turn yet.
     pub model: Option<String>,
+    /// The registered node a remote card lives on; `None` for this box's own
+    /// cards. A remote session id never resolves against the local roster,
+    /// so no local action (focus, letter, prune) can reach one by mistake.
+    pub host: Option<String>,
     pub depth: usize,
     pub row: usize,
     /// The card's retained rectangle in world cells.
@@ -106,6 +113,9 @@ struct Meta {
     state: Option<String>,
     tags: Vec<String>,
     model: Option<String>,
+    host: Option<String>,
+    petname: Option<String>,
+    activity: String,
 }
 
 /// The parsed, world-placed forest and the camera over it.
@@ -259,7 +269,8 @@ pub fn view_label(app: &App) -> &'static str {
     app.graph.view.label()
 }
 
-/// Build the layout model from the canonical graph document.
+/// Build the layout model from the canonical graph document and the roster's
+/// last word on every registered node.
 pub fn build_model(app: &App) -> Model {
     build_model_on(app, &aoide_storage::display::local_host_name())
 }
@@ -268,6 +279,20 @@ pub fn build_model(app: &App) -> Model {
 /// than read from this box.
 fn build_model_on(app: &App, host: &str) -> Model {
     let doc = graph::build_graph(&app.projects, &app.sessions, &app.hooks);
+    build_model_from(app, &doc, &app.roster_nodes())
+}
+
+/// The model over an explicit document and roster — what [`build_model`]
+/// reads off the app, split out so a test can hand in a synthetic pair.
+///
+/// Registered nodes come from the ROSTER, not the document's own `node:*`
+/// fold: the fold carries a node's sessions only while its cache is within
+/// the five-minute TTL and only `node pull` writes that cache, while the
+/// roster is the live probe this frontend already runs and the same rows
+/// Mesh paints. A node the probe could not reach keeps its cached sessions,
+/// each wearing the cache's word (`last-seen`/`unknown`) in place of a live
+/// state, so a remote card never claims more than the roster did.
+pub fn build_model_from(app: &App, doc: &serde_json::Value, roster: &[crate::app::RosterNode]) -> Model {
     let merged = app.merged();
     let tag_by_id: HashMap<String, Vec<String>> = merged
         .iter()
@@ -320,6 +345,9 @@ fn build_model_on(app: &App, host: &str) -> Model {
                         state: None,
                         tags: Vec::new(),
                         model: None,
+                        host: None,
+                        petname: None,
+                        activity: String::new(),
                     },
                 );
             }
@@ -363,6 +391,9 @@ fn build_model_on(app: &App, host: &str) -> Model {
                         state: Some(state),
                         tags,
                         model,
+                        host: None,
+                        petname: None,
+                        activity: String::new(),
                     },
                 );
             }
@@ -411,10 +442,85 @@ fn build_model_on(app: &App, host: &str) -> Model {
                 state: None,
                 tags: Vec::new(),
                 model: None,
+                host: None,
+                petname: None,
+                activity: String::new(),
             },
         );
         children.insert(uid.clone(), unanchored);
         roots.push(uid);
+    }
+
+    // Registered nodes stand after this box's own forest, one root each,
+    // their sessions hanging flat beneath (the roster carries no spawned
+    // edges across the wire). Ids are prefixed with the node's own root id,
+    // so a far session id can never collide with a local one.
+    for node in roster.iter().filter(|n| !n.is_local) {
+        let nid = format!("node:{}", node.name);
+        let title = match node.presence.as_str() {
+            "online" => format!("{} session(s) · live", node.sessions.len()),
+            "unreachable" => format!(
+                "unreachable · last seen {}",
+                node.fetched_at.as_deref().map(theme::age_label).unwrap_or("unknown".into())
+            ),
+            "never-pulled" => "never pulled".to_string(),
+            other => other.to_string(),
+        };
+        meta.insert(
+            nid.clone(),
+            Meta {
+                kind: NodeKind::Host,
+                label: node.name.clone(),
+                title,
+                role: "node".into(),
+                harness: String::new(),
+                session_id: None,
+                state: Some(node.presence.clone()),
+                tags: Vec::new(),
+                model: None,
+                host: None,
+                petname: None,
+                activity: String::new(),
+            },
+        );
+        let mut kids = Vec::with_capacity(node.sessions.len());
+        for s in &node.sessions {
+            let sid = format!("{nid}/session:{}", s.session_id);
+            // A cached row's state is what the far node LAST said; the
+            // card's state slot carries the cache's word instead, and the
+            // old state rides the activity row as history.
+            let (state, activity) = if s.is_cached() {
+                (s.presence.clone(), format!("was {}", s.state))
+            } else {
+                (s.state.clone(), s.cwd.clone())
+            };
+            meta.insert(
+                sid.clone(),
+                Meta {
+                    kind: NodeKind::Session,
+                    label: s.label.clone(),
+                    title: String::new(),
+                    role: String::new(),
+                    harness: s.agent.clone(),
+                    // No bare session id: Enter, `s` and the menu resolve a
+                    // card through `session_id` against this box's roster,
+                    // and a far id must never find a local record there.
+                    // The roster label already carries the tail.
+                    session_id: None,
+                    state: Some(state),
+                    tags: Vec::new(),
+                    model: None,
+                    host: Some(node.name.clone()),
+                    petname: s.petname.clone(),
+                    activity,
+                },
+            );
+            kids.push(sid);
+        }
+        if !kids.is_empty() {
+            children.insert(nid.clone(), kids);
+        }
+        roots.push(nid);
     }
 
     // Preorder DFS: row = push order, depth = distance from the root.
@@ -432,7 +538,7 @@ fn build_model_on(app: &App, host: &str) -> Model {
         .position(|&i| nodes[i].id == app.graph.selected)
         .unwrap_or(0);
 
-    for node in &mut nodes {
+    for node in nodes.iter_mut().filter(|n| n.host.is_none()) {
         if let Some(record) = node
             .session_id
             .as_ref()
@@ -490,14 +596,15 @@ fn walk(
             kind: m.kind,
             label: m.label.clone(),
             title: m.title.clone(),
-            activity: String::new(),
-            petname: None,
+            activity: m.activity.clone(),
+            petname: m.petname.clone(),
             role: m.role.clone(),
             harness: m.harness.clone(),
             session_id: m.session_id.clone(),
             state: m.state.clone(),
             tags: m.tags.clone(),
             model: m.model.clone(),
+            host: m.host.clone(),
             depth,
             row: out.len(),
             world: WorldRect::new(0, 0, CARD_W, CARD_H),
@@ -993,7 +1100,9 @@ fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &m
     );
     let accent = theme::role_color(
         pal,
-        if n.kind != NodeKind::Session {
+        if n.kind == NodeKind::Host {
+            theme::Role::Host
+        } else if n.kind != NodeKind::Session {
             theme::Role::Project
         } else if n.harness == "shell" || n.role == "terminal" {
             theme::Role::Terminal
@@ -1037,6 +1146,7 @@ fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &m
     let mark = theme::mark(match role {
         "project" | "root" => theme::Mark::Project,
         "terminal" => theme::Mark::Terminal,
+        "node" => theme::Mark::Host,
         _ if n.kind != NodeKind::Session => theme::Mark::Project,
         _ => theme::Mark::Agent,
     });
@@ -1063,14 +1173,9 @@ fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &m
         (_, Some(m)) => m.into(),
         (h, None) => h.clone(),
     };
-    let card_identity = n
-        .petname
-        .as_ref()
-        .map(|name| {
-            let tail: String = n
-                .session_id
-                .as_deref()
-                .unwrap_or("")
+    let card_identity = match (&n.petname, n.session_id.as_deref()) {
+        (Some(name), Some(id)) => {
+            let tail: String = id
                 .chars()
                 .rev()
                 .take(4)
@@ -1079,8 +1184,9 @@ fn render_card_into(n: &Node, selected: bool, pal: &crate::app::Palette, buf: &m
                 .rev()
                 .collect();
             format!("{name} (…{tail})")
-        })
-        .unwrap_or_else(|| n.label.clone());
+        }
+        _ => n.label.clone(),
+    };
     // An ordered (text, style) sequence, one entry per would-be row, with
     // empty entries dropped and the survivors renumbered by `enumerate` --
     // so a titleless card never leaves a blank row where the title would
@@ -1698,6 +1804,128 @@ mod tests {
         // Picking the gathering root itself opens the sessions under it.
         app.graph.selected = UNANCHORED_ID.into();
         assert_eq!(node_order(&app).len(), 3);
+    }
+
+    /// A `session --hosts --json` outcome: this box (skipped — its sessions
+    /// are already the local forest), one unreachable node with a cached row
+    /// and one live row, one never-pulled node.
+    fn roster_fixture() -> aoide_protocol::output::Outcome {
+        let data = serde_json::json!({
+            "host": "osaka",
+            "generatedAt": "2026-08-21T00:00:00Z",
+            "nodes": [
+                { "name": "osaka", "isLocal": true, "presence": "online", "fetchedAt": null,
+                  "sessions": [
+                      { "sessionId": "local", "label": "osaka/root/brave-otter (…ocal)",
+                        "petname": "brave-otter", "agent": "claude", "state": "working",
+                        "presence": "online", "cwd": "/x" } ] },
+                { "name": "yomi-strix", "isLocal": false, "presence": "unreachable",
+                  "fetchedAt": "2026-08-20T23:00:00Z", "error": "HTTP 000",
+                  "sessions": [
+                      { "sessionId": "far1", "label": "yomi-strix/root/misty-comet (…far1)",
+                        "petname": "misty-comet", "agent": "codex", "state": "working",
+                        "presence": "last-seen", "cwd": "/y" } ] },
+                { "name": "sakaki", "isLocal": false, "presence": "online", "fetchedAt": null,
+                  "sessions": [
+                      { "sessionId": "far2", "label": "sakaki/child/calm-thorn (…far2)",
+                        "petname": "calm-thorn", "agent": "shell", "state": "idle",
+                        "presence": "online", "cwd": "/z" } ] },
+                { "name": "ghost", "isLocal": false, "presence": "never-pulled",
+                  "fetchedAt": null, "error": "could not reach the agent", "sessions": [] },
+            ],
+        });
+        aoide_protocol::output::Outcome::ok("session", "4 node(s)").with_data(data)
+    }
+
+    #[test]
+    fn registered_nodes_stand_as_host_cards_with_their_roster_rows_beneath() {
+        let mut app = App::for_test(
+            vec![],
+            vec![session("local", "/x", "working", None)],
+            Vec::new(),
+        );
+        app.roster.outcome = Some(roster_fixture());
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        let m = build_model(&app);
+
+        // This box is the local forest already; it gets no host card, and its
+        // roster row is not a second card for the same session.
+        assert!(m.nodes.iter().all(|n| n.id != "node:osaka"));
+        assert_eq!(m.nodes.iter().filter(|n| n.session_id.as_deref() == Some("local")).count(), 1);
+
+        let yomi = node(&m, "node:yomi-strix");
+        assert_eq!(yomi.kind, NodeKind::Host);
+        assert_eq!(yomi.depth, 0, "a node is a root of its own");
+        assert!(
+            yomi.title.starts_with("unreachable · last seen ") && yomi.title.ends_with(" ago"),
+            "the host card says it is cache, and how old: {}",
+            yomi.title
+        );
+        let far1 = node(&m, "node:yomi-strix/session:far1");
+        assert_eq!(far1.host.as_deref(), Some("yomi-strix"));
+        assert_eq!(far1.depth, 1, "a remote session hangs off its node");
+        assert_eq!(far1.state.as_deref(), Some("last-seen"), "a cached row's state is the cache's word");
+        assert_eq!(far1.activity, "was working", "its last state rides as history");
+        assert_eq!(far1.petname.as_deref(), Some("misty-comet"));
+
+        let sakaki = node(&m, "node:sakaki");
+        assert_eq!(sakaki.title, "1 session(s) · live");
+        let far2 = node(&m, "node:sakaki/session:far2");
+        assert_eq!(far2.state.as_deref(), Some("idle"), "a live row keeps its state");
+        assert_eq!(far2.activity, "/z");
+        assert_eq!(far2.harness, "shell");
+
+        let ghost = node(&m, "node:ghost");
+        assert_eq!(ghost.title, "never pulled");
+        assert!(m.children.get("node:ghost").is_none(), "nothing hangs off a node never pulled");
+
+        // Local forest first, nodes after — the gathering root precedes every host.
+        let unanchored = m.nodes.iter().position(|n| n.id == UNANCHORED_ID).unwrap();
+        assert!(unanchored < m.nodes.iter().position(|n| n.id == "node:yomi-strix").unwrap());
+
+        // Painted: the host card wears the node mark and its name; the cached
+        // row shows the cache's word and no live glyph next to it.
+        let buf = paint(&app, Rect::new(0, 0, 320, 40));
+        let out = dump(&buf);
+        assert!(out.contains("🖧 NODE · unreachable"), "{out}");
+        assert!(out.contains("yomi-strix"), "{out}");
+        assert!(out.contains("AGENT · last-seen"), "{out}");
+        assert!(out.contains("was working"), "{out}");
+        assert!(out.contains("🖧 NODE · never-pulled"), "{out}");
+    }
+
+    #[test]
+    fn a_remote_session_resolves_no_local_record() {
+        // A far session id must never reach `merged()`: Enter, the letter
+        // key and the context menu all look a card up there, and finding
+        // nothing is what keeps every local action on this box's own rows.
+        let mut app = App::for_test(
+            vec![],
+            vec![session("far1", "/x", "working", None)],
+            Vec::new(),
+        );
+        app.roster.outcome = Some(roster_fixture());
+        app.graph.view = View::All;
+        app.sync_graph_scene();
+        let m = build_model(&app);
+        let remote = m
+            .nodes
+            .iter()
+            .find(|n| n.id == "node:yomi-strix/session:far1")
+            .unwrap();
+        let local = m.nodes.iter().find(|n| n.id == "session:far1").unwrap();
+        assert_eq!(local.session_id.as_deref(), Some("far1"));
+        assert_eq!(remote.session_id, None, "a far card carries no id a local lookup could hit");
+        assert!(remote.host.is_some() && local.host.is_none());
+        assert!(remote.world != local.world, "distinct cards, distinct retained positions");
+
+        // Selecting the far card yields no session for Enter or `s` to act on,
+        // while its label still shows the far tail.
+        app.graph.selected = remote.id.clone();
+        assert_eq!(selected_session_id(&app), None);
+        let out = dump(&paint(&app, Rect::new(0, 0, 200, 40)));
+        assert!(out.contains("yomi-strix/root/") && out.contains("(…far1)"), "{out}");
     }
 
     #[test]

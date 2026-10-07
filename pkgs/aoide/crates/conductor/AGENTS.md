@@ -20,6 +20,12 @@
   (`j`/`k`/`h`/`l`) resolves against the whole forest and the view follows
   the selection; never gate a step on what the current view draws, or a
   Focus view strands the cursor one `j` below its root.
+- Registered nodes enter the graph from the roster outcome (`App::roster_nodes`),
+  never from the document's `node:*` fold (fresh only inside the cache TTL,
+  written only by `node pull`). A remote card's id is prefixed with its node's
+  root id and its `session_id` is `None`, so no local action — focus, letter,
+  menu, prune — can resolve it against this box's roster; a cached row's
+  state slot carries the roster's `presence` word, never its last live state.
 - The follow camera (no manual pan) shows the forest, never the pad: an
   axis the forest fits in holds it whole, an overflowing axis centres the
   selected card clamped inside the forest's bounds. The pad is reachable
