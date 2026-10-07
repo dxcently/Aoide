@@ -494,6 +494,9 @@ pub struct RosterSession {
     pub petname: Option<String>,
     pub agent: String,
     pub cwd: String,
+    /// The spawner's id when it is a session on the same node — the one
+    /// edge the roster carries across the wire.
+    pub parent: Option<String>,
 }
 
 impl RosterSession {
@@ -1625,6 +1628,7 @@ impl App {
                             petname: s["petname"].as_str().map(String::from),
                             agent: s["agent"].as_str().unwrap_or("").to_string(),
                             cwd: s["cwd"].as_str().unwrap_or("").to_string(),
+                            parent: s["parentSessionId"].as_str().map(String::from),
                         })
                         .collect(),
                 }

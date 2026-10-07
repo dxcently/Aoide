@@ -158,7 +158,8 @@ children, and one synthetic `Active sessions` root for the projectless —
 followed by one **host card per registered node** off the roster probe
 (border `🖧 NODE · online|unreachable|never-pulled`, then the node's name and
 `n session(s)` or `last seen <age>`), its
-reported sessions flat beneath. A remote card carries no local session id,
+reported sessions beneath, ranked under a same-node spawner when the row
+names one (`parentSessionId`) and flat otherwise. A remote card carries no local session id,
 so the local actions pass over it — `s` writes to the far agent's
 `node/petname` mailbox and `e` offers Details (its Mesh row) and Write
 letter; a cached row wears `last-seen` as its

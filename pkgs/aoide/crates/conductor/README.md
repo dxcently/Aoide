@@ -128,8 +128,9 @@ borrowing a forest of strangers.
 Every registered node stands after this box's forest as a host card (border
 `🖧 NODE · online|unreachable|never-pulled`, then its name and `n
 session(s)` or `last seen <age>`), with the
-sessions the roster reports for it hanging flat beneath — the roster carries
-no spawned edges across the wire. The rows are the same `session --hosts`
+sessions the roster reports for it beneath — ranked under a same-node
+spawner when the row carries `parentSessionId`, flat under the node
+otherwise. The rows are the same `session --hosts`
 probe Mesh paints, refreshed on the same ~15 s throttle while Graph is open;
 a cached row under an unreachable node wears the cache's word (`last-seen`)
 as its state and `was <state>` as its activity, never a live glyph, and is

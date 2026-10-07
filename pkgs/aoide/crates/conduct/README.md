@@ -1315,7 +1315,9 @@ a stub: a signal-less host has no `Ended::Signal` variant at all.
   `.aoide/project.json` manifest directory's own basename via `walk_up`,
   else a trailing `(no project)` bucket — a remote row has no
   `effective_project` and keeps this same ladder verbatim);
-  `--hosts` groups by HOST instead — this host, then each node,
+  `--hosts` groups by HOST instead (a `--json` session row carries
+  `parentSessionId` when its spawner is a session on the same node, so a
+  consumer can rank a far forest) — this host, then each node,
   byte-identical to `who`'s old rendering (`render_nodes`/`node_json`
   survive unchanged). `filter`/`--all` narrow `nodes` BEFORE either split,
   so they apply to both groupings uniformly. A PROJECTION, never a store —

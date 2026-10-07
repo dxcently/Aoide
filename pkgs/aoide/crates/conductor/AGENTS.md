@@ -23,6 +23,9 @@
   one `j` below its root. A parent lookup takes the first DRAWN parent
   inside the search: a resurrected session also sits under its `resumed`
   ghost, which is not a node, and map order must not let it win.
+- A remote row's `parentSessionId` ranks it only under a parent the SAME
+  node lists; a parent the node does not list (or a self-reference) leaves
+  the row flat, never guessed across nodes.
 - Registered nodes enter the graph from the roster outcome (`App::roster_nodes`),
   never from the document's `node:*` fold (fresh only inside the cache TTL,
   written only by `node pull`). A remote card's id is prefixed with its node's

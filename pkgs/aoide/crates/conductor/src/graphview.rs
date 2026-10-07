@@ -574,9 +574,10 @@ pub fn build_model_from(
     }
 
     // Registered nodes stand after this box's own forest, one root each,
-    // their sessions hanging flat beneath (the roster carries no spawned
-    // edges across the wire). Ids are prefixed with the node's own root id,
-    // so a far session id can never collide with a local one.
+    // their sessions beneath — ranked under a same-node spawner when the
+    // row names one, flat under the node otherwise. Ids are prefixed with
+    // the node's own root id, so a far session id can never collide with a
+    // local one.
     let probe_failed = app.roster_probe_failed();
     for node in roster.iter().filter(|n| !n.is_local) {
         let nid = format!("node:{}", node.name);
@@ -614,8 +615,16 @@ pub fn build_model_from(
             },
         );
         let mut kids = Vec::with_capacity(node.sessions.len());
+        let on_node = |id: &str| node.sessions.iter().any(|s| s.session_id == id);
         for s in &node.sessions {
             let sid = format!("{nid}/session:{}", s.session_id);
+            match s.parent.as_deref().filter(|p| on_node(p) && *p != s.session_id) {
+                Some(parent) => children
+                    .entry(format!("{nid}/session:{parent}"))
+                    .or_default()
+                    .push(sid.clone()),
+                None => kids.push(sid.clone()),
+            }
             // A cached row's state is what the far node LAST said; the
             // card's state slot carries the cache's word instead, and the
             // old state rides the activity row as history.
@@ -647,7 +656,6 @@ pub fn build_model_from(
                     cached: s.is_cached() || probe_failed.is_some(),
                 },
             );
-            kids.push(sid);
         }
         if !kids.is_empty() {
             children.insert(nid.clone(), kids);
@@ -2057,7 +2065,13 @@ mod tests {
                   "sessions": [
                       { "sessionId": "far2", "label": "sakaki/child/calm-thorn (…far2)",
                         "petname": "calm-thorn", "agent": "shell", "state": "idle",
-                        "presence": "online", "cwd": "/z" } ] },
+                        "presence": "online", "cwd": "/z" },
+                      { "sessionId": "far3", "label": "sakaki/child/keen-fox (…far3)",
+                        "petname": "keen-fox", "agent": "claude", "state": "working",
+                        "presence": "online", "cwd": "/z", "parentSessionId": "far2" },
+                      { "sessionId": "far4", "label": "sakaki/child/lost-elk (…far4)",
+                        "petname": "lost-elk", "agent": "claude", "state": "idle",
+                        "presence": "online", "cwd": "/z", "parentSessionId": "elsewhere" } ] },
                 { "name": "ghost", "isLocal": false, "presence": "never-pulled",
                   "fetchedAt": null, "error": "could not reach the agent", "sessions": [] },
             ],
@@ -2098,11 +2112,17 @@ mod tests {
         assert_eq!(far1.petname.as_deref(), Some("misty-comet"));
 
         let sakaki = node(&m, "node:sakaki");
-        assert_eq!(sakaki.title, "1 session(s)");
+        assert_eq!(sakaki.title, "3 session(s)");
         let far2 = node(&m, "node:sakaki/session:far2");
         assert_eq!(far2.state.as_deref(), Some("idle"), "a live row keeps its state");
         assert_eq!(far2.activity, "/z");
         assert_eq!(far2.harness, "shell");
+        // A same-node spawner ranks its child beneath it; a parent the node
+        // does not list leaves the row flat under the node.
+        let far3 = node(&m, "node:sakaki/session:far3");
+        assert_eq!(far3.depth, far2.depth + 1, "far3 hangs off far2");
+        assert_eq!(m.children.get("node:sakaki/session:far2").map(Vec::len), Some(1));
+        assert_eq!(node(&m, "node:sakaki/session:far4").depth, 1, "an unknown parent means flat");
 
         let ghost = node(&m, "node:ghost");
         assert_eq!(ghost.title, "");
