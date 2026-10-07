@@ -920,6 +920,17 @@ pub fn poll_node(node_name: &str, named: Option<&str>) -> Result<PollOutcome, St
     if record_forbidden_by_declaration(&mesh, node) {
         return Ok(PollOutcome::default());
     }
+    // **One poll of a node at a time**, taken before anything is read. Two
+    // overlapping polls (a timer's and a hand-run one) both read `filed`
+    // before either has recorded what it filed, so the hub offers the same
+    // letter to both and the second mints a second receipt for it, which the
+    // relay refuses as a different body for one msgid. The poll in flight does
+    // the asking; this one says so rather than answering "0 filed".
+    let Some(_poll_lock) = aoide_storage::outbox::try_take_poll_lock(node_name)? else {
+        return Err(format!(
+            "another poll of `{node_name}` is already in progress, and it does the asking — ask again once it is done"
+        ));
+    };
     // P-SEAL: publish our binding and learn theirs before taking anything
     // over, so a node that has just published one never hands us plaintext
     // it did not have to.
@@ -2790,6 +2801,35 @@ mod tests {
         let acks = aoide_storage::outbox::list_entries(&me).unwrap();
         assert_eq!(acks.len(), 1, "and exactly one pending ack: {acks:?}");
         assert_eq!(acks[0].envelope.text, letter_msgid);
+
+        drop(listener);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **Overlapping polls of one node file a letter and mint its receipt once.**
+    /// A poll in flight holds the node's poll lock; a second one answers that it
+    /// is in progress and files nothing, so the hub never hands the letter to
+    /// both and no second receipt is minted for it.
+    #[test]
+    fn overlapping_polls_of_one_node_mint_one_receipt() {
+        let _g = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_env, dir) = root("poll-overlap");
+
+        let me = register_local_origin();
+        let letter = aoide_storage::mail::mint_outbound_letter("alice", &me, "conductor", "filed once").unwrap();
+        let (listener, port, _log) =
+            recording_door(r#"{"jsonrpc":"2.0","id":1,"result":{"status":"accepted"}}"#, poll_answer(&[letter]));
+        register_relay(format!("http://127.0.0.1:{port}/"));
+
+        let in_flight = aoide_storage::outbox::try_take_poll_lock("relay").unwrap().expect("nothing polls yet");
+        let err = poll_node("relay", None).expect_err("a poll already runs");
+        assert!(err.contains("already in progress"), "{err}");
+        assert!(aoide_storage::mail::read_base().unwrap().is_empty(), "the second poll filed nothing");
+        drop(in_flight);
+
+        assert_eq!(poll_node("relay", None).unwrap().filed, 1);
+        let receipts = aoide_storage::outbox::list_entries(&me).unwrap();
+        assert_eq!(receipts.len(), 1, "exactly one receipt for the letter: {receipts:?}");
 
         drop(listener);
         let _ = std::fs::remove_dir_all(&dir);

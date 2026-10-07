@@ -500,7 +500,11 @@ door's audit name whitelist gains both names so they never log as bare
   retires its own custody of those (a `transit` entry, and only that) before
   it offers: a response can be lost, so the hand-over itself is not an
   acknowledgement, and anything the poller has not yet named is offered
-  again. Handed-over
+  again. **One poll of a node runs at a time** (the `.poll` flock, tried and
+  never waited for): two overlapping asks would both read `filed` before either
+  recorded it, be handed the same letter, and mint two receipts for it — which
+  the relay refuses as a different body for one msgid. The second ask answers
+  that a poll is already in progress. Handed-over
   `letter` entries stay in the outbox
   until acked like any other; a re-poll before the ack re-hands them and
   the receiver's dedup makes that harmless. **An HTTPS adapter's answer names
@@ -561,6 +565,7 @@ carries plaintext.
                 lastTry, lastOutcome
 link.json       { "holdUntil": ts, "lastError": "…" }   per-link backoff
 .bsy            flock'd while a drain session with this node runs
+.poll           flock'd while a poll of this node runs
 ```
 
 - `aoide mail send` writes the entry first, then attempts delivery. The

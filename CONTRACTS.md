@@ -3790,6 +3790,7 @@ state/outbox/<node>/<msgid>.json   one OutboxEntry per pending envelope
 state/outbox/<node>/link.json      that LINK's own backoff state (absent
                                     = not held off)
 state/outbox/<node>/.bsy           a drain's lock file — never data
+state/outbox/<node>/.poll          a poll's lock file — never data; one poll of a node at a time
 state/outbox/<node>/.ack/<acked>   pending-ack marker: its content is the
                                     msgid of the receipt entry covering
                                     letter <acked> — never data, never

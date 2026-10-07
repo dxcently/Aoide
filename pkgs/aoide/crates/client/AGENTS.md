@@ -843,6 +843,11 @@
   originated): `.bsy` is `LOCK_NB`, so that inner drain is skipped and the
   ack waits for the next tick — correct, not a leak; never make `.bsy`
   blocking to "fix" it.
+  `poll_node` takes the node's `.poll` lock (tried, never waited for) before
+  it reads `filed`: that read-ask-record cycle is what overlapping polls would
+  interleave, and the interleaving is how one letter got two receipts. It is a
+  different lock from `.bsy` because a poll's own acks are drained under `.bsy`
+  from inside it.
 - **`handle_mail_send` reports the WRITE, never the drain's outcome (spec
   item 8), and it READS THE ROUTE FIRST.** The four steps are asked before
   anything is minted: a letter with no route is the sender's own answer

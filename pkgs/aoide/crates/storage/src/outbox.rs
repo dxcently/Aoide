@@ -95,6 +95,10 @@ fn bsy_path(node: &str) -> PathBuf {
     node_dir(node).join(".bsy")
 }
 
+fn poll_lock_path(node: &str) -> PathBuf {
+    node_dir(node).join(".poll")
+}
+
 /// One node's pending-ack marker for `acked_msgid` — its CONTENT is the
 /// pending ack entry's own msgid (its file stem, what [`entry_path`]
 /// keys on), never empty, never binary data. Its sole job is making "is
@@ -631,7 +635,7 @@ pub fn list_entries(node: &str) -> Result<Vec<OutboxEntry>, String> {
             if path.file_name().and_then(|n| n.to_str()) == Some("link.json") {
                 continue;
             }
-            if path.file_name().and_then(|n| n.to_str()) == Some(".bsy") {
+            if matches!(path.file_name().and_then(|n| n.to_str()), Some(".bsy" | ".poll")) {
                 continue;
             }
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
@@ -1127,9 +1131,23 @@ impl Drop for LinkLockGuard {
 /// ordinary "another drain already holds this link" outcome, never an
 /// error; `Err` only when the lock file itself can't be created or opened.
 pub fn try_take_link_lock(node: &str) -> Result<Option<LinkLockGuard>, String> {
+    try_take(node, bsy_path(node))
+}
+
+/// Try to take `node`'s `.poll` lock, NON-BLOCKING, the same way: ONE poll of a
+/// node at a time. A poll reads what it has filed so far, asks, files the
+/// answer and records what it filed — two overlapping polls both ask before
+/// either has recorded, so the hub hands the same letter to both and the second
+/// mints a second receipt for it. A poll that finds the node being polled is
+/// skipped and says so; the one already in flight does the asking. It is not
+/// `.bsy` on purpose: a poll's own acks are drained under `.bsy` from inside it.
+pub fn try_take_poll_lock(node: &str) -> Result<Option<LinkLockGuard>, String> {
+    try_take(node, poll_lock_path(node))
+}
+
+fn try_take(node: &str, path: PathBuf) -> Result<Option<LinkLockGuard>, String> {
     let dir = node_dir(node);
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let path = bsy_path(node);
     let file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
