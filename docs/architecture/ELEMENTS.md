@@ -170,9 +170,11 @@ $AOIDE_ROOT/run/elements/            (sibling of run/qml — storage
 
 Two writers, one rank rule — the same stage-beats-declared convention
 `run/qml` and the stage twin already hold. Between rebuilds, `rice
-stage` overwrites freely (the sketch); a rebuild reasserts the
-declared song's store truth (the truth), exactly as the lyra
-lane's `rsync -a --delete` reasserts `run/qml`.
+stage` overwrites freely; a rebuild reasserts the declared song's
+store truth, exactly as the lyra lane's `rsync -a --delete`
+reasserts `run/qml`, and a staged song is then restored from the
+runtime songbook by `lyra reload` (the lyra lane's
+`aoide-rice-reload` unit), as it restores the rest of the stage.
 
 ## Flows
 

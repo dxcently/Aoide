@@ -144,20 +144,35 @@ in
       cfg = flake.nixosConfigurations.yomi-strix.config;
       home = cfg.home-manager.users.${cfg.aoide.user};
       # Every unit that stages, or whose spawned children can: the daemon that
-      # spawns sessions, the shell whose QML execs `lyra`, and the bridge that
-      # stages in-process. One entry per unit, so a check can name the one that
-      # went missing.
+      # spawns sessions, the shell whose QML execs `lyra`, the bridge that
+      # stages in-process, and the reload that re-stages the last staged song at
+      # login. One entry per unit, so a check can name the one that went missing.
       templates = {
         aoided = templatesOf (unitEnv cfg.systemd.user.services "aoided");
         shellbridge = templatesOf (unitEnv cfg.systemd.user.services "shellbridge");
         quickshell = templatesOf (unitEnv (home.systemd.user.services or { }) "aoide-quickshell");
+        riceReload = templatesOf (unitEnv (home.systemd.user.services or { }) "aoide-rice-reload");
       };
+      # The unit that brings the staged or drafted song back after a login or a
+      # switch, as the lane declares it — null when it is absent, so a check
+      # reads a missing unit as a failed comparison, not an evaluation error.
+      riceReload =
+        let
+          unit = (home.systemd.user.services or { }).aoide-rice-reload or null;
+        in
+        if unit == null then null else { inherit (unit) Unit Service Install; };
     in
     {
       systemdUserServices = builtins.attrNames cfg.systemd.user.services;
       packages = map (p: baseNameOf p.outPath) cfg.environment.systemPackages;
-      inherit templates;
-      # All three must agree on ONE directory: a unit left with a different
+      inherit templates riceReload;
+      # What the switch runs once the deploy, the seed, home-manager's file step
+      # and its systemd step are done: the one try-restart that orders the reload
+      # before the shell.
+      restartRice = {
+        inherit (home.home.activation.aoideRestartRice) after data;
+      };
+      # Every unit must agree on ONE directory: a unit left with a different
       # answer is the drift this reading exists to catch.
       templatesAgree = builtins.length (lib.unique (lib.concatLists (lib.attrValues templates))) == 1;
     };

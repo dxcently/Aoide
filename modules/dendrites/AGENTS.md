@@ -51,7 +51,13 @@ covers only what's specific to dendrites.
   file.** `stageLivery` patches the active song's committed `livery.json` with
   `stagePatch` (the same `aoide.livery.override` rule `resolve` applies for
   stylix/the compositor) before it is jq-stamped with `song` and written to
-  `song/stage/livery.json` — `checks.livery-fanout` is the gate. The one run
+  `song/stage/livery.json` — `checks.livery-fanout` is the gate. The seed
+  RENAMES that file over the stage entry and never writes through it, so a
+  drafted song's own file is untouched, and it is declared truth on every
+  activation: the stage twin stays that until the session's `lyra reload`
+  (the lane's `aoide-rice-reload` unit) puts back the staged or drafted song
+  `stage/mode.json` names. Nix never reads the mode, so the seed stays one
+  unconditional write. The one run
   writes the same bytes to `song/declared/livery.json` too (CONTRACTS.md §4):
   the declared twin, and the `lyra` lane is its ONLY writer — `rice stage` and
   the other runtime writers read it and must never write it, since only the nix

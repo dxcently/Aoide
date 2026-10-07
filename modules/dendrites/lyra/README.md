@@ -16,17 +16,21 @@ modules/dendrites/lyra/
   plus the widget bodies of the songs this host BUILT IN
   (`aoide.songbook.builtIn`, from its own record), and deploys it to
   `$AOIDE_ROOT/run/qml` (`home.activation.aoideDeployQml` — an rsync, not a
-  symlink tree, so live QML edits survive until the next switch). It declares
+  symlink tree: a deploy target the runtime writes into, never a source, so a
+  switch reasserts the store over it). It declares
   the surfaces it owns in `aoide.surfaces` (stylix stands down for those),
-  seeds the live stage from the active song, reasserts the paint on every
-  activation, runs the healthcheck timer, and installs `pkgs.aoide.rice` — the
-  lyra binary — as the `aoide.lyra.enable` fact. It also owns what "built in"
+  seeds the declared song into both stage twins, reasserts the paint on every
+  activation, brings the staged or drafted song back (below), runs the
+  healthcheck timer, and installs `pkgs.aoide.rice` — the lyra binary — as the
+  `aoide.lyra.enable` fact. It also owns what "built in"
   means at the byte level: the deployed `manifest.json`/`registry.json` cover
   the built-in songs only, `pkgs.lyra-songbook` is overridden to ship just those
   folders plus `builtin.json` (`{ declared, songs, packages }`), and
   `home.activation.aoideSeedSongbook` copies each one into the machine's own
   songbook **only when it is absent** — a rebuild never rewrites what the machine
-  has. That set is CLOSED UNDER BORROWS (`lib/songbook.nix`'s `builtIn`): a
+  has — and leaves the copy writable by its owner, not in the store's read-only
+  modes: the runtime songbook is the one place a song is edited, and staging
+  writes `takes/` there. That set is CLOSED UNDER BORROWS (`lib/songbook.nix`'s `builtIn`): a
   selected song's records name their slot bodies by `owner`, so the lenders ship
   and seed beside it, which is what makes every manifest record resolve to a
   directory that exists on the host. Guarded on that fact; the lane sets it
@@ -37,6 +41,20 @@ modules/dendrites/lyra/
   speaks an agent protocol). Self-gated on `aoide.enable && aoide.lyra.enable`:
   lyra owns the bridge, and its `ExecStart` execs lyra out of `pkgs.aoide.rice`,
   a separate droppable output.
+- **`default.nix` — `aoide-rice-reload`, the staged song comes back.** Declared truth is laid
+  down first, exactly as the activation always does (the rsync into `run/qml`
+  and the seed into both stage twins), and nix never reads `stage/mode.json`.
+  Then one user unit runs `lyra reload`, which re-stages whatever the mode names:
+  the last staged song (palette, cover, widget bodies, slot map, registry,
+  compositor keywords, terminal colours), the routed draft (re-routed and
+  re-synced), or, in `declarative`, nothing but the shell's reload. The unit is
+  a one-shot ordered Before `aoide-quickshell.service`, so the shell's first
+  frame is the staged song, and it runs in the user manager because
+  home-manager's activation has no Hyprland environment. It stays active even
+  when the reload refuses. At login the session starts it; on a switch
+  `aoideRestartRice` restarts it together with the shell in ONE `try-restart`,
+  after home-manager's file and systemd steps, which is what puts the reload
+  between the seed and the shell's restart.
 
 ## The seam with `quickshell`
 
@@ -57,8 +75,8 @@ config** — the host sets `aoide.quickshell.config` to a config directory of it
 own (a store path or a path in someone's home) and gets the package, the
 service, and the session anchor; or **bare** — nothing is set, and the host gets
 the package and nothing else. Neither shape builds a QML tree, installs the
-rice binary, runs shellbridge or the healthcheck: those are this lane's, and
-this lane is what a song needs.
+rice binary, runs shellbridge, the healthcheck or the rice reload: those are
+this lane's, and this lane is what a song needs.
 
 That is also why the song is gated here and not in the shell lane: `aoide.song`
 with no `lyra` is a host that says "perform this rice" with nothing to perform

@@ -10,7 +10,7 @@ source: "[[references/AOIDE-HANDOFF]]"
 
 Aoide ships the rice engine as a builtin. The engine provides the loop, the schema, and the staging mechanism. Everything else — the songs, the preferences, the accumulated taste — it learns by doing.
 
-**Status today:** the loop below is real end to end, `rice declare` included. `rice lint` (runs the native [[livery]] engine), `rice stage`, `rice compose`, `lyra reload` (the one mode-aware iteration command — absorbed `quickshell reload` outright), the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, geometry, window-border colours and the hyprglass switch apply to the running compositor over `hyprctl` in the same step, and the terminals follow: `stage/terminal-colors.conf` for every new kitty window, pushed over kitty's control socket to the open ones — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, the activation seed reseeds `stage/livery.json` from the active song's committed notes with the venue's `aoide.livery.override` applied and publishes the same bytes at `song/declared/livery.json`, the declared twin the runtime writers re-derive the declared song from ([[Codebase#Runtime contracts (socket + stage files)]]) — so a host that boots without ever staging still carries the correct stage twin, and a later re-stage of that song reproduces the venue recolour instead of reverting it. `rice declare` is implemented — gated, it copies the composed song from the runtime songbook into the checkout's `song/songbook/<name>/` (byte-diff, a repeat with nothing new is a no-op; no `git add`, no rebuild — the user runs those herself). `rice transpose` remains the one declared-but-not-implemented stub (exit `64`) — narrate it as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
+**Status today:** the loop below is real end to end, `rice declare` included. `rice lint` (runs the native [[livery]] engine), `rice stage`, `rice compose`, `lyra reload` (the one mode-aware iteration command — absorbed `quickshell reload` outright), the `rice draft` group (`save`/`list`/`drop`), and the `rice mode` group (`status`/`stage`/`declarative`/`draft`) are all implemented. `rice stage` stages `stage/livery.json`, [[Quickshell]] hot-reloads it live via `FileView`, geometry, window-border colours and the hyprglass switch apply to the running compositor over `hyprctl` in the same step, and the terminals follow: `stage/terminal-colors.conf` for every new kitty window, pushed over kitty's control socket to the open ones — while `rice mode declarative` is locked (below), `rice stage` refuses instead of writing. Beyond a live `rice stage`, the activation seed reseeds `stage/livery.json` from the active song's committed notes with the venue's `aoide.livery.override` applied and publishes the same bytes at `song/declared/livery.json`, the declared twin the runtime writers re-derive the declared song from ([[Codebase#Runtime contracts (socket + stage files)]]) — so a host that boots without ever staging still carries the correct stage twin, and a later re-stage of that song reproduces the venue recolour instead of reverting it. The seed is declared truth and nothing more: the lyra lane's `aoide-rice-reload` unit then runs `lyra reload` at every login (before the shell starts) and on every switch, which brings back whatever `stage/mode.json` names — the last staged song, or the routed draft. `rice declare` is implemented — gated, it copies the composed song from the runtime songbook into the checkout's `song/songbook/<name>/` (byte-diff, a repeat with nothing new is a no-op; no `git add`, no rebuild — the user runs those herself). `rice transpose` remains the one declared-but-not-implemented stub (exit `64`) — narrate it as planned, not as a working pipeline. There is no `rice gen`; `rice compose` is the real, working scaffolding entry point.
 
 ## The Rice Loop
 
@@ -251,10 +251,23 @@ songbook stages and hot-loads without a commit, a merge or a rebuild. The
 declarative path may seed staging (the activation seed, the baked
 templates), never gate it. The staged song is always the LAST one staged:
 `stage/mode.json` remembers it as `stagingSong`, and every way back into
-staging (the bar's RICE toggle, a bare `rice mode stage`, a reboot)
-restores that song, never the declared one. The checkout is reached by
-exactly one staging-adjacent step, `rice declare`'s commit-in, and by
-nothing else.
+staging (the bar's RICE toggle, a bare `rice mode stage`, a login after a
+reboot or a switch) restores that song, never the declared one.
+
+A switch and a reboot restore it the same way. The activation lays the
+declared song over the runtime tree — the rsync into `run/qml` and the seed
+into both stage twins — and never reads the mode. Then `aoide-rice-reload`, a
+user unit of the lyra lane, runs `lyra reload` in the user manager, before the
+shell: it re-stages the song `stage/mode.json` names (palette, cover, widget
+bodies, slot map, registry, compositor keywords, terminal colours), or
+re-routes and re-syncs the routed draft. At login the session starts the unit;
+on a switch the activation restarts it together with the shell. So the shell's
+first frame after either is the staged song; in `declarative` the reload only
+reloads the shell, the seed already being what shows.
+
+The checkout is reached by exactly two staging-adjacent steps: `rice
+declare`'s commit-in from the runtime songbook, and `lyra preview declare`'s
+from a preview root. Nothing else touches it.
 
 `rice stage` doesn't only hot-load the palette/notes tier any more —
 it also syncs the song's widget QML **bodies**

@@ -60,11 +60,14 @@ The repo root carries no `qml/` directory — widget source lives in
 (`rsync -a --delete --chmod=u+w`) into `$AOIDE_ROOT/run/qml/` (default
 `~/.aoide/run/qml/` — the runtime root, outside the git checkout), which
 Quickshell reads as its entry point (`quickshell -p
-$AOIDE_ROOT/run/qml/shell.qml`). The deployed tree is self-healing: hot-editing
-QML directly under `$AOIDE_ROOT/run/qml/` previews live without a rebuild, and
-every activation's rsync reasserts the store's build over any such edit —
-the same "switch is the truth, hot edits are the sketch" discipline as
-every other stage/preview seam. `hyprland.conf` is owned by
+$AOIDE_ROOT/run/qml/shell.qml`). The deployed tree is self-healing: it is a
+deploy target, never a source, and every activation's rsync reasserts the
+store's build over it, so a hand edit under `$AOIDE_ROOT/run/qml/` is lost at
+the next switch. A song is edited in the runtime songbook
+(`$AOIDE_ROOT/song/songbook/<song>`), and a STAGED song is restored from
+there: after the switch the lyra lane's `aoide-rice-reload` unit runs `lyra
+reload`, which syncs its widget bodies back into `run/qml/songs/<song>/`.
+`hyprland.conf` is owned by
 home-manager's `wayland.windowManager.hyprland`: the compositor lane
 writes livery + keybind fragments with `mkBefore`, and the quickshell
 lane appends its `exec-once` autostart with `mkAfter`, so the two lanes

@@ -62,7 +62,10 @@ committed `song/songbook/<song>/livery.json` on every activation (see
 `lib/livery.nix`'s `stagePatch` — the same `aoide.livery.override` venue
 recolour the Stylix/compositor fan-outs apply through `resolve` — so a
 freshly booted host carries a correctly recoloured stage twin even before
-`rice stage` ever runs. The same run also publishes the DECLARED twin,
+`rice stage` ever runs. That seed is declared truth: when `stage/mode.json`
+names a staged or drafted song, `lyra reload` — run by the lane's
+`aoide-rice-reload` unit at every login and after every switch — re-stages it
+over the seed. The same run also publishes the DECLARED twin,
 `song/declared/livery.json` (CONTRACTS.md §4) — those same bytes under their
 own name, its `"song"` field naming the song the venue declared. That field
 is the whole scope: the runtime writers (`rice stage`, `rice mode

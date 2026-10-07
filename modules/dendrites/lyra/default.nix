@@ -181,20 +181,20 @@ let
       );
 
       # ── Seed script for `home.activation.aoideSeedStage` (below) ───────────────
-      # Reasserts the ACTIVE song's committed livery, with the venue override
-      # applied (`stageLivery`, above), into the live stage twin
-      # (`song/stage/livery.json`, CONTRACTS.md §4) AND its declared twin
-      # (`song/declared/livery.json`) on every activation, injecting
-      # the same `"song"` field `aoide rice preview <name>` would (jq's
-      # `. + {song: …}`; `-S` sorts keys to match serde_json::Value's BTreeMap
-      # ordering) — byte-identical to what `rice preview ${config.aoide.song}`
-      # would stage ONLY where the host sets no `aoide.livery.override` (verified
-      # by hand: `jq -S '. + {song:"sonata"}'` against song/songbook/sonata/livery.json
-      # reproduces the current staged file exactly). The declared twin is what the
-      # runtime writers (`rice stage`, `rice mode stage`/`declarative`) read back
-      # for the declared song — that song's notes with the venue recolour already
-      # applied — so a re-stage after activation reproduces the venue rather than
-      # reverting to the song's own colours.
+      # Lays down the DECLARED song on every activation: the ACTIVE song's
+      # committed livery, with the venue override applied (`stageLivery`, above),
+      # into the live stage twin (`song/stage/livery.json`, CONTRACTS.md §4) AND
+      # its declared twin (`song/declared/livery.json`), injecting the same
+      # `"song"` field `lyra rice stage` injects (jq's `. + {song: …}`; `-S` sorts
+      # keys to match serde_json::Value's BTreeMap ordering). The declared twin is
+      # what the runtime writers (`rice stage`, `rice mode stage`/`declarative`)
+      # read back for the declared song — that song's notes with the venue
+      # recolour already applied — so `lyra rice stage ${config.aoide.song}`
+      # stages these same notes, and a re-stage after activation reproduces the
+      # venue rather than reverting to the song's own colours.
+      # The seed is declared truth and nothing else: when `stage/mode.json` names
+      # a staged or drafted song, `aoide-rice-reload` (below) puts that one back
+      # once the session is up.
       # Write-temp-then-rename in the SAME directory as each destination (so each
       # rename is atomic) mirrors `shellbridge::atomic_write`
       # (`aoide_storage::fs::atomic_write`) so a hot-reloading FileView
@@ -225,7 +225,7 @@ let
         mv -f "$provider" "${config.aoide.root}/song/stage/wallpaper-provider"
         # No cover.json handling here: a cover carries the song it was staged
         # for, and the layer ignores one that names a song other than the
-        # staged one (CONTRACTS.md §4) — so reseeding the staged song is enough.
+        # staged one (CONTRACTS.md §4) — so reseeding the declared song is enough.
         # The declared song's terminal opacity, as a one-line kitty fragment
         # (CONTRACTS.md §4). The kitty dendrite includes this BEFORE the staged
         # colours, and kitty's last-include-wins keeps a live stage authoritative
@@ -500,20 +500,21 @@ let
         #
         # `home.file` would manage this as a tree of symlinks into the nix
         # store, which is the RIGHT semantics for most home-manager-installed
-        # config — but this lane's whole point is that agents/dev iteration
-        # hot-edit the deployed QML directly to preview without a rebuild
-        # (Quickshell live-reloads on file change). A symlink tree makes that
-        # workflow permanently hostile to the NEXT switch: home-manager finds a
-        # real file where it expects to manage a symlink and refuses to
-        # activate until every stray file is hand-diffed against the fresh
-        # store build and removed — exactly the failure this rsync replaces.
+        # config — but the runtime writes into this tree (`lyra rice stage`
+        # syncs a staged song's widget bodies into run/qml/songs/<song>/, and
+        # Quickshell live-reloads on file change). A symlink tree makes that
+        # permanently hostile to the NEXT switch: home-manager finds a real
+        # file where it expects to manage a symlink and refuses to activate
+        # until every stray file is hand-diffed against the fresh store build
+        # and removed — exactly the failure this rsync replaces.
         #
         # `rsync -a --delete` makes the deployed tree self-healing instead: a
-        # switch always reasserts the store's truth over whatever was hand-
-        # edited, rather than refusing to proceed. This is deliberate — hot
-        # edits under run/qml/ are previews ("the sketch"); the next switch is
-        # what makes a change real ("the truth"), same discipline as every
-        # other stage/preview seam in this project.
+        # switch always reasserts the store over it, rather than refusing to
+        # proceed. run/qml is a deploy target, never a source: a hand edit
+        # there is lost at the next switch. A song is edited in the runtime
+        # songbook (`$AOIDE_ROOT/song/songbook/<song>`, house rule 10), and a
+        # STAGED song lives there, not here — `aoide-rice-reload` (below)
+        # re-syncs its widget bodies into run/qml once the switch is done.
         # NOTE: this is a home-manager submodule FUNCTION (`{ lib, ... }:`), not a bare
         # attrset — so `lib` here is home-manager's EXTENDED lib (carrying `lib.hm.dag`),
         # not the outer NixOS-module lib (which lacks `hm`). `config`/`pkgs`/`quickshellConfig`
@@ -525,6 +526,11 @@ let
         # folder does not exist — no comparison, no merge, never an overwrite.
         # `sonata/takes/`, `sonata/drafts/` and edited `design/` notes on a
         # machine that already holds them survive every rebuild.
+        #
+        # The copy is left writable by its owner. `cp -r` out of the store keeps
+        # the store's modes (dr-xr-xr-x), and the runtime songbook is the ONE
+        # place a song is edited: a read-only song cannot be edited by an agent,
+        # and staging cannot write its `takes/` there.
         #
         # Gated on the BUILT-IN set, not on the active song: a host that builds a
         # song in as `available` without performing it still gets seeded, and a
@@ -538,7 +544,7 @@ let
         # host already restricted to its built-in set). `[ ! -e ]` is a read,
         # evaluated even under `--dry-run`, while `run cp` is not: a dry run over
         # an existing songbook writes nothing, and one over an absent song prints
-        # the copy it would make.
+        # the copy and the chmod it would make.
         home-manager.users.${config.aoide.user} =
           { lib, ... }:
           {
@@ -555,6 +561,7 @@ let
                   ${lib.concatMapStrings (name: ''
                     if [ ! -e "$songbookDir/${name}" ] && [ ! -L "$songbookDir/${name}" ]; then
                       run ${pkgs.coreutils}/bin/cp -r "${pkgs.lyra-songbook}/share/lyra/songbook/${name}" "$songbookDir/${name}"
+                      run ${pkgs.coreutils}/bin/chmod -R u+w "$songbookDir/${name}"
                     fi
                   '') builtIn}
                 '';
@@ -586,17 +593,18 @@ let
 
                 # ── Seed the live stage twin from the active song ──────────────────────
                 # `song/stage/livery.json` is what LiveryState.qml hot-reloads
-                # (CONTRACTS.md §4); until now nothing seeded it from the BAKED default,
-                # so a host that never ran `aoide rice preview <name>` had a stale/absent
-                # stage twin even though the compositor/Stylix/QML tree were all built
-                # from the active song. This reasserts the active song's committed livery
-                # into the stage file on every activation — `seedStageScript` (above)
-                # does the actual write. Same "switch = truth resets the sketch"
-                # discipline as `aoideDeployQml`'s rsync above: this OVERWRITES whatever
-                # a live `rice preview` staged, which is intended — the next
-                # `rice preview` can re-sketch over it again live. It reseeds
-                # `song/stage/livery.json` ONLY: `song/stage/cover.json` is left alone
-                # (CONTRACTS.md §4).
+                # (CONTRACTS.md §4). A host that never ran `lyra rice stage <name>` would
+                # otherwise carry a stale/absent stage twin even though the
+                # compositor/Stylix/QML tree were all built from the active song. This
+                # writes the declared song into both twins — `song/stage/livery.json`
+                # and `song/declared/livery.json` — on every activation:
+                # `seedStageScript` (above) does the actual write. It RENAMES over
+                # `stage/livery.json` and never writes through it, so a drafted song's
+                # own file is untouched while its routing link is replaced.
+                # `song/stage/cover.json` is never touched (CONTRACTS.md §4). The seed
+                # is declared truth, written the same way whatever the mode: the staged
+                # or drafted song `stage/mode.json` names is brought back afterwards by
+                # `aoide-rice-reload` (below).
                 home.activation.aoideSeedStage = lib.hm.dag.entryBetween [ "reloadSystemd" ] [ "writeBoundary" ] ''
                   run ${seedStageScript}
                 '';
@@ -611,8 +619,21 @@ let
                 # try-restart bounces a running shell onto the freshly rsynced tree and
                 # re-acquired outputs, no-ops when the unit is stopped (headless/
                 # session-less activation must not start or fail anything), and never
-                # fails the switch. Ordered after both writes above so the restarted
-                # shell reads the new tree, never the old one.
+                # fails the switch.
+                #
+                # ONE try-restart names both units, so systemd orders them: the shell is
+                # stopped, `aoide-rice-reload` (Before the shell, below) writes the staged
+                # or drafted song over the declared seed, and only then does the shell
+                # start. Ordered after both writes above, so the reload lands over the
+                # fresh seed and the restarted shell reads the new tree, never the old
+                # one; after `reloadSystemd`, so a unit this switch introduces is loaded;
+                # and after `onFilesChange`, where home-manager's `hyprctl reload
+                # config-only` runs on hosts whose home-manager hyprland package is
+                # non-null — a config reload after the reload would reset the keywords it
+                # applied live. (The compositor lane sets that package to null, so there
+                # only Hyprland's own file watcher reloads the config.) Both units no-op
+                # when inactive (a boot activation has no session); the session's own
+                # start of them is what restores the song then.
                 #
                 # This is the REBUILD-side half of the recovery, not the whole of it:
                 # the identical lockup recurring live, mid-session, with no rebuild in
@@ -624,10 +645,12 @@ let
                     [
                       "aoideDeployQml"
                       "aoideSeedStage"
+                      "onFilesChange"
+                      "reloadSystemd"
                     ]
                     ''
                       run env XDG_RUNTIME_DIR=/run/user/$(${pkgs.coreutils}/bin/id -u) \
-                        ${pkgs.systemd}/bin/systemctl --user try-restart aoide-quickshell.service || true
+                        ${pkgs.systemd}/bin/systemctl --user try-restart aoide-rice-reload.service aoide-quickshell.service || true
                     '';
 
                 # ── Confirm the restart above actually landed ──────────────────────────
@@ -746,6 +769,55 @@ let
                     OnActiveSec = "20s";
                     OnUnitActiveSec = "15s";
                     AccuracySec = "2s";
+                  };
+                  Install.WantedBy = [ "graphical-session.target" ];
+                };
+
+                # ── Bring the staged or drafted song back after a login or a switch ────
+                # The activation lays DECLARED truth over the runtime tree (the rsync
+                # and the seed above), and a login or a switch would leave the desktop
+                # on it. `stage/mode.json` is what remembers the last staged song or
+                # the routed draft, and `lyra reload` is its reader: it re-stages that
+                # song (staging), re-routes and re-syncs the draft (draft), or reloads
+                # the shell alone (declarative) — palette, cover, widget bodies, slot
+                # map, registry, compositor keywords and terminal colours. Nix never
+                # reads the mode; this unit only runs the reader. Gated on
+                # `aoide.lyra.enable` like the healthcheck above, since it execs the
+                # same lyra binary.
+                #
+                # Three constraints are invisible from this file:
+                #   - BEFORE the shell, so the shell's first frame is the staged song,
+                #     not the declared one; the activation's try-restart (above) orders
+                #     the same way, the shell being down while the reload writes.
+                #   - In the user MANAGER, never as an activation step: home-manager's
+                #     NixOS activation carries no HYPRLAND_INSTANCE_SIGNATURE, so the
+                #     compositor half of the reload (`live::apply_live`) would skip,
+                #     and the manager has it by the time graphical-session.target is
+                #     up. For the same reason there is no `PATH=`: the manager's own
+                #     reaches hyprctl, kitty, nix-instantiate, quickshell and the
+                #     wallpaper provider's helper without this lane naming other lanes'
+                #     packages (house rule 5).
+                #   - The `-` prefix plus RemainAfterExit: a refused or failed reload
+                #     still leaves the unit active, so the activation's try-restart
+                #     reaches it on the next switch (it skips a unit that is not active).
+                systemd.user.services.aoide-rice-reload = lib.mkIf config.aoide.lyra.enable {
+                  Unit = {
+                    Description = "Aoide rice reload: bring the staged or drafted song back after a login or a switch";
+                    After = [ "graphical-session.target" ];
+                    PartOf = [ "graphical-session.target" ];
+                    Before = [ "aoide-quickshell.service" ];
+                  };
+                  Service = {
+                    Type = "oneshot";
+                    RemainAfterExit = true;
+                    ExecStart = "-${pkgs.aoide.rice}/bin/lyra reload";
+                    Environment = [
+                      "AOIDE_ROOT=${config.aoide.root}"
+                      # Same declaration as aoide-quickshell's own: the staging path's one
+                      # session-sourced variable, spelled on the unit so a reload after a
+                      # switch stages from THIS build's songbook.
+                      "AOIDE_SONG_TEMPLATES=${pkgs.lyra-songbook}/share/lyra/songbook"
+                    ];
                   };
                   Install.WantedBy = [ "graphical-session.target" ];
                 };

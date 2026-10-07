@@ -1693,10 +1693,13 @@ venue's `aoide.livery.override` applied, on every activation**
 (`home.activation.aoideSeedStage`, `modules/dendrites/lyra/default.nix`,
 via `lib/livery.nix`'s `stagePatch`) — so a host that boots without ever
 running `rice stage` still has a correct, recoloured live stage twin from
-boot. The same jq run publishes the declared twin below, which is what the
-runtime writers re-derive the DECLARED song from — so their next re-stage
-reproduces the venue recolour rather than reverting the stage twin to the
-song's own colours.
+boot. The seed is declared truth, written whatever the mode: when
+`stage/mode.json` names a staged or drafted song, `lyra reload` (the lyra lane's
+`aoide-rice-reload` user unit, run Before the shell at login and restarted with
+it on every switch) re-stages it over the seed. The same jq run publishes the
+declared twin below, which is what the runtime writers re-derive the DECLARED
+song from — so their next re-stage reproduces the venue recolour rather than
+reverting the stage twin to the song's own colours.
 
 **Additive in v0:** this path MAY be a SYMLINK rather than a plain file —
 `rice mode draft <name>` (§4's `stage/mode.json` entry) routes it into a
@@ -1808,9 +1811,13 @@ anything else is IGNORED: the layer falls back to the baked/palette default
 above, and the staged song's own board may draw. A cover with NO `song` field
 is legacy, written before writers stamped it, and applies as before. This is
 what carries a pick across a rebuild — the activation seed rewrites
-`stage/livery.json`'s `song` and leaves `cover.json` alone, so a pick for the
-song that gets staged again still applies, and one for a different song does
-not.
+`stage/livery.json`'s `song` to the declared song and leaves `cover.json`
+alone, so a pick for the declared song still applies and one for a different
+song is hidden. When `stage/mode.json` names a staged or drafted song,
+`lyra reload` puts it back after the seed and the pick applies again: staging
+stages it again, and `stage_for_song` keeps a pick stamped for that same song;
+a draft is re-routed, and the `cover.json` nobody touched names the song that
+is staged once more.
 
 `pick: true` additionally stops the wallpaper layer instantiating the song's
 `wallpaper` board at all — the pick is what shows, and the board, with its
@@ -1888,7 +1895,10 @@ override tier), its top-level `song` field set to that song's name, keys
 sorted (`jq -S`, matching `serde_json::Value`'s BTreeMap ordering). Written by
 the SAME activation seed that writes `song/stage/livery.json` above
 (`home.activation.aoideSeedStage`, `modules/dendrites/lyra/default.nix`) —
-one `jq` run, two destinations, so the two files can never disagree.
+one `jq` run, two destinations. In `staging` and `draft` mode the session's
+`lyra reload` (the `aoide-rice-reload` unit) then re-stages the stage twin
+from the staged or drafted song, and the declared twin stays as the seed wrote
+it.
 
 Why it exists: `stage/livery.json` is the LIVE stage, rewritten by runtime
 writers, so it cannot itself say what the venue declared. This file is the

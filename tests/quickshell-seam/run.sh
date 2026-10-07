@@ -12,14 +12,16 @@
 # `test-quickshell-only` — quickshell selected, `aoide.quickshell.config` = the
 # fixture directory, no lyra: the host's own shell runs (one `aoide-quickshell`
 # unit, on that directory), and nothing lyra would have brought is there (no
-# rice binary, no `songs/`, no shellbridge unit, no healthcheck, no deploy
-# activation).
+# rice binary, no `songs/`, no shellbridge unit, no healthcheck, no rice-reload
+# unit, no deploy activation).
 # `test-quickshell-bare` — the same selection with no config: package installed,
 # no service, no session anchor claimed.
 # `test-song-without-lyra` — a song and no performer: MUST fail, with the
 # platform assertion's own message.
 # `yomi-strix` — the positive control, from the same ref: the two absence
-# checks above are only worth anything against a host that HAS the things.
+# checks above are only worth anything against a host that HAS the things,
+# among them the `aoide-rice-reload` unit that brings a staged song back after a
+# login or a switch, and the switch's one try-restart that runs it before the shell.
 #
 # A fixture that fails to evaluate is a failing test, not a skipped one; the
 # runner keeps the real stderr so a vague error cannot pass. Every reading is
@@ -83,6 +85,8 @@ else
     "$(o '[.userServices[], .systemdUserServices[], .systemServices[] | select(test("shellbridge"))] | length')"
   check "only: no healthcheck unit or timer"    "0" \
     "$(o '[.userServices[], .userTimers[], .systemdUserServices[], .systemServices[] | select(test("healthcheck"))] | length')"
+  check "only: no rice-reload unit"             "0" \
+    "$(o '[.userServices[], .systemdUserServices[], .systemServices[] | select(test("rice-reload"))] | length')"
   check "only: no lane activation"              "0" \
     "$(o '[.activation[] | select(test("^aoide"))] | length')"
   # No lyra, no reader: the units that would carry the staging path's own
@@ -147,9 +151,40 @@ else
   check "control: aoided declares the templates" "1" "$(y '.templates.aoided | length')"
   check "control: shellbridge declares it"      "1" "$(y '.templates.shellbridge | length')"
   check "control: the shell declares it"        "1" "$(y '.templates.quickshell | length')"
-  check "control: all three name one directory" "true" "$(y '.templatesAgree')"
+  check "control: the rice reload declares it"  "1" "$(y '.templates.riceReload | length')"
+  check "control: every unit names one directory" "true" "$(y '.templatesAgree')"
   check "control: it is the shipped songbook"   "true" \
     "$(y '.templates.aoided[0] | endswith("-lyra-songbook-templates/share/lyra/songbook")')"
+  # The unit that brings a staged or drafted song back after a login or a
+  # switch: ordered before the shell (its first frame is the staged song), run in
+  # the user manager once the session is up, one shot that stays active even when
+  # `lyra reload` refuses (the `-`), carrying the runtime root and the templates
+  # but no PATH (the manager's own reaches the tools).
+  check "control: the rice reload is before the shell" "1" \
+    "$(y '[(.riceReload.Unit.Before // [])[] | select(. == "aoide-quickshell.service")] | length')"
+  check "control: the rice reload follows the session" "1" \
+    "$(y '[(.riceReload.Unit.After // [])[] | select(. == "graphical-session.target")] | length')"
+  check "control: the rice reload is part of it" "1" \
+    "$(y '[(.riceReload.Unit.PartOf // [])[] | select(. == "graphical-session.target")] | length')"
+  check "control: the rice reload starts with it" "1" \
+    "$(y '[(.riceReload.Install.WantedBy // [])[] | select(. == "graphical-session.target")] | length')"
+  check "control: the rice reload is one shot"  "oneshot" "$(y '.riceReload.Service.Type')"
+  check "control: the rice reload stays active" "true" "$(y '.riceReload.Service.RemainAfterExit')"
+  check "control: a refused reload is not a failure" "true" \
+    "$(y '.riceReload.Service.ExecStart | if type == "array" then .[0] else . end | startswith("-") and endswith("/bin/lyra reload")')"
+  check "control: the rice reload has root, templates" "2" \
+    "$(y '[(.riceReload.Service.Environment // [])[] | select(startswith("AOIDE_ROOT=") or startswith("AOIDE_SONG_TEMPLATES="))] | length')"
+  check "control: the rice reload names no PATH" "0" \
+    "$(y '[(.riceReload.Service.Environment // [])[] | select(startswith("PATH="))] | length')"
+  # The switch's half: after home-manager has linked its files and reloaded the
+  # user manager, ONE try-restart names both units, so systemd orders the reload
+  # before the shell.
+  check "control: restart follows hm's file step" "1" \
+    "$(y '[(.restartRice.after // [])[] | select(. == "onFilesChange")] | length')"
+  check "control: restart follows hm's systemd step" "1" \
+    "$(y '[(.restartRice.after // [])[] | select(. == "reloadSystemd")] | length')"
+  check "control: one restart runs both units"  "true" \
+    "$(y '(.restartRice.data // "") | contains("try-restart aoide-rice-reload.service aoide-quickshell.service")')"
 fi
 
 printf '%s\n' "-----------------------------------------------------------------"

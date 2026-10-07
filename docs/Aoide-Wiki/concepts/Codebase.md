@@ -276,7 +276,10 @@ Live-side state, all under the runtime root (`$AOIDE_ROOT`, default
   `home.activation.aoideSeedStage` in `modules/dendrites/lyra/default.nix`
   — a write-temp-then-rename script that injects the same `"song"` field
   `rice stage` writes, so a host that boots without ever staging still
-  carries a correct live stage twin from the baked default), `mode.json`
+  carries a correct live stage twin from the baked default; when `mode.json`
+  names a staged or drafted song, `lyra reload`, run by the lane's
+  `aoide-rice-reload` unit at every login and after every switch, re-stages it
+  over that seed), `mode.json`
   (the staging/declarative mode marker — absent reads as `declarative`), and
   `grimoire.json` (QML-only writer). That same seed also publishes the
   DECLARED twin at `song/declared/livery.json` — the declared song's
