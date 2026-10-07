@@ -5106,6 +5106,32 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    /// A blank stored value is refused over the daemon's admin op too, with the
+    /// same marker the CLI teaches from, and nothing changes.
+    #[cfg(unix)]
+    #[test]
+    fn admin_migrate_of_a_blank_value_is_refused_and_changes_nothing() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("admin-migrate-blank");
+        crate::backend::seed_default_backends(&home).unwrap();
+        crate::store::save_policies(&home, &[Policy::new("t", "file", "k")]).unwrap();
+        std::fs::create_dir_all(home.join("store")).unwrap();
+        std::fs::write(home.join("store").join("k"), " \n").unwrap();
+        let before = crate::store::load_policies(&home).unwrap();
+
+        with_redirected_audit_log(&home, || {
+            let req = json!({"op": "admin", "command": "migrate", "name": "t", "target": "age"});
+            let reply = handle_admin(&home, &req, operator_peer());
+            assert_eq!(reply["ok"], false, "{reply}");
+            assert!(reply["error"].as_str().unwrap().contains(crate::admin::BLANK_SOURCE), "{reply}");
+        });
+
+        assert_eq!(crate::store::load_policies(&home).unwrap(), before);
+        assert_eq!(std::fs::read_to_string(home.join("store").join("k")).unwrap(), " \n");
+        assert!(!home.join("values").join("k.age").exists());
+        std::fs::remove_dir_all(&home).ok();
+    }
+
     /// Task #79 item 6d (migrate-over-socket durability order): the SAME
     /// fetch -> store -> flip -> remove-old-last ordering [`crate::admin::
     /// migrate`]'s own doc holds regardless of caller, proven here end to

@@ -75,7 +75,10 @@
   a new `put` path needs the same gate, not a bypass "for tests". A refused
   `put` is audited (`audit_put`, name-only) and teaches `sudo -u
   aoide-secrets aoide secrets put …` through `teach::broker_user`; the client's
-  own fix lines for `put` spell that same `sudo` prefix.
+  own fix lines for `put` spell that same `sudo` prefix, `run_put` refuses a
+  non-owner of the socket before it reads a value (`not_the_socket_owner`,
+  the admin gate's own comparison), and an `EACCES` on an admin op teaches
+  `sudo -u aoide-secrets …`, never `sg` (`describe_admin_connect_error`).
 - **The "does this secret already have a value" check is BROKER-SIDE ONLY,
   never the client's** (P-67, "warn before overwrite" — the User's own
   live complaint: `put` silently overwrote). `broker::has_value`-backed

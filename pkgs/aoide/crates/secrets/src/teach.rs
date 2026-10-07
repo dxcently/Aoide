@@ -59,6 +59,15 @@ fn classify(err: &str) -> Fail {
     }
 }
 
+fn is_admin(inv: &Invocation) -> bool {
+    inv.path.len() == 2
+        && inv.path[0] == "secrets"
+        && matches!(
+            inv.path[1].as_str(),
+            "put" | "add" | "rm" | "grant" | "revoke" | "set-totp" | "automate" | "expose" | "allow-remote-origin" | "migrate"
+        )
+}
+
 fn wrapped(inv: &Invocation) -> bool {
     inv.path == ["secrets", "exec"]
 }
@@ -123,6 +132,14 @@ pub fn broker_user(inv: &Invocation, err: &str) -> Refusal {
 }
 
 fn no_access(w: &Where) -> Refusal {
+    if is_admin(w.inv) {
+        return Refusal::new(
+            Kind::Refused,
+            format!("this session may not open the secrets broker's socket at {}", w.socket.display()),
+            "it is not in the `aoide-secrets-access` group, and an admin command runs as the broker user anyway, which the `sg` borrow would not change",
+            Fix::Run(format!("sudo -u {BROKER_USER} {}", line(w.inv))),
+        );
+    }
     let sg = line(w.inv).replace('\'', "'\\''");
     Refusal::new(
         Kind::Refused,

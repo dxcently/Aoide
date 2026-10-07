@@ -156,6 +156,22 @@ pub(crate) fn describe_connect_error(socket_path: &Path, err: &io::Error, reinvo
     }
 }
 
+/// [`describe_connect_error`] for an ADMIN op (`put`, the admin commands): a
+/// refused connect there is taught as the `sudo -u aoide-secrets` line, since
+/// the group's `sg` borrow would only lead into the broker's admin refusal.
+/// Every other failure reads exactly as [`describe_connect_error`] says it.
+pub(crate) fn describe_admin_connect_error(socket_path: &Path, err: &io::Error, reinvoke: &str) -> String {
+    if err.kind() != io::ErrorKind::PermissionDenied {
+        return describe_connect_error(socket_path, err, reinvoke);
+    }
+    format!(
+        "connecting to the secrets broker at {}: permission denied — this session isn't in the \
+         `aoide-secrets-access` group yet, and an admin command runs as the broker user anyway. \
+         Fix: run `sudo -u aoide-secrets {reinvoke}`.",
+        socket_path.display()
+    )
+}
+
 /// **"Nothing is listening there" is ONE question, with one spelling per
 /// host.** Unix spells a missing socket path `ENOENT`/`ECONNREFUSED`, which
 /// Rust surfaces as [`io::ErrorKind::NotFound`]/
@@ -734,7 +750,7 @@ impl std::fmt::Display for PutError {
 /// `totp`/`argv0` fields already hold.
 pub fn put(socket_path: &Path, secret: &str, value: &str, overwrite: bool) -> Result<bool, PutError> {
     let mut stream = connect_bounded(socket_path, CONNECT_TIMEOUT).map_err(|e| {
-        PutError::Other(describe_connect_error(socket_path, &e, &format!("aoide secrets put {secret}")))
+        PutError::Other(describe_admin_connect_error(socket_path, &e, &format!("aoide secrets put {secret}")))
     })?;
 
     let mut req = json!({ "op": "put", "secret": secret, "value": value });
@@ -813,7 +829,7 @@ pub fn admin_request(socket_path: &Path, req: Value) -> Result<Value, AdminError
         if nothing_is_listening(&e) {
             AdminError::NoSocket
         } else {
-            AdminError::Other(describe_connect_error(socket_path, &e, "aoide secrets <admin command> ..."))
+            AdminError::Other(describe_admin_connect_error(socket_path, &e, "aoide secrets <admin command> ..."))
         }
     })?;
 
@@ -1272,6 +1288,9 @@ fn confirm_overwrite(secret: &str) -> Result<bool, String> {
 /// "replaced", so the CLI's own `Outcome` can say which happened) or a
 /// value-free [`PutFailure`].
 pub fn run_put(secret: &str, socket_path: &Path, force: bool) -> Result<String, PutFailure> {
+    if let Some(refusal) = not_the_socket_owner(&crate::home::effective_user(), crate::home::owner_of(socket_path), socket_path) {
+        return Err(PutFailure::Broker(refusal));
+    }
     let typed = stdin_is_tty();
     let value = if typed {
         read_hidden_line(&format!("value for `{secret}` (input hidden): ")).map_err(PutFailure::Broker)?
@@ -1308,6 +1327,18 @@ pub fn run_put(secret: &str, socket_path: &Path, force: bool) -> Result<String, 
             }
         }
     }
+}
+
+/// [`run_put`]'s early refusal, before a value is asked for: the broker accepts
+/// `put` only from its own user, and that user owns its socket, so a caller
+/// that is not the socket's owner is refused here instead of after typing a
+/// secret that would be thrown away. The decision is the admin gate's own
+/// ([`crate::home::admin_identity_error`]); the broker stays the authority, so
+/// an absent or unreadable socket (`owner` is `None`) passes and the connect
+/// reports it.
+fn not_the_socket_owner(me: &Option<crate::peercred::PeerUser>, owner: Option<crate::peercred::PeerUser>, socket_path: &Path) -> Option<String> {
+    let (me, owner) = (me.as_ref()?, owner?);
+    crate::home::admin_identity_error(me, &owner, socket_path, "put")
 }
 
 /// Why [`run_put`] stored nothing.
@@ -1835,11 +1866,32 @@ mod tests {
     fn permission_denied_teaches_both_the_sg_and_relogin_fixes() {
         let socket = Path::new("/run/aoide-secrets/secrets.sock");
         let err = io::Error::new(io::ErrorKind::PermissionDenied, "denied");
-        let msg = describe_connect_error(socket, &err, "aoide secrets put db-prod");
+        let msg = describe_connect_error(socket, &err, "aoide secrets status");
         assert!(msg.contains(&socket.display().to_string()), "{msg}");
         assert!(msg.contains("aoide-secrets-access"), "{msg}");
-        assert!(msg.contains("sg aoide-secrets-access -c 'aoide secrets put db-prod'"), "{msg}");
+        assert!(msg.contains("sg aoide-secrets-access -c 'aoide secrets status'"), "{msg}");
         assert!(msg.to_lowercase().contains("log out"), "{msg}");
+    }
+
+    #[test]
+    fn a_put_by_anyone_but_the_socket_owner_is_refused_before_a_value_is_asked_for() {
+        use crate::peercred::PeerUser::Uid;
+        let socket = Path::new("/run/aoide-secrets/secrets.sock");
+        let refusal = not_the_socket_owner(&Some(Uid(1000)), Some(Uid(990)), socket).expect("a foreign owner is refused");
+        assert!(refusal.contains("secrets put must run as the broker user"), "{refusal}");
+        assert!(not_the_socket_owner(&Some(Uid(1000)), Some(Uid(1000)), socket).is_none());
+        assert!(not_the_socket_owner(&Some(Uid(1000)), None, socket).is_none(), "no socket to stat: the connect says so");
+        assert!(not_the_socket_owner(&None, Some(Uid(990)), socket).is_none(), "the broker gate stays the authority");
+    }
+
+    #[test]
+    fn permission_denied_on_an_admin_op_teaches_the_sudo_line_not_sg() {
+        let socket = Path::new("/run/aoide-secrets/secrets.sock");
+        let err = io::Error::new(io::ErrorKind::PermissionDenied, "denied");
+        let msg = describe_admin_connect_error(socket, &err, "aoide secrets put db-prod");
+        assert!(msg.contains(NO_ACCESS), "{msg}");
+        assert!(msg.contains("sudo -u aoide-secrets aoide secrets put db-prod"), "{msg}");
+        assert!(!msg.contains("sg aoide-secrets-access"), "{msg}");
     }
 
     #[test]

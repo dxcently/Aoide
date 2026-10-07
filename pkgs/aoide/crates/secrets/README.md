@@ -179,7 +179,7 @@ The write-side mirror of the flow above, and it goes the OTHER direction —
 a value flows CLIENT-to-broker, never released back:
 
 ```
-operator/service -> aoide secrets put <name> [--force]   (value read from STDIN, never argv)
+operator/service -> sudo -u aoide-secrets aoide secrets put <name> [--force]   (value read from STDIN, never argv)
                   -> client (caller uid) connects, sends
                      {op:"put", secret, value, overwrite:<bool>?}
                      (stdin is a terminal -> prompt on stderr, echo hidden;
@@ -218,7 +218,7 @@ from) — a yes re-sends the value ALREADY held in memory with
 `overwrite:true`, never asking the caller to retype it; a no or EOF aborts
 with an "unchanged" message. On a piped/non-interactive stdin there is no
 one to ask, so the refusal teaches the fix instead:
-`printf %s <value> | aoide secrets put <name> --force`. `secrets put
+`printf %s <value> | sudo -u aoide-secrets aoide secrets put <name> --force`. `secrets put
 <name> --force` sends `overwrite:true` on the very FIRST attempt, skipping
 the confirmation on a tty too. A `put` on a secret with no stored value is
 unaffected either way — no prompt, no warning, same as before this
@@ -245,11 +245,18 @@ stdin read to the `put()` call that pipes it into the wire request — never
 an `Outcome`, never either audit line (both are written broker-side,
 name-only, exactly like `resolve`'s — see `broker`'s module doc).
 
+`client::run_put` also stats the socket before it asks for a value: a caller
+that is not the socket's owner (the broker user) is refused at once with the
+same taught line, instead of after typing a secret that would be thrown away.
+The broker's gate stays the authority; this is only the early exit. A refused
+connect (`EACCES`) on `put` or any admin command teaches the `sudo -u
+aoide-secrets` line directly, never the `sg` group borrow.
+
 **Stdin intake, P-V4e**: `aoide secrets put <name>` with no pipe now
 prompts —
 
 ```
-$ aoide secrets put db-prod
+$ sudo -u aoide-secrets aoide secrets put db-prod
 value for `db-prod` (input hidden):
 put secret `db-prod`
 ```
@@ -260,7 +267,7 @@ P-I1: a thin wrapper around `aoide_protocol::pick::hidden_input`,
 `inquire::Password` with hidden display mode and no confirmation, since
 `inquire` lives in `aoide-protocol` only; before P-I1 this function
 disabled `ECHO` on stdin's own `libc::termios` by hand). A piped/redirected
-stdin (`printf %s hunter2 | aoide secrets put db-prod`, the original shape) is
+stdin (`printf %s hunter2 | sudo -u aoide-secrets aoide secrets put db-prod`, the original shape) is
 BYTE-IDENTICAL to before: `client::stdin_is_tty` is false in that case and
 `run_put` falls straight through the old `read_to_string` path.
 

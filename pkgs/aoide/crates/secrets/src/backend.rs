@@ -1044,7 +1044,7 @@ fn missing_age_identity_hint(secrets_home: &Path) -> String {
          under `values/` first"
             .to_string()
     } else {
-        "no age identity found for this secrets home yet — run `secrets put <name>` once to lazily mint \
+        "no age identity found for this secrets home yet — run `sudo -u aoide-secrets aoide secrets put <name>` once to lazily mint \
          `age.key`/`age.recipient` (SET mints; GET never does), or provision `age.key`/`age.recipient` \
          out of band"
             .to_string()
@@ -1975,7 +1975,7 @@ mod tests {
     fn missing_age_identity_hint_names_the_restore_or_clean_choice_only_when_orphans_exist() {
         let fresh_home = tmp_home("age-hint-fresh");
         let hint = missing_age_identity_hint(&fresh_home);
-        assert!(hint.contains("secrets put"), "a truly fresh home should still be told to run `secrets put`: {hint}");
+        assert!(hint.contains("sudo -u aoide-secrets aoide secrets put <name>"), "a truly fresh home should still be told to run `secrets put`: {hint}");
         assert!(!hint.contains("restore"), "no orphans present -> no restore-or-clean wording: {hint}");
         std::fs::remove_dir_all(&fresh_home).ok();
 
