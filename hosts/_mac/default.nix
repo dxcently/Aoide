@@ -1,13 +1,14 @@
 # hosts/_mac/default.nix — TEMPLATE (forward-looking): macOS / nix-darwin host.
 #
 # Shelved (the `_` prefix): not discovered by flake.nix, so nothing builds or
-# evaluates it. NOT EVALUABLE TODAY — the constructor is nixosSystem-only.
-# Landing a mac host needs the class seam first:
+# evaluates it. NOT EVALUABLE TODAY — lib/aoideos.nix builds NixOS hosts only.
+# Habit's composition has the class (`mkDarwinHost`); landing a mac host needs
+# Aoide to call it:
 #   1. flake.nix: a nix-darwin input (follows nixpkgs), `aarch64-darwin` in
 #      `systems`, a `darwinConfigurations` output
-#   2. habit's composition / lib/aoideos.nix: a `class` arg — darwinSystem plus
-#      home-manager's and stylix's *darwinModules* instead of the nixosModules
-#      sets (`composition.laneNames` already carries `darwin`)
+#   2. lib/aoideos.nix: a builder calling `mkDarwinHost` — nix-darwin's
+#      `darwinSystem` plus home-manager's and stylix's *darwinModules* instead
+#      of the nixosModules sets
 #   3. modules/nucleus: a launchd twin for the aoided/shellbridge user services
 #      (systemd.user.services → launchd.user.agents); `nixpkgs.hostPlatform`
 #      and `users.users.*.isNormalUser` are NixOS-only options

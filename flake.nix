@@ -43,7 +43,7 @@
     # Its nixpkgs only feeds habit's own checks; the library takes `lib` from
     # whoever applies it.
     habit = {
-      url = "github:dxcently/habit/v1";
+      url = "github:dxcently/habit/v2";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -77,7 +77,7 @@
       forAllSystems = f: nixpkgs.lib.genAttrs systems f;
       inherit (nixpkgs) lib;
 
-      # Per-host assembly (selection constructor + host record + home-manager).
+      # Per-host assembly (selection constructor + host module + home-manager).
       aoideos = import ./lib/aoideos.nix {
         inherit inputs lib;
         system = "x86_64-linux";
@@ -238,11 +238,11 @@
       #
       # `nixosModules` is the catalogue plus `nucleus`: one entry per catalogue
       # name, each the PATH this flake's own registry holds for that capability
-      # (`import`ing it yields the lane record `{ body; nixos; }` the
-      # constructor's `registry.catalogue` takes — the same value, spelled one
-      # name at a time), and `nucleus` the ONE module that sets
-      # `_module.args.aoideInputs`, which is also what `mkHost` passes. A
-      # consumer's catalogue is that attrset minus `nucleus`.
+      # (a plain module, or a provider set `{ providers.<p> = <path>; }`: what
+      # the constructor's `registry.catalogue` takes — the same value, spelled
+      # one name at a time), and `nucleus` the ONE module that sets
+      # `_module.args.aoideInputs`, which is also what `mkHost` passes as an
+      # extra module. A consumer's catalogue is that attrset minus `nucleus`.
       nixosModules = {
         nucleus = aoideos.nucleusModule;
       }

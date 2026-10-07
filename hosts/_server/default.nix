@@ -5,27 +5,24 @@
 # host that selects no `aoideos` imports no committed song at all. A headless
 # machine has no terminal to open, so `kitty` is the one floor member it drops;
 # `enable = false` outranks the aggregation's membership.
+{ lib, ... }:
 {
-  aggregation.base.enable = true;
+  habit.aggregation.base.enable = true;
 
-  dendrites.kitty.enable = false;
+  habit.dendrites.kitty.enable = false;
 
-  users.khoa = {
+  habit.users.khoa = {
     definition = ../../users/khoa.nix;
-    homeManager.enable = true;
+    home.enable = true;
   };
 
-  nixos =
-    { lib, ... }:
-    {
-      imports = lib.optional (builtins.pathExists ./hardware.nix) ./hardware.nix;
+  imports = lib.optional (builtins.pathExists ./hardware.nix) ./hardware.nix;
 
-      nixpkgs.hostPlatform = "x86_64-linux";
+  nixpkgs.hostPlatform = "x86_64-linux";
 
-      networking.hostName = "server"; # ← your hostname
+  networking.hostName = "server"; # ← your hostname
 
-      time.timeZone = "UTC";
+  time.timeZone = "UTC";
 
-      aoide.user = "khoa"; # ← your user
-    };
+  aoide.user = "khoa"; # ← your user
 }
