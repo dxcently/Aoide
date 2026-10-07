@@ -234,7 +234,7 @@ Every helper takes `required property var kit`. All text is
 | `open` | true | false→true: reveal; true→false: close |
 | `animateOnCreate` | false | a pane created open skips the reveal unless set. A list delegate must never animate |
 | `glow` | `"outline"` | title glow: `off` / `outline` / `bloom` (§5) |
-| `innerGlow` | true | `title` phosphor blooming inward from all four edges (below); `false` opts out |
+| `innerGlow` | true | `title` phosphor blooming inward from all four edges (below); `false` only hides it, the canvas still paints |
 | `content` | null | a `Component`, instantiated inset one cell and one line, clipped |
 | `cols`, `rows` | 20, 3 | INNER size in cells |
 | *out* `innerCols`, `innerRows`, `contentItem` | | the inner size when sized from outside; the live body |
@@ -271,6 +271,16 @@ or `kit.title` changes. Focus eases its `opacity` from rest (0.5 of focused)
 to full over 150ms, and it fades with the fill on reveal and close. Neither
 repaints. The knobs are Pane's
 `_glowBlur` (34), `_glowPeak` (0.8 shadow alpha) and `_glowRest` (0.5).
+
+The paint runs on the canvas's own render thread (`Canvas.Threaded`), never
+the GUI thread. A Context2D `shadowBlur` of 34 costs seconds per paint at a
+pane's size: measured on the GUI thread, 330x200 took 3.9 s, 640x300 6.4 s and
+the dock's 562x1043 frame 12 s, against 12 ms with no blur. On the GUI thread
+that froze the whole shell: the bar clock, the toasts and every shortcut. The
+worker pays the same CPU, so a resize's glow lands late, and a pane whose
+height follows its content repaints on every change. A hidden canvas paints
+too: `innerGlow: false` hides the glow and saves nothing.
+
 Block has no rules and no glow.
 
 ### Block

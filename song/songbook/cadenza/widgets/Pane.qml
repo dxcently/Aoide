@@ -39,7 +39,14 @@
 // title and the stat too (they sit on no box). Always `title`, whatever the
 // rule's colour. Focus eases the canvas's opacity (rest = `_glowRest` of
 // focused, 150ms); reveal/close fade it with the fill; neither repaints.
-// `innerGlow: false` opts a pane out.
+//
+// The paint runs on the canvas's own render thread (`Canvas.Threaded`), never
+// the GUI thread. Context2D's shadowBlur costs seconds per paint at a pane's
+// size (about 4 s at 330x200, 12 s at the dock's 562x1043 frame), and on the
+// GUI thread that froze the whole shell: the bar clock, the toasts, every
+// shortcut. The work is the same on the worker, so a resize's glow lands
+// late, and a pane whose height follows its content repaints on every change.
+// `innerGlow: false` only hides the canvas; it still paints.
 //
 // ── SIZE ──────────────────────────────────────────────────────────────────
 // Whole cells: `cols`/`rows` are the INNER content size; the pane reports
@@ -122,12 +129,13 @@ Item {
         color: pane.kit.withA(pane.kit.ground, pane.fillA)
     }
 
-    // ── inner glow: one Canvas, a gaussian painted once ─────────────────────
+    // ── inner glow: one Canvas, a gaussian painted off the GUI thread ───────
     // A solid `title` frame is filled just OUTSIDE the pane rect with a
     // shadowBlur; only its blurred shadow falls inside the canvas, so the
     // light is a true gaussian from every edge, the corners round and even.
     // It repaints on size/colour change only; focus and reveal move its
-    // `opacity`, which never repaints.
+    // `opacity`, which never repaints. `Canvas.Threaded` keeps the seconds a
+    // shadowBlur costs off the GUI thread (header, INNER GLOW).
     readonly property real _glowBlur: 34          // Context2D shadowBlur
     readonly property real _glowPeak: 0.8         // shadowColor alpha (focused)
     readonly property real _glowRest: 0.5        // rest strength, of focused
@@ -137,6 +145,7 @@ Item {
         id: glowCanvas
         x: 0; y: pane._ruleY
         width: pane._w; height: pane._side
+        renderStrategy: Canvas.Threaded
         visible: pane.innerGlow && width > 0 && height > 0   // reveal moves opacity only
         opacity: pane.fillA / pane.kit.paneAlpha * pane._glowLevel
         readonly property color tint: pane.kit.title
