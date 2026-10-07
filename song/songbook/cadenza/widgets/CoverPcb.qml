@@ -19,18 +19,23 @@
 // ONCE. A Canvas rasterises them into one image and keeps no scene-graph
 // object per track; Shapes would keep ~1000 live ShapePaths (each its own
 // geometry, re-tessellated on any change) for a picture that never changes.
-// It repaints only when its size or the livery changes.
+// It repaints only when its size has settled, a board lands, or the livery
+// changes.
 //
-// The generator (CoverPcbWorker.mjs) is about three seconds of JS per output,
-// so it runs in a WorkerScript, never on the GUI thread, and the canvas
-// strokes the board on its own render thread (`Canvas.Threaded`; on the GUI
-// thread that is another ~100 ms). The canvas paints the ground until the
-// board arrives, then the board: `board` is null until then. A size change
-// asks for a new board, and an answer to a stale size is dropped.
+// The generator (CoverPcbWorker.js) is about three seconds of JS per output,
+// so it runs in a WorkerScript, never on the GUI thread. The canvas strokes
+// the board `Canvas.Threaded` (on the GUI thread that is another ~100 ms), on
+// the one render thread the engine shares between every Threaded canvas, behind
+// any Pane glows queued before it. It paints the ground until the first board
+// arrives, then the board: `board` is null only until then. A size change
+// restarts a 250ms `settle` Timer, and only the settled size is asked of the
+// worker, which computes one board at a time: the last board stays on the
+// canvas until the new one lands, and an answer to a superseded size is
+// dropped.
 //
 // Deterministic: one seed (`seed` below), a local PRNG (mulberry32), no
 // Math.random, no clock. The same size and seed give the same pixels.
-// Static: no timers, no animation. No text.
+// Static: no animation; the one Timer is the resize settle. No text.
 import QtQuick
 import QtQml.WorkerScript
 import "Kit.js" as Kit
@@ -53,19 +58,23 @@ Item {
     property var board: null
     property string wantKey: ""
 
-    function ensureBoard() {
-        var w = Math.round(root.width), h = Math.round(root.height)
-        var key = w + "x" + h + ":" + root.seed
-        if (key !== root.wantKey) {
-            root.wantKey = key
-            worker.sendMessage({ key: key, w: w, h: h, seed: root.seed })
+    Timer {
+        id: settle
+        interval: 250
+        onTriggered: {
+            var w = Math.round(root.width), h = Math.round(root.height)
+            var key = w + "x" + h + ":" + root.seed
+            if (key !== root.wantKey) {
+                root.wantKey = key
+                worker.sendMessage({ key: key, w: w, h: h, seed: root.seed })
+            }
+            canvas.requestPaint()
         }
-        return root.board
     }
 
     WorkerScript {
         id: worker
-        source: "CoverPcbWorker.mjs"
+        source: "CoverPcbWorker.js"
         onMessage: function (m) {
             if (m.key !== root.wantKey) return
             root.board = m.board
@@ -79,8 +88,9 @@ Item {
         renderTarget: Canvas.Image
         renderStrategy: Canvas.Threaded
         onPaint: {
+            if (settle.running) return      // a resize repaints by itself; `settle` paints the settled size
             var ctx = getContext("2d")
-            var bd = root.ensureBoard()
+            var bd = root.board
             ctx.reset()
             ctx.fillStyle = "" + root.kit.ground
             ctx.fillRect(0, 0, width, height)
@@ -110,7 +120,8 @@ Item {
         }
     }
 
-    onWidthChanged: canvas.requestPaint()
-    onHeightChanged: canvas.requestPaint()
+    Component.onCompleted: settle.start()
+    onWidthChanged: settle.restart()
+    onHeightChanged: settle.restart()
     onKitChanged: canvas.requestPaint()
 }

@@ -32,10 +32,10 @@ function loadTrace() {
 
 // ── the generator, lifted between its own markers (the file's own promise) ──
 function loadGenerator() {
-    const src = fs.readFileSync(path.join(widgets, "CoverPcbWorker.mjs"), "utf8")
+    const src = fs.readFileSync(path.join(widgets, "CoverPcbWorker.js"), "utf8")
     const a = src.indexOf("// BEGIN-PCB-GENERATOR")
     const b = src.indexOf("// END-PCB-GENERATOR")
-    if (a < 0 || b < 0) throw new Error("CoverPcbWorker.mjs lost its generator markers")
+    if (a < 0 || b < 0) throw new Error("CoverPcbWorker.js lost its generator markers")
     const block = src.slice(src.indexOf("\n", a) + 1, b)
     return new Function(block + "\nreturn pcbGenerate")()
 }

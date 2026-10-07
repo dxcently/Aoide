@@ -1,11 +1,12 @@
-// CoverPcbWorker.mjs — CoverPcb's board generator, run by its WorkerScript so
+// CoverPcbWorker.js — CoverPcb's board generator, run by its WorkerScript so
 // the three seconds it takes per output never block the GUI thread.
 //
 //     in   { key, w, h, seed }
 //     out  { key, board }          board = { tracks, rings, tw, ring }
 //
-// The block between the markers is plain JS, exactly as it ran inside
-// CoverPcb.qml; design/trace.test.js lifts the same bytes under node.
+// The block between the markers is plain JS, no QML: design/trace.test.js
+// lifts the same bytes under node. A `.js` source runs sloppy, as that
+// test does; an `.mjs` would run strict.
 // Deterministic: one seed, a local PRNG, no Math.random, no clock.
 
     // BEGIN-PCB-GENERATOR (plain JS, no QML: a JS script outside Quickshell can lift it verbatim)
