@@ -32,7 +32,11 @@
 // the file for the board's NOTIF tab; nothing daemon-side expires it.
 // Deadlines are pinned per (id, receivedAt) at first sight, so a rewrite of
 // the file (another arrival) never restarts a toast's clock, and a new
-// arrival reusing an id (dunst's stack_duplicates) gets a fresh one.
+// arrival reusing an id (dunst's stack_duplicates) gets a fresh one. A
+// deadline counts from the record's own `receivedAt` (from first sight only
+// when that does not parse), so a QML reload, which meets the whole stored
+// ledger as first sight, never replays it as fresh toasts: a record already
+// past its timeout lapses in `ingest`, before anything is drawn.
 //
 // ── THE WIRE (the only two commands, sonata's exact shapes) ───────────────
 //   click a toast              → { cmd: "heralddismiss", id: <record id> }
@@ -125,8 +129,8 @@ Item {
             var at = "" + (r.receivedAt || "")
             var same = root.arrivals[id] !== undefined && root.arrivals[id] === at
             var t = (r.timeoutMs !== undefined) ? (r.timeoutMs | 0) : 0
-            dl[id] = (same && id in root.deadlines) ? root.deadlines[id] : (t > 0 ? now + t : 0)
-            if (same && root.lapsed[id]) lp[id] = true
+            dl[id] = (same && id in root.deadlines) ? root.deadlines[id] : (t > 0 ? (Date.parse(at) || now) + t : 0)
+            if ((same && root.lapsed[id]) || (dl[id] > 0 && now >= dl[id])) lp[id] = true
             av[id] = at
         }
         root.deadlines = dl; root.lapsed = lp; root.arrivals = av

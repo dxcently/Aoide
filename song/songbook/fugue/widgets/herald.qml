@@ -54,6 +54,11 @@ PanelWindow {
     }
 
     // -- The dismiss clock -- one map id -> epoch-ms deadline (0 = never) ----
+    // A deadline counts from the record's receivedAt (from first sight only
+    // when that does not parse): every reload of this file meets the whole
+    // stored ledger as first sight, and now + t replayed it as fresh toasts.
+    // A record already past its deadline lapses in ingest, so it is never
+    // drawn.
     property var deadlines: ({})
     property var lapsed: ({})
     // id -> receivedAt of the arrival currently tracked. dunst's
@@ -82,8 +87,8 @@ PanelWindow {
             var sameArrival = root.arrivals[id] !== undefined && root.arrivals[id] === receivedAt
             var t = (r.timeoutMs !== undefined) ? (r.timeoutMs | 0) : 0
             dl[id] = (sameArrival && id in root.deadlines) ? root.deadlines[id]
-                                            : (t > 0 ? now + t : 0)
-            if (sameArrival && root.lapsed[id]) lp[id] = true
+                                            : (t > 0 ? (Date.parse(receivedAt) || now) + t : 0)
+            if ((sameArrival && root.lapsed[id]) || (dl[id] > 0 && now >= dl[id])) lp[id] = true
             av[id] = receivedAt
         }
         root.deadlines = dl

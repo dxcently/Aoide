@@ -45,8 +45,9 @@
 // (0 = never — critical and every summons). Expiry is LOCAL: a lapsed card
 // leaves this popup but stays in the file for the dock's herald-center
 // ledger; nothing daemon-side ever expires a record. Deadlines are pinned
-// per id at first sight, so a file rewrite (another arrival) never restarts
-// a card's clock.
+// per arrival at first sight and count from the record's own `receivedAt`,
+// so a file rewrite (another arrival) never restarts a card's clock and a
+// QML reload never replays the stored ledger as fresh cards.
 //
 // Write-side, socket only (ShellBridge, the powermenu idiom — QML never
 // touches the file):
@@ -118,6 +119,12 @@ PanelWindow {
     // every neighbour's arrival. So the clock lives here: one map id →
     // epoch-ms deadline (0 = never), one 500ms sweep while cards show.
     //
+    // A deadline counts from the record's `receivedAt` (from first sight only
+    // when that does not parse): every reload of this file meets the whole
+    // stored ledger as first sight, and `now + t` replayed it as fresh cards.
+    // A record already past its deadline lapses in `ingest`, so it is never
+    // drawn.
+    //
     // Keyed by id AND `receivedAt`, not id alone: dunst's `stack_duplicates`
     // (modules/dendrites/dunst.nix) reuses ONE notification id for a repeated
     // identical summary+body — e.g. two back-to-back "nothing to reap" reap
@@ -149,8 +156,9 @@ PanelWindow {
             var sameArrival = root.arrivals[id] !== undefined && root.arrivals[id] === receivedAt
             var t = (r.timeoutMs !== undefined) ? (r.timeoutMs | 0) : 0
             dl[id] = (sameArrival && id in root.deadlines) ? root.deadlines[id]
-                                            : (t > 0 ? now + t : 0)
-            if (sameArrival && root.lapsed[id]) lp[id] = true   // stays lapsed only within the SAME arrival
+                                            : (t > 0 ? (Date.parse(receivedAt) || now) + t : 0)
+            // lapsed already (the SAME arrival) or past its deadline on first sight
+            if ((sameArrival && root.lapsed[id]) || (dl[id] > 0 && now >= dl[id])) lp[id] = true
             av[id] = receivedAt
         }
         root.deadlines = dl                          // dropped ids pruned
