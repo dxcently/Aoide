@@ -171,12 +171,14 @@
   `blurEnabled` opinion — the lane's block takes both keys from that same
   field, so the bake follows the song. `decoration:blur:*`
   keeps the plain no-opinion rule (no keyword). **This crate's own unit
-  tests never run `hyprctl`** (`cfg!(test)` in `live::apply_live`, after the
-  `HYPRLAND_INSTANCE_SIGNATURE` check): `cfg!` is evaluated when *this crate*
-  is compiled, so a `lyra`/CLI integration test, or anything else linking
-  this library, still reaches the compositor — and with a batch in every
-  stage, such a handler test run from a Hyprland terminal would flip the
-  operator's live glass and borders.
+  tests never run `hyprctl` and never reload the live shell** (`cfg!(test)`
+  in `live::apply_live`, after the `HYPRLAND_INSTANCE_SIGNATURE` check, and
+  at the head of `ipc::quickshell_ipc_reload`): `cfg!` is evaluated when
+  *this crate* is compiled, so a `lyra`/CLI integration test, or anything
+  else linking this library, still reaches the compositor and the shell —
+  and with a batch in every stage, such a handler test run from a Hyprland
+  terminal would flip the operator's live glass and borders, and a reload
+  rebuilds the whole running scene.
 - **`song/declared/livery.json` (the declared twin, CONTRACTS.md §4) is
   READ-ONLY for this crate — only the nix side writes it.** The lyra
   lane's activation seed (`home.activation.aoideSeedStage`) publishes it: the

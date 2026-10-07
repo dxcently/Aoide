@@ -260,7 +260,7 @@ lyra quickshell reload [--json]
 
 - **Reads:** liveness probe via `systemctl --user show
   aoide-quickshell.service --property=MainPID --value`
-  (`pkgs/aoide/crates/song/src/reap.rs`); the `shell.qml` path under
+  (`pkgs/aoide/crates/song/src/ipc.rs`); the `shell.qml` path under
   `run/qml/` (`run_qml_dir()`: `$AOIDE_ROOT/run/qml/shell.qml`, default
   `~/.aoide/run/qml/shell.qml`; `$AOIDE_STAGE_DIR`-relocatable).
 - **Pipes to / output:** when the service is up, spawns `quickshell -p

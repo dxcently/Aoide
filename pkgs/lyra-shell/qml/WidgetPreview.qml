@@ -5,10 +5,6 @@
 //   env -u QS_STAGE AOIDE_ROOT=<root> AOIDE_STATE_DIR=<root>/state \
 //     AOIDE_STAGE_DIR=<root>/state/stage qs -p <root>/run/qml/WidgetPreview.qml
 //
-// The name ends in `Preview.qml` ON PURPOSE: `rice mode stage` reaps every
-// `qs -p *Preview.qml` harness by that suffix, so the canvas is torn down by
-// the same convention that reaps the other seven harnesses.
-//
 // ── Why a canvas and not another fixed-size *Preview.qml ────────────────────
 // ConductorPreview/TerminalsPreview/DockPreview each pin ONE widget into ONE
 // 360x520 PanelWindow with a stub palette. That answers "does it still

@@ -109,9 +109,7 @@ The window is a `FloatingWindow` — a real compositor client, titled
 it — `lyra preview shot --what canvas` finds the address by title AND the
 root's own quickshell pid (`qs list --all` names it), so two open roots
 never capture each other — and it is never a layer surface fighting the
-live bar or dock. `rice mode stage` reaps any
-`qs -p *Preview.qml` harness by that suffix; the canvas keeps the suffix on
-purpose and simply relaunches.
+live bar or dock.
 
 ## Controls and their meaning
 

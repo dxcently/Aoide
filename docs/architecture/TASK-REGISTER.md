@@ -438,8 +438,7 @@ Fields per entry: status · owner · depends on · evidence · next.
 - Owner: widget-preview-fable (plan + delegation + hands-on pass); Fable
   integrates. Designer session `widget-design-fable` consumes it for the
   card redesign (§13 UI half, now under the User's live-draft workflow).
-- Depends on: the reap-scoping slice (carried backlog) before any stage/
-  preview acceptance; native `FolderDialog` only, no custom browser.
+- Depends on: native `FolderDialog` only, no custom browser.
 - Handoff RECEIVED (owner seq 454/457, 2026-09-13T03:46Z): preview.rs
   2237 l, preview_tools.rs 3019 l, WidgetPreview.qml 2092 l, fixtures,
   Widget-Preview.md, lyra README/AGENTS/mod.rs/registry.rs (golden 48→54),

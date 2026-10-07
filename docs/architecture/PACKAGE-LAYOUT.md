@@ -249,13 +249,13 @@ this is structure, not features.
   exit`, fired only by a UI button press) and, inside the ricing surface
   itself, one env-guarded `hyprctl` call in `song::live` — none of it reaches
   `nixos-rebuild`, `switch`, or service *installation*, the shape
-  `management`'s charter actually names. The env-guarded `hyprctl` call stayed a function separate
-  from `song::live::geometry_keywords` so a future `management` crate could
-  lift just the host-effect half out later without touching the pure
-  computation. `management` is deferred indefinitely until real host-ops
-  commands (rebuild/switch/service installation) actually get built —
-  there's no ETA, it's not "next," it's "whenever that work exists to
-  extract."
+  `management`'s charter actually names. The env-guarded `hyprctl` call
+  stayed a function separate from `song::live::geometry_keywords` so a
+  future `management` crate could lift just the host-effect half out later
+  without touching the pure computation. `management` is deferred
+  indefinitely until real host-ops commands (rebuild/switch/service
+  installation) actually get built — there's no ETA, it's not "next," it's
+  "whenever that work exists to extract."
 - **Phase 6 — extract `conductor`; `cli` stays the root package. LANDED
   (6a: d6b771d, 6b: 1f5ae31).** Planning corrected the original scope: `cli`
   was never a separate crate to build — the root `aoide` package already is

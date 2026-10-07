@@ -99,8 +99,13 @@ impl ReloadStatus {
 /// `aoide-quickshell.service` isn't up ([`quickshell_service_main_pid`]
 /// returns `None`) — the common case in this sandboxed environment, and any
 /// time a rebuild/rice change lands with no live shell to show it in.
+///
+/// This crate's own test build is always that no-op, before the service is
+/// even asked: `cfg!` is evaluated when *this crate* is compiled, so a
+/// handler test run from a desktop session never reloads the operator's live
+/// shell, while a `lyra`/CLI integration test linking this library still can.
 pub fn quickshell_ipc_reload() -> ReloadStatus {
-    if quickshell_service_main_pid().is_none() {
+    if cfg!(test) || quickshell_service_main_pid().is_none() {
         return ReloadStatus::NotRunning;
     }
     let shell_qml = aoide_storage::fs::run_qml_dir().join("shell.qml");
@@ -230,9 +235,31 @@ mod tests {
         assert!(s.message().contains("nonzero"), "{}", s.message());
     }
 
-    // `quickshell_ipc_reload()` itself isn't unit-tested here: it reads the
-    // REAL `aoide-quickshell.service` state via `systemctl --user`, which is
-    // environment-dependent (absent in this sandbox, but legitimately live
-    // on a real desktop) — only `classify_call`, its pure half, is tested;
-    // `quickshell_service_main_pid()` is never called from a test.
+    /// A stand-in `systemctl` that reports a live shell and a stand-in
+    /// `quickshell` that records being run: the test build must never reach
+    /// the second one.
+    #[test]
+    fn a_test_build_never_reaches_the_live_shell() {
+        let _g = aoide_test_support::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let _s = aoide_test_support::EnvSaver::capture(&["PATH"]);
+        let dir = aoide_test_support::unique_tmp("ipc-reload");
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let ran = dir.join("quickshell.ran");
+        for (name, body) in [
+            ("systemctl", "echo 4242".to_string()),
+            ("quickshell", format!(": > '{}'", ran.display())),
+        ] {
+            let shim = bin.join(name);
+            std::fs::write(&shim, format!("#!/bin/sh\n{body}\n")).unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        std::env::set_var("PATH", &bin);
+
+        assert_eq!(quickshell_service_main_pid(), Some(4242), "the stand-in must read as a live shell");
+        assert_eq!(quickshell_ipc_reload().tag(), "not-running");
+        assert!(!ran.exists(), "the test build ran `quickshell`");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
