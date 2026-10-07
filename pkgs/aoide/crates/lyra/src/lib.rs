@@ -13,6 +13,7 @@ pub mod dispatch;
 pub mod guide;
 pub mod output;
 pub mod registry;
+pub mod xdg;
 
 use daemon::Door;
 

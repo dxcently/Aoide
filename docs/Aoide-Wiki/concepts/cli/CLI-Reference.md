@@ -1,7 +1,7 @@
 ---
 type: concept
 created: 2026-08-19
-updated: 2026-09-27
+updated: 2026-10-07
 tags: [aoide, cli, reference, schema]
 ---
 
@@ -104,6 +104,9 @@ start at [[aoide-cli]] and the group pages linked below.
   commands across direct-home admin, over-the-socket operator, and the daemon
   itself. State: `/run/aoide-secrets/{secrets.sock,events.jsonl}`, the
   secrets home.
+- [[Apps-Commands|Apps-Commands]] — the `lyra apps` group: `apps list/show/
+  publish`, the installed desktop apps with icons resolved to files. State:
+  `song/stage/apps.json`.
 
 ## Related
 

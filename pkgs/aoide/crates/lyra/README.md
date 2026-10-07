@@ -12,11 +12,11 @@ are core `aoide` identity, root `AGENTS.md`).
 
 - `bin/lyra` — the binary entry point.
 - `dispatch`/`registry` — lyra's own argv parsing, dispatch, and golden
-  command-path snapshot (54 paths), independent of core's.
+  command-path snapshot, independent of core's.
 - `commands::LAYOUT` — how `lyra` lists itself (Start here · Songs &
-  liveries · Widgets & icons · Screen control · Dialogs & notices · Agent
-  interfaces · System), adopted by `all()` through `Registry::arrange`; bare
-  `lyra`, `--help`, group pages and `guide` read it.
+  liveries · Widgets & icons · Desktop apps · Screen control · Dialogs &
+  notices · Agent interfaces · System), adopted by `all()` through
+  `Registry::arrange`; bare `lyra`, `--help`, group pages and `guide` read it.
 - `guide` — `lyra guide`.
 - `commands` — lyra's `commands::all()`, pulling in `song`, `screen`, and
   `conduct`'s `shellbridge`/`herald` registration lines (the files stay in
@@ -379,11 +379,22 @@ are core `aoide` identity, root `AGENTS.md`).
   PRUNING any asset the current selection no longer names. The SVG assembly
   is a direct port of upstream Iconify's own `@iconify/utils` alias-chain
   fold and `iconToSVG`/`iconToHTML` string math (module doc cites the
-  fetched source lines). **Not yet wired into `commands::all()`** — landed
-  ahead of the concurrent preview lane per its own dispatch's registry
-  procedure; the integrator appends `pub mod icon;` + `icon::register(&mut
-  r)` last and the three golden paths (54 → 57) in the same commit that
-  resolves that lane.
+  fetched source lines). Registered after `preview_tools` in
+  `commands::all()`.
+- `xdg` — the workspace's one freedesktop key-file reader: `keyfile` (the
+  grammar that `.desktop` files, icon-theme `index.theme` files and
+  `gtk-3.0/settings.ini` share), `entry` (desktop entries by id, the first
+  data dir wins, and the listing filter) and `icon_theme` (the theme chain and
+  icon lookup at one nominal size). Everything takes an `Env`, never the
+  process environment, so a test builds one over temp dirs. `commands::apps` and
+  `lyra launch` read through it; neither carries a parser of its own.
+- `commands::apps` — `apps list`/`apps show`/`apps publish [--run]`: the
+  installed desktop apps with their icons resolved to files, and
+  `song/stage/apps.json` (CONTRACTS.md §4), which the `aoide-apps` user unit
+  keeps current with `apps publish --run`. `list` and `show` build fresh and
+  never read the file; `publish` replaces it atomically, and only when the
+  document minus `at` changed. docs/Aoide-Wiki/concepts/cli/Apps-Commands.md
+  has the commands.
 
 ## What it consumes
 
@@ -393,10 +404,10 @@ serve --stdio`'s door loop).
 
 ## How it composes
 
-55 command paths: onboard/rice/draft/mode/cover/livery/quickshell/screen/
+Command paths: onboard/rice/draft/mode/cover/livery/quickshell/screen/
 shellbridge/herald/take/element/secrets ask/pair ask/pair show/preview/
-preview set/preview declare/preview shot/preview tree/preview notes —
-everything that paints, or that only a desktop needs.
+preview set/preview declare/preview shot/preview tree/preview notes/icon/
+apps — everything that paints, or that only a desktop needs.
 `element seed` (L-E1,
 docs/architecture/ELEMENTS.md) renders a song's committed
 `elements/*/element.json` (non-QML rice targets — waybar, dunst, anything

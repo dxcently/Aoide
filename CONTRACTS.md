@@ -1188,9 +1188,10 @@ committed, never load-bearing for the nix build (enforced by
 applied to the stage tree itself):
 
 - **`song/stage/`** — rice/paint staging. `livery.json`, `mode.json`, the
-  draft-routing symlink target, `grimoire.json`. Emitted by the notes
-  package, `lyra rice`/`cover`/`draft`, and QML itself (`grimoire.json`);
-  read by Quickshell. This is lyra's tree.
+  draft-routing symlink target, `grimoire.json`, `apps.json`. Emitted by the
+  notes package, `lyra rice`/`cover`/`draft`, `lyra apps publish`
+  (`apps.json`, kept current by the `aoide-apps` user unit) and QML itself
+  (`grimoire.json`); read by Quickshell. This is lyra's tree.
 - **`state/stage/`** — CONDUCTING state: `sessions.json`, `hooks.json`,
   `projects.json`, `graph.json`, `pending.json`, `herald.json`. Written by
   shellbridge and the `aoide`/`aoided` binaries (`aoide graph`, `aoide
@@ -3604,6 +3605,121 @@ chapter/search is about to render.
   }
 }
 ```
+
+### `song/stage/apps.json` — **v0**
+
+The installed desktop apps with their icons already resolved to files, as the
+shell's launcher lists them. A surface paints this file instead of parsing
+`.desktop` files and icon themes itself (§0's corollary: QML is a render
+surface, never an API).
+
+**The single writer is `lyra apps publish`**, over `crate::xdg`, the
+workspace's one freedesktop key-file reader (`.desktop` files, `index.theme`
+files and `gtk-3.0/settings.ini` are the same grammar). The `aoide-apps`
+user unit runs `lyra apps publish --run`: every 2 s it recomputes a
+fingerprint of everything the document is built from — the canonical path of
+each data dir, the name, size and mtime of every `*.desktop` below its
+canonical `applications/`, and the canonical path, size and mtime of
+`$XDG_CONFIG_HOME/gtk-3.0/settings.ini` — and rebuilds only when it changed.
+Every path is re-resolved on every tick and nothing holds an inode or a
+watch, so a nix profile swap (a new canonical path) is seen. The file is
+replaced, atomically (`aoide_storage::fs::atomic_write`), only when the new
+document minus `at` differs from the file on disk minus `at`. There is no
+stage lock: the file has one writer and is replaced whole.
+
+**Readers.** QML through `bridge.apps` (`AppsState.qml`); agents through
+`lyra apps list --json`, whose `data` is this exact document, built fresh and
+never read back from the file. `lyra apps show <id> --json` returns one entry
+in the same shape plus `file` (the winning `.desktop`), `listed` (bool) and
+`filtered` (null, or one of `not-application`, `no-name`, `no-exec`,
+`no-display`, `only-show-in`, `not-show-in`, `try-exec`).
+
+```json
+{
+  "schemaVersion": "0",
+  "at": "2026-10-07T09:00:00Z",
+  "theme": "windows10",
+  "iconSize": 48,
+  "fallbackIcon": "/etc/profiles/per-user/khoa/share/icons/windows10/48x48/mimetypes/application-x-executable.png",
+  "entries": [
+    { "id": "kitty", "name": "kitty", "genericName": "Terminal emulator",
+      "comment": "Fast, feature-rich, GPU based terminal",
+      "icon": "/etc/profiles/per-user/khoa/share/icons/windows10/48x48/apps/kitty.png",
+      "keywords": ["terminal", "console"], "categories": ["System", "TerminalEmulator"],
+      "terminal": false, "startupWMClass": "kitty",
+      "actions": [ { "id": "new-os-window", "name": "New OS Window", "icon": null } ] }
+  ]
+}
+```
+
+- `schemaVersion`: always `"0"`. `at`: ISO-8601 UTC of the build, the only field
+  write-if-changed ignores.
+- `theme`: the icon theme the lookup chain started from — `gtk-icon-theme-name`
+  from `$XDG_CONFIG_HOME/gtk-3.0/settings.ini` when some base dir holds that
+  theme's `index.theme`, else `hicolor`. The chain is that theme, its
+  `Inherits` depth-first (a repeat is skipped), then `hicolor`.
+- `iconSize`: always `48`, the nominal size every icon was resolved for, at
+  scale 1. `fallbackIcon`: `application-x-executable` resolved through the same
+  chain, or `null`; a body paints it for any entry whose `icon` is `null`.
+- `entries`: sorted by (`name` lowercased, then `id`). Every entry is listable
+  and launchable by id through `lyra launch <id>`. All keys are always present.
+  - `id`: the desktop-file id — the path relative to `applications/` with `/`
+    turned into `-`, minus `.desktop`. The first data dir wins (`$XDG_DATA_HOME`,
+    then `$XDG_DATA_DIRS` in order). Ids may hold spaces and punctuation
+    (`Tabletop Simulator`, `osu!`).
+  - `name`, `genericName`, `comment`, `keywords`, action `name`: localized from
+    the first set of `LC_ALL`, `LC_MESSAGES`, `LANG`, in the spec's match order
+    (`lang_COUNTRY@MODIFIER`, `lang_COUNTRY`, `lang@MODIFIER`, `lang`, then the
+    plain key). `genericName` and `comment` are `null` when absent; `keywords`
+    and `categories` are `[]`.
+  - `icon`: the absolute path of an existing regular `.png`, `.svg` or `.xpm`
+    file, or `null`. Never an icon name.
+  - `terminal`: `Terminal=true`; `lyra launch` opens such an app in a
+    conducted terminal. `startupWMClass`: `StartupWMClass` verbatim, or `null`;
+    it matches a running window's class to its entry, and the matching is the
+    body's job.
+  - `actions`: in `Actions=` order; only those whose `[Desktop Action <id>]`
+    group exists and holds a `Name` and an `Exec`. Each is `{id, name, icon}`.
+
+**Never present:** `Exec`, `Path`, `TryExec`, the `.desktop` file path,
+`NoDisplay` or `Hidden` entries, MIME associations, recents, any ranking. What
+runs is decided by `lyra launch <id>`, never by a field of a file under the
+stage tree.
+
+**Every text field is untrusted** (`name`, `genericName`, `comment`, `keywords`,
+`startupWMClass`, action names): a body renders it as `Text.PlainText` and never
+as a command or markup.
+
+**Listing filter.** The first data dir holding an id wins, and that winning file
+alone decides whether the id is listed. The id is dropped when the winning file:
+
+- is unreadable, not UTF-8, over 1 MiB, or has no `[Desktop Entry]` group;
+- has `Hidden=true` (the id is deleted even if a later dir also has it);
+- has a `Type` other than `Application`, or no `Name`, or no `Exec`;
+- has `NoDisplay=true`;
+- has `OnlyShowIn` with no match in `XDG_CURRENT_DESKTOP` (an unset
+  `XDG_CURRENT_DESKTOP` never matches), or `NotShowIn` with a match;
+- has an absolute `TryExec` that is not an executable regular file. A relative
+  `TryExec` is never looked up: a user unit's `PATH` is not the session's.
+
+**Icon resolution** (`resolve(name, 48)`):
+
+1. An absolute `Icon` is used only if it is an existing regular file ending in
+   `.png`, `.svg` or `.xpm`.
+2. An empty name, or a relative name containing `/`, resolves to `null`.
+3. Otherwise, for each theme in the chain, over only its scale-1 subdirs: a
+   subdir's distance is how far 48 lies outside its range (`Fixed`: `|Size -
+   48|`; `Scalable`: outside `MinSize..=MaxSize`; `Threshold`: outside `Size ±
+   Threshold`; 0 is an exact match), a `Fixed` size below 48 ranks after every
+   `Fixed` size at or above it, and the first file at the least distance wins,
+   in `Directories`, then base dir, then `png`, `svg`, `xpm` order. The first
+   theme in the chain holding any file for the name decides.
+4. If no theme matched, the first `<dir>/<name>.<ext>` over the base dirs, then
+   each data dir's `pixmaps/`, then `/usr/share/pixmaps`.
+
+Base dirs are `$HOME/.icons`, then each data dir's `icons/`; a theme's index is
+the `index.theme` of the first base dir that has one. `icon-theme.cache` is
+never read.
 
 ### `state/mail/` — **v0** (messaging plan P-M1, 2026-09-07)
 

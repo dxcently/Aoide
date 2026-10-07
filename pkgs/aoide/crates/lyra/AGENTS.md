@@ -6,9 +6,9 @@
   (root `AGENTS.md`) — adding either here reopens the exact boundary P-A4
   drew. If a paint feature seems to need the graph or A2A, that's a signal
   it belongs in core, not a reason to add the dependency here.
-- **Lyra's golden is independent of core's.** `registry.rs`'s snapshot (54
-  paths) is its own list, not a subset check against `cli`'s own — the two
-  evolve separately.
+- **Lyra's golden is independent of core's.** `registry.rs`'s snapshot is its
+  own list, not a subset check against `cli`'s own — the two evolve
+  separately.
 - **`commands::preview`'s root is a SIBLING of the live socket dir, never a
   descendant.** Its default (`$XDG_RUNTIME_DIR/aoide-preview`) and every
   `--root` a caller supplies must never resolve under
@@ -322,6 +322,36 @@
   behind — the same "removable without a trace" house rule `commands::
   preview`'s own root-isolation invariant above cites.
 
+- **`crate::xdg` is the workspace's only freedesktop key-file parser.**
+  `.desktop` files, icon-theme `index.theme` files and `gtk-3.0/settings.ini`
+  are one grammar, read by `xdg::keyfile`; a second reader of any of the three
+  anywhere in the workspace is a defect, so widen `xdg` instead. Every `xdg`
+  function takes an `Env`, never the process environment. Icon-theme lists
+  (`Directories`, `ScaledDirectories`, `Inherits`) are comma-separated
+  (`KeyFile::comma_list`); desktop-entry lists are `;`-separated.
+- **`apps.json` never carries `Exec`, `Path` or `TryExec`.** The document
+  names an app by id and `lyra launch <id>` decides what runs, so nothing
+  under the stage tree can name a command. `commands::apps`' test greps the
+  serialized document for all three.
+- **`TryExec` is checked only when it is absolute.** The `aoide-apps` unit's
+  `PATH` is its `path` list, not the session's, so looking up a relative
+  `TryExec` there would drop kitty, nvim and every other app that carries one
+  from the launcher, and `lyra apps list` in a terminal would disagree with
+  the unit on identical inputs.
+- **`xdg::icon_theme`'s size rule is Qt's distance model, measured, not the
+  spec's nominal size and not "prefer larger".** Preferring the smallest
+  nominal size at or above the request for every subdir kind matched Qt on 84
+  of 89 osaka apps and picked a 64/96/128 px file where Qt took the 32 px
+  `Threshold` one; the model in the module doc (a `Fixed` size below the
+  request ranks last, every other kind ranks by its range distance) matches
+  88, and the oracle for it is a Quickshell run against the same data dirs.
+  Reordering the key or folding the kinds together reopens that regression.
+- **`apps publish --run` re-resolves every path on every tick and holds no
+  watch.** A nix profile swap re-points a chain of symlinks, so an inotify
+  watch on a store path never fires again; `fingerprint` canonicalizes each
+  data dir and `settings.ini` afresh each tick instead. `--run` is CLI-only,
+  because over another door it would hold the call open forever.
+
 ## Extension points
 
 - **A new paint command** adds a `cmd!`/`register` entry in the owning domain
@@ -329,13 +359,20 @@
   lyra's `commands::all()`.
 - **A new special-cased command** extends the `special` closure passed to
   `aoide_protocol::door::run` in `run_lyra`.
+- **A new reader of desktop entries** (`lyra launch`) calls
+  `xdg::entry::{find, ids, scan}` and applies the `Exec` field codes and
+  argument quoting to `Entry::exec`, the key-file-unescaped value; that
+  tokenising stays with the reader that executes.
 
 ## Docs update required in the same commit
 
-- This `README.md` when the command count or a dependency changes.
+- This `README.md` when a seam or a dependency changes.
 - The golden snapshot in `registry.rs` when the command-path set changes.
 - `docs/architecture/PACKAGE-LAYOUT.md`/`CONTRACTS.md §3` when the
   core/lyra split itself shifts.
+- `CONTRACTS.md` §4 (`song/stage/apps.json`) and
+  `docs/Aoide-Wiki/concepts/cli/Apps-Commands.md` when the `apps.json`
+  document, the listing filter or the icon rules change.
 - `commands::dialog_qml`'s own module doc, plus every caller's doc
   (`commands::secrets`, `commands::pair`, `aoide-secrets`' `watch.rs`,
   `aoide-client`'s `pair_watch.rs`) when the shared output contract

@@ -125,6 +125,9 @@ mod tests {
         got.sort();
 
         let mut expected: Vec<&str> = vec![
+            "apps.list",
+            "apps.publish",
+            "apps.show",
             "cover.set",
             "cover.sync",
             "element.seed",

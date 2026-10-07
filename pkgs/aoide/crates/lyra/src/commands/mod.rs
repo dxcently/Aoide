@@ -42,29 +42,13 @@
 //! conductor, a2a serve, agents, nodes, usage, hooks, daemon, soundcheck)
 //! are absent — lyra never registers them.
 //!
-//! Path count: 2 (meta) + 1 (onboard) + 1 (mcp.serve) + 3 (rice) + 3 (draft)
-//! + 4 (mode) + 1 (cover) + 3 (livery) + 2 (rice-late) + 1 (shellbridge) + 1
-//! (quickshell: healthcheck) + 1 (reload) + 14 (screen) + 1 (herald) + 6
-//! (take) + 1 (element.seed) + 1 (secrets ask) + 2 (pair ask, pair show) +
-//! 3 (preview, preview.set, preview.declare) + 3 (preview.shot,
-//! preview.tree, preview.notes) + 3 (icon.collections, icon.list, icon.resolve) =
-//! 57 (P-I3: 42 -> 43; P3: 43 -> 44; L-E1: 44 -> 45; P-PV3 landing: 45 ->
-//! 46; P-PV3 revert (`pair confirm` added): 46 -> 47; `quickshell
-//! healthcheck`: 47 -> 48; R2's own repurpose (`pair confirm` -> `pair
-//! show`): 48 -> 48, net zero; `reload`'s absorption of `quickshell reload`
-//! (`lyra reload` design, settled 2026-08-31): 48 -> 48, net zero — one path
-//! dies, one lands, same as R2's own swap; P1's `preview`/`preview.set`:
-//! 48 -> 50; a same-lane follow-up's `preview.declare`: 50 -> 51; P6's
-//! `preview.shot`/`preview.tree`/`preview.notes`: 51 -> 54; I1's `icon.collections`/`icon.list`/`icon.resolve`: 54 -> 57). The
-//! plan's phase description estimated 41 (the named groups
-//! alone, without `mcp.serve`); verified by
-//! generating (`lyra schema --json | jq '.commands|length'`) — `mcp.serve`
-//! must be a registered path for `aoide_protocol::door::parse` to ever reach
-//! `lib.rs`'s `special` closure on `mcp serve --stdio`, exactly like core's
-//! own `mcp.serve` entry. See `crates/lyra/src/registry.rs`'s golden test
-//! for the exact path list — that list, not this arithmetic, is the
-//! authority (`pkgs/aoide/crates/AGENTS.md`'s "no count or tally lives
-//! anywhere else").
+//! `icon` (`icon collections`/`icon list`/`icon resolve`, the pinned Iconify
+//! glyphs) and `apps` (`apps list`/`apps show`/`apps publish`, over
+//! `crate::xdg`: the installed desktop apps with their resolved icons, and
+//! `song/stage/apps.json`) close the list. `registry.rs`'s golden test is the
+//! sole authority for the command set (`pkgs/aoide/crates/AGENTS.md`, "Golden
+//! discipline").
+pub mod apps;
 pub mod dialog_qml;
 pub mod icon;
 pub mod infra;
@@ -100,6 +84,7 @@ const LAYOUT: Layout = Layout {
                 ("icon", "The pinned Iconify collections, resolved offline"),
             ],
         ),
+        ("Desktop apps", &[("apps", "Installed apps and their icons, as the shell lists them")]),
         ("Screen control", &[("screen", "See and drive the desktop: info, shots, pointer, OCR, diff")]),
         (
             "Dialogs & notices",
@@ -138,6 +123,7 @@ pub fn all() -> Registry {
     preview::register(&mut r); // preview + preview.set + preview.declare — an isolated quickshell canvas for one widget (P1, then a same-lane follow-up added declare)
     preview_tools::register(&mut r); // preview.shot + preview.tree + preview.notes — shell-first agent tools over that same canvas (P6): screenshots, the live/static-joined item tree, and scaffolding notes
     icon::register(&mut r); // icon.collections + icon.list + icon.resolve — the pinned icon collections (Iconify data) resolved into the lane's own SVG tree, no network at render (I1)
+    apps::register(&mut r); // apps list/show/publish — installed desktop apps with resolved icons, song/stage/apps.json
 
     r.arrange(LAYOUT);
     r
