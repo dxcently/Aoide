@@ -12,8 +12,8 @@
 // filename, resolved by TYPE NAME through the per-song qmldir the
 // derivation emits for any song carrying an uppercase-first widgets/ file
 // (modules/dendrites/lyra/default.nix) -- no import statement needed by
-// a caller sitting in the same songs/fugue/ directory. Used by both
-// bar.qml and herald.qml.
+// a caller sitting in the same songs/fugue/ directory. Used by bar.qml,
+// herald.qml and ricemode.qml.
 import QtQuick
 
 Item {

@@ -52,7 +52,8 @@
 # which lists it in error (see that file's audit note in the commit that
 # added this shelf).
 #
-# `shared`, `stagingEngine`: declared, unused (bar.qml's own comments say so).
+# `shared`: declared, unused (bar.qml's own comments say so). `stagingEngine`:
+# handed on to the embedded `ricemode` slot.
 #
 # The one `WidgetSlot` it embeds is `ricemode` — fugue's bar has no popout of
 # its own, so no `calendar` dependency either.
