@@ -187,12 +187,15 @@
 //! [`GateOutcome::Granted`]/`Denied`, before the no-code/park branch is
 //! ever reached; nothing about this phase changes that.
 //!
-//! **`put` carries NO `consumer` field and is never gated by
-//! `requireTotp`** (P-V4c, deliberate): `secrets put` is CLI-only
-//! (`commands::handle_secrets_put`'s `require_cli` gate) and, in
-//! deployment, runs AS THE SECRETS UID's own operator (`sudo -u
-//! aoide-secrets aoide secrets put …`, same admin-command precedent as
-//! `add`/`grant` — README's "Admin commands" section) — there is no separate
+//! **`put` is an admin mutation: [`handle_put`] runs [`admin_gate`] first**
+//! (the peer's uid must be the broker user, exactly as for `{op:"admin"}`),
+//! so a member of the socket's access group cannot substitute the value an
+//! already-policied secret hands out. It carries NO `consumer` field and is
+//! never gated by `requireTotp` (P-V4c, deliberate): `secrets put` is
+//! CLI-only (`commands::handle_secrets_put`'s `require_cli` gate) and runs
+//! AS THE SECRETS UID's own operator (`sudo -u aoide-secrets aoide secrets
+//! put …`, same admin-command precedent as `add`/`grant` — README's "Admin
+//! commands" section) — there is no separate
 //! "consumer" identity to authorize the way `resolve`'s agent-facing
 //! callers need, and a code check would be gating the secrets uid against
 //! itself. [`put_gate`] therefore checks ONLY that a policy exists for the
@@ -1173,8 +1176,9 @@ fn handle_dismiss(
 }
 
 /// `put` (P-V4c): stores `value` through the named secret's backend `set`
-/// template. No `consumer` field on this op, no TOTP gate — see module doc
-/// for why (CLI-only, admin-side). The value exists here ONLY as this
+/// template. Gated by [`admin_gate`] before anything else (a refusal is
+/// audited, the store untouched). No `consumer` field on this op, no TOTP
+/// gate — see module doc for why (CLI-only, admin-side). The value exists here ONLY as this
 /// function's own local read of `req`'s `value` field, handed straight to
 /// [`put_gate`]/`crate::backend::store_value`; it never lands anywhere
 /// else in this function (not the returned `Value`, not either audit line
@@ -1195,6 +1199,10 @@ fn handle_put(secrets_home: &Path, events_path: &Path, req: &Value, peer: Option
 
     if secret.is_empty() {
         return json!({"ok": false, "error": "malformed request: `secret` is required"});
+    }
+    if let Some(reason) = admin_gate(peer_uid, secrets_home, "put") {
+        audit_put(secrets_home, &secret, false, Some(&reason), None, peer_uid);
+        return json!({"ok": false, "error": reason});
     }
 
     let outcome = put_gate(secrets_home, &secret, &value, overwrite);
@@ -3062,7 +3070,7 @@ mod tests {
 
         with_redirected_audit_log(&home, || {
             let reply =
-                handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","secret":"t","value":"the-stored-value"}"#, &parked, &mut Vec::new(), None);
+                handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","secret":"t","value":"the-stored-value"}"#, &parked, &mut Vec::new(), operator_peer());
             assert_eq!(reply["ok"], true, "{reply}");
         });
 
@@ -3078,7 +3086,7 @@ mod tests {
         crate::store::save_policies(&home, &[Policy::new("t", "age", "t"), Policy::new("t2", "age", "t2")]).unwrap();
         with_redirected_audit_log(&home, || {
             let reply =
-                handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","secret":"t2","value":"another-value"}"#, &parked, &mut Vec::new(), None);
+                handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","secret":"t2","value":"another-value"}"#, &parked, &mut Vec::new(), operator_peer());
             assert_eq!(reply["ok"], true, "{reply}");
         });
         let mint_events = own_log_lines(&home)
@@ -3368,20 +3376,20 @@ mod tests {
         seed_with_set(&home, &[p], &format!("cat {}", out.display()), &format!("cat > {}", out.display()));
 
         // 1. Empty -> stores, `replaced` is false.
-        let first = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","secret":"t","value":"first-value"}"#, &ParkRegistry::new(), &mut Vec::new(), None);
+        let first = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","secret":"t","value":"first-value"}"#, &ParkRegistry::new(), &mut Vec::new(), operator_peer());
         assert_eq!(first["ok"], true, "{first}");
         assert_eq!(first["replaced"], false, "{first}");
         assert_eq!(std::fs::read_to_string(&out).unwrap(), "first-value");
 
         // 2. Existing, no `overwrite` -> the distinct `exists` refusal, and
         //    the stored value is UNCHANGED.
-        let second = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","secret":"t","value":"attempted-overwrite"}"#, &ParkRegistry::new(), &mut Vec::new(), None);
+        let second = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","secret":"t","value":"attempted-overwrite"}"#, &ParkRegistry::new(), &mut Vec::new(), operator_peer());
         assert_eq!(second["ok"], false, "{second}");
         assert_eq!(second["exists"], true, "the refusal must be machine-readable via `exists`, not error prose: {second}");
         assert_eq!(std::fs::read_to_string(&out).unwrap(), "first-value", "a refused put must never touch the store");
 
         // 3. Existing, `overwrite: true` -> replaced, `replaced` is true.
-        let third = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","secret":"t","value":"second-value","overwrite":true}"#, &ParkRegistry::new(), &mut Vec::new(), None);
+        let third = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","secret":"t","value":"second-value","overwrite":true}"#, &ParkRegistry::new(), &mut Vec::new(), operator_peer());
         assert_eq!(third["ok"], true, "{third}");
         assert_eq!(third["replaced"], true, "{third}");
         assert_eq!(std::fs::read_to_string(&out).unwrap(), "second-value");
@@ -3402,8 +3410,8 @@ mod tests {
         seed_with_set(&home, &[p], &format!("cat {}", out.display()), &format!("cat > {}", out.display()));
         std::fs::write(&out, "original-value").unwrap();
 
-        let with_false = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","secret":"t","value":"x","overwrite":false}"#, &ParkRegistry::new(), &mut Vec::new(), None);
-        let without_field = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","secret":"t","value":"x"}"#, &ParkRegistry::new(), &mut Vec::new(), None);
+        let with_false = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","secret":"t","value":"x","overwrite":false}"#, &ParkRegistry::new(), &mut Vec::new(), operator_peer());
+        let without_field = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","secret":"t","value":"x"}"#, &ParkRegistry::new(), &mut Vec::new(), operator_peer());
         assert_eq!(with_false, without_field, "an explicit `overwrite:false` and an absent field must match byte-for-byte");
         assert_eq!(with_false["exists"], true, "{with_false}");
         std::fs::remove_dir_all(&home).ok();
@@ -3426,7 +3434,7 @@ mod tests {
         let p = Policy::new("t", "scratch", "k");
         seed_with_set(&home, &[p], &format!("cat {}", out.display()), &format!("cat > {}", out.display()));
 
-        let reply = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","secret":"t","value":"stored-value"}"#, &ParkRegistry::new(), &mut Vec::new(), None);
+        let reply = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","secret":"t","value":"stored-value"}"#, &ParkRegistry::new(), &mut Vec::new(), operator_peer());
         assert_eq!(reply["ok"], true);
         assert!(reply.get("value").is_none(), "put's reply must never carry a value: {reply}");
         assert_eq!(reply["replaced"], false, "the store starts empty — this is a new store, not a replace: {reply}");
@@ -3448,7 +3456,7 @@ mod tests {
         crate::store::save_policies(&home, &[Policy::new("t", "scratch", "k")]).unwrap();
         for blank in ["", "\n", "  \t\n"] {
             let line = json!({"op": "put", "secret": "t", "value": blank}).to_string();
-            let reply = handle_line(&home, &home.join("events.jsonl"), &line, &ParkRegistry::new(), &mut Vec::new(), None);
+            let reply = handle_line(&home, &home.join("events.jsonl"), &line, &ParkRegistry::new(), &mut Vec::new(), operator_peer());
             assert_eq!(reply["ok"], false, "{reply}");
             assert_eq!(reply["error"], crate::client::EMPTY_VALUE, "{reply}");
         }
@@ -3472,10 +3480,50 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    /// `put` is an admin mutation: a peer that is not the broker user (a
+    /// different uid, root, or no readable identity) is refused with the
+    /// admin gate's wording, the stored value is untouched, and the refusal is
+    /// audited. A real socketpair cannot produce a different uid in-test, so
+    /// the peer is injected the way the admin-gate tests above do.
+    #[cfg(unix)]
+    #[test]
+    fn a_put_from_anyone_but_the_broker_user_is_refused_and_the_stored_value_is_untouched() {
+        let _guard = crate::env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let home = tmp_home("put-not-admin");
+        let out = home.join("out.txt");
+        seed_with_set(&home, &[Policy::new("t", "scratch", "k")], &format!("cat {}", out.display()), &format!("cat > {}", out.display()));
+        std::fs::write(&out, "original-value").unwrap();
+        let wrong = real_euid_or_a_value_no_identity_on_this_host_will_equal().wrapping_add(40_000);
+        let peers = [
+            Some(crate::peercred::PeerCred { uid: Some(wrong), gid: None, sid: None, pid: 0 }),
+            Some(crate::peercred::PeerCred { uid: Some(0), gid: None, sid: None, pid: 0 }),
+            None,
+        ];
+
+        with_redirected_audit_log(&home, || {
+            for peer in peers {
+                for overwrite in [false, true] {
+                    let line = json!({"op": "put", "secret": "t", "value": "substituted", "overwrite": overwrite}).to_string();
+                    let reply = handle_line(&home, &home.join("events.jsonl"), &line, &ParkRegistry::new(), &mut Vec::new(), peer.clone());
+                    assert_eq!(reply["ok"], false, "{peer:?}: {reply}");
+                    assert!(reply["error"].as_str().unwrap().contains("secrets put must run as the broker user"), "{peer:?}: {reply}");
+                    assert!(reply.get("exists").is_none(), "{reply}");
+                }
+            }
+        });
+
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), "original-value", "a refused put must never touch the store");
+        let own_log = std::fs::read_to_string(own_audit_log_path(&home)).unwrap();
+        assert_eq!(own_log.matches("\"op\":\"put\"").count(), 6, "{own_log}");
+        assert!(!own_log.contains("\"granted\":true"), "{own_log}");
+        assert!(!own_log.contains("substituted"), "{own_log}");
+        std::fs::remove_dir_all(&home).ok();
+    }
+
     #[test]
     fn put_with_a_missing_secret_field_is_malformed() {
         let home = tmp_home("put-missingfields");
-        let reply = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","value":"x"}"#, &ParkRegistry::new(), &mut Vec::new(), None);
+        let reply = handle_line(&home, &home.join("events.jsonl"), r#"{"op":"put","value":"x"}"#, &ParkRegistry::new(), &mut Vec::new(), operator_peer());
         assert_eq!(reply["ok"], false);
         assert!(reply["error"].as_str().unwrap().contains("required"));
         std::fs::remove_dir_all(&home).ok();
@@ -3495,7 +3543,7 @@ mod tests {
 
         // ── failure 1: no policy at all for this secret ────────────────
         seed(&home, &[]);
-        let reply = handle_line(&home, &home.join("events.jsonl"), &format!(r#"{{"op":"put","secret":"nope","value":"{SENTINEL}"}}"#), &ParkRegistry::new(), &mut Vec::new(), None);
+        let reply = handle_line(&home, &home.join("events.jsonl"), &format!(r#"{{"op":"put","secret":"nope","value":"{SENTINEL}"}}"#), &ParkRegistry::new(), &mut Vec::new(), operator_peer());
         assert_eq!(reply["ok"], false);
         assert!(!reply.to_string().contains(SENTINEL), "wire reply leaked the sentinel: {reply}");
 
@@ -3507,7 +3555,7 @@ mod tests {
         let p = Policy::new("t", "scratch", "k");
         seed(&home, &[p]); // `seed`'s fixture backend is get-only.
         let reply =
-            handle_line(&home, &home.join("events.jsonl"), &format!(r#"{{"op":"put","secret":"t","value":"{SENTINEL}","overwrite":true}}"#), &ParkRegistry::new(), &mut Vec::new(), None);
+            handle_line(&home, &home.join("events.jsonl"), &format!(r#"{{"op":"put","secret":"t","value":"{SENTINEL}","overwrite":true}}"#), &ParkRegistry::new(), &mut Vec::new(), operator_peer());
         assert_eq!(reply["ok"], false);
         assert!(!reply.to_string().contains(SENTINEL), "wire reply leaked the sentinel: {reply}");
 

@@ -103,7 +103,7 @@ fn put_refuses_empty_or_blank_stdin_with_what_why_and_fix_and_stores_nothing() {
         assert!(out.stderr.contains("nothing arrived on stdin"), "{}", out.stderr);
         assert!(out.stderr.contains("why: the command before the pipe printed nothing or failed"), "{}", out.stderr);
         assert!(
-            out.stderr.contains("fix: head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \\n' | aoide secrets put x --force"),
+            out.stderr.contains("fix: head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \\n' | sudo -u aoide-secrets aoide secrets put x --force"),
             "{}",
             out.stderr
         );
@@ -188,4 +188,39 @@ fn the_broker_user_refusal_prints_the_whole_command_to_paste() {
         out.stderr
     );
     assert!(!out.stderr.contains("..."), "{}", out.stderr);
+}
+
+#[test]
+fn a_put_the_broker_refuses_as_non_admin_prints_the_whole_sudo_line_to_paste() {
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::net::UnixListener;
+    use aoide_secrets::peercred::PeerUser;
+    let rig = Rig::new("put-gate");
+    // A stand-in broker answers with the wording of the real gate, built by the
+    // function the real broker calls; a test process cannot be a second uid.
+    let stub = aoide_test_support::short_tmp(&format!("secrets-cli-put-stub-{}", std::process::id())).join("b.sock");
+    let listener = UnixListener::bind(&stub).unwrap();
+    let reason = aoide_secrets::home::admin_identity_error(&PeerUser::Uid(1000), &PeerUser::Uid(990), &rig.home, "put").unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut conn, _) = listener.accept().unwrap();
+        let mut request = String::new();
+        BufReader::new(conn.try_clone().unwrap()).read_line(&mut request).unwrap();
+        writeln!(conn, "{}", serde_json::json!({"ok": false, "error": reason})).unwrap();
+    });
+    let out = rig.aoide_in(&rig.home, &stub, &["secrets", "put", "x", "--force"], Some("a-value"));
+    server.join().unwrap();
+    assert_eq!(out.code, 1, "{}{}", out.stdout, out.stderr);
+    assert!(out.stderr.contains("must run as the broker user"), "{}", out.stderr);
+    assert!(out.stderr.contains("fix: sudo -u aoide-secrets aoide secrets put x --force"), "{}", out.stderr);
+    assert!(!out.stderr.contains("..."), "{}", out.stderr);
+}
+
+#[test]
+fn a_put_from_the_broker_user_still_stores_through_the_real_socket() {
+    let rig = Rig::new("put-admin");
+    let add = rig.aoide(&["secrets", "add", "x", "--backend", "file", "--key", "x"], None);
+    assert_eq!(add.code, 0, "{}", add.stderr);
+    let out = rig.aoide(&["secrets", "put", "x"], Some("a-value"));
+    assert_eq!(out.code, 0, "{}{}", out.stdout, out.stderr);
+    assert!(out.stdout.contains("stored secret `x`"), "{}{}", out.stdout, out.stderr);
 }

@@ -5182,9 +5182,13 @@ added P-67, "warn before overwrite"):
 <- {"ok":false,"exists":true,"error":"<message>"}
 <- {"ok":false,"error":"<message>"}
 ```
-No `consumer` field, and NEVER gated by `requireTotp` — `put` is CLI-only/
-admin-side (never agent-facing), so there is no separate consumer identity
-to authorize and no code check to run (`crates/secrets/src/broker.rs`'s
+`put` is an admin mutation: the broker refuses it unless the peer's uid is
+the broker user (the same `admin_gate` as `{"op":"admin"}`; the error reads
+`secrets put must run as the broker user …` and the CLI teaches `sudo -u
+aoide-secrets aoide secrets put <name> …`). It carries no `consumer` field,
+and is NEVER gated by `requireTotp` — `put` is CLI-only/admin-side (never
+agent-facing), so there is no separate consumer identity to authorize and no
+code check to run (`crates/secrets/src/broker.rs`'s
 module doc has the full reasoning). `put` never creates a policy — `secrets
 add` owns that — so error strings mirror `resolve`'s policy-side ones:
 `"secret not found"`; `"backend `<name>` has no `set` template"`; `"backend

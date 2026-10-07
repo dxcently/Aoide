@@ -68,6 +68,14 @@
   full reasoning. Don't add a TOTP or consumer check to `put_gate` "for
   symmetry with resolve"; the two ops have different threat models on
   purpose.
+- **`put` IS an admin mutation: `broker::handle_put` runs `admin_gate`
+  before `put_gate`.** The peer's uid must be the broker user, so a member
+  of the socket's access group cannot overwrite an already-policied secret's
+  value. Every `put` test that reaches `handle_line` passes `operator_peer()`;
+  a new `put` path needs the same gate, not a bypass "for tests". A refused
+  `put` is audited (`audit_put`, name-only) and teaches `sudo -u
+  aoide-secrets aoide secrets put …` through `teach::broker_user`; the client's
+  own fix lines for `put` spell that same `sudo` prefix.
 - **The "does this secret already have a value" check is BROKER-SIDE ONLY,
   never the client's** (P-67, "warn before overwrite" — the User's own
   live complaint: `put` silently overwrote). `broker::has_value`-backed
@@ -762,6 +770,10 @@
   becomes an `Outcome` field, an audit line, or an error string, from the
   `backend::fetch_value` call that produces it straight through to the
   `backend::store_value` call that consumes it and drops it.
+- **`admin::migrate` refuses a blank source value** (empty or whitespace
+  only) right after the fetch — before any mint, store or policy flip — with
+  `admin::BLANK_SOURCE` as the marker `teach::classify` reads. `put` and the
+  broker already refuse blanks; migrate must not carry one onto a new backend.
 - **`secrets migrate`'s ordering is: fetch → (maybe mint) → store on the
   TARGET → flip + save `policy.json` → remove the OLD value LAST, and ONLY
   ever in that order (P-G2, task #72, hard constraint).** Any failure

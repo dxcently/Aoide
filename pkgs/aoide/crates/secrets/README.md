@@ -227,12 +227,17 @@ feature. The success message says which happened ("stored" a new value vs.
 carries the same distinction into both audit logs (names only, never the
 value).
 
-`put` carries NO `consumer` field and is NEVER gated by `requireTotp`
-(deliberate): `secrets put` is CLI-only (`commands::handle_secrets_put`'s
-`require_cli` gate, same as the policy-admin quartet) and, in deployment,
-runs as the secrets uid's own operator (`sudo -u aoide-secrets aoide
-secrets put …`, same admin-command precedent as `add`/`grant` — "Admin commands"
-below) — there is no separate agent-facing "consumer" identity to
+`put` is an admin mutation: the broker accepts it only from the broker user
+(`broker::admin_gate`, the check every `{op:"admin"}` request passes), so a
+member of the socket's access group cannot overwrite the value of an
+already-policied secret. Anyone else is refused with the taught line
+`sudo -u aoide-secrets aoide secrets put <name> …`, the refusal is audited,
+and the store is untouched. `put` carries NO `consumer` field and is NEVER
+gated by `requireTotp` (deliberate): `secrets put` is CLI-only
+(`commands::handle_secrets_put`'s `require_cli` gate, same as the
+policy-admin quartet) and runs as the secrets uid's own operator (`sudo -u
+aoide-secrets aoide secrets put …`, same admin-command precedent as
+`add`/`grant` — "Admin commands" below) — there is no separate agent-facing "consumer" identity to
 authorize, and gating the secrets uid's own operator behind a TOTP code it
 would also have to hold is pointless ceremony, not defense in depth. The
 value exists ONLY as a local `String` in `client::run_put`, from the
@@ -1509,6 +1514,13 @@ unflipped, no partial state. Once the flip has landed, the secret is fully
 migrated even if the old-value cleanup that follows fails or is skipped —
 cleanup is best-effort tidiness, never load-bearing for correctness.
 
+**A blank source value is refused.** A stored value that is empty or only
+whitespace is not migrated (`put` and the broker refuse to store one, so one
+here predates them): copying it would flip the policy over a value that reads
+as no secret. The refusal is checked right after the fetch, before anything
+is minted or stored, so nothing changes; its fix is `printf %s <value> | sudo
+-u aoide-secrets aoide secrets put <name> --force`, then migrate again.
+
 **Old-value removal only ever happens for a built-in SOURCE backend whose
 value path this crate can derive without asking its own template**
 (`backend::remove_builtin_value`): `file` → `<home>/store/<key>`, `age` →
@@ -1927,7 +1939,7 @@ command, e.g.:
 ```
 $ sudo aoide secrets add db-prod --backend file --key db-prod
 [error] secrets.add: secrets add must run as the broker user (uid 999, the owner of /var/lib/aoide-secrets) — this process is running as root (uid 0) — plain `sudo` runs as root, and root CAN write here regardless of file ownership, which is exactly what silently corrupts it
-  why: an admin command writes the broker's policy file, and only the broker user may: a write by anyone else, root included, re-owns it and bricks the broker
+  why: an admin command writes the broker's policy file and stored values, and only the broker user may: a write by anyone else, root included, re-owns them and bricks the broker
   fix: sudo -u aoide-secrets aoide secrets add db-prod --backend file --key db-prod
 ```
 

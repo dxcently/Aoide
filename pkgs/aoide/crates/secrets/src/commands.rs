@@ -181,8 +181,10 @@
 //! field. `enroll`'s own write path (`enroll::run`) carries the same guard
 //! directly, since its actual work happens in `cli`'s `special` hook, not
 //! here — `enroll::show` (read-only, rotates nothing) does NOT carry it,
-//! and neither does `put`/`exec`: those are the socket-side operator commands
-//! this guard was never meant to cover (`home.rs`'s module doc).
+//! and neither does `exec`: it is a socket-side consumer command this guard
+//! was never meant to cover (`home.rs`'s module doc). `put` carries no
+//! direct-home guard either — it never touches the home — but the BROKER
+//! gates it as an admin op (`broker::handle_put`'s `admin_gate`).
 
 use crate::client::PutFailure;
 use crate::policy::valid_secret_name;
@@ -291,7 +293,7 @@ pub fn register(r: &mut Registry) {
     ));
     r.insert(cmd!(
         path: ["secrets", "put"],
-        summary: "Store a value for an EXISTING secret's policy, read from stdin (never argv) — prompts on stderr with input hidden when stdin is a terminal, reads piped bytes byte-identically otherwise. Warns and asks [y/N] before overwriting a secret that already has a stored value on a tty; a piped/non-interactive attempt to overwrite is refused and told to pass --force. CLI-only — no TOTP, since put is admin-side, not agent-facing. The named policy's backend must carry a `set` template (the built-in `file`/`age` backends both have one by default).",
+        summary: "Store a value for an EXISTING secret's policy, read from stdin (never argv) — prompts on stderr with input hidden when stdin is a terminal, reads piped bytes byte-identically otherwise. Warns and asks [y/N] before overwriting a secret that already has a stored value on a tty; a piped/non-interactive attempt to overwrite is refused and told to pass --force. CLI-only and an ADMIN command like `add`/`grant`: the broker accepts it only from the broker user, so run it as `sudo -u aoide-secrets aoide secrets put <name>` (no TOTP — it is admin-side, not agent-facing). The named policy's backend must carry a `set` template (the built-in `file`/`age` backends both have one by default).",
         args: [arg!("name", "string", true, "The secret's nickname — must already have a policy (`secrets add` first).")],
         flags: [
             flag!("force", "bool", "Store the value even if the secret already has one, skipping the overwrite confirmation. Required to overwrite from a piped/non-interactive stdin (no one to confirm with there).")
@@ -708,7 +710,7 @@ fn handle_secrets_put(inv: &Invocation) -> Outcome {
             Kind::Refused,
             format!("secret `{name}` already has a stored value"),
             "stdin is not a terminal, so there is no one to confirm the overwrite",
-            Fix::Run(format!("printf %s <value> | aoide secrets put {name} --force")),
+            Fix::Run(format!("printf %s <value> | sudo -u aoide-secrets aoide secrets put {name} --force")),
         )
         .into_outcome(cmd),
         Err(PutFailure::Declined) => Refusal::new(
@@ -2287,6 +2289,36 @@ mod tests {
             assert_eq!(store::load_policies(home).unwrap(), before, "a refused migrate must not touch policy.json");
             assert!(!home.join("values").join("k.age").exists(), "nothing must be stored on the target either");
         });
+    }
+
+    // cfg(unix): the fixture writes the `file` backend's store by hand and the
+    // refusal under test is portable.
+    #[cfg(unix)]
+    #[test]
+    fn migrate_refuses_a_blank_stored_value_and_changes_nothing() {
+        for blank in ["", "\n", "  \t\n"] {
+            with_secrets_home("migrate-blank-value", |home| {
+                crate::backend::seed_default_backends(home).unwrap();
+                let add = inv(Door::Cli, &["secrets", "add"], &["t"], &[("backend", "file"), ("key", "k")]);
+                assert_eq!(run(&add).status, Status::Ok);
+                std::fs::create_dir_all(home.join("store")).unwrap();
+                std::fs::write(home.join("store").join("k"), blank).unwrap();
+                let before = store::load_policies(home).unwrap();
+
+                let out = run(&inv(Door::Cli, &["secrets", "migrate"], &["t"], &[("backend", "age")]));
+                assert_eq!(out.status, Status::Error, "{blank:?}: {out:?}");
+                let refusal = format!("{out:?}");
+                assert!(refusal.contains("holds an empty or blank value"), "{blank:?}: {refusal}");
+                assert!(
+                    refusal.contains("printf %s <value> | sudo -u aoide-secrets aoide secrets put t --force"),
+                    "{blank:?}: {refusal}"
+                );
+
+                assert_eq!(store::load_policies(home).unwrap(), before, "a refused migrate must not touch policy.json");
+                assert_eq!(std::fs::read_to_string(home.join("store").join("k")).unwrap(), blank, "the source value stays");
+                assert!(!home.join("values").join("k.age").exists(), "nothing must be stored on the target");
+            });
+        }
     }
 
     #[test]

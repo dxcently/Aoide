@@ -43,9 +43,12 @@ else a sibling of the socket, `/run/aoide-secrets/events.jsonl`, capped at
   the broker's own denial, is reported straight through, never silently
   downgraded into the fallback. Both paths call the identical `admin.rs`
   functions — one implementation, two gates.
-- **Over-the-socket operator** — `put`, `exec`, `pending`, `approve`,
-  `dismiss`, `watch`. CLI-door-only; no admin-identity check (`pending` in
-  particular touches only in-memory broker state, no `policy.json` write).
+- **Over-the-socket operator** — `exec`, `pending`, `approve`, `dismiss`,
+  `watch`. CLI-door-only; no admin-identity check (`pending` in particular
+  touches only in-memory broker state, no `policy.json` write).
+- **Over-the-socket admin** — `put`. CLI-door-only, and the broker itself
+  refuses any peer that is not the broker user, so it runs as `sudo -u
+  aoide-secrets aoide secrets put <name>`.
 - **The daemon itself** — `serve`.
 
 None of the 17 carries `gated: true` in the schema. `secrets exec` on a
@@ -223,7 +226,9 @@ aoide secrets put <name> [--force] [--json]
   broker is asked, and the broker's own put refuses it again for any wire caller ("nothing arrived on stdin": the command before the pipe
   printed nothing or failed), because a stored empty value reads as no secret
   to every check built on it, the A2A door's bearer included. CLI-only,
-  admin-side — no `consumer` field, never TOTP-gated. `secrets add` must register the policy first; `put` never
+  admin-side: the broker refuses a peer that is not the broker user, so run
+  it as `sudo -u aoide-secrets aoide secrets put <name>`; no `consumer`
+  field, never TOTP-gated. `secrets add` must register the policy first; `put` never
   auto-creates one.
 
 ## aoide secrets set-totp

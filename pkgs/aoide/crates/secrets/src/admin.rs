@@ -64,8 +64,15 @@ pub const NO_POLICY: &str = "no policy for secret";
 /// The marker of [`not_admitted`], read the same way.
 pub const NOT_ADMITTED: &str = "does not admit consumer";
 
+/// The marker of [`blank_source`], read the same way.
+pub const BLANK_SOURCE: &str = "holds a blank value";
+
 fn no_policy(name: &str) -> String {
     format!("{NO_POLICY} `{name}`")
+}
+
+fn blank_source(name: &str, source: &str) -> String {
+    format!("secret `{name}`: backend `{source}` {BLANK_SOURCE} for it (empty or only whitespace)")
 }
 
 fn not_admitted(name: &str, consumer: &str, admitted: &[String]) -> String {
@@ -298,6 +305,10 @@ pub fn migrate(home: &Path, door: Door, name: &str, target: &str) -> Result<(Adm
 
     let value = crate::backend::fetch_value(home, &source, &key)
         .map_err(|e| MigrateError::with_source(format!("secret `{name}`: could not fetch from backend `{source}`: {e}"), &source))?;
+
+    if value.trim().is_empty() {
+        return Err(MigrateError::with_source(blank_source(name, &source), &source));
+    }
 
     if target == "age" && crate::backend::backend_is_known(home, "age") {
         crate::backend::mint_age_identity_if_needed(home)

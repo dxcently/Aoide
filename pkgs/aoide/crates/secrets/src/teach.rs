@@ -32,6 +32,7 @@ enum Fail {
     BrokerUser,
     NotRegistered,
     NotAdmitted,
+    BlankSource,
     NoAccess,
     NotRunning,
     EmptyValue,
@@ -45,6 +46,8 @@ fn classify(err: &str) -> Fail {
         Fail::NotRegistered
     } else if err.contains(admin::NOT_ADMITTED) {
         Fail::NotAdmitted
+    } else if err.contains(admin::BLANK_SOURCE) {
+        Fail::BlankSource
     } else if err.contains(client::NO_ACCESS) {
         Fail::NoAccess
     } else if err.contains(client::NOT_RUNNING) {
@@ -70,6 +73,7 @@ pub fn from_broker(w: &Where, err: &str) -> Refusal {
         Fail::BrokerUser => broker_user(w.inv, err),
         Fail::NotRegistered => not_registered(w),
         Fail::NotAdmitted => not_admitted(w, err),
+        Fail::BlankSource => blank_source(w),
         Fail::NoAccess => no_access(w),
         Fail::EmptyValue => empty_value(w.secret.unwrap_or("?"), false),
         Fail::NotRunning => Refusal::new(
@@ -96,14 +100,14 @@ pub fn empty_value(name: &str, typed: bool) -> Refusal {
             Kind::Refused,
             "nothing was typed at the prompt",
             "an empty value stored under a secret reads as no secret at all to every check built on it",
-            Fix::Run(format!("aoide secrets put {name}")),
+            Fix::Run(format!("sudo -u {BROKER_USER} aoide secrets put {name}")),
         );
     }
     Refusal::new(
         Kind::Refused,
         "nothing arrived on stdin",
         "the command before the pipe printed nothing or failed (e.g. `openssl: command not found`)",
-        Fix::Run(format!("head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \\n' | aoide secrets put {name} --force")),
+        Fix::Run(format!("head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \\n' | sudo -u {BROKER_USER} aoide secrets put {name} --force")),
     )
 }
 
@@ -113,7 +117,7 @@ pub fn broker_user(inv: &Invocation, err: &str) -> Refusal {
     Refusal::new(
         Kind::Refused,
         what,
-        "an admin command writes the broker's policy file, and only the broker user may: a write by anyone else, root included, re-owns it and bricks the broker",
+        "an admin command writes the broker's policy file and stored values, and only the broker user may: a write by anyone else, root included, re-owns them and bricks the broker",
         Fix::Run(format!("sudo -u {BROKER_USER} {}", line(inv))),
     )
 }
@@ -172,6 +176,16 @@ fn not_registered(w: &Where) -> Refusal {
         format!("the broker holds no policy by that name; the registered secrets are {}", names.join(", "))
     };
     Refusal::new(Kind::Refused, what, why, Fix::Run(format!("aoide secrets add {name}")))
+}
+
+fn blank_source(w: &Where) -> Refusal {
+    let name = w.secret.unwrap_or("?");
+    Refusal::new(
+        Kind::Refused,
+        format!("secret `{name}` holds an empty or blank value, so it was not migrated"),
+        "an empty value reads as no secret to every check built on it; copying it would only move the problem to the new backend and flip the policy over it",
+        Fix::Run(format!("printf %s <value> | sudo -u {BROKER_USER} aoide secrets put {name} --force")),
+    )
 }
 
 fn not_admitted(w: &Where, err: &str) -> Refusal {
@@ -279,6 +293,21 @@ mod tests {
         let i = inv(&["secrets", "automate"], &["sudo-pass", "grant", "orchestrator"], &[]);
         let r = broker_user(&i, "secrets automate must run as the broker user (uid 0) — this process is running as uid 1000");
         assert_eq!(fix_of(r), "sudo -u aoide-secrets aoide secrets automate sudo-pass grant orchestrator");
+    }
+
+    #[test]
+    fn a_put_refused_by_the_broker_gate_teaches_the_whole_sudo_line() {
+        let i = inv(&["secrets", "put"], &["db-prod"], &[("force", "true")]);
+        let gate = home::admin_identity_error(
+            &crate::peercred::PeerUser::Uid(1000),
+            &crate::peercred::PeerUser::Uid(990),
+            Path::new("/h"),
+            "put",
+        )
+        .unwrap();
+        assert_eq!(classify(&gate), Fail::BrokerUser);
+        let r = broker_user(&i, &gate);
+        assert_eq!(fix_of(r), "sudo -u aoide-secrets aoide secrets put db-prod --force");
     }
 
     #[test]
